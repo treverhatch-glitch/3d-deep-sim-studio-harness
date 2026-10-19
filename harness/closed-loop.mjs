@@ -2,17 +2,13 @@
 /**
  * harness/closed-loop.mjs — Tight Closed-Loop Test -> Auto-Bug -> Escalate Gate
  *
- * Implements the closed-loop workflow:
- *   1. Run `qa/playtest.mjs` + `scripts/check-sim-purity.mjs`.
- *   2. On PASS: reset retry counter and log clean verification.
+ * Flow:
+ *   1. Run purity + stage-1 playtest.
+ *   2. On PASS: reset counter.
  *   3. On FAIL:
- *        - Record exact `{ seed, tick, description }` replay payload.
- *        - Auto-open/update a structured bug report in `qa/reports/open-bug.md`
- *          (using `studio/templates/bug.md`) and enqueue a P0 bug task in `studio/NEXT.md`.
- *        - Increment retry counter in `.studio/closed-loop-state.json`.
- *        - After `CLOSED_LOOP_MAX_RETRIES` (default 3) consecutive failures on the
- *          same bug, halt automatic retries and flag for a stronger model
- *          (`node harness/prepare-brief.mjs`) or human review instead of looping forever.
+ *        - Write studio/templates-compatible seed failure to .studio/last-seed-failure.json
+ *        - Open bug report
+ *        - After MAX_FIX_ATTEMPTS (default 3) escalate instead of looping
  */
 
 import fs from 'node:fs';
@@ -22,7 +18,8 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { addTask } from './task.mjs';
 
 const STATE_FILE = path.join(STUDIO_STATE_DIR, 'closed-loop-state.json');
-const MAX_RETRIES = Number(process.env.CLOSED_LOOP_MAX_RETRIES || 3);
+const SEED_FAILURE_FILE = path.join(STUDIO_STATE_DIR, 'last-seed-failure.json');
+const MAX_RETRIES = Number(process.env.CLOSED_LOOP_MAX_RETRIES || process.env.MAX_FIX_ATTEMPTS || 3);
 
 function readLoopState() {
   try {
@@ -38,6 +35,11 @@ function readLoopState() {
 function writeLoopState(next) {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(next, null, 2), 'utf8');
+}
+
+function writeSeedFailure(payload) {
+  fs.mkdirSync(path.dirname(SEED_FAILURE_FILE), { recursive: true });
+  fs.writeFileSync(SEED_FAILURE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
 const simulateFail = process.argv.includes('--simulate-fail');
@@ -65,48 +67,53 @@ if (passed) {
     type: 'closedloop.pass',
     agent: 'playtester',
     status: 'IDLE',
-    tokensSaved: 5200,
-    msg: 'Closed-loop verification PASSED (seed=42069, tick=120). Task ready to mark done.',
+    msg: 'Closed-loop verification PASSED.',
   });
-  console.log('[closed-loop] PASS — Sim purity & deterministic trajectory verified.');
+  console.log('[closed-loop] PASS');
   process.exit(0);
 }
 
-// Failed: increment retry counter, write bug report, and check escalation threshold
 const attempt = loopState.consecutiveFailures + 1;
 const escalated = attempt >= MAX_RETRIES;
+const seed = 42069;
+const tick = 120;
+
 writeLoopState({
   consecutiveFailures: attempt,
-  lastSeed: 42069,
-  lastTick: 120,
+  lastSeed: seed,
+  lastTick: tick,
   escalated,
   updatedAt: new Date().toISOString(),
 });
+
+const seedPayload = {
+  seed,
+  tick,
+  description: failureReason.replace(/\n/g, ' ').slice(0, 200),
+  severity: 'P0',
+  attempt,
+  maxAttempts: MAX_RETRIES,
+};
+writeSeedFailure(seedPayload);
 
 const bugId = `BUG-${Date.now().toString().slice(-4)}`;
 const bugReportPath = path.join(REPO_ROOT, 'qa', 'reports', `${bugId}.md`);
 fs.mkdirSync(path.dirname(bugReportPath), { recursive: true });
 
-const bugMarkdown = `### [P0] ${bugId} — Automated Closed-Loop Failure (Attempt ${attempt}/${MAX_RETRIES})
-- **Stage**: Stage 1 (\`?playtest=1\` \`window.__hatch\` / \`window.__sim\`)
-- **Closed-Loop Attempt**: \`${attempt} / ${MAX_RETRIES}\` ${escalated ? '⚠️ **ESCALATED TO STRONG MODEL / HUMAN**' : ''}
-- **Deterministic Replay Payload**:
-  \`\`\`json
-  {
-    "seed": 42069,
-    "tick": 120,
-    "description": "${failureReason.replace(/"/g, "'")}"
-  }
-  \`\`\`
-- **Replay Command**: \`node harness/replay.mjs --seed 42069 --tick 120\`
-- **Post-Fix Requirement**: Append 4-bullet root cause note to \`studio/memory/failures.md\`.
+const bugMarkdown = `### [P0] ${bugId} — Closed-Loop Failure (Attempt ${attempt}/${MAX_RETRIES})
+- **Replay**: \`node harness/replay.mjs --seed ${seed} --tick ${tick}\`
+- **Seed file**: \`.studio/last-seed-failure.json\`
+- **Escalated**: ${escalated ? 'YES — stop auto-retries, use stronger model or human' : 'no'}
+- **Description**: ${seedPayload.description}
+
+After fix, run \`scripts/distill-bug.sh\` or append to \`studio/memory/failures.md\`.
 `;
 
 fs.writeFileSync(bugReportPath, bugMarkdown, 'utf8');
 
 if (attempt === 1) {
   addTask({
-    title: `Fix ${bugId} (replay: node harness/replay.mjs --seed 42069 --tick 120) and distill into studio/memory/failures.md`,
+    title: `Fix ${bugId} (replay seed ${seed} tick ${tick})`,
     role: 'builder',
     priority: 'P0',
   });
@@ -117,11 +124,14 @@ emitEvent({
   agent: 'playtester',
   status: 'ERROR',
   task: bugId,
-  target: path.relative(REPO_ROOT, bugReportPath),
   msg: escalated
-    ? `ESCALATED after ${attempt}/${MAX_RETRIES} failures -> Run node harness/prepare-brief.mjs for strong model or human review`
-    : `Closed-loop failure (${attempt}/${MAX_RETRIES}) -> Opened ${bugId} with seed=42069 tick=120`,
+    ? `ESCALATED after ${attempt}/${MAX_RETRIES}`
+    : `Failure ${attempt}/${MAX_RETRIES} recorded`,
 });
 
 console.log(bugMarkdown);
+console.log('\nSeed failure written to .studio/last-seed-failure.json');
+if (escalated) {
+  console.log('ESCALATE: do not keep auto-retrying. Run prepare-brief or hand to human.');
+}
 process.exit(1);
