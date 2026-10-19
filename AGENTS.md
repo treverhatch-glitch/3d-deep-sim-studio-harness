@@ -5,7 +5,7 @@ You are working on a 3D game with deep simulation using this AI Game Studio harn
 ## Before Starting Work
 
 1. Read `CURRENT_TASK.md` (checkpoint / handoff).
-2. Read the relevant section of `NEXT.md` if needed.
+2. If it is empty or done, pull the next task from `NEXT.md` (see `docs/WORK-ORGANIZATION.md`).
 3. Check `studio/llms.txt` and path-scoped rules in `studio/rules/` (especially sim-isolation and graphics-sim-boundary) before editing core systems.
 4. For workflow context see `docs/3D-DEEP-SIM.md`.
 5. Search docs or code with QMD / ripgrep / symbol MCP instead of loading entire files.
@@ -22,11 +22,14 @@ You are working on a 3D game with deep simulation using this AI Game Studio harn
 
 ## After Finishing a Task
 
-1. Update `CURRENT_TASK.md` with what was done, remaining work, and the exact next step.
-2. Update `NEXT.md` if priorities changed.
-3. Optionally run `./scripts/check-sim-isolation.sh`.
-4. Commit with a clear message.
-5. Do not leave long status summaries in the chat — the files are the source of truth.
+1. Write a short summary in `studio/done/YYYY-MM-DD-short-title.md`.
+2. Update `CURRENT_TASK.md` with what was done and the exact next step (or clear it).
+3. Update `NEXT.md` (check off or remove the completed item).
+4. Optionally run `./scripts/check-sim-isolation.sh`.
+5. Commit with a clear message.
+6. Do not leave long status summaries in the chat — the files are the source of truth.
+
+See `docs/WORK-ORGANIZATION.md` for the full flow.
 
 ## Producer Role
 
