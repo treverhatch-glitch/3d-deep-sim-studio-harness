@@ -1,204 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI GAME STUDIO // MISSION CONTROL</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <title>AI Game Studio // War Room</title>
   <style>
-    :root {
-      --cyan: #00e5ff;
-      --amber: #ffb000;
-      --green: #00ff9f;
-      --red: #ff3366;
-      --bg: #05080f;
-      --panel: rgba(8, 16, 32, 0.92);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: #d0e0f0;
-      font-family: 'Rajdhani', sans-serif;
-      overflow: hidden;
-      height: 100vh;
-      background-image:
-        radial-gradient(ellipse at 50% 0%, rgba(0, 100, 180, 0.15) 0%, transparent 50%),
-        linear-gradient(180deg, #02040a 0%, #0a1220 100%);
-    }
-    .vignette {
-      position: fixed; inset: 0;
-      pointer-events: none;
-      box-shadow: inset 0 0 120px rgba(0,0,0,0.8);
-      z-index: 5;
-    }
-    header {
-      height: 64px;
-      padding: 0 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: linear-gradient(180deg, rgba(0,30,60,0.9), rgba(0,15,30,0.7));
-      border-bottom: 2px solid var(--cyan);
-      box-shadow: 0 0 20px rgba(0,229,255,0.3);
-    }
-    .logo {
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 900;
-      font-size: 20px;
-      letter-spacing: 3px;
-      color: var(--cyan);
-      text-shadow: 0 0 12px var(--cyan);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .logo::before {
-      content: "\1F3AE";
-      font-size: 26px;
-      filter: drop-shadow(0 0 6px var(--cyan));
-    }
-    .status-bar {
-      display: flex;
-      gap: 20px;
-      font-family: 'Orbitron', sans-serif;
-      font-size: 11px;
-      letter-spacing: 2px;
-    }
-    .status-item {
-      padding: 4px 12px;
-      border: 1px solid var(--green);
-      color: var(--green);
-      border-radius: 2px;
-      text-shadow: 0 0 6px var(--green);
-    }
-    .container {
-      display: grid;
-      grid-template-columns: 1fr 340px;
-      height: calc(100vh - 64px);
-      gap: 12px;
-      padding: 12px;
-    }
-    .feed, .sidebar {
-      background: var(--panel);
-      border: 1px solid rgba(0,229,255,0.35);
-      border-radius: 6px;
-      box-shadow: 0 0 30px rgba(0,100,180,0.2), inset 0 0 40px rgba(0,0,0,0.4);
-      overflow: hidden;
-    }
-    .feed { padding: 10px; overflow-y: auto; }
-    .sidebar { padding: 16px; }
-
-    .event {
-      margin: 8px 0;
-      padding: 14px 16px;
-      background: linear-gradient(90deg, rgba(0,40,80,0.6), rgba(0,20,40,0.4));
-      border-left: 4px solid var(--cyan);
-      border-radius: 2px;
-      position: relative;
-      transition: all 0.15s;
-    }
-    .event:hover {
-      background: linear-gradient(90deg, rgba(0,60,120,0.8), rgba(0,30,60,0.6));
-      transform: translateX(6px);
-      box-shadow: 0 0 15px rgba(0,229,255,0.3);
-    }
-    .event .status {
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 700;
-      font-size: 15px;
-      color: var(--green);
-      letter-spacing: 1px;
-    }
-    .event .worker { color: var(--amber); font-weight: 600; }
-    .event .meta { color: #6a8aaa; font-size: 12px; margin-top: 6px; }
-
-    .sidebar h2 {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 13px;
-      letter-spacing: 4px;
-      color: var(--cyan);
-      margin: 0 0 20px 0;
-      text-align: center;
-      border-bottom: 1px solid rgba(0,229,255,0.4);
-      padding-bottom: 10px;
-    }
-    .stat {
-      margin: 14px 0;
-      padding: 12px;
-      background: rgba(0,0,0,0.5);
-      border: 1px solid rgba(0,229,255,0.25);
-      border-radius: 4px;
-      text-align: center;
-    }
-    .stat label { display: block; font-size: 10px; letter-spacing: 3px; color: #5a7a9a; margin-bottom: 4px; }
-    .stat .value { font-family: 'Orbitron', sans-serif; font-size: 26px; color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
-
-    .empty {
-      text-align: center;
-      padding: 80px 20px;
-      color: #4a6a8a;
-      font-family: 'Orbitron', sans-serif;
-      letter-spacing: 3px;
-      font-size: 14px;
-    }
+    body { margin: 0; background: #05080f; color: #00e5ff; font-family: monospace; }
+    #root { width: 100vw; height: 100vh; }
+    .fallback { padding: 20px; }
   </style>
 </head>
 <body>
-  <div class="vignette"></div>
-  <header>
-    <div class="logo">AI GAME STUDIO</div>
-    <div class="status-bar">
-      <div class="status-item">SYSTEM ONLINE</div>
-      <div class="status-item">0 TOKENS</div>
-    </div>
-  </header>
-  <div class="container">
-    <div class="feed" id="log">
-      <div class="empty">AWAITING AGENT EVENTS<br><small>node hub/server.js</small></div>
-    </div>
-    <div class="sidebar">
-      <h2>ACTIVE WORKERS</h2>
-      <div class="stat"><label>LAST STATUS</label><div class="value" id="lastStatus">—</div></div>
-      <div class="stat"><label>ASSIGNED</label><div class="value" id="lastWorker">—</div></div>
-      <div class="stat"><label>TOTAL OPS</label><div class="value" id="count">0</div></div>
+  <div id="root">
+    <div class="fallback">
+      <h1>AI GAME STUDIO</h1>
+      <p>Loading War Room…</p>
+      <p>If this stays blank, run the build steps in docs/WAR-ROOM.md</p>
     </div>
   </div>
-
-  <script>
-    let total = 0;
-    async function poll() {
-      try {
-        const res = await fetch('/events');
-        const text = await res.text();
-        const lines = text.trim().split('\n').filter(Boolean);
-        total = lines.length;
-        const log = document.getElementById('log');
-        if (lines.length === 0) {
-          log.innerHTML = '<div class="empty">AWAITING AGENT EVENTS<br><small>./scripts/append-event.sh TEST</small></div>';
-          return;
-        }
-        const recent = lines.slice(-30).reverse();
-        log.innerHTML = recent.map(line => {
-          try {
-            const e = JSON.parse(line);
-            return `<div class="event">
-              <div><span class="status">${e.status || 'OP'}</span> · <span class="worker">${e.worker || 'unassigned'}</span></div>
-              <div class="meta">${e.ts || ''} · ${e.file || 'system'} ${e.bugId ? '· ' + e.bugId : ''}</div>
-            </div>`;
-          } catch { return ''; }
-        }).join('');
-
-        const last = JSON.parse(lines[lines.length - 1]);
-        document.getElementById('lastStatus').textContent = last.status || '—';
-        document.getElementById('lastWorker').textContent = last.worker || '—';
-        document.getElementById('count').textContent = total;
-      } catch (err) {
-        document.getElementById('log').innerHTML = '<div class="empty">SIGNAL LOST<br><small>node hub/server.js</small></div>';
-      }
-    }
-    setInterval(poll, 1200);
-    poll();
-  </script>
+  <script type="module" src="/index.jsx"></script>
 </body>
 </html>
