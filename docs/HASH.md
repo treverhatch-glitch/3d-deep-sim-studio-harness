@@ -1,7 +1,5 @@
 # Hashing
 
-The example sim uses a 32-bit FNV-1a hash. That is enough for the harness fixtures.
+The example sim uses a 64-bit FNV-style hash (two 32-bit lanes). New games should do the same from the first golden file.
 
-For a real game, prefer a 64-bit hash (two FNV lanes or a library) before you store golden files you cannot afford to collide.
-
-Current harness choice: stay on 32-bit so existing golden files stay valid. Do not silently change the hash width.
+Do not silently change the hash width after golden or regression files exist. If you change it, regenerate those files in the same commit.
