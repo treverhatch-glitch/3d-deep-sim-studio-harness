@@ -46,7 +46,8 @@ loadDotEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.HUB_PORT || 3847);
-const HOST = process.env.HUB_HOST || '0.0.0.0';
+const HOST = process.env.HUB_HOST || '127.0.0.1';
+const HUB_TOKEN = process.env.HUB_TOKEN || '';
 
 const sseClients = new Set();
 const wsClients = new Set();
@@ -243,9 +244,15 @@ function sendJson(res, status, obj) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(JSON.stringify(obj));
+}
+
+function isWriteAuthorized(req) {
+  if (!HUB_TOKEN) return false;
+  const header = req.headers['x-hub-token'] || req.headers['authorization'] || '';
+  const token = String(header).replace(/^Bearer\s+/i, '').trim();
+  return token === HUB_TOKEN;
 }
 
 function runCommandCapture(cmd, cwd = REPO_ROOT, timeoutMs = 25000) {
@@ -439,11 +446,18 @@ export function createHubServer() {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
+    const writePaths = new Set([
+      '/api/tasks', '/api/task', '/api/events', '/api/event', '/api/usage', '/usage',
+      '/api/config', '/api/frame', '/api/macro', '/api/brief'
+    ]);
+    if (req.method === 'POST' && writePaths.has(url.pathname) && !isWriteAuthorized(req)) {
+      return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    }
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Hub-Token, Authorization',
       });
       return res.end();
     }
@@ -501,7 +515,7 @@ export function createHubServer() {
     if (url.pathname === '/events' && req.method === 'GET') {
       ensureEventsFile();
       const raw = fs.readFileSync(eventsFile, 'utf8');
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end(raw);
     }
 
@@ -605,7 +619,7 @@ export function createHubServer() {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
+        
       });
       res.write(`data: ${JSON.stringify(buildStudioSnapshot())}\n\n`);
       sseClients.add(res);
