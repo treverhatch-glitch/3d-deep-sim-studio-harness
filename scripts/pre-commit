@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Install with: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+node scripts/verify-session.mjs
+node scripts/check-sim-purity.mjs
+echo "[pre-commit] note: claim a unique lock before editing shared files"
