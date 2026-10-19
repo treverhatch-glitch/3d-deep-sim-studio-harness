@@ -2,39 +2,192 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hatchfield Mission Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HATCHFIELD // MISSION CONTROL</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
   <style>
-    body { background: #0a0a0f; color: #e0e0e0; font-family: system-ui, sans-serif; margin: 0; padding: 20px; }
-    h1 { color: #00d4ff; }
-    .event { background: #1a1a2e; border-left: 4px solid #00d4ff; padding: 12px; margin: 8px 0; border-radius: 4px; }
-    .status { font-weight: bold; color: #00ff88; }
-    .worker { color: #ffaa00; }
-    #log { max-height: 80vh; overflow-y: auto; }
+    :root {
+      --cyan: #00f0ff;
+      --magenta: #ff00aa;
+      --green: #00ff88;
+      --amber: #ffaa00;
+      --bg: #030308;
+      --panel: rgba(10, 15, 30, 0.85);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: #c0d0e0;
+      font-family: 'Share Tech Mono', monospace;
+      overflow: hidden;
+      height: 100vh;
+      background-image:
+        radial-gradient(circle at 20% 30%, rgba(0, 240, 255, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(255, 0, 170, 0.06) 0%, transparent 40%),
+        linear-gradient(180deg, #000 0%, #0a0a15 100%);
+    }
+    .scanline {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 240, 255, 0.03) 2px,
+        rgba(0, 240, 255, 0.03) 4px
+      );
+      animation: scan 8s linear infinite;
+      z-index: 10;
+    }
+    @keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(4px); } }
+
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid rgba(0, 240, 255, 0.3);
+      background: linear-gradient(90deg, rgba(0,240,255,0.1), transparent);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    h1 {
+      margin: 0;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 900;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: var(--cyan);
+      text-shadow: 0 0 10px var(--cyan), 0 0 20px var(--cyan);
+    }
+    .status-pill {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 12px;
+      letter-spacing: 2px;
+      padding: 6px 14px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      border-radius: 2px;
+      text-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 50% { opacity: 0.6; } }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      height: calc(100vh - 70px);
+      gap: 16px;
+      padding: 16px;
+    }
+    .feed, .sidebar {
+      background: var(--panel);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      border-radius: 4px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .feed { padding: 8px; overflow-y: auto; }
+    .sidebar { padding: 16px; }
+
+    .event {
+      margin: 6px 0;
+      padding: 12px 14px;
+      background: rgba(0, 20, 40, 0.6);
+      border-left: 3px solid var(--cyan);
+      font-size: 13px;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .event:hover { background: rgba(0, 40, 80, 0.8); transform: translateX(4px); }
+    .event .status {
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 1px;
+    }
+    .event .worker { color: var(--amber); }
+    .event .meta { color: #6688aa; font-size: 11px; margin-top: 4px; }
+
+    .sidebar h2 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 14px;
+      letter-spacing: 3px;
+      color: var(--cyan);
+      margin: 0 0 16px 0;
+      border-bottom: 1px solid rgba(0,240,255,0.3);
+      padding-bottom: 8px;
+    }
+    .stat {
+      margin: 12px 0;
+      padding: 10px;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(0,240,255,0.2);
+    }
+    .stat label { display: block; font-size: 10px; letter-spacing: 2px; color: #6688aa; }
+    .stat .value { font-family: 'Orbitron', sans-serif; font-size: 22px; color: var(--cyan); }
+
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #446688;
+      font-family: 'Orbitron', sans-serif;
+      letter-spacing: 2px;
+    }
   </style>
 </head>
 <body>
-  <h1>Hatchfield AI Studio — Mission Control</h1>
-  <p>Passive HUB. Reads <code>/tmp/agent-events.jsonl</code>. Zero LLM tokens.</p>
-  <div id="log">Waiting for events...</div>
+  <div class="scanline"></div>
+  <header>
+    <h1>HATCHFIELD // MISSION CONTROL</h1>
+    <div class="status-pill">SYSTEM ONLINE</div>
+  </header>
+  <div class="container">
+    <div class="feed" id="log">
+      <div class="empty">AWAITING AGENT EVENTS<br><small>Start with: node hub/server.js</small></div>
+    </div>
+    <div class="sidebar">
+      <h2>ACTIVE WORKERS</h2>
+      <div class="stat"><label>LAST EVENT</label><div class="value" id="lastStatus">—</div></div>
+      <div class="stat"><label>WORKER</label><div class="value" id="lastWorker">—</div></div>
+      <div class="stat"><label>EVENTS</label><div class="value" id="count">0</div></div>
+      <div class="stat"><label>TOKENS USED</label><div class="value" style="color:var(--green)">0</div></div>
+    </div>
+  </div>
 
   <script>
-    // For local use: run a simple server or open via file:// and poll a served endpoint.
-    // This example assumes a small local server is serving the JSONL (see README).
+    let total = 0;
     async function poll() {
       try {
         const res = await fetch('/events');
         const text = await res.text();
         const lines = text.trim().split('\n').filter(Boolean);
+        total = lines.length;
         const log = document.getElementById('log');
-        log.innerHTML = lines.slice(-50).reverse().map(line => {
-          const e = JSON.parse(line);
-          return `<div class="event"><span class="status">${e.status}</span> · <span class="worker">${e.worker}</span><br><small>${e.ts} · ${e.agent} · ${e.file || ''} ${e.bugId || ''}</small></div>`;
+        if (lines.length === 0) {
+          log.innerHTML = '<div class="empty">AWAITING AGENT EVENTS<br><small>Run: ./scripts/append-event.sh TEST</small></div>';
+          return;
+        }
+        const recent = lines.slice(-40).reverse();
+        log.innerHTML = recent.map(line => {
+          try {
+            const e = JSON.parse(line);
+            return `<div class="event">
+              <div><span class="status">${e.status || 'EVENT'}</span> · <span class="worker">${e.worker || 'unknown'}</span></div>
+              <div class="meta">${e.ts || ''} · ${e.agent || ''} · ${e.file || ''} ${e.bugId || ''}</div>
+            </div>`;
+          } catch { return ''; }
         }).join('');
+
+        const last = JSON.parse(lines[lines.length - 1]);
+        document.getElementById('lastStatus').textContent = last.status || '—';
+        document.getElementById('lastWorker').textContent = last.worker || '—';
+        document.getElementById('count').textContent = total;
       } catch (err) {
-        document.getElementById('log').innerHTML = '<div class="event">No events yet or server not running. Start with: <code>node hub/server.js</code></div>';
+        document.getElementById('log').innerHTML = '<div class="empty">CONNECTION LOST<br><small>Start the server: node hub/server.js</small></div>';
       }
     }
-    setInterval(poll, 2000);
+    setInterval(poll, 1500);
     poll();
   </script>
 </body>
