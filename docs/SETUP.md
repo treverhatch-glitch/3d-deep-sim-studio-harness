@@ -2,39 +2,57 @@
 
 ## Token Savers (Recommended First)
 
-### RTK (Rust Token Killer)
+One command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
-# or: brew install rtk-ai/tap/rtk
+chmod +x scripts/setup-token-savers.sh
+./scripts/setup-token-savers.sh
+```
+
+This installs RTK and QMD (if bun is present) and indexes the docs.
+
+### RTK (Rust Token Killer)
+
+Filters shell output (vitest, git, tsc, etc.) before the agent sees it. 60–90% reduction on common commands.
+
+```bash
 rtk gain   # verify after a few commands
 ```
 
-RTK intercepts shell output (vitest, git, tsc, etc.) and strips noise before the agent sees it. 60–90% reduction on common commands.
-
 ### QMD (Query Markup Documents)
 
-```bash
-bun install -g https://github.com/tobi/qmd
-qmd collection add ./docs --name docs
-qmd embed
-```
+Local search over markdown. Agents fetch relevant sections instead of loading whole files.
 
-Use for searching NEXT.md, PLAYTEST notes, aircraft specs, etc., instead of loading whole files.
+```bash
+qmd query "current task"
+```
 
 ## Event Log
 
-Agents (or wrapper scripts) append one JSON line to `/tmp/agent-events.jsonl` on major steps. The visual HUB reads this file with zero LLM tokens.
+Agents append one JSON line to `/tmp/agent-events.jsonl`. The visual HUB reads this file with zero LLM tokens.
 
-Example line:
-```json
-{"ts":"2026-10-19T12:00:00Z","agent":"grok-producer","worker":"nvidia-glm-5.3-flash","status":"RUNNING_VITEST","file":"src/game/sim.ts","bugId":"P0-12"}
+```bash
+./scripts/append-event.sh RUNNING_VITEST src/game/sim.ts P0-12 nvidia-glm
 ```
 
 ## Multi-Model Router
 
-See `scripts/llm-dispatch.sh` (stub). Primary: Vertex Gemini. Failover: NVIDIA GLM Flash / Groq when credits or rate limits hit.
+Primary: `harness/route.mjs` (real OpenAI-compatible failover).
+
+```bash
+export VERTEX_API_KEY=...
+export NVIDIA_API_KEY=...
+export GROQ_API_KEY=...
+node harness/route.mjs "Summarize the current task"
+```
+
+Shell wrapper still available at `scripts/llm-dispatch.sh`.
 
 ## Visual HUB
 
-Optional. Local React Flow or n8n canvas that watches the event log. Can be closed; work continues. Accessible via Tailscale or Cloudflare Tunnel on phone.
+```bash
+node hub/server.js
+# open http://localhost:3847
+```
+
+Zero LLM tokens. Can be closed; work continues.
