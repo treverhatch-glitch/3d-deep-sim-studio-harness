@@ -9,6 +9,8 @@ Agents must keep durable work in files, not chat.
 | Active handoff / current focus | `CURRENT_TASK.md` | Start and end of every session |
 | Prioritized backlog | `NEXT.md` | When priorities change or new work appears |
 | Completed task summary | `studio/done/YYYY-MM-DD-short-title.md` | When a task is finished |
+| Daily rollup + videos | `studio/daily/YYYY-MM-DD.md` | End of day or major session |
+| Before/after videos | `studio/daily/videos/` | When gameplay visuals change |
 | Bug report | `studio/templates/bug.md` → copy into `qa/reports/` | When a bug is found |
 | Playtest report | `studio/templates/playtest.md` → copy into `qa/reports/` | After a playtest |
 | Calibration notes | Inside the done summary or `CURRENT_TASK.md` | During Designer-Calibrator work |
@@ -24,6 +26,7 @@ Agents must keep durable work in files, not chat.
    - Write a short summary in `studio/done/`.
    - Update `CURRENT_TASK.md` with what was done and the new next step (or clear it).
    - Check the item off in `NEXT.md` or remove it.
+7. At the end of a day or major session, fill `studio/daily/YYYY-MM-DD.md` (copy from `TEMPLATE.md`). Include the task checklist and any before/after gameplay videos.
 
 ## Summary Format (studio/done/)
 
@@ -37,9 +40,14 @@ Agents must keep durable work in files, not chat.
 - **Follow-ups:** (or "none")
 ```
 
+## Daily Summary
+
+See `docs/DAILY-SUMMARY.md` and `studio/daily/TEMPLATE.md`.
+
 ## Rules
 
 - Never leave the only record of work in the chat.
 - Keep `CURRENT_TASK.md` short and current.
 - Prefer appending to `NEXT.md` over creating new tracking files.
 - The Producer is responsible for keeping `CURRENT_TASK.md` and `NEXT.md` accurate.
+- Daily summaries with optional before/after videos give a visual record of progress.
