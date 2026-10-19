@@ -28,3 +28,25 @@ MCP tools that control an editor should stay on localhost.
 - MCP servers can change local project files. Bind them to localhost and do not expose them.
 - Generated 3D from TripoSR is a prototype. It still goes through the approval gate before use.
 - Physics, particles, and postprocessing stay outside the pure sim cartridge.
+
+## Agent frameworks (optional notes)
+
+These are general agent frameworks, not game tools. Do not vendor them.
+Most of them fight this harness: they want to own the agent loop.
+
+### Worth a note
+
+| Repo | Why it is listed | Use here? |
+|------|------------------|-----------|
+| [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | Local autonomous runtime. Fits the cheap-model / no-quota idea. | Optional local worker. Not the producer. |
+| [huggingface/smolagents](https://github.com/huggingface/smolagents) | Tiny code-first agents. Low overhead. | Optional if you want a small local coder. |
+| [paul-gauthier/aider](https://github.com/paul-gauthier/aider) | Edits a git repo from the terminal. | Optional coding helper. Still use the lock rule. |
+| [browser-use/browser-use](https://github.com/browser-use/browser-use) | Agent can open a browser and look at a page. | Optional for visual playtest later. Local only. |
+| [mem0ai/mem0](https://github.com/mem0ai/mem0) | Persistent agent memory. | Skip for now. `studio/memory/failures.md` is the lighter version. |
+| [affaan-m/ECC](https://github.com/affaan-m/ECC) | Isolated coding harness ideas. | Read only. Do not replace this harness. |
+
+### Skip
+
+LangGraph, LangChain, CrewAI, AutoGen, OpenAI Agents, Agno, AutoGPT, n8n, Langflow, Dify, RAGFlow, OpenClaw, Composio, GLaDOS, Jenjutsu, and the 500-agents list.
+They are heavy, general, or visual platforms. This harness stays file-based and game-specific.
+
