@@ -1,0 +1,23 @@
+# Hatchfield Sim API (llms.txt)
+
+Compact reference for agents. Load this instead of full source when possible.
+
+## Core Concepts
+
+- Fixed-timestep simulation tick (not frame-rate based).
+- Pure TypeScript sim — no DOM or Three.js imports in core logic.
+- Serializable state (flights, economy, research must survive save/load).
+
+## Key Surfaces
+
+- `tick(dt)` — advance simulation by fixed delta.
+- `getState()` / `loadState(json)` — full serializable snapshot.
+- `window.__hatch` (debug only) — exposed when `?playtest=1`.
+- Pathfinding heap, turnaround classes, aircraft rules live under `src/game/`.
+
+## Rules
+
+- Never import Three.js or React inside `src/game/sim*`.
+- Prefer reading this file + targeted QMD/symbol lookup over full file loads.
+
+Fill in exact function signatures as the sim stabilizes.
