@@ -1,0 +1,10 @@
+---
+description: Harness session rules for Cursor
+alwaysApply: true
+---
+
+Before editing:
+1. Read AGENTS.md
+2. Run `node scripts/verify-session.mjs`
+3. Claim work with `node harness/lock.mjs claim <key> --owner cursor`
+4. Do not use unapproved references
