@@ -7,6 +7,7 @@ These make the harness stronger once the basics are running.
 - **Symbol-level code access** — Serena (or similar LSP-based MCP) so agents edit by symbol instead of reading whole files of a large codebase.
 - **Real model keys** — Set `VERTEX_API_KEY`, `NVIDIA_API_KEY`, and/or `GROQ_API_KEY` so `harness/route.mjs` can actually fail over.
 - **RTK + QMD** — Run `scripts/setup-token-savers.sh`.
+- **Local agent offload** — Install [grokbot-local-agent](https://github.com/robbin/grokbot-local-agent) so Grok Bot can hand heavy work to Pi (or similar) on the same machine. See `docs/GROKBOT-LOCAL-AGENT.md`.
 
 ## Medium priority
 
