@@ -1,23 +1,36 @@
-# Hatchfield Sim API (llms.txt)
+# Game Sim + Presentation API (llms.txt)
 
-Compact reference for agents. Load this instead of full source when possible.
+Compact reference for agents working on 3D games with deep simulation. Load this instead of full source when possible. Inspired by VibeGame’s llms.txt pattern.
 
-## Core Concepts
+## Architecture
 
-- Fixed-timestep simulation tick (not frame-rate based).
-- Pure TypeScript sim — no DOM or Three.js imports in core logic.
-- Serializable state (flights, economy, research must survive save/load).
+- Fixed-timestep pure TypeScript simulation.
+- Serializable state snapshot is the only contract between sim and renderer.
+- Three.js / React Three Fiber lives only in the presentation layer.
 
-## Key Surfaces
+## Simulation Surface (fill in per game)
 
-- `tick(dt)` — advance simulation by fixed delta.
-- `getState()` / `loadState(json)` — full serializable snapshot.
-- `window.__hatch` (debug only) — exposed when `?playtest=1`.
-- Pathfinding heap, turnaround classes, aircraft rules live under `src/game/`.
+- `tick(dt: number): void` — advance by fixed delta.
+- `getState(): GameState` — full serializable snapshot.
+- `loadState(json: GameState): void`
+- Debug: `window.__hatch` when `?playtest=1`.
 
-## Rules
+## Presentation Surface
 
-- Never import Three.js or React inside `src/game/sim*`.
-- Prefer reading this file + targeted QMD/symbol lookup over full file loads.
+- Renderer subscribes to state changes or polls `getState()`.
+- No sim logic inside React components or Three.js loops.
+- Materials, LOD, lighting, and post-processing are free to be complex.
 
-Fill in exact function signatures as the sim stabilizes.
+## Deep Simulation Notes
+
+- Pathfinding, economy, scheduling, and multi-entity rules belong in sim.
+- Keep heaps, priority queues, and tick handlers pure.
+- Headless tests must cover sim behavior without a canvas.
+
+## Rules Agents Must Follow
+
+- See `studio/rules/sim-isolation.md`
+- See `studio/rules/graphics-sim-boundary.md`
+- Update this file when the public sim API changes.
+
+Replace the placeholders above with the real signatures once the first game (Hatchfield or other) stabilizes.
