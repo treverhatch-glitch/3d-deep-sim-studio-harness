@@ -6,22 +6,25 @@ Agents write procedural Python scripts against Blender's built-in `bpy` module
 (or coordinate via `mlolson/blender-orchestrator`) and export optimized `.glb`
 assets headlessly with zero GUI overhead:
 
-  blender -b --factory-startup -P tools/blender/generate_glb.py -- \
+  blender -b --factory-startup -P tools/blender/generate_glb.py -- \\
     --preset vehicle --out public/assets/vehicle.glb
 
 Supported presets:
-  - crate   : Low-poly cargo crate (1x1x1m)
-  - cone    : Traffic / safety marker cone with base plinth
-  - vehicle : Low-poly utility vehicle (chassis + cabin + 4 wheel cylinders)
-  - beacon  : Navigation / telemetry tower cylinder
-  - hangar  : Wide industrial hangar / warehouse structure
+  - crate       : Low-poly cargo crate
+  - cone        : Traffic / safety marker cone
+  - vehicle     : Low-poly utility vehicle
+  - beacon      : Navigation / telemetry tower
+  - hangar      : Wide industrial hangar
+  - fuel_truck  : Simple fuel tanker
+  - cart        : Baggage / cargo cart
+  - light_pole  : Apron light pole
 """
 
 import argparse
 import os
 import sys
 
-PRESETS = ["crate", "cone", "vehicle", "beacon", "hangar"]
+PRESETS = ["crate", "cone", "vehicle", "beacon", "hangar", "fuel_truck", "cart", "light_pole"]
 
 
 def parse_args():
@@ -71,12 +74,10 @@ def build_scene(preset: str, out_path: str):
     elif preset == "cone":
         mat_orange = make_material("mat_cone_orange", (0.98, 0.36, 0.05, 1.0), roughness=0.45, metallic=0.05)
         mat_base = make_material("mat_cone_base", (0.12, 0.14, 0.18, 1.0), roughness=0.8, metallic=0.1)
-        # Base plinth
         bpy.ops.mesh.primitive_cube_add(size=0.5, location=(0.0, 0.0, 0.04))
         base = bpy.context.active_object
         base.scale = (1.0, 1.0, 0.16)
         assign_material(base, mat_base)
-        # Cone body
         bpy.ops.mesh.primitive_cone_add(vertices=12, radius1=0.22, radius2=0.04, depth=0.75, location=(0.0, 0.0, 0.42))
         cone = bpy.context.active_object
         cone.name = "sim_cone"
@@ -87,21 +88,18 @@ def build_scene(preset: str, out_path: str):
         mat_cab = make_material("mat_vehicle_cabin", (0.75, 0.88, 0.98, 1.0), roughness=0.2, metallic=0.1)
         mat_wheel = make_material("mat_vehicle_wheel", (0.10, 0.11, 0.13, 1.0), roughness=0.85, metallic=0.1)
 
-        # Chassis
         bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 0.0, 0.45))
         chassis = bpy.context.active_object
         chassis.name = "sim_vehicle_chassis"
         chassis.scale = (2.2, 1.1, 0.45)
         assign_material(chassis, mat_body)
 
-        # Cabin
         bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.35, 0.0, 0.88))
         cabin = bpy.context.active_object
         cabin.name = "sim_vehicle_cabin"
         cabin.scale = (1.0, 0.95, 0.42)
         assign_material(cabin, mat_cab)
 
-        # 4 Wheels
         wheel_offsets = [(-0.7, -0.58, 0.24), (-0.7, 0.58, 0.24), (0.7, -0.58, 0.24), (0.7, 0.58, 0.24)]
         for idx, (wx, wy, wz) in enumerate(wheel_offsets):
             bpy.ops.mesh.primitive_cylinder_add(
@@ -118,6 +116,37 @@ def build_scene(preset: str, out_path: str):
         obj.name = "sim_beacon"
         assign_material(obj, mat)
 
+    elif preset == "fuel_truck":
+        mat_tank = make_material("mat_fuel_tank", (0.85, 0.75, 0.15, 1.0), roughness=0.4, metallic=0.3)
+        mat_cab = make_material("mat_fuel_cab", (0.2, 0.2, 0.22, 1.0), roughness=0.5, metallic=0.2)
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(-0.8, 0.0, 0.7))
+        cab = bpy.context.active_object
+        cab.scale = (0.7, 0.8, 0.6)
+        assign_material(cab, mat_cab)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.45, depth=2.2, location=(0.6, 0.0, 0.85), rotation=(0.0, 1.5708, 0.0))
+        tank = bpy.context.active_object
+        tank.name = "sim_fuel_truck"
+        assign_material(tank, mat_tank)
+
+    elif preset == "cart":
+        mat = make_material("mat_cart", (0.55, 0.35, 0.2, 1.0), roughness=0.6, metallic=0.15)
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 0.0, 0.4))
+        body = bpy.context.active_object
+        body.scale = (1.4, 0.7, 0.35)
+        body.name = "sim_cart"
+        assign_material(body, mat)
+
+    elif preset == "light_pole":
+        mat = make_material("mat_pole", (0.7, 0.7, 0.72, 1.0), roughness=0.4, metallic=0.5)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=8, radius=0.08, depth=4.0, location=(0.0, 0.0, 2.0))
+        pole = bpy.context.active_object
+        pole.name = "sim_light_pole"
+        assign_material(pole, mat)
+        bpy.ops.mesh.primitive_cube_add(size=0.4, location=(0.0, 0.0, 4.1))
+        head = bpy.context.active_object
+        head.scale = (1.2, 0.3, 0.2)
+        assign_material(head, mat)
+
     else:  # hangar
         mat = make_material("mat_hangar", (0.45, 0.50, 0.58, 1.0), roughness=0.65, metallic=0.25)
         bpy.ops.mesh.primitive_cube_add(size=2.0, location=(0.0, 0.0, 1.0))
@@ -126,7 +155,7 @@ def build_scene(preset: str, out_path: str):
         obj.scale = (1.8, 1.2, 0.7)
         assign_material(obj, mat)
 
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
     bpy.ops.export_scene.gltf(
         filepath=os.path.abspath(out_path),
         export_format="GLB",
