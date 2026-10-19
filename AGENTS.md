@@ -1,6 +1,6 @@
 # AGENTS.md — Standing Instructions for All Agents
 
-You are working on a 3D game with deep simulation using this AI Game Studio harness. Follow these rules every session.
+You are working on a 3D game with deep simulation using this AI Game Studio harness. These rules apply to **any agent** (Cursor, Claude Code, Codex, Pi, Grok Bot, Gemini CLI, local models, etc.).
 
 ## Before Starting Work
 
@@ -19,6 +19,7 @@ You are working on a 3D game with deep simulation using this AI Game Studio harn
 - Route heavy reasoning to stronger models; bulk fixes and classification to free-tier workers.
 - Respect lean roles in `studio/roles/` (Producer, Builder, QA-Playtester, Reviewer, Designer-Calibrator).
 - Keep simulation pure; keep Three.js in the presentation layer only.
+- Any agent may fill any role. There is no required agent.
 
 ## After Finishing a Task
 
@@ -34,10 +35,12 @@ See `docs/WORK-ORGANIZATION.md` for the full flow.
 ## Producer Role
 
 - Read the task files.
-- Decide which worker / model to use.
+- Decide which worker / model / agent to use.
 - Direct the work.
 - Verify results and update the handoff files.
 - Never accumulate multi-turn status history in one chat.
+
+Any agent can act as Producer. One optional route is Grok Bot as a thin Producer that offloads heavy work (see `docs/GROKBOT-LOCAL-AGENT.md`).
 
 ## Visual / Playtest Testing
 
