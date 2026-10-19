@@ -19,25 +19,12 @@ jobs:
           node --check harness/route.mjs
           node --check harness/event.mjs
           node --check harness/task.mjs
+          node --check harness/lock.mjs
           node --check hub/server.mjs
           node --check qa/playtest.mjs
           node --check cartridges/example-sim/index.mjs
-      - name: Session files
-        run: node scripts/verify-session.mjs
-      - name: Sim purity
-        run: node scripts/check-sim-purity.mjs
-      - name: Sim isolation
-        run: bash scripts/check-sim-isolation.sh
-      - name: Golden hashes
-        run: node qa/check-golden.mjs
-      - name: Approvals
-        run: node scripts/check-approvals.mjs
-      - name: Regressions
-        run: node qa/check-regressions.mjs
-      - name: Renderer budget
-        run: node scripts/check-renderer-budget.mjs
-      - name: Reviewer markers
-        run: node scripts/check-reviewer.mjs
+      - name: Run gates
+        run: node scripts/run-gates.mjs
       - name: Closed-loop must fail when simulated
         run: |
           set +e
@@ -45,5 +32,3 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 1
-      - name: Secret scan
-        run: bash scripts/secret-scan.sh
