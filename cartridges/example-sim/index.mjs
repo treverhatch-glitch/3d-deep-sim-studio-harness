@@ -1,13 +1,5 @@
 /**
  * cartridges/example-sim/index.mjs — Reference Deterministic 3D Sim Cartridge
- *
- * Demonstrates the #1 mandatory rule for every new game in this harness:
- *   Implement a deterministic SEED + FIXED-TICK system FIRST so automated QA
- *   and bug replay (`{ seed, tick, description }`) can scroll back to any
- *   exact failing moment.
- *
- * Pure JS/TS: ZERO DOM, Three.js, unseeded RNG, or wall-clock calls inside
- * simulation state transitions.
  */
 
 export function nextMulberry32(rngState) {
@@ -36,10 +28,7 @@ export function createInitialState(seed = 42069) {
     rngState: cleanSeed,
     tick: 0,
     paused: false,
-    resources: {
-      credits: 10000,
-      energy: 500,
-    },
+    resources: { credits: 10000, energy: 500 },
     entities: [
       { id: 'unit-1', kind: 'vehicle', x: 0, y: 0, z: 0, speed: 1 },
       { id: 'prop-1', kind: 'crate', x: 4, y: 0, z: -2, speed: 0 },
@@ -48,31 +37,36 @@ export function createInitialState(seed = 42069) {
   };
 }
 
+function normalizeActions(action) {
+  if (!action) return [];
+  return Array.isArray(action) ? action.filter(Boolean) : [action];
+}
+
 export function step(prevState, action = null) {
-  if (prevState.paused && (!action || action.type !== 'RESUME')) {
+  if (prevState.paused && (!action || (action.type && action.type !== 'RESUME'))) {
     return prevState;
   }
   const state = structuredClone(prevState);
   state.tick += 1;
 
-  if (action && action.type) {
-    state.actionLog.push({ tick: state.tick, action });
-    if (action.type === 'SPAWN_ENTITY') {
+  for (const act of normalizeActions(action)) {
+    if (!act || !act.type) continue;
+    state.actionLog.push({ tick: state.tick, action: act });
+    if (act.type === 'SPAWN_ENTITY' || act.type === 'spawn') {
       state.entities.push({
-        id: action.id || `entity-${state.tick}`,
-        kind: action.kind || 'crate',
-        x: Number(action.x || 0),
+        id: act.id || `entity-${state.tick}-${state.entities.length}`,
+        kind: act.kind || 'crate',
+        x: Number(act.x || 0),
         y: 0,
-        z: Number(action.z || 0),
-        speed: Number(action.speed ?? 1),
+        z: Number(act.z || 0),
+        speed: Number(act.speed ?? 1),
       });
-      state.resources.credits -= Number(action.cost ?? 250);
+      state.resources.credits -= Number(act.cost ?? 250);
     }
   }
 
   const rng = nextMulberry32(state.rngState);
   state.rngState = rng.rngState;
-
   const drift = Math.round((rng.value - 0.45) * 40);
   state.resources.credits += 25 + drift;
   state.resources.energy = Math.max(0, state.resources.energy - 1);
@@ -86,31 +80,21 @@ export function step(prevState, action = null) {
   return state;
 }
 
-/**
- * Deterministically replay from `{ seed, tick, actions }` to reproduce any bug state.
- */
 export function replayToTick({ seed = 42069, tick = 120, actions = [] } = {}) {
   let state = createInitialState(seed);
   const actionsByTick = new Map();
   for (const entry of actions) {
-    if (entry && typeof entry.tick === 'number') {
-      actionsByTick.set(entry.tick, entry.action || entry);
-    }
+    if (!entry || typeof entry.tick !== 'number') continue;
+    const list = actionsByTick.get(entry.tick) || [];
+    list.push(entry.action || entry);
+    actionsByTick.set(entry.tick, list);
   }
   for (let t = 1; t <= tick; t++) {
     state = step(state, actionsByTick.get(t) || null);
   }
-  return {
-    seed,
-    tick: state.tick,
-    hash: hashSimState(state),
-    state,
-  };
+  return { seed, tick: state.tick, hash: hashSimState(state), state };
 }
 
-/**
- * Expose both `window.__hatch` and `window.__sim` when running in a browser with `?playtest=1`.
- */
 export function mountPlaytestApi(targetWindow) {
   if (!targetWindow) return null;
   let current = createInitialState(42069);
@@ -120,28 +104,17 @@ export function mountPlaytestApi(targetWindow) {
       return current;
     },
     step(ticks = 1, action = null) {
-      for (let i = 0; i < ticks; i++) {
-        current = step(current, i === 0 ? action : null);
-      }
+      for (let i = 0; i < ticks; i++) current = step(current, i === 0 ? action : null);
       return current;
     },
     dispatch(action) {
       current = step(current, action);
       return current;
     },
-    getState() {
-      return current;
-    },
-    getHash() {
-      return hashSimState(current);
-    },
-    serialize() {
-      return JSON.stringify(current);
-    },
-    deserialize(raw) {
-      current = JSON.parse(raw);
-      return current;
-    },
+    getState() { return current; },
+    getHash() { return hashSimState(current); },
+    serialize() { return JSON.stringify(current); },
+    deserialize(raw) { current = JSON.parse(raw); return current; },
     replay(payload) {
       const res = replayToTick(payload);
       current = res.state;
