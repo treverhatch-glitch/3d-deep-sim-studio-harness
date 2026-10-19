@@ -2,10 +2,12 @@
 /**
  * hub/server.mjs — Zero-Token Passive Workflow UI HUB Server
  *
- * Serves the 4-Quadrant Sci-Fi Mission Control War Room (`hub/WarRoom.tsx` +
- * `hub/index.html`) and streams `.studio/events.jsonl` + `studio/NEXT.md`
- * changes in real time over Server-Sent Events (`/api/stream`) and JSON REST
- * endpoints (`/api/state`, `/api/event`, `/api/task`).
+ * Serves the 4-Quadrant React Flow Mission Control War Room (`hub/WarRoom.tsx`
+ * / `hub/dist/index.html` or standalone `hub/index.html`) and streams:
+ *   - `.studio/events.jsonl` (`/events`, `/api/state`, `/api/stream`)
+ *   - `.studio/usage.json` (`/usage`, `/api/usage`)
+ *   - `studio/NEXT.md` (`/api/task`)
+ *   - Latest QA screenshot (`/api/latest-screenshot`)
  *
  * Uses 0% LLM tokens. Safe to leave open on a second monitor for YouTube
  * devlogs or access remotely from a phone via Tailscale / Cloudflare Tunnel.
@@ -15,7 +17,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildStudioSnapshot } from '../harness/status.mjs';
+import { buildStudioSnapshot, readSubscriptionUsage, USAGE_FILE } from '../harness/status.mjs';
 import { emitEvent, getEventPaths, REPO_ROOT } from '../harness/event.mjs';
 import { startTask, completeTask, addTask, NEXT_FILE } from '../harness/task.mjs';
 import { loadDotEnv } from '../harness/route.mjs';
@@ -23,7 +25,7 @@ import { loadDotEnv } from '../harness/route.mjs';
 loadDotEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.HUB_PORT || 4177);
+const PORT = Number(process.env.HUB_PORT || 3847);
 const HOST = process.env.HUB_HOST || '0.0.0.0';
 
 const sseClients = new Set();
@@ -40,7 +42,6 @@ function broadcastSnapshot() {
   }
 }
 
-// Ensure `.studio/events.jsonl` exists and watch for changes
 const { primary: eventsFile } = getEventPaths();
 fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
 if (!fs.existsSync(eventsFile)) {
@@ -54,13 +55,13 @@ if (!fs.existsSync(eventsFile)) {
   });
 }
 
-for (const watchTarget of [eventsFile, NEXT_FILE]) {
+for (const watchTarget of [eventsFile, NEXT_FILE, USAGE_FILE]) {
   try {
     if (fs.existsSync(watchTarget)) {
       fs.watch(watchTarget, { persistent: false }, () => broadcastSnapshot());
     }
   } catch {
-    // Polling fallback handled below
+    // Non-fatal
   }
 }
 
@@ -107,6 +108,33 @@ export function createHubServer() {
       return sendJson(res, 200, buildStudioSnapshot());
     }
 
+    if ((url.pathname === '/usage' || url.pathname === '/api/usage') && req.method === 'GET') {
+      return sendJson(res, 200, readSubscriptionUsage());
+    }
+
+    if (url.pathname === '/events' && req.method === 'GET') {
+      const raw = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8') : '';
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      return res.end(raw);
+    }
+
+    if (url.pathname === '/api/latest-screenshot' && req.method === 'GET') {
+      const reportsDir = path.join(REPO_ROOT, 'qa', 'reports');
+      if (fs.existsSync(reportsDir)) {
+        const pngs = fs
+          .readdirSync(reportsDir)
+          .filter((f) => f.endsWith('.png'))
+          .map((f) => ({ name: f, mtime: fs.statSync(path.join(reportsDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        if (pngs[0]) {
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+          return res.end(fs.readFileSync(path.join(reportsDir, pngs[0].name)));
+        }
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      return res.end('No QA screenshot captured yet.');
+    }
+
     if (url.pathname === '/api/stream' && req.method === 'GET') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -148,25 +176,33 @@ export function createHubServer() {
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      const htmlPath = path.join(__dirname, 'index.html');
+      const builtHtml = path.join(__dirname, 'dist', 'index.html');
+      const fallbackHtml = path.join(__dirname, 'index.html');
+      const targetHtml = fs.existsSync(builtHtml) ? builtHtml : fallbackHtml;
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(fs.readFileSync(htmlPath, 'utf8'));
+      return res.end(fs.readFileSync(targetHtml, 'utf8'));
     }
 
     sendJson(res, 404, { error: 'Not found', path: url.pathname });
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+export function startHubCli() {
   const server = createHubServer();
   server.listen(PORT, HOST, () => {
     console.log('====================================================================');
     console.log(' 3D DEEP-SIM WORKFLOW UI HUB — ZERO-TOKEN MISSION CONTROL HQ');
     console.log('====================================================================');
-    console.log(` Desktop War Room (4-Quadrant) : http://127.0.0.1:${PORT}`);
-    console.log(` Mobile Command Feed           : http://127.0.0.1:${PORT}/?view=mobile`);
-    console.log(` Events Ledger                 : ${ path.relative(REPO_ROOT, eventsFile) }`);
+    console.log(` Desktop War Room (4-Quadrant) : http://localhost:${PORT}`);
+    console.log(` Mobile Command Feed           : http://localhost:${PORT}/?view=mobile`);
+    console.log(` Events Ledger                 : ${path.relative(REPO_ROOT, eventsFile)}`);
+    console.log(` Subscription Usage File       : ${path.relative(REPO_ROOT, USAGE_FILE)}`);
     console.log(` LLM Token Cost                : 0% (Passive local SSE stream)`);
     console.log('====================================================================');
   });
+  return server;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  startHubCli();
 }

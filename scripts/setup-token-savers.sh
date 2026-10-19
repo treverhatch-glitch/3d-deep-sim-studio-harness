@@ -88,6 +88,13 @@ cat > "${REPO_ROOT}/.mcp.json" <<'EOF'
         "--headless",
         "--caps=vision"
       ]
+    },
+    "blender-orchestrator": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:mlolson/blender-orchestrator"
+      ]
     }
   }
 }

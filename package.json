@@ -19,6 +19,8 @@
     "playtest:stage1": "node qa/playtest.mjs --stage 1",
     "playtest:stage2": "node qa/playtest.mjs --stage 2",
     "check:purity": "node scripts/check-sim-purity.mjs",
+    "check:isolation": "bash scripts/check-sim-isolation.sh",
+    "event:sh": "bash scripts/append-event.sh",
     "session:start": "bash scripts/session-start.sh",
     "session:precompact": "bash scripts/pre-compact.sh",
     "setup:token-savers": "bash scripts/setup-token-savers.sh"

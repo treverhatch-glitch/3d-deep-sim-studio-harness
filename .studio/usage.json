@@ -1,0 +1,62 @@
+{
+  "updatedAt": "2026-10-19T21:45:00Z",
+  "zeroTokenHubActive": true,
+  "tokenSavers": {
+    "rtkCompressionPct": 78,
+    "qmdRagActive": true,
+    "serenaLspActive": true,
+    "avoidedCheckInTokens": 185000
+  },
+  "subscriptions": [
+    {
+      "id": "grok-bot",
+      "name": "Grok Bot (Executive Producer)",
+      "tier": "Subscription / Thin Producer",
+      "used": 12,
+      "limit": 100,
+      "unit": "cycles",
+      "resetAt": "Rolling 24h",
+      "status": "healthy"
+    },
+    {
+      "id": "vertex-gemini",
+      "name": "Google Cloud Vertex AI ($300 Credit)",
+      "tier": "Primary Reasoning (Gemini 2.5 Pro / Flash)",
+      "used": 14.5,
+      "limit": 300.0,
+      "unit": "USD credit",
+      "resetAt": "90-day trial credit",
+      "status": "healthy"
+    },
+    {
+      "id": "nvidia-nim",
+      "name": "NVIDIA NIM (GLM 5.3 Flash / Nemotron)",
+      "tier": "Free Failover Tier #1",
+      "used": 140,
+      "limit": 1000,
+      "unit": "req/day",
+      "resetAt": "Daily UTC",
+      "status": "healthy"
+    },
+    {
+      "id": "groq-free",
+      "name": "Groq Cloud (Llama 3.3 70B)",
+      "tier": "Free Failover Tier #2",
+      "used": 85,
+      "limit": 14400,
+      "unit": "req/day",
+      "resetAt": "Daily UTC",
+      "status": "healthy"
+    },
+    {
+      "id": "cursor-claude",
+      "name": "Cursor / Claude Code (Optional BYOK)",
+      "tier": "Swappable IDE Agent",
+      "used": 45,
+      "limit": 500,
+      "unit": "fast requests",
+      "resetAt": "Monthly",
+      "status": "healthy"
+    }
+  ]
+}

@@ -21,7 +21,7 @@
       .grid-4q {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: repeat(2, minmax(330px, 1fr));
+        grid-template-rows: repeat(2, minmax(340px, 1fr));
         gap: 14px; padding: 14px;
       }
       @media (max-width: 900px) {
@@ -45,15 +45,17 @@
         padding: 5px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
       }
       button:hover { opacity: 0.9; }
-      table { width: 100%; border-collapse: collapse; font-size: 11px; }
-      th, td { padding: 6px 4px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.1); }
+      table { width: 100%; border-collapse: collapse; font-size: 10px; }
+      th, td { padding: 5px 4px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.1); }
     </style>
   </head>
   <body>
+    <div id="root"></div>
     <div id="app">Loading Zero-Token Workflow UI HUB...</div>
     <script type="module">
       let snapshot = null;
       let mobileMode = new URLSearchParams(location.search).get('view') === 'mobile' || innerWidth < 860;
+      let liveMode = 'queue'; // 'queue' | 'screenshot' | 'novnc' | 'preview'
 
       async function postJson(url, body) {
         await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -61,6 +63,7 @@
 
       window.hubStartTask = (id) => postJson('/api/task', { action: 'start', id });
       window.hubDoneTask = (id) => postJson('/api/task', { action: 'done', id });
+      window.hubSetLiveMode = (m) => { liveMode = m; render(); };
       window.hubAddTask = () => {
         const input = document.getElementById('new-task-input');
         const role = document.getElementById('new-task-role');
@@ -85,7 +88,8 @@
       function render() {
         if (!snapshot) return;
         const activeAgent = snapshot.queue.inProgress[0]?.role || snapshot.recentEvents[0]?.agent || 'producer';
-        const activeProvider = snapshot.recentEvents.find((e) => e.provider)?.provider || 'vertex-gemini-pro';
+        const activeProvider = snapshot.recentEvents.find((e) => e.provider || e.worker)?.provider || 'vertex-gemini-pro';
+        const subs = snapshot.usage?.subscriptions || [];
 
         const rolesSvg = snapshot.roles.slice(0, 5).map((r, i) => {
           const y = 12 + i * 52;
@@ -110,6 +114,52 @@
               <text x="10" y="33" fill="#94a3b8" font-size="9">${p.model.slice(0, 26)} [${p.tier}]</text>
             </g>`;
         }).join('');
+
+        const subsHtml = subs.map((s) => {
+          const pct = Math.min(100, Math.round((s.used / Math.max(1, s.limit)) * 100));
+          return `
+            <div style="font-size:10px;margin-bottom:6px;">
+              <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+                <strong>${s.name}</strong>
+                <span style="color:#94a3b8">${s.used} / ${s.limit} ${s.unit} (${pct}%)</span>
+              </div>
+              <div style="height:5px;background:#1e293b;border-radius:3px;overflow:hidden;">
+                <div style="width:${pct}%;height:100%;background:${pct > 85 ? '#f59e0b' : '#10b981'};"></div>
+              </div>
+            </div>`;
+        }).join('');
+
+        let q3Body = '';
+        if (liveMode === 'screenshot') {
+          q3Body = snapshot.liveView?.latestScreenshot
+            ? `<div style="text-align:center;"><img src="${snapshot.liveView.latestScreenshot}" style="max-width:100%;max-height:240px;border-radius:6px;" /></div>`
+            : `<div style="font-size:11px;color:#94a3b8;padding:16px;">No Stage-2 screenshot in <code>qa/reports/</code> yet. Run <code>node qa/playtest.mjs</code>.</div>`;
+        } else if (liveMode === 'novnc') {
+          q3Body = `<iframe src="${snapshot.liveView?.novncUrl || 'http://127.0.0.1:6080/vnc.html'}" style="flex:1;width:100%;min-height:230px;border:1px solid #334155;border-radius:6px;background:#05080f;"></iframe>`;
+        } else if (liveMode === 'preview') {
+          q3Body = `<iframe src="${snapshot.liveView?.playtestUrl || 'http://127.0.0.1:5173/?playtest=1'}" style="flex:1;width:100%;min-height:230px;border:1px solid #334155;border-radius:6px;background:#05080f;"></iframe>`;
+        } else {
+          q3Body = `
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+              <input id="new-task-input" placeholder="Queue new task in studio/NEXT.md..." style="flex:1;background:#091020;color:#f8fafc;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px 8px;font-size:11px;font-family:inherit;" />
+              <select id="new-task-role" style="background:#091020;color:#38bdf8;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px;font-size:11px;font-family:inherit;">
+                ${snapshot.roles.map((r) => `<option value="${r.id}">${r.id}</option>`).join('')}
+              </select>
+              <button onclick="hubAddTask()">+ Add</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:220px;">
+              ${snapshot.queue.inProgress.map((t) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);border-radius:6px;font-size:11px;">
+                  <div><strong style="color:#34d399">▶ ${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
+                  <button style="background:#059669" onclick="hubDoneTask('${t.id}')">✓ Done</button>
+                </div>`).join('')}
+              ${snapshot.queue.backlog.map((t) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(15,23,42,0.7);border:1px solid rgba(148,163,184,0.18);border-radius:6px;font-size:11px;">
+                  <div><strong style="color:#38bdf8">${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
+                  <button onclick="hubStartTask('${t.id}')">Start</button>
+                </div>`).join('')}
+            </div>`;
+        }
 
         document.getElementById('app').innerHTML = `
           <header>
@@ -146,13 +196,14 @@
               </svg>
             </section>
             <section class="card">
-              <div class="card-hdr"><span>Q2 // FREECC:AUTO FAILOVER ROUTER MATRIX</span><span style="color:#a78bfa">FAILOVERS: ${snapshot.telemetry.failovers}</span></div>
+              <div class="card-hdr"><span>Q2 // SUBSCRIPTION USAGE (.studio/usage.json) & ROUTER</span><span style="color:#a78bfa">FAILOVERS: ${snapshot.telemetry.failovers}</span></div>
+              <div style="margin-bottom:8px;">${subsHtml}</div>
               <table>
                 <thead><tr><th>#</th><th>Provider</th><th>Model</th><th>Tier</th><th>Status</th></tr></thead>
                 <tbody>
                   ${snapshot.router.map((r) => {
                     const cd = r.channels.find((c) => c.status === 'cooldown');
-                    const st = !r.configured ? 'NO KEY (SKIP)' : cd ? 'COOLDOWN (' + cd.cooldownRemainingSec + 's)' : 'READY';
+                    const st = !r.configured ? 'NO KEY' : cd ? 'COOLDOWN (' + cd.cooldownRemainingSec + 's)' : 'READY';
                     const col = !r.configured ? '#64748b' : cd ? '#f59e0b' : '#10b981';
                     return `<tr><td>${r.order}</td><td><strong>${r.providerId}</strong></td><td style="color:#94a3b8">${r.model}</td><td style="color:#38bdf8">${r.tier}</td><td style="color:${col};font-weight:700">${st}</td></tr>`;
                   }).join('')}
@@ -160,26 +211,16 @@
               </table>
             </section>
             <section class="card">
-              <div class="card-hdr"><span>Q3 // STUDIO/NEXT.MD TASK QUEUE</span><span style="color:#10b981">${snapshot.queue.inProgress.length} ACTIVE / ${snapshot.queue.backlog.length} BACKLOG</span></div>
-              <div style="display:flex;gap:6px;margin-bottom:10px;">
-                <input id="new-task-input" placeholder="Queue new task in studio/NEXT.md..." style="flex:1;background:#091020;color:#f8fafc;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px 8px;font-size:11px;font-family:inherit;" />
-                <select id="new-task-role" style="background:#091020;color:#38bdf8;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px;font-size:11px;font-family:inherit;">
-                  ${snapshot.roles.map((r) => `<option value="${r.id}">${r.id}</option>`).join('')}
-                </select>
-                <button onclick="hubAddTask()">+ Add</button>
+              <div class="card-hdr">
+                <span>Q3 // STUDIO/NEXT.MD & LIVE AGENT VIEW</span>
+                <div style="display:flex;gap:4px;">
+                  <button onclick="hubSetLiveMode('queue')" style="padding:3px 6px;font-size:10px;background:${liveMode==='queue'?'#0284c7':'#1e293b'}">QUEUE</button>
+                  <button onclick="hubSetLiveMode('screenshot')" style="padding:3px 6px;font-size:10px;background:${liveMode==='screenshot'?'#0284c7':'#1e293b'}">SCREENSHOT</button>
+                  <button onclick="hubSetLiveMode('novnc')" style="padding:3px 6px;font-size:10px;background:${liveMode==='novnc'?'#0284c7':'#1e293b'}">NOVNC</button>
+                  <button onclick="hubSetLiveMode('preview')" style="padding:3px 6px;font-size:10px;background:${liveMode==='preview'?'#0284c7':'#1e293b'}">PREVIEW</button>
+                </div>
               </div>
-              <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:220px;">
-                ${snapshot.queue.inProgress.map((t) => `
-                  <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);border-radius:6px;font-size:11px;">
-                    <div><strong style="color:#34d399">▶ ${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
-                    <button style="background:#059669" onclick="hubDoneTask('${t.id}')">✓ Done</button>
-                  </div>`).join('')}
-                ${snapshot.queue.backlog.map((t) => `
-                  <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(15,23,42,0.7);border:1px solid rgba(148,163,184,0.18);border-radius:6px;font-size:11px;">
-                    <div><strong style="color:#38bdf8">${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
-                    <button onclick="hubStartTask('${t.id}')">Start</button>
-                  </div>`).join('')}
-              </div>
+              ${q3Body}
             </section>
             <section class="card">
               <div class="card-hdr"><span>Q4 // PASSIVE EVENT STREAM (.studio/events.jsonl)</span><span>EVENTS: ${snapshot.telemetry.totalEvents}</span></div>

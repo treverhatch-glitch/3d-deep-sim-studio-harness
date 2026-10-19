@@ -22,14 +22,29 @@ Synthesized from a 17-repository architecture audit (`Claude-Code-Game-Studios`,
 3. **Zero-Server Plug-and-Play Model Router (`harness/route.mjs` & `harness/models.config.mjs`)**
    - Implements the `freecc:auto` failover pattern across **Vertex Gemini**, **NVIDIA NIM** (GLM 5.3 Flash / Nemotron Ultra), **Groq**, **OpenRouter**, **xAI Grok**, **Anthropic Claude**, **OpenAI**, and **local Ollama**.
    - Instant failover on HTTP `429` / `5xx` / quota exhaustion with a persistent 30s+ cooldown ledger (`.studio/cooldowns.json`) and per-run ledger (`.studio/runs/<run-id>/ledger.json`).
-4. **Zero-Token Passive Workflow UI HUB (`hub/server.mjs` & `hub/WarRoom.tsx`)**
-   - Appends 1-line JSON events via `harness/event.mjs` to `.studio/events.jsonl` (mirrored to `/tmp/agent-events.jsonl`).
-   - Renders a **4-Quadrant Sci-Fi Mission Control War Room** (for YouTube devlogs & desktop monitors) and a **Responsive Mobile Command Feed** (for phone check-ins over Tailscale / Cloudflare Tunnel) at **0% LLM token cost**.
+4. **Zero-Token Passive Workflow UI HUB (`hub/server.mjs`, `hub/WarRoom.tsx`, `docs/WAR-ROOM.md`)**
+   - Appends 1-line JSON events via `scripts/append-event.sh` and `harness/event.mjs` to `.studio/events.jsonl` (mirrored to `/tmp/agent-events.jsonl`).
+   - Renders a **4-Quadrant React Flow Sci-Fi Mission Control War Room** (`reactflow` agent topology, **Live Agent View** with `noVNC` stream / latest QA screenshot / playtest preview switcher, and **Subscription Usage Panel** reading `.studio/usage.json`) plus a **Responsive Mobile Command Feed** at **0% LLM token cost**.
 5. **Two-Stage Programmatic & Visual QA (`qa/playtest.mjs` & `qa/sim.adapter.mjs`)**
    - **Stage 1**: Drives simulation trajectories via `?playtest=1` (`window.__sim`) or headless Node adapter to catch frozen ticks, `NaN` drift, save/load entity loss, and determinism bugs.
    - **Stage 2**: Runs Playwright accessibility snapshots (`ariaSnapshot`), console error gates, UISentinel layout overflow checks, and targeted screenshots into `qa/reports/`.
-6. **Generalized 3D Deep-Sim Rules & Late-Game Porting Bridges (`docs/3D-DEEP-SIM.md`)**
-   - Enforces pure-TypeScript deterministic simulation (`node scripts/check-sim-purity.mjs`), Three.js `InstancedMesh`/PBR budgets, headless Blender `bpy` `.glb` generation (`tools/blender/generate_glb.py`), and late-game porting guides for **Tauri v2**, **Godot 4** (`ts2gd` + `godot-mcp`), and **Unity** (`SharpTS`).
+6. **Generalized 3D Deep-Sim Rules, Blender Orchestrator & Porting Bridges (`docs/3D-DEEP-SIM.md`, `docs/BLENDER.md`, `docs/PORTING.md`)**
+   - Enforces pure-TypeScript deterministic simulation (`node scripts/check-sim-purity.mjs` + `bash scripts/check-sim-isolation.sh` + `studio/rules/graphics-sim-boundary.md`), Three.js `InstancedMesh`/PBR budgets, headless Blender `bpy` `.glb` generation (`tools/blender/generate_glb.py`), and `mlolson/blender-orchestrator` MCP (`https://github.com/mlolson/blender-orchestrator`) for agent-driven Blender control and optional AI mesh generation.
+   - Late-game porting guides for **Tauri v2**, **Godot 4** (`ts2gd` + `godot-mcp`), and **Unity** (`SharpTS`).
+
+---
+
+## Documentation Index (`docs/`)
+
+- [`docs/SETUP.md`](docs/SETUP.md) — Quickstart & environment setup
+- [`docs/BLENDER.md`](docs/BLENDER.md) — Headless Blender `bpy` procedural `.glb` generation (`CargoCrate.glb` example) + [`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator) MCP bridge
+- [`docs/WAR-ROOM.md`](docs/WAR-ROOM.md) — React Flow War Room HUD, Live Agent View (`noVNC` / screenshot / preview), and Subscription Usage Panel (`.studio/usage.json`)
+- [`docs/WORK-ORGANIZATION.md`](docs/WORK-ORGANIZATION.md) & [`docs/DAILY-SUMMARY.md`](docs/DAILY-SUMMARY.md) — Task lifecycle (`studio/NEXT.md` → `studio/CURRENT_TASK.md` → `studio/done/` → `studio/daily/`)
+- [`docs/GROKBOT-LOCAL-AGENT.md`](docs/GROKBOT-LOCAL-AGENT.md) — Optional Grok Bot Local-Agent route (`https://github.com/robbin/grokbot-local-agent`)
+- [`docs/ROUTING.md`](docs/ROUTING.md) — Multi-model failover matrix (`harness/route.mjs` + `harness/models.config.mjs`)
+- [`docs/SERENA.md`](docs/SERENA.md) — Symbol-level TypeScript LSP workflows via `oraios/serena`
+- [`docs/3D-DEEP-SIM.md`](docs/3D-DEEP-SIM.md) & [`docs/PORTING.md`](docs/PORTING.md) — Pure-TS simulation architecture & Tauri v2 / Godot 4 / Unity porting bridges
+- [`docs/BLUEPRINT.md`](docs/BLUEPRINT.md), [`docs/COMPARISON.md`](docs/COMPARISON.md), [`docs/UPGRADES.md`](docs/UPGRADES.md), [`docs/VISUAL_HUB.md`](docs/VISUAL_HUB.md) — 17-repo architecture synthesis & upgrade roadmap
 
 ---
 
@@ -39,7 +54,7 @@ Synthesized from a 17-repository architecture audit (`Claude-Code-Game-Studios`,
 # 1. Configure your API keys (optional — any subset of free/BYOK providers works)
 cp .env.example .env
 
-# 2. Wire token-saving MCP servers (qmd, serena, playwright) & Claude hooks
+# 2. Wire token-saving MCP servers (qmd, serena, playwright, blender-orchestrator) & Claude hooks
 bash scripts/setup-token-savers.sh --check
 
 # 3. Inspect loaded studio roles & failover matrix (0 tokens)
@@ -50,11 +65,14 @@ node harness/route.mjs --status
 node harness/task.mjs next
 node harness/status.mjs
 
-# 5. Run Sim-Purity check & Two-Stage QA suite
+# 5. Run Sim-Purity / Sim-Isolation checks & Two-Stage QA suite
 node scripts/check-sim-purity.mjs
+bash scripts/check-sim-isolation.sh
 node qa/playtest.mjs
 
-# 6. Launch the Zero-Token Passive Workflow UI HUB (Desktop War Room + Mobile Feed)
+# 6. Append a passive telemetry event & launch the Zero-Token Workflow UI HUB
+bash scripts/append-event.sh RUNNING_VITEST src/sim/clock.ts P0-01 nvidia-glm-flash
 node hub/server.mjs
 # -> Open http://127.0.0.1:4177 (or http://127.0.0.1:4177/?view=mobile)
 ```
+

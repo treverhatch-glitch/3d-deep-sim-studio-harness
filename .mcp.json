@@ -25,6 +25,13 @@
         "--headless",
         "--caps=vision"
       ]
+    },
+    "blender-orchestrator": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:mlolson/blender-orchestrator"
+      ]
     }
   }
 }
