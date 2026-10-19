@@ -27,8 +27,32 @@ These should already be true (see `studio/rules/sim-isolation.md`):
 | Target | Tooling | Notes |
 |--------|---------|-------|
 | Steam desktop | **Tauri v2** | Package the existing web build. Highest graphics ceiling with least rewrite if the sim stays pure. |
+| **Unity** | Manual port + optional tools | Solid, mature engine with excellent tooling, asset store, and graphics. Best for high-polish 3D or complex rendering. See Unity section below. |
 | Godot 4 | **ts2gd** (johnfn/ts2gd) | TypeScript → GDScript transpiler. Speeds mechanical translation. Complex systems still need manual work. |
-| .NET / C# | **SharpTS** (nickna/SharpTS) | TypeScript interpreter for .NET. Useful if targeting a C# engine later. |
+| .NET / C# | **SharpTS** (nickna/SharpTS) | TypeScript interpreter for .NET. Useful bridge if targeting Unity or other C# engines. |
+
+## Unity Porting Guidance
+
+Unity is a strong choice when you want maximum graphics fidelity, mature tooling, or easy access to the asset store.
+
+**Best approaches (in order of practicality):**
+
+1. **Keep the sim pure and reimplement the thin layer**  
+   Leave the core simulation logic in TypeScript as long as possible. Port only the presentation and engine-specific systems into C#. This is the cleanest path if the sim stayed pure.
+
+2. **Use SharpTS as a bridge**  
+   Run portions of the TypeScript sim inside .NET via SharpTS while you gradually rewrite hot paths in C#. Good for validating behavior before a full rewrite.
+
+3. **Manual structured port**  
+   Translate systems module-by-module (economy, pathfinding, turnaround, etc.) once the TypeScript version is locked and playtested. Use the serializable state format as the contract between the old and new implementations.
+
+4. **Avoid full automated transpilation**  
+   There is no high-quality, production-ready TypeScript-to-C# transpiler that handles complex game logic well. Treat any automated translation as a starting point only.
+
+**Recommended Unity sequence:**
+- Lock and playtest the TypeScript sim.
+- Package a Tauri build first if you need a desktop version quickly.
+- When ready for higher graphics, start a Unity project and port systems one at a time, validating against the original sim's serializable state and playtest traces.
 
 ## Transpiler Usage
 
@@ -41,13 +65,13 @@ These should already be true (see `studio/rules/sim-isolation.md`):
 
 1. Lock the TypeScript sim and pass playtests.
 2. Package with Tauri v2 for a Steam build (fastest path to desktop).
-3. Only if needed, explore Godot via ts2gd or other engines.
+3. Only if needed, explore Unity, Godot via ts2gd, or other engines.
 4. Raise graphics quality in the target engine after the port is stable.
 
 ## What This Template Does Not Include
 
 - No automated transpiler pipeline yet
-- No Tauri or Godot project templates
+- No Tauri, Unity, or Godot project templates
 - These can be added later once a specific game is ready to port
 
 Agents should refuse early porting requests and point back to this document and the sim-isolation rule.
