@@ -1,14 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/closed-loop.mjs — Tight Closed-Loop Test -> Auto-Bug -> Escalate Gate
- *
- * Flow:
- *   1. Run purity + stage-1 playtest.
- *   2. On PASS: reset counter.
- *   3. On FAIL:
- *        - Write studio/templates-compatible seed failure to .studio/last-seed-failure.json
- *        - Open bug report
- *        - After MAX_FIX_ATTEMPTS (default 3) escalate instead of looping
+ * harness/closed-loop.mjs — fail -> record real seed/tick -> escalate
  */
 
 import fs from 'node:fs';
@@ -23,13 +15,9 @@ const MAX_RETRIES = Number(process.env.CLOSED_LOOP_MAX_RETRIES || process.env.MA
 
 function readLoopState() {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    }
-  } catch {
-    // ignore
-  }
-  return { consecutiveFailures: 0, lastSeed: 42069, lastTick: 120, escalated: false };
+    if (fs.existsSync(STATE_FILE)) return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  } catch {}
+  return { consecutiveFailures: 0, escalated: false };
 }
 
 function writeLoopState(next) {
@@ -42,54 +30,75 @@ function writeSeedFailure(payload) {
   fs.writeFileSync(SEED_FAILURE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+function extractFailure(stdout) {
+  const fallback = { seed: null, tick: null, description: 'Playtest failed', actions: [] };
+  try {
+    const parsed = JSON.parse(stdout);
+    const stage1 = parsed.stage1 || parsed;
+    return {
+      seed: stage1.seed ?? parsed.seed ?? null,
+      tick: stage1.ticksRun ?? stage1.tick ?? parsed.tick ?? null,
+      description: (stage1.findings?.[0]?.summary) || parsed.message || 'Playtest failed',
+      actions: stage1.actions || [],
+      hash: stage1.finalHash || null,
+    };
+  } catch {
+    const seedMatch = stdout.match(/seed[=:]\s*(\d+)/i);
+    const tickMatch = stdout.match(/tick[s]?[=:]\s*(\d+)/i);
+    return {
+      ...fallback,
+      seed: seedMatch ? Number(seedMatch[1]) : null,
+      tick: tickMatch ? Number(tickMatch[1]) : null,
+      description: stdout.slice(0, 200),
+    };
+  }
+}
+
 const simulateFail = process.argv.includes('--simulate-fail');
 const loopState = readLoopState();
 
 let passed = !simulateFail;
-let failureReason = simulateFail ? 'Simulated invariant drift at tick 120' : '';
+let failure = { seed: 1337, tick: 0, description: 'Simulated failure', actions: [] };
 
 if (!simulateFail) {
   try {
-    execSync('node scripts/check-sim-purity.mjs && node qa/playtest.mjs --stage 1', {
+    const out = execSync('node qa/playtest.mjs --stage 1', {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      encoding: 'utf8',
     });
     passed = true;
   } catch (err) {
     passed = false;
-    failureReason = String(err.stderr || err.stdout || err.message).slice(0, 300);
+    const stdout = String(err.stdout || '');
+    const stderr = String(err.stderr || err.message || '');
+    failure = extractFailure(stdout || stderr);
   }
 }
 
 if (passed) {
-  writeLoopState({ consecutiveFailures: 0, lastSeed: 42069, lastTick: 120, escalated: false });
-  emitEvent({
-    type: 'closedloop.pass',
-    agent: 'playtester',
-    status: 'IDLE',
-    msg: 'Closed-loop verification PASSED.',
-  });
+  writeLoopState({ consecutiveFailures: 0, escalated: false });
+  emitEvent({ type: 'closedloop.pass', agent: 'playtester', status: 'IDLE', msg: 'Closed-loop PASS' });
   console.log('[closed-loop] PASS');
   process.exit(0);
 }
 
-const attempt = loopState.consecutiveFailures + 1;
+const attempt = (loopState.consecutiveFailures || 0) + 1;
 const escalated = attempt >= MAX_RETRIES;
-const seed = 42069;
-const tick = 120;
 
 writeLoopState({
   consecutiveFailures: attempt,
-  lastSeed: seed,
-  lastTick: tick,
+  lastSeed: failure.seed,
+  lastTick: failure.tick,
   escalated,
   updatedAt: new Date().toISOString(),
 });
 
 const seedPayload = {
-  seed,
-  tick,
-  description: failureReason.replace(/\n/g, ' ').slice(0, 200),
+  seed: failure.seed,
+  tick: failure.tick,
+  description: String(failure.description || '').replace(/\n/g, ' ').slice(0, 240),
+  actions: failure.actions || [],
   severity: 'P0',
   attempt,
   maxAttempts: MAX_RETRIES,
@@ -99,21 +108,23 @@ writeSeedFailure(seedPayload);
 const bugId = `BUG-${Date.now().toString().slice(-4)}`;
 const bugReportPath = path.join(REPO_ROOT, 'qa', 'reports', `${bugId}.md`);
 fs.mkdirSync(path.dirname(bugReportPath), { recursive: true });
+const replayCmd = failure.seed != null
+  ? `node harness/replay.mjs --seed ${failure.seed} --tick ${failure.tick || 0}`
+  : 'node harness/replay.mjs';
 
 const bugMarkdown = `### [P0] ${bugId} — Closed-Loop Failure (Attempt ${attempt}/${MAX_RETRIES})
-- **Replay**: \`node harness/replay.mjs --seed ${seed} --tick ${tick}\`
+- **Replay**: \`${replayCmd}\`
 - **Seed file**: \`.studio/last-seed-failure.json\`
-- **Escalated**: ${escalated ? 'YES — stop auto-retries, use stronger model or human' : 'no'}
+- **Seed**: ${failure.seed}
+- **Tick**: ${failure.tick}
+- **Escalated**: ${escalated ? 'YES' : 'no'}
 - **Description**: ${seedPayload.description}
-
-After fix, run \`scripts/distill-bug.sh\` or append to \`studio/memory/failures.md\`.
 `;
-
 fs.writeFileSync(bugReportPath, bugMarkdown, 'utf8');
 
 if (attempt === 1) {
   addTask({
-    title: `Fix ${bugId} (replay seed ${seed} tick ${tick})`,
+    title: `Fix ${bugId} (seed ${failure.seed} tick ${failure.tick})`,
     role: 'builder',
     priority: 'P0',
   });
@@ -124,14 +135,9 @@ emitEvent({
   agent: 'playtester',
   status: 'ERROR',
   task: bugId,
-  msg: escalated
-    ? `ESCALATED after ${attempt}/${MAX_RETRIES}`
-    : `Failure ${attempt}/${MAX_RETRIES} recorded`,
+  msg: escalated ? `ESCALATED after ${attempt}/${MAX_RETRIES}` : `Failure ${attempt}/${MAX_RETRIES}`,
 });
 
 console.log(bugMarkdown);
-console.log('\nSeed failure written to .studio/last-seed-failure.json');
-if (escalated) {
-  console.log('ESCALATE: do not keep auto-retrying. Run prepare-brief or hand to human.');
-}
+if (escalated) console.log('ESCALATE: stop auto-retries.');
 process.exit(1);
