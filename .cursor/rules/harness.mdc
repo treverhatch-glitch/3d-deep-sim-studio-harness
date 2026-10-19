@@ -6,5 +6,6 @@ alwaysApply: true
 Before editing:
 1. Read AGENTS.md
 2. Run `node scripts/verify-session.mjs`
-3. Claim work with `node harness/lock.mjs claim <key> --owner cursor`
-4. Do not use unapproved references
+3. Claim work with a unique owner: `node harness/lock.mjs claim <key> --owner cursor-<session>`
+4. Shared owners like `cursor` or `agent` are rejected
+5. Do not use unapproved references
