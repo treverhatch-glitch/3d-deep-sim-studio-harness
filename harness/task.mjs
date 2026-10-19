@@ -1,32 +1,19 @@
 #!/usr/bin/env node
 /**
  * harness/task.mjs — Markdown Task Queue Manager (`studio/NEXT.md`)
- *
- * Adapts the Task Master `next` workflow into a zero-server, human-and-agent
- * readable Markdown queue (`studio/NEXT.md`) coupled to `studio/CURRENT_TASK.md`
- * and `.studio/events.jsonl`.
- *
- * Commands:
- *   node harness/task.mjs next
- *   node harness/task.mjs list
- *   node harness/task.mjs start <TASK_ID> [--agent builder]
- *   node harness/task.mjs done <TASK_ID> [--note "Passed Stage 1 & 2 QA"]
- *   node harness/task.mjs add "<Title>" [--role builder] [--priority P1]
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from './event.mjs';
+import { claim, release } from './lock.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 
 const TASK_LINE_RE = /^-\s+\[([ x>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[(P[0-3])\]\s+\(`([^`]+)`\)\s+—\s+(.+)$/;
 
-/**
- * Parse `studio/NEXT.md` into structured tasks across IN_PROGRESS, BACKLOG, and DONE.
- */
 export function parseNextQueue() {
   if (!fs.existsSync(NEXT_FILE)) {
     return { inProgress: [], backlog: [], done: [] };
@@ -99,8 +86,6 @@ export function syncCurrentTaskCheckpoint(activeTask, note = '') {
   const ts = new Date().toISOString();
   const content = `# Active Session State (\`studio/CURRENT_TASK.md\`)
 
-> Restored automatically by \`scripts/session-start.sh\` and snapshotted before context compaction by \`scripts/pre-compact.sh\`.
-
 ## CHECKPOINT
 - **Timestamp**: ${ts}
 - **Active Task ID**: ${activeTask ? activeTask.id : 'NONE'}
@@ -111,18 +96,33 @@ export function syncCurrentTaskCheckpoint(activeTask, note = '') {
 ## STATUS
 - **Phase**: ${activeTask ? 'IN_PROGRESS' : 'READY'}
 - **Last Note**: ${note || (activeTask ? 'Task started via harness/task.mjs' : 'Ready to pull from studio/NEXT.md')}
-- **Verification Gate**: Run \`node scripts/check-sim-purity.mjs\` and \`node qa/playtest.mjs\` before marking done.
 `;
   fs.mkdirSync(path.dirname(CURRENT_TASK_FILE), { recursive: true });
   fs.writeFileSync(CURRENT_TASK_FILE, content, 'utf8');
 }
 
 export function startTask(taskId, agentOverride = null) {
+  const owner = agentOverride || 'agent';
+  const lockRes = claim(`task:${taskId}`, owner);
+  if (!lockRes.ok) {
+    emitEvent({
+      type: 'task.lock_denied',
+      agent: owner,
+      task: taskId,
+      status: 'blocked',
+      msg: `Task ${taskId} already claimed`,
+    });
+    return { error: 'locked', lock: lockRes.lock || null };
+  }
+
   const q = parseNextQueue();
   let target = q.inProgress.find((t) => t.id === taskId);
   if (!target) {
     const idx = q.backlog.findIndex((t) => t.id === taskId);
-    if (idx === -1) return null;
+    if (idx === -1) {
+      release(`task:${taskId}`, owner);
+      return null;
+    }
     [target] = q.backlog.splice(idx, 1);
     if (agentOverride) target.role = agentOverride;
     target.status = 'in_progress';
@@ -134,6 +134,7 @@ export function startTask(taskId, agentOverride = null) {
     type: 'task.start',
     agent: target.role,
     task: target.id,
+    status: 'editing',
     msg: `Started ${target.id}: ${target.title}`,
   });
   return target;
@@ -155,6 +156,7 @@ export function completeTask(taskId, note = '') {
   if (note) target.title = `${target.title} _(✓ ${note})_`;
   q.done.unshift(target);
   writeNextQueue(q);
+  release(`task:${taskId}`, target.role);
 
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
@@ -162,6 +164,7 @@ export function completeTask(taskId, note = '') {
     type: 'task.done',
     agent: target.role,
     task: target.id,
+    status: 'done',
     msg: `Completed ${target.id}: ${target.title}`,
   });
   return target;
@@ -212,7 +215,6 @@ function parseFlags(argv) {
   return flags;
 }
 
-// CLI execution
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const flags = parseFlags(process.argv.slice(2));
   const [cmd = 'next', arg1] = flags._;
@@ -242,6 +244,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const started = startTask(targetId, flags.agent || null);
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
+      process.exit(1);
+    }
+    if (started.error === 'locked') {
+      console.error(`Task "${targetId}" is locked.`);
+      console.log(JSON.stringify(started, null, 2));
       process.exit(1);
     }
     console.log(JSON.stringify(started, null, 2));
