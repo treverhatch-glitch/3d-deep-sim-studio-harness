@@ -1,6 +1,6 @@
 # AGENTS.md — Standing Instructions for All Agents
 
-You are working on Hatchfield (or a project using this harness). Follow these rules every session.
+You are working on a video game project using this AI Game Studio harness. Follow these rules every session.
 
 ## Before Starting Work
 
@@ -23,7 +23,7 @@ You are working on Hatchfield (or a project using this harness). Follow these ru
 3. Commit with a clear message.
 4. Do not leave long status summaries in the chat — the files are the source of truth.
 
-## Producer (Grok Bot) Role
+## Producer Role
 
 - Read the task files.
 - Decide which worker / model to use.
@@ -33,8 +33,8 @@ You are working on Hatchfield (or a project using this harness). Follow these ru
 
 ## Visual Testing
 
-Dedicated QA sub-agents may use Playwright MCP + screenshot / accessibility tree tools. Prefer Gemini Flash or free tiers for visual checks.
+Dedicated QA sub-agents may use Playwright MCP + screenshot / accessibility tree tools. Prefer free tiers for visual checks.
 
 ## Porting Rule
 
-Do not port core systems until they are feature-complete and playtested in the TypeScript stack. Transpilers help only after that point.
+Do not port core systems until they are feature-complete and playtested in the current stack. Transpilers help only after that point.
