@@ -1,7 +1,7 @@
 {
   "name": "hatchfield-ai-studio-template",
   "version": "2.1.0",
-  "description": "Generalized 3D Deep Simulation & AI Game Studio Harness — vendor-neutral multi-agent roles, freecc:auto model failover router, prepare-then-escalate brief compressor, shared improving memory, zero-token Workflow UI HUB, and closed-loop seed-replay QA.",
+  "description": "Generalized 3D Deep Simulation & AI Game Studio Harness \u2014 vendor-neutral multi-agent roles, freecc:auto model failover router, prepare-then-escalate brief compressor, shared improving memory, zero-token Workflow UI HUB, and closed-loop seed-replay QA.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -31,7 +31,11 @@
     "display:start": "bash scripts/start-agent-display.sh",
     "session:start": "bash scripts/session-start.sh",
     "session:precompact": "bash scripts/pre-compact.sh",
-    "setup:token-savers": "bash scripts/setup-token-savers.sh"
+    "setup:token-savers": "bash scripts/setup-token-savers.sh",
+    "golden": "node qa/check-golden.mjs",
+    "golden:py": "python3 tools/golden.py --check qa/golden",
+    "test:golden": "python3 qa/test-golden.py",
+    "verify": "node scripts/run-gates.mjs"
   },
   "devDependencies": {
     "playwright": "^1.50.0",
