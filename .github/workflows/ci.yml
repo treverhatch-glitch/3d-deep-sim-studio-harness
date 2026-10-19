@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sim purity
+        run: node scripts/check-sim-purity.mjs
+      - name: Sim isolation
+        run: bash scripts/check-sim-isolation.sh
+      - name: Golden hashes
+        run: node qa/check-golden.mjs
+      - name: Closed-loop simulate fail
+        run: node harness/closed-loop.mjs --simulate-fail || true
+      - name: Secret scan (basic)
+        run: |
+          if grep -RInE "(sk-|AKIA|ghp_|xai-|AIza)" --exclude-dir=.git --exclude-dir=node_modules . ; then
+            echo "Possible secret found"
+            exit 1
+          fi
+          echo "No obvious secrets"
