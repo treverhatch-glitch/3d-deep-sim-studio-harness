@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 # Append one status event for the passive visual HUB.
-# Usage: ./scripts/append-event.sh "STATUS" "optional-file" "optional-bugId"
+# Zero LLM tokens. Writes one JSON line to /tmp/agent-events.jsonl
+#
+# Usage:
+#   ./scripts/append-event.sh STATUS [file] [bugId] [worker]
+#   AGENT=grok-producer WORKER=nvidia-glm ./scripts/append-event.sh RUNNING_VITEST src/game/sim.ts P0-12
+
+set -euo pipefail
 
 STATUS="${1:-RUNNING}"
 FILE="${2:-}"
 BUGID="${3:-}"
+WORKER="${4:-${WORKER:-unknown}}"
 AGENT="${AGENT:-grok-producer}"
-WORKER="${WORKER:-unknown}"
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-mkdir -p /tmp
-echo "{\"ts\":\"$TS\",\"agent\":\"$AGENT\",\"worker\":\"$WORKER\",\"status\":\"$STATUS\",\"file\":\"$FILE\",\"bugId\":\"$BUGID\"}" >> /tmp/agent-events.jsonl
+# Escape for JSON
+escape() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))'; }
 
-echo "Event logged: $STATUS"
+JSON=$(printf '{"ts":%s,"agent":%s,"worker":%s,"status":%s,"file":%s,"bugId":%s}' \
+  "$(escape "$TS")" \
+  "$(escape "$AGENT")" \
+  "$(escape "$WORKER")" \
+  "$(escape "$STATUS")" \
+  "$(escape "$FILE")" \
+  "$(escape "$BUGID")")
+
+mkdir -p /tmp
+echo "$JSON" >> /tmp/agent-events.jsonl
+echo "Event logged: $STATUS (worker=$WORKER)"
