@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Human Agent</title>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #0e1116; color: #e8eef7; }
+    header { padding: 16px 20px; border-bottom: 1px solid #243041; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; }
+    section { background: #161b22; border: 1px solid #243041; border-radius: 12px; padding: 14px; }
+    pre { white-space: pre-wrap; background: #0b0f14; padding: 12px; border-radius: 8px; min-height: 180px; }
+    textarea { width: 100%; min-height: 90px; background: #0b0f14; color: #e8eef7; border: 1px solid #243041; border-radius: 8px; }
+    button { background: #3dd6c6; color: #04211d; border: 0; border-radius: 8px; padding: 8px 12px; font-weight: 700; }
+    input { background: #0b0f14; color: #e8eef7; border: 1px solid #243041; border-radius: 8px; padding: 8px; width: 220px; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Human Agent</h1>
+    <p>Read balancer and fun notes. Write a decision. Token required to save.</p>
+    <label>Hub token <input id="token" type="password" placeholder="HUB_TOKEN" /></label>
+  </header>
+  <main>
+    <section>
+      <h2>Balance</h2>
+      <pre id="balance">loading...</pre>
+      <textarea id="balance-note" placeholder="Pick a number and why"></textarea>
+      <button onclick="save('balance')">Save balance decision</button>
+    </section>
+    <section>
+      <h2>Fun</h2>
+      <pre id="fun">loading...</pre>
+      <textarea id="fun-note" placeholder="Sign the slice or send it back"></textarea>
+      <button onclick="save('fun')">Save fun review</button>
+    </section>
+  </main>
+  <script>
+    async function load() {
+      const res = await fetch('/api/human/notes');
+      const data = await res.json();
+      document.getElementById('balance').textContent = data.balance || 'No balance notes yet.';
+      document.getElementById('fun').textContent = data.fun || 'No fun notes yet.';
+    }
+    async function save(kind) {
+      const note = document.getElementById(kind + '-note').value;
+      const token = document.getElementById('token').value;
+      const res = await fetch('/api/human/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-hub-token': token },
+        body: JSON.stringify({ kind, note })
+      });
+      const data = await res.json();
+      alert(res.ok ? 'Saved ' + data.file : (data.error || 'Save failed'));
+    }
+    load();
+  </script>
+</body>
+</html>
