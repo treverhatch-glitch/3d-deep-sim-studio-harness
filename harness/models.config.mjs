@@ -105,7 +105,7 @@ export const PROVIDERS = {
     label: 'OpenAI GPT-4.1 / o4-mini',
     tier: 'byok',
     protocol: 'openai',
-    model: process.env.OPENAI_MODEL || 'gpt-5'
+    model: process.env.OPENAI_MODEL || 'gpt-5',
     envKeys: ['OPENAI_API_KEY'],
     baseUrl: 'https://api.openai.com/v1',
   },
