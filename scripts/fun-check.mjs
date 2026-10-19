@@ -36,7 +36,7 @@ const report = [
   '',
   'Proxies only. A human decides if the slice is fun.',
 ].join('\n');
-const out = path.join(root, 'qa', 'reports', 'fun-latest.md');
+const out = path.join(root, 'studio', 'fun', 'latest.md');
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, report);
 console.log(report);
