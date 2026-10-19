@@ -1,49 +1,82 @@
-# War Room (`hub/WarRoom.tsx` — React Flow Mission Control & Live Agent View)
+# Mission Control War Room & Embedded Terminal (`docs/WAR-ROOM.md`)
 
-The zero-token visual Mission Control HUB (`hub/WarRoom.tsx` + `hub/server.mjs`). Passively watches `.studio/events.jsonl`, `.studio/usage.json`, and `studio/NEXT.md` using **0% of your LLM quota**.
+The **Mission Control War Room** (`hub/`) is a zero-LLM-token tactical command center designed in a **Palantir / SpaceX Dragon / Cyberpunk Mission Control** aesthetic (`#06080E` obsidian matte, `backdrop-filter: blur(12px)`, `1px solid #00F0FF` tactical borders, CRT scanline toggle, and `JetBrains Mono` telemetry).
+
+It passively watches local studio files (`.studio/events.jsonl`, `.studio/usage.json`, `.studio/war-room.config.json`, `studio/NEXT.md`, `studio/CURRENT_TASK.md`) via native RFC 6455 WebSockets (`/ws`) and Server-Sent Events (`/api/stream`), eliminating the 30k–80k token "Full-Context Re-Read Tax" caused by asking an agent *"What are you doing?"*.
 
 ---
 
-## 1. Quick Launch (Zero-Build or React Flow Build)
+## 1. Architecture & 7 Core Modules
 
-### Option A: Instant Zero-Build Launch (Works Immediately on Clone)
-```bash
-node hub/server.mjs
-# (or: node hub/server.js)
-```
-Open **http://localhost:3847** (or **http://localhost:3847/?view=mobile** on your phone via Tailscale / Cloudflare Tunnel).
+| Module | File | Purpose |
+| :--- | :--- | :--- |
+| **1. Ultrawide 4-Quadrant Layout & Mobile Feed** | `hub/WarRoom.tsx` | Draggable 4-quadrant splitters for 16:9, 21:9, and 32:9 monitors; auto-collapses into a touch-friendly **Mobile Command Feed** on screens `< 768px` (or `?view=mobile`). |
+| **2. Dynamic, Uncapped Agent & Failover Node Graph** | `hub/AgentGraph.tsx` | Powered by `@xyflow/react`. Dynamically loads all roles from `studio/roles/*.md` and provider chains from `harness/models.config.mjs`. Includes a live Head Producer preset switcher, 30s amber HTTP `429` cooldown countdowns, and a slide-out **Agent Inspector Drawer** with `git diff` preview (`/api/diff`). |
+| **3. "Agent Eyes" Real-Time Viewport Multiplexer** | `hub/AgentEyesViewport.tsx` | 4-source live monitor with FPS/latency HUD, fullscreen toggle, and persistent **Source Gear Menu** (`localStorage` + `.studio/war-room.config.json`). |
+| **4. Cyberpunk Terminal Dock & Command Deck** | `hub/TerminalDock.tsx` | Multi-tabbed `xterm.js` (`@xterm/xterm` + `@xterm/addon-fit`) terminal over WebSocket (`/ws`). Tab 1 streams color-coded `.studio/events.jsonl` with regex/role filtering; Tab 2 provides a live Studio Shell (with a safe Read-Only lock for public tunnels) + 5 tactical macro buttons. |
+| **5. Subscription Quota & Efficiency Telemetry Bar** | `hub/UsageTelemetry.tsx` | Reads/writes `.studio/usage.json` via `/api/usage`. Tracks **Grok/xAI**, **Cursor Ultra**, **Claude**, **Google Vertex ($300 credit)**, **NVIDIA NIM**, and **Groq**, plus the **RTK + QMD + Serena Efficiency Meter** and a `<dialog closedby="any">` quota editor modal. |
+| **6. "What's Next" Pipeline & Context Health** | `hub/NextQueue.tsx` | 3-column Kanban (`IN_PROGRESS`, `BACKLOG`, `DONE`) wired to `studio/NEXT.md` + `studio/done/` and a **Context Health Indicator** tracking `studio/CURRENT_TASK.md`, `studio/VISION_LOCK.md`, and `studio/llms.txt`. |
+| **7. Zero-Token WebSocket & REST Server** | `hub/server.js` / `hub/server.mjs` | Native Node.js HTTP + RFC 6455 WebSocket server watching studio files on disk. |
 
-### Option B: Full React Flow (`@xyflow/react` / `reactflow`) Vite Build
+---
+
+## 2. Running the War Room Locally
+
 ```bash
+# Option A: Instant zero-build launch (serves standalone hub/index.html + WebSocket bridge)
+node hub/server.js
+# -> Open http://localhost:3847
+
+# Option B: Vite HMR / Production bundle build for modular TypeScript components
 cd hub
 npm install
 npm run build
 cd ..
-node hub/server.mjs
-```
-Or run Vite dev mode with hot reload:
-```bash
-# Terminal 1
-node hub/server.mjs
-
-# Terminal 2
-cd hub
-npm install
-npm run dev
+node hub/server.js
 ```
 
 ---
 
-## 2. What the 4-Quadrant War Room Displays
+## 3. Streaming Live Agent Screens ("Agent Eyes" 4 Sources)
 
-1. **Quadrant 1 — React Flow Live Agent & Provider Node Graph (`hub/WarRoom.tsx`)**
-   - Visualizes the Executive Producer (`grok-producer` / `auto`), the 5 core roles (`designer-calibrator`, `builder`, `qa-playtester`, `reviewer` + any custom roles in `studio/roles/`), and the active `freecc:auto` model channel (`vertex-gemini-pro`, `nvidia-glm-flash`, `groq-llama-70b`, `ollama-local`).
-2. **Quadrant 2 — Subscription & Quota Usage Panel (`.studio/usage.json`) + `freecc:auto` Router Matrix**
-   - Reads `.studio/usage.json` (`/usage` / `/api/usage`) to render live quota bars for Grok Bot cycles, Vertex AI $300 credit, NVIDIA NIM free tier, Groq free tier, and Cursor/Claude fast requests, alongside RTK/QMD token savings and avoided "Check-In Tax" tokens.
-3. **Quadrant 3 — Live Agent Viewport (`noVNC` / Latest QA Screenshot / Playtest Preview) + `studio/NEXT.md` Queue**
-   - Switch between three zero-token visual inspection modes right inside the War Room:
-     - **Screenshot Mode (`screenshot`)**: Displays the latest Stage-2 Playwright screenshot from `qa/reports/` (`/api/latest-screenshot`) auto-refreshing as QA runs.
-     - **Live Desktop / Container Stream (`novnc`)**: Embeds a live `noVNC` canvas (`NOVNC_URL`, default `http://127.0.0.1:6080/vnc.html`) so you can watch headless Playwright or Blender agents work in real time.
-     - **Interactive Playtest Preview (`preview`)**: Embeds `PLAYTEST_URL` (`http://127.0.0.1:5173/?playtest=1`) to inspect `window.__sim` live.
-4. **Quadrant 4 — Passive `.studio/events.jsonl` Stream & QA Verdict Ledger**
-   - Tails events logged by `./scripts/append-event.sh`, `node harness/event.mjs`, `node harness/route.mjs`, and `node qa/playtest.mjs`.
+Click the **Source Gear Menu (`⚙ Gear`)** in the top-right of the **Agent Eyes Multiplexer** to switch between or configure the 4 live video/frame pipelines (persisted automatically to `.studio/war-room.config.json`):
+
+### Source 1: `noVNC` / `Xvfb` Live Desktop Stream (`:6080`)
+Watch the actual headless Linux/WSL2/Docker browser or Blender 4.x viewport the agent is controlling in real time:
+```bash
+bash scripts/start-agent-display.sh
+export DISPLAY=:99
+# Any Playwright or Blender process launched on DISPLAY=:99 now streams live to :6080
+```
+
+### Source 2: WebRTC Low-Latency Video Stream
+Connects the `<video>` receiver to a local WHEP/WebRTC endpoint (default `http://localhost:8889/agent-stream` via MediaMTX or OBS WebRTC) for sub-100ms 60 FPS desktop/game streaming.
+
+### Source 3: Playwright CDP / High-Frequency Screencast (`POST /api/frame`)
+Streams base64 JPEG/PNG frames pushed by `qa/playtest.mjs` with an interactive HUD overlay showing:
+- **UISentinel** DOM bounding-box checks (`#sim-telemetry-bar`, `canvas#three-sim-canvas`)
+- **`?playtest=1` (`window.__sim` / `window.__hatch`)** deterministic tick, seed, state hash, and entity count.
+
+Push a custom frame from any script or test runner:
+```bash
+curl -X POST http://localhost:3847/api/frame \
+  -H "Content-Type: application/json" \
+  -d '{"fps":60,"latencyMs":11,"simTelemetry":{"tick":240,"seed":42069,"hash":"9f8a12c4","entities":64,"credits":18400,"paused":false,"api":"window.__sim (?playtest=1)"}}'
+```
+
+### Source 4: Live Game HMR Iframe (`http://localhost:5173/?playtest=1`)
+Embeds the live Three.js / Vite game server directly inside the War Room with a **🎮 Take Manual Control** toggle so you can inspect or playtest the running simulation without leaving Mission Control.
+
+---
+
+## 4. Connecting a Phone via Tailscale or Cloudflare Tunnel
+
+On screens `< 768px` (or `http://<host>:3847/?view=mobile`), the War Room automatically switches into the **Mobile Command Feed** while keeping the interactive Studio Shell locked in **🔒 Tunnel Read-Only: ON** mode by default:
+
+```bash
+# Via Tailscale (Private Mesh VPN)
+tailscale serve --bg 3847
+
+# Via Cloudflare Quick Tunnel
+cloudflared tunnel --url http://localhost:3847
+```

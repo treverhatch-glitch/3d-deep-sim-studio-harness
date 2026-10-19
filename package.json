@@ -21,6 +21,7 @@
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "bash scripts/check-sim-isolation.sh",
     "event:sh": "bash scripts/append-event.sh",
+    "display:start": "bash scripts/start-agent-display.sh",
     "session:start": "bash scripts/session-start.sh",
     "session:precompact": "bash scripts/pre-compact.sh",
     "setup:token-savers": "bash scripts/setup-token-savers.sh"

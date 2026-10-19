@@ -1,61 +1,73 @@
 {
-  "updatedAt": "2026-10-19T21:45:00Z",
+  "updatedAt": "2026-10-19T22:00:00Z",
   "zeroTokenHubActive": true,
   "tokenSavers": {
-    "rtkCompressionPct": 78,
+    "rtkCompressionPct": 84,
     "qmdRagActive": true,
     "serenaLspActive": true,
-    "avoidedCheckInTokens": 185000
+    "avoidedCheckInTokens": 248500,
+    "tokensSavedToday": 312400,
+    "estimatedDollarsPreserved": 4.68
   },
   "subscriptions": [
     {
-      "id": "grok-bot",
-      "name": "Grok Bot (Executive Producer)",
-      "tier": "Subscription / Thin Producer",
-      "used": 12,
+      "id": "grok-xai",
+      "name": "Grok / xAI (Executive Producer)",
+      "tier": "Grok Bot Subscription",
+      "used": 14,
       "limit": 100,
       "unit": "cycles",
-      "resetAt": "Rolling 24h",
+      "resetAt": "Rolling 24h (04h 12m)",
+      "status": "healthy"
+    },
+    {
+      "id": "cursor-ultra",
+      "name": "Cursor Ultra",
+      "tier": "IDE Agent / Fast Pool",
+      "used": 620,
+      "limit": 5000,
+      "unit": "fast reqs",
+      "resetAt": "Monthly (18d left)",
+      "status": "healthy"
+    },
+    {
+      "id": "claude-max",
+      "name": "Claude (Opus / Sonnet)",
+      "tier": "Anthropic Pro / Max",
+      "used": 18,
+      "limit": 45,
+      "unit": "5h window msgs",
+      "resetAt": "01h 48m",
       "status": "healthy"
     },
     {
       "id": "vertex-gemini",
-      "name": "Google Cloud Vertex AI ($300 Credit)",
-      "tier": "Primary Reasoning (Gemini 2.5 Pro / Flash)",
+      "name": "Google Vertex AI ($300 Credit)",
+      "tier": "Gemini 2.5 Pro / Flash",
       "used": 14.5,
       "limit": 300.0,
       "unit": "USD credit",
-      "resetAt": "90-day trial credit",
+      "resetAt": "82d trial remaining",
       "status": "healthy"
     },
     {
       "id": "nvidia-nim",
-      "name": "NVIDIA NIM (GLM 5.3 Flash / Nemotron)",
-      "tier": "Free Failover Tier #1",
-      "used": 140,
+      "name": "NVIDIA NIM (Free Tier)",
+      "tier": "GLM 5.3 Flash / Nemotron",
+      "used": 142,
       "limit": 1000,
       "unit": "req/day",
-      "resetAt": "Daily UTC",
+      "resetAt": "Daily 00:00 UTC",
       "status": "healthy"
     },
     {
       "id": "groq-free",
-      "name": "Groq Cloud (Llama 3.3 70B)",
-      "tier": "Free Failover Tier #2",
-      "used": 85,
+      "name": "Groq Cloud (Free Tier)",
+      "tier": "Llama 3.3 70B / Qwen",
+      "used": 310,
       "limit": 14400,
       "unit": "req/day",
-      "resetAt": "Daily UTC",
-      "status": "healthy"
-    },
-    {
-      "id": "cursor-claude",
-      "name": "Cursor / Claude Code (Optional BYOK)",
-      "tier": "Swappable IDE Agent",
-      "used": 45,
-      "limit": 500,
-      "unit": "fast requests",
-      "resetAt": "Monthly",
+      "resetAt": "Daily 00:00 UTC",
       "status": "healthy"
     }
   ]

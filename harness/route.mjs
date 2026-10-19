@@ -122,10 +122,22 @@ export function getRouterMatrix(role = 'producer') {
 
   return chain.map((providerId, order) => {
     const def = PROVIDERS[providerId];
-    if (!def) return { order: order + 1, providerId, status: 'unknown_provider', channels: [] };
+    if (!def) {
+      return {
+        order: order + 1,
+        provider: providerId,
+        providerId,
+        model: 'unknown',
+        coolingDown: false,
+        cooldownRemainingMs: 0,
+        status: 'unknown_provider',
+        channels: [],
+      };
+    }
     const channels = resolveProviderChannels(def);
+    const providerCd = isCoolingDown(def.id, now, cooldowns);
     const channelStates = channels.map((c) => {
-      const cd = isCoolingDown(c.channelKey, now, cooldowns);
+      const cd = isCoolingDown(c.channelKey, now, cooldowns) || providerCd;
       return {
         channelKey: c.channelKey,
         keyEnv: c.keyEnv,
@@ -134,13 +146,22 @@ export function getRouterMatrix(role = 'producer') {
         lastReason: cd ? cd.reason : null,
       };
     });
+    const anyChannelCd = channelStates.find((c) => c.status === 'cooldown');
+    const remMs = providerCd
+      ? Math.max(0, providerCd.untilMs - now)
+      : anyChannelCd
+      ? anyChannelCd.cooldownRemainingSec * 1000
+      : 0;
     return {
       order: order + 1,
+      provider: def.id,
       providerId: def.id,
       label: def.label,
       tier: def.tier,
       model: def.model,
       configured: channels.length > 0,
+      coolingDown: remMs > 0,
+      cooldownRemainingMs: remMs,
       channels: channelStates,
     };
   });

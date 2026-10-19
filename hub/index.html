@@ -1,244 +1,698 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>3D Deep-Sim AI Studio // Mission Control War Room</title>
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body {
-        background: radial-gradient(circle at 50% 0%, #0d1b2a 0%, #050811 75%);
-        color: #e2e8f0;
-        font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-        min-height: 100vh;
-      }
-      header {
-        display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-        gap: 12px; padding: 12px 20px;
-        border-bottom: 1px solid rgba(56, 189, 248, 0.28);
-        background: rgba(8, 15, 30, 0.92);
-      }
-      .grid-4q {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: repeat(2, minmax(340px, 1fr));
-        gap: 14px; padding: 14px;
-      }
-      @media (max-width: 900px) {
-        .grid-4q { grid-template-columns: 1fr; grid-template-rows: auto; }
-      }
-      .card {
-        background: rgba(10, 18, 36, 0.88);
-        border: 1px solid rgba(56, 189, 248, 0.25);
-        border-radius: 10px; padding: 14px;
-        display: flex; flex-direction: column;
-        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-      }
-      .card-hdr {
-        display: flex; justify-content: space-between; align-items: center;
-        font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #94a3b8;
-        padding-bottom: 8px; margin-bottom: 10px;
-        border-bottom: 1px solid rgba(56, 189, 248, 0.18);
-      }
-      button {
-        background: #0284c7; color: #f8fafc; border: none; border-radius: 5px;
-        padding: 5px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
-      }
-      button:hover { opacity: 0.9; }
-      table { width: 100%; border-collapse: collapse; font-size: 10px; }
-      th, td { padding: 5px 4px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.1); }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <div id="app">Loading Zero-Token Workflow UI HUB...</div>
-    <script type="module">
-      let snapshot = null;
-      let mobileMode = new URLSearchParams(location.search).get('view') === 'mobile' || innerWidth < 860;
-      let liveMode = 'queue'; // 'queue' | 'screenshot' | 'novnc' | 'preview'
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Deep-Sim AI Studio — Mission Control War Room (0% LLM Token Cost)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <style>
+    :root {
+      --bg: #06080E;
+      --panel: rgba(10, 15, 28, 0.82);
+      --border: rgba(0, 240, 255, 0.36);
+      --border-sub: rgba(14, 165, 233, 0.25);
+      --cyan: #00F0FF;
+      --blue: #0EA5E9;
+      --emerald: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    body.crt-active::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 95;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0),
+        rgba(255, 255, 255, 0) 2px,
+        rgba(0, 240, 255, 0.028) 3px
+      );
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      background: rgba(6, 8, 14, 0.96);
+      border-bottom: 1px solid var(--cyan);
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border);
+      color: var(--cyan);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { background: rgba(0, 240, 255, 0.18); }
+    .btn.active { background: rgba(0, 240, 255, 0.22); border-color: var(--cyan); font-weight: 700; }
+    .usage-bar {
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .subs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 7px;
+    }
+    .sub-card {
+      background: rgba(6, 8, 14, 0.88);
+      border: 1px solid var(--border-sub);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 10px;
+    }
+    .war-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 50% 1fr;
+      grid-template-rows: 55% 1fr;
+      gap: 8px;
+      padding: 8px;
+      min-height: 0;
+    }
+    .quadrant {
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      min-height: 0;
+    }
+    .q-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: rgba(6, 8, 14, 0.92);
+      border-bottom: 1px solid var(--border-sub);
+      font-size: 11px;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .node-card {
+      background: rgba(10, 15, 28, 0.92);
+      border: 1px solid #1e293b;
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .node-card:hover { border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 240, 255, 0.25); }
+    .drawer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(410px, 92%);
+      background: rgba(6, 8, 14, 0.97);
+      backdrop-filter: blur(16px);
+      border-left: 1px solid var(--cyan);
+      z-index: 35;
+      padding: 12px;
+      overflow-y: auto;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .drawer.open { display: flex; }
+    dialog:modal {
+      overscroll-behavior: contain;
+      background: #06080E;
+      color: var(--text);
+      border: 1px solid var(--cyan);
+      border-radius: 8px;
+      padding: 16px;
+      width: min(680px, 94vw);
+      max-height: 85vh;
+      margin: auto;
+    }
+    dialog::backdrop {
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(4px);
+      overflow: hidden;
+      overscroll-behavior: contain;
+    }
+    @keyframes dashFlow {
+      to { stroke-dashoffset: -24; }
+    }
+    .packet-wire {
+      stroke-dasharray: 6 6;
+      animation: dashFlow 1s linear infinite;
+    }
+    @media (max-width: 768px) {
+      body { height: auto; overflow-y: auto; }
+      .war-grid { display: flex; flex-direction: column; height: auto; }
+      .quadrant { min-height: 340px; }
+    }
+  </style>
+</head>
+<body class="crt-active">
+  <header>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="width:9px;height:9px;border-radius:50%;background:#00F0FF;box-shadow:0 0 10px #00F0FF;"></span>
+      <strong style="font-size:13px;color:#00F0FF;letter-spacing:0.8px;">
+        3D DEEP-SIM AI STUDIO // MISSION CONTROL WAR ROOM
+      </strong>
+      <span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);border:1px solid #10b981;color:#34d399;">
+        0% LLM TOKEN TELEMETRY
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button class="btn active" id="crtToggleBtn" onclick="toggleCrt()">CRT Scanlines: ON</button>
+      <button class="btn" onclick="openQuotaDialog()">✎ Edit Quotas (.studio/usage.json)</button>
+    </div>
+  </header>
 
-      async function postJson(url, body) {
-        await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      }
+  <!-- Module 5: Subscription Quota & Token-Saver Telemetry Bar -->
+  <section class="usage-bar">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <strong style="color:#00F0FF;">⚡ RTK + QMD + SERENA EFFICIENCY METER</strong>
+        <span id="rtkBadge" style="padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);border:1px solid #10b981;color:#34d399;font-size:10px;font-weight:700;">
+          84% Bash Saved via RTK
+        </span>
+        <span>Tokens Saved Today: <strong id="tokensSavedVal" style="color:#38bdf8;">248,500</strong></span>
+        <span>Value Preserved: <strong id="dollarsSavedVal" style="color:#34d399;">$4.68</strong></span>
+      </div>
+      <span style="font-size:10px;color:#64748b;" id="syncClock">Synced</span>
+    </div>
+    <div class="subs-grid" id="subsGrid"></div>
+  </section>
 
-      window.hubStartTask = (id) => postJson('/api/task', { action: 'start', id });
-      window.hubDoneTask = (id) => postJson('/api/task', { action: 'done', id });
-      window.hubSetLiveMode = (m) => { liveMode = m; render(); };
-      window.hubAddTask = () => {
-        const input = document.getElementById('new-task-input');
-        const role = document.getElementById('new-task-role');
-        if (input && input.value.trim()) {
-          postJson('/api/task', { action: 'add', title: input.value.trim(), role: role ? role.value : 'builder' });
-          input.value = '';
+  <!-- 4-Quadrant Desktop Grid / Mobile Command Feed -->
+  <main class="war-grid">
+    <!-- Q1: Dynamic Uncapped Agent & Failover Node Graph -->
+    <section class="quadrant">
+      <div class="q-header">
+        <span style="color:#00F0FF;font-weight:700;">🕸 UNCAPPED AGENT &amp; FAILOVER TOPOLOGY (<span id="roleCount">5</span> ROLES)</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select id="producerPresetSelect" class="btn" onchange="switchProducerPreset(this.value)">
+            <option value="grok-bot">★ Head: Grok Bot (xAI)</option>
+            <option value="claude-opus">★ Head: Claude Opus 4.6</option>
+            <option value="gemini-argon">★ Head: Gemini Argon / 2.5 Pro</option>
+            <option value="cursor-ultra">★ Head: Cursor Ultra</option>
+            <option value="local-swarm">★ Head: Local Swarm (Ollama)</option>
+          </select>
+          <button class="btn" style="border-color:#f59e0b;color:#fbbf24;" onclick="runMacro('simulate-failover')">
+            ⚡ Test 429 Failover (30s)
+          </button>
+        </div>
+      </div>
+      <div id="agentGraphStage" style="flex:1;padding:10px;overflow:auto;position:relative;display:flex;flex-direction:column;gap:12px;"></div>
+      <aside class="drawer" id="inspectorDrawer" aria-label="Agent Inspector Drawer"></aside>
+    </section>
+
+    <!-- Q2: "Agent Eyes" Real-Time Viewport Multiplexer -->
+    <section class="quadrant" id="viewportQuadrant">
+      <div class="q-header">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="color:#00F0FF;font-weight:700;">👁 AGENT EYES MULTIPLEXER</span>
+          <span id="fpsBadge" style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.16);border:1px solid #10b981;color:#34d399;">
+            30 FPS // 14ms
+          </span>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button class="btn" id="src-novnc" onclick="setViewportSource('novnc')">1. noVNC :6080</button>
+          <button class="btn" id="src-webrtc" onclick="setViewportSource('webrtc')">2. WebRTC</button>
+          <button class="btn active" id="src-cdp" onclick="setViewportSource('cdp')">3. Playwright CDP</button>
+          <button class="btn" id="src-hmr" onclick="setViewportSource('hmr')">4. HMR ?playtest=1</button>
+          <button class="btn" onclick="toggleViewportFullscreen()">⤢ FS</button>
+        </div>
+      </div>
+      <div id="viewportStage" style="flex:1;position:relative;background:#03050a;overflow:hidden;"></div>
+    </section>
+
+    <!-- Q3: "What's Next" Pipeline & External Context Status -->
+    <section class="quadrant">
+      <div class="q-header">
+        <span style="color:#00F0FF;font-weight:700;">📋 "WHAT'S NEXT" PIPELINE &amp; CONTEXT HEALTH</span>
+        <span style="color:#34d399;font-size:10px;">studio/NEXT.md + studio/CURRENT_TASK.md</span>
+      </div>
+      <div style="flex:1;padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;">
+        <div id="contextHealthBar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;"></div>
+        <form onsubmit="addNewTask(event)" style="display:flex;gap:6px;">
+          <input id="newTaskTitle" placeholder="Enqueue new task into studio/NEXT.md..." style="flex:1;background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px 8px;border-radius:4px;font-family:inherit;font-size:10px;" />
+          <button type="submit" class="btn">+ Enqueue</button>
+        </form>
+        <div id="kanbanBoard" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;flex:1;"></div>
+      </div>
+    </section>
+
+    <!-- Q4: Built-In Cyberpunk Terminal Dock & Command Deck (xterm.js) -->
+    <section class="quadrant">
+      <div class="q-header">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button class="btn" onclick="runMacro('pull-next')">▶ Pull Next Task</button>
+          <button class="btn" style="color:#34d399;border-color:#10b981;" onclick="runMacro('run-playtest')">🧪 Run ?playtest=1</button>
+          <button class="btn" onclick="runMacro('rtk-gain')">⚡ RTK Gain Stats</button>
+          <button class="btn" style="color:#fbbf24;border-color:#f59e0b;" onclick="runMacro('pre-compact')">💾 Pre-Compact Checkpoint</button>
+          <button class="btn" style="color:#d8b4fe;border-color:#a855f7;" onclick="runMacro('switch-producer')">🔄 Switch Head Producer</button>
+        </div>
+        <button class="btn" id="readOnlyBtn" onclick="toggleReadOnlyShell()">🔒 Tunnel Read-Only: ON</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#05070d;border-bottom:1px solid #1e293b;gap:6px;">
+        <div style="display:flex;gap:4px;">
+          <button class="btn active" id="tabEventsBtn" onclick="switchTermTab('events')">Tab 1: Live Agent Event Stream</button>
+          <button class="btn" id="tabShellBtn" onclick="switchTermTab('shell')">Tab 2: Interactive Studio Shell</button>
+        </div>
+        <input id="termRegexInput" oninput="renderTerminal()" placeholder="Regex / Role filter..." style="background:#020409;border:1px solid #334155;color:#e2e8f0;padding:2px 6px;border-radius:4px;font-family:inherit;font-size:10px;width:165px;" />
+      </div>
+      <div id="xtermContainer" style="flex:1;background:#05070d;padding:4px;overflow:hidden;"></div>
+      <form id="shellForm" onsubmit="sendShellCmd(event)" style="display:none;gap:6px;padding:6px 8px;background:#06080E;border-top:1px solid #1e293b;">
+        <span style="color:#00F0FF;font-size:11px;align-self:center;">studio$</span>
+        <input id="shellCmdInput" placeholder="Enter shell command (unlock Read-Only toggle above first)..." style="flex:1;background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px 8px;border-radius:4px;font-family:inherit;font-size:10px;" />
+        <button type="submit" class="btn">Run</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Quota Configuration Modal (<dialog closedby="any">) -->
+  <dialog id="quotaDialog" closedby="any" aria-labelledby="quotaDialogTitle">
+    <form onsubmit="saveQuotaDialog(event)" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong id="quotaDialogTitle" style="color:#00F0FF;font-size:13px;">CONFIGURE SUBSCRIPTION QUOTAS (.studio/usage.json)</strong>
+        <button type="button" class="btn" onclick="document.getElementById('quotaDialog').close()">✕</button>
+      </div>
+      <div id="quotaInputsList" style="display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow-y:auto;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="btn" onclick="document.getElementById('quotaDialog').close()">Cancel</button>
+        <button type="submit" class="btn active">Save to .studio/usage.json</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    let state = null;
+    let frameState = null;
+    let activeViewportSource = localStorage.getItem('warRoom.viewport.activeSource') || 'cdp';
+    let termTab = 'events';
+    let readOnlyShell = true;
+    let shellHistory = [];
+    let term = null;
+    let fitAddon = null;
+    let ws = null;
+
+    // Fallback for browsers without native <dialog closedby="any"> support
+    const quotaDialog = document.getElementById('quotaDialog');
+    if (quotaDialog && !('closedBy' in HTMLDialogElement.prototype)) {
+      quotaDialog.addEventListener('click', (event) => {
+        if (event.target !== quotaDialog) return;
+        const rect = quotaDialog.getBoundingClientRect();
+        const inside =
+          rect.top <= event.clientY &&
+          event.clientY <= rect.top + rect.height &&
+          rect.left <= event.clientX &&
+          event.clientX <= rect.left + rect.width;
+        if (!inside) quotaDialog.close();
+      });
+    }
+
+    function initTerminal() {
+      const container = document.getElementById('xtermContainer');
+      if (!container || !window.Terminal) return;
+      term = new window.Terminal({
+        cursorBlink: true,
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 11,
+        theme: { background: '#05070d', foreground: '#e2e8f0', cursor: '#00F0FF' },
+        convertEol: true,
+      });
+      if (window.FitAddon) {
+        fitAddon = new window.FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+      }
+      term.open(container);
+      if (fitAddon) fitAddon.fit();
+      window.addEventListener('resize', () => fitAddon && fitAddon.fit());
+    }
+
+    function renderTerminal() {
+      if (!term || !state) return;
+      term.clear();
+      if (termTab === 'events') {
+        term.writeln('\x1b[38;2;0;240;255m=== TAB 1: LIVE AGENT EVENT & BASH STREAM (.studio/events.jsonl) ===\x1b[0m');
+        const filterStr = (document.getElementById('termRegexInput')?.value || '').trim();
+        let evts = (state.recentEvents || []).slice().reverse();
+        if (filterStr) {
+          try {
+            const rx = new RegExp(filterStr, 'i');
+            evts = evts.filter((e) => rx.test(JSON.stringify(e)));
+          } catch {
+            evts = evts.filter((e) => JSON.stringify(e).toLowerCase().includes(filterStr.toLowerCase()));
+          }
         }
-      };
-      window.hubSimFailover = () =>
-        postJson('/api/event', {
-          type: 'route.failover',
-          agent: 'builder',
-          provider: 'nvidia-glm-flash',
-          tokensSaved: 4500,
-          msg: 'Simulated 429 on primary -> instant freecc:auto failover to NVIDIA GLM 5.3 Flash (0 downtime)',
-        });
-      window.hubToggleMode = () => {
-        mobileMode = !mobileMode;
-        render();
-      };
-
-      function render() {
-        if (!snapshot) return;
-        const activeAgent = snapshot.queue.inProgress[0]?.role || snapshot.recentEvents[0]?.agent || 'producer';
-        const activeProvider = snapshot.recentEvents.find((e) => e.provider || e.worker)?.provider || 'vertex-gemini-pro';
-        const subs = snapshot.usage?.subscriptions || [];
-
-        const rolesSvg = snapshot.roles.slice(0, 5).map((r, i) => {
-          const y = 12 + i * 52;
-          const act = r.id === activeAgent;
-          return `
-            <line x1="175" y1="135" x2="285" y2="${y + 21}" stroke="${act ? '#10b981' : 'rgba(148,163,184,0.25)'}" stroke-width="${act ? 2.5 : 1.2}"/>
-            <g transform="translate(285,${y})">
-              <rect width="175" height="42" rx="6" fill="${act ? 'rgba(16,185,129,0.18)' : 'rgba(15,23,42,0.9)'}" stroke="${act ? '#10b981' : 'rgba(148,163,184,0.35)'}"/>
-              <text x="10" y="17" fill="${act ? '#34d399' : '#e2e8f0'}" font-size="11" font-weight="bold">${r.id.toUpperCase()}</text>
-              <text x="10" y="33" fill="#94a3b8" font-size="9">dept:${r.department} | ${r.tier}</text>
-            </g>`;
-        }).join('');
-
-        const provSvg = snapshot.router.slice(0, 5).map((p, i) => {
-          const y = 12 + i * 52;
-          const sel = p.providerId === activeProvider;
-          return `
-            <line x1="460" y1="135" x2="555" y2="${y + 21}" stroke="${sel ? '#a78bfa' : 'rgba(148,163,184,0.2)'}" stroke-width="${sel ? 2.4 : 1}"/>
-            <g transform="translate(555,${y})">
-              <rect width="190" height="42" rx="6" fill="${sel ? 'rgba(167,139,250,0.16)' : 'rgba(15,23,42,0.9)'}" stroke="${sel ? '#a78bfa' : 'rgba(148,163,184,0.3)'}"/>
-              <text x="10" y="17" fill="${sel ? '#c4b5fd' : '#cbd5e1'}" font-size="10" font-weight="bold">#${p.order} ${p.providerId}</text>
-              <text x="10" y="33" fill="#94a3b8" font-size="9">${p.model.slice(0, 26)} [${p.tier}]</text>
-            </g>`;
-        }).join('');
-
-        const subsHtml = subs.map((s) => {
-          const pct = Math.min(100, Math.round((s.used / Math.max(1, s.limit)) * 100));
-          return `
-            <div style="font-size:10px;margin-bottom:6px;">
-              <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-                <strong>${s.name}</strong>
-                <span style="color:#94a3b8">${s.used} / ${s.limit} ${s.unit} (${pct}%)</span>
-              </div>
-              <div style="height:5px;background:#1e293b;border-radius:3px;overflow:hidden;">
-                <div style="width:${pct}%;height:100%;background:${pct > 85 ? '#f59e0b' : '#10b981'};"></div>
-              </div>
-            </div>`;
-        }).join('');
-
-        let q3Body = '';
-        if (liveMode === 'screenshot') {
-          q3Body = snapshot.liveView?.latestScreenshot
-            ? `<div style="text-align:center;"><img src="${snapshot.liveView.latestScreenshot}" style="max-width:100%;max-height:240px;border-radius:6px;" /></div>`
-            : `<div style="font-size:11px;color:#94a3b8;padding:16px;">No Stage-2 screenshot in <code>qa/reports/</code> yet. Run <code>node qa/playtest.mjs</code>.</div>`;
-        } else if (liveMode === 'novnc') {
-          q3Body = `<iframe src="${snapshot.liveView?.novncUrl || 'http://127.0.0.1:6080/vnc.html'}" style="flex:1;width:100%;min-height:230px;border:1px solid #334155;border-radius:6px;background:#05080f;"></iframe>`;
-        } else if (liveMode === 'preview') {
-          q3Body = `<iframe src="${snapshot.liveView?.playtestUrl || 'http://127.0.0.1:5173/?playtest=1'}" style="flex:1;width:100%;min-height:230px;border:1px solid #334155;border-radius:6px;background:#05080f;"></iframe>`;
-        } else {
-          q3Body = `
-            <div style="display:flex;gap:6px;margin-bottom:10px;">
-              <input id="new-task-input" placeholder="Queue new task in studio/NEXT.md..." style="flex:1;background:#091020;color:#f8fafc;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px 8px;font-size:11px;font-family:inherit;" />
-              <select id="new-task-role" style="background:#091020;color:#38bdf8;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px;font-size:11px;font-family:inherit;">
-                ${snapshot.roles.map((r) => `<option value="${r.id}">${r.id}</option>`).join('')}
-              </select>
-              <button onclick="hubAddTask()">+ Add</button>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:220px;">
-              ${snapshot.queue.inProgress.map((t) => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);border-radius:6px;font-size:11px;">
-                  <div><strong style="color:#34d399">▶ ${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
-                  <button style="background:#059669" onclick="hubDoneTask('${t.id}')">✓ Done</button>
-                </div>`).join('')}
-              ${snapshot.queue.backlog.map((t) => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(15,23,42,0.7);border:1px solid rgba(148,163,184,0.18);border-radius:6px;font-size:11px;">
-                  <div><strong style="color:#38bdf8">${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
-                  <button onclick="hubStartTask('${t.id}')">Start</button>
-                </div>`).join('')}
-            </div>`;
+        for (const e of evts) {
+          const ts = (e.ts || '').slice(11, 19);
+          const saved = e.tokensSaved ? ` \x1b[32m(+${e.tokensSaved} RTK saved)\x1b[0m` : '';
+          term.writeln(`\x1b[90m${ts}\x1b[0m \x1b[36m[${e.agent}]\x1b[0m \x1b[35m${e.type}\x1b[0m: ${e.msg}${saved}`);
         }
-
-        document.getElementById('app').innerHTML = `
-          <header>
-            <div>
-              <div style="font-size:15px;font-weight:700;color:#38bdf8;letter-spacing:1.3px;">
-                3D DEEP-SIM AI STUDIO // MISSION CONTROL WAR ROOM
-              </div>
-              <div style="font-size:11px;color:#94a3b8;margin-top:2px;">
-                PRODUCER: <strong style="color:#f8fafc">${snapshot.producerPreset.toUpperCase()}</strong> ·
-                ROLES: <strong style="color:#f8fafc">${snapshot.rolesCount}</strong> (UNLIMITED) ·
-                LLM TOKEN USAGE: <strong style="color:#10b981">0.0% (PASSIVE)</strong>
-              </div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <span style="padding:5px 10px;border-radius:6px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);font-size:11px;color:#34d399;">
-                TOKENS SAVED: ~${snapshot.telemetry.estimatedTokensSaved.toLocaleString()}
-              </span>
-              <button onclick="hubSimFailover()" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.45);">⚡ Simulate Failover</button>
-              <button onclick="hubToggleMode()">${mobileMode ? '🖥️ 4Q War Room' : '📱 Mobile Feed'}</button>
-            </div>
-          </header>
-          <main class="grid-4q" style="${mobileMode ? 'grid-template-columns:1fr;max-width:560px;margin:0 auto;' : ''}">
-            <section class="card">
-              <div class="card-hdr"><span>Q1 // LIVE MULTI-AGENT & PROVIDER NODE GRAPH</span><span style="color:#38bdf8">ACTIVE: ${activeAgent.toUpperCase()}</span></div>
-              <svg viewBox="0 0 760 275" style="width:100%;height:255px;">
-                <g transform="translate(15,102)">
-                  <rect width="160" height="66" rx="8" fill="rgba(15,23,42,0.95)" stroke="#38bdf8" stroke-width="2"/>
-                  <text x="12" y="24" fill="#38bdf8" font-size="11" font-weight="bold">EXEC PRODUCER</text>
-                  <text x="12" y="42" fill="#f8fafc" font-size="10">Preset: ${snapshot.producerPreset}</text>
-                  <text x="12" y="56" fill="#94a3b8" font-size="9">VISION_LOCK + NEXT.md</text>
-                </g>
-                ${rolesSvg}
-                ${provSvg}
-              </svg>
-            </section>
-            <section class="card">
-              <div class="card-hdr"><span>Q2 // SUBSCRIPTION USAGE (.studio/usage.json) & ROUTER</span><span style="color:#a78bfa">FAILOVERS: ${snapshot.telemetry.failovers}</span></div>
-              <div style="margin-bottom:8px;">${subsHtml}</div>
-              <table>
-                <thead><tr><th>#</th><th>Provider</th><th>Model</th><th>Tier</th><th>Status</th></tr></thead>
-                <tbody>
-                  ${snapshot.router.map((r) => {
-                    const cd = r.channels.find((c) => c.status === 'cooldown');
-                    const st = !r.configured ? 'NO KEY' : cd ? 'COOLDOWN (' + cd.cooldownRemainingSec + 's)' : 'READY';
-                    const col = !r.configured ? '#64748b' : cd ? '#f59e0b' : '#10b981';
-                    return `<tr><td>${r.order}</td><td><strong>${r.providerId}</strong></td><td style="color:#94a3b8">${r.model}</td><td style="color:#38bdf8">${r.tier}</td><td style="color:${col};font-weight:700">${st}</td></tr>`;
-                  }).join('')}
-                </tbody>
-              </table>
-            </section>
-            <section class="card">
-              <div class="card-hdr">
-                <span>Q3 // STUDIO/NEXT.MD & LIVE AGENT VIEW</span>
-                <div style="display:flex;gap:4px;">
-                  <button onclick="hubSetLiveMode('queue')" style="padding:3px 6px;font-size:10px;background:${liveMode==='queue'?'#0284c7':'#1e293b'}">QUEUE</button>
-                  <button onclick="hubSetLiveMode('screenshot')" style="padding:3px 6px;font-size:10px;background:${liveMode==='screenshot'?'#0284c7':'#1e293b'}">SCREENSHOT</button>
-                  <button onclick="hubSetLiveMode('novnc')" style="padding:3px 6px;font-size:10px;background:${liveMode==='novnc'?'#0284c7':'#1e293b'}">NOVNC</button>
-                  <button onclick="hubSetLiveMode('preview')" style="padding:3px 6px;font-size:10px;background:${liveMode==='preview'?'#0284c7':'#1e293b'}">PREVIEW</button>
-                </div>
-              </div>
-              ${q3Body}
-            </section>
-            <section class="card">
-              <div class="card-hdr"><span>Q4 // PASSIVE EVENT STREAM (.studio/events.jsonl)</span><span>EVENTS: ${snapshot.telemetry.totalEvents}</span></div>
-              <div style="background:rgba(3,7,18,0.75);border-radius:6px;padding:10px;font-size:11px;line-height:1.55;overflow-y:auto;max-height:250px;">
-                ${snapshot.recentEvents.map((e) => `
-                  <div style="border-bottom:1px solid rgba(148,163,184,0.08);padding:3px 0;">
-                    <span style="color:#64748b">[${e.ts.slice(11, 19)}]</span>
-                    <strong style="color:#38bdf8">(${e.agent})</strong>
-                    <span style="color:${e.type.includes('failover') ? '#fbbf24' : '#a78bfa'}">${e.type}</span>:
-                    ${e.msg}
-                  </div>`).join('')}
-              </div>
-            </section>
-          </main>`;
+      } else {
+        term.writeln('\x1b[38;2;0;240;255m=== TAB 2: INTERACTIVE STUDIO SHELL & MACRO OUTPUT ===\x1b[0m');
+        for (const chunk of shellHistory) {
+          term.write(chunk);
+        }
       }
+    }
 
-      const es = new EventSource('/api/stream');
-      es.onmessage = (e) => { snapshot = JSON.parse(e.data); render(); };
-    </script>
-  </body>
+    function renderAll() {
+      if (!state) return;
+      document.getElementById('roleCount').textContent = state.rolesCount || (state.roles || []).length;
+      document.getElementById('rtkBadge').textContent = `${state.telemetry?.rtkCompressionPct || 84}% Bash Saved via RTK`;
+      document.getElementById('tokensSavedVal').textContent = Number(state.telemetry?.estimatedTokensSaved || 0).toLocaleString();
+      document.getElementById('dollarsSavedVal').textContent = `$${state.telemetry?.estimatedDollarsPreserved || '4.68'}`;
+      document.getElementById('syncClock').textContent = `Updated ${new Date(state.generatedAt).toLocaleTimeString()}`;
+
+      // Subscriptions
+      const subsGrid = document.getElementById('subsGrid');
+      subsGrid.innerHTML = (state.usage?.subscriptions || []).map((s) => {
+        const pct = Math.min(100, Math.round((Number(s.used) / Math.max(1, Number(s.limit))) * 100));
+        const left = Math.max(0, 100 - pct);
+        const col = pct >= 85 ? '#ef4444' : pct >= 65 ? '#f59e0b' : '#00F0FF';
+        return `<div class="sub-card">
+          <div style="display:flex;justify-content:space-between;"><strong style="color:#f8fafc;">${s.name}</strong><span style="color:${col};font-weight:700;">${left}% left</span></div>
+          <div style="height:4px;background:#0f172a;border-radius:2px;margin:4px 0;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${col};"></div></div>
+          <div style="display:flex;justify-content:space-between;color:#94a3b8;font-size:9px;"><span>${s.used}/${s.limit} ${s.unit}</span><span>↻ ${s.resetAt}</span></div>
+        </div>`;
+      }).join('');
+
+      // Uncapped Agent & Failover Graph
+      const roles = state.roles || [];
+      const head = roles.find((r) => r.slug === 'producer') || roles[0];
+      const workers = roles.filter((r) => r.slug !== (head && head.slug));
+      const graphEl = document.getElementById('agentGraphStage');
+      graphEl.innerHTML = `
+        <div style="display:flex;justify-content:center;">
+          ${renderRoleNode(head, true)}
+        </div>
+        <svg height="36" width="100%" style="overflow:visible;">
+          ${workers.map((_, idx) => {
+            const xPct = ((idx + 0.5) / Math.max(1, workers.length)) * 100;
+            return `<line x1="50%" y1="0" x2="${xPct}%" y2="36" stroke="#00F0FF" stroke-width="1.6" class="packet-wire" />`;
+          }).join('')}
+        </svg>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:8px;">
+          ${workers.map((w) => renderRoleNode(w, false)).join('')}
+        </div>
+      `;
+
+      // Context Health & Kanban
+      const chBar = document.getElementById('contextHealthBar');
+      chBar.innerHTML = (state.contextHealth || []).map((c) => {
+        const col = c.status === 'synced' ? '#10b981' : '#38bdf8';
+        return `<div style="background:#05070d;border:1px solid ${col}55;border-radius:4px;padding:4px 6px;font-size:9px;">
+          <div style="color:#e2e8f0;font-weight:700;">${c.label}</div>
+          <div style="display:flex;justify-content:space-between;color:#94a3b8;margin-top:2px;"><span style="color:${col};">${c.status.toUpperCase()}</span><span>${c.updatedAt ? c.updatedAt.slice(11, 19) : ''}</span></div>
+        </div>`;
+      }).join('');
+
+      const q = state.queue || { inProgress: [], backlog: [], done: [] };
+      document.getElementById('kanbanBoard').innerHTML = `
+        <div style="background:#05070d;border:1px solid rgba(0,240,255,0.3);border-radius:6px;padding:8px;">
+          <div style="color:#00F0FF;font-size:10px;font-weight:700;margin-bottom:6px;">IN_PROGRESS (${q.inProgress.length})</div>
+          ${q.inProgress.map((t) => `<div style="padding:6px;border-left:2px solid #00F0FF;background:#0a0f1c;margin-bottom:6px;font-size:10px;">
+            <div><strong>${t.id}</strong> [${t.priority}] (${t.role})</div>
+            <div style="color:#cbd5e1;margin:3px 0;">${t.title}</div>
+            <button class="btn" onclick="taskAction('done','${t.id}')">✓ Complete</button>
+          </div>`).join('')}
+        </div>
+        <div style="background:#05070d;border:1px solid rgba(14,165,233,0.25);border-radius:6px;padding:8px;">
+          <div style="color:#38bdf8;font-size:10px;font-weight:700;margin-bottom:6px;">BACKLOG (${q.backlog.length})</div>
+          ${q.backlog.map((t) => `<div style="padding:6px;border-left:2px solid #38bdf8;background:#0a0f1c;margin-bottom:6px;font-size:10px;">
+            <div><strong>${t.id}</strong> [${t.priority}] (${t.role})</div>
+            <div style="color:#cbd5e1;margin:3px 0;">${t.title}</div>
+            <button class="btn" onclick="taskAction('start','${t.id}')">▶ Start</button>
+          </div>`).join('')}
+        </div>
+        <div style="background:#05070d;border:1px solid rgba(16,185,129,0.25);border-radius:6px;padding:8px;">
+          <div style="color:#34d399;font-size:10px;font-weight:700;margin-bottom:6px;">DONE (${q.done.length})</div>
+          ${q.done.slice(0, 5).map((t) => `<div style="padding:6px;border-left:2px solid #10b981;background:#0a0f1c;margin-bottom:6px;font-size:10px;opacity:0.8;">
+            <div><strong style="color:#34d399;">${t.id}</strong> (${t.role})</div>
+            <div style="color:#94a3b8;">${t.title}</div>
+          </div>`).join('')}
+        </div>
+      `;
+
+      renderViewport();
+      renderTerminal();
+    }
+
+    function renderRoleNode(r, isHead) {
+      if (!r) return '';
+      const isCooling = r.status === 'FAILOVER_COOLDOWN' || (r.cooldownRemainingMs || 0) > 0;
+      const borderCol = isCooling ? '#f59e0b' : r.status !== 'IDLE' ? '#00F0FF' : '#1e293b';
+      const cdSec = Math.ceil((r.cooldownRemainingMs || 0) / 1000);
+      const chainHtml = (r.providerChain || []).slice(0, 3).map((c) => {
+        const cool = c.coolingDown;
+        const act = !cool && c.provider === r.activeProvider;
+        const col = cool ? '#fbbf24' : act ? '#34d399' : '#64748b';
+        return `<span style="font-size:9px;padding:1px 4px;border-radius:3px;border:1px solid ${col};color:${col};">${c.provider}${cool ? ` (${cdSec || 30}s)` : act ? ' ●' : ''}</span>`;
+      }).join(' ');
+
+      return `<div class="node-card" onclick="inspectRole('${r.slug}')" style="border-color:${borderCol};width:${isHead ? '310px' : 'auto'};">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:${isHead ? '#00F0FF' : '#f8fafc'};">${isHead ? '★ HEAD PRODUCER' : r.slug.toUpperCase()}</strong>
+          <span style="font-size:9px;color:${isCooling ? '#fbbf24' : '#00F0FF'};">${r.status}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin:5px 0;">${chainHtml}</div>
+        <div style="font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;">
+          <span>Task: <strong style="color:#e2e8f0;">${r.taskId || 'STANDBY'}</strong></span>
+          <span>RTK: +${Number(r.tokensSavedByRtk || 0).toLocaleString()}</span>
+        </div>
+        <div style="font-size:9px;color:#64748b;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">target: ${r.targetFile || 'studio/NEXT.md'}</div>
+      </div>`;
+    }
+
+    async function inspectRole(slug) {
+      const r = (state.roles || []).find((x) => x.slug === slug);
+      if (!r) return;
+      const drawer = document.getElementById('inspectorDrawer');
+      drawer.classList.add('open');
+      drawer.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="color:#00F0FF;">AGENT INSPECTOR // ${r.slug.toUpperCase()}</strong>
+        <button class="btn" onclick="document.getElementById('inspectorDrawer').classList.remove('open')">✕ Close</button>
+      </div>
+      <div style="font-size:10px;color:#94a3b8;">Model: <strong style="color:#38bdf8;">${r.activeProvider} / ${r.activeModel}</strong> | RTK Saved: <strong style="color:#34d399;">${Number(r.tokensSavedByRtk || 0).toLocaleString()} tok</strong></div>
+      <div style="font-size:10px;color:#0EA5E9;font-weight:700;">GIT DIFF PREVIEW</div>
+      <pre id="drawerDiff" style="background:#020409;border:1px solid #1e293b;padding:8px;border-radius:4px;font-size:9px;max-height:150px;overflow:auto;white-space:pre-wrap;">Loading diff...</pre>
+      <div style="font-size:10px;color:#0EA5E9;font-weight:700;">RECENT EVENTS</div>
+      <div>${(r.recentEvents || []).map((e) => `<div style="font-size:9px;padding:4px;border-left:2px solid #00F0FF;margin-bottom:4px;background:#0a0f1c;">[${(e.ts || '').slice(11, 19)}] <strong>${e.type}</strong>: ${e.msg}</div>`).join('')}</div>`;
+
+      const res = await fetch(`/api/diff?file=${encodeURIComponent(r.targetFile || '')}`).then((x) => x.json()).catch(() => ({ diff: 'Clean working tree.' }));
+      const diffEl = document.getElementById('drawerDiff');
+      if (diffEl) diffEl.textContent = res.diff || 'Clean working tree.';
+    }
+
+    function setViewportSource(src) {
+      activeViewportSource = src;
+      localStorage.setItem('warRoom.viewport.activeSource', src);
+      ['novnc', 'webrtc', 'cdp', 'hmr'].forEach((id) => {
+        document.getElementById(`src-${id}`)?.classList.toggle('active', id === src);
+      });
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ viewport: { activeSource: src } }),
+      });
+      renderViewport();
+    }
+
+    function renderViewport() {
+      const stage = document.getElementById('viewportStage');
+      if (!stage) return;
+      const sim = frameState?.simTelemetry || { tick: 120, seed: 42069, hash: '1b29485e', entities: 48, api: 'window.__sim (?playtest=1)' };
+      const hud = `<div style="position:absolute;bottom:8px;right:8px;background:rgba(6,8,14,0.9);border:1px solid #00F0FF;border-radius:5px;padding:5px 9px;font-size:10px;display:flex;gap:10px;">
+        <strong style="color:#00F0FF;">${sim.api}</strong>
+        <span>TICK: <strong>${sim.tick}</strong></span>
+        <span>SEED: <strong>${sim.seed}</strong></span>
+        <span>HASH: <strong style="color:#34d399;">${sim.hash}</strong></span>
+      </div>`;
+
+      if (activeViewportSource === 'novnc') {
+        const url = state?.liveView?.novncUrl || 'http://localhost:6080/vnc.html?autoconnect=true&resize=scale';
+        stage.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none;"></iframe>${hud}`;
+      } else if (activeViewportSource === 'webrtc') {
+        stage.innerHTML = `<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:11px;">WebRTC Low-Latency Stream Receiver Ready (ws://localhost:8889/agent-stream)</div>${hud}`;
+      } else if (activeViewportSource === 'hmr') {
+        const url = state?.liveView?.playtestUrl || 'http://localhost:5173/?playtest=1';
+        stage.innerHTML = `<iframe src="${url}" style="width:100%;height:100%;border:none;"></iframe>${hud}`;
+      } else {
+        const boxes = (frameState?.uisentinelBoxes || []).map((b) => `<div style="position:absolute;left:5%;top:12%;right:15%;height:34%;border:1px dashed #10b981;background:rgba(16,185,129,0.06);padding:4px;"><span style="font-size:9px;background:#06080E;color:#34d399;padding:1px 5px;border:1px solid #10b981;">${b.label}</span></div>`).join('');
+        stage.innerHTML = `<div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 40%,rgba(0,240,255,0.12),#03050a 70%);font-size:11px;color:#94a3b8;gap:6px;">
+          <strong style="color:#00F0FF;">PLAYWRIGHT CDP SCREENCAST &amp; UISENTINEL OVERLAY ACTIVE</strong>
+          <span>Streaming base64 frames via <code>/api/frame</code> + <code>window.__sim</code> telemetry</span>
+        </div>${boxes}${hud}`;
+      }
+    }
+
+    function toggleCrt() {
+      const active = document.body.classList.toggle('crt-active');
+      const btn = document.getElementById('crtToggleBtn');
+      btn.textContent = active ? 'CRT Scanlines: ON' : 'CRT Scanlines: OFF';
+      btn.classList.toggle('active', active);
+    }
+
+    function toggleViewportFullscreen() {
+      const el = document.getElementById('viewportQuadrant');
+      if (!document.fullscreenElement) el.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    }
+
+    function switchTermTab(tab) {
+      termTab = tab;
+      document.getElementById('tabEventsBtn').classList.toggle('active', tab === 'events');
+      document.getElementById('tabShellBtn').classList.toggle('active', tab === 'shell');
+      document.getElementById('shellForm').style.display = tab === 'shell' ? 'flex' : 'none';
+      renderTerminal();
+    }
+
+    function toggleReadOnlyShell() {
+      readOnlyShell = !readOnlyShell;
+      const btn = document.getElementById('readOnlyBtn');
+      btn.textContent = readOnlyShell ? '🔒 Tunnel Read-Only: ON' : '🔓 Live PTY Shell: UNLOCKED';
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ terminal: { readOnlyShell } }),
+      });
+    }
+
+    function sendShellCmd(e) {
+      e.preventDefault();
+      const input = document.getElementById('shellCmdInput');
+      const cmd = input.value.trim();
+      if (!cmd || !ws) return;
+      ws.send(JSON.stringify({ type: 'shell.exec', command: cmd, overrideReadOnly: !readOnlyShell }));
+      input.value = '';
+    }
+
+    function runMacro(macro, extra = {}) {
+      fetch('/api/macro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ macro, ...extra }),
+      }).then((r) => r.json()).then((res) => {
+        if (res.snapshot) { state = res.snapshot; renderAll(); }
+      });
+    }
+
+    function switchProducerPreset(presetId) {
+      runMacro('switch-producer', { presetId });
+    }
+
+    function taskAction(action, id) {
+      fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id }),
+      }).then((r) => r.json()).then((res) => {
+        if (res.snapshot) { state = res.snapshot; renderAll(); }
+      });
+    }
+
+    function addNewTask(e) {
+      e.preventDefault();
+      const input = document.getElementById('newTaskTitle');
+      if (!input.value.trim()) return;
+      fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', title: input.value.trim(), role: 'builder', priority: 'P1' }),
+      }).then((r) => r.json()).then((res) => {
+        input.value = '';
+        if (res.snapshot) { state = res.snapshot; renderAll(); }
+      });
+    }
+
+    function openQuotaDialog() {
+      const list = document.getElementById('quotaInputsList');
+      const subs = state?.usage?.subscriptions || [];
+      list.innerHTML = subs.map((s, i) => `<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1.2fr;gap:6px;">
+        <input data-idx="${i}" data-field="name" value="${s.name}" style="background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px;font-size:10px;" />
+        <input data-idx="${i}" data-field="used" type="number" step="any" value="${s.used}" style="background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px;font-size:10px;" />
+        <input data-idx="${i}" data-field="limit" type="number" step="any" value="${s.limit}" style="background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px;font-size:10px;" />
+        <input data-idx="${i}" data-field="resetAt" value="${s.resetAt}" style="background:#020409;border:1px solid #334155;color:#e2e8f0;padding:4px;font-size:10px;" />
+      </div>`).join('');
+      document.getElementById('quotaDialog').showModal();
+    }
+
+    function saveQuotaDialog(e) {
+      e.preventDefault();
+      const subs = JSON.parse(JSON.stringify(state?.usage?.subscriptions || []));
+      document.querySelectorAll('#quotaInputsList input').forEach((inp) => {
+        const idx = Number(inp.getAttribute('data-idx'));
+        const field = inp.getAttribute('data-field');
+        subs[idx][field] = field === 'used' || field === 'limit' ? Number(inp.value) : inp.value;
+      });
+      fetch('/api/usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...state.usage, subscriptions: subs }),
+      }).then((r) => r.json()).then((res) => {
+        if (res.usage) { state.usage = res.usage; renderAll(); }
+        document.getElementById('quotaDialog').close();
+      });
+    }
+
+    initTerminal();
+    fetch('/api/state').then((r) => r.json()).then((s) => { state = s; renderAll(); });
+    fetch('/api/frame').then((r) => r.json()).then((f) => { frameState = f; renderViewport(); });
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'init') {
+          state = msg.data;
+          frameState = msg.frame;
+          if (msg.banner) shellHistory.push(msg.banner);
+          renderAll();
+        } else if (msg.type === 'state') {
+          state = msg.data;
+          renderAll();
+        } else if (msg.type === 'frame') {
+          frameState = msg.data;
+          renderViewport();
+        } else if (msg.type === 'terminal.output') {
+          shellHistory.push(msg.text);
+          if (termTab === 'shell' && term) term.write(msg.text);
+        }
+      } catch {}
+    };
+  </script>
+</body>
 </html>

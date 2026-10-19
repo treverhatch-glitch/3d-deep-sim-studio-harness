@@ -1,0 +1,39 @@
+{
+  "updatedAt": "2026-10-19T22:00:00Z",
+  "theme": {
+    "crtScanlines": true,
+    "glassBlurPx": 12,
+    "accentColor": "#00F0FF",
+    "secondaryAccent": "#0EA5E9",
+    "backgroundColor": "#06080E"
+  },
+  "producerPreset": "grok-bot",
+  "availablePresets": [
+    { "id": "grok-bot", "label": "Grok Bot (xAI Thin Producer)", "provider": "xai-grok", "model": "grok-4-latest" },
+    { "id": "claude-opus", "label": "Claude Opus (Anthropic)", "provider": "anthropic-claude", "model": "claude-opus-4-6" },
+    { "id": "gemini-argon", "label": "Gemini Argon / 2.5 Pro (Vertex)", "provider": "vertex-gemini-pro", "model": "gemini-2.5-pro" },
+    { "id": "cursor-ultra", "label": "Cursor Ultra (Agent IDE)", "provider": "cursor-agent", "model": "cursor-ultra" },
+    { "id": "local-swarm", "label": "Local Swarm (Ollama + NIM)", "provider": "ollama-local", "model": "qwen2.5-coder:32b" }
+  ],
+  "viewport": {
+    "activeSource": "cdp",
+    "novncUrl": "http://localhost:6080/vnc.html?autoconnect=true&resize=scale",
+    "novncWsUrl": "ws://localhost:6080/websockify",
+    "webrtcUrl": "http://localhost:8889/agent-stream",
+    "hmrUrl": "http://localhost:5173/?playtest=1",
+    "showUisentinelOverlay": true,
+    "showSimTelemetryOverlay": true,
+    "manualControlEnabled": false,
+    "targetFps": 30
+  },
+  "terminal": {
+    "activeTab": "events",
+    "readOnlyShell": true,
+    "roleFilter": "ALL",
+    "regexFilter": ""
+  },
+  "layout": {
+    "leftColumnWidthPct": 54,
+    "topRowHeightPct": 58
+  }
+}
