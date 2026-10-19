@@ -93,3 +93,10 @@ Require explicit human or Producer approval before:
 - JSON-serializable state only.
 - Run `scripts/check-sim-isolation.sh` before calling work done.
 - Snapshot state before risky changes (`scripts/snapshot-state.sh`).
+
+---
+
+## 8. External tools
+
+Optional external tools are listed in `docs/EXTERNAL-TOOLS.md`. Do not vendor them into this repo.
+
