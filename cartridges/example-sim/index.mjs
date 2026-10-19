@@ -88,6 +88,14 @@ export function step(prevState, action = null) {
     }
   }
 
+  function bad(v) {
+    if (typeof v === 'number') return !Number.isFinite(v);
+    if (Array.isArray(v)) return v.some(bad);
+    if (v && typeof v === 'object') return Object.values(v).some(bad);
+    return false;
+  }
+  if (bad(state)) throw new Error('non-finite sim state');
+
   return state;
 }
 
