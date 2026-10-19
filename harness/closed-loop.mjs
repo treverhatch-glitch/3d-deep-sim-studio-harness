@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness/closed-loop.mjs — fail -> record real seed/tick -> escalate
+ * harness/closed-loop.mjs — fail -> record replayable seed/tick/actions -> escalate
  */
 
 import fs from 'node:fs';
@@ -30,27 +30,32 @@ function writeSeedFailure(payload) {
   fs.writeFileSync(SEED_FAILURE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+function normalizeActions(actions, tick) {
+  if (!Array.isArray(actions)) return [];
+  return actions.map((entry, i) => {
+    if (entry && typeof entry === 'object' && entry.action) {
+      return { tick: entry.tick ?? tick ?? 1, action: entry.action };
+    }
+    return { tick: tick ?? 1, action: entry };
+  });
+}
+
 function extractFailure(stdout) {
   const fallback = { seed: null, tick: null, description: 'Playtest failed', actions: [] };
   try {
     const parsed = JSON.parse(stdout);
     const stage1 = parsed.stage1 || parsed;
+    const finding = stage1.findings?.[0] || {};
+    const tick = finding.tick ?? stage1.failingTick ?? stage1.tick ?? stage1.ticksRun ?? null;
     return {
       seed: stage1.seed ?? parsed.seed ?? null,
-      tick: stage1.ticksRun ?? stage1.tick ?? parsed.tick ?? null,
-      description: (stage1.findings?.[0]?.summary) || parsed.message || 'Playtest failed',
-      actions: stage1.actions || [],
+      tick,
+      description: finding.summary || parsed.message || 'Playtest failed',
+      actions: normalizeActions(stage1.actions || [], tick),
       hash: stage1.finalHash || null,
     };
   } catch {
-    const seedMatch = stdout.match(/seed[=:]\s*(\d+)/i);
-    const tickMatch = stdout.match(/tick[s]?[=:]\s*(\d+)/i);
-    return {
-      ...fallback,
-      seed: seedMatch ? Number(seedMatch[1]) : null,
-      tick: tickMatch ? Number(tickMatch[1]) : null,
-      description: stdout.slice(0, 200),
-    };
+    return { ...fallback, description: stdout.slice(0, 200) };
   }
 }
 
@@ -58,21 +63,20 @@ const simulateFail = process.argv.includes('--simulate-fail');
 const loopState = readLoopState();
 
 let passed = !simulateFail;
-let failure = { seed: 1337, tick: 0, description: 'Simulated failure', actions: [] };
+let failure = {
+  seed: 1337,
+  tick: 1,
+  description: 'Simulated failure',
+  actions: [{ tick: 1, action: { type: 'spawn', kind: 'sensor' } }],
+};
 
 if (!simulateFail) {
   try {
-    const out = execSync('node qa/playtest.mjs --stage 1', {
-      cwd: REPO_ROOT,
-      stdio: 'pipe',
-      encoding: 'utf8',
-    });
+    execSync('node qa/playtest.mjs --stage 1', { cwd: REPO_ROOT, stdio: 'pipe', encoding: 'utf8' });
     passed = true;
   } catch (err) {
     passed = false;
-    const stdout = String(err.stdout || '');
-    const stderr = String(err.stderr || err.message || '');
-    failure = extractFailure(stdout || stderr);
+    failure = extractFailure(String(err.stdout || err.stderr || err.message || ''));
   }
 }
 
@@ -85,7 +89,6 @@ if (passed) {
 
 const attempt = (loopState.consecutiveFailures || 0) + 1;
 const escalated = attempt >= MAX_RETRIES;
-
 writeLoopState({
   consecutiveFailures: attempt,
   lastSeed: failure.seed,
@@ -108,15 +111,12 @@ writeSeedFailure(seedPayload);
 const bugId = `BUG-${Date.now().toString().slice(-4)}`;
 const bugReportPath = path.join(REPO_ROOT, 'qa', 'reports', `${bugId}.md`);
 fs.mkdirSync(path.dirname(bugReportPath), { recursive: true });
-const replayCmd = failure.seed != null
-  ? `node harness/replay.mjs --seed ${failure.seed} --tick ${failure.tick || 0}`
-  : 'node harness/replay.mjs';
-
+const replayCmd = 'node harness/replay.mjs --trace .studio/last-seed-failure.json';
 const bugMarkdown = `### [P0] ${bugId} — Closed-Loop Failure (Attempt ${attempt}/${MAX_RETRIES})
 - **Replay**: \`${replayCmd}\`
 - **Seed file**: \`.studio/last-seed-failure.json\`
 - **Seed**: ${failure.seed}
-- **Tick**: ${failure.tick}
+- **Failing tick**: ${failure.tick}
 - **Escalated**: ${escalated ? 'YES' : 'no'}
 - **Description**: ${seedPayload.description}
 `;
