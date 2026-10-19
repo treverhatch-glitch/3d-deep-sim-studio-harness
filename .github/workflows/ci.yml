@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Session files
+        run: node scripts/verify-session.mjs
       - name: Sim purity
         run: node scripts/check-sim-purity.mjs
       - name: Sim isolation
@@ -25,12 +27,9 @@ jobs:
         run: node qa/check-regressions.mjs
       - name: Renderer budget
         run: node scripts/check-renderer-budget.mjs
+      - name: Reviewer markers
+        run: node scripts/check-reviewer.mjs
       - name: Closed-loop simulate fail
         run: node harness/closed-loop.mjs --simulate-fail || true
-      - name: Secret scan (basic)
-        run: |
-          if grep -RInE "(sk-|AKIA|ghp_|xai-|AIza)" --exclude-dir=.git --exclude-dir=node_modules . ; then
-            echo "Possible secret found"
-            exit 1
-          fi
-          echo "No obvious secrets"
+      - name: Secret scan
+        run: bash scripts/secret-scan.sh
