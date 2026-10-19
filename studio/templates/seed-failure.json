@@ -1,0 +1,6 @@
+{
+  "seed": 12345,
+  "tick": 1000,
+  "description": "Short description of what broke",
+  "severity": "P0"
+}
