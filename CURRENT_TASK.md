@@ -4,37 +4,32 @@
 
 ## Status
 
-- **Current focus:** Claude's prioritized plan has been applied to the template
+- **Current focus:** Harness upgraded with real failover client and setup script
 - **Owner:** Producer + human
 - **Last updated:** 2026-10-19
 
 ## What Was Just Done
 
-- Applied Claude's Borrow/Adapt recommendations:
-  - Lean roles in `studio/roles/`
-  - Path-scoped rules (`studio/rules/sim-isolation.md`)
-  - Compact `studio/llms.txt` stub
-  - Failover client (`harness/route.mjs` + `models.config.mjs`) based on freecc:auto rules
-  - Structured bug template
-  - QA playtest guidance (programmatic API preferred)
-- Existing core harness (event log, HUB, AGENTS.md, NEXT.md) remains in place.
+- Upgraded `harness/route.mjs` to a real OpenAI-compatible failover client (skip 429/5xx, 30s cooldown, failure log).
+- Added `scripts/setup-token-savers.sh` (one-command RTK + QMD).
+- Added Reviewer role.
+- Updated `docs/SETUP.md` and added `docs/UPGRADES.md`.
+- Claude-plan structure (roles, rules, llms.txt, QA guidance) already in place.
 
 ## Immediate Next Steps
 
-1. Install RTK and QMD locally and verify.
-2. Wire real API calls into `harness/route.mjs` (or keep using the shell stub).
-3. Fill in `studio/llms.txt` with actual Hatchfield sim surfaces as they stabilize.
-4. Begin using the harness on Hatchfield.
+1. Run `./scripts/setup-token-savers.sh` on a machine that will use the harness.
+2. Set API keys and test `node harness/route.mjs "hello"`.
+3. Clone/use this template on the Hatchfield repo (or a fresh game repo).
+4. Fill `studio/llms.txt` as the sim API stabilizes.
 
 ## Context Needed for Next Agent
 
-- This is a general AI game development harness.
+- General AI game development harness.
 - Hatchfield is the first project.
-- Priority is finishing deep systems and playability before any engine port.
-- Keep the sim pure TypeScript.
-- Free-tier failover must stay available.
-- Durable logic stays in files, not chat.
+- Build playable first, keep sim pure TypeScript, free-tier failover available.
+- Durable logic stays in files.
 
 ## Blockers
 
-None. The system is ready to use.
+None. Ready to copy into a game repository and use.
