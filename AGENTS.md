@@ -1,14 +1,15 @@
 # AGENTS.md — Standing Instructions for All Agents
 
-You are working on a video game project using this AI Game Studio harness. Follow these rules every session.
+You are working on a 3D game with deep simulation using this AI Game Studio harness. Follow these rules every session.
 
 ## Before Starting Work
 
 1. Read `CURRENT_TASK.md` (checkpoint / handoff).
 2. Read the relevant section of `NEXT.md` if needed.
-3. Check `studio/llms.txt` and path-scoped rules in `studio/rules/` before editing core systems.
-4. Search docs or code with QMD / ripgrep / symbol MCP instead of loading entire files.
-5. Prefer `gh` CLI over full GitHub MCP when possible.
+3. Check `studio/llms.txt` and path-scoped rules in `studio/rules/` (especially sim-isolation and graphics-sim-boundary) before editing core systems.
+4. For workflow context see `docs/3D-DEEP-SIM.md`.
+5. Search docs or code with QMD / ripgrep / symbol MCP instead of loading entire files.
+6. Prefer `gh` CLI over full GitHub MCP when possible.
 
 ## During Work
 
@@ -17,13 +18,15 @@ You are working on a video game project using this AI Game Studio harness. Follo
 - Append status events to the local event log when starting major steps (see `scripts/`).
 - Route heavy reasoning to stronger models; bulk fixes and classification to free-tier workers.
 - Respect lean roles in `studio/roles/` (Producer, Builder, QA-Playtester, Reviewer, Designer-Calibrator).
+- Keep simulation pure; keep Three.js in the presentation layer only.
 
 ## After Finishing a Task
 
 1. Update `CURRENT_TASK.md` with what was done, remaining work, and the exact next step.
 2. Update `NEXT.md` if priorities changed.
-3. Commit with a clear message.
-4. Do not leave long status summaries in the chat — the files are the source of truth.
+3. Optionally run `./scripts/check-sim-isolation.sh`.
+4. Commit with a clear message.
+5. Do not leave long status summaries in the chat — the files are the source of truth.
 
 ## Producer Role
 
@@ -39,4 +42,4 @@ Prefer programmatic playtesting via debug API (`?playtest=1` / `window.__hatch`)
 
 ## Porting Rule
 
-Do not port core systems until they are feature-complete and playtested in the current stack. Keep the sim pure TypeScript (no Three.js/DOM imports). See `docs/PORTING.md` for engine targets (Tauri v2, Godot via ts2gd, SharpTS) and when transpilers are appropriate. Refuse early porting requests.
+Do not port core systems until they are feature-complete and playtested in the current stack. Keep the sim pure TypeScript (no Three.js/DOM imports). See `docs/PORTING.md` for engine targets (Tauri v2, Unity, Godot via ts2gd, SharpTS). Refuse early porting requests.
