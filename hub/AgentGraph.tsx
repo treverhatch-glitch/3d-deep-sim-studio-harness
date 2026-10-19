@@ -244,7 +244,7 @@ function TacticalAgentNode({ data }: NodeProps<Node<StudioRoleNodeData>>) {
         })}
       </div>
 
-      {/* Task ID + Target File + Runtime Timer */}
+      {/* Task ID + Target File + Live Runtime (start time -> duration) */}
       <div
         style={{
           marginTop: 7,
@@ -261,7 +261,10 @@ function TacticalAgentNode({ data }: NodeProps<Node<StudioRoleNodeData>>) {
           <span>
             Task: <strong style={{ color: '#e2e8f0' }}>{data.taskId || 'STANDBY'}</strong>
           </span>
-          <span style={{ color: '#38bdf8' }}>T+{elapsedSec}s</span>
+          <span style={{ color: '#38bdf8' }} title="Start Time -> Duration">
+            {data.startedAt ? String(data.startedAt).slice(11, 19) : '00:00:00'} →{' '}
+            {data.durationMs ? `${(Number(data.durationMs) / 1000).toFixed(1)}s` : `${elapsedSec}s`}
+          </span>
         </div>
         <div
           style={{

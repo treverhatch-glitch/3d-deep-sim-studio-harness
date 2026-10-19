@@ -189,11 +189,12 @@ export function buildStudioSnapshot() {
 
   // Attach dynamic provider chains & live telemetry per role (never capped)
   const roles = rawRoles.map((r) => {
-    const chain = getRouterMatrix(r.slug);
+    const roleSlug = r.slug || r.id;
+    const chain = getRouterMatrix(roleSlug);
     const roleEvents = events.filter(
       (e) =>
-        e.agent === r.slug ||
-        (r.slug === 'producer' && (e.agent === 'grok-producer' || e.agent === 'head-producer'))
+        e.agent === roleSlug ||
+        (roleSlug === 'producer' && (e.agent === 'grok-producer' || e.agent === 'head-producer'))
     );
     const lastEvt = roleEvents[roleEvents.length - 1] || null;
     const coolingEntry = chain.find((c) => c.coolingDown);
@@ -213,6 +214,7 @@ export function buildStudioSnapshot() {
       else if (
         rawStatus.includes('START') ||
         rawStatus.includes('CODE') ||
+        rawStatus.includes('CODING') ||
         rawStatus.includes('BUILD') ||
         rawStatus.includes('EDIT')
       ) {
@@ -229,15 +231,28 @@ export function buildStudioSnapshot() {
       )
     );
 
+    const firstEvt = roleEvents[0] || null;
+    const startedAt = lastEvt?.startedAt || firstEvt?.ts || null;
+    const durationMs =
+      lastEvt?.durationMs != null
+        ? Number(lastEvt.durationMs)
+        : firstEvt && lastEvt && firstEvt !== lastEvt
+        ? Math.max(0, new Date(lastEvt.ts).getTime() - new Date(firstEvt.ts).getTime())
+        : 0;
+
     return {
       ...r,
+      id: roleSlug,
+      slug: roleSlug,
       status,
       activeProvider: lastEvt?.provider || activeProvider.provider,
       activeModel: lastEvt?.model || activeProvider.model,
       cooldownRemainingMs: coolingEntry ? coolingEntry.cooldownRemainingMs : 0,
       coolingProvider: coolingEntry ? coolingEntry.provider : null,
-      taskId: lastEvt?.task || queue.inProgress.find((t) => t.role === r.slug)?.id || null,
+      taskId: lastEvt?.task || queue.inProgress.find((t) => t.role === roleSlug)?.id || null,
       targetFile: lastEvt?.target || filesModified[filesModified.length - 1] || null,
+      startedAt,
+      durationMs,
       lastEventAt: lastEvt?.ts || null,
       lastMessage: lastEvt?.msg || 'Standing by for task dispatch',
       tokensSavedByRtk: rtkSaved,

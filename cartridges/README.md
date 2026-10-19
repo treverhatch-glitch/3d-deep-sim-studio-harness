@@ -1,29 +1,13 @@
-# Simulation Cartridges (`cartridges/`)
+# Game Simulation Cartridges (`cartridges/`)
 
-Drop your 3D simulation game into `cartridges/<your-game-name>/` (or `src/sim/` + `src/render/`) without modifying the studio harness.
+This folder holds plug-in simulation modules ("cartridges") so the studio harness stays 100% game-agnostic while giving you a working reference simulation out of the box.
 
-## Cartridge Structure
-```text
-cartridges/<your-game>/
-├── sim/                  # Pure TypeScript simulation (checked by scripts/check-sim-purity.mjs)
-│   ├── state.ts          # Plain-JSON SimState + TUNING table
-│   ├── rng.ts            # Seeded sfc32 PRNG stored in SimState.rng
-│   ├── clock.ts          # Fixed-timestep integer tick accumulator
-│   └── step.ts           # Deterministic tick systems + action dispatcher
-└── render/               # Three.js / WebGL stateless projection + ?playtest=1 bridge
-```
+## Mandatory Rule: Implement the Deterministic Seed System First
 
-## Wiring `?playtest=1` (`window.__sim`) for Stage 1 & Stage 2 QA
-In your browser entry point, expose your simulation adapter when `?playtest=1` is present in the URL:
+Every new game cartridge **MUST** implement a deterministic seed + fixed-tick system (`{ seed, tick, rngState }`) as **one of the very first systems coded**:
+- Enables exact bug replay (`node harness/replay.mjs --seed 42069 --tick 120`).
+- Allows agents to scroll back to the exact failing tick without guessing or clicking around blindly.
+- Exposes `window.__hatch` and `window.__sim` when the game runs with `?playtest=1`.
 
-```ts
-if (new URLSearchParams(window.location.search).get('playtest') === '1') {
-  (window as any).__sim = mySimAdapter;
-}
-```
-
-Then run:
-```bash
-node scripts/check-sim-purity.mjs
-node qa/playtest.mjs --url http://127.0.0.1:5173/?playtest=1
-```
+## Included Starter Cartridge
+- [`cartridges/example-sim/index.mjs`](example-sim/index.mjs) — Pure JavaScript/TypeScript deterministic simulation cartridge with Mulberry32 seeded PRNG, fixed-tick `step(state, action)`, `replayToTick({ seed, tick, actions })`, FNV-1a state hashing, and `mountPlaytestApi(window)` for `?playtest=1`.

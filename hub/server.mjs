@@ -40,6 +40,7 @@ import {
 import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR } from '../harness/event.mjs';
 import { startTask, completeTask, addTask, NEXT_FILE } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
+import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 
 loadDotEnv();
 
@@ -187,17 +188,24 @@ export function broadcastSnapshot() {
 }
 
 const { primary: eventsFile } = getEventPaths();
-fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
-if (!fs.existsSync(eventsFile)) {
-  emitEvent({
-    type: 'hub.boot',
-    agent: 'producer',
-    provider: 'vertex-gemini-pro',
-    model: 'gemini-2.5-pro',
-    tokensSaved: 4200,
-    msg: 'Workflow UI HUB initialized (0% LLM token passive telemetry active)',
-  });
+
+export function ensureEventsFile() {
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  if (!fs.existsSync(eventsFile)) {
+    emitEvent({
+      type: 'hub.boot',
+      agent: 'producer',
+      provider: 'vertex-gemini-pro',
+      model: 'gemini-2.5-pro',
+      durationMs: 1200,
+      tokensSaved: 4200,
+      msg: 'Workflow UI HUB initialized (0% LLM token passive telemetry active)',
+    });
+  }
+  return eventsFile;
 }
+
+ensureEventsFile();
 
 const currentTaskFile = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 const visionLockFile = path.join(REPO_ROOT, 'studio', 'VISION_LOCK.md');
@@ -440,7 +448,25 @@ export function createHubServer() {
       return res.end();
     }
 
+    if (url.pathname === '/health' && req.method === 'GET') {
+      ensureEventsFile();
+      return sendJson(res, 200, {
+        ok: true,
+        status: 'healthy',
+        uptimeSec: Math.round(process.uptime()),
+        eventsFile: path.relative(REPO_ROOT, eventsFile),
+        zeroToken: true,
+      });
+    }
+
+    if (url.pathname === '/api/brief' && (req.method === 'GET' || req.method === 'POST')) {
+      const briefRes = buildPreparedBrief();
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, ...briefRes });
+    }
+
     if (url.pathname === '/api/state' && req.method === 'GET') {
+      ensureEventsFile();
       return sendJson(res, 200, buildStudioSnapshot());
     }
 
@@ -473,12 +499,14 @@ export function createHubServer() {
     }
 
     if (url.pathname === '/events' && req.method === 'GET') {
-      const raw = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8') : '';
+      ensureEventsFile();
+      const raw = fs.readFileSync(eventsFile, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
       return res.end(raw);
     }
 
     if (url.pathname === '/api/events' && req.method === 'GET') {
+      ensureEventsFile();
       const limit = Number(url.searchParams.get('limit') || 250);
       return sendJson(res, 200, { events: readRecentEvents(limit) });
     }

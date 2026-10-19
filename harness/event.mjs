@@ -42,19 +42,31 @@ export function getEventPaths() {
  */
 export function emitEvent(partial = {}) {
   const now = new Date().toISOString();
+  const durationMs =
+    partial.durationMs != null
+      ? Number(partial.durationMs)
+      : partial.latencyMs != null
+      ? Number(partial.latencyMs)
+      : null;
+  const startedAt =
+    partial.startedAt ||
+    (durationMs != null ? new Date(Date.now() - durationMs).toISOString() : now);
   const event = {
     id: partial.id || `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     ts: partial.ts || now,
+    startedAt,
+    durationMs,
     type: partial.type || 'agent.info',
     agent: partial.agent || process.env.STUDIO_AGENT_ROLE || 'producer',
     provider: partial.provider || null,
     model: partial.model || null,
     task: partial.task || null,
+    target: partial.target || partial.file || null,
     status: partial.status || 'ok',
     tokensIn: Number(partial.tokensIn || 0),
     tokensOut: Number(partial.tokensOut || 0),
     tokensSaved: Number(partial.tokensSaved || 0),
-    latencyMs: partial.latencyMs != null ? Number(partial.latencyMs) : null,
+    latencyMs: durationMs,
     msg: partial.msg || '',
     meta: partial.meta || {},
   };
@@ -144,11 +156,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     provider: args.provider || null,
     model: args.model || null,
     task: args.task || null,
+    target: args.target || args.file || null,
     status: args.status || 'ok',
     tokensIn: args['tokens-in'] || 0,
     tokensOut: args['tokens-out'] || 0,
-    tokensSaved: args['tokens-saved'] || 0,
-    latencyMs: args['latency-ms'] != null ? Number(args['latency-ms']) : null,
+    tokensSaved: args['tokens-saved'] || args.saved || 0,
+    durationMs:
+      args.duration != null
+        ? Number(args.duration)
+        : args['latency-ms'] != null
+        ? Number(args['latency-ms'])
+        : null,
     msg: args.msg || args.message || 'Event recorded',
     meta,
   });

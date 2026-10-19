@@ -1,16 +1,22 @@
 {
   "name": "hatchfield-ai-studio-template",
-  "version": "1.0.0",
-  "description": "Generalized 3D Deep Simulation & AI Game Studio Harness — vendor-neutral multi-agent roles, freecc:auto model failover router, external context memory, zero-token Workflow UI HUB, and two-stage programmatic + visual QA.",
+  "version": "2.1.0",
+  "description": "Generalized 3D Deep Simulation & AI Game Studio Harness — vendor-neutral multi-agent roles, freecc:auto model failover router, prepare-then-escalate brief compressor, shared improving memory, zero-token Workflow UI HUB, and closed-loop seed-replay QA.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "seed:events": "bash scripts/seed-demo-events.sh",
+    "daily:summary": "bash scripts/daily-summary.sh",
     "hub": "node hub/server.mjs",
     "agents": "node harness/agents.mjs",
     "route": "node harness/route.mjs",
+    "brief": "node harness/prepare-brief.mjs",
+    "replay": "node harness/replay.mjs",
+    "closed-loop": "node harness/closed-loop.mjs",
     "task": "node harness/task.mjs",
     "next": "node harness/task.mjs next",
     "event": "node harness/event.mjs",
@@ -18,6 +24,7 @@
     "playtest": "node qa/playtest.mjs",
     "playtest:stage1": "node qa/playtest.mjs --stage 1",
     "playtest:stage2": "node qa/playtest.mjs --stage 2",
+    "qa:visual": "node qa/visual-check.mjs",
     "check:purity": "node scripts/check-sim-purity.mjs",
     "check:isolation": "bash scripts/check-sim-isolation.sh",
     "event:sh": "bash scripts/append-event.sh",

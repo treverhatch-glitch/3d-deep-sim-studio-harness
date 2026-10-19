@@ -1,34 +1,33 @@
 # Daily Summary — YYYY-MM-DD
 
-## What Happened
+> Generate automatically with `bash scripts/daily-summary.sh` at 0% LLM token cost.
+
+## 1. What Happened
 - 
 - 
 - 
 
-## Task Checklist
+## 2. Task Checklist (`studio/NEXT.md`)
 - [ ] 
 - [ ] 
 - [ ] 
 
-## Gameplay Before / After
+## 3. Gameplay & Visual Before / After
 
-### Before
+### Before (Baseline)
 <!-- Drop video or GIF link / path from studio/daily/videos/ here -->
-- Video: 
-- Notes: 
+- **Video Placeholder**: `studio/daily/videos/YYYY-MM-DD-before.mp4`
+- **Replay Seed & Tick**: `{ "seed": 42069, "tick": 0, "description": "Baseline state before change" }`
+- **Notes**: 
 
-### After
+### After (Verified Pass)
 <!-- Drop video or GIF link / path from studio/daily/videos/ here -->
-- Video: 
-- Notes: 
+- **Video Placeholder**: `studio/daily/videos/YYYY-MM-DD-after.mp4`
+- **Replay Seed & Tick**: `{ "seed": 42069, "tick": 120, "description": "Verified state after fix" }`
+- **Notes**: 
 
-## Key Changes
-- 
-
-## Blockers / Next
-- 
-
-## Links
-- Commits: 
-- Playtest reports (`qa/reports/`): 
-- Done summaries (`studio/done/`): 
+## 4. Key Changes & Distilled Memory
+- **Distilled Failure Notes Added (`studio/memory/failures.md`)**: 
+- **Commits**: 
+- **Playtest Reports (`qa/reports/`)**: 
+- **Done Summaries (`studio/done/`)**: 

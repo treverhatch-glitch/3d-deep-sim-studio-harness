@@ -36,43 +36,41 @@ Synthesized from a 17-repository architecture audit (`Claude-Code-Game-Studios`,
 
 ## Documentation Index (`docs/`)
 
-- [`docs/SETUP.md`](docs/SETUP.md) — Quickstart & environment setup
-- [`docs/BLENDER.md`](docs/BLENDER.md) — Headless Blender `bpy` procedural `.glb` generation (`CargoCrate.glb` example) + [`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator) MCP bridge
-- [`docs/WAR-ROOM.md`](docs/WAR-ROOM.md) — React Flow War Room HUD, Live Agent View (`noVNC` / screenshot / preview), and Subscription Usage Panel (`.studio/usage.json`)
+- [`docs/SETUP.md`](docs/SETUP.md) & [`docs/CLONE-AND-CUSTOMIZE.md`](docs/CLONE-AND-CUSTOMIZE.md) — Quickstart (`npm run setup`) & cloning guide
+- [`docs/MEMORY.md`](docs/MEMORY.md) & [`studio/memory/failures.md`](studio/memory/failures.md) — Shared improving memory (Hermes Agent 4-bullet distillation rule)
+- [`docs/BLENDER.md`](docs/BLENDER.md) & [`docs/BLENDER-ORCHESTRATOR.md`](docs/BLENDER-ORCHESTRATOR.md) — Headless Blender `bpy` procedural `.glb` generation (`crate`, `cone`, `vehicle`) + [`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator) MCP bridge
+- [`docs/WAR-ROOM.md`](docs/WAR-ROOM.md) — Mission Control War Room HUD, Live Agent View (`noVNC` / WebRTC / CDP / HMR), and Subscription Usage Panel (`.studio/usage.json`)
 - [`docs/WORK-ORGANIZATION.md`](docs/WORK-ORGANIZATION.md) & [`docs/DAILY-SUMMARY.md`](docs/DAILY-SUMMARY.md) — Task lifecycle (`studio/NEXT.md` → `studio/CURRENT_TASK.md` → `studio/done/` → `studio/daily/`)
 - [`docs/GROKBOT-LOCAL-AGENT.md`](docs/GROKBOT-LOCAL-AGENT.md) — Optional Grok Bot Local-Agent route (`https://github.com/robbin/grokbot-local-agent`)
-- [`docs/ROUTING.md`](docs/ROUTING.md) — Multi-model failover matrix (`harness/route.mjs` + `harness/models.config.mjs`)
-- [`docs/SERENA.md`](docs/SERENA.md) — Symbol-level TypeScript LSP workflows via `oraios/serena`
-- [`docs/3D-DEEP-SIM.md`](docs/3D-DEEP-SIM.md) & [`docs/PORTING.md`](docs/PORTING.md) — Pure-TS simulation architecture & Tauri v2 / Godot 4 / Unity porting bridges
-- [`docs/BLUEPRINT.md`](docs/BLUEPRINT.md), [`docs/COMPARISON.md`](docs/COMPARISON.md), [`docs/UPGRADES.md`](docs/UPGRADES.md), [`docs/VISUAL_HUB.md`](docs/VISUAL_HUB.md) — 17-repo architecture synthesis & upgrade roadmap
+- [`docs/ROUTING.md`](docs/ROUTING.md) — Multi-model failover (`Local → Free → Paid`), 5-line endpoint guide, and **"Cheap Model Prepares (`<=300w`), Strong Model Executes"** (`harness/prepare-brief.mjs`)
+- [`qa/README.md`](qa/README.md) — `?playtest=1` (`window.__hatch` / `window.__sim`), seed+tick replay (`harness/replay.mjs`), closed-loop gate (`harness/closed-loop.mjs`), and accessibility-first QA (`qa/visual-check.mjs`)
+- [`docs/SECRETS.md`](docs/SECRETS.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CHANGELOG.md`](CHANGELOG.md) — Secret hygiene & contribution workflow
+- [`docs/3D-DEEP-SIM.md`](docs/3D-DEEP-SIM.md) & [`docs/PORTING.md`](docs/PORTING.md) — Pure-TS simulation architecture & Tauri v2 / Godot 4 / Unity 5-step porting checklist
 
 ---
 
 ## Quickstart
 
 ```bash
-# 1. Configure your API keys (optional — any subset of free/BYOK providers works)
-cp .env.example .env
+# 1. One-command setup (creates .studio/, .env, and verifies .studio/events.jsonl)
+npm run setup
+bash scripts/seed-demo-events.sh
 
-# 2. Wire token-saving MCP servers (qmd, serena, playwright, blender-orchestrator) & Claude hooks
-bash scripts/setup-token-savers.sh --check
+# 2. Prepare a <=300-word brief with a cheap/local model before escalating to a strong model
+node harness/prepare-brief.mjs
 
-# 3. Inspect loaded studio roles & failover matrix (0 tokens)
+# 3. Inspect loaded studio roles (including asset-3d & playtester) & failover matrix
 node harness/agents.mjs list
 node harness/route.mjs --status
 
-# 4. Check the "What's Next" queue & studio status (0 tokens)
-node harness/task.mjs next
-node harness/status.mjs
-
-# 5. Run Sim-Purity / Sim-Isolation checks & Two-Stage QA suite
-node scripts/check-sim-purity.mjs
+# 4. Run Sim-Isolation check, Deterministic Seed Replay, & Closed-Loop QA
 bash scripts/check-sim-isolation.sh
-node qa/playtest.mjs
+node harness/replay.mjs --seed 42069 --tick 120
+node harness/closed-loop.mjs
 
-# 6. Append a passive telemetry event & launch the Zero-Token Workflow UI HUB
-bash scripts/append-event.sh RUNNING_VITEST src/sim/clock.ts P0-01 nvidia-glm-flash
-node hub/server.mjs
-# -> Open http://127.0.0.1:4177 (or http://127.0.0.1:4177/?view=mobile)
+# 5. Roll daily summary & launch the Zero-Token Mission Control War Room (:3847)
+bash scripts/daily-summary.sh
+node hub/server.js
+# -> Open http://127.0.0.1:3847 (or http://127.0.0.1:3847/health)
 ```
 

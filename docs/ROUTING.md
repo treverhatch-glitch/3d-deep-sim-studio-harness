@@ -1,27 +1,49 @@
-# Multi-Model Failover (`docs/ROUTING.md`)
+# Multi-Model Failover & "Prepare Then Escalate" Routing (`docs/ROUTING.md`)
 
-Implemented in [`harness/route.mjs`](../harness/route.mjs) and [`harness/models.config.mjs`](../harness/models.config.mjs) using the `freecc:auto` pattern.
+[`harness/route.mjs`](../harness/route.mjs) and [`harness/models.config.mjs`](../harness/models.config.mjs) implement a zero-server, vendor-neutral model router with automatic HTTP `429` / `5xx` failover (`30s` cooldown ledger in `.studio/cooldowns.json`).
 
-## Default Failover Priority Order
+---
 
-1. **Vertex Gemini 2.5 Pro / Flash** (`GEMINI_API_KEY` / `VERTEX_ACCESS_TOKEN`) — primary deep reasoning, architecture, and fast visual QA
-2. **NVIDIA NIM (GLM 5.3 Flash / Nemotron Ultra 253B)** (`NVIDIA_API_KEY`) — free-tier failover #1
-3. **Groq (Llama 3.3 70B Versatile)** (`GROQ_API_KEY`) — free-tier failover #2
-4. **OpenRouter (`:free` channel)** (`OPENROUTER_API_KEY`) — free-tier failover #3
-5. **xAI Grok / Anthropic Claude / OpenAI** (`XAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) — optional BYOK channels
-6. **Local Ollama** (`OLLAMA_BASE_URL`) — offline $0 fallback
+## 1. Preferred Cost Order: Local → Free Tiers → Paid
 
-## Usage
+To scale a 100k+ line 3D simulation without exhausting budgets, always route tasks in this order:
+1. **Local Model (`ollama-local` — `qwen2.5-coder:14b` / `32b`)**: `$0` cost, offline capable, zero rate limits. Ideal for context compression (`harness/prepare-brief.mjs`), boilerplate, and headless `bpy` scripts.
+2. **Free Cloud Tiers & Credits (`nvidia-nim-glm`, `groq-llama-70b`, `openrouter-free`, `vertex-gemini-flash`)**: High-speed throughput for `builder`, `playtester`, and `designer-calibrator` tasks.
+3. **Paid / High-Reasoning Escalation (`anthropic-claude`, `xai-grok`, `vertex-gemini-pro`, `openai-gpt4o`)**: Reserved for complex architecture, ADR gating, or bugs that fail closed-loop retries.
+
+---
+
+## 2. "Cheap Model Prepares, Strong Model Executes" (`harness/prepare-brief.mjs`)
+
+Never feed raw `.studio/events.jsonl` logs or long chat histories directly into an expensive model (Opus, Grok, Gemini Pro). Instead, use the **Prepare Then Escalate** pipeline (skip for already-short tasks; use whenever history is long or a bug escalates):
 
 ```bash
-# Inspect live channel matrix and cooldowns (0 tokens)
-node harness/route.mjs --status
+# 1. Cheap/local model reads .studio/events.jsonl + studio/memory/failures.md
+#    + studio/CURRENT_TASK.md + studio/NEXT.md + recent qa/reports/
+#    and writes a constrained <= 300-word brief to .studio/briefs/latest.md:
+node harness/prepare-brief.mjs
 
-# Dispatch a prompt with automatic 429/5xx failover and 30s+ cooldown
-node harness/route.mjs --role builder --prompt "Optimize InstancedMesh matrix updates"
-
-# Or via the bash wrapper:
-./scripts/llm-dispatch.sh --role qa-playtester --prompt "Classify playtest report"
+# 2. Strong model (or Producer) receives ONLY the <= 300-word brief:
+node harness/route.mjs --role producer --prompt "$(cat .studio/briefs/latest.md)"
 ```
 
-Every attempt and failover appends a line to `.studio/events.jsonl` so the War Room HUB (`hub/WarRoom.tsx`) shows which worker is active without polling chat.
+The prepared brief is also exposed at `GET /api/brief` so the Producer and Mission Control War Room can inspect it before escalation.
+
+---
+
+## 3. How to Add a New Model Endpoint in ~5 Lines
+
+Open [`harness/models.config.mjs`](../harness/models.config.mjs) and add a 5-line entry inside `PROVIDERS`:
+
+```js
+  'my-custom-provider': {
+    id: 'my-custom-provider',
+    label: 'My OpenAI-Compatible Endpoint',
+    protocol: 'openai', // 'openai' | 'anthropic' | 'ollama'
+    baseUrl: 'https://api.example.com/v1',
+    model: 'my-model-id',
+    envKeys: ['MY_CUSTOM_API_KEY'],
+  },
+```
+
+Then reference `'my-custom-provider'` in any role's `preferredChain` inside `studio/roles/<role>.md` or `ROLE_CHAINS` in `harness/models.config.mjs`.

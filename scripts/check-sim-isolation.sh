@@ -4,7 +4,7 @@
 #
 # Exits non-zero if forbidden rendering/DOM imports (`three`, `react`,
 # `@react-three`, `document.`, `window.`) or unseeded randomness appear
-# inside pure simulation paths.
+# inside pure simulation paths. Prints a clean summary table when it passes.
 #
 # Usage:
 #   ./scripts/check-sim-isolation.sh [root]
@@ -18,6 +18,7 @@ SIM_PATHS=(
   "src/game/sim"
   "src/game/pathfinding"
   "src/game/economy"
+  "cartridges"
 )
 
 FORBIDDEN=(
@@ -30,27 +31,39 @@ FORBIDDEN=(
 )
 
 found=0
+checked_dirs=0
+checked_files=0
+
 for path in "${SIM_PATHS[@]}"; do
   dir="$ROOT/$path"
   if [ -d "$dir" ]; then
+    checked_dirs=$((checked_dirs + 1))
+    dir_files=$(find "$dir" -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.mjs" \) 2>/dev/null | wc -l | tr -d ' ')
+    checked_files=$((checked_files + dir_files))
     for pattern in "${FORBIDDEN[@]}"; do
-      if grep -rE --include="*.ts" --include="*.tsx" "$pattern" "$dir" 2>/dev/null | grep -v "__sim" | grep -v "__hatch" | grep -v "playtest"; then
-        echo "Violation in $dir: pattern $pattern"
+      if grep -rE --include="*.ts" --include="*.tsx" --include="*.mjs" "$pattern" "$dir" 2>/dev/null | grep -vE ":\s*(//|\*)" | grep -v "__sim" | grep -v "__hatch" | grep -v "playtest"; then
+        echo "[FAIL] Violation in $dir: forbidden pattern $pattern"
         found=1
       fi
     done
   fi
 done
 
-# Also run the Node AST/regex purity checker if node is installed
 if command -v node >/dev/null 2>&1 && [ -f "$ROOT/scripts/check-sim-purity.mjs" ]; then
   node "$ROOT/scripts/check-sim-purity.mjs" || found=1
 fi
 
+echo "===================================================================="
 if [ "$found" -eq 1 ]; then
-  echo "Sim isolation check failed."
+  echo " SIM ISOLATION CHECK: FAILED"
+  echo " Fix DOM / Three.js / Math.random leaks in simulation paths above."
+  echo "===================================================================="
   exit 1
 else
-  echo "Sim isolation check passed (or no sim paths present)."
+  echo " SIM ISOLATION CHECK: PASSED"
+  echo "   Directories Scanned : ${checked_dirs} (${SIM_PATHS[*]})"
+  echo "   Files Verified Pure : ${checked_files}"
+  echo "   Forbidden Imports   : 0 (three, react, DOM, Math.random)"
+  echo "===================================================================="
   exit 0
 fi

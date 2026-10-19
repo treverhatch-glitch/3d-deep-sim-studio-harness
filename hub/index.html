@@ -482,6 +482,9 @@
         return `<span style="font-size:9px;padding:1px 4px;border-radius:3px;border:1px solid ${col};color:${col};">${c.provider}${cool ? ` (${cdSec || 30}s)` : act ? ' ●' : ''}</span>`;
       }).join(' ');
 
+      const startStr = r.startedAt ? String(r.startedAt).slice(11, 19) : '00:00:00';
+      const durStr = r.durationMs ? `${(Number(r.durationMs) / 1000).toFixed(1)}s` : '0.0s';
+
       return `<div class="node-card" onclick="inspectRole('${r.slug}')" style="border-color:${borderCol};width:${isHead ? '310px' : 'auto'};">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <strong style="color:${isHead ? '#00F0FF' : '#f8fafc'};">${isHead ? '★ HEAD PRODUCER' : r.slug.toUpperCase()}</strong>
@@ -490,7 +493,7 @@
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin:5px 0;">${chainHtml}</div>
         <div style="font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;">
           <span>Task: <strong style="color:#e2e8f0;">${r.taskId || 'STANDBY'}</strong></span>
-          <span>RTK: +${Number(r.tokensSavedByRtk || 0).toLocaleString()}</span>
+          <span style="color:#38bdf8;">${startStr} → ${durStr}</span>
         </div>
         <div style="font-size:9px;color:#64748b;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">target: ${r.targetFile || 'studio/NEXT.md'}</div>
       </div>`;

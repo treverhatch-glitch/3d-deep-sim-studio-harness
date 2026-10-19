@@ -81,11 +81,12 @@ export function loadAllRoles() {
     const raw = fs.readFileSync(file, 'utf8');
     const { meta, body } = parseFrontmatter(raw);
     const rel = path.relative(ROLES_DIR, file).replace(/\\/g, '/');
-    const slug = meta.id || path.basename(file, '.md');
+    const slug = meta.slug || meta.id || path.basename(file, '.md');
     const customChain = Array.isArray(meta.modelChain) ? meta.modelChain : null;
 
     roles.push({
       id: slug,
+      slug,
       title: meta.title || slug,
       tier: meta.tier || 'specialist',
       department: meta.department || (rel.includes('/') ? path.dirname(rel) : 'core'),
