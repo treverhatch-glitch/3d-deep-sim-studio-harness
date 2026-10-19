@@ -39,4 +39,4 @@ Prefer programmatic playtesting via debug API (`?playtest=1` / `window.__hatch`)
 
 ## Porting Rule
 
-Do not port core systems until they are feature-complete and playtested in the current stack. Keep the sim pure TypeScript (no Three.js/DOM imports). Transpilers help only after that point.
+Do not port core systems until they are feature-complete and playtested in the current stack. Keep the sim pure TypeScript (no Three.js/DOM imports). See `docs/PORTING.md` for engine targets (Tauri v2, Godot via ts2gd, SharpTS) and when transpilers are appropriate. Refuse early porting requests.
