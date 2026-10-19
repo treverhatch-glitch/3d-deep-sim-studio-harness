@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Append one status event for the passive visual HUB.
-# Zero LLM tokens. Writes one JSON line to /tmp/agent-events.jsonl
+# Zero LLM tokens. Writes one JSON line to .studio/events.jsonl
 #
 # Usage:
 #   ./scripts/append-event.sh STATUS [file] [bugId] [worker]
@@ -26,6 +26,6 @@ JSON=$(printf '{"ts":%s,"agent":%s,"worker":%s,"status":%s,"file":%s,"bugId":%s}
   "$(escape "$FILE")" \
   "$(escape "$BUGID")")
 
-mkdir -p /tmp
-echo "$JSON" >> /tmp/agent-events.jsonl
+mkdir -p .studio
+echo "$JSON" >> .studio/events.jsonl
 echo "Event logged: $STATUS (worker=$WORKER)"
