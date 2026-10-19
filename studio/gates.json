@@ -6,6 +6,7 @@
     { "id": "golden", "command": "node qa/check-golden.mjs", "required": true },
     { "id": "approvals", "command": "node scripts/check-approvals.mjs", "required": true },
     { "id": "regressions", "command": "node qa/check-regressions.mjs", "required": true },
+    { "id": "vertical-slice", "command": "node qa/vertical-slice.mjs", "required": true },
     { "id": "renderer-budget", "command": "node scripts/check-renderer-budget.mjs", "required": false },
     { "id": "secrets", "command": "bash scripts/secret-scan.sh", "required": true }
   ]
