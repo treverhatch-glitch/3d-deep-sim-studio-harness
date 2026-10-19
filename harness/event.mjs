@@ -26,13 +26,12 @@ export function getEventPaths() {
     ? path.resolve(REPO_ROOT, process.env.AGENT_EVENTS_FILE)
     : DEFAULT_EVENTS_FILE;
 
-  // Support both POSIX /tmp/agent-events.jsonl and cross-platform os.tmpdir()
-  const tmpCandidates = new Set([
-    process.env.AGENT_EVENTS_MIRROR || '/tmp/agent-events.jsonl',
-    path.join(os.tmpdir(), 'agent-events.jsonl'),
-  ]);
-
-  return { primary, mirrors: [...tmpCandidates] };
+  // Mirror only when explicitly requested. Do not share /tmp across clones.
+  const mirrors = [];
+  if (process.env.AGENT_EVENTS_MIRROR) {
+    mirrors.push(path.resolve(process.env.AGENT_EVENTS_MIRROR));
+  }
+  return { primary, mirrors };
 }
 
 /**
