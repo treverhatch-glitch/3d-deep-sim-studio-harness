@@ -11,8 +11,19 @@ export function nextMulberry32(rngState) {
   return { value: floatVal, rngState: nextState };
 }
 
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = canonical(value[key]);
+      return acc;
+    }, {});
+  }
+  return value;
+}
+
 export function hashSimState(state) {
-  const json = JSON.stringify(state);
+  const json = JSON.stringify(canonical(state));
   let hash = 0x811c9dc5;
   for (let i = 0; i < json.length; i++) {
     hash ^= json.charCodeAt(i);
