@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-/**
- * Soak: N seeds x M ticks, fail on NaN or non-determinism.
- * Usage: node qa/soak.mjs --seeds 5 --ticks 100
- */
-import { replayToTick, hashSimState } from '../cartridges/example-sim/index.mjs';
+import { replayToTick } from '../cartridges/example-sim/index.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(name);
@@ -11,6 +7,13 @@ function arg(name, fallback) {
 }
 const seeds = arg('--seeds', 5);
 const ticks = arg('--ticks', 100);
+
+function hasBadNumber(value) {
+  if (typeof value === 'number') return !Number.isFinite(value);
+  if (Array.isArray(value)) return value.some(hasBadNumber);
+  if (value && typeof value === 'object') return Object.values(value).some(hasBadNumber);
+  return false;
+}
 
 for (let i = 0; i < seeds; i++) {
   const seed = 1000 + i;
@@ -20,8 +23,7 @@ for (let i = 0; i < seeds; i++) {
     console.error(`[soak] FAIL seed ${seed}: ${a.hash} != ${b.hash}`);
     process.exit(1);
   }
-  const blob = JSON.stringify(a.state);
-  if (blob.includes('NaN') || blob.includes('Infinity')) {
+  if (hasBadNumber(a.state)) {
     console.error(`[soak] FAIL seed ${seed}: non-finite state`);
     process.exit(1);
   }
