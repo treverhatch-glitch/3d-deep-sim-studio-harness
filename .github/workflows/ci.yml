@@ -19,6 +19,12 @@ jobs:
         run: bash scripts/check-sim-isolation.sh
       - name: Golden hashes
         run: node qa/check-golden.mjs
+      - name: Approvals
+        run: node scripts/check-approvals.mjs
+      - name: Regressions
+        run: node qa/check-regressions.mjs
+      - name: Renderer budget
+        run: node scripts/check-renderer-budget.mjs
       - name: Closed-loop simulate fail
         run: node harness/closed-loop.mjs --simulate-fail || true
       - name: Secret scan (basic)
