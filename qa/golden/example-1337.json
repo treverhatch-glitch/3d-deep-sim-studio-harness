@@ -3,9 +3,24 @@
   "seed": 1337,
   "tick": 50,
   "actions": [
-    { "tick": 1, "action": { "type": "spawn", "kind": "sensor", "x": 6, "z": -6 } },
-    { "tick": 1, "action": { "type": "spawn", "kind": "crate", "x": 2, "z": 2 } }
+    {
+      "tick": 1,
+      "action": {
+        "type": "spawn",
+        "kind": "sensor",
+        "x": 6,
+        "z": -6
+      }
+    },
+    {
+      "tick": 1,
+      "action": {
+        "type": "spawn",
+        "kind": "crate",
+        "x": 2,
+        "z": 2
+      }
+    }
   ],
-  "hash": "REPLACE_AFTER_FIRST_RUN",
-  "note": "Update hash after first deterministic run if this placeholder fails."
+  "hash": "0876d5b2"
 }
