@@ -14,8 +14,15 @@ if (!files.length) {
   console.log('[regressions] none');
   process.exit(0);
 }
+let failed = 0;
 for (const file of files) {
   const spec = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
   const result = replayToTick({ seed: spec.seed, tick: spec.tick, actions: spec.actions || [] });
-  console.log(`[regressions] replayed ${file} hash=${result.hash}`);
+  if (spec.hash && result.hash !== spec.hash) {
+    console.error(`[regressions] FAIL ${file}: expected ${spec.hash} got ${result.hash}`);
+    failed += 1;
+  } else {
+    console.log(`[regressions] PASS ${file} hash=${result.hash}`);
+  }
 }
+if (failed) process.exit(1);
