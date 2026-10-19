@@ -4,14 +4,18 @@ Living list of work. Agents update this when priorities change. Pull from here i
 
 ## P0 — Must Do Now
 
-- [ ] Complete minimal event logger (`scripts/append-event.sh` or equivalent)
-- [ ] Document RTK + QMD setup in `docs/SETUP.md`
-- [ ] Add example multi-model router stub (`scripts/llm-dispatch.sh`)
+- [x] Complete event logger (`scripts/append-event.sh`)
+- [x] Document RTK + QMD setup in `docs/SETUP.md`
+- [x] Add multi-model router (`scripts/llm-dispatch.sh`)
+- [ ] Install RTK and QMD locally and verify
+- [ ] Wire real API calls into the dispatch script
 
 ## P1 — Core Harness
 
-- [ ] Passive visual HUB (React Flow War Room or n8n export)
-- [ ] Skill definitions for common Hatchfield tasks (turnaround, pathfinding, bug triage)
+- [x] Passive visual HUB (basic feed + server in `hub/`)
+- [ ] Expand HUB to React Flow node graph (YouTube War Room)
+- [x] Example skill (`skills/bug-triage.md`)
+- [ ] More skills (turnaround, pathfinding, aircraft class rules)
 - [ ] Playwright QA sub-agent pattern
 - [ ] Symbol-level code retrieval MCP recommendation
 
@@ -25,3 +29,4 @@ Living list of work. Agents update this when priorities change. Pull from here i
 
 - [x] Public repo created
 - [x] Core governance files (AGENTS.md, CURRENT_TASK.md, NEXT.md)
+- [x] Event logger, dispatch script, passive HUB, routing docs, example skill
