@@ -1,6 +1,7 @@
-# Integrating grokbot-local-agent
+# Integrating grokbot-local-agent (Optional Grok Bot Route)
 
-Optional layer that lets Grok Bot stay a thin Producer while handing heavy work to a local agent (Pi, or similar) running on the same machine.
+**This is one supported route, not a requirement.**  
+The harness is agent-agnostic. Any agent (Cursor, Claude Code, Codex, Pi, local models, etc.) can fill any role. This document only covers the optional path where Grok Bot acts as a thin Producer and offloads heavy work.
 
 Upstream: https://github.com/robbin/grokbot-local-agent
 
@@ -42,3 +43,5 @@ This template does not copy their scripts. Install them from the upstream repo s
 ## Limitations (from upstream)
 
 Best for moderate-length tasks. For long-running project maintenance they suggest a heavier tool (e.g. Cursor Cloud Agent). Our file-based handoff (`CURRENT_TASK.md`, `NEXT.md`) still works either way.
+
+Other agents do not need this integration. They can read and write the same task files directly.
