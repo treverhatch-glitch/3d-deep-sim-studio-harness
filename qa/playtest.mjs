@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReferenceSimAdapter, hashCanonicalState } from './sim.adapter.mjs';
+import { createCartridgeAdapter } from './cartridge-adapter.mjs';
 import { emitEvent, REPO_ROOT } from '../harness/event.mjs';
 
 const REPORTS_DIR = path.join(REPO_ROOT, 'qa', 'reports');
@@ -29,7 +30,7 @@ const BUG_TEMPLATE_PATH = path.join(REPO_ROOT, 'studio', 'templates', 'bug.md');
 /**
  * Stage 1: Programmatic Trajectory & Determinism Suite
  */
-export async function runStage1ProgrammaticQA({ seed = 1337, ticks = 200, adapterFactory = createReferenceSimAdapter } = {}) {
+export async function runStage1ProgrammaticQA({ seed = 1337, ticks = 200, adapterFactory = createCartridgeAdapter } = {}) {
   const startMs = Date.now();
   const findings = [];
   const adapterA = adapterFactory();
