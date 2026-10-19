@@ -13,8 +13,9 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FORBIDDEN_PATTERNS = [
   { id: 'NO_THREE_IMPORT', re: /from\s+['"]three(\/.*)?['"]/g, reason: 'Three.js import inside pure sim layer' },
   { id: 'NO_DOM_WINDOW', re: /\b(window|document|localStorage|sessionStorage|requestAnimationFrame)\b/g, reason: 'Browser DOM global inside pure sim layer' },
-  { id: 'NO_MATH_RANDOM', re: /\bMath\.random\s*\(/g, reason: 'Unseeded Math.random() breaks determinism' },
-  { id: 'NO_WALL_CLOCK', re: /\b(Date\.now|performance\.now)\s*\(/g, reason: 'Wall-clock time breaks fixed-timestep determinism' },
+  { id: 'NO_MATH_RANDOM', re: /\bMath\.random\s*\(|Math\s*\[\s*['"]random['"]\s*\]/g, reason: 'Unseeded Math.random() breaks determinism' },
+  { id: 'NO_WALL_CLOCK', re: /\b(Date\.now|performance\.now)\s*\(|Date\s*\[\s*['"]now['"]\s*\]|\bnew\s+Date\s*\(|process\.hrtime/g, reason: 'Wall-clock time breaks fixed-timestep determinism' },
+  { id: 'NO_CRYPTO_RANDOM', re: /crypto\.getRandomValues|Math\s*\[\s*['"]random['"]\s*\]\s*\(/g, reason: 'Unseeded crypto/random breaks determinism' },
 ];
 
 function collectSimFiles(dir, out = []) {
