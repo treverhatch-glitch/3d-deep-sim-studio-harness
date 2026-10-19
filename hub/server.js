@@ -1,5 +1,6 @@
-// Hatchfield Mission Control HUB — zero-token local server
-// Serves the sci-fi dashboard and streams /tmp/agent-events.jsonl
+// AI Game Studio Mission Control HUB — zero-token local server
+// Default: serves the React Flow War Room build (or falls back to index.html)
+// Streams .studio/events.jsonl
 // Run: node hub/server.js
 // Then open: http://localhost:3847
 
@@ -8,20 +9,23 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 3847;
-const EVENTS = '/tmp/agent-events.jsonl';
+const EVENTS = path.join(process.cwd(), '.studio', 'events.jsonl');
 
 const server = http.createServer((req, res) => {
-  // CORS for local flexibility
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (req.url === '/' || req.url === '/index.html') {
+    // Prefer a built War Room if present, otherwise the simple HTML feed
+    const warRoomHtml = path.join(__dirname, 'dist', 'index.html');
+    const fallback = path.join(__dirname, 'index.html');
+    const file = fs.existsSync(warRoomHtml) ? warRoomHtml : fallback;
     try {
-      const html = fs.readFileSync(path.join(__dirname, 'index.html'));
+      const html = fs.readFileSync(file);
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(html);
     } catch (e) {
       res.writeHead(500);
-      res.end('Failed to load index.html');
+      res.end('Failed to load HUB');
     }
   } else if (req.url === '/events') {
     try {
@@ -45,7 +49,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('  HATCHFIELD // MISSION CONTROL');
+  console.log('  AI GAME STUDIO // WAR ROOM');
   console.log(`  http://localhost:${PORT}`);
   console.log(`  Watching: ${EVENTS}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
