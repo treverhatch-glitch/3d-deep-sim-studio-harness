@@ -663,6 +663,21 @@ export function createHubServer() {
       socket.destroy();
       return;
     }
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const headerToken = req.headers['x-hub-token'] || '';
+    const queryToken = url.searchParams.get('token') || '';
+    const token = String(headerToken || queryToken).replace(/^Bearer\s+/i, '').trim();
+    if (!HUB_TOKEN || token !== HUB_TOKEN) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const origin = req.headers.origin || '';
+    if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const accept = crypto
       .createHash('sha1')
       .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', 'binary')
@@ -707,38 +722,12 @@ export function createHubServer() {
           if (msg.type === 'macro') {
             await executeTacticalMacro(msg.macro, msg);
           } else if (msg.type === 'shell.exec') {
-            const cfg = readWarRoomConfig();
-            if (cfg.terminal?.readOnlyShell && !msg.overrideReadOnly) {
-              socket.write(
-                encodeWsFrame(
-                  JSON.stringify({
-                    type: 'terminal.output',
-                    stream: 'shell',
-                    text: '\r\n\x1b[33m[GUARD] Interactive Studio Shell is in READ-ONLY mode (safe for public tunnels). Toggle "Read-Only Lock" in Terminal Dock to execute custom commands.\x1b[0m\r\n',
-                  })
-                )
-              );
-              continue;
-            }
-            const cmdStr = String(msg.command || '').trim();
-            if (!cmdStr) continue;
             socket.write(
               encodeWsFrame(
                 JSON.stringify({
                   type: 'terminal.output',
                   stream: 'shell',
-                  text: `\r\n\x1b[38;2;0;240;255m$ ${cmdStr}\x1b[0m\r\n`,
-                })
-              )
-            );
-            const res = await runCommandCapture(cmdStr);
-            const combined = (res.stdout + (res.stderr ? `\n${res.stderr}` : '')).trim() || '(exit 0)';
-            socket.write(
-              encodeWsFrame(
-                JSON.stringify({
-                  type: 'terminal.output',
-                  stream: 'shell',
-                  text: `${combined.replace(/\n/g, '\r\n')}\r\n`,
+                  text: '\r\n\x1b[33m[GUARD] Arbitrary shell.exec is disabled. Use a named macro.\x1b[0m\r\n',
                 })
               )
             );
