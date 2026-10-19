@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-/**
- * Proves key checks can fail. Uses temp copies; does not edit the repo.
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,6 +30,31 @@ mustFail('lock-shared-owner', () => {
     cwd: root,
     stdio: 'pipe',
   });
+});
+
+mustFail('golden-bad-hash', () => {
+  const dir = path.join(tmp, 'golden');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bad.json'), JSON.stringify({
+    seed: 1,
+    tick: 1,
+    actions: [],
+    hash: 'deadbeef',
+  }));
+  execSync(`python3 "${path.join(root, 'tools/golden.py')}" --check "${dir}"`, { stdio: 'pipe' });
+});
+
+mustFail('purity-random', () => {
+  const dir = path.join(tmp, 'sim');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bad.mjs'), 'export const x = Math.random();\n');
+  const script = `
+import fs from 'node:fs';
+const code = fs.readFileSync(${JSON.stringify(path.join(dir, 'bad.mjs'))}, 'utf8');
+if (/Math\\.random/.test(code)) process.exit(1);
+`;
+  fs.writeFileSync(path.join(tmp, 'purity-mini.mjs'), script);
+  execSync(`node "${path.join(tmp, 'purity-mini.mjs')}"`, { stdio: 'pipe' });
 });
 
 if (process.exitCode) process.exit(process.exitCode);
