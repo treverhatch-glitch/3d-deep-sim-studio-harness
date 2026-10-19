@@ -104,12 +104,14 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks = 200, adapte
     });
   }
 
+  const actions = [{ type: 'spawn', kind: 'sensor', x: 6, z: -6 }];
   return {
     stage: 1,
     adapter: adapterA.name || 'custom-sim-adapter',
     seed,
     ticksRun: finalA.tick,
     finalHash: finalHashA,
+    actions,
     durationMs: Date.now() - startMs,
     passed: findings.length === 0,
     findings,
