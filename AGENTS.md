@@ -16,6 +16,8 @@ Do **NOT** scan the entire repository or dump raw files into context. Load state
 4. **`studio/llms.txt`** — Load the compact engine & simulation API sheet instead of reading full engine source files.
 5. **`studio/VISION_LOCK.md` & `studio/decisions/`** — Consult before changing core simulation loops, state schemas, or rendering pipelines.
 
+See also `docs/READ-FIRST.md`.
+
 ---
 
 ## 2. Preferred Model Cost Order & "Prepare Then Escalate" (`docs/ROUTING.md`)
@@ -35,30 +37,71 @@ Do **NOT** scan the entire repository or dump raw files into context. Load state
 1. **Seed System First**:
    - Every new game built in this harness **MUST** implement a deterministic **Seed + Fixed-Tick** system (`{ seed, tick, rngState }`) as **one of the very first systems coded**.
    - Failures are recorded as `{ seed, tick, description }` so agents can scroll back and replay the exact failing tick via `node harness/replay.mjs --seed <seed> --tick <tick>`.
+   - Use `studio/templates/seed-failure.json` as the format.
 2. **Direct State Access Over Pure GUI Clicking (`?playtest=1`)**:
    - Following the **Recursive Game Creator** pattern and **OhMyGame** open-loop critique, games expose `window.__hatch` and `window.__sim` when launched with `?playtest=1` (`qa/hatchfield.adapter.mjs`).
    - Always check **accessibility trees first (`ariaSnapshot()`)** and take screenshots **only when needed** (`qa/visual-check.mjs`).
 3. **Tight Closed Loop & Shared Improving Memory (`Hermes Agent` Pattern)**:
-   - Run `node harness/closed-loop.mjs`: fail test → auto-open bug (`studio/templates/bug.md`) → attempt fix → re-test → mark done only on pass. Escalate to a strong model or human after `3` failed attempts.
-   - After fixing any bug, append a distilled 4-bullet entry (`What broke`, `Root cause`, `The fix that worked`, `How to avoid it next time`) to [`studio/memory/failures.md`](studio/memory/failures.md).
+   - Run `node harness/closed-loop.mjs`: fail test → auto-open bug (`studio/templates/bug.md`) → attempt fix → re-test → mark done only on pass. Escalate to a strong model or human after `MAX_FIX_ATTEMPTS=3` failed attempts.
+   - After fixing any bug, append a distilled 4-bullet entry to `studio/memory/failures.md` (or run `scripts/distill-bug.sh`).
 
 ---
 
-## 4. Mandatory Token-Saver Discipline & 3D Asset Orchestration
+## 4. Concurrent Work Rule
+
+Only one agent may actively edit a given file or tightly coupled set of files at a time.
+
+### Before starting work
+1. Check `studio/CURRENT_TASK.md` and `.studio/events.jsonl` for any in-progress work.
+2. If another agent is already editing the same file(s) or the same feature area, do not start. Either wait, pick a different task, or ask the Producer.
+3. Announce what you are about to touch by appending a short event:
+   `{ "agent": "...", "status": "editing", "file": "path/to/file", "task": "short description" }`
+
+### While working
+- Stay inside the files you announced.
+- Do not edit files another agent has marked as `editing` unless the Producer explicitly reassigns them.
+- If you need a file that is locked, stop and report it instead of editing anyway.
+
+### When finished
+- Append an event with `"status": "done"` (or `"blocked"`).
+- Update `CURRENT_TASK.md` so the next agent can see it is free.
+
+### Producer responsibility
+- The Producer assigns non-overlapping file sets when multiple agents are active.
+- If two agents request the same area, the Producer picks one and tells the other to wait or switch tasks.
+
+### Simple lock convention
+Treat a file as locked if the latest event for that file has `"status": "editing"` and no later `"done"` or `"blocked"` event exists.
+
+---
+
+## 5. Human Approval Gate
+
+The following actions require explicit human or Producer approval before proceeding:
+- Pulling or integrating external assets
+- Large refactors
+- Changing core simulation rules or state schemas
+
+Reference Scout items stay in `studio/references/APPROVALS.md` until marked approved.
+
+---
+
+## 6. Mandatory Token-Saver Discipline & 3D Asset Orchestration
 
 - **Shell Commands via `rtk`**: Prefix noisy shell/test/git commands with `rtk` (e.g., `rtk git status`, `rtk npm test`).
 - **Markdown Docs via `qmd`** & **Code Lookup via `serena` (LSP)**: Fetch top sections or symbol bodies instead of reading full 2,000-line files.
-- **3D Assets (`tools/blender/generate_glb.py` + `mlolson/blender-orchestrator`)**: Use headless `bpy` for procedural `.glb` primitives (`crate`, `cone`, `vehicle`, `beacon`, `hangar`) and connect [`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator) (`docs/BLENDER-ORCHESTRATOR.md`) when agents need to both **see** and **act** inside Blender.
-- **Passive Telemetry (`harness/event.mjs`)**: Emit 1-line JSONL events to `.studio/events.jsonl` so the Mission Control War Room (`node hub/server.js`) streams live status at **0% LLM token cost**.
+- **3D Assets (`tools/blender/generate_glb.py` + `mlolson/blender-orchestrator`)**: Use headless `bpy` for procedural `.glb` primitives and connect blender-orchestrator when agents need to both see and act inside Blender.
+- **Passive Telemetry (`harness/event.mjs`)**: Emit 1-line JSONL events to `.studio/events.jsonl` so the War Room streams live status at 0% LLM token cost.
 
 ---
 
-## 5. Non-Negotiable 3D Deep-Sim Purity Rules (`studio/rules/sim-purity.md`)
+## 7. Non-Negotiable 3D Deep-Sim Purity Rules (`studio/rules/sim-purity.md`)
 
 1. **Pure TypeScript Simulation (`src/sim/**` & `cartridges/**`)**:
    - **ZERO** DOM, `window`, `document`, WebGL, or `three` imports inside simulation logic (`bash scripts/check-sim-isolation.sh`).
    - **Fixed-Timestep Tick Only**: Simulation state advances strictly by integer ticks (`step(state, action)`), never by variable `requestAnimationFrame` delta time.
    - **Seeded Deterministic RNG**: `Math.random()` and `Date.now()` / `performance.now()` are forbidden in simulation paths.
-   - **100% JSON-Serializable State**: Plain objects, arrays, numbers, strings, and booleans only so saves, replays, and cross-engine ports (Tauri v2, Godot `ts2gd`, Unity `SharpTS`) work losslessly.
+   - **100% JSON-Serializable State**: Plain objects, arrays, numbers, strings, and booleans only so saves, replays, and cross-engine ports work losslessly.
 2. **Pre-Stop Checkpoint**:
-   - Before ending a session or compacting context, update `studio/CURRENT_TASK.md` (`## CHECKPOINT` and `## STATUS`) and run `bash scripts/pre-compact.sh`.
+   - Before ending a session or compacting context, update `studio/CURRENT_TASK.md` and run `bash scripts/pre-compact.sh`.
+   - For risky changes, run `scripts/snapshot-state.sh` first.
