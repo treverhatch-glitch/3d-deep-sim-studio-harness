@@ -4,6 +4,7 @@
     { "id": "purity", "command": "node scripts/check-sim-purity.mjs", "required": true },
     { "id": "isolation", "command": "bash scripts/check-sim-isolation.sh", "required": true },
     { "id": "golden", "command": "node qa/check-golden.mjs", "required": true },
+    { "id": "golden-py", "command": "python3 qa/test-golden.py", "required": true },
     { "id": "approvals", "command": "node scripts/check-approvals.mjs", "required": true },
     { "id": "regressions", "command": "node qa/check-regressions.mjs", "required": true },
     { "id": "vertical-slice", "command": "node qa/vertical-slice.mjs", "required": true },
