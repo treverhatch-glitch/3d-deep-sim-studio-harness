@@ -4,29 +4,33 @@
 
 ## Status
 
-- **Current focus:** Initial setup of the AI Studio Template
+- **Current focus:** Core harness is in place and runnable
 - **Owner:** Producer (Grok Bot) + human
 - **Last updated:** 2026-10-19
 
 ## What Was Just Done
 
-- Created the public template repository.
-- Added core governance files.
+- Public template repo created and populated.
+- Event logger (`scripts/append-event.sh`) with proper JSON.
+- Multi-model dispatch stub (`scripts/llm-dispatch.sh`) with failover order.
+- Passive visual HUB (`hub/index.html` + `hub/server.js`) — zero-token dashboard.
+- Docs: SETUP.md, VISUAL_HUB.md, ROUTING.md.
+- Example skill: `skills/bug-triage.md`.
 
 ## Immediate Next Steps
 
-1. Flesh out `docs/SETUP.md` with RTK + QMD install steps.
-2. Add a minimal event-logger script stub.
-3. Add a multi-model dispatch example (`scripts/llm-dispatch.sh`).
-4. Document the passive visual HUB (React Flow or n8n).
+1. Install RTK and QMD locally and verify `rtk gain`.
+2. Wire real API calls into `scripts/llm-dispatch.sh` (Vertex / NVIDIA / Groq).
+3. (Optional) Expand the HUB into a React Flow node graph for YouTube B-roll.
+4. Start using the harness on the actual Hatchfield codebase (point agents at this repo's AGENTS.md).
 
 ## Context Needed for Next Agent
 
 - Project is Hatchfield Airport Tycoon (~105k lines TypeScript + Three.js).
-- Priority is finishing deep systems and playability in the web stack before any engine port.
-- Free-tier failover (NVIDIA GLM / Groq) must stay available.
+- Priority remains finishing deep systems and playability in the web stack before any engine port.
+- Free-tier failover must stay available.
 - Keep all durable logic in files, not chat.
 
 ## Blockers
 
-None.
+None. The harness is ready to use.
