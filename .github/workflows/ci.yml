@@ -13,6 +13,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Syntax check
+        run: |
+          node --check harness/models.config.mjs
+          node --check harness/route.mjs
+          node --check harness/event.mjs
+          node --check harness/task.mjs
+          node --check hub/server.mjs
+          node --check qa/playtest.mjs
+          node --check cartridges/example-sim/index.mjs
       - name: Session files
         run: node scripts/verify-session.mjs
       - name: Sim purity
@@ -29,7 +38,12 @@ jobs:
         run: node scripts/check-renderer-budget.mjs
       - name: Reviewer markers
         run: node scripts/check-reviewer.mjs
-      - name: Closed-loop simulate fail
-        run: node harness/closed-loop.mjs --simulate-fail || true
+      - name: Closed-loop must fail when simulated
+        run: |
+          set +e
+          node harness/closed-loop.mjs --simulate-fail
+          code=$?
+          set -e
+          test "$code" -eq 1
       - name: Secret scan
         run: bash scripts/secret-scan.sh
