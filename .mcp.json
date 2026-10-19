@@ -8,20 +8,21 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena",
+        "git+https://github.com/oraios/serena@main",
         "serena",
         "start-mcp-server",
         "--context",
         "ide-assistant",
         "--project",
         "."
-      ]
+      ],
+      "note": "Pin to a commit SHA when you depend on this in production."
     },
     "playwright": {
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@latest",
+        "@playwright/mcp@0.0.32",
         "--headless",
         "--caps=vision"
       ]
@@ -30,8 +31,9 @@
       "command": "npx",
       "args": [
         "-y",
-        "github:mlolson/blender-orchestrator"
-      ]
+        "github:mlolson/blender-orchestrator#main"
+      ],
+      "note": "Pin to a commit SHA for reproducible setups."
     }
   }
 }
