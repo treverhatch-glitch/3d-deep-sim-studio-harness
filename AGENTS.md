@@ -4,17 +4,19 @@ You are working on a video game project using this AI Game Studio harness. Follo
 
 ## Before Starting Work
 
-1. Read `CURRENT_TASK.md` (this is your handoff).
+1. Read `CURRENT_TASK.md` (checkpoint / handoff).
 2. Read the relevant section of `NEXT.md` if needed.
-3. Search docs or code with QMD / ripgrep / symbol MCP instead of loading entire files.
-4. Prefer `gh` CLI over full GitHub MCP when possible.
+3. Check `studio/llms.txt` and path-scoped rules in `studio/rules/` before editing core systems.
+4. Search docs or code with QMD / ripgrep / symbol MCP instead of loading entire files.
+5. Prefer `gh` CLI over full GitHub MCP when possible.
 
 ## During Work
 
 - Keep chat context thin. Write important state, decisions, and next steps into files.
 - Use RTK-wrapped commands for shell output (vitest, git, tsc, etc.).
 - Append status events to the local event log when starting major steps (see `scripts/`).
-- Route heavy reasoning to stronger models; bulk fixes and classification to free-tier workers (NVIDIA GLM Flash, Groq, Gemini Flash).
+- Route heavy reasoning to stronger models; bulk fixes and classification to free-tier workers.
+- Respect lean roles in `studio/roles/` (Producer, Builder, QA-Playtester, Reviewer, Designer-Calibrator).
 
 ## After Finishing a Task
 
@@ -31,10 +33,10 @@ You are working on a video game project using this AI Game Studio harness. Follo
 - Verify results and update the handoff files.
 - Never accumulate multi-turn status history in one chat.
 
-## Visual Testing
+## Visual / Playtest Testing
 
-Dedicated QA sub-agents may use Playwright MCP + screenshot / accessibility tree tools. Prefer free tiers for visual checks.
+Prefer programmatic playtesting via debug API (`?playtest=1` / `window.__hatch`) over pure screenshots. See `qa/README.md`. Playwright MCP is secondary.
 
 ## Porting Rule
 
-Do not port core systems until they are feature-complete and playtested in the current stack. Transpilers help only after that point.
+Do not port core systems until they are feature-complete and playtested in the current stack. Keep the sim pure TypeScript (no Three.js/DOM imports). Transpilers help only after that point.
