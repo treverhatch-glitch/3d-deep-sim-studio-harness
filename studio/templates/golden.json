@@ -1,0 +1,11 @@
+{
+  "name": "new-game-seed",
+  "seed": 1337,
+  "tick": 50,
+  "actions": [
+    { "tick": 1, "action": { "type": "spawn", "kind": "unit", "x": 0, "z": 0 } }
+  ],
+  "hash": "REPLACE_WITH_64BIT",
+  "hashWidth": 64,
+  "note": "New games should commit a 64-bit golden before the first playable slice. Generate with node qa/check-golden.mjs --update or python tools/golden.py --update."
+}
