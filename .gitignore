@@ -1,0 +1,35 @@
+# deps & builds
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets — never commit keys
+.env
+.env.*
+!.env.example
+
+# runtime state written by the harness (events, cooldowns, runs, session logs)
+.studio/
+
+# QA output (keep the folder, not the runs)
+qa/reports/*
+!qa/reports/.gitkeep
+test-results/
+playwright-report/
+
+# generated assets (rebuild with `npm run assets`)
+public/assets/*.glb
+*.blend1
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# local tool caches
+.serena/cache/
+.qmd/
+3D DEEP-SIM RULES/
+

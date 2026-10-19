@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Deep-Sim AI Studio // Mission Control War Room</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: radial-gradient(circle at 50% 0%, #0d1b2a 0%, #050811 75%);
+        color: #e2e8f0;
+        font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+        min-height: 100vh;
+      }
+      header {
+        display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 12px 20px;
+        border-bottom: 1px solid rgba(56, 189, 248, 0.28);
+        background: rgba(8, 15, 30, 0.92);
+      }
+      .grid-4q {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(330px, 1fr));
+        gap: 14px; padding: 14px;
+      }
+      @media (max-width: 900px) {
+        .grid-4q { grid-template-columns: 1fr; grid-template-rows: auto; }
+      }
+      .card {
+        background: rgba(10, 18, 36, 0.88);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 10px; padding: 14px;
+        display: flex; flex-direction: column;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+      .card-hdr {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #94a3b8;
+        padding-bottom: 8px; margin-bottom: 10px;
+        border-bottom: 1px solid rgba(56, 189, 248, 0.18);
+      }
+      button {
+        background: #0284c7; color: #f8fafc; border: none; border-radius: 5px;
+        padding: 5px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+      }
+      button:hover { opacity: 0.9; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { padding: 6px 4px; text-align: left; border-bottom: 1px solid rgba(148,163,184,0.1); }
+    </style>
+  </head>
+  <body>
+    <div id="app">Loading Zero-Token Workflow UI HUB...</div>
+    <script type="module">
+      let snapshot = null;
+      let mobileMode = new URLSearchParams(location.search).get('view') === 'mobile' || innerWidth < 860;
+
+      async function postJson(url, body) {
+        await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      }
+
+      window.hubStartTask = (id) => postJson('/api/task', { action: 'start', id });
+      window.hubDoneTask = (id) => postJson('/api/task', { action: 'done', id });
+      window.hubAddTask = () => {
+        const input = document.getElementById('new-task-input');
+        const role = document.getElementById('new-task-role');
+        if (input && input.value.trim()) {
+          postJson('/api/task', { action: 'add', title: input.value.trim(), role: role ? role.value : 'builder' });
+          input.value = '';
+        }
+      };
+      window.hubSimFailover = () =>
+        postJson('/api/event', {
+          type: 'route.failover',
+          agent: 'builder',
+          provider: 'nvidia-glm-flash',
+          tokensSaved: 4500,
+          msg: 'Simulated 429 on primary -> instant freecc:auto failover to NVIDIA GLM 5.3 Flash (0 downtime)',
+        });
+      window.hubToggleMode = () => {
+        mobileMode = !mobileMode;
+        render();
+      };
+
+      function render() {
+        if (!snapshot) return;
+        const activeAgent = snapshot.queue.inProgress[0]?.role || snapshot.recentEvents[0]?.agent || 'producer';
+        const activeProvider = snapshot.recentEvents.find((e) => e.provider)?.provider || 'vertex-gemini-pro';
+
+        const rolesSvg = snapshot.roles.slice(0, 5).map((r, i) => {
+          const y = 12 + i * 52;
+          const act = r.id === activeAgent;
+          return `
+            <line x1="175" y1="135" x2="285" y2="${y + 21}" stroke="${act ? '#10b981' : 'rgba(148,163,184,0.25)'}" stroke-width="${act ? 2.5 : 1.2}"/>
+            <g transform="translate(285,${y})">
+              <rect width="175" height="42" rx="6" fill="${act ? 'rgba(16,185,129,0.18)' : 'rgba(15,23,42,0.9)'}" stroke="${act ? '#10b981' : 'rgba(148,163,184,0.35)'}"/>
+              <text x="10" y="17" fill="${act ? '#34d399' : '#e2e8f0'}" font-size="11" font-weight="bold">${r.id.toUpperCase()}</text>
+              <text x="10" y="33" fill="#94a3b8" font-size="9">dept:${r.department} | ${r.tier}</text>
+            </g>`;
+        }).join('');
+
+        const provSvg = snapshot.router.slice(0, 5).map((p, i) => {
+          const y = 12 + i * 52;
+          const sel = p.providerId === activeProvider;
+          return `
+            <line x1="460" y1="135" x2="555" y2="${y + 21}" stroke="${sel ? '#a78bfa' : 'rgba(148,163,184,0.2)'}" stroke-width="${sel ? 2.4 : 1}"/>
+            <g transform="translate(555,${y})">
+              <rect width="190" height="42" rx="6" fill="${sel ? 'rgba(167,139,250,0.16)' : 'rgba(15,23,42,0.9)'}" stroke="${sel ? '#a78bfa' : 'rgba(148,163,184,0.3)'}"/>
+              <text x="10" y="17" fill="${sel ? '#c4b5fd' : '#cbd5e1'}" font-size="10" font-weight="bold">#${p.order} ${p.providerId}</text>
+              <text x="10" y="33" fill="#94a3b8" font-size="9">${p.model.slice(0, 26)} [${p.tier}]</text>
+            </g>`;
+        }).join('');
+
+        document.getElementById('app').innerHTML = `
+          <header>
+            <div>
+              <div style="font-size:15px;font-weight:700;color:#38bdf8;letter-spacing:1.3px;">
+                3D DEEP-SIM AI STUDIO // MISSION CONTROL WAR ROOM
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:2px;">
+                PRODUCER: <strong style="color:#f8fafc">${snapshot.producerPreset.toUpperCase()}</strong> ·
+                ROLES: <strong style="color:#f8fafc">${snapshot.rolesCount}</strong> (UNLIMITED) ·
+                LLM TOKEN USAGE: <strong style="color:#10b981">0.0% (PASSIVE)</strong>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span style="padding:5px 10px;border-radius:6px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);font-size:11px;color:#34d399;">
+                TOKENS SAVED: ~${snapshot.telemetry.estimatedTokensSaved.toLocaleString()}
+              </span>
+              <button onclick="hubSimFailover()" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.45);">⚡ Simulate Failover</button>
+              <button onclick="hubToggleMode()">${mobileMode ? '🖥️ 4Q War Room' : '📱 Mobile Feed'}</button>
+            </div>
+          </header>
+          <main class="grid-4q" style="${mobileMode ? 'grid-template-columns:1fr;max-width:560px;margin:0 auto;' : ''}">
+            <section class="card">
+              <div class="card-hdr"><span>Q1 // LIVE MULTI-AGENT & PROVIDER NODE GRAPH</span><span style="color:#38bdf8">ACTIVE: ${activeAgent.toUpperCase()}</span></div>
+              <svg viewBox="0 0 760 275" style="width:100%;height:255px;">
+                <g transform="translate(15,102)">
+                  <rect width="160" height="66" rx="8" fill="rgba(15,23,42,0.95)" stroke="#38bdf8" stroke-width="2"/>
+                  <text x="12" y="24" fill="#38bdf8" font-size="11" font-weight="bold">EXEC PRODUCER</text>
+                  <text x="12" y="42" fill="#f8fafc" font-size="10">Preset: ${snapshot.producerPreset}</text>
+                  <text x="12" y="56" fill="#94a3b8" font-size="9">VISION_LOCK + NEXT.md</text>
+                </g>
+                ${rolesSvg}
+                ${provSvg}
+              </svg>
+            </section>
+            <section class="card">
+              <div class="card-hdr"><span>Q2 // FREECC:AUTO FAILOVER ROUTER MATRIX</span><span style="color:#a78bfa">FAILOVERS: ${snapshot.telemetry.failovers}</span></div>
+              <table>
+                <thead><tr><th>#</th><th>Provider</th><th>Model</th><th>Tier</th><th>Status</th></tr></thead>
+                <tbody>
+                  ${snapshot.router.map((r) => {
+                    const cd = r.channels.find((c) => c.status === 'cooldown');
+                    const st = !r.configured ? 'NO KEY (SKIP)' : cd ? 'COOLDOWN (' + cd.cooldownRemainingSec + 's)' : 'READY';
+                    const col = !r.configured ? '#64748b' : cd ? '#f59e0b' : '#10b981';
+                    return `<tr><td>${r.order}</td><td><strong>${r.providerId}</strong></td><td style="color:#94a3b8">${r.model}</td><td style="color:#38bdf8">${r.tier}</td><td style="color:${col};font-weight:700">${st}</td></tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </section>
+            <section class="card">
+              <div class="card-hdr"><span>Q3 // STUDIO/NEXT.MD TASK QUEUE</span><span style="color:#10b981">${snapshot.queue.inProgress.length} ACTIVE / ${snapshot.queue.backlog.length} BACKLOG</span></div>
+              <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <input id="new-task-input" placeholder="Queue new task in studio/NEXT.md..." style="flex:1;background:#091020;color:#f8fafc;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px 8px;font-size:11px;font-family:inherit;" />
+                <select id="new-task-role" style="background:#091020;color:#38bdf8;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:5px;font-size:11px;font-family:inherit;">
+                  ${snapshot.roles.map((r) => `<option value="${r.id}">${r.id}</option>`).join('')}
+                </select>
+                <button onclick="hubAddTask()">+ Add</button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:220px;">
+                ${snapshot.queue.inProgress.map((t) => `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.4);border-radius:6px;font-size:11px;">
+                    <div><strong style="color:#34d399">▶ ${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
+                    <button style="background:#059669" onclick="hubDoneTask('${t.id}')">✓ Done</button>
+                  </div>`).join('')}
+                ${snapshot.queue.backlog.map((t) => `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:rgba(15,23,42,0.7);border:1px solid rgba(148,163,184,0.18);border-radius:6px;font-size:11px;">
+                    <div><strong style="color:#38bdf8">${t.id}</strong> [${t.priority}] (<code>${t.role}</code>) — ${t.title}</div>
+                    <button onclick="hubStartTask('${t.id}')">Start</button>
+                  </div>`).join('')}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-hdr"><span>Q4 // PASSIVE EVENT STREAM (.studio/events.jsonl)</span><span>EVENTS: ${snapshot.telemetry.totalEvents}</span></div>
+              <div style="background:rgba(3,7,18,0.75);border-radius:6px;padding:10px;font-size:11px;line-height:1.55;overflow-y:auto;max-height:250px;">
+                ${snapshot.recentEvents.map((e) => `
+                  <div style="border-bottom:1px solid rgba(148,163,184,0.08);padding:3px 0;">
+                    <span style="color:#64748b">[${e.ts.slice(11, 19)}]</span>
+                    <strong style="color:#38bdf8">(${e.agent})</strong>
+                    <span style="color:${e.type.includes('failover') ? '#fbbf24' : '#a78bfa'}">${e.type}</span>:
+                    ${e.msg}
+                  </div>`).join('')}
+              </div>
+            </section>
+          </main>`;
+      }
+
+      const es = new EventSource('/api/stream');
+      es.onmessage = (e) => { snapshot = JSON.parse(e.data); render(); };
+    </script>
+  </body>
+</html>
