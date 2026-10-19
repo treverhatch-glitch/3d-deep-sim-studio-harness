@@ -8,15 +8,14 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@main",
+        "git+https://github.com/oraios/serena@4c4268f",
         "serena",
         "start-mcp-server",
         "--context",
         "ide-assistant",
         "--project",
         "."
-      ],
-      "note": "Pin to a commit SHA when you depend on this in production."
+      ]
     },
     "playwright": {
       "command": "npx",
@@ -33,7 +32,7 @@
         "-y",
         "github:mlolson/blender-orchestrator#main"
       ],
-      "note": "Pin to a commit SHA for reproducible setups."
+      "note": "Repo has no release tags. Pin to a full commit SHA when you freeze a setup."
     }
   }
 }
