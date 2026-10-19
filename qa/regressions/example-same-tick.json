@@ -1,0 +1,11 @@
+{
+  "id": "REG-same-tick",
+  "seed": 1337,
+  "tick": 1,
+  "actions": [
+    { "tick": 1, "action": { "type": "spawn", "kind": "sensor", "x": 1, "z": 1 } },
+    { "tick": 1, "action": { "type": "spawn", "kind": "crate", "x": 2, "z": 2 } }
+  ],
+  "hash": "PENDING",
+  "description": "Two actions on tick 1 must both apply. Revert of the array-per-tick fix should change this hash."
+}
