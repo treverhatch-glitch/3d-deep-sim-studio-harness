@@ -1,15 +1,6 @@
 #!/usr/bin/env node
 /**
- * scripts/check-sim-purity.mjs — Static Determinism & Sim-Purity Guard
- *
- * Enforces `studio/rules/sim-purity.md` across any simulation folder (`src/sim`
- * or `cartridges/<name>/sim`):
- *   1. ZERO imports of `three`, `@react-three/*`, DOM (`window`, `document`,
- *      `localStorage`, `requestAnimationFrame`), or browser audio APIs.
- *   2. ZERO calls to `Math.random()`, `Date.now()`, or `performance.now()`.
- *
- * Keeps the simulation 100% deterministic, headless-testable in Node, and
- * ready for late-game porting to Tauri v2, Godot 4 (`ts2gd`), or Unity (`SharpTS`).
+ * scripts/check-sim-purity.mjs — fail if no sim files are found
  */
 
 import fs from 'node:fs';
@@ -22,7 +13,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FORBIDDEN_PATTERNS = [
   { id: 'NO_THREE_IMPORT', re: /from\s+['"]three(\/.*)?['"]/g, reason: 'Three.js import inside pure sim layer' },
   { id: 'NO_DOM_WINDOW', re: /\b(window|document|localStorage|sessionStorage|requestAnimationFrame)\b/g, reason: 'Browser DOM global inside pure sim layer' },
-  { id: 'NO_MATH_RANDOM', re: /\bMath\.random\s*\(/g, reason: 'Unseeded Math.random() breaks determinism; use seeded SimState RNG' },
+  { id: 'NO_MATH_RANDOM', re: /\bMath\.random\s*\(/g, reason: 'Unseeded Math.random() breaks determinism' },
   { id: 'NO_WALL_CLOCK', re: /\b(Date\.now|performance\.now)\s*\(/g, reason: 'Wall-clock time breaks fixed-timestep determinism' },
 ];
 
@@ -31,6 +22,7 @@ function collectSimFiles(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
       collectSimFiles(full, out);
     } else if (entry.isFile() && /\.(ts|mts|js|mjs)$/.test(entry.name) && !entry.name.endsWith('.test.ts')) {
       out.push(full);
@@ -40,32 +32,25 @@ function collectSimFiles(dir, out = []) {
 }
 
 function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '');
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
 const candidateDirs = [
   path.join(REPO_ROOT, 'src', 'sim'),
+  path.join(REPO_ROOT, 'cartridges'),
 ];
-
-const cartridgesDir = path.join(REPO_ROOT, 'cartridges');
-if (fs.existsSync(cartridgesDir)) {
-  for (const entry of fs.readdirSync(cartridgesDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      candidateDirs.push(path.join(cartridgesDir, entry.name, 'sim'));
-      candidateDirs.push(path.join(cartridgesDir, entry.name, 'src', 'sim'));
-    }
-  }
-}
 
 const files = [];
 for (const d of candidateDirs) collectSimFiles(d, files);
 
+if (files.length === 0) {
+  console.error('[sim-purity] FAIL — 0 simulation files found. Expected files under src/sim or cartridges/.');
+  process.exit(1);
+}
+
 const violations = [];
 for (const file of files) {
-  const raw = fs.readFileSync(file, 'utf8');
-  const code = stripComments(raw);
+  const code = stripComments(fs.readFileSync(file, 'utf8'));
   for (const rule of FORBIDDEN_PATTERNS) {
     rule.re.lastIndex = 0;
     if (rule.re.test(code)) {
@@ -79,11 +64,10 @@ for (const file of files) {
 }
 
 if (violations.length > 0) {
-  console.error('SIM PURITY CHECK FAILED (studio/rules/sim-purity.md):');
-  for (const v of violations) {
-    console.error(`  ✗ [${v.rule}] ${v.file}: ${v.reason}`);
-  }
+  console.error('SIM PURITY CHECK FAILED:');
+  for (const v of violations) console.error(`  x [${v.rule}] ${v.file}: ${v.reason}`);
   process.exit(1);
 }
 
-console.log(`[sim-purity] PASS — ${files.length} simulation file(s) verified pure (0 DOM/Three/Math.random/wall-clock leaks).`);
+console.log(`[sim-purity] PASS — ${files.length} simulation file(s) verified.`);
+for (const f of files) console.log(`  - ${path.relative(REPO_ROOT, f)}`);
