@@ -645,6 +645,36 @@ export function createHubServer() {
       }
     }
 
+    if (url.pathname === '/human' || url.pathname === '/human.html') {
+      const file = path.join(__dirname, 'human.html');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(fs.readFileSync(file, 'utf8'));
+    }
+
+    if (url.pathname === '/api/human/notes' && req.method === 'GET') {
+      const read = (rel) => {
+        const file = path.join(REPO_ROOT, rel);
+        return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+      };
+      return sendJson(res, 200, {
+        balance: read('studio/balance/latest.md'),
+        fun: read('studio/fun/latest.md'),
+      });
+    }
+
+    if (url.pathname === '/api/human/decision' && req.method === 'POST') {
+      if (!isWriteAuthorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      const body = await readBody(req);
+      const kind = body.kind === 'fun' ? 'fun' : 'balance';
+      const dir = path.join(REPO_ROOT, 'studio', kind);
+      fs.mkdirSync(dir, { recursive: true });
+      const name = `${kind === 'fun' ? 'review' : 'decision'}-${new Date().toISOString().slice(0, 10)}.md`;
+      const file = path.join(dir, name);
+      const text = `# ${kind} decision\n\n${String(body.note || '').slice(0, 2000)}\n\n- by: human\n- at: ${new Date().toISOString()}\n`;
+      fs.writeFileSync(file, text);
+      return sendJson(res, 200, { ok: true, file: `studio/${kind}/${name}` });
+    }
+
     if (url.pathname === '/' || url.pathname === '/index.html') {
       const builtHtml = path.join(__dirname, 'dist', 'index.html');
       const fallbackHtml = path.join(__dirname, 'index.html');
