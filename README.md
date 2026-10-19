@@ -1,10 +1,10 @@
-# Hatchfield AI Studio Template
+# AI Game Studio Template
 
-Lightweight, open-source AI agent harness for building deep, playable games (starting with Hatchfield Airport Tycoon) on a low or zero budget.
+Lightweight, open-source AI agent harness for building deep, playable video games on a low or zero budget.
 
-**Goal:** Finish deep gameplay systems, a solid loop, full playability, playtesting, and calibration in TypeScript + Three.js + React first. Only after the simulation is stable and feature-complete do we port or raise the graphics ceiling in other engines (Tauri v2 for Steam, or Godot 4).
+**Purpose:** A reusable system for finishing game logic, systems, gameplay loops, playtesting, and calibration in a flexible web stack (TypeScript + Three.js + React or similar) before porting to native engines. Durable logic lives in the repo. The Producer (Grok Bot or any agent) stays thin — it reads task files, directs workers, and writes results back.
 
-Durable logic lives in this repo. Grok Bot (or any Producer) stays thin — it reads the current task, directs workers, and writes results back. No long chat histories required.
+**First project / test case:** Hatchfield Airport Tycoon (~105k lines TypeScript + Three.js).
 
 ## Core Principles
 
@@ -12,14 +12,14 @@ Durable logic lives in this repo. Grok Bot (or any Producer) stays thin — it r
 - **Token efficiency** — RTK for shell output, QMD for Markdown search, optional symbol-level code MCPs and Headroom.
 - **Multi-model failover** — Vertex Gemini primary → free NVIDIA GLM / Groq (and others) with zero out-of-pocket when credits run low.
 - **Passive status** — Local event log (`/tmp/agent-events.jsonl`) + visual HUB. Zero LLM tokens for monitoring.
-- **Build playable first** — Lock simulation, economy, pathfinding, and UI before any engine port.
+- **Build playable first** — Lock core systems and gameplay loop before any engine port.
 
 ## Quick Start
 
-1. Clone this template.
+1. Clone this template for a new game project.
 2. Read `AGENTS.md` and `docs/SETUP.md`.
 3. Set up RTK, QMD, and the event logger (see `scripts/`).
-4. Point your Producer (Grok Bot) at `CURRENT_TASK.md` and `NEXT.md`.
+4. Point your Producer at `CURRENT_TASK.md` and `NEXT.md`.
 5. Run the passive visual HUB if desired.
 
 ## Structure
@@ -28,9 +28,10 @@ Durable logic lives in this repo. Grok Bot (or any Producer) stays thin — it r
 - `NEXT.md` — Prioritized backlog.
 - `CURRENT_TASK.md` — Active handoff (read and update).
 - `docs/` — Setup, routing, visual HUB, porting notes.
-- `scripts/` — Event logger, dispatch stubs, helpers.
+- `scripts/` — Event logger, dispatch, helpers.
 - `skills/` — Reusable agent skills.
+- `hub/` — Passive Mission Control dashboard (zero LLM tokens).
 
 ## License
 
-MIT — Use, fork, and adapt freely. Built for Hatchfield and the community building games with AI agents.
+MIT — Use, fork, and adapt freely for any game project.
