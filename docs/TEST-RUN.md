@@ -54,6 +54,8 @@ While it runs:
 - The HUB writes `REPORT.md` and a snapshot to the results folder every hour, and backs up daily.
 - **Stop all agents** in the War Room (or `npm run task -- stop --by <name>`) holds every new start.
 - Harness problems go in notes (`npm run notes -- add --kind bad "..."`), not in harness code.
+- System tasks need a review from a model made by another company. With only one company's models,
+  run Ollama locally (`ollama pull qwen2.5-coder:14b`) and `npm run review -- <ID> --local`.
 
 ## 4. Finish
 

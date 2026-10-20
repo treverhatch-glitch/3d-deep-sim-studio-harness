@@ -13,3 +13,7 @@
 task ID or commit it reviews and gives a verdict (approve, LGTM, request changes, reject, blocking).
 
 **Never.** Approve your own work. Fix the code yourself instead of saying what is wrong.
+
+**A second opinion in one command.** `npm run review -- <ID> --local` sends the task's commits to your
+local Ollama model (a different company's model, free and offline) and writes the review file for
+you. Small local models miss things: read its notes, and write a review by hand when it matters.

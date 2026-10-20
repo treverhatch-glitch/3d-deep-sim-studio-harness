@@ -85,6 +85,7 @@
 - `npm run preflight [-- --fix] [--quick]` — is this clone ready for a test run; --fix installs hooks, freezes the harness, turns off git push, makes .env (docs/TEST-RUN.md)
 - `npm run run-report [-- --to <folder>] [--final]` — REPORT.md, a snapshot and the run's files in STUDIO_RESULTS_DIR; the HUB writes it hourly
 - `npm run task -- stop --by <name> [--reason "..."] | resume --by <name>` — hold every task start (War Room: Stop all agents)
+- `npm run review -- <ID> [--local] [--implementer <model>]` — a model from another company reviews the task's tagged commits (--local: your Ollama model, free); writes the review with both family lines and one verdict
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

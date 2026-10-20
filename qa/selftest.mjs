@@ -771,6 +771,51 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the static renderer scan fails nine lights', scan.status !== 0 && /9 lights > 8/.test(scan.stderr), scan.stderr);
 }
 
+// npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
+{
+  const http = await import('node:http');
+  let answer = 'VERDICT: APPROVE\nWHY: The visitor rate is seeded and tested; the hand-off explains the tuning.\nISSUES:\n- none';
+  const fake = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ model: 'qwen2.5-coder:14b', choices: [{ message: { role: 'assistant', content: answer } }], usage: { prompt_tokens: 900, completion_tokens: 60 } }));
+    });
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  const ollama = { OLLAMA_BASE_URL: `http://127.0.0.1:${fake.address().port}/v1`, OLLAMA_MODEL: 'qwen2.5-coder:14b', STUDIO_PRODUCER_NAME: 'prod-1' };
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system', ollama).stdout).id;
+  run(dir, `node harness/task.mjs start ${id} --agent builder-1 --model claude-opus-5-5`, ollama);
+  fs.mkdirSync(path.join(dir, 'studio/bible/systems'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals.\n`);
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// visitors scenario\n`);
+  edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1500,', 'startCredits: 1550,'));
+  run(dir, 'node qa/check-golden.mjs --update');
+  run(dir, 'node qa/check-regressions.mjs --update');
+  run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
+  git('add -A');
+  git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  const rv = await runAsync(dir, `node harness/review.mjs ${id} --local`, ollama);
+  const files = fs.readdirSync(path.join(dir, 'studio/reviews')).filter((f) => f.includes(id));
+  const text = files[0] ? fs.readFileSync(path.join(dir, 'studio/reviews', files[0]), 'utf8') : '';
+  report('npm run review -- --local writes a review with both families and one verdict', rv.status === 0 && /model-family: qwen/.test(text) && /implementer-family: anthropic/.test(text) && /Verdict: approve/.test(text), rv.stdout + rv.stderr + text);
+  const dc = run(dir, `node harness/done-check.mjs ${id}`, ollama);
+  report('that approval satisfies the system task\'s cross-family review', /\[x\] Approved by a reviewer from another model family/.test(dc.stdout), dc.stdout);
+  answer = 'The diff looks mostly fine but I would approve only after a test.\nISSUES:\n- qa.mjs: no scenario';
+  fs.rmSync(path.join(dir, 'studio/reviews', files[0]));
+  await runAsync(dir, `node harness/review.mjs ${id} --local`, ollama);
+  const vague = fs.readdirSync(path.join(dir, 'studio/reviews')).filter((f) => f.includes(id)).map((f) => fs.readFileSync(path.join(dir, 'studio/reviews', f), 'utf8')).join('');
+  report('a review without a clear verdict counts as changes, even if it says approve in passing', /Verdict: request changes/.test(vague) && /\[ \] Approved by a reviewer/.test(run(dir, `node harness/done-check.mjs ${id}`, ollama).stdout), vague);
+  fake.close();
+}
+
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.
 {
   const dir = copyRepo();

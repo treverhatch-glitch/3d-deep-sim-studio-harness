@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.14.1] — 2026-10-21
+### Added
+- **`npm run review -- <ID> [--local]`**: a model from another company reviews a task's tagged commits (and its spec, for system tasks) through the router, and writes the review with `model-family:`, `implementer-family:` and one verdict. `--local` uses only your Ollama model, so a studio with one company's models can still close system tasks. Refuses a same-family reviewer; a reply with no clear verdict counts as changes.
+
+---
+
 ## [2.14.0] — 2026-10-20
 ### Added
 - **`npm run preflight [-- --fix]`**: checks a clone is ready for a test run (Node, hooks, `.env`, HUB token, Producer name, backup and results folders writable, Python, keys and cap, the required gates). `--fix` installs the hooks, freezes the harness (`.studio/harness-frozen`: the pre-commit hook refuses commits to harness files), turns off `git push` for the clone, and makes `.env` with a strong token.
