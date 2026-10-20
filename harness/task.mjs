@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from './event.mjs';
 import { claim, release, status as lockStatus } from './lock.mjs';
+import { checkDone } from './done-check.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -128,7 +129,11 @@ export function startTask(taskId, agent = null) {
   return { ...target, owner: agent };
 }
 
-/** Only the lock owner can finish a claimed task, unless force is set (a person in the War Room). */
+/**
+ * Only the lock owner can finish a claimed task, and only once the done-check for its type passes
+ * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
+ * P1 task to run it.
+ */
 export function completeTask(taskId, note = '', agent = null, { force = false } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force) {
@@ -145,6 +150,21 @@ export function completeTask(taskId, note = '', agent = null, { force = false } 
   }
   if (!target) return null;
 
+  const check = checkDone(target);
+  if (!check.ok && !force) {
+    emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${check.missing[0]}` });
+    return {
+      error: 'not-done',
+      check,
+      message: [
+        `${target.id} is a "${check.type}" task. Done means: ${check.means}.`,
+        ...check.missing.map((m) => `  missing: ${m}`),
+        check.skill ? `How: ${check.skill}` : '',
+        'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
+      ].filter(Boolean).join('\n'),
+    };
+  }
+
   target.status = 'done';
   if (note) target.title = `${target.title} _(✓ ${note})_`;
   q.done.unshift(target);
@@ -153,7 +173,22 @@ export function completeTask(taskId, note = '', agent = null, { force = false } 
 
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
-  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', msg: `Completed ${target.id}: ${target.title}` });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
+
+  if (!check.ok) {
+    // Forced past a failing check: tell the Producer, and give it a task to run the check.
+    emitEvent({
+      type: 'task.forced',
+      agent: agent || target.role,
+      task: target.id,
+      status: 'forced',
+      to: 'producer',
+      msg: `Forced ${target.id} done without: ${check.missing[0]}`,
+      meta: { type: check.type, missing: check.missing },
+    });
+    const followUp = addTask({ title: `Check forced done ${target.id} (${check.type}): ${check.missing[0]}`, role: 'producer', priority: 'P1' });
+    return { ...target, forced: true, check, followUp: followUp.id };
+  }
   return target;
 }
 
@@ -256,6 +291,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(done.message);
       process.exit(1);
     }
+    if (done.forced) console.error(`Forced past the ${done.check.type} check. The Producer has ${done.followUp} to run it.`);
     console.log(JSON.stringify(done, null, 2));
     process.exit(0);
   }
@@ -263,11 +299,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs]');
       process.exit(1);
     }
+    // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
+    const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
+    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review or docs.`);
+      process.exit(1);
+    }
+    const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
     const created = addTask({
-      title,
+      title: `${prefix}${title}`,
       role: flags.role || 'builder',
       priority: flags.priority || 'P1',
     });

@@ -35,7 +35,9 @@ contains no keys; `bash scripts/secret-scan.sh` checks exactly what git would pu
 ## How work flows
 
 1. `studio/NEXT.md` is the queue. `node harness/task.mjs start T-002 --agent <unique-name>` claims a task;
-   a second agent is refused until it is done (`task.mjs done T-002 --agent <same-name>`).
+   a second agent is refused until it is done (`task.mjs done T-002 --agent <same-name>`). `done` checks the
+   proof for that kind of task first (a green verify, a regression and lesson for a bug, a sweep for balance;
+   see `studio/skills/`). `--force` skips it, logs it and gives the Producer a task to check.
 2. Claim the files you will touch: `node harness/lock.mjs claim path:cartridges/my-game --owner <name>`.
 3. Change the sim, then `npm run verify`. If you meant to change behaviour: `npm run golden -- --update`.
 4. `node harness/closed-loop.mjs` plays the slice; on failure it writes `.studio/last-seed-failure.json`

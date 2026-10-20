@@ -8,9 +8,13 @@
   Loads all roles from `studio/roles/**/*.md` (5 default + unlimited custom roles/swarms) and presets from `studio/presets/*.md`.
 - `node harness/route.mjs [--role <id>] [--prompt "..."] [--dry-run] [--status]`
   Executes `freecc:auto` multi-model failover routing across Vertex Gemini, NVIDIA NIM, Groq, OpenRouter, xAI Grok, Anthropic, OpenAI, and Ollama with 30s+ cooldowns in `.studio/cooldowns.json`.
-- `node harness/task.mjs [next | list | start <ID> | done <ID> | add "<Title>" --role <role> --priority P0..P3]`
-  Manages `studio/NEXT.md` and synchronizes `studio/CURRENT_TASK.md`.
-- `node harness/event.mjs --type <event.type> --agent <role> [--task <ID>] --msg "<summary>"`
+- `node harness/task.mjs [next | list | start <ID> | done <ID> [--force] | add "<Title>" --role <role> --priority P0..P3 [--type bug|study|balance|fun|playtest|review|docs]]`
+  Manages `studio/NEXT.md` and synchronizes `studio/CURRENT_TASK.md`. `done` refuses until the task's done-check passes.
+- `node harness/done-check.mjs <ID>`
+  Shows a task's type, what done means for it, and what is missing. One skill per type in `studio/skills/`.
+- `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`
+  Outside tools agents can use (`studio/plugins.json`): REA, Playwright MCP, Chrome DevTools MCP, Blender, Godot, Unity.
+- `node harness/event.mjs --type <event.type> --agent <role> [--task <ID>] [--to producer] --msg "<summary>"`
   Appends a zero-token telemetry line to `.studio/events.jsonl` (mirror only if AGENT_EVENTS_MIRROR is set).
 - `node harness/status.mjs [--json]`
   Prints a 0-token studio snapshot combining queue, router matrix, and recent events.

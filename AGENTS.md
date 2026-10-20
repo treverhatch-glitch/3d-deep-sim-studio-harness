@@ -63,12 +63,15 @@ Logging `editing` is not enough. Use the lock helper.
 
 ### When finished
 - `node harness/lock.mjs release <key> --owner cursor-win2`
-- `node harness/task.mjs done <ID> --agent cursor-win2` (only the owner can finish a claimed task)
+- `node harness/task.mjs done <ID> --agent cursor-win2` (only the owner can finish a claimed task, and only once its
+  done-check passes: `node harness/done-check.mjs <ID>` shows what is missing; how each kind of task finishes is in `studio/skills/`)
+- `--force` finishes anyway, but it is logged and the Producer gets a P1 `Check forced done` task
 - `npm run verify` before calling it done; `npm run release` before a merge
 - Update `CURRENT_TASK.md`
 
 ### Producer
 - Assign non-overlapping work.
+- Work through `Check forced done` tasks: run the skipped check (or order it) and accept or reopen the work.
 - If two agents want the same area, pick one.
 
 ---

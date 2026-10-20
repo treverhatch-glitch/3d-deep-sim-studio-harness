@@ -51,7 +51,26 @@ const ROOM_FOR_ROLE = {
   reviewer: 'review',
   'reference-scout': 'design',
   'asset-3d': '3d',
+  'sound-designer': 'sound',
+  composer: 'sound',
+  'listen-checker': 'sound',
+  artist: 'art',
+  'art-director': 'art',
+  localizer: 'localization',
+  translator: 'localization',
+  'ui-designer': 'ui',
+  'accessibility-checker': 'ui',
+  writer: 'narrative',
+  'release-manager': 'release',
+  'store-manager': 'release',
+  devlogger: 'devlog',
+  'engine-porter': 'engine',
 };
+// Custom roles named after their division ("sound-mixer", "art-lead") land in that room.
+const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || divs.find((d) => role && (role === d.id || role.startsWith(`${d.id}-`)))?.id || null;
+
+// Events that mean "an agent reports to the Producer" in the Studio view.
+const TO_PRODUCER = new Set(['task.done', 'task.forced', 'task.not_done', 'task.lock_denied', 'closedloop.escalate']);
 
 function divisions() {
   const cfg = readJson('studio/divisions.json');
@@ -146,24 +165,56 @@ export function buildHudState() {
     if (l.key.startsWith('task:')) a.task = l.key.slice(5);
     agents.set(l.owner, a);
   }
+  const divs = divisions();
   const agentList = [...agents.values()].map((a) => {
     const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
-    const role = ROOM_FOR_ROLE[a.name] ? a.name : roleOfTask.get(a.task) || null;
-    const errored = /error|fail|escalate|bug/.test(a.lastType || '');
+    const role = roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
+    const errored = /error|fail|escalate|bug|forced|not_done/.test(a.lastType || '');
     return {
       ...a,
       role,
-      room: ROOM_FOR_ROLE[role] || 'engineering',
+      room: roomForRole(role, divs) || 'engineering',
       status: errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       idleMin,
     };
   });
+  // The Producer's office is never empty: the role exists even before it writes an event.
+  if (!agentList.some((a) => a.room === 'production')) {
+    agentList.push({ name: 'producer', role: 'producer', room: 'production', status: 'idle', events: 0, idleMin: null, placeholder: true });
+  }
+  const producerName = agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
+  const byName = new Map(agentList.map((a) => [a.name, a]));
 
-  // Needs a person: escalations and exhausted routing since the last pass.
+  // Conversations with the Producer, so the Studio view can walk people between rooms.
+  const talks = [];
+  for (const e of events.slice().reverse()) {
+    if (talks.length >= 20 || Date.parse(e.ts) < now - 30 * 60000) break;
+    if (!e.agent) continue;
+    const fromRoom = byName.get(e.agent)?.room;
+    if (e.to && e.to !== e.agent) {
+      const to = e.to === 'producer' ? producerName : e.to;
+      const toAgent = byName.get(to);
+      talks.push({ id: e.id, ts: e.ts, from: e.agent, to: toAgent ? to : null, room: toAgent?.room || roomForRole(e.to, divs), msg: e.msg, type: e.type });
+    } else if (TO_PRODUCER.has(e.type) && fromRoom !== 'production') {
+      talks.push({ id: e.id, ts: e.ts, from: e.agent, to: producerName, room: 'production', msg: e.msg, type: e.type });
+    } else if (e.type === 'task.added' && (e.agent === producerName || e.agent === 'producer')) {
+      const role = roleOfTask.get(e.task);
+      const room = roomForRole(role, divs) || 'engineering';
+      if (room === 'production') continue;
+      const toAgent = agentList.find((a) => a.room === room && a.role === role) || agentList.find((a) => a.room === room);
+      talks.push({ id: e.id, ts: e.ts, from: producerName, to: toAgent?.name || null, room, msg: e.msg, type: e.type });
+    }
+  }
+
+  // Needs a person: escalations and exhausted routing since the last pass, and forced work
+  // the Producer has not checked yet.
   const needs = [];
   for (const e of events.slice().reverse()) {
     if (e.type === 'closedloop.pass') break;
     if (e.type === 'closedloop.escalate' || e.type === 'route.exhausted') needs.push({ ts: e.ts, agent: e.agent, msg: e.msg, task: e.task });
+  }
+  for (const t of [...queue.inProgress, ...queue.backlog]) {
+    if (/^Check forced done/i.test(t.title)) needs.push({ agent: 'producer', msg: t.title, task: t.id });
   }
 
   const gates = readJson('.studio/gates-last.json');
@@ -175,11 +226,12 @@ export function buildHudState() {
     locks,
     agents: agentList.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))),
     events: events.slice(-120).reverse(),
+    talks,
     needs: needs.slice(0, 10),
     gates,
     playtest: latestPlaytest(),
     router: { providers, failovers, exhausted },
-    divisions: divisions(),
+    divisions: divs,
     lessons: lessons(),
     rtk: rtkGain(),
   };

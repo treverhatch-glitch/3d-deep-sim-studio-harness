@@ -118,7 +118,41 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('task start succeeds for the first owner', run(dir, 'node harness/task.mjs start T-002 --agent alice-1').status === 0);
   report('task start refuses claimed work', run(dir, 'node harness/task.mjs start T-002 --agent bob-1').status !== 0);
   report('task done refuses a non-owner', run(dir, 'node harness/task.mjs done T-002 --agent bob-1').status !== 0);
-  report('task done works for the owner', run(dir, 'node harness/task.mjs done T-002 --agent alice-1').status === 0);
+  run(dir, 'node scripts/balance-sweep.mjs --write');
+  report('task done works for the owner once the check passes', run(dir, 'node harness/task.mjs done T-002 --agent alice-1').status === 0);
+}
+
+// Done-checks: each type of task refuses to close while its proof is missing, and forcing tells the Producer.
+{
+  const dir = copyRepo();
+  const kinds = [
+    ['change', 'node harness/task.mjs add "Wire the spawn table" --role builder'],
+    ['bug', 'node harness/task.mjs add "Crash at tick 40" --type bug'],
+    ['balance', 'node harness/task.mjs add "Spawn cost" --type balance --role designer-calibrator'],
+    ['fun', 'node harness/task.mjs add "Early game pacing" --type fun --role fun-tester'],
+    ['playtest', 'node harness/task.mjs add "Seed 7 run" --role qa-playtester'],
+    ['study', 'node harness/task.mjs add "Build menu layouts" --type study --role reference-scout'],
+    ['review', 'node harness/task.mjs add "Last merge" --type review --role reviewer'],
+    ['docs', 'node harness/task.mjs add "Quickstart" --type docs'],
+  ];
+  const ids = {};
+  for (const [kind, add] of kinds) {
+    const id = JSON.parse(run(dir, add).stdout).id;
+    ids[kind] = id;
+    run(dir, `node harness/task.mjs start ${id} --agent alice-1`);
+    const res = run(dir, `node harness/task.mjs done ${id} --agent alice-1`);
+    report(`done-check refuses an unfinished ${kind} task`, res.status !== 0 && res.stderr.includes(`"${kind}" task`), `${res.stdout}${res.stderr}`);
+  }
+  run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
+  report('done-check passes a playtest task once a report exists', run(dir, `node harness/task.mjs done ${ids.playtest} --agent alice-1`).status === 0);
+  fs.mkdirSync(path.join(dir, 'studio/research/build-menus'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/research/build-menus/study.md'), '# Question\nHow do build menus group items?\n');
+  report('done-check passes a study task once study.md exists', run(dir, `node harness/task.mjs done ${ids.study} --agent alice-1`).status === 0);
+  const forced = run(dir, `node harness/task.mjs done ${ids.change} --agent alice-1 --force`);
+  const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const events = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
+  report('--force closes the task and queues a check for the Producer', forced.status === 0 && new RegExp(`\\(\`producer\`\\) — Check forced done ${ids.change}`).test(queue), `${forced.stdout}${forced.stderr}\n${queue}`);
+  report('--force writes a task.forced event addressed to the Producer', /"type":"task\.forced"[^\n]*"to":"producer"/.test(events));
 }
 
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
