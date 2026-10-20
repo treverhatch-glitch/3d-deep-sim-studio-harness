@@ -220,6 +220,23 @@ From a read-only review of 2.11.0 by Gemini on Windows (2026-10-20), each findin
 | C1 | No content pipeline for a big game. | Content as data under `cartridges/<game>/content/` (JSON with a schema per kept layer, tagged by phase), checked by a gate, written by generators, with a sweep for the economy and unlock curve across the phases. Crossed-out layers need no content. | planned |
 | C2 | Art, audio and narrative are folders and notes, not tools. | One tool each that an agent drives and a gate checks (when the layer is kept): art through Blender presets plus a budget check; audio through a sound preset generator plus loudness and length checks; narrative as structured dialogue files with a lint (missing speakers, dead branches). | planned |
 
+## 2.15.x to 2.18.0 — After the first real run
+
+From the Producer's notes on the first real game run (B1 to B13) and the owner's requests.
+
+| # | What | Status |
+| --- | --- | --- |
+| F1 | Green is reachable and honest: a clean self-test, the active game in `studio/game.json`, done-check counts tagged commits, wide claims refused, scope refusals name the word (B1, B2, B9, B11, B12, B13) | done (2.15.0) |
+| F2 | Pace chosen by the game dev (precise, budget, fast, extreme), and the MAX SPEED lever in every view | done (2.16.0) |
+| F3 | The launcher: starts any tool the same way on every OS, heartbeats, and cleans up a dead agent's task, claims and work (B3, B4, B5) | done (2.16.0) |
+| F4 | Three signals: Needs you, A check is red, Agent stalled (B10) | done (2.16.0) |
+| F5 | Questions with a deadline; the Producer's default applies and is logged, reviewable and reversible | done (2.16.0) |
+| F6 | The art department from day one: style sheet and placeholders, approved by the dev, the art reference in the Bible | done (2.17.0) |
+| F7 | War Room actions start the right agent; a Liaison chat in the Game plan | done (2.17.0) |
+| F8 | A Stage-2 browser gate that plays start to win with real input and checks the scene matches the sim (B6) | planned (2.18.0) |
+| F9 | Screenshot proof for renderer tasks, checked against the art reference | planned (2.18.0) |
+| F10 | Bugs carry a layer (sim, renderer, both); renderer bugs close with a browser regression (B8) | planned (2.18.0) |
+
 ## 2.10.0 and later — Verifiable results, data, and the platform
 
 Groundwork for a platform where results are shared, sold or rewarded. Each piece is optional for a

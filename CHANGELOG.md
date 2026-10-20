@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.17.0] — 2026-10-21
+### Added
+- **Art department from day one.** The Art division is on by default. Pre-production queues "Art: style sheet and five placeholder assets" for the new `art` role (`studio/roles/art.md`, `studio/skills/art.md`). `npm run art -- propose|approve|changes`: the game dev approves designs in the Game plan view (images shown, listed under Needs you). An approved style sheet becomes the Game Bible's art reference; an approved asset under `assets/` is recorded in the asset ledger with who approved it and its licence and source. "Ask for changes" gives the art department a task with the dev's words. Art tasks have their own done-check (the designs the title asks for were proposed). `docs/ART-DEPARTMENT.md`.
+- **War Room actions reach agents.** A pitch goes straight to R&D and starts an R&D agent; a message starts the Producer; follow-up answers start the Director; a confirmed Liaison brief starts R&D or the Producer; design changes start the art department. Within the pace's caps, when a tool is set for the role. Every answer says what happens next.
+- **Liaison chat** in the Game plan view: a cheap model through the router asks until it understands, then reads a brief back; nothing is sent until the dev says yes, and corrections change the same brief. Transcript in `studio/liaison/chat.md`.
+- Ops: a new task says who picks it up (a running agent, the watcher, or nobody yet); `art` and `rnd` in the role list.
+### Fixed
+- Windows: stopping an agent ends its whole process tree (`taskkill /T`), so no agent keeps running in a folder after Stop. The self-test no longer fails when Windows is slow to release its temp folder.
+- The Bible check notes when there is no art reference yet.
+
+---
+
 ## [2.16.0] — 2026-10-21
 ### Added
 - **Pace** (`npm run mode`, intake, the Game plan view): Precise and slow, Budget, Fast and furious, Extreme speed. It sets how many agents run at once, which work needs a cross-family review, whether agents start automatically, and how often the Director and Producer check in. Logged in `studio/mode.json`.

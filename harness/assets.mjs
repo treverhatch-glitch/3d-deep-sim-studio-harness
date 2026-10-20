@@ -64,6 +64,25 @@ export async function addAsset({ source, use, owner = '', licence = '', origin =
   return { ok: true, asset: entry };
 }
 
+/** The game dev approved a studio-made design under assets/ (npm run art -- approve): record it like a declaration. */
+export function recordApproved({ file, by, licence, source = '', design, maker }) {
+  const abs = path.join(REPO_ROOT, file);
+  if (!fs.existsSync(abs)) return { ok: false, message: `${file} is gone; propose it again.` };
+  const m = readManifest();
+  const existing = m.assets.find((a) => a.file === file);
+  if (existing) {
+    Object.assign(existing, { sha256: sha256(abs), declaredBy: by, declaredAt: new Date().toISOString(), design });
+    writeManifest(m);
+    return { ok: true, asset: existing };
+  }
+  const n = m.assets.reduce((x, a) => Math.max(x, Number(a.id.slice(2))), 0) + 1;
+  const entry = { id: `A-${String(n).padStart(3, '0')}`, file, sha256: sha256(abs), use: 'game', owner: 'this studio', licence: licence || 'own work (made in this studio)', source: source || `made by ${maker}`, declaredBy: by, declaredAt: new Date().toISOString(), design, statement: `${by} approved design ${design} for the game; ${maker} made or sourced it (${licence || 'own work'}${source ? `, from ${source}` : ''}).` };
+  m.assets.push(entry);
+  writeManifest(m);
+  emitEvent({ type: 'asset.added', agent: by, to: 'producer', msg: `${entry.id} ${file} approved for the game by ${by} (design ${design}, ${entry.licence})` });
+  return { ok: true, asset: entry };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => {

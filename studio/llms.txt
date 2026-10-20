@@ -95,6 +95,8 @@
 - `npm run mode [-- set precise|budget|fast|extreme --by <name> | boost on|off --by <name> [--hours 4]]` — the pace and the MAX SPEED lever (docs/PACE-AND-AGENTS.md)
 - `npm run agent -- start --role <r> --agent <name> --tool claude|codex|agy|cursor|grok|aider|custom --model <m> [--fallback tool:model,…] [--detach] | list | stop <name> | fill` — the launcher: heartbeats, caps, cleans up a dead agent's task, claims and work
 - `npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…" | answer <id> <answer> --by <person> | reverse <id> <answer> --by <person> | list`
+- `npm run art [-- propose <file> --kind style|asset|concept --title "…" --task <ID> --by <agent> | approve D-001 --by <person> | changes D-001 "<what>" --by <person>]` — the art department's designs; an approved style sheet becomes the Bible's art reference, an approved asset is recorded in the ledger (docs/ART-DEPARTMENT.md)
+- War Room: a pitch starts R&D, a message the Producer, a confirmed Liaison brief its agent, design changes the art department (`wake` in harness/agent.mjs); the Game plan has a Liaison chat on a cheap model (POST /api/liaison)
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

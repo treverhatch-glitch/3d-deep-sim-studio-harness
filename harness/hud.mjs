@@ -19,6 +19,7 @@ import { readTaskHandoff } from './task.mjs';
 import { effectiveMode, describeMode, MODES } from './mode.mjs';
 import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
+import { readDesigns } from './art.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -28,7 +29,7 @@ const readJson = (rel, fallback = null) => {
   }
 };
 
-// Divisions ship switched off; studio/divisions.json (phase 1) overrides this list.
+// Core divisions and Art are on; the rest ship switched off. studio/divisions.json overrides this list.
 export const DEFAULT_DIVISIONS = [
   { id: 'production', name: 'Producer', core: true },
   { id: 'engineering', name: 'Engineering', core: true },
@@ -36,7 +37,7 @@ export const DEFAULT_DIVISIONS = [
   { id: 'design', name: 'Design & Balance', core: true },
   { id: 'review', name: 'Review', core: true },
   { id: 'sound', name: 'Sound Studio' },
-  { id: 'art', name: 'Art' },
+  { id: 'art', name: 'Art', active: true },
   { id: '3d', name: '3D' },
   { id: 'localization', name: 'Localization' },
   { id: 'ui', name: 'UI & Accessibility' },
@@ -66,6 +67,7 @@ const ROOM_FOR_ROLE = {
   'sound-designer': 'sound',
   composer: 'sound',
   'listen-checker': 'sound',
+  art: 'art',
   artist: 'art',
   'art-director': 'art',
   localizer: 'localization',
@@ -270,6 +272,7 @@ export function buildHudState() {
       ...needs.map((n) => `${n.task ? `${n.task}: ` : ''}${n.msg}`),
       ...(bibleNow && !bibleNow.signed ? ['The Game Bible is waiting for your signature (npm run bible -- check, then sign)'] : []),
       ...(bibleNow?.amended ? [`The Bible changed after signing (${bibleNow.amended.changes.map((c) => c.field).join(', ')}): re-sign it so build work can go on`] : []),
+      ...readDesigns().filter((d) => d.status === 'proposed').map((d) => `${d.id}: approve or change the ${d.kind === 'style' ? 'style sheet' : d.kind} "${d.title}" (Game plan)`),
       ...openAsks().map((a) => `${a.id}: ${a.question}${a.deadline ? ` (if you don't answer in time, it goes with "${a.default}")` : ''}`),
     ].slice(0, 12),
     red: ((readJson('.studio/gates-last.json', null) || {}).rows || []).filter((r) => r.required && !r.ok).map((r) => r.id),
@@ -296,6 +299,7 @@ export function buildHudState() {
     stopped: readJson('.studio/STOP.json', null),
     mode: { ...effectiveMode(), text: describeMode() },
     modes: Object.fromEntries(Object.entries(MODES).map(([id, m]) => [id, { label: m.label, pitch: m.pitch }])),
+    art: { designs: readDesigns().filter((d) => d.status !== 'replaced').slice(-24).map((d) => ({ id: d.id, kind: d.kind, title: d.title, file: d.file, image: d.image, status: d.status, by: d.by, note: d.note || '', licence: d.licence })), reference: bibleNow?.artReference || null },
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
     launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null })),
     signals,

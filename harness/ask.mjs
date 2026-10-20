@@ -25,7 +25,7 @@ const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md'
 const PROTECTED = /\b(sign|re-?sign|signature|pillars?|crossed[- ]out|bring back|spend|pay|purchase|buy|budget|money|delete|remove (?:the )?repo|wipe)\b/i;
 // Names agents use (a role, a tool or a model, often with -1, -auto-2 …): they can't answer for a person.
 const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|liaison|scout|reference-scout|designer|balancer|agent|watch|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes)\b/i;
-const isAgent = (by) => AGENTISH.test(by) || by === process.env.STUDIO_LOCK_OWNER || by === process.env.STUDIO_PRODUCER_NAME;
+export const isAgent = (by) => AGENTISH.test(by) || by === process.env.STUDIO_LOCK_OWNER || by === process.env.STUDIO_PRODUCER_NAME;
 
 const read = (f) => {
   try {

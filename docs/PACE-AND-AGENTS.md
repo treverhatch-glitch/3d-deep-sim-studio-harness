@@ -44,6 +44,29 @@ The launcher:
 
 In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself.
 
+## War Room actions reach agents
+
+What the game dev does in the War Room starts the agent that should act on it, if a tool is set for
+that role and the pace's caps allow it (a person asked, so this works in every pace):
+
+| In the War Room | Goes to | Starts |
+| --- | --- | --- |
+| Pitch an idea | the Idea Board, straight to R&D | an R&D agent |
+| Message the Producer | the Producer's inbox | the Producer, if none is running |
+| Answer follow-up questions | the Game Bible | the Director |
+| Say yes to a Liaison brief | R&D (an idea) or the Producer | that agent |
+| Ask for changes to a design | an art task with your words | the art department |
+
+Each answer says what happens next in one line: who has it, whether an agent started, or what to set
+so one can (`STUDIO_AGENT_TOOL` or `STUDIO_<ROLE>_TOOL`).
+
+## The Liaison chat
+
+The Game plan view has a chat with the Liaison, on a cheap model through the router (Ollama or a free
+key; the daily token cap applies). It asks until it understands, then reads back a brief: an idea, a
+direction, an asset or a question. Nothing is sent until you press **Yes, send it**; correcting it in
+the chat changes the same brief. The conversation is kept in `studio/liaison/chat.md`.
+
 ## Questions with a deadline
 
 ```bash

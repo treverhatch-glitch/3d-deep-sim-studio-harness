@@ -55,6 +55,19 @@
   #plan .mode b { display: block; }
   #plan .ask { border-left: 4px solid #f5b83d; padding: 6px 10px; margin-bottom: 10px; }
   #plan .ask .opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #plan .designs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+  #plan .design { border: 1px solid var(--line, #ccc); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  #plan .design.proposed { border-color: #f5b83d; border-width: 2px; }
+  #plan .design img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: rgba(127, 127, 127, .12); border-radius: 4px; }
+  #plan .design .file { font-size: 13px; overflow-wrap: anywhere; opacity: .8; }
+  #plan .design input { width: 100%; box-sizing: border-box; }
+  #plan .design .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  #plan .chatlog { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; overscroll-behavior: contain; }
+  #plan .chatmsg { padding: 6px 10px; border-radius: 10px; max-width: 88%; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #plan .chatmsg.me { align-self: flex-end; background: rgba(108, 198, 255, .16); }
+  #plan .chatmsg.them { align-self: flex-start; border: 1px solid var(--line, #ccc); }
+  #plan #p-chat { display: flex; gap: 6px; }
+  #plan #p-chat textarea { flex: 1; min-height: 44px; }
   #o-launched .ag { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
@@ -449,7 +462,7 @@
       <section id="o-act"><h2>Act <small id="o-actstate">read-only</small></h2>
         <div class="act-row"><input id="o-name" placeholder="Your name" aria-label="Your name, shown on what you do"> <input id="o-token" type="password" placeholder="HUB token" aria-label="HUB token from .env" autocomplete="off"> <button id="o-save" type="button">Use</button></div>
         <form id="o-add" class="act-row"><input id="o-title" placeholder="New task" aria-label="New task title" required>
-          <select id="o-role" aria-label="Role"><option>builder</option><option>qa-playtester</option><option>designer-calibrator</option><option>reviewer</option><option>reference-scout</option><option>fun-tester</option><option>asset-3d</option><option>producer</option></select>
+          <select id="o-role" aria-label="Role"><option>builder</option><option>qa-playtester</option><option>designer-calibrator</option><option>reviewer</option><option>reference-scout</option><option>fun-tester</option><option>asset-3d</option><option>art</option><option>rnd</option><option>producer</option></select>
           <select id="o-type" aria-label="Kind of task"><option value="">change</option><option>bug</option><option>study</option><option>balance</option><option>fun</option><option>playtest</option><option>review</option><option>docs</option><option>system</option></select>
           <select id="o-pri" aria-label="Priority"><option>P0</option><option selected>P1</option><option>P2</option><option>P3</option></select>
           <select id="o-size" aria-label="Size, 1 easy to 5 big"><option value="">size</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
@@ -520,6 +533,20 @@
       <section>
         <h2>The studio is asking you <small id="p-askcount"></small></h2>
         <div id="p-asks"></div>
+      </section>
+    </div>
+    <div class="two">
+      <section>
+        <h2>Art department <small id="p-artcount">proposes the look; you approve it</small></h2>
+        <p class="note" id="p-artref"></p>
+        <div class="designs" id="p-designs"></div>
+        <p class="note" id="p-artmsg" role="status"></p>
+      </section>
+      <section>
+        <h2>Talk to the Liaison <small>a cheap model; nothing is sent until you say yes</small></h2>
+        <div class="chatlog" id="p-chatlog" aria-live="polite"><div class="chatmsg them">Tell me what you want for the game, a change to how the studio works, or a question. I'll ask until I understand, then read it back before anything is sent.</div></div>
+        <form id="p-chat"><textarea id="p-chatin" aria-label="Message for the Liaison" maxlength="1500" required></textarea><button class="go">Send</button></form>
+        <p class="note" id="p-chatmsg" role="status"></p>
       </section>
     </div>
     <section id="p-shape"></section>
@@ -647,7 +674,9 @@
       const r = (await post('/api/tasks', body)).result;
       $('o-title').value = '';
       $('o-cause').value = '';
-      return `Queued ${r.id}: ${r.title}`;
+      const on = ((state && state.launched) || []).find((x) => x.running && x.role === body.role);
+      const m = (state && state.mode) || {};
+      return `Queued ${r.id}: ${r.title}. ${on ? `${on.agent} picks it up after its current task.` : m.autoLaunch ? `The watcher starts a ${body.role} agent for it on its next pass (within ${m.label}'s caps).` : `It waits until a ${body.role} agent starts: Start agent below, or choose a faster pace.`}`;
     });
   });
   $('o-watch').addEventListener('click', () => act('Watcher', async () => {
@@ -747,7 +776,7 @@
       const r = await post('/api/ideas', { title, detail: $('p-idetail').value.trim(), by: actor() });
       $('p-ititle').value = '';
       $('p-idetail').value = '';
-      $('p-msg').textContent = `${r.idea.id} captured. The watcher hands it to the Producer on its next pass.`;
+      $('p-msg').textContent = r.next || `${r.idea.id} captured.`;
       pollPlan();
     } catch (err) {
       $('p-msg').textContent = `Couldn't pitch it: ${err.message}`;
@@ -769,7 +798,7 @@
     if (!Object.keys(answers).length) return;
     try {
       const r = await post('/api/followups', { answers, by: actor() });
-      $('p-fumsg').textContent = `Saved ${r.saved}. ${r.left} left.`;
+      $('p-fumsg').textContent = r.next || `Saved ${r.saved}. ${r.left} left.`;
       lastFuKeys = null;
       pollPlan();
     } catch (err) {
@@ -781,9 +810,9 @@
     const msg = $('o-msg').value.trim();
     if (!msg) return;
     act('Message', async () => {
-      await post('/api/inbox', { msg, by: actor() });
+      const r = await post('/api/inbox', { msg, by: actor() });
       $('o-msg').value = '';
-      return 'Sent. The Producer reads its inbox at its next briefing.';
+      return r.next || 'Sent. The Producer reads its inbox at its next briefing.';
     });
   });
 
@@ -1618,10 +1647,52 @@
       $('p-askcount').textContent = asks.open.length ? `${asks.open.length} waiting` : '';
       $('p-asks').innerHTML = (asks.open.length ? asks.open.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}<div class="note">from ${esc(a.by)}${a.deadline ? `; if you don't answer by ${esc(hhmm(a.deadline))}, it goes with "${esc(a.default)}" because ${esc(a.why)}` : '; it waits for you'}</div><div class="opts">${(a.options.length ? a.options : ['yes', 'no']).map((o) => `<button type="button" data-ask="${esc(a.id)}" data-answer="${esc(o)}">${esc(o)}</button>`).join('')}</div></div>`).join('') : '<p class="note">No questions waiting.</p>')
         + (asks.decided.length ? `<h3 class="sub">Decided without you</h3>${asks.decided.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}: went with "${esc(a.answer)}" (${esc(a.why)})<div class="opts">${a.options.filter((o) => o !== a.answer).map((o) => `<button type="button" data-reverse="${esc(a.id)}" data-answer="${esc(o)}">Change to ${esc(o)}</button>`).join('')}</div></div>`).join('')}` : '');
+      const art = s.art || { designs: [], reference: null };
+      const waiting = art.designs.filter((d) => d.status === 'proposed');
+      $('p-artcount').textContent = waiting.length ? `${waiting.length} waiting for you` : 'proposes the look; you approve it';
+      $('p-artref').textContent = art.reference ? `Art reference: ${art.reference.file}, approved by ${art.reference.approvedBy}. Art and renderer work is checked against it.` : 'No art reference yet. The art department starts in pre-production with a style sheet and five placeholder assets for you to approve.';
+      const keep = {};
+      $('p-designs').querySelectorAll('input[data-note]').forEach((i) => { if (i.value) keep[i.dataset.note] = i.value; });
+      const order = [...waiting, ...art.designs.filter((d) => d.status !== 'proposed').reverse()].slice(0, 12);
+      const artSig = JSON.stringify(order.map((d) => [d.id, d.status]));
+      if ($('p-designs').dataset.sig !== artSig) {
+        $('p-designs').dataset.sig = artSig;
+        $('p-designs').innerHTML = order.length ? order.map((d) => `<div class="design ${esc(d.status)}">${d.image ? `<img src="/api/art/file?id=${encodeURIComponent(d.id)}" alt="${esc(d.title)}" loading="lazy">` : ''}<div><b>${esc(d.id)}</b> ${esc(d.title)}</div><div class="file">${esc(d.kind === 'style' ? 'style sheet' : d.kind)} · ${esc(d.file)}${d.licence ? ` · ${esc(d.licence)}` : ''} · by ${esc(d.by)}</div>${d.status === 'proposed' ? `<input data-note="${esc(d.id)}" placeholder="What to change (for Ask for changes)" aria-label="What to change in ${esc(d.id)}"><div class="opts"><button type="button" class="go" data-art="approve" data-id="${esc(d.id)}">Approve</button><button type="button" data-art="changes" data-id="${esc(d.id)}">Ask for changes</button></div>` : `<div class="note">${d.status === 'approved' ? 'Approved' : d.status === 'changes' ? `Changes asked: ${esc(d.note)}` : esc(d.status)}</div>`}</div>`).join('') : '<p class="note">No designs yet.</p>';
+        $('p-designs').querySelectorAll('input[data-note]').forEach((i) => { if (keep[i.dataset.note]) i.value = keep[i.dataset.note]; });
+      }
     }
   }
+  // The Liaison chat: the conversation stays in this tab; a brief is sent only on "Yes, send it".
+  let chatMsgs = [];
+  let pendingBrief = null;
+  const bubble = (who, text, extra = '') => {
+    const el = document.createElement('div');
+    el.className = `chatmsg ${who}`;
+    el.textContent = text;
+    if (extra) el.insertAdjacentHTML('beforeend', extra);
+    $('p-chatlog').appendChild(el);
+    $('p-chatlog').scrollTop = $('p-chatlog').scrollHeight;
+  };
+  $('p-chat').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const text = $('p-chatin').value.trim();
+    if (!text) return;
+    $('p-chatin').value = '';
+    chatMsgs.push({ role: 'user', content: text });
+    bubble('me', text);
+    $('p-chatmsg').textContent = 'The Liaison is thinking…';
+    try {
+      const r = await post('/api/liaison', { messages: chatMsgs, pending: pendingBrief, by: actor() });
+      if (r.brief) pendingBrief = r.brief;
+      chatMsgs.push({ role: 'assistant', content: r.reply });
+      bubble('them', r.reply, r.brief ? `<div class="opts"><button type="button" class="go" data-brief="confirm" data-id="${esc(r.brief)}">Yes, send it</button><button type="button" data-brief="drop" data-id="${esc(r.brief)}">No, drop it</button></div>` : '');
+      $('p-chatmsg').textContent = r.brief ? `${r.brief} is waiting for your yes. To change it, just say what's different.` : '';
+    } catch (err) {
+      $('p-chatmsg').textContent = `Couldn't reach the Liaison: ${err.message}`;
+    }
+  });
   document.addEventListener('click', async (ev) => {
-    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse]');
+    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse],[data-art],[data-brief]');
     if (!t) return;
     const say = (msg) => { notify(msg); if ($('p-modemsg') && document.body.dataset.skin === 'plan') $('p-modemsg').textContent = msg; };
     try {
@@ -1636,8 +1707,20 @@
         const r = await post('/api/mode', { mode: t.dataset.mode, by: actor() });
         say(r.text);
       } else if (t.dataset.ask) {
-        await post('/api/asks', { id: t.dataset.ask, answer: t.dataset.answer, by: actor() });
-        say(`${t.dataset.ask} answered: ${t.dataset.answer}. The asking agent sees it on its next step.`);
+        const r = await post('/api/asks', { id: t.dataset.ask, answer: t.dataset.answer, by: actor() });
+        say(r.next || `${t.dataset.ask} answered: ${t.dataset.answer}.`);
+      } else if (t.dataset.art) {
+        const note = ($('p-designs').querySelector(`input[data-note="${t.dataset.id}"]`) || {}).value || '';
+        if (t.dataset.art === 'changes' && !note.trim()) { $('p-artmsg').textContent = 'Write what to change in the box first.'; return; }
+        const r = await post('/api/art', { action: t.dataset.art, id: t.dataset.id, note, by: actor() });
+        $('p-artmsg').textContent = r.next;
+      } else if (t.dataset.brief) {
+        const r = await post('/api/liaison', { action: t.dataset.brief, id: t.dataset.id, by: actor() });
+        t.parentElement.remove();
+        bubble('them', r.next);
+        $('p-chatmsg').textContent = '';
+        chatMsgs = [];
+        pendingBrief = null;
       } else if (t.dataset.reverse) {
         const r = await post('/api/asks', { action: 'reverse', id: t.dataset.reverse, answer: t.dataset.answer, by: actor() });
         say(`${t.dataset.reverse} changed to ${t.dataset.answer}; the Producer has ${r.task} to undo the earlier choice.`);
@@ -1651,7 +1734,7 @@
     ev.preventDefault();
     try {
       const r = await post('/api/agents', { role: $('o-arole').value, tool: $('o-atool').value || undefined, model: $('o-amodel').value.trim() || undefined, by: actor() });
-      notify(`Started ${r.agent} (${r.tool}, ${r.model}). It takes the next ${$('o-arole').value} task; its output is in .studio/agents/${r.agent}.log.`);
+      notify(`Started ${r.agent} (${r.tool}, ${r.model}). It takes the next ${$('o-arole').value} task and shows below with a heartbeat every 2 minutes; output in .studio/agents/${r.agent}.log.`);
       poll();
     } catch (err) {
       notify(`Not started: ${err.message}`);

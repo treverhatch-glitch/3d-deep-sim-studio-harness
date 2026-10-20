@@ -214,6 +214,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   return { ok: true, code, ...result };
 }
 
+/** End an agent and anything it started (on Windows the agent runs under cmd.exe, so kill the tree). */
+export function stopAgent(pid) {
+  try {
+    if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    else process.kill(pid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Start one agent, after the stop switch, caps and spend checks. */
 export function startAgent(opts, { detach = false } = {}) {
   const { role, agent } = opts;
@@ -259,6 +270,24 @@ export function fillAgents() {
   return { started };
 }
 
+/**
+ * A person did something in the War Room that an agent should act on now (a pitch, a message, a
+ * confirmed brief, a design to change). Start that role's agent if none is running and the caps
+ * allow it, even in paces that don't start agents on their own: a person asked. Returns `next`,
+ * one plain sentence saying what happens now.
+ */
+export function wake(role, { task = null, why = '' } = {}) {
+  const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
+  const busy = sessions().find((s) => s.role === role && s.running);
+  if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
+  if (!launchableRoles([role]).length) return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
+  const n = sessions().filter((s) => s.role === role).length + 1;
+  const r = startAgent({ role, agent: `${role}-${n}`, task }, { detach: true });
+  if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
+  emitEvent({ type: 'agent.wake', agent: 'war-room', to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
+  return { started: true, agent: r.agent, next: `${label} is starting now as ${r.agent} (${r.tool}${r.model !== 'unknown' ? `, ${r.model}` : ''})${task ? ` on ${task}` : ''}. Watch it in Ops.` };
+}
+
 /** Which roles can start without a person (for preflight and the War Room). */
 export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-playtester', 'rnd', 'planner', 'art', 'reviewer', 'liaison']) {
   return roles.filter((r) => process.env[`STUDIO_${roleKey(r)}_CMD`] || process.env[`STUDIO_${roleKey(r)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || (r === 'director' && process.env.STUDIO_DIRECTOR_CMD));
@@ -292,11 +321,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(`${argv[1] || '(no name)'} isn't running.`);
       process.exit(1);
     }
-    try {
-      process.kill(s.pid);
-    } catch {
-      // already gone
-    }
+    stopAgent(s.pid);
     console.log(`Stopping ${s.agent}; the launcher hands its work back.`);
     process.exit(0);
   }

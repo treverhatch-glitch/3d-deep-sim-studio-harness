@@ -41,6 +41,7 @@ const PREFIX = [
   [/^check forced done\b/i, 'none'],
   [/^director review\b/i, 'direction'],
   [/^idea\b/i, 'idea'],
+  [/^art\b/i, 'art'],
   [/^(plan|sign the game bible|ideas:)\b/i, 'none'],
 ];
 const BY_ROLE = {
@@ -59,6 +60,9 @@ const BY_ROLE = {
   liaison: 'none',
   rnd: 'idea',
   planner: 'idea',
+  art: 'art',
+  artist: 'art',
+  'art-director': 'art',
 };
 
 export const TYPES = {
@@ -73,6 +77,7 @@ export const TYPES = {
   direction: { skill: 'studio/skills/direction.md', means: 'a dated review in studio/bible/reviews/ since the task started, naming the phase, what it checked, a verdict, and next tasks' },
   system: { skill: 'studio/skills/system.md', means: 'a spec with a hand-off in studio/bible/systems/, the sim change with a scenario in qa.mjs and updated goldens, a playtest of the current build, a green verify after the last change, and an approving review from another model family' },
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
+  art: { skill: 'studio/skills/art.md', means: 'designs proposed for the game dev since the task started (npm run art -- propose); approving them is the dev\'s call, not part of done' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
 
@@ -311,6 +316,20 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Review gives a verdict (on course, drifting, off course, phase-ready)', reviews.some((r) => r.verdict), 'the review has no "Verdict: on course|drifting|off course|phase-ready" line');
     check('Review says what it checked (pillars or layers)', reviews.some((r) => /pillar:|layer:/i.test(r.checked)), 'the review has no "Checked: pillar:… layer:…" line');
     check('Review lists next tasks', reviews.some((r) => r.next), 'the review has no "## Next" list');
+  }
+  if (type === 'art') {
+    let designs = [];
+    try {
+      designs = JSON.parse(fs.readFileSync(abs('studio/art/designs.json'), 'utf8')).designs || [];
+    } catch {
+      // none yet
+    }
+    const mine = designs.filter((d) => d.task === task.id || Date.parse(d.at) >= since);
+    check('Designs proposed for the game dev since the task started', mine.length, 'no design proposed since this task started (npm run art -- propose <file> --title "…" --kind style|asset --task ' + task.id + ')');
+    if (/style sheet/i.test(task.title)) check('A style sheet among them', mine.some((d) => d.kind === 'style'), 'the task asks for a style sheet; propose one with --kind style');
+    const m = task.title.match(/\b(\w+) placeholder assets?\b/i);
+    const want = m ? { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }[m[1].toLowerCase()] || Number(m[1]) || 0 : 0;
+    if (want) check(`${want} placeholder assets among them`, mine.filter((d) => d.kind === 'asset').length >= want, `${mine.filter((d) => d.kind === 'asset').length} of ${want} placeholder assets proposed`);
   }
   if (type === 'idea') {
     const id = (task.title.match(/\bI-\d+\b/) || [])[0];

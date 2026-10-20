@@ -1,6 +1,6 @@
 {
   "name": "3d-deep-sim-studio-harness",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "description": "Agent-agnostic, file-based workflow harness for deep simulation games: pure sim cartridges, seed + tick replay, 64-bit golden hashes, locks, gates, a closed QA loop and a zero-token War Room.",
   "type": "module",
   "license": "MIT",
@@ -46,6 +46,7 @@
     "agent": "node harness/agent.mjs",
     "mode": "node harness/mode.mjs",
     "ask": "node harness/ask.mjs",
+    "art": "node harness/art.mjs",
     "hud:check": "node qa/hud-check.mjs",
     "sign": "node harness/sign.mjs",
     "trajectories": "node harness/trajectories.mjs",

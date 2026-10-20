@@ -48,15 +48,16 @@ import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
 import { learnIfDue } from '../harness/learn.mjs';
 import { runReportIfDue } from '../harness/run-report.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
-import { startAgent, sessions as agentSessions } from '../harness/agent.mjs';
+import { startAgent, stopAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
+import { readDesigns, approve as approveDesign, changes as changeDesign, IMAGE as ART_IMAGE } from '../harness/art.mjs';
 import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
-import { readBriefs } from '../harness/liaison.mjs';
+import { readBriefs, chatTurn, confirmBrief, dropBrief } from '../harness/liaison.mjs';
 import { readBible, writeBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview, pendingFollowups, answerFollowup } from '../harness/bible.mjs';
 import { runIntake } from '../harness/intake.mjs';
 import { readConsent, setConsent, markShown, describeConsent, QUESTION as DATA_QUESTION, DETAIL as DATA_DETAIL } from '../harness/data-consent.mjs';
-import { addIdea } from '../harness/ideas.mjs';
+import { addIdea, routeIdea } from '../harness/ideas.mjs';
 
 loadDotEnv();
 
@@ -547,8 +548,12 @@ export function createHubServer() {
       const body = await readBody(req);
       noteHuman(body.by || 'war-room-human');
       const r = addIdea({ title: String(body.title || ''), detail: String(body.detail || ''), by: String(body.by || 'war-room-human').slice(0, 60), source: 'dev-pitched' });
+      if (!r.ok) return sendJson(res, 400, r);
+      // A pitch from the dev goes straight to R&D, and R&D's agent starts if it can.
+      const routed = routeIdea(r.idea.id, 'war-room');
+      const w = routed.ok ? wake('rnd', { task: routed.task, why: `pitch ${r.idea.id}` }) : { next: routed.message };
       broadcastSnapshot();
-      return sendJson(res, r.ok ? 201 : 400, r);
+      return sendJson(res, 201, { ...r, task: routed.task || null, started: w.agent || null, next: `${r.idea.id} is on the Idea Board. ${w.next}` });
     }
     if (url.pathname === '/api/intake' && req.method === 'POST') {
       const body = await readBody(req);
@@ -570,11 +575,7 @@ export function createHubServer() {
       if (body.action === 'stop') {
         const s = agentSessions().find((x) => x.agent === body.agent && x.running);
         if (!s) return sendJson(res, 400, { ok: false, error: `${body.agent} isn't running` });
-        try {
-          process.kill(s.pid);
-        } catch {
-          // already gone
-        }
+        stopAgent(s.pid);
         return sendJson(res, 200, { ok: true, stopping: s.agent });
       }
       const role = String(body.role || '').replace(/[^a-z0-9-]/gi, '').slice(0, 30);
@@ -589,7 +590,45 @@ export function createHubServer() {
       noteHuman(by);
       const r = body.action === 'reverse' ? await reverseAsk(String(body.id || ''), String(body.answer || ''), by) : answerAsk(String(body.id || ''), String(body.answer || ''), by);
       broadcastSnapshot();
-      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ask: r.ask, task: r.task || null } : { ok: false, error: r.message });
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ask: r.ask, task: r.task || null, next: r.task ? `The Producer has ${r.task} to undo the old decision.` : `${r.ask.id} answered; ${r.ask.by} sees your answer in its next briefing.` } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/liaison' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      if (body.action === 'confirm' || body.action === 'drop') {
+        const id = String(body.id || '');
+        if (body.action === 'drop') {
+          const d = dropBrief(id, 'the game dev said no in the War Room chat', by);
+          return sendJson(res, d.ok ? 200 : 400, d.ok ? { ok: true, next: `${id} dropped; nothing was sent.` } : { ok: false, error: d.message });
+        }
+        const r = confirmBrief(id, { by, quote: 'yes (War Room chat)' });
+        if (!r.ok) return sendJson(res, 400, { ok: false, error: r.message });
+        const w = r.routed.rnd ? wake('rnd', { task: r.routed.rnd, why: id }) : wake('producer', { task: r.routed.producer, why: id });
+        broadcastSnapshot();
+        return sendJson(res, 200, { ok: true, routed: r.routed, started: w.agent || null, next: `${id} sent on${r.routed.idea ? ` as ${r.routed.idea}` : ''}${r.routed.director ? '; the Director checks it fits the game' : ''}. ${w.next}` });
+      }
+      const r = await chatTurn({ messages: body.messages || [], from: by, pending: /^B-\d+$/.test(body.pending || '') ? body.pending : null });
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? r : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/art' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const id = String(body.id || '');
+      const r = body.action === 'changes' ? await changeDesign(id, String(body.note || '').slice(0, 1000), by) : await approveDesign(id, by, String(body.note || '').slice(0, 1000));
+      let next = r.next;
+      if (r.ok && r.task) next = `${next} ${wake('art', { task: r.task, why: `changes to ${id}` }).next}`;
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, design: r.design, task: r.task || null, next } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/art/file' && req.method === 'GET') {
+      const d = readDesigns().find((x) => x.id === url.searchParams.get('id'));
+      const file = d ? path.resolve(REPO_ROOT, d.file) : null;
+      if (!d || !ART_IMAGE.test(d.file) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file)) return sendJson(res, 404, { ok: false, error: 'no image for that design' });
+      const ext = path.extname(file).slice(1).toLowerCase();
+      res.writeHead(200, { 'content-type': ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+      return res.end(fs.readFileSync(file));
     }
     if (url.pathname === '/api/stop' && req.method === 'POST') {
       const body = await readBody(req);
@@ -617,7 +656,9 @@ export function createHubServer() {
       let saved = 0;
       for (const [k, v] of Object.entries(body.answers || {})) if (typeof v === 'string' && v.trim() && answerFollowup(b, k, v.slice(0, 2000), String(body.by || 'war-room-human').slice(0, 60))) saved += 1;
       writeBible(b);
-      return sendJson(res, 200, { ok: true, saved, left: pendingFollowups(b).length });
+      const left = pendingFollowups(b).length;
+      const w = saved ? wake('director', { why: `${saved} new answer(s) in the Bible` }) : { next: '' };
+      return sendJson(res, 200, { ok: true, saved, left, started: w.agent || null, next: `${saved} answer(s) saved in the Game Bible${left ? `, ${left} question(s) left` : ''}. ${w.next}`.trim() });
     }
     if (url.pathname === '/api/bible/sign' && req.method === 'POST') {
       const body = await readBody(req);
@@ -638,8 +679,9 @@ export function createHubServer() {
       if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
       fs.appendFileSync(inbox, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **${by}**: ${msg.replace(/\n+/g, ' ')}\n`);
       emitEvent({ type: 'human.message', agent: by, to: 'producer', msg: msg.slice(0, 300) });
+      const w = wake('producer', { why: `a message from ${by}` });
       broadcastSnapshot();
-      return sendJson(res, 201, { ok: true });
+      return sendJson(res, 201, { ok: true, started: w.agent || null, next: `In the Producer's inbox. ${w.next}` });
     }
 
     if (url.pathname === '/api/brief' && req.method === 'POST') {

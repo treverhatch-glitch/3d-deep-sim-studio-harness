@@ -37,6 +37,7 @@ export function queuePreproduction(b) {
   const added = [];
   const t = b.answers.title;
   added.push(addTask({ title: `Study: the reference games for ${t} (what to take, what to avoid)`, role: 'reference-scout', priority: 'P1', meta: { size: 2, preproduction: true } }));
+  added.push(addTask({ title: `Art: style sheet and five placeholder assets for ${t} (npm run art -- propose; the game dev approves them)`, role: 'art', priority: 'P1', meta: { size: 2, preproduction: true } }));
   added.push(addTask({ title: `Docs: storyboard ${t} Phase 1, 2 and 3 as beat sheets in studio/bible/STORYBOARD.md`, role: 'director', priority: 'P1', meta: { size: 2, preproduction: true } }));
   // One study per explore layer, up to what the play length can carry; the rest share one task.
   const explore = LAYERS.filter((x) => b.layers[x.id]?.answer === 'explore');

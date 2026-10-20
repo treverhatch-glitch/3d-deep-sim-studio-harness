@@ -910,6 +910,80 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the run report shows the pace and what was decided without the dev', /Pace: Extreme speed/.test(rep) && /## Decided without you[\s\S]*A-001/.test(rep), rep.slice(0, 600));
 }
 
+// The art department starts in pre-production; the dev approves its designs; War Room actions reach agents.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const artTask = (q.match(/\*\*(T-\d+)\*\* \[P1\] \(`art`\) — Art: style sheet and five placeholder assets/) || [])[1];
+  report('pre-production queues the art department: a style sheet and five placeholder assets', Boolean(artTask), q);
+  report('the Bible says there is no art reference yet', /no art reference yet/.test(run(dir, 'node harness/bible.mjs check', env).stdout));
+  fs.mkdirSync(path.join(dir, 'studio/art'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'assets/placeholder'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'references/R-009'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'references/R-009/shot.png'), 'png');
+  report('a file from the reference library can\'t be proposed for the game', /never to ship/.test(run(dir, 'node harness/art.mjs propose references/R-009/shot.png --title "Their look" --by art-1', env).stderr));
+  const start = run(dir, `node harness/task.mjs start ${artTask} --agent art-1`, env);
+  report('art work can start before the Bible is signed', start.status === 0, start.stdout + start.stderr);
+  fs.writeFileSync(path.join(dir, 'studio/art/STYLE.md'), '# Style\nMoss greens, warm lamps, round shapes.\n');
+  run(dir, `node harness/art.mjs propose studio/art/STYLE.md --kind style --title "Moss and lamplight" --task ${artTask} --by art-1`, env);
+  fs.writeFileSync(path.join(dir, 'assets/placeholder/crate.glb'), 'glb');
+  run(dir, `node harness/art.mjs propose assets/placeholder/crate.glb --title "Garden crate" --task ${artTask} --source "tools/blender/generate_glb.py --preset crate" --by art-1`, env);
+  const early = run(dir, `node harness/task.mjs done ${artTask} --agent art-1`, env);
+  report('the art task isn\'t done with one placeholder of five', early.status !== 0 && /1 of 5 placeholder assets/.test(early.stdout + early.stderr), early.stdout + early.stderr);
+  for (const k of [2, 3, 4, 5]) {
+    fs.writeFileSync(path.join(dir, `assets/placeholder/p${k}.glb`), `glb${k}`);
+    run(dir, `node harness/art.mjs propose assets/placeholder/p${k}.glb --title "Prop ${k}" --task ${artTask} --by art-1`, env);
+  }
+  const done = run(dir, `node harness/task.mjs done ${artTask} --agent art-1`, env);
+  report('with a style sheet and five placeholders proposed, the art task is done (approval stays with the dev)', done.status === 0, done.stdout + done.stderr);
+  report('an agent can\'t approve a design', run(dir, 'node harness/art.mjs approve D-001 --by art-1', env).status !== 0 && run(dir, 'node harness/art.mjs approve D-001 --by prod-1', env).status !== 0);
+  const ap = run(dir, 'node harness/art.mjs approve D-001 --by hatch', env);
+  const bible = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8'));
+  report('approving the style sheet makes it the art reference in the Bible', ap.status === 0 && bible.artReference?.file === 'studio/art/STYLE.md' && /Art reference: studio\/art\/STYLE\.md \(approved by hatch/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')), ap.stdout + ap.stderr);
+  run(dir, 'node harness/art.mjs approve D-002 --by hatch', env);
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8'));
+  report('approving a placeholder asset records it in the asset ledger with who approved it and its source', man.assets.some((a) => a.file === 'assets/placeholder/crate.glb' && a.declaredBy === 'hatch' && a.design === 'D-002' && /generate_glb/.test(a.source)), JSON.stringify(man));
+  const noWords = run(dir, 'node harness/art.mjs changes D-003 --by hatch', env);
+  const ch = run(dir, 'node harness/art.mjs changes D-003 "taller, with a lid" --by hatch', env);
+  report('asking for changes needs your words, then gives the art department a task', noWords.status !== 0 && ch.status === 0 && /\(`art`\) — Art: change D-003 Prop 2: taller, with a lid/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), noWords.stderr + ch.stdout + ch.stderr + fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').split('\n').filter((l) => /Art:/.test(l)).join('\n'));
+  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
+  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
+  report('the art division is on by default, and designs waiting show under Needs you', hud.divisions?.find((d) => d.id === 'art')?.active === true && (hud.signals?.needsYou || []).some((x) => /D-004: approve or change/.test(x)), JSON.stringify(hud.signals));
+  // War Room actions start the right agent when a tool is set, and say what happens next either way.
+  fs.writeFileSync(path.join(dir, 'wake.mjs'), "import { wake } from './harness/agent.mjs';\nconsole.log(JSON.stringify(wake(process.argv[2], { task: process.argv[3] || null })));\n");
+  const none = JSON.parse(run(dir, 'node wake.mjs rnd T-001', env).stdout);
+  report('with no tool set, a wake-up says the task waits and how to start an agent', none.started === false && /No tool is set to start R&D/.test(none.next), none.next);
+  const wenv = { ...env, STUDIO_HEARTBEAT_SEC: '1', STUDIO_RND_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-001 wait' };
+  const up = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 8000 && !/rnd-1/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  const again = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
+  report('a pitch or message starts the role\'s agent, and a second one finds it already running', up.started === true && /R&D is starting now as rnd-1/.test(up.next) && again.started === false && /is running/.test(again.next), `${up.next} | ${again.next}`);
+  run(dir, 'node harness/agent.mjs stop rnd-1', env);
+  // The Liaison chat on a cheap model: a brief is drafted and read back; a correction changes it.
+  const fake = path.join(dir, 'fake-liaison.mjs');
+  fs.writeFileSync(fake, `import http from 'node:http';
+let n = 0;
+const replies = ['What should the player see first?', 'BRIEF {"kind":"idea","title":"Fireflies at dusk","summary":"Fireflies light the garden at dusk.","detail":""}', 'BRIEF {"kind":"idea","title":"Fireflies at dusk, only in summer","summary":"Fireflies light the garden at dusk in summer.","detail":""}'];
+const s = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content: replies[Math.min(n++, 2)] } }], usage: { prompt_tokens: 5, completion_tokens: 5 } })); }); });
+s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
+  const server = spawn(process.execPath, [fake], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
+  fs.writeFileSync(path.join(dir, 'chat.mjs'), "import { chatTurn } from './harness/liaison.mjs';\nconst out = [];\nlet m = [{ role: 'user', content: 'fireflies please' }];\nlet r = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'the garden, at dusk' }];\nr = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'only in summer' }];\nout.push(await chatTurn({ messages: m, from: 'hatch', pending: r.brief }));\nconsole.log(JSON.stringify(out));\n");
+  const chat = await runAsync(dir, 'node chat.mjs', { ...env, OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' });
+  server.kill();
+  let turns = [];
+  try {
+    turns = JSON.parse(chat.stdout.trim().split('\n').pop());
+  } catch {
+    // reported below
+  }
+  report('the Liaison chat asks, then reads a brief back; a correction changes the same brief', turns.length === 3 && !turns[0].brief && /What should the player see first/.test(turns[0].reply) && turns[1].brief === turns[2].brief && /only in summer/.test(turns[2].reply) && /fireflies please/.test(fs.readFileSync(path.join(dir, 'studio/liaison/chat.md'), 'utf8')), chat.stdout + chat.stderr);
+  report('nothing reaches the queue until the dev confirms the brief', !/Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')));
+}
+
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
 {
   const http = await import('node:http');
@@ -1092,7 +1166,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   }
 }
 
-fs.rmSync(tmpRoot, { recursive: true, force: true });
+try {
+  fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 });
+} catch (err) {
+  // Windows keeps a folder while any process still runs in it; the OS cleans its temp folder later.
+  console.log(`[selftest] note: couldn't remove ${tmpRoot} yet (${err.code})`);
+}
 if (failed) {
   console.error(`[selftest] ${failed} check(s) failed`);
   process.exit(1);

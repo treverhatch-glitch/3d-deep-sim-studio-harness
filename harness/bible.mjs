@@ -267,6 +267,7 @@ export function checkBible(b) {
   if (pillars.length < 3 || pillars.length > 5) missing.push(`3 to 5 pillars (has ${pillars.length})`);
   if (pillars.some((p) => !p.rulesOut)) warnings.push('a pillar is stronger when it says what it rules out ("name: what it rules out")');
   for (const n of [1, 2, 3]) if (!b.phases?.[n]?.player) missing.push(`Phase ${n}: what the player does (phase${n})`);
+  if (!b.artReference) warnings.push('no art reference yet: the art department proposes a style sheet and the game dev approves it (npm run art)');
   if (b.amended) warnings.push(`changed after signing (${b.amended.changes.map((c) => c.field).join(', ')}): new build tasks wait until a person re-signs (npm run bible -- sign --by <name>)`);
   const unanswered = LAYERS.filter((l) => !b.layers?.[l.id]);
   if (unanswered.length) missing.push(`answer every layer yes, explore or no (${unanswered.length} left: ${unanswered.slice(0, 6).map((l) => l.id).join(', ')}${unanswered.length > 6 ? ', …' : ''})`);
@@ -375,7 +376,7 @@ export function renderBible(b) {
   L.push(b.signed ? `**Signed** by ${b.signed.by} on ${b.signed.at.slice(0, 10)}. **Open phase:** ${b.phase?.open || 1} of 3.` : '**Not signed yet: pre-production.** Build tasks wait until a person signs it (`npm run bible -- check`).', '');
   L.push('## Pitch', `${a.fantasy || '_?_'} The main verb: **${a.verb || '?'}**.`, '');
   const pl = PLAY_LENGTHS[a.playLength];
-  L.push(`- Play length: ${pl ? pl.label : '_?_'}${pl ? `. ${pl.involvement}` : ''}`, `- One sitting: ${a.session || '_?_'}`, `- For: ${a.audience || '_?_'}`, `- Genres: ${(a.genres || []).join(', ') || '_?_'}`, `- Platforms: ${(a.platforms || []).join(', ') || '_?_'}`, `- Art: ${a.art || '_?_'}`, `- Has to feel great: ${a.feelGreat || '_?_'}`, `- Win: ${a.win || '_?_'}`, `- Lose: ${a.lose || '_?_'}`, `- First playable slice: ${a.slice || '_?_'}`, `- Never: ${a.never || '_?_'}`, '');
+  L.push(`- Play length: ${pl ? pl.label : '_?_'}${pl ? `. ${pl.involvement}` : ''}`, `- One sitting: ${a.session || '_?_'}`, `- For: ${a.audience || '_?_'}`, `- Genres: ${(a.genres || []).join(', ') || '_?_'}`, `- Platforms: ${(a.platforms || []).join(', ') || '_?_'}`, `- Art: ${a.art || '_?_'}`, ...(b.artReference ? [`- Art reference: ${b.artReference.file} (approved by ${b.artReference.approvedBy} on ${b.artReference.at.slice(0, 10)}; art and renderer work is checked against it)`] : []), `- Has to feel great: ${a.feelGreat || '_?_'}`, `- Win: ${a.win || '_?_'}`, `- Lose: ${a.lose || '_?_'}`, `- First playable slice: ${a.slice || '_?_'}`, `- Never: ${a.never || '_?_'}`, '');
   if (b.voice && (b.voice.tone || b.voice.examples?.length || b.voice.do?.length)) {
     const v = b.voice;
     L.push('## Voice (how the game talks)', ...[v.tone ? `- Tone: ${v.tone}` : '', ...(v.do || []).map((x) => `- Do: ${x}`), ...(v.dont || []).map((x) => `- Don't: ${x}`), v.never?.length ? `- Never say: ${v.never.join(', ')}` : '', ...(v.examples || []).map((x) => `- Sounds like: "${x}"`)].filter(Boolean), '');

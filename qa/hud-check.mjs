@@ -7,13 +7,15 @@
  * Copies the repo to a temporary folder, fills it with a small studio (a signed Bible, tasks, an
  * agent at work, an idea, a playtest), starts the HUB there and drives Chromium through all three
  * views at desktop and phone sizes: no console errors, no sideways scroll, the agent drawer, adding a
- * task, messaging the Producer, live updates, pitching an idea, answering a follow-up, and the
- * data-sharing box. Your own studio is never touched. Skips (exit 0) when Playwright or Chromium
+ * task, messaging the Producer, live updates, pitching an idea, answering a follow-up, the
+ * data-sharing box, the MAX SPEED lever and the pace, the studio's questions, approving the art
+ * department's designs, the Liaison chat (on a fake local model), and starting and stopping an agent. Your own studio is never touched. Skips (exit 0) when Playwright or Chromium
  * isn't installed; set PLAYWRIGHT_CHROMIUM to a Chromium binary to use a specific one.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
+import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -54,6 +56,23 @@ sh('harness/task.mjs', 'start', 'T-002', '--agent', 'balancer-1', '--model', 'ge
 sh('harness/event.mjs', '--type', 'task.progress', '--agent', 'balancer-1', '--task', 'T-002', '--msg', 'sweeping spawnCost 40..120');
 sh('harness/ideas.mjs', 'add', 'Night market events', '--by', 'hatch');
 sh('qa/playtest.mjs', '--stage', '1', '--quiet');
+fs.mkdirSync(path.join(dir, 'studio/art'), { recursive: true });
+fs.mkdirSync(path.join(dir, 'assets/placeholder'), { recursive: true });
+fs.writeFileSync(path.join(dir, 'studio/art/concept.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGElEQVR4nGP4z8DwHwxRAQMDAwMDLjcDALOLD/G4jBqDAAAAAElFTkSuQmCC', 'base64'));
+fs.writeFileSync(path.join(dir, 'assets/placeholder/crate.glb'), 'glTF placeholder');
+sh('harness/art.mjs', 'propose', 'studio/art/concept.png', '--kind', 'style', '--title', 'Mossy pastel, soft light', '--by', 'art-1');
+sh('harness/art.mjs', 'propose', 'assets/placeholder/crate.glb', '--title', 'Garden crate', '--by', 'art-1');
+// A fake local model for the Liaison chat: it answers with a brief straight away.
+const fakeModel = http.createServer((req, res) => {
+  req.resume();
+  req.on('end', () => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content: 'BRIEF {"kind":"idea","title":"Fireflies at dusk","summary":"Fireflies light the garden at dusk and visitors stay longer.","detail":""}' } }], usage: { prompt_tokens: 5, completion_tokens: 5 } }));
+  });
+});
+await new Promise((r) => fakeModel.listen(0, '127.0.0.1', r));
+env.OLLAMA_BASE_URL = `http://127.0.0.1:${fakeModel.address().port}/v1`;
+env.STUDIO_PREPARE_CHAIN = 'ollama-local';
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 
 const port = await new Promise((resolve) => {
@@ -158,7 +177,7 @@ try {
   await page.fill('#p-ititle', 'Rainy day visitors');
   await page.click('#p-idea button');
   await wait(5500);
-  check('pitching an idea adds a card', /Rainy day visitors/.test(await page.locator('#p-board').innerText()));
+  check('pitching an idea adds a card and says R&D has it', /Rainy day visitors/.test(await page.locator('#p-board').innerText()) && /Idea: shape I-002/.test(read('studio/NEXT.md')) && /No tool is set to start R&D/.test(await page.locator('#p-msg').innerText()), await page.locator('#p-msg').innerText());
   const fu = page.locator('#p-fu input[data-key]');
   if (await fu.count()) {
     await fu.first().fill('Moss spreads slower in shade');
@@ -185,6 +204,25 @@ try {
   await wait(1500);
   check('answering it with one click records the answer', /"answer": "Food court"/.test(read('studio/asks/A-001.json')));
   check('the signals strip shows the pace on every view', (await page.locator('[data-signals] .sig.pace').count()) === 3);
+  // The art department's designs: shown with the image, approved or sent back with the dev's words.
+  const designs = await page.locator('#p-designs').innerText();
+  const imgOk = await page.locator('#p-designs img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
+  check('the art panel shows the designs waiting, with the concept image', /D-001/.test(designs) && /D-002/.test(designs) && imgOk && /D-001: approve or change/.test(await page.locator('#plan [data-signals]').innerText()), designs);
+  await page.fill('#p-designs input[data-note="D-002"]', 'make it rounder, like a planter');
+  await page.click('#p-designs [data-art="changes"][data-id="D-002"]');
+  await wait(1500);
+  check('asking for changes gives the art department a task with your words', /Art: change D-002 Garden crate: make it rounder/.test(read('studio/NEXT.md')) && /art department has T-/.test(await page.locator('#p-artmsg').innerText()), await page.locator('#p-artmsg').innerText());
+  await page.click('#p-designs [data-art="approve"][data-id="D-001"]');
+  await wait(1500);
+  check('approving the style sheet makes it the art reference in the Bible', /"artReference"/.test(read('studio/bible/bible.json')) && /art reference/.test(await page.locator('#p-artmsg').innerText()), await page.locator('#p-artmsg').innerText());
+  // The Liaison chat: the model reads a brief back; nothing moves until "Yes, send it".
+  await page.fill('#p-chatin', 'I want fireflies in the garden at night');
+  await page.click('#p-chat button');
+  await wait(2500);
+  check('the Liaison reads back what it understood, with a yes button', /Fireflies at dusk/.test(await page.locator('#p-chatlog').innerText()) && (await page.locator('#p-chatlog [data-brief="confirm"]').count()) === 1 && !/Fireflies/.test(read('studio/NEXT.md')), await page.locator('#p-chatlog').innerText());
+  await page.click('#p-chatlog [data-brief="confirm"]');
+  await wait(1500);
+  check('saying yes sends it to R&D and says what happens next', /Idea: shape I-\d+ Fireflies at dusk/.test(read('studio/NEXT.md')) && /sent on as I-/.test(await page.locator('#p-chatlog').innerText()), await page.locator('#p-chatlog').innerText());
   await page.click('#plan .switch[data-to="ops"]');
   await wait(800);
   await page.selectOption('#o-arole', 'builder');
@@ -198,6 +236,7 @@ try {
 } finally {
   await browser.close();
   hub.kill();
+  fakeModel.close();
   await wait(300);
   fs.rmSync(dir, { recursive: true, force: true });
 }
