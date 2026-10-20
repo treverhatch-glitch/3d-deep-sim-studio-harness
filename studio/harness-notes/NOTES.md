@@ -41,6 +41,7 @@
 
 ## Upgrade ideas
 
+- [2026-10-20 · producer] The game dev's seat (ROADMAP 2.9.0): a Liaison who converses, restates and gets confirmation before a brief reaches the Producer and Director; follow-up questions per layer; references with timestamped videos; assets with an owned or reference-only record; experiments on tracked branches that can be kept or taken back.
 - [2026-10-20 · producer] Layer keyword matching is a heuristic (it caught "levels" meaning maps and "weather" meaning rain in testing). Watch for false refusals in the stress test; the Director's drift report is the backstop.
 - [2026-10-20 · producer] Make each phase's scenario (phase-1-early, …) a required check before the phase opens, on top of the Director's verdict.
 - [2026-10-20 · producer] An intake form in the War Room on POST /api/intake: the first piece of a friendlier front end.

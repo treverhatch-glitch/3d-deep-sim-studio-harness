@@ -155,7 +155,28 @@ The tab shows the game's shape: the three phases as columns, the kept layers as 
 tree, unlocks, factions…), crossed-out layers greyed, where each approved idea sits, and the cards
 moving through the stages. It reads files only, like the other tabs.
 
-## 2.9.0 — Deeper skills and stricter slices
+## 2.9.0 — The game dev's seat: a Liaison, follow-up questions, references, assets, experiments
+
+**Why.** The studio runs on agents, but the game is the game dev's. Today they can answer the intake,
+pitch an idea and message the Producer. They can't yet hold a real conversation about what they mean,
+hand over a reference video or their own assets, or try something and take it all back out. This
+release gives them that seat without ever stopping the studio mid-run: everything they bring goes
+through a conversation, is confirmed in their words, and then flows to the Producer and the Director
+while the agents keep working.
+
+| # | What | How | Status |
+| --- | --- | --- | --- |
+| G1 | New game or existing one | The intake's first question: starting from scratch, or bringing something already started? Existing games go through `npm run onboard` first (read-only scan, fact sheet), and the intake starts with what the scan found (engine, size, unrepeatable calls) filled in. | planned |
+| G2 | Follow-up questions | After the base intake, a follow-up round per kept or explore layer and per phase ("How many tiers does the tech tree have, and what does the first unlock solve?"). Two sources: a fixed question bank per layer that always works (no keys, no tokens), and a cheap model that writes extra questions from the dev's own answers, checked by a script (count, no repeats, only real layers and phases) like `npm run brief`. Answers are stored in `bible.json` under the layer they explain. Can run any time, not only at the start. | planned |
+| G3 | References with features and videos | References become structured: the game, the feature, a link (a video with its timestamp, a page, a screenshot), what to take and what to avoid. Links are stored, not downloaded. A clip the dev attaches stays in the private copy, and the dev says what in it matters, because most models can't watch video. For models that read images, a script pulls a few frames with ffmpeg. | planned |
+| G4 | The dev's own assets | `npm run asset -- add <file or link>` (and a drop box in the War Room) for 3D models, music, sound, maps, art, anything. Each asset gets a provenance record in `studio/assets/manifest.json`: **use in the game** (the dev declares they own it or have a licence: which, from where, by whom, when) or **reference only** (to design from, never shipped). A gate fails when a reference-only asset, or one with no record, ends up in the game's files. The declaration is recorded and shown on every use. This is not legal advice: the harness records what the dev states, and a product built on it would need proper terms written by a lawyer. Large files stay in the private copy (Git LFS or an ignored folder), never the public repo. Extends the existing approval gate. | planned |
+| G5 | The Liaison: a conversation, then a confirmed brief | A new role, `liaison`: the agent the game dev talks to, any time. It asks until it understands, sorts what it heard into an **idea** (new feature: Idea Board), a **direction** (change to something that exists), an **asset** (G4) or a **question**, then restates it in plain words and asks the dev to confirm. Only a confirmed brief moves on, to both the Producer (work) and the Director (where it fits in the game's logic and phases). Nothing already running stops; the brief is just new input. The conversation runs in the dev's own agent tool first (a kickoff prompt and a skill), and later as a chat panel in the War Room through the router (a cheap model by default, under the spend cap and the token). | planned |
+| G6 | Labels on the Idea Board | Each idea shows where it came from: **dev, confirmed** (from the Liaison), **dev, pitched** (the quick box), **agent**, **playtest**, and whether it's new since the dev last looked. Dev-confirmed ideas are routed first. | planned |
+| G7 | Experiments you can keep or take back | `npm run experiment -- start "<what>"` opens a tracked experiment (X-001): its own git branch, a `Studio-Experiment` commit trailer, and, inside the game, a flag in the TUNING table so a prototype can be played without touching the main path. `keep` merges it; `drop` removes every commit tagged with it (or deletes the branch if unmerged); `drop --only <files or parts>` takes back just those. The registry (`studio/experiments/`) lists each experiment's idea, files, tasks and status, and the Game plan view shows them. Goldens are regenerated in the same commit either way. | planned |
+| G8 | Deeper agent identity | Richer role cards: who the agent is, what good work looks like, its common mistakes (from the scorecard and retros), the questions it should ask, and a worked example. Lessons filed per role, so a builder reads builder lessons. Player personas for playtests and fun checks (a calm player, a min-maxer, a first-timer), so agents judge the game from a player's side. | planned |
+| G9 | The game's voice | A voice and tone section in the Bible (how the game talks: UI text, tutorial lines, dialogue, with do and don't examples), read by every agent that writes words the player sees. With VoiceStudio (optional), the same script files turn into voice lines. | planned |
+
+## 2.10.0 — Deeper skills and stricter slices
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -164,7 +185,7 @@ moving through the stages. It reads files only, like the other tabs.
 | S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | planned |
 | S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | planned |
 
-## 2.10.0 — Content and craft pipelines
+## 2.11.0 — Content and craft pipelines
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -181,7 +202,7 @@ moving through the stages. It reads files only, like the other tabs.
 | H4 | Phone alerts | ntfy or Telegram when a person is needed: a forced done, a Bible or phase sign-off, an idea waiting for approval, the spend cap, a Director verdict of "off course". | planned |
 | H5 | Agents on several machines | Make the HUB the single home for tasks, locks and events (agents call it with their token; locks keep a heartbeat so a dead remote worker's claims expire), so separate clones and cloud sandboxes share one studio. | planned |
 | H6 | Play the latest build | A link to the latest web build with the seed and phase scenario shown. | planned |
-| H8 | A friendly front end | The same flow (intake, sign, ideas, phases) for people who don't use GitHub or a terminal, on the HUB endpoints that exist now. Asks play length first and suggests a demo. | later |
+| H8 | A friendly front end | The same flow (intake, follow-ups, references, assets, the Liaison, ideas, experiments) for people who don't use GitHub or a terminal, on the HUB endpoints. Asks play length first and suggests a demo; says plainly that longer games need more of the dev's own time. | later |
 | H7 | Game plan view with the Idea Board | Phases, layers, crossed-out layers, approved ideas, the Idea Board, a box to pitch an idea, the Director's verdict and drift. | done (2.8.0) |
 
 ## Not here
