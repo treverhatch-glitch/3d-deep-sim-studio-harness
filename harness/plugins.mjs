@@ -48,7 +48,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     p.enabled = cmd === 'enable';
     save(cfg);
     emitEvent({ type: `plugin.${cmd}`, agent: process.env.STUDIO_LOCK_OWNER || 'producer', target: p.id, msg: `${p.name} ${cmd}d` });
-    console.log(`${p.name} ${cmd}d.${p.enabled && p.approval === 'human' ? ` A person approves its use; read ${p.rules}.` : ''}${p.enabled && p.install ? ` Install: ${p.install}` : ''}`);
+    console.log(`${p.name} ${cmd}d.${p.enabled && p.guide ? ` Guide: ${p.guide}.` : ''}${p.enabled && p.install ? ` Install: ${p.install}` : ''}`);
   } else if (cmd === 'mcp') {
     console.log(JSON.stringify(mcpConfig(cfg), null, 2));
   } else {

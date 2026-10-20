@@ -19,7 +19,12 @@
       "division": "core",
       "what": "Local search over the studio's markdown, so agents read the right paragraph instead of whole docs.",
       "install": "npm install -g @tobilu/qmd",
-      "mcp": { "command": "qmd", "args": ["mcp"] },
+      "mcp": {
+        "command": "qmd",
+        "args": [
+          "mcp"
+        ]
+      },
       "enabled": false
     },
     {
@@ -30,7 +35,19 @@
       "division": "core",
       "what": "Symbol-level code lookup and edits over LSP for large codebases.",
       "install": "uv (https://docs.astral.sh/uv/)",
-      "mcp": { "command": "uvx", "args": ["--from", "git+https://github.com/oraios/serena@v2.1.0", "serena", "start-mcp-server", "--context", "ide", "--project", "."] },
+      "mcp": {
+        "command": "uvx",
+        "args": [
+          "--from",
+          "git+https://github.com/oraios/serena@v2.1.0",
+          "serena",
+          "start-mcp-server",
+          "--context",
+          "ide",
+          "--project",
+          "."
+        ]
+      },
       "enabled": false
     },
     {
@@ -40,7 +57,15 @@
       "license": "Apache-2.0",
       "division": "qa",
       "what": "Browser control for agents: accessibility snapshots, screenshots, console.",
-      "mcp": { "command": "npx", "args": ["-y", "@playwright/mcp@0.0.83", "--headless", "--caps=vision"] },
+      "mcp": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@playwright/mcp@0.0.83",
+          "--headless",
+          "--caps=vision"
+        ]
+      },
       "enabled": true
     },
     {
@@ -50,7 +75,15 @@
       "license": "Apache-2.0",
       "division": "qa",
       "what": "Performance traces, network, console with source maps, Lighthouse audits for the web build.",
-      "mcp": { "command": "npx", "args": ["-y", "chrome-devtools-mcp@1.11.0", "--headless", "--no-usage-statistics"] },
+      "mcp": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "chrome-devtools-mcp@1.11.0",
+          "--headless",
+          "--no-usage-statistics"
+        ]
+      },
       "enabled": false
     },
     {
@@ -59,12 +92,18 @@
       "repo": "https://github.com/morluto/rea",
       "license": "MIT",
       "division": "game-study",
-      "what": "Lets agents study how existing software is built: web bundles, Electron apps, Godot PCK and Unity IL2CPP metadata, native binaries with Ghidra. Findings come back with evidence.",
+      "what": "Lets agents study how software is built: web bundles, Electron and Tauri apps, Godot PCK and Unity IL2CPP metadata, native binaries with Ghidra. Use it on other games for research and on our own build for bug hunting.",
       "install": "npx rea-agents@6.7.0 setup (asks before changing agent configs)",
-      "mcp": { "command": "npx", "args": ["-y", "rea-agents@6.7.0", "mcp"] },
-      "approval": "human",
-      "rules": "docs/GAME-STUDY.md",
-      "enabled": false
+      "mcp": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "rea-agents@6.7.0",
+          "mcp"
+        ]
+      },
+      "enabled": false,
+      "guide": "docs/GAME-STUDY.md"
     },
     {
       "id": "watch-skill",
@@ -75,7 +114,8 @@
       "what": "Indexes screen recordings into timestamped frames, OCR text and transcripts that agents can search. Use your own recordings.",
       "install": "pip install 'watch-skill[standard]==1.4.3'",
       "status": "trial",
-      "enabled": false
+      "enabled": false,
+      "guide": "docs/GAME-STUDY.md"
     },
     {
       "id": "blender-mcp",
@@ -93,7 +133,13 @@
       "license": "see repo",
       "division": "3d",
       "what": "Agent-driven Blender control (already in .mcp.json).",
-      "mcp": { "command": "npx", "args": ["-y", "github:mlolson/blender-orchestrator#a9dfb32d41709dd013b3c6ca0802bb869040656d"] },
+      "mcp": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "github:mlolson/blender-orchestrator#a9dfb32d41709dd013b3c6ca0802bb869040656d"
+        ]
+      },
       "enabled": false
     },
     {

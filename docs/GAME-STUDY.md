@@ -1,30 +1,39 @@
-# Studying existing games
+# Game study: best-practice layout
 
-Agents can study how other games are built, the way a designer studies games they admire: how the UI
-is laid out, how systems are structured, how a web game organises its code. The goal is to learn
-patterns and turn them into a plan for your own game, built with your own code and art.
+A study answers one question about how a game is built, then turns the answer into tasks. The
+Producer can order one like any other task, about another game or about our own build.
 
-## Tools
+```bash
+node harness/task.mjs add "Study: how <game> lays out its build menu" --role reference-scout --priority P2
+node harness/task.mjs add "Study our web build: what runs on every frame" --role qa-playtester --priority P1
+```
 
-| Tool | What it studies | Plugin |
+## Two kinds of study
+
+| Study | Good for | Tools |
 | --- | --- | --- |
-| [REA](https://github.com/morluto/rea) (MIT) | Web bundles and Electron apps (modules, routes, state), Godot PCK and Unity IL2CPP metadata, native binaries with Ghidra, Hopper or IDA | `node harness/plugins.mjs enable rea` |
-| Playwright MCP | Live web games: layout, accessibility tree, screenshots | on by default |
-| [Watch Skill](https://github.com/oxbshw/watch-skill) (MIT, trial) | Your own screen recordings of games: frames, OCR text, timestamps | `node harness/plugins.mjs enable watch-skill` |
+| Another game | UI layout, menus, flows, how systems are organised, save formats, performance tricks | [REA](https://github.com/morluto/rea), Playwright MCP, [Watch Skill](https://github.com/oxbshw/watch-skill) on your own recordings |
+| Our own build | Bug hunting the shipped bundle: dead code, unexpected network calls, state that leaks between systems, slow paths, what changed between two builds | REA on `dist/` or the Tauri app, Chrome DevTools MCP traces, `qa/playtest.mjs` |
 
-## How a study runs
+Turn a plugin on with `node harness/plugins.mjs enable rea` (or `watch-skill`, `chrome-devtools-mcp`).
 
-1. The developer names the game and what they want to learn from it ("its build menu", "how it
-   stores save data"). A person approves the study before an agent runs REA.
-2. The agent studies only copies the developer owns or is allowed to examine, on the developer's
-   own machine, and writes `studio/research/<game>/study.md`: what it found, with evidence.
-3. It ends with "how our game gets there": each pattern mapped to our own systems and tasks.
-4. The Producer queues those tasks. Nothing from the studied game is copied into the repo.
+## Suggested layout for `studio/research/<subject>/study.md`
 
-## Limits (from REA's own disclaimer, and good practice)
+1. **Question.** One sentence: what we want to learn and why.
+2. **Material.** What was examined (build, version, recordings, screenshots) and where it came from.
+3. **Findings.** Each with its evidence: the REA result, a screenshot, a frame timestamp, a trace.
+4. **Patterns worth using.** What we'd adapt, in our own words.
+5. **How our game gets there.** Each pattern mapped to our systems, with the tools and tasks it needs.
+6. **Tasks.** Lines ready for `studio/NEXT.md`.
 
-- Analyse software you own or are authorised to examine; licences and local law can restrict
-  reverse engineering.
-- No bypassing DRM, licence checks or anti-cheat, no cheats, no tampering with online services.
-- Don't copy protected code, art, audio or text into the game. Patterns and structure, written fresh.
-- Prefer your own recordings and screenshots over downloading other people's videos.
+For a study of our own build, add a **Bugs** section: each finding as a bug file
+(`studio/templates/bug.md`), with a seed and tick when the playtest can reproduce it.
+
+## Advice
+
+- Ask one clear question per study; broad "study everything" runs burn tokens and return little.
+- Work from copies you own, on your own machine. REA's own disclaimer asks the same, and licences
+  and local law can limit reverse engineering.
+- Keep the game's own code, art, audio and text out of our repo; write the patterns fresh.
+- Prefer your own recordings and screenshots to downloading other people's videos.
+- Pin the plugin version in `studio/plugins.json` so two studies months apart are comparable.
