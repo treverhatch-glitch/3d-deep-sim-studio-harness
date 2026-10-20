@@ -32,7 +32,7 @@ export function readLog() {
     });
 }
 
-export function addLogNote(text, agent = process.env.STUDIO_LOCK_OWNER || 'producer') {
+export function addLogNote(text, agent = process.env.STUDIO_PRODUCER_NAME || process.env.STUDIO_LOCK_OWNER || 'producer') {
   const body = String(text || '').trim();
   if (!body) throw new Error('A log note needs text.');
   const existing = fs.existsSync(LOG_FILE) ? fs.readFileSync(LOG_FILE, 'utf8').replace(/\r\n/g, '\n') : HEADER;

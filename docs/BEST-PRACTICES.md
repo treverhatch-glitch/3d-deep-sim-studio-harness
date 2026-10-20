@@ -70,6 +70,23 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 - **The ladder:** script (free, mechanical fixes) → cheap model (summaries, triage) → Producer (what
   to do next, who does it) → you (design, balance, money, anything you can't undo).
 
+## Letting the studio improve itself
+
+- **Everything leaves a note.** Agents' work, refusals, hand-backs, meetings and bugs all land in
+  files. Once a day the HUB writes a retro (`studio/memory/retros/`) that turns repeating patterns
+  into suggestions: which skill to tighten, which tasks are too big, which model to route away from.
+  It is a script; it costs nothing.
+- **The Producer decides what sticks.** Suggestions show up in the briefing. The Producer accepts or
+  rejects each in its log; accepted ones become tasks that change a skill, a check or the routing.
+- **Score models on what they finish.** File bugs with `--caused-by <task>` and reopen bad work with
+  `task reopen`; `npm run scorecard` shows bugs per 10 points of task size per model, so a model on
+  hard tasks isn't punished for difficulty alone. Treat it as a signal to review, not a verdict.
+
+## Before a test with real API keys
+
+See `docs/STRESS-TEST.md`. In short: run it in a private copy, set `STUDIO_DAILY_TOKEN_CAP` first,
+start from `npm run studio:reset`, and keep the HUB open so the watcher and retros run.
+
 ## Bringing in an existing game
 
 - **Scan, then fill in.** `npm run onboard -- --path ../my-game --name "My Game"` writes a fact

@@ -19,7 +19,7 @@ else
 fi
 
 echo ""
-(cd "${REPO_ROOT}" && node harness/watch.mjs) || true
+(cd "${REPO_ROOT}" && node harness/watch.mjs && node harness/retro.mjs --if-due) || true
 echo ""
 echo "Producer? Run: npm run handoff  (full briefing; key documents are mapped in studio/MASTER.md)"
 echo ""

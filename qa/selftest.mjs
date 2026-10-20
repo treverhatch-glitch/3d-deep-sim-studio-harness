@@ -215,6 +215,51 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('the Producer briefing shows the onboarded game', /## The game[\s\S]*Tiny: A tiny test game/.test(run(dir, 'node harness/handoff.mjs').stdout));
 }
 
+// Model scorecard: bugs land on the model that closed the work; the retro turns patterns into suggestions.
+{
+  const dir = copyRepo();
+  run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model model-a');
+  run(dir, 'node harness/task.mjs done T-003 --agent cursor-a --force');
+  run(dir, 'node harness/task.mjs start T-004 --agent gem-b --model model-b');
+  run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
+  run(dir, 'node harness/task.mjs done T-004 --agent gem-b');
+  run(dir, 'node harness/task.mjs add "Spawn crash" --type bug --caused-by T-003');
+  report('reopen refuses a task that is not done', run(dir, 'node harness/task.mjs reopen T-005 --reason x').status !== 0);
+  run(dir, 'node harness/task.mjs reopen T-004 --reason "report missed the stall"');
+  let sc = {};
+  try {
+    sc = JSON.parse(run(dir, 'node harness/scorecard.mjs --json').stdout);
+  } catch {
+    // reported below
+  }
+  const by = Object.fromEntries((sc.models || []).map((m) => [m.model, m]));
+  report('scorecard puts a caused-by bug on the model that closed the task', by['model-a']?.bugs === 1 && by['model-a']?.forced === 1, JSON.stringify(sc));
+  report('scorecard counts a reopened task as a bug for its closer', by['model-b']?.bugs === 1 && by['model-b']?.done === 1, JSON.stringify(sc));
+  run(dir, 'node harness/task.mjs start T-005 --agent cursor-c --model model-a');
+  run(dir, 'node harness/task.mjs pause T-005 --agent cursor-c --note "out of usage"');
+  run(dir, 'node harness/task.mjs start T-005 --agent cursor-d --model model-a');
+  run(dir, 'node harness/task.mjs pause T-005 --agent cursor-d --note "out of usage again"');
+  const retro = run(dir, 'node harness/retro.mjs');
+  const retroText = fs.existsSync(path.join(dir, 'studio/memory/retros')) ? fs.readdirSync(path.join(dir, 'studio/memory/retros')).filter((f) => f !== 'README.md').map((f) => fs.readFileSync(path.join(dir, 'studio/memory/retros', f), 'utf8')).join('') : '';
+  report('retro writes suggestions from what happened', retro.status === 0 && /ran out of usage/.test(retroText) && /reopened/.test(retroText), `${retro.stdout}${retro.stderr}\n${retroText}`);
+  report('the briefing shows the scorecard and the retro suggestions', /## Models[\s\S]*model-a/.test(run(dir, 'node harness/handoff.mjs').stdout) && /What the studio learned[\s\S]*ran out of usage/.test(run(dir, 'node harness/handoff.mjs').stdout));
+}
+
+// The daily spend cap stops model calls before they reach a provider; studio:reset starts a fresh project.
+{
+  const dir = copyRepo();
+  run(dir, 'node harness/event.mjs --quiet --type route.success --agent builder --tokens-in 60 --tokens-out 60 --msg "earlier call"');
+  const capped = run(dir, 'node harness/route.mjs --prompt hi --dry-run', { STUDIO_DAILY_TOKEN_CAP: '100' });
+  report('spend cap refuses calls once today\'s tokens pass STUDIO_DAILY_TOKEN_CAP', capped.status !== 0 && /Daily token cap reached/.test(capped.stdout), `${capped.stdout}${capped.stderr}`);
+  report('without a cap the same call goes through', run(dir, 'node harness/route.mjs --prompt hi --dry-run', { STUDIO_DAILY_TOKEN_CAP: '0' }).stdout.includes('"capped"') === false);
+  const dry = run(dir, 'node scripts/studio-reset.mjs --name "Mini Farm"');
+  const planBefore = fs.readFileSync(path.join(dir, 'studio/PLAN.md'), 'utf8');
+  const reset = run(dir, 'node scripts/studio-reset.mjs --name "Mini Farm" --yes');
+  const plan = fs.readFileSync(path.join(dir, 'studio/PLAN.md'), 'utf8');
+  report('studio:reset changes nothing without --yes', /nothing changed/.test(dry.stdout) && planBefore !== plan === true);
+  report('studio:reset writes a fresh plan and queue and archives the old one', reset.status === 0 && /Mini Farm/.test(plan) && /npm run new-game mini-farm/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(dir, '.studio/archive')), `${reset.stdout}${reset.stderr}`);
+}
+
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
 {
   const dir = copyRepo();

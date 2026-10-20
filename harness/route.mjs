@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDERS, COOLDOWN_DEFAULTS, getChainForRole } from './models.config.mjs';
-import { emitEvent, STUDIO_STATE_DIR, REPO_ROOT } from './event.mjs';
+import { emitEvent, readRecentEvents, STUDIO_STATE_DIR, REPO_ROOT } from './event.mjs';
 
 const COOLDOWN_FILE = path.join(STUDIO_STATE_DIR, 'cooldowns.json');
 const RUNS_DIR = path.join(STUDIO_STATE_DIR, 'runs');
@@ -269,6 +269,18 @@ function writeRunLedger(runId, ledger) {
 /**
  * Execute a routed chat completion across the role's failover chain (`freecc:auto`).
  */
+/**
+ * Daily spend cap: STUDIO_DAILY_TOKEN_CAP (tokens in + out across every provider, since local
+ * midnight). 0 or unset means no cap. Counted from route.success events, as reported by providers.
+ */
+export function spendToday() {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return readRecentEvents(20000)
+    .filter((e) => e.type === 'route.success' && Date.parse(e.ts) >= midnight.getTime())
+    .reduce((n, e) => n + Number(e.tokensIn || 0) + Number(e.tokensOut || 0), 0);
+}
+
 export async function routeChatCompletion({
   role = 'producer',
   messages = [],
@@ -280,6 +292,16 @@ export async function routeChatCompletion({
 } = {}) {
   loadDotEnv();
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const cap = Number(process.env.STUDIO_DAILY_TOKEN_CAP || 0);
+  if (cap > 0) {
+    const used = spendToday();
+    if (used >= cap) {
+      const capped = { ok: false, status: 429, capped: true, runId, role, error: `Daily token cap reached: ${used.toLocaleString()} of ${cap.toLocaleString()} (STUDIO_DAILY_TOKEN_CAP). Raise it on purpose or wait until tomorrow.`, attempts: [] };
+      writeRunLedger(runId, capped);
+      emitEvent({ type: 'route.capped', agent: role, task, status: 'error', msg: capped.error });
+      return capped;
+    }
+  }
   const chainIds = getChainForRole(role, customChain);
   const attempts = [];
 

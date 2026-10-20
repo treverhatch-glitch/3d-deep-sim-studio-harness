@@ -20,6 +20,8 @@ import { listLocks } from './lock.mjs';
 import { readLog, addLogNote } from './producer-log.mjs';
 import { activeMeeting, MEETINGS_DIR } from './meeting.mjs';
 import { watchPass } from './watch.mjs';
+import { buildScorecard, renderScorecard } from './scorecard.mjs';
+import { latestRetro } from './retro.mjs';
 
 const read = (rel) => {
   try {
@@ -133,7 +135,13 @@ export function buildHandoff() {
   const signoff = (rel) => {
     const t = read(rel);
     if (t == null) return null;
-    return { file: rel, title: firstLine(rel).replace(/^#\s*/, ''), updated: changed(rel), signed: /signed off|approved by|human-review:\s*(done|approved)/i.test(t) };
+    // Signed off: a person's decision file (War Room "Sign off", or written by hand) newer than the report.
+    const dir = path.dirname(rel);
+    const pattern = rel.includes('/fun/') ? /^review-.*\.md$/ : /^decision-.*\.md$/;
+    const updated = changed(rel);
+    const decisions = fs.existsSync(path.join(REPO_ROOT, dir)) ? fs.readdirSync(path.join(REPO_ROOT, dir)).filter((f) => pattern.test(f)).map((f) => mtime(`${dir}/${f}`) || 0) : [];
+    const signed = decisions.some((m) => m >= (updated || 0)) || /signed off|approved by|human-review:\s*(done|approved)/i.test(t);
+    return { file: rel, title: firstLine(rel).replace(/^#\s*/, ''), updated, signed };
   };
 
   const divisions = readJson('studio/divisions.json')?.divisions?.filter((d) => d.active || d.core).map((d) => d.name) || null;
@@ -160,6 +168,8 @@ export function buildHandoff() {
     paused,
     watch,
     game: gameInfo,
+    scorecard: buildScorecard({ queue: q }),
+    retro: latestRetro(),
     bugs,
     locks,
     gates,
@@ -229,8 +239,17 @@ export function renderHandoff(h) {
 
   add(h.watch.findings.length ? `- Watcher right now: ${h.watch.findings.map((f) => f.msg).join('; ')}` : '- Watcher right now: all quiet');
 
+  head('Models (npm run scorecard)');
+  add(...renderScorecard(h.scorecard).split('\n').map((l) => `    ${l}`));
+
   head('Waiting on a person');
   add(...(h.signoffs.length ? h.signoffs.map((s) => `- ${s.title} (${s.file}, ${age(s.updated)}): ${s.signed ? 'signed off' : 'not signed off yet'}`) : ['- Nothing.']));
+
+  head('What the studio learned (latest retro)');
+  if (h.retro) {
+    const open = h.retro.text.split('\n').filter((l) => l.startsWith('- [ ] '));
+    add(`From ${h.retro.file}. Accept or reject each in your log; tick the box when it's handled.`, ...(open.length ? open.map((l) => l.replace('- [ ] ', '- ')) : ['- Nothing open.']));
+  } else add('- No retro yet. The HUB writes one a day; npm run retro writes one now.');
 
   head('Lessons (studio/memory/failures.md)');
   add(...(h.lessons.length ? h.lessons.map((l) => `- ${l}`) : ['- None recorded.']));

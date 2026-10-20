@@ -38,11 +38,12 @@ import {
   WAR_ROOM_CONFIG_FILE,
 } from '../harness/status.mjs';
 import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR } from '../harness/event.mjs';
-import { startTask, completeTask, addTask, NEXT_FILE } from '../harness/task.mjs';
+import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState } from '../harness/hud.mjs';
 import { watchPass } from '../harness/watch.mjs';
+import { retroIfDue } from '../harness/retro.mjs';
 
 loadDotEnv();
 
@@ -478,7 +479,7 @@ export function createHubServer() {
 
     const writePaths = new Set([
       '/api/tasks', '/api/task', '/api/events', '/api/event', '/api/usage', '/usage',
-      '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision'
+      '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision', '/api/watch'
     ]);
     if (req.method === 'POST' && writePaths.has(url.pathname) && !isWriteAuthorized(req)) {
       return sendJson(res, 401, { ok: false, error: 'unauthorized' });
@@ -509,11 +510,16 @@ export function createHubServer() {
       return sendJson(res, 200, { ok: true, ...briefRes });
     }
 
+    if (url.pathname === '/api/watch' && req.method === 'POST') {
+      return sendJson(res, 200, { ok: true, ...watchPass() });
+    }
+
     if (url.pathname === '/api/hud' && req.method === 'GET') {
       return sendJson(res, 200, buildHudState());
     }
 
-    if ((url.pathname === '/v3' || url.pathname === '/v3/') && req.method === 'GET') {
+    // The War Room v3 is the home page. The old React War Room is retired to /legacy for one release.
+    if ((url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/v3' || url.pathname === '/v3/') && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end(fs.readFileSync(path.join(__dirname, 'v3', 'index.html'), 'utf8'));
     }
@@ -591,8 +597,21 @@ export function createHubServer() {
       } else if (body.action === 'done' && body.id) {
         // A person with the HUB token may close any task; the lock is released either way.
         result = completeTask(body.id, body.note || 'Marked done from the War Room', body.agent || 'war-room-human', { force: true });
+      } else if (body.action === 'pause' && body.id) {
+        result = pauseTask(body.id, body.agent || 'war-room-human', body.note || 'Handed back from the War Room', { force: true });
+      } else if (body.action === 'reopen' && body.id) {
+        result = reopenTask(body.id, body.note || 'Reopened from the War Room', body.agent || 'war-room-human');
       } else if (body.action === 'add' && body.title) {
-        result = addTask({ title: body.title, role: body.role || 'builder', priority: body.priority || 'P1' });
+        const types = { bug: 'Bug', study: 'Study', balance: 'Balance', fun: 'Fun', playtest: 'Playtest', review: 'Review', docs: 'Docs' };
+        const prefix = types[body.type] && !String(body.title).toLowerCase().startsWith(body.type) ? `${types[body.type]}: ` : '';
+        const size = Number(body.size);
+        result = addTask({
+          title: `${prefix}${String(body.title).slice(0, 200)}`,
+          role: body.role || 'builder',
+          priority: /^P[0-3]$/.test(body.priority) ? body.priority : 'P1',
+          agent: body.agent || 'war-room-human',
+          meta: { ...(size >= 1 && size <= 5 ? { size } : {}), ...(/^T-\d+$/.test(body.causedBy || '') ? { causedBy: body.causedBy } : {}) },
+        });
       }
       broadcastSnapshot();
       return sendJson(res, 200, { ok: Boolean(result) && !result.error, result, snapshot: buildStudioSnapshot() });
@@ -714,12 +733,13 @@ export function createHubServer() {
       return sendJson(res, 200, { ok: true, file: `studio/${kind}/${name}` });
     }
 
-    if (url.pathname === '/' || url.pathname === '/index.html') {
+    if (url.pathname === '/legacy' || url.pathname === '/legacy/') {
       const builtHtml = path.join(__dirname, 'dist', 'index.html');
       const fallbackHtml = path.join(__dirname, 'index.html');
       const targetHtml = fs.existsSync(builtHtml) ? builtHtml : fallbackHtml;
+      const notice = '<div style="position:fixed;z-index:2147483647;left:0;right:0;top:0;padding:8px 14px;background:#ffd54f;color:#2b1d14;font:14px system-ui">This War Room is retired and will be removed in the next release. The new one is at <a href="/">/</a>.</div>';
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(fs.readFileSync(targetHtml, 'utf8'));
+      return res.end(fs.readFileSync(targetHtml, 'utf8').replace(/<body([^>]*)>/i, (m) => `${m}${notice}`));
     }
 
     sendJson(res, 404, { error: 'Not found', path: url.pathname });
@@ -840,8 +860,9 @@ export function startHubCli() {
     console.log('====================================================================');
     console.log(' 3D DEEP-SIM WORKFLOW UI HUB — ZERO-TOKEN MISSION CONTROL WAR ROOM');
     console.log('====================================================================');
-    console.log(` Desktop War Room (4-Quadrant) : http://localhost:${PORT}${hubToken() ? '/?token=<HUB_TOKEN from .env>' : ' (read-only: no HUB_TOKEN)'}`);
-    console.log(` Mobile Command Feed (<768px)  : http://localhost:${PORT}/?view=mobile`);
+    console.log(` War Room                      : http://localhost:${PORT}/${hubToken() ? '?token=<HUB_TOKEN from .env> (buttons need it)' : ' (read-only: no HUB_TOKEN)'}`);
+    console.log(` Studio view                   : http://localhost:${PORT}/?skin=tycoon`);
+    console.log(` Retired War Room (one release): http://localhost:${PORT}/legacy`);
     console.log(` WebSocket Terminal & Stream   : ws://localhost:${PORT}/ws`);
     console.log(` Events Ledger                 : ${path.relative(REPO_ROOT, eventsFile)}`);
     console.log(` Subscription Usage File       : ${path.relative(REPO_ROOT, USAGE_FILE)}`);
@@ -857,6 +878,8 @@ export function startHubCli() {
       try {
         const r = watchPass();
         if (r.findings.length) console.log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
+        const retro = retroIfDue();
+        if (retro) console.log(`[retro] wrote ${retro.file}: ${retro.suggestions.length} suggestion(s)`);
       } catch (err) {
         console.error(`[watch] ${err.message}`);
       }

@@ -75,6 +75,13 @@ export function emitEvent(partial = {}) {
   const { primary, mirrors } = getEventPaths();
 
   fs.mkdirSync(path.dirname(primary), { recursive: true });
+  // Rotate before the log gets heavy: readers only need the recent end (STUDIO_EVENTS_MAX_MB, default 25).
+  try {
+    const maxBytes = Number(process.env.STUDIO_EVENTS_MAX_MB || 25) * 1024 * 1024;
+    if (fs.statSync(primary).size > maxBytes) fs.renameSync(primary, primary.replace(/\.jsonl$/, `-${now.replace(/[:.]/g, '-')}.jsonl`));
+  } catch {
+    // no log yet
+  }
   fs.appendFileSync(primary, line, 'utf8');
 
   for (const mirror of mirrors) {

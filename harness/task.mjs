@@ -238,7 +238,31 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   return { ...target, handoffFile: path.relative(REPO_ROOT, file) };
 }
 
-export function addTask({ title, role = 'builder', priority = 'P1', agent = 'producer' }) {
+export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
+
+/** meta: { size: 1-5 (how hard), causedBy: 'T-012' (the task whose work caused this bug) } */
+/**
+ * Reopen finished work that turned out wrong. Counts as a bug against the model that closed it
+ * (harness/scorecard.mjs). The reason goes into the task's handoff notes.
+ */
+export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
+  const q = parseNextQueue();
+  const idx = q.done.findIndex((t) => t.id === taskId);
+  if (idx === -1) return null;
+  const [target] = q.done.splice(idx, 1);
+  target.title = target.title.replace(/\s*_\(✓ .*\)_$/, '');
+  target.status = 'backlog';
+  q.backlog.unshift(target);
+  writeNextQueue(q);
+  fs.mkdirSync(HANDOFF_DIR, { recursive: true });
+  const file = handoffFile(taskId);
+  const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
+  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${agent} (reopened)\n${reason || 'No reason given.'}\n`);
+  emitEvent({ type: 'task.reopened', agent, task: target.id, status: 'reopened', msg: `Reopened ${target.id}: ${reason || 'no reason given'}` });
+  return target;
+}
+
+export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
   const q = parseNextQueue();
   const all = [...q.inProgress, ...q.backlog, ...q.done];
   const maxNum = all.reduce((max, t) => {
@@ -259,6 +283,7 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = 'pro
     agent,
     task: newTask.id,
     msg: `Queued ${newTask.id} [${newTask.priority}] (${newTask.role}): ${newTask.title}`,
+    meta,
   });
   return newTask;
 }
@@ -338,6 +363,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  if (cmd === 'reopen') {
+    const res = arg1 && reopenTask(arg1, typeof flags.reason === 'string' ? flags.reason : '', typeof flags.agent === 'string' ? flags.agent : PRODUCER_NAME());
+    if (!res) {
+      console.error('Usage: node harness/task.mjs reopen <TASK_ID> --reason "what was wrong" (the task must be done)');
+      process.exit(1);
+    }
+    console.log(`${res.id} is back at the top of the queue. It counts as a bug against the model that closed it.`);
+    process.exit(0);
+  }
+
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
@@ -361,7 +396,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs] [--size 1-5] [--caused-by T-012]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -371,10 +406,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
+    const size = flags.size !== undefined ? Number(flags.size) : null;
+    if (size !== null && !(size >= 1 && size <= 5)) {
+      console.error('--size is how hard the task is, 1 (trivial) to 5 (big).');
+      process.exit(1);
+    }
+    const causedBy = typeof flags['caused-by'] === 'string' ? flags['caused-by'] : null;
     const created = addTask({
       title: `${prefix}${title}`,
       role: flags.role || 'builder',
       priority: flags.priority || 'P1',
+      agent: typeof flags.agent === 'string' ? flags.agent : PRODUCER_NAME(),
+      meta: { ...(size ? { size } : {}), ...(causedBy ? { causedBy } : {}) },
     });
     console.log(JSON.stringify(created, null, 2));
     process.exit(0);

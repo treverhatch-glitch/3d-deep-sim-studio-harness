@@ -34,7 +34,7 @@ const ago = (ms) => `${Math.max(0, Math.round((Date.now() - ms) / 60000))} min`;
 function trail(events, agent) {
   const said = events.filter((e) => e.agent === agent && e.msg).slice(-3).map((e) => `- ${e.ts.slice(11, 16)} ${e.type}: ${e.msg}${e.target ? ` (${e.target})` : ''}`);
   const st = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
-  const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/NEXT\.md|studio\/CURRENT_TASK\.md|studio\/handoffs)/.test(l)) : [];
+  const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs|producer|meetings|game|memory\/retros|balance\/latest|fun\/latest))/.test(l)) : [];
   return [
     said.length ? `Its last words:\n${said.join('\n')}` : 'It left no messages.',
     dirty.length ? `Uncommitted changes in the repo (check before you continue):\n${dirty.slice(0, 8).map((l) => `- ${l.trim()}`).join('\n')}${dirty.length > 8 ? `\n- …and ${dirty.length - 8} more` : ''}` : 'No uncommitted changes.',
@@ -80,6 +80,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     }
   }
 
+  const capped = events.filter((e) => e.type === 'route.capped' && now - Date.parse(e.ts) < 3600000);
+  if (capped.length) findings.push({ kind: 'exhausted', msg: `The daily spend cap stopped ${capped.length} model call(s) in the last hour (STUDIO_DAILY_TOKEN_CAP)`, producer: true });
   const exhausted = events.filter((e) => e.type === 'route.exhausted' && now - Date.parse(e.ts) < 3600000);
   if (exhausted.length) findings.push({ kind: 'exhausted', msg: `Every provider was busy or out ${exhausted.length} time(s) in the last hour (${[...new Set(exhausted.map((e) => e.agent))].join(', ')})`, producer: true });
 

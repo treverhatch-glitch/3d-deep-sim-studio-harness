@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.4.0] — 2026-10-20
+### Added
+- **Model scorecard** (`npm run scorecard`): per model, tasks finished, task points (size 1-5, default by type, `--size` on `task add`), confirmed bugs (a bug filed with `--caused-by <task>`, or a task reopened with `task reopen`), bugs per 10 points so harder work isn't punished for its size, closed-loop failures shared among suspects, and refused, forced and handed-back work. Shown in the Ops view, as a bug badge on desks in the Studio view, and in the Producer briefing.
+- **Self-improving retros** (`npm run retro`): a daily retrospective in `studio/memory/retros/` written by a script from the event log, ending in suggestions (tighten a skill, split big tasks, route away from a model, raise or lower the spend cap). The HUB writes one a day, `session:start` writes one if today's is missing, and the briefing lists the open suggestions for the Producer to accept or reject.
+- **Daily spend cap** (`STUDIO_DAILY_TOKEN_CAP`): the router refuses calls past the day's token total and the watcher tells the Producer.
+- **`npm run studio:reset`**: a fresh plan, log and queue for a new game in your own copy, archiving the previous project's notes.
+- **`docs/STRESS-TEST.md`**: running a long test with real keys in a private copy.
+- `STUDIO_PRODUCER_NAME` merges script events into the Producer agent; the event log rotates past `STUDIO_EVENTS_MAX_MB`.
+### Changed
+- **War Room v3 is the HUB's home page**, with buttons behind the token: start, pause, done and reopen tasks, add tasks (type, size, caused-by), sign off balance and fun, and run the watcher. The old React War Room is retired to `/legacy` for one release.
+- The watcher's list of uncommitted files leaves out the studio's own bookkeeping.
+- Sign-offs from the War Room count as signed in the briefing.
+
+---
+
 ## [2.3.0] — 2026-10-20
 ### Added
 - **Done-checks by task type** (`harness/done-check.mjs`): `task done` refuses until the proof for that kind of work exists, newer than the task's start. Change and docs: a full green verify. Bug: a pinned regression, a lesson in `failures.md` and a green verify. Balance and fun: a fresh report. Playtest: a report in `qa/reports/`. Study: a `study.md`. Review: a note in `studio/reviews/`. `--type` on `task add` sets the type.

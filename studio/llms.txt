@@ -20,6 +20,12 @@
   Zero-token watcher: requeues work whose claim expired, flags silent agents and provider outages, pings the Producer with one `Watch:` task. Runs on its own every 5 minutes while the HUB is up (`STUDIO_WATCH_INTERVAL`, 0 = off) and at `npm run session:start`.
 - `npm run onboard -- --path <game folder> --name "<name>" [--dry-run]`
   Brings an existing game in: read-only scan, `studio/game/GAME.md` fact sheet, onboarding tasks. Guide: `docs/ONBOARDING-A-GAME.md`.
+- `node harness/task.mjs reopen <ID> --reason "<what was wrong>"` · `task add ... --size 1-5 --caused-by T-012`
+  Reopen finished work, or file a bug against the task whose work caused it. Both count against the model that closed that task.
+- `npm run scorecard` · `npm run retro`
+  Bugs and slips per model (per 10 points of task size). Daily retrospective with suggestions in `studio/memory/retros/` (scripts, no tokens; the HUB writes one a day).
+- `npm run studio:reset -- --name "<game>" [--yes]`
+  Fresh plan, log and queue for a new game in your own copy; the old project's notes are archived to `.studio/archive/`.
 - `node harness/done-check.mjs <ID>`
   Shows a task's type, what done means for it, and what is missing. One skill per type in `studio/skills/`.
 - `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`
@@ -28,7 +34,7 @@
   Appends a zero-token telemetry line to `.studio/events.jsonl` (mirror only if AGENT_EVENTS_MIRROR is set).
 - `node harness/status.mjs [--json]`
   Prints a 0-token studio snapshot combining queue, router matrix, and recent events.
-- `node hub/server.mjs`
+- `node hub/server.mjs` (home page: War Room v3; `?skin=tycoon` for the Studio view; the old page is at `/legacy` until it is removed)
   Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:3847/?token=<HUB_TOKEN>`; `?view=mobile` for phones).
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

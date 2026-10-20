@@ -1,5 +1,9 @@
 # Mission Control War Room & Embedded Terminal (`docs/WAR-ROOM.md`)
 
+> **Retired in 2.4.0.** The HUB's home page is now War Room v3 (`hub/v3/index.html`): an Ops view and a
+> Studio view, built from files only, with buttons behind the HUB token. This React War Room still
+> answers at `/legacy` for one release and will then be removed. What follows describes the old page.
+
 The **Mission Control War Room** (`hub/`) is a zero-LLM-token tactical command center designed in a **Palantir / SpaceX Dragon / Cyberpunk Mission Control** aesthetic (`#06080E` obsidian matte, `backdrop-filter: blur(12px)`, `1px solid #00F0FF` tactical borders, CRT scanline toggle, and `JetBrains Mono` telemetry).
 
 It passively watches local studio files (`.studio/events.jsonl`, `.studio/usage.json`, `.studio/war-room.config.json`, `studio/NEXT.md`, `studio/CURRENT_TASK.md`) via native RFC 6455 WebSockets (`/ws`) and Server-Sent Events (`/api/stream`), eliminating the 30k–80k token "Full-Context Re-Read Tax" caused by asking an agent *"What are you doing?"*.

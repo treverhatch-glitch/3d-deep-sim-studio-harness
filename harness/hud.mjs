@@ -13,6 +13,7 @@ import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { activeMeeting } from './meeting.mjs';
+import { buildScorecard } from './scorecard.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -124,6 +125,14 @@ function lessons() {
   }
 }
 
+// The scorecard reads the long event history; rebuild it at most every 30 s.
+let scoreCache = { at: 0, value: [] };
+function scorecardCached(queue) {
+  if (Date.now() - scoreCache.at < 30000) return scoreCache.value;
+  scoreCache = { at: Date.now(), value: buildScorecard({ queue }).models.slice(0, 12) };
+  return scoreCache.value;
+}
+
 export function buildHudState() {
   const now = Date.now();
   const events = readRecentEvents(400);
@@ -150,6 +159,9 @@ export function buildHudState() {
   // Agents: everyone who wrote an event in the last 24 h, with what they hold now.
   const roleOfTask = new Map([...queue.inProgress, ...queue.backlog, ...queue.done].map((t) => [t.id, t.role]));
   const agents = new Map();
+  // Scripts log as "producer"; STUDIO_PRODUCER_NAME (e.g. grok-producer) merges them into one person.
+  const pname = process.env.STUDIO_PRODUCER_NAME;
+  if (pname) for (const e of events) if (e.agent === 'producer') e.agent = pname;
   for (const e of events) {
     if (!e.agent || Date.parse(e.ts) < dayAgo) continue;
     const a = agents.get(e.agent) || { name: e.agent, events: 0 };
@@ -186,7 +198,7 @@ export function buildHudState() {
   if (!agentList.some((a) => a.room === 'production')) {
     agentList.push({ name: 'producer', role: 'producer', room: 'production', status: 'idle', events: 0, idleMin: null, placeholder: true });
   }
-  const producerName = agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
+  const producerName = (pname && agentList.find((a) => a.name === pname)?.name) || agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
   const byName = new Map(agentList.map((a) => [a.name, a]));
 
   // Conversations with the Producer, so the Studio view can walk people between rooms.
@@ -242,6 +254,7 @@ export function buildHudState() {
     events: events.slice(-120).reverse(),
     talks,
     meeting,
+    scorecard: scorecardCached(queue),
     needs: needs.slice(0, 10),
     gates,
     playtest: latestPlaytest(),

@@ -65,6 +65,19 @@ function request(port, { method = 'GET', path: p = '/', headers = {}, body } = {
   });
 }
 
+function requestBody(port, p) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: p, headers: { host: `127.0.0.1:${port}` } }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+    req.setTimeout(3000, () => req.destroy(new Error('timeout')));
+    req.end();
+  });
+}
+
 function upgrade(port, { query = '', headers = {} } = {}) {
   return new Promise((resolve) => {
     const req = http.request({
@@ -101,6 +114,9 @@ if (a.down) {
   check('write with token only in query is refused', (await request(a.port, { method: 'POST', path: `/api/events?token=${strong}`, headers: post, body: json })) === 401);
   check('foreign Host header is refused (DNS rebinding)', (await request(a.port, { path: '/api/state', headers: { host: 'evil.example.com' } })) === 403);
   check('GET /api/brief does not write', (await request(a.port, { path: '/api/brief' })) === 404);
+  check('home page is the War Room v3', /Studio floor/.test(await requestBody(a.port, '/')));
+  check('retired War Room still answers at /legacy', (await request(a.port, { path: '/legacy' })) === 200);
+  check('running the watcher needs the token', (await request(a.port, { method: 'POST', path: '/api/watch', headers: post, body: '{}' })) === 401);
   check('websocket without token is refused', (await upgrade(a.port)) === 401);
   check('websocket with token is accepted', (await upgrade(a.port, { query: `?token=${strong}` })) === 101);
   check('websocket from a foreign origin is refused', (await upgrade(a.port, { query: `?token=${strong}`, headers: { origin: 'https://evil.example.com' } })) === 403);
