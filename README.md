@@ -79,5 +79,6 @@ Model routing (`harness/route.mjs`) fails over between local, free-tier and paid
 from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:token-savers`.
 
 Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST-PRACTICES.md](docs/BEST-PRACTICES.md).
+Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-TOOLS.md](docs/AGENT-TOOLS.md).
 
 MIT licensed.

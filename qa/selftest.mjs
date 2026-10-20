@@ -147,6 +147,9 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('done-check passes a playtest task once a report exists', run(dir, `node harness/task.mjs done ${ids.playtest} --agent alice-1`).status === 0);
   fs.mkdirSync(path.join(dir, 'studio/research/build-menus'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'studio/research/build-menus/study.md'), '# Question\nHow do build menus group items?\n');
+  report('done-check refuses a study under 120 words', run(dir, `node harness/task.mjs done ${ids.study} --agent alice-1`).status !== 0);
+  fs.writeFileSync(path.join(dir, 'studio/research/build-menus/study.md'), `# Question\nHow do build menus group items?\n\n# Findings\n${'Both games group buildings by job, then by size, and show cost before placement. '.repeat(12)}\n`);
+
   report('done-check passes a study task once study.md exists', run(dir, `node harness/task.mjs done ${ids.study} --agent alice-1`).status === 0);
   const forced = run(dir, `node harness/task.mjs done ${ids.change} --agent alice-1 --force`);
   const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
@@ -258,6 +261,47 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const plan = fs.readFileSync(path.join(dir, 'studio/PLAN.md'), 'utf8');
   report('studio:reset changes nothing without --yes', /nothing changed/.test(dry.stdout) && planBefore !== plan === true);
   report('studio:reset writes a fresh plan and queue and archives the old one', reset.status === 0 && /Mini Farm/.test(plan) && /npm run new-game mini-farm/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(dir, '.studio/archive')), `${reset.stdout}${reset.stderr}`);
+}
+
+// Done-checks read content in a git checkout, and the scorecard traces a bug to the commit before it.
+{
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const add = (cmd) => JSON.parse(run(dir, cmd).stdout).id;
+  const change = add('node harness/task.mjs add "Faster spawns" --role builder');
+  run(dir, `node harness/task.mjs start ${change} --agent alice-1 --model model-a`);
+  const none = run(dir, `node harness/task.mjs done ${change} --agent alice-1`);
+  report('done-check refuses a change task with no changes', none.status !== 0 && /\[ \] Changes exist/.test(`${none.stdout}${none.stderr}`), `${none.stdout}${none.stderr}`);
+  edit(dir, 'cartridges/example-sim/qa.mjs', (x) => `${x}\n// faster spawns\n`);
+  const noVerify = run(dir, `node harness/task.mjs done ${change} --agent alice-1`);
+  report('done-check sees the change but still wants a verify after it', noVerify.status !== 0 && /\[x\] Changes exist/.test(`${noVerify.stdout}${noVerify.stderr}`), `${noVerify.stdout}${noVerify.stderr}`);
+  git(`commit -qam "faster spawns" --trailer "Studio-Task: ${change}" --trailer "Studio-Model: model-a" --no-verify`);
+
+  const review = add('node harness/task.mjs add "Review faster spawns" --type review --role reviewer');
+  run(dir, `node harness/task.mjs start ${review} --agent rita-1`);
+  fs.writeFileSync(path.join(dir, 'studio/reviews/spawns.md'), 'Looked at it. Seems fine overall.\n');
+  report('done-check refuses a review that names nothing and gives no verdict', run(dir, `node harness/task.mjs done ${review} --agent rita-1`).status !== 0);
+  fs.writeFileSync(path.join(dir, 'studio/reviews/spawns.md'), `Review of ${change}: spawn timing reads correctly. Verdict: approve.\n`);
+  report('done-check passes a review that names the task and gives a verdict', run(dir, `node harness/task.mjs done ${review} --agent rita-1`).status === 0);
+
+  const bug = add('node harness/task.mjs add "Spawns overlap" --type bug');
+  edit(dir, 'cartridges/example-sim/qa.mjs', (x) => `${x}// fix overlap\n`);
+  git(`commit -qam "fix overlap" --trailer "Studio-Task: ${bug}" --trailer "Studio-Model: model-b" --no-verify`);
+  const sc = JSON.parse(run(dir, 'node harness/scorecard.mjs --json').stdout);
+  const t = sc.traces.find((x) => x.bug === bug);
+  report('scorecard traces a bug through commit trailers to the model that last changed the code', t?.model === 'model-a' && t?.task === change, JSON.stringify(sc.traces));
+}
+
+// The model check and the launch lines work without any keys.
+{
+  const dir = copyRepo();
+  const mc = run(dir, 'node harness/models-check.mjs --dry-run', { OPENAI_API_KEY: 'test-not-a-key' });
+  report('models:check --dry-run names what it would ask, and what has no key', mc.status === 0 && /would-check\s+openai-gpt/.test(mc.stdout) && /no-key/.test(mc.stdout), mc.stdout + mc.stderr);
+  const kl = run(dir, 'node harness/kickoff.mjs --role builder --agent codex-a --model gpt-x --tool codex');
+  report('kickoff --tool prints a headless launch line with the agent\'s name and model', kl.status === 0 && /STUDIO_LOCK_OWNER=codex-a STUDIO_AGENT_MODEL=gpt-x codex exec --sandbox workspace-write/.test(kl.stdout), kl.stdout);
 }
 
 // Agents get a one-page brief on start and a kickoff prompt; harness notes survive a studio reset.

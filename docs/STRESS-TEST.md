@@ -34,15 +34,22 @@ In `.env` (gitignored; `bash scripts/secret-scan.sh` checks what git would publi
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
 
-Give each agent its opening prompt: `npm run kickoff -- --role builder --agent claude-a --model claude-opus-5-5`
-(one per agent, Producer included). It sets the agent's name and model and gives it the work loop;
+Before any agent starts, check the models: `npm run models:check`. It asks each provider you have a
+key for which models it serves (free, no tokens) and names any configured model that is gone; set the
+matching `*_MODEL` in `.env`. A free dry run first is worth it: one builder on Aider + Ollama through a
+few small tasks (`docs/AGENT-TOOLS.md`).
+
+Give each agent its opening prompt: `npm run kickoff -- --role builder --agent claude-a --model claude-opus-5-5 --tool claude`
+(one per agent, Producer included). `--tool` also prints the headless launch line for that tool.
+Run every agent in this one checkout, not in separate worktrees, so they share the queue and locks. It sets the agent's name and model and gives it the work loop;
 `task start` then hands it a one-page brief per task. Commits get `Studio-Agent`, `Studio-Model` and
 `Studio-Task` trailers, so every change can be traced to who made it, on what model, for which task.
 
 ## 3. Run it
 
 - `npm run hub`, then open `http://localhost:3847/?token=<HUB_TOKEN>`. The watcher and the daily
-  retro run inside the HUB. Keep it on a second screen; switch to the Studio view to watch.
+  retro run inside the HUB. Keep it on a second screen; switch to the Studio view to watch. Click
+  any agent to see its task, its done checklist and who assigned it.
 - The Producer starts with `npm run handoff` and works the queue; workers follow `studio/skills/`.
 - Let agents hit real limits: hand-backs, the spend cap, provider failover and the watcher are part
   of what is being tested.

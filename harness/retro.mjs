@@ -75,9 +75,9 @@ export function buildRetro({ hours = 24 } = {}) {
   if (exhausted.length >= 2) suggestions.push(`Every provider was busy or out ${exhausted.length} times. Add a fallback provider or a second key for the roles that hit it.`);
 
   const sc = buildScorecard().models.filter((m) => m.done >= 2);
-  const worst = sc.filter((m) => m.bugs >= 2 && m.per10 != null).sort((a, b) => b.per10 - a.per10)[0];
+  const worst = sc.filter((m) => m.bugs + (m.traced || 0) >= 2 && m.per10 != null).sort((a, b) => b.per10 - a.per10)[0];
   const avg = sc.length ? sc.reduce((s, m) => s + (m.per10 || 0), 0) / sc.length : 0;
-  if (worst && worst.per10 > avg * 1.5) suggestions.push(`${worst.model} has ${worst.bugs} confirmed bugs, ${worst.per10} per 10 points against a studio average of ${Math.round(avg * 10) / 10}. Consider routing code changes away from it, or pairing it with a review task.`);
+  if (worst && worst.per10 > avg * 1.5) suggestions.push(`${worst.model} has ${worst.bugs + (worst.traced || 0)} bugs (confirmed or traced), ${worst.per10} per 10 points against a studio average of ${Math.round(avg * 10) / 10}. Consider routing code changes away from it, or pairing it with a review task.`);
 
   return {
     date: today(),

@@ -116,6 +116,7 @@ if (a.down) {
   check('GET /api/brief does not write', (await request(a.port, { path: '/api/brief' })) === 404);
   check('home page is the War Room v3', /Studio floor/.test(await requestBody(a.port, '/')));
   check('retired War Room still answers at /legacy', (await request(a.port, { path: '/legacy' })) === 200);
+  check('agent drawer answers 404 for an unknown agent', (await request(a.port, { path: '/api/agent?name=nobody-here' })) === 404);
   check('running the watcher needs the token', (await request(a.port, { method: 'POST', path: '/api/watch', headers: post, body: '{}' })) === 401);
   check('websocket without token is refused', (await upgrade(a.port)) === 401);
   check('websocket with token is accepted', (await upgrade(a.port, { query: `?token=${strong}` })) === 101);

@@ -97,6 +97,34 @@
     .timeline { max-height: none; }
   }
 
+  /* ---------- Agent drawer: click anyone to see their task and checklist ---------- */
+  .drawer { position: fixed; z-index: 2147483000; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); overflow-y: auto; padding: 16px 18px 28px; background: #1f2833; color: #e8edf2; font: 14px/1.45 Barlow, system-ui, sans-serif; border-left: 1px solid #34404f; box-shadow: -10px 0 30px rgba(0, 0, 0, .35); transform: translateX(105%); transition: transform .22s ease-out; }
+  .drawer.open { transform: none; }
+  body[data-skin="tycoon"] .drawer { background: #fff6e0; color: #2b1d14; border-left: 4px solid #5a3a22; font: 19px/1.15 VT323, monospace; }
+  .drawer h2 { margin: 0 34px 2px 0; font: 700 22px/1.15 "Barlow Condensed", sans-serif; overflow-wrap: anywhere; }
+  body[data-skin="tycoon"] .drawer h2 { font: 14px/1.3 "Press Start 2P", monospace; }
+  .drawer h3 { margin: 16px 0 6px; font: 600 15px/1.2 "Barlow Condensed", sans-serif; color: #93a1b2; }
+  body[data-skin="tycoon"] .drawer h3 { font: 10px/1.3 "Press Start 2P", monospace; color: #8d5a32; }
+  .drawer .close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 6px; font-size: 18px; line-height: 1; }
+  .drawer .sub { color: #93a1b2; }
+  body[data-skin="tycoon"] .drawer .sub { color: #6d4c41; }
+  .drawer ul { margin: 0; padding-left: 0; list-style: none; }
+  .drawer li { padding: 4px 0; border-top: 1px solid rgba(147, 161, 178, .2); overflow-wrap: anywhere; }
+  .drawer li:first-child { border-top: 0; }
+  .drawer .ck { display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
+  .drawer .ck b { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-size: 13px; border: 2px solid #93a1b2; }
+  .drawer .ck.ok b { background: #3ddc84; border-color: #3ddc84; color: #10251a; }
+  .drawer .ck .why { display: block; font-size: .88em; color: #ffb3b5; }
+  body[data-skin="tycoon"] .drawer .ck .why { color: #c62828; }
+  .drawer ol { margin: 0; padding-left: 20px; }
+  .drawer ol li { border: 0; padding: 2px 0; }
+  .drawer pre { white-space: pre-wrap; margin: 0; font: 12.5px/1.4 ui-monospace, Menlo, monospace; background: rgba(0, 0, 0, .15); padding: 8px; border-radius: 5px; }
+  .drawer .chip { display: inline-block; padding: 1px 7px; margin: 0 4px 4px 0; border-radius: 10px; border: 1px solid currentColor; font-size: .85em; }
+  .drawer .foot { margin-top: 18px; font-size: .85em; color: #93a1b2; }
+  #ops .cue[data-agent] { cursor: pointer; border-radius: 6px; }
+  #ops .cue[data-agent]:hover { background: rgba(255, 255, 255, .04); }
+  .person, .desk { pointer-events: auto; cursor: pointer; }
+
   /* ---------- Tycoon: a pixel game studio ---------- */
   body[data-skin="tycoon"] {
     --sky: #7ec8e3; --ink: #2b1d14; --panel: #fff6e0;
@@ -346,7 +374,7 @@
       </section>
       <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
-      <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code> or a task reopened. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
+      <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
       <section><h2>Model calls today</h2><div id="o-router"></div></section>
       <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
       <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
@@ -375,6 +403,7 @@
   </div>
 </div>
 
+<aside id="drawer" class="drawer" aria-hidden="true" aria-labelledby="dr-name"><button class="close" type="button" aria-label="Close">×</button><div id="dr-body"></div></aside>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -469,6 +498,60 @@
     return `Signed off: ${r.file}`;
   })));
 
+  // ---------- Agent drawer ----------
+  let drawerName = null;
+  const drawer = $('drawer');
+  const ago2 = (ts) => (ts ? `${hhmm(ts)}` : '');
+  function openDrawer(name) {
+    drawerName = name;
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    $('dr-body').innerHTML = `<h2 id="dr-name">${esc(name)}</h2><p class="sub">Loading…</p>`;
+    refreshDrawer();
+  }
+  function closeDrawer() {
+    drawerName = null;
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+  }
+  drawer.querySelector('.close').addEventListener('click', closeDrawer);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawerName) closeDrawer(); });
+  $('o-agents').addEventListener('click', (e) => { const r = e.target.closest('[data-agent]'); if (r) openDrawer(r.dataset.agent); });
+  $('o-agents').addEventListener('keydown', (e) => { const r = e.target.closest('[data-agent]'); if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDrawer(r.dataset.agent); } });
+  $('t-crowd').addEventListener('click', (e) => { const el = e.target.closest('[data-agent]'); if (el) openDrawer(el.dataset.agent); });
+  async function refreshDrawer() {
+    if (!drawerName) return;
+    try {
+      const res = await fetch(`/api/agent?name=${encodeURIComponent(drawerName)}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(res.status === 404 ? 'This agent has left the floor.' : `HUB ${res.status}`);
+      renderDrawer(await res.json());
+    } catch (err) {
+      $('dr-body').innerHTML = `<h2 id="dr-name">${esc(drawerName)}</h2><p class="sub">${esc(err.message)}</p>`;
+    }
+  }
+  function renderDrawer(d) {
+    const kind = d.kind === 'script' ? 'the watcher (a script, no AI)' : d.kind === 'human' ? 'you, through the War Room' : `${d.role || 'agent'} · ${d.model || 'model not reported'}`;
+    const t = d.task;
+    const list = (items, f, empty) => (items.length ? `<ul>${items.map(f).join('')}</ul>` : `<p class="sub">${empty}</p>`);
+    let html = `<h2 id="dr-name">${esc(d.name)}</h2><p class="sub">${esc(kind)} · ${esc(d.status)}${d.idleMin != null ? `, last seen ${d.idleMin < 1 ? 'just now' : `${d.idleMin} min ago`}` : ''}</p>`;
+    if (d.watch) html += `<h3>Last pass</h3><p>${esc(ago2(d.watch.at))}: ${esc(d.watch.findings.length ? d.watch.findings.join('; ') : 'all quiet')}</p>`;
+    if (t) {
+      html += `<h3>Working on</h3><p><b>${esc(t.id)}</b> ${esc(t.title)}</p><p><span class="chip">${esc(t.priority)}</span><span class="chip">${esc(t.type)}</span>${t.size ? `<span class="chip">size ${t.size}</span>` : ''}${t.causedBy ? `<span class="chip">bug from ${esc(t.causedBy)}</span>` : ''}</p>`;
+      html += `<p class="sub">${t.assignedBy ? `Assigned by ${esc(t.assignedBy)} at ${esc(ago2(t.assignedAt))}` : 'Assignment not on record'}${t.startedAt ? `, started ${esc(ago2(t.startedAt))}` : ''}</p>`;
+      html += `<h3>Checklist (live, from the done-check)</h3><p class="sub">Done means: ${esc(t.means)}.</p><ul>${t.checks.map((c) => `<li class="ck ${c.ok ? 'ok' : ''}"><b>${c.ok ? '✓' : ''}</b><span>${esc(c.label)}${c.ok ? '' : `<span class="why">${esc(c.why)}</span>`}</span></li>`).join('') || '<li class="sub">Nothing to check for this kind of task.</li>'}</ul>`;
+      if (t.steps.length) html += `<h3>Steps (${esc(t.skill)})</h3><ol>${t.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`;
+      if (t.brief) html += `<p class="sub">One-page brief: <code>${esc(t.brief)}</code></p>`;
+      if (t.handoff) html += `<h3>Notes from before</h3><pre>${esc(t.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim())}</pre>`;
+    } else if (d.kind === 'agent') html += '<h3>Working on</h3><p class="sub">No task claimed right now.</p>';
+    if (d.claims.length) html += `<h3>Holds</h3>${list(d.claims, (c) => `<li><code>${esc(c.key)}</code> until ${esc(ago2(c.until))}</li>`, '')}`;
+    if (d.assignedByThem.length) html += `<h3>Tasks they assigned</h3>${list(d.assignedByThem, (e) => `<li>${esc(ago2(e.ts))} ${esc(e.msg)}</li>`, '')}`;
+    if (d.finishedToday.length) html += `<h3>Finished today</h3>${list(d.finishedToday, (e) => `<li>${esc(ago2(e.ts))} ${esc(e.msg)}</li>`, '')}`;
+    if (d.score) html += `<h3>${esc(d.score.model)} record</h3><p>${d.score.done} done, ${d.score.points} pts, ${d.score.bugs} bugs, ${d.score.traced || 0} traced, ${d.score.per10 ?? '–'} per 10 pts; ${d.score.refused} refused, ${d.score.forced} forced, ${d.score.handedBack} handed back.</p>`;
+    html += `<h3>Lately</h3>${list(d.recent, (e) => `<li><span class="sub">${esc(ago2(e.ts))} ${esc(e.type)}</span><br>${esc(e.msg)}</li>`, 'Nothing yet.')}`;
+    html += '<p class="foot">Read from the studio\'s files when you open it and every 2 seconds while open. No AI is used.</p>';
+    $('dr-body').innerHTML = html;
+  }
+
   function tone(e) {
     if (/escalate|exhausted|error|fail|bug|denied/.test(e.type || '') || /FAIL/.test(e.msg || '')) return 'bad';
     if (/pass|done|success/.test(e.type || '')) return 'good';
@@ -492,7 +575,7 @@
     $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task ? ` (<code>${esc(n.task)}</code>)` : ''}</div>`).join('');
 
     $('o-agents').innerHTML = s.agents.some((a) => !a.placeholder)
-      ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
+      ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue" data-agent="${esc(a.name)}" role="button" tabindex="0" title="Show ${esc(a.name)}'s task and checklist"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
       : '<p class="note">No agent has written an event yet. Agents appear here when they run any harness command.</p>';
     $('o-locks').innerHTML = s.locks.length
       ? s.locks.map((l) => `<div class="lock"><b>${esc(l.owner)}</b> holds <code>${esc(l.key)}</code> until ${esc(hhmm(l.expiresAt))}</div>`).join('')
@@ -521,7 +604,7 @@
       : '<p class="note">No playtest yet. Run <code>node qa/playtest.mjs --stage 1</code>.</p>';
 
     $('o-score').innerHTML = (s.scorecard || []).length
-      ? `<table class="score"><tr><th>Model</th><th>Done</th><th>Pts</th><th>Bugs</th><th>/10 pts</th><th>Slips</th></tr>${s.scorecard.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.done}</td><td>${m.points}</td><td class="${m.bugs ? 'bad' : ''}">${m.bugs}${m.suspected ? ` <span title="suspected from closed-loop failures">+${m.suspected}?</span>` : ''}</td><td>${m.per10 ?? '–'}</td><td title="done refused by a check / forced / handed back">${m.refused}/${m.forced}/${m.handedBack}</td></tr>`).join('')}</table>`
+      ? `<table class="score"><tr><th>Model</th><th>Done</th><th>Pts</th><th>Bugs</th><th>/10 pts</th><th>Slips</th></tr>${s.scorecard.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.done}</td><td>${m.points}</td><td class="${m.bugs + (m.traced || 0) ? 'bad' : ''}" title="confirmed ${m.bugs}, traced through commits ${m.traced || 0}">${m.bugs + (m.traced || 0)}${m.suspected ? ` <span title="suspected from closed-loop failures">+${m.suspected}?</span>` : ''}</td><td>${m.per10 ?? '–'}</td><td title="done refused by a check / forced / handed back">${m.refused}/${m.forced}/${m.handedBack}</td></tr>`).join('')}</table>`
       : '<p class="note">No finished work yet. Models show up once agents report them.</p>';
     const prov = Object.entries(s.router.providers);
     $('o-router').innerHTML = (prov.length
@@ -792,7 +875,7 @@
   // Feet position of desk i in a room. The Producer's big desk takes slot 0 and pushes the rest right.
   const slotPt = (g, i, roomId) => {
     const big = roomId === 'production';
-    return { x: g.x + 18 + (i % 3) * 74 + (big && i % 3 ? 44 : 0), y: g.y - 46 - Math.floor(i / 3) * 70 };
+    return { x: g.x + 18 + (i % 3) * 74 + (big && i % 3 ? 44 : 0), y: g.y - 46 - Math.floor(i / 3) * 88 };
   };
   const home = (p) => { const g = geo(p.room); return g ? slotPt(g, p.i, p.room) : { x: p.x, y: p.y }; };
 
@@ -961,6 +1044,7 @@
     const accShadow = acc ? `${shadowsFor(acc.p, acc.c)},` : '';
     const el = document.createElement('div');
     el.className = 'person';
+    el.dataset.agent = a.name;
     el.title = a.kind === 'script' ? 'watch: the watcher, a script (no AI)' : a.kind === 'human' ? `${a.name}: you, through the War Room` : `${a.name}${a.role ? ` (${a.role})` : ''}`;
     el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="zz">z</span><span class="beacon"></span><span class="fx"></span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
     crowd.appendChild(el);
@@ -976,6 +1060,7 @@
       if (el) el.remove();
       el = document.createElement('span');
       el.dataset.room = roomId;
+      el.dataset.agent = a.name;
       const big = roomId === 'production' && i === 0;
       el.className = `desk${big ? ' big' : ''}`;
       el.innerHTML = `<span class="equip">${EQUIP[roomId] || EQUIP.engineering}</span><span class="tag"></span><span class="model"></span><span class="bugs" title="Confirmed bugs by this model"></span>`;
@@ -984,7 +1069,8 @@
     }
     el.querySelector('.tag').textContent = a.kind === 'script' ? 'watch (script)' : a.kind === 'human' ? `${a.name} (you)` : a.name;
     const score = (state?.scorecard || []).find((m) => m.model === a.model);
-    el.querySelector('.bugs').textContent = score && score.bugs ? `${score.bugs} BUG${score.bugs > 1 ? 'S' : ''}` : '';
+    const nBugs = score ? score.bugs + (score.traced || 0) : 0;
+    el.querySelector('.bugs').textContent = nBugs ? `${nBugs} BUG${nBugs > 1 ? 'S' : ''}` : '';
     el.querySelector('.model').textContent = a.model ? String(a.model).replace(/^(models\/|accounts\/[^/]+\/models\/)/, '') : '';
     el.title = `${a.name}${a.model ? ` on ${a.model}` : ''}: ${a.lastMsg || 'no activity yet'}`;
     el.classList.toggle('on', a.status === 'working');
@@ -1223,6 +1309,7 @@
       }
       primed = true;
       render();
+      if (drawerName) refreshDrawer();
     } catch (err) {
       $('o-now').textContent = `Can't reach the HUB (${err.message}). Is node hub/server.mjs running?`;
     }

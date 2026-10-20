@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { isHash64 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
@@ -42,14 +43,14 @@ const BY_ROLE = {
 };
 
 export const TYPES = {
-  change: { skill: 'studio/skills/builder.md', means: 'a full `npm run verify` passed after the task started' },
-  bug: { skill: 'studio/skills/bug.md', means: 'a pinned regression in qa/regressions/, a lesson in studio/memory/failures.md, and a green verify, all after the task started' },
-  balance: { skill: 'studio/skills/balance.md', means: 'a sweep report (studio/balance/latest.md) written after the task started; a person picks the number' },
-  fun: { skill: 'studio/skills/playtest.md', means: 'a fun report (studio/fun/latest.md) written after the task started' },
-  playtest: { skill: 'studio/skills/playtest.md', means: 'a playtest report in qa/reports/ written after the task started' },
-  study: { skill: 'studio/skills/study.md', means: 'a study.md under studio/research/ written after the task started' },
-  review: { skill: 'studio/skills/review.md', means: 'a review note in studio/reviews/ written after the task started' },
-  docs: { skill: 'studio/skills/docs.md', means: 'a full `npm run verify` passed after the task started' },
+  change: { skill: 'studio/skills/builder.md', means: 'changes exist for the task, and a full `npm run verify` passed after the last of them' },
+  bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned hash, a lesson naming the bug, changes for the fix, and a green verify after the last change' },
+  balance: { skill: 'studio/skills/balance.md', means: 'a sweep of the current tuning, newer than the last game change; a person picks the number' },
+  fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
+  playtest: { skill: 'studio/skills/playtest.md', means: 'a playtest report on the current build with seed, ticks, hash, and the failing tick if it failed' },
+  study: { skill: 'studio/skills/study.md', means: 'a study.md of 120+ words under studio/research/, written after the task started' },
+  review: { skill: 'studio/skills/review.md', means: 'a review note naming the task or commit it reviewed, with a verdict' },
+  docs: { skill: 'studio/skills/docs.md', means: 'a changed .md file, and a full `npm run verify` after the last change' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
 
@@ -93,7 +94,70 @@ function filesUnder(rel, test, deep = false) {
 }
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
-function gatesSince(since) {
+// ---- what changed, and when ----
+const BOOKKEEPING = /^(\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/)|qa\/reports\/)/;
+const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
+const git = (...args) => {
+  const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
+  return r.status === 0 ? r.stdout : null;
+};
+function walkSince(rel, since, out, depth = 0) {
+  const dir = abs(rel);
+  if (depth > 6 || !fs.existsSync(dir)) return;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+    const child = path.posix.join(rel, e.name);
+    if (e.isDirectory()) walkSince(child, since, out, depth + 1);
+    else if (!BOOKKEEPING.test(child) && mtime(child) >= since) out.push(child);
+  }
+}
+/** Evidence that work happened for this task: tagged commits, untagged commits since the start, or edits on disk. */
+export function taskChanges(taskId, since) {
+  const files = new Set();
+  let lastAt = 0;
+  const log = git('log', `--since=${Math.floor(since / 1000)}`, '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', '--name-only');
+  const commits = [];
+  if (log !== null) {
+    for (const block of log.split('\x1e').slice(1)) {
+      const [head, ...names] = block.trim().split('\n');
+      const [hash, ct, tasks] = head.split('\t');
+      const tagged = (tasks || '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (tagged.length && !tagged.includes(taskId)) continue; // someone else's task
+      if (!tagged.length && Number(ct) * 1000 < since) continue; // same second as the start, but before it
+      const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
+      if (!touched.length) continue;
+      commits.push({ hash, at: Number(ct) * 1000, tagged: tagged.includes(taskId) });
+      touched.forEach((n) => files.add(n));
+      lastAt = Math.max(lastAt, Number(ct) * 1000);
+    }
+    const status = git('status', '--porcelain') || '';
+    for (const line of status.split('\n').filter(Boolean)) {
+      const f = line.slice(3).replace(/^"|"$/g, '').split(' -> ').pop();
+      if (BOOKKEEPING.test(f)) continue;
+      const m = mtime(f);
+      if (m >= since) {
+        files.add(f);
+        lastAt = Math.max(lastAt, m);
+      }
+    }
+  } else {
+    // Not a git checkout: fall back to files modified since the task started.
+    const out = [];
+    for (const d of WORK_DIRS) walkSince(d, since, out);
+    out.forEach((f) => {
+      files.add(f);
+      lastAt = Math.max(lastAt, mtime(f));
+    });
+  }
+  return { files: [...files], commits, lastAt };
+}
+/** The last time game code changed (cartridges/, src/): reports older than this describe an old build. */
+function lastGameChange() {
+  const out = [];
+  for (const d of ['cartridges', 'src']) walkSince(d, 0, out);
+  return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
+}
+function gatesAfter(at) {
   let run = null;
   try {
     run = JSON.parse(fs.readFileSync(abs('.studio/gates-last.json'), 'utf8'));
@@ -101,46 +165,81 @@ function gatesSince(since) {
     return 'no full `npm run verify` has been recorded';
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
-  if ((Date.parse(run.at) || 0) < since) return 'no full `npm run verify` since this task started';
+  if ((Date.parse(run.at) || 0) < at) return 'no full `npm run verify` after your last change; run it again';
   const red = (run.rows || []).filter((r) => r.required && !r.ok).map((r) => r.id);
   return red.length ? `the last verify failed: ${red.join(', ')}` : null;
 }
+const readJson = (rel) => {
+  try {
+    return JSON.parse(fs.readFileSync(abs(rel), 'utf8'));
+  } catch {
+    return null;
+  }
+};
+const words = (rel) => (fs.readFileSync(abs(rel), 'utf8').match(/[A-Za-z0-9]{2,}/g) || []).length;
 
-/** Returns { ok, type, means, skill, missing: [..] }. */
+/**
+ * Returns { ok, type, means, skill, checks: [{ label, ok, why }], missing: [why…] }.
+ * Each check reads what the work contains, not only when a file was touched.
+ */
 export function checkDone(task, since = startedAt(task.id)) {
   const type = taskType(task);
-  const missing = [];
-  const need = (cond, msg) => {
-    if (!cond) missing.push(msg);
-  };
-  const gates = () => {
-    const why = gatesSince(since);
-    if (why) missing.push(why);
+  const checks = [];
+  const check = (label, ok, why) => checks.push({ label, ok: Boolean(ok), why: ok ? null : why });
+
+  const workAndVerify = (docsOnly = false) => {
+    const ch = taskChanges(task.id, since);
+    const relevant = docsOnly ? ch.files.filter((f) => f.endsWith('.md')) : ch.files;
+    check(docsOnly ? 'Docs changed for this task' : 'Changes exist for this task', relevant.length, docsOnly ? 'no changed .md file since this task started' : `no changes found for ${task.id}: no commit tagged Studio-Task: ${task.id} and no edits since it started`);
+    const why = gatesAfter(Math.max(since, ch.lastAt));
+    check('Full verify green after the last change', !why, why);
   };
 
-  if (type === 'change' || type === 'docs') gates();
+  if (type === 'change') workAndVerify();
+  if (type === 'docs') workAndVerify(true);
   if (type === 'bug') {
-    const pinned = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since).filter((f) => {
-      try {
-        return isHash64(JSON.parse(fs.readFileSync(abs(f), 'utf8')).hash);
-      } catch {
-        return false;
-      }
-    });
-    need(pinned.length, 'no regression in qa/regressions/ with a pinned hash since this task started (add one, then `node qa/check-regressions.mjs --update`)');
-    need(mtime('studio/memory/failures.md') >= since, 'no lesson added to studio/memory/failures.md since this task started (`bash scripts/distill-bug.sh`)');
-    gates();
+    const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
+      .map((f) => ({ f, j: readJson(f) }))
+      .filter(({ j }) => j && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isHash64(j.hash));
+    check('Regression saved with seed, tick and a pinned hash', regs.length, 'no regression in qa/regressions/ with a seed, a tick and a pinned hash since this task started (save the replay, then `node qa/check-regressions.mjs --update`)');
+    const lessons = fs.existsSync(abs('studio/memory/failures.md')) ? fs.readFileSync(abs('studio/memory/failures.md'), 'utf8').match(/^### .+$/gm) || [] : [];
+    const ids = [task.id, ...(task.title.match(/\b(BUG|REG)-[\w-]+/g) || []), ...regs.map(({ j }) => j.id).filter(Boolean)];
+    const day = new Date(since).toISOString().slice(0, 10);
+    const named = lessons.some((h) => ids.some((id) => h.includes(id)));
+    const dated = lessons.some((h) => (h.match(/\[(\d{4}-\d{2}-\d{2})\]/) || [])[1] >= day) && mtime('studio/memory/failures.md') >= since;
+    check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`bash scripts/distill-bug.sh\`)`);
+    workAndVerify();
   }
-  if (type === 'balance') need(mtime('studio/balance/latest.md') >= since, 'no sweep since this task started (`npm run balance`)');
-  if (type === 'fun') need(mtime('studio/fun/latest.md') >= since, 'no fun report since this task started (`npm run fun`)');
-  if (type === 'playtest') need(newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
+  const fresh = lastGameChange();
+  if (type === 'balance') {
+    const rel = 'studio/balance/latest.md';
+    check('Sweep written since the task started', mtime(rel) >= since, 'no sweep since this task started (`npm run balance`)');
+    check('Sweep covers the current tuning value', fs.existsSync(abs(rel)) && /\(current\)/.test(fs.readFileSync(abs(rel), 'utf8')), 'the sweep has no "(current)" row; it was not run against the game\'s current tuning');
+    check('Sweep is newer than the last game change', mtime(rel) >= fresh, 'the game changed after the sweep; run `npm run balance` again');
+  }
+  if (type === 'fun') {
+    check('Fun report since the task started', mtime('studio/fun/latest.md') >= since, 'no fun report since this task started (`npm run fun`)');
+    check('Fun report is newer than the last game change', mtime('studio/fun/latest.md') >= fresh, 'the game changed after the fun report; run `npm run fun` again');
+  }
+  if (type === 'playtest') {
+    const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
+    check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
+    const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && j.stage1.finalHash && (j.passed || j.stage1.failingTick != null));
+    check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
+  }
   if (type === 'study') {
-    const studies = newestSince(filesUnder('studio/research', (n) => n === 'study.md', true), since).filter((f) => fs.readFileSync(abs(f), 'utf8').trim().length > 0);
-    need(studies.length, 'no study.md under studio/research/ since this task started (layout ideas: docs/GAME-STUDY.md)');
+    const studies = newestSince(filesUnder('studio/research', (n) => n === 'study.md', true), since);
+    check('study.md written since the task started', studies.length, 'no study.md under studio/research/ since this task started (layout ideas: docs/GAME-STUDY.md)');
+    check('Study has substance (120+ words)', studies.some((f) => words(f) >= 120), 'the study is under 120 words; write the findings and the tasks they lead to');
   }
-  if (type === 'review') need(newestSince(filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md'), since).length, 'no review note in studio/reviews/ since this task started');
-
-  return { ok: missing.length === 0, type, since, missing, ...TYPES[type] };
+  if (type === 'review') {
+    const notes = newestSince(filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md'), since).map((f) => fs.readFileSync(abs(f), 'utf8'));
+    check('Review note since the task started', notes.length, 'no review note in studio/reviews/ since this task started');
+    check('Note names what it reviewed (a task ID or commit)', notes.some((t) => /\bT-\d+\b|\b[0-9a-f]{7,40}\b/.test(t)), 'the review note doesn\'t name the task or commit it reviewed');
+    check('Note gives a verdict', notes.some((t) => /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t)), 'the review note has no verdict (approve, request changes, or reject)');
+  }
+  const missing = checks.filter((c) => !c.ok).map((c) => c.why);
+  return { ok: missing.length === 0, type, since, checks, missing, ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -153,7 +252,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   const res = checkDone(task);
   console.log(`${task.id} is a "${res.type}" task. Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
-  if (res.ok) console.log('Ready to finish.');
-  else for (const m of res.missing) console.log(`  missing: ${m}`);
+  for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
+  console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);
 }

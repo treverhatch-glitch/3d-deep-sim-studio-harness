@@ -6,7 +6,9 @@ skills say how a kind of work gets finished. Each file has four parts: **When**,
 
 "Done means" is not a promise in prose: `node harness/task.mjs done <ID>` runs
 `harness/done-check.mjs` and refuses while something is missing. See what a task still needs with
-`node harness/done-check.mjs <ID>`.
+`node harness/done-check.mjs <ID>`. The checks read content, not just file times: a review must name
+what it reviews and give a verdict, a bug needs a pinned regression and a lesson, a build needs real
+changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
 
 | Type | Picked by | Skill |
 | --- | --- | --- |

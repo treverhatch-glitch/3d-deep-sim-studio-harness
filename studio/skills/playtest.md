@@ -9,7 +9,8 @@ or a fun pass.
    someone else (`node harness/task.mjs add "<what broke>" --type bug`).
 3. For a fun pass: `npm run fun` (writes `studio/fun/latest.md`).
 
-**Done means.** A playtest report in `qa/reports/` (or a fun report) written after the task
-started.
+**Done means.** A playtest report in `qa/reports/`, written after the task started, on the current
+build: seed, ticks run, final hash, and the failing tick if it failed. For a fun task: a fun report
+newer than the last game change.
 
 **Never.** Fix code during a playtest. Report a failure without its seed and tick.

@@ -8,6 +8,7 @@
 3. Write `studio/reviews/<date>-<task>.md`: approve or request changes, with file and line for
    each point.
 
-**Done means.** A review note in `studio/reviews/` written after the task started.
+**Done means.** A review note in `studio/reviews/`, written after the task started, that names the
+task ID or commit it reviews and gives a verdict (approve, LGTM, request changes, reject, blocking).
 
 **Never.** Approve your own work. Fix the code yourself instead of saying what is wrong.

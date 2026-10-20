@@ -16,8 +16,9 @@
 If you can't, the watcher requeues the task once your claim expires and leaves your last messages
 for the next agent.
 
-**Done means.** A full `npm run verify` passed after the task started. If a hash changed, the
-golden was regenerated in the same commit.
+**Done means.** Changes for this task (commits tagged with it, or edits not yet committed), and a
+full `npm run verify` after your last change. If a hash changed, the golden was regenerated in the
+same commit.
 
 **Never.** Change a hash without its golden. Edit files someone else has claimed. Loop past three
 failed tries.

@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.6.0] — 2026-10-20
+### Added
+- **Agent drawer in the War Room**: click any agent (a row in Ops, a person or desk in the Studio view) to see its current task, who assigned it and when, the done checklist ticking live, the skill's steps, hand-off notes, its claims, what it finished today, what it assigned (for the Producer), its recent activity and its scorecard. `GET /api/agent?name=`. It reads the studio's files when opened and every 2 seconds while open; no AI is used.
+- **Content-based done-checks**: a build task needs real changes (commits tagged with it, or edits) and a full verify after the last one; docs need a changed `.md`; a bug needs a regression with seed, tick and pinned hash and a lesson naming the task or bug; a balance sweep needs a `(current)` row and must be newer than the last game change; fun and playtest reports must cover the current build; a study needs 120+ words; a review must name what it reviews and give a verdict. `done` and `done-check` print a `[x]`/`[ ]` checklist.
+- **Bugs traced through commit trailers**: the scorecard follows a bug's fix commits back to the last commit from another task that touched the same code, and counts it against that commit's model (`traced`), even without `--caused-by`. Retros use it too.
+- **`npm run models:check`**: asks each provider you have a key for which models it serves (free model-list endpoints, no tokens) and names configured models that are gone, with close matches.
+- **`kickoff --tool claude|codex|cursor|grok|agy|aider`**: prints a headless launch line for that tool with the agent's name and model set.
+- **`docs/AGENT-TOOLS.md`**: how to plug in Claude Code, Codex, Cursor, Grok Build, Antigravity (which replaced Gemini CLI for personal accounts) and Aider + Ollama, with sources. Recommends one shared checkout over separate worktrees, and a free Aider + Ollama dry run before a paid run.
+### Changed
+- Anthropic's default model is `claude-sonnet-5-5`. Gemini models can be set with `GEMINI_PRO_MODEL` and `GEMINI_FLASH_MODEL`.
+- Skills' "Done means" lines match the new checks.
+
+---
+
 ## [2.5.0] — 2026-10-20
 ### Added
 - **Focus briefs**: `task start` writes `.studio/briefs/<ID>.md`, one page an agent reads instead of the repo (done means, the skill's steps, notes from whoever worked on it before, meeting mentions, its claims and others', off-limits areas, related lessons, gate state, the exact finish and hand-back commands). `npm run focus -- <ID>` rebuilds it.

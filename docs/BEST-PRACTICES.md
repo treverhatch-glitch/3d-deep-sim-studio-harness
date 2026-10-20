@@ -43,6 +43,8 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   `studio/memory/failures.md`, so every model learns it next session.
 - **Say which model is working.** Set `STUDIO_AGENT_MODEL` (or `task start --model`) once per
   agent; every event carries it, and both War Room views show it at the agent's desk.
+- **One checkout.** Run every agent in the same checkout rather than separate git worktrees, so they
+  share one queue and one set of locks. Launch lines per tool: `docs/AGENT-TOOLS.md`.
 
 ## When an agent runs out of usage
 
@@ -85,7 +87,8 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 ## Before a test with real API keys
 
 See `docs/STRESS-TEST.md`. In short: run it in a private copy, set `STUDIO_DAILY_TOKEN_CAP` first,
-start from `npm run studio:reset`, and keep the HUB open so the watcher and retros run.
+start from `npm run studio:reset`, check models with `npm run models:check`, and keep the HUB open
+so the watcher and retros run.
 
 ## Bringing in an existing game
 

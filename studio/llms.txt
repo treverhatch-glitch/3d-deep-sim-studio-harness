@@ -23,18 +23,20 @@
 - `node harness/task.mjs reopen <ID> --reason "<what was wrong>"` · `task add ... --size 1-5 --caused-by T-012`
   Reopen finished work, or file a bug against the task whose work caused it. Both count against the model that closed that task.
 - `npm run scorecard` · `npm run retro`
-  Bugs and slips per model (per 10 points of task size). Daily retrospective with suggestions in `studio/memory/retros/` (scripts, no tokens; the HUB writes one a day).
+  Bugs and slips per model (per 10 points of task size). Bugs without `--caused-by` are traced through commit trailers to the commit and model that last touched the fixed code. Daily retrospective with suggestions in `studio/memory/retros/` (scripts, no tokens; the HUB writes one a day).
 - `npm run studio:reset -- --name "<game>" [--yes]`
   Fresh plan, log and queue for a new game in your own copy; the old project's notes are archived to `.studio/archive/`.
-- `npm run kickoff -- --role <role> --agent <unique> --model <model>`
-  Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop.
+- `npm run kickoff -- --role <role> --agent <unique> --model <model> [--tool claude|codex|cursor|grok|agy|aider]`
+  Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop. `--tool` adds a headless launch line (`docs/AGENT-TOOLS.md`).
+- `npm run models:check [-- --dry-run]`
+  Asks each provider you have a key for which models it serves (free model-list endpoints, no tokens); exits 1 if a configured model is gone.
 - `npm run focus -- <ID>` (written for you by `task start`)
   The agent's one-page brief in `.studio/briefs/<ID>.md`: done means, the skill's steps, notes from before, lanes, related lessons, finish commands.
 - `npm run notes -- add --kind well|bad|workaround|upgrade "…"` · `list` · `export`
   Notes about the harness itself (`studio/harness-notes/NOTES.md`); kept across `studio:reset`.
 - Commits made with `STUDIO_LOCK_OWNER` set get `Studio-Agent`, `Studio-Model` and `Studio-Task` trailers (commit-msg hook).
 - `node harness/done-check.mjs <ID>`
-  Shows a task's type, what done means for it, and what is missing. One skill per type in `studio/skills/`.
+  Shows a task's type and its checklist (`[x]`/`[ ]`): content checks, not file times. One skill per type in `studio/skills/`.
 - `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`
   Outside tools agents can use (`studio/plugins.json`): REA, Playwright MCP, Chrome DevTools MCP, Blender, Godot, Unity.
 - `node harness/event.mjs --type <event.type> --agent <role> [--task <ID>] [--to producer] --msg "<summary>"`
@@ -42,6 +44,7 @@
 - `node harness/status.mjs [--json]`
   Prints a 0-token studio snapshot combining queue, router matrix, and recent events.
 - `node hub/server.mjs` (home page: War Room v3; `?skin=tycoon` for the Studio view; the old page is at `/legacy` until it is removed)
+  Click an agent for its drawer: current task, checklist, skill steps, hand-off notes, claims, score (`GET /api/agent?name=`; file reads only, no AI).
   Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:3847/?token=<HUB_TOKEN>`; `?view=mobile` for phones).
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

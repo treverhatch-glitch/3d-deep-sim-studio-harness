@@ -5,6 +5,7 @@
  *
  *   npm run kickoff -- --role builder --agent claude-a --model claude-opus-5-5
  *   npm run kickoff -- --role producer --agent grok-producer --model grok-4
+ *   npm run kickoff -- --role builder --agent codex-a --model gpt-5 --tool codex   also print a launch line
  *
  * Writes .studio/kickoff/<agent>.md and prints it. Paste it as the agent's first message (or into
  * its rules file). It names the agent, sets its model tag, points it at its role and skills, and
@@ -15,6 +16,51 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
+
+/**
+ * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
+ * Each runs one session in this checkout with the agent's name and model in its environment, so the
+ * harness commands it runs (task, lock, event) and its commits are tagged correctly.
+ */
+export const TOOLS = {
+  claude: {
+    name: 'Claude Code',
+    line: (f) => `claude -p "$(cat ${f})" --permission-mode acceptEdits --allowedTools "Bash(node harness/*),Bash(npm run *),Bash(npm test*),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *)" --output-format json --max-budget-usd 5`,
+    note: 'Not --bare: it skips CLAUDE.md and AGENTS.md. The JSON result has total_cost_usd. Add --permission-prompts none for unattended runs.',
+  },
+  codex: {
+    name: 'Codex CLI',
+    line: (f) => `codex exec --sandbox workspace-write --json - < ${f}`,
+    note: 'Read-only unless --sandbox workspace-write. Must run inside the git checkout. Key: CODEX_API_KEY, set for this command only.',
+  },
+  cursor: {
+    name: 'Cursor CLI',
+    line: (f) => `agent -p --force --output-format text "$(cat ${f})"`,
+    note: 'Without --force it only proposes edits. Key: CURSOR_API_KEY.',
+  },
+  grok: {
+    name: 'Grok Build CLI',
+    line: (f, model) => `grok -p "$(cat ${f})"${model && model !== 'unknown' ? ` -m ${model}` : ''} --output-format json --always-approve`,
+    note: 'Early beta. Key: XAI_API_KEY (or grok login).',
+  },
+  agy: {
+    name: 'Antigravity CLI (replaced Gemini CLI for personal accounts)',
+    line: (f) => `script -qc 'agy -p "$(cat ${f})"' /dev/null`,
+    note: 'Wrapped in script(1): agy 1.1 can print nothing when stdout is not a terminal. Reads AGENTS.md; GEMINI.md wins if both exist.',
+  },
+  aider: {
+    name: 'Aider (free local dry run with Ollama)',
+    line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes`,
+    note: 'One instruction, then exits: best for single small tasks. Start Ollama with OLLAMA_CONTEXT_LENGTH=32768 or more; its 2k default silently drops context.',
+  },
+};
+
+export function launchLine(tool, { agent, model }) {
+  const t = TOOLS[tool];
+  if (!t) return null;
+  const file = `.studio/kickoff/${agent}.md`;
+  return { name: t.name, line: `STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model} ${t.line(file, model)}`, note: t.note };
+}
 
 export function kickoff({ role, agent, model = 'unknown' }) {
   const roleFile = `studio/roles/${role}.md`;
@@ -70,7 +116,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const role = arg('role');
   const agent = arg('agent');
   if (!role || !agent) {
-    console.error('Usage: npm run kickoff -- --role <role> --agent <unique-name> [--model <model>]');
+    console.error(`Usage: npm run kickoff -- --role <role> --agent <unique-name> [--model <model>] [--tool ${Object.keys(TOOLS).join('|')}]`);
     process.exit(1);
   }
   if (SHARED_OWNERS.has(agent.toLowerCase()) && role !== 'producer') {
@@ -83,4 +129,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   fs.writeFileSync(path.join(dir, `${agent}.md`), text);
   console.log(text);
   console.log(`Saved to .studio/kickoff/${agent}.md`);
+  const tool = arg('tool');
+  if (tool) {
+    const l = launchLine(tool, { agent, model: arg('model') || 'unknown' });
+    if (!l) {
+      console.error(`Unknown tool "${tool}". Known: ${Object.keys(TOOLS).join(', ')}`);
+      process.exit(1);
+    }
+    console.log(`\nLaunch it headless with ${l.name}, from the repo root:\n\n  ${l.line}\n\n${l.note}\nOne line runs one session; run it again (or in a loop) to keep the agent working. Or paste the prompt into the tool's chat.`);
+  }
 }

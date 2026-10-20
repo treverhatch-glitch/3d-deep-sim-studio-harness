@@ -7,6 +7,6 @@
 2. Check commands you mention actually run.
 3. Run the full `npm run verify` (the secret scan and session checks read docs too).
 
-**Done means.** A full `npm run verify` passed after the task started.
+**Done means.** A changed `.md` file, and a full `npm run verify` after it.
 
 **Never.** Paste keys, tokens or private URLs into docs. Turn advice into rules nobody asked for.

@@ -14,8 +14,8 @@
 
 ## Didn't work
 
-- [2026-10-20 · producer] Done-checks compare file times, so touching a file can pass a check.
-- [2026-10-20 · producer] Closed-loop failures can only be blamed on models as "suspected". Commits now carry Studio-Agent, Studio-Model and Studio-Task trailers, but the scorecard doesn't read git history yet.
+- [2026-10-20 · producer] Done-checks compared file times, so touching a file could pass a check. Mostly fixed in 2.6.0 (content checks); a balance sweep can still pass when the game hasn't changed.
+- [2026-10-20 · producer] Closed-loop failures can only be blamed on models as "suspected". Bug tasks now trace to a commit and model through trailers (2.6.0), but a failure with no bug task still can't.
 - [2026-10-20 · producer] Playwright's bundled video recorder needed an ffmpeg build that wasn't installed; screen recordings had to use Chromium's screencast instead.
 
 ## Workarounds in use
@@ -26,6 +26,6 @@
 
 ## Upgrade ideas
 
-- [2026-10-20 · producer] Content-based done-checks: a sweep for the current tuning values, a review note naming the merge, a regression that fails on the commit before the fix.
-- [2026-10-20 · producer] Let the scorecard read the Studio-Task and Studio-Model commit trailers, so a bug fix can be traced to the commit (and model) that introduced it.
+- [2026-10-20 · producer] Done-check: prove a regression fails on the commit before the fix (needs a checkout of that commit).
+- [2026-10-20 · producer] Shared studio state for git worktrees, so agents can work in separate worktrees and still see one queue and one set of locks.
 - [2026-10-20 · producer] Route tasks by scorecard automatically once enough runs exist, with the Producer approving.

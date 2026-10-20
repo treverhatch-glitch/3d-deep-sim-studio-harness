@@ -12,7 +12,8 @@ own build.
 4. Turn findings into tasks (`node harness/task.mjs add …`). For our own build, file each bug with
    `--type bug`.
 
-**Done means.** A `study.md` under `studio/research/` written after the task started.
+**Done means.** A `study.md` under `studio/research/` written after the task started, at least 120
+words.
 
 **Never.** Copy the studied game's code, art, audio or text into the repo. Study builds you don't
 have a right to examine.

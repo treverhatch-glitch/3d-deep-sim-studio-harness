@@ -8,7 +8,8 @@
 3. Write two or three options with their trade-offs at the top of `latest.md`.
 4. Hand it to a person. They pick the number; a builder task applies it.
 
-**Done means.** A sweep report written after the task started.
+**Done means.** A sweep written after the task started, with a `(current)` row, and newer than the
+last change to the game code.
 
 **Never.** Change a tuning value on your own. A tuning change moves the goldens, and that is a
 person's call.

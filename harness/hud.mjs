@@ -14,7 +14,8 @@ import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { activeMeeting } from './meeting.mjs';
 import { buildScorecard } from './scorecard.mjs';
-import { taskType } from './done-check.mjs';
+import { taskType, checkDone } from './done-check.mjs';
+import { readTaskHandoff } from './task.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -278,5 +279,71 @@ export function buildHudState() {
     divisions: divs,
     lessons: lessons(),
     rtk: rtkGain(),
+  };
+}
+
+/**
+ * Everything the War Room shows when you click an agent: its task, who assigned it, the live done
+ * checklist, the skill's steps, notes from before, its claims and what it did lately. Files only.
+ */
+export function buildAgentDetail(name) {
+  const hud = buildHudState();
+  const agent = hud.agents.find((a) => a.name === name);
+  if (!agent) return null;
+  const events = readRecentEvents(3000);
+  const q = hud.queue;
+  const all = [...q.inProgress, ...q.backlog, ...q.done];
+  const held = hud.locks.filter((l) => l.owner === name);
+  const taskId = held.find((l) => l.key.startsWith('task:'))?.key.slice(5) || agent.task || null;
+  const task = all.find((t) => t.id === taskId) || null;
+  let detail = null;
+  if (task) {
+    const added = events.find((e) => e.type === 'task.added' && e.task === task.id);
+    const started = events.filter((e) => e.type === 'task.start' && e.task === task.id).pop();
+    const check = checkDone(task);
+    let steps = [];
+    try {
+      const skill = check.skill ? fs.readFileSync(path.join(REPO_ROOT, check.skill), 'utf8') : '';
+      const block = (skill.match(/\*\*Steps\.?\*\*\s*([\s\S]*?)(?=\n\*\*[A-Z]|$)/) || [, ''])[1];
+      steps = block.split(/\n(?=\d+\.\s)/).map((x) => x.replace(/^\d+\.\s*/, '').replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+    } catch {
+      // no skill file
+    }
+    detail = {
+      id: task.id,
+      title: task.title,
+      priority: task.priority,
+      role: task.role,
+      status: task.status,
+      type: check.type,
+      size: added?.meta?.size || null,
+      causedBy: added?.meta?.causedBy || null,
+      assignedBy: added?.agent || null,
+      assignedAt: added?.ts || null,
+      startedAt: started?.ts || null,
+      means: check.means,
+      skill: check.skill,
+      checks: check.checks,
+      steps,
+      handoff: readTaskHandoff(task.id),
+      brief: fs.existsSync(path.join(REPO_ROOT, '.studio', 'briefs', `${task.id}.md`)) ? `.studio/briefs/${task.id}.md` : null,
+    };
+  }
+  const mine = events.filter((e) => e.agent === name);
+  return {
+    name,
+    kind: agent.kind || 'agent',
+    model: agent.model || null,
+    role: agent.role || null,
+    room: agent.room,
+    status: agent.status,
+    idleMin: agent.idleMin,
+    task: detail,
+    claims: held.map((l) => ({ key: l.key, until: l.expiresAt })),
+    finishedToday: mine.filter((e) => e.type === 'task.done' && Date.parse(e.ts) > Date.now() - 86400000).map((e) => ({ ts: e.ts, task: e.task, msg: e.msg })),
+    assignedByThem: mine.filter((e) => e.type === 'task.added').slice(-8).map((e) => ({ ts: e.ts, task: e.task, msg: e.msg })),
+    recent: mine.slice(-10).reverse().map((e) => ({ ts: e.ts, type: e.type, msg: e.msg })),
+    score: hud.scorecard.find((m) => m.model === agent.model) || null,
+    watch: name === 'watch' ? hud.watch : null,
   };
 }

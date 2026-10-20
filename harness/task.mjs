@@ -179,7 +179,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false } 
       check,
       message: [
         `${target.id} is a "${check.type}" task. Done means: ${check.means}.`,
-        ...check.missing.map((m) => `  missing: ${m}`),
+        ...(check.checks?.length ? check.checks.map((c) => `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : check.missing.map((m) => `  missing: ${m}`)),
         check.skill ? `How: ${check.skill}` : '',
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
       ].filter(Boolean).join('\n'),

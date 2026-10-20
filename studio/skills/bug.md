@@ -12,8 +12,8 @@
    to spot it next time). `bash scripts/distill-bug.sh` starts it for you.
 5. Run the full `npm run verify`.
 
-**Done means.** A regression with a pinned hash, a lesson in `failures.md`, and a green verify, all
-after the task started.
+**Done means.** Your fix, a regression with seed, tick and a pinned hash, a lesson in `failures.md`
+whose heading names the task or bug, and a full verify after your last change.
 
 **Never.** Close a bug with no seed and tick that reproduce it. Delete a regression to make the
 gate pass.

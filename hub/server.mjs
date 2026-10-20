@@ -41,7 +41,7 @@ import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR
 import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
-import { buildHudState } from '../harness/hud.mjs';
+import { buildHudState, buildAgentDetail } from '../harness/hud.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 
@@ -528,6 +528,11 @@ export function createHubServer() {
 
     if (url.pathname === '/api/watch' && req.method === 'POST') {
       return sendJson(res, 200, { ok: true, ...watchPass() });
+    }
+
+    if (url.pathname === '/api/agent' && req.method === 'GET') {
+      const detail = buildAgentDetail(String(url.searchParams.get('name') || ''));
+      return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: 'no such agent' });
     }
 
     if (url.pathname === '/api/hud' && req.method === 'GET') {
