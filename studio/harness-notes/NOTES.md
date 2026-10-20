@@ -7,6 +7,7 @@
 
 ## Worked well
 
+- [2026-10-20 · producer] Walking a fresh studio through intake, sign-off, the Director and an idea end to end found four rough edges before release: too many explore studies, prototypes flagged as drift, a repeated briefing line, and intake able to change locked pillars after signing.
 - [2026-10-20 · producer] Cheap prepare, strong act is real code now: a bounded window, a cheap draft and a script check that throws bad drafts away (`npm run brief -- <ID> --model`).
 - [2026-10-20 · producer] Done-checks by task type caught unfinished balance and review work in every test run; agents fixed what the refusal named instead of arguing.
 - [2026-10-20 · producer] Scripts for watching (watcher, retro, scorecard, briefing) cost no tokens and caught an abandoned task within one watcher pass.
@@ -40,11 +41,10 @@
 
 ## Upgrade ideas
 
-- [2026-10-20 · producer] Split the game into Phase 1 (early), 2 (mid) and 3 (endgame), and ask about every progression layer (levels, tech tree, unlocks, factions and governance…) so a "no" crosses it out and agents never build it. ROADMAP 2.8.0.
-- [2026-10-20 · producer] An Idea Board tab: ideas go captured, shaped (R&D), placed (progression planner), approved (Director), then scheduled; nothing goes straight to builders. ROADMAP 2.8.0.
+- [2026-10-20 · producer] Layer keyword matching is a heuristic (it caught "levels" meaning maps and "weather" meaning rain in testing). Watch for false refusals in the stress test; the Director's drift report is the backstop.
+- [2026-10-20 · producer] Make each phase's scenario (phase-1-early, …) a required check before the phase opens, on top of the Director's verdict.
+- [2026-10-20 · producer] An intake form in the War Room on POST /api/intake: the first piece of a friendlier front end.
 - [2026-10-20 · producer] Done-check: prove a regression fails on the commit before the fix (needs a checkout of that commit). Planned with the full bug skill, ROADMAP S1.
 - [2026-10-20 · producer] Make the HUB the single home for tasks, locks and events, so agents in cloud sandboxes or separate worktrees share one studio. ROADMAP H5.
-- [2026-10-20 · producer] Pre-production before any build: intake questions, a Game Bible (pitch, pillars, early/mid/late loops, storyboards, content, not-doing), R&D studies and throwaway prototypes, signed by a person. ROADMAP 2.8.0.
-- [2026-10-20 · producer] A Director (of Knowledge) who guards the Bible, pinged daily by the HUB and by the Producer before it generates tasks. A ping queues a review, writes its brief and wakes or starts a Director agent, which reads the docs first, then answers and works with the Producer. ROADMAP 2.8.0.
-- [2026-10-20 · producer] War Room: a Producer inbox box (no AI), a Dungeon RPG tab where tasks are rooms, phone access over Tailscale with a cookie login, push alerts when a person is needed, and a link to play the latest build. ROADMAP H1-H6.
+- [2026-10-20 · producer] War Room: a Dungeon RPG tab where tasks are rooms, phone access over Tailscale with a cookie login, push alerts when a person is needed, and a link to play the latest build. ROADMAP H2-H6.
 - [2026-10-20 · producer] Route tasks by scorecard automatically once enough runs exist, with the Producer approving.

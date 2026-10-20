@@ -14,7 +14,7 @@
   button { font: inherit; cursor: pointer; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .skin { display: none; }
-  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon { display: block; }
+  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon, body[data-skin="plan"] #plan { display: block; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
   /* ---------- Ops: a stage manager's cue board ---------- */
@@ -96,6 +96,56 @@
     .meter .bar { width: 90px; }
     .timeline { max-height: none; }
   }
+
+
+  /* ---------- Game plan: the Bible's phases and layers, and the Idea Board ---------- */
+  body[data-skin="plan"] {
+    --paper: #eef1ea; --grid: #dde3d6; --ink: #1d2721; --quiet: #5d6b62; --rule: #b9c4b3;
+    --open: #2f7d4f; --shut: #9aa59c; --idea: #c8571b; --cut: #a33b2b; --focus: #2f7d4f;
+    background: var(--paper) repeating-linear-gradient(0deg, transparent 0 23px, var(--grid) 23px 24px), var(--paper);
+    background-color: var(--paper); color: var(--ink); font: 15px/1.45 Barlow, system-ui, sans-serif;
+  }
+  #plan header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; padding: 16px 20px 10px; border-bottom: 2px solid var(--ink); }
+  #plan h1 { margin: 0; font: 700 28px/1 "Barlow Condensed", sans-serif; }
+  #plan .game { font: 600 20px/1.2 "Barlow Condensed", sans-serif; }
+  #plan .state { color: var(--quiet); }
+  #plan .spacer { flex: 1; }
+  #plan .switch { border: 1px solid var(--ink); color: var(--ink); }
+  #plan main { padding: 14px 20px 28px; display: grid; gap: 22px; }
+  #plan h2 { margin: 0 0 8px; font: 700 20px/1.2 "Barlow Condensed", sans-serif; }
+  #plan h2 small { font: 400 13px Barlow, sans-serif; color: var(--quiet); margin-left: 8px; }
+  #plan .empty { max-width: 62ch; padding: 18px; border: 2px dashed var(--rule); }
+  .phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 2px solid var(--ink); background: #f7f9f4; }
+  .phase { padding: 12px 14px 14px; border-left: 2px solid var(--ink); min-width: 0; }
+  .phase:first-child { border-left: 0; }
+  .phase.shut { color: var(--shut); }
+  .phase h3 { margin: 0; font: 700 22px/1.1 "Barlow Condensed", sans-serif; display: flex; gap: 8px; align-items: baseline; }
+  .phase h3 .tag { font: 600 12px Barlow, sans-serif; padding: 1px 7px; border: 1px solid currentColor; border-radius: 10px; }
+  .phase.open h3 .tag { color: var(--open); }
+  .phase p { margin: 6px 0 10px; font-size: 14px; }
+  .layer { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; margin-top: 5px; border-left: 4px solid var(--open); background: #fff; font-size: 14px; }
+  .layer.carry { border-left-style: dotted; color: var(--quiet); background: transparent; }
+  .layer.explore { border-left: 4px dashed var(--idea); }
+  .layer small { color: var(--quiet); }
+  .pin { margin-top: 6px; padding: 5px 8px; background: #fff3ea; border: 1px solid var(--idea); font-size: 13.5px; }
+  .cut { margin-top: 10px; color: var(--cut); font-size: 14px; }
+  .cut s { margin-right: 10px; white-space: nowrap; }
+  .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .stage h3 { margin: 0 0 6px; font: 600 16px/1.2 "Barlow Condensed", sans-serif; color: var(--quiet); }
+  .card { background: #fff; border: 1px solid var(--rule); border-top: 3px solid var(--idea); padding: 7px 9px; margin-bottom: 8px; font-size: 14px; overflow-wrap: anywhere; }
+  .card .meta { color: var(--quiet); font-size: 12.5px; }
+  .card.rejected { border-top-color: var(--cut); opacity: .7; }
+  .card.parked { border-top-color: var(--shut); }
+  .card.approved, .card.scheduled { border-top-color: var(--open); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+  #plan form, #plan .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  #plan input, #plan textarea { flex: 1 1 220px; min-width: 0; font: 15px Barlow, sans-serif; padding: 7px 9px; border: 1px solid var(--ink); background: #fff; color: var(--ink); }
+  #plan textarea { min-height: 60px; flex-basis: 100%; }
+  #plan button.go { border: 2px solid var(--ink); background: var(--ink); color: var(--paper); padding: 6px 14px; font-weight: 600; }
+  #plan .note { color: var(--quiet); font-size: 13px; margin: 6px 0 0; }
+  #plan ul.drift { margin: 6px 0 0; padding-left: 18px; }
+  #plan .verdict { font: 700 18px/1.2 "Barlow Condensed", sans-serif; }
+  @media (max-width: 900px) { .phases, .board, .two { grid-template-columns: 1fr; } .phase { border-left: 0; border-top: 2px solid var(--ink); } .phase:first-child { border-top: 0; } #plan header, #plan main { padding-left: 16px; padding-right: 16px; } }
 
   /* ---------- Agent drawer: click anyone to see their task and checklist ---------- */
   .drawer { position: fixed; z-index: 2147483000; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); overflow-y: auto; padding: 16px 18px 28px; background: #1f2833; color: #e8edf2; font: 14px/1.45 Barlow, system-ui, sans-serif; border-left: 1px solid #34404f; box-shadow: -10px 0 30px rgba(0, 0, 0, .35); transform: translateX(105%); transition: transform .22s ease-out; }
@@ -346,6 +396,7 @@
     <div class="meter" title="Tasks done out of all tasks in studio/NEXT.md"><span id="o-prog">0 of 0 tasks done</span><span class="bar"><i id="o-progbar"></i></span></div>
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="switch" data-to="plan">Game plan</button>
   </header>
   <div class="meet-strip" id="o-meet"></div>
   <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
@@ -370,6 +421,7 @@
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
           <button>Add task</button></form>
         <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <form id="o-inbox" class="act-row"><input id="o-msg" placeholder="Message the Producer" aria-label="Message for the Producer's inbox" required> <button>Send</button></form>
         <p class="note" id="o-actmsg" role="status">Paste the HUB token from .env to use the buttons. Without it the page is read-only.</p>
       </section>
       <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
@@ -394,6 +446,7 @@
     <span class="stat" title="Local time">Day <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
+    <button class="switch" data-to="plan">Game plan</button>
   </div>
   <div class="office" id="t-office"><div id="t-crowd" aria-hidden="true"></div></div>
   <div class="dock">
@@ -401,6 +454,37 @@
     <div class="ticker" aria-live="off"><span id="t-ticker">Waiting for the first event…</span></div>
     <div class="legend">Every number is read from the studio files. Locked rooms are divisions that are switched off.</div>
   </div>
+</div>
+
+
+<!-- Game plan: the Game Bible's phases and layers, the Idea Board -->
+<div id="plan" class="skin">
+  <header>
+    <h1>Game plan</h1>
+    <span class="game" id="p-game"></span>
+    <span class="state" id="p-state">Loading…</span>
+    <span class="spacer"></span>
+    <button class="switch" data-to="ops">Ops view</button>
+    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+  </header>
+  <main>
+    <section id="p-shape"></section>
+    <section>
+      <h2>Idea Board <small>nothing here is built until the Director approves it</small></h2>
+      <div class="board" id="p-board"></div>
+    </section>
+    <div class="two">
+      <section>
+        <h2>Pitch an idea</h2>
+        <form id="p-idea"><input id="p-ititle" placeholder="The idea in one line" aria-label="Idea title" required maxlength="160"><textarea id="p-idetail" placeholder="Anything else: what the player would do, why it's fun" aria-label="Idea detail" maxlength="2000"></textarea><button class="go">Pitch it</button></form>
+        <p class="note" id="p-msg" role="status">R&amp;D shapes it, a planner places it in the game, the Director decides. Needs the HUB token (set it in the Ops view).</p>
+      </section>
+      <section>
+        <h2>Director</h2>
+        <div id="p-director"></div>
+      </section>
+    </div>
+  </main>
 </div>
 
 <aside id="drawer" class="drawer" aria-hidden="true" aria-labelledby="dr-name"><button class="close" type="button" aria-label="Close">×</button><div id="dr-body"></div></aside>
@@ -423,8 +507,8 @@
 
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
-  const setSkin = (s) => { document.body.dataset.skin = s; store.set('hudSkin', s); if (state) render(); };
-  setSkin(fromUrl === 'tycoon' || fromUrl === 'ops' ? fromUrl : store.get('hudSkin') || 'ops');
+  const setSkin = (s) => { document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
+  setSkin(['tycoon', 'ops', 'plan'].includes(fromUrl) ? fromUrl : store.get('hudSkin') || 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
 
 
@@ -497,6 +581,83 @@
     const r = await post('/api/human/decision', { kind: b.dataset.sign, note: $('o-note').value.trim() || `Signed off by ${actor()}` });
     return `Signed off: ${r.file}`;
   })));
+
+
+  // ---------- Game plan view ----------
+  let plan = null;
+  const PH = { 1: 'Early game', 2: 'Mid game', 3: 'Endgame' };
+  const STAGE_COLS = [['Captured', ['captured']], ['Being worked out', ['shaped', 'placed']], ['Approved', ['approved', 'scheduled']], ['Parked or rejected', ['parked', 'rejected']]];
+  function renderPlan() {
+    const p = plan;
+    if (!p) return;
+    const b = p.bible;
+    $('p-game').textContent = b?.answers?.title || '';
+    if (!b) {
+      $('p-state').textContent = 'No Game Bible yet';
+      $('p-shape').innerHTML = `<div class="empty"><h2>No Game Bible yet</h2><p>Pre-production starts with questions about the game: what the player does, how long it is (a 15 to 30 minute demo is the easiest start), its three phases, and which kinds of progression it has. Run <code>npm run intake</code>.</p></div>`;
+    } else {
+      const open = b.phase?.open || 0;
+      $('p-state').textContent = b.signed ? `Signed by ${b.signed.by}. Phase ${open} (${PH[open]}) is open.` : `Pre-production: not signed yet${p.check?.ok ? '; ready to sign (npm run bible -- sign --by <name>)' : ` (${p.check?.missing.length} thing${p.check?.missing.length === 1 ? '' : 's'} left)`}.`;
+      const layers = p.layers.filter((l) => b.layers?.[l.id] && b.layers[l.id].answer !== 'no');
+      const ideas = p.ideas.filter((i) => ['approved', 'scheduled'].includes(i.stage) && i.place);
+      const col = (n) => {
+        const here = layers.filter((l) => (b.layers[l.id].phase || 99) <= n || b.layers[l.id].answer === 'explore');
+        const rows = here.map((l) => {
+          const v = b.layers[l.id];
+          if (v.answer === 'explore') return n === 1 ? `<div class="layer explore"><span>${esc(l.label)}</span><small>explore</small></div>` : '';
+          return v.phase === n ? `<div class="layer"><span>${esc(l.label)}</span><small>${esc(l.group)}</small></div>` : `<div class="layer carry"><span>${esc(l.label)}</span><small>from Phase ${v.phase}</small></div>`;
+        }).join('');
+        const pins = ideas.filter((i) => i.place.phase === n).map((i) => `<div class="pin">${esc(i.id)} ${esc(i.title)}</div>`).join('');
+        const shut = !b.signed || n > open;
+        return `<div class="phase ${shut ? 'shut' : 'open'}"><h3>Phase ${n}: ${PH[n]} <span class="tag">${n <= open && b.signed ? 'open' : 'not open'}</span></h3><p>${esc(b.phases?.[n]?.player || 'Not described yet.')}</p>${rows}${pins}</div>`;
+      };
+      const cut = p.layers.filter((l) => b.layers?.[l.id]?.answer === 'no');
+      $('p-shape').innerHTML = `<h2>The game's shape <small>phases left to right; a layer starts where it enters and carries on</small></h2><div class="phases">${col(1)}${col(2)}${col(3)}</div>${cut.length ? `<div class="cut">Not doing: ${cut.map((l) => `<s>${esc(l.label)}</s>`).join(' ')}</div>` : ''}`;
+    }
+    $('p-board').innerHTML = STAGE_COLS.map(([title, stages]) => {
+      const cards = p.ideas.filter((i) => stages.includes(i.stage)).map((i) => `<div class="card ${esc(i.stage)}"><b>${esc(i.id)}</b> ${esc(i.title)}<div class="meta">${esc(i.stage)}${i.place ? `, Phase ${i.place.phase}${i.place.layer ? `, ${esc(i.place.layer)}` : ''}` : ''}${i.by ? `, from ${esc(i.by)}` : ''}</div></div>`).join('');
+      return `<div class="stage"><h3>${title}</h3>${cards || '<p class="note">None.</p>'}</div>`;
+    }).join('');
+    const r = p.latestReview;
+    const drift = (p.drift?.items || []).filter((i) => i.kind !== 'no-bible');
+    $('p-director').innerHTML = `${r ? `<p><span class="verdict">${esc(r.verdict || 'no verdict')}</span> on Phase ${esc(r.phase || '?')}, ${esc(hhmm(r.at))} ${esc(new Date(r.at).toLocaleDateString())}. <code>${esc(r.file)}</code></p>` : '<p>No review yet. The HUB pings the Director daily, and the Producer pings it before making new tasks.</p>'}${drift.length ? `<p class="note">Drift report (free, from scripts):</p><ul class="drift">${drift.map((i) => `<li>${esc(i.msg)}</li>`).join('')}</ul>` : '<p class="note">Nothing drifting.</p>'}`;
+  }
+  async function pollPlan() {
+    try {
+      const res = await fetch('/api/bible', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HUB ${res.status}`);
+      plan = await res.json();
+      renderPlan();
+    } catch (err) {
+      $('p-state').textContent = `Can't reach the HUB (${err.message}).`;
+    }
+  }
+  setInterval(() => { if (document.body.dataset.skin === 'plan') pollPlan(); }, 5000);
+  $('p-idea').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const title = $('p-ititle').value.trim();
+    if (!title) return;
+    try {
+      $('p-msg').textContent = 'Pitching…';
+      const r = await post('/api/ideas', { title, detail: $('p-idetail').value.trim(), by: actor() });
+      $('p-ititle').value = '';
+      $('p-idetail').value = '';
+      $('p-msg').textContent = `${r.idea.id} captured. The watcher hands it to the Producer on its next pass.`;
+      pollPlan();
+    } catch (err) {
+      $('p-msg').textContent = `Couldn't pitch it: ${err.message}`;
+    }
+  });
+  $('o-inbox').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const msg = $('o-msg').value.trim();
+    if (!msg) return;
+    act('Message', async () => {
+      await post('/api/inbox', { msg, by: actor() });
+      $('o-msg').value = '';
+      return 'Sent. The Producer reads its inbox at its next briefing.';
+    });
+  });
 
   // ---------- Agent drawer ----------
   let drawerName = null;
@@ -703,6 +864,8 @@
     review: () => `<span class="lens">${FXP.lens}</span>`,
     docs: () => `<span class="pencil">${FXP.pencil}</span><span class="sheet"></span>`,
     change: () => `<span class="pop code">{ }</span>`,
+    direction: () => `<span class="book">${FXP.book}</span><span class="pop plus">on course?</span>`,
+    idea: () => `<span class="pencil">${FXP.pencil}</span><span class="pop q">!</span>`,
   };
   function setWork(p, work) {
     if (p.workShown === work) return;

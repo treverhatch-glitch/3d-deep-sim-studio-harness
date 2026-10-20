@@ -23,6 +23,8 @@ To pull later harness updates into the private copy: `git remote add upstream <p
 npm ci && npm run setup                 # writes .env with a HUB token
 npm run studio:reset -- --name "Mini Farm" --yes
 npm run hooks:install                   # pre-commit refuses secrets and other agents' locked files
+npm run intake                          # the game: play length (start with a demo), phases, layers
+npm run bible -- sign --by <your name>  # when BIBLE.md reads right; build tasks wait until then
 ```
 
 In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publish):
@@ -33,6 +35,7 @@ In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publ
 | `STUDIO_DAILY_TOKEN_CAP` | **Set this first.** Calls past it are refused and the Producer is told |
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
+| `STUDIO_DIRECTOR_CMD` | The launch line from `npm run kickoff -- --role director --agent director-1 --tool …`, so pings start the Director |
 
 Before any agent starts, check the models: `npm run models:check`. It asks each provider you have a
 key for which models it serves (free, no tokens) and names any configured model that is gone; set the

@@ -91,6 +91,16 @@ See `docs/STRESS-TEST.md`. In short: run it in a private copy, set `STUDIO_DAILY
 start from `npm run studio:reset`, check models with `npm run models:check`, and keep the HUB open
 so the watcher and retros run.
 
+## Starting a game
+
+- **Start with the intake.** `npm run intake` before any build work: play length first, then the
+  three phases, then every layer (yes, explore or no). A 15 to 30 minute demo is the easiest first
+  game; longer games need more of your own time.
+- **Cross out freely.** A "no" is a gift to the studio: agents never build it.
+- **Ping the Director before making tasks.** Its review keeps new work tied to a pillar or layer.
+- **Ideas go through the Idea Board.** Shaped, placed and approved before anyone builds them.
+  Guide: `docs/GAME-BIBLE.md`.
+
 ## Bringing in an existing game
 
 - **Scan, then fill in.** `npm run onboard -- --path ../my-game --name "My Game"` writes a fact

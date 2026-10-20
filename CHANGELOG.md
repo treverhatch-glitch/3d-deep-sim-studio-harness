@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.8.0] — 2026-10-20
+### Added
+- **Game Bible** (`studio/bible/bible.json`, written out as `BIBLE.md` and `NOT-DOING.md`): the game as structured data a future front end can drive. `npm run bible` shows what's missing, signs it (a person, not an agent), and opens phases.
+- **Intake** (`npm run intake`, `--answers <file>`, `--ask`, `--questions`): about 19 questions with **play length first** (a 15 to 30 minute demo is the recommended start; longer games say how much of the game dev's time they need), three phases, and every progression layer (levels, tech tree, unlocks, factions and governance, …) answered yes, explore or no. It suggests the layers games like yours usually have, and can cross out the rest in one step. Queues pre-production once: a reference study, storyboards, R&D studies for explore layers, and the person's sign-off. Example: `studio/templates/intake-example.json`.
+- **Task gates from the Bible**: until a person signs, build tasks wait (prototypes and `--infra` tooling allowed); after, build tasks need `--phase 1|2|3` (only open phases) and `--serves pillar:<name>|layer:<id>` or an approved `--idea`; titles that touch a crossed-out layer are refused. Pillars and crossed-out layers stay locked after signing.
+- **The Director** (`npm run director`, role `director`): pinged daily by the HUB, by the Producer before it generates tasks (`task add` warns when it hasn't), when an idea is placed, and on phase changes. A ping queues one review task, writes `.studio/briefs/director.md`, and starts `STUDIO_DIRECTOR_CMD` (at most hourly, under the spend cap). Reviews in `studio/bible/reviews/` have their own done-check; a `phase-ready` verdict lets a person open the next phase. A free drift report flags work that serves nothing, touches crossed-out layers or runs ahead of the open phase.
+- **The Idea Board** (`npm run idea`, roles `rnd` and `planner`): captured, shaped, placed, decided by the Director, then scheduled with `task add --idea`. The watcher's pass hands new ideas to the Producer in one task. Idea tasks have their own done-check.
+- **War Room Game plan view** (`?skin=plan`): the three phases with the layers that enter each, crossed-out layers, approved ideas, the Idea Board, a box to pitch an idea, and the Director's verdict with the drift report. The Ops view has a box to message the Producer (`studio/producer/INBOX.md`, first in its briefing). New endpoints: `GET /api/bible`, `POST /api/intake`, `POST /api/bible/sign`, `GET|POST /api/ideas`, `POST /api/inbox`; every `/api/` write needs the token.
+- `docs/GAME-BIBLE.md`; VoiceStudio as an optional audio plugin with best practices in `docs/AUDIO-AND-NARRATIVE.md`.
+### Changed
+- `npm run studio:reset` and `npm run onboard` start an unsigned Game Bible, so a new or onboarded game begins in pre-production. The Producer's briefing opens with the game plan, new messages and ideas; its kickoff prompt pings the Director before generating tasks.
+
+---
+
 ## [2.7.0] — 2026-10-20
 ### Added
 - **Cheap prepare, strong act is real** (`npm run brief -- <ID> --model`): reads a bounded window of the task's history (its last events, hand-off notes, matching lessons, newest QA result, files touched); a local or free model drafts a 300-word brief in five sections; a script checks it (sections, word cap, task named, only real files and task IDs) and throws a bad draft away for its own version. Skips the model when the history is short. The focus brief and kickoff prompts point to it; the Producer sees words in and out. Self-tested with a fake local model.

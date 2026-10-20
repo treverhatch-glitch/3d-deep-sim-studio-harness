@@ -117,6 +117,10 @@ if (a.down) {
   check('home page is the War Room v3', /Studio floor/.test(await requestBody(a.port, '/')));
   check('retired War Room still answers at /legacy', (await request(a.port, { path: '/legacy' })) === 200);
   check('agent drawer answers 404 for an unknown agent', (await request(a.port, { path: '/api/agent?name=nobody-here' })) === 404);
+  check('the game plan reads without a token on loopback', (await request(a.port, { path: '/api/bible' })) === 200);
+  check('pitching an idea needs the token', (await request(a.port, { method: 'POST', path: '/api/ideas', headers: post, body: '{"title":"x"}' })) === 401);
+  check('messaging the Producer needs the token', (await request(a.port, { method: 'POST', path: '/api/inbox', headers: post, body: '{"msg":"x"}' })) === 401);
+  check('signing the Bible needs the token', (await request(a.port, { method: 'POST', path: '/api/bible/sign', headers: post, body: '{"by":"x"}' })) === 401);
   check('running the watcher needs the token', (await request(a.port, { method: 'POST', path: '/api/watch', headers: post, body: '{}' })) === 401);
   check('websocket without token is refused', (await upgrade(a.port)) === 401);
   check('websocket with token is accepted', (await upgrade(a.port, { query: `?token=${strong}` })) === 101);

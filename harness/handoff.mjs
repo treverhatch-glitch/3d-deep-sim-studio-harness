@@ -23,6 +23,8 @@ import { watchPass } from './watch.mjs';
 import { buildScorecard, renderScorecard } from './scorecard.mjs';
 import { latestRetro } from './retro.mjs';
 import { readNotes } from './notes.mjs';
+import { readBible, checkBible, latestReview, readIdeas, PLAY_LENGTHS } from './bible.mjs';
+import { driftReport } from './director.mjs';
 
 const read = (rel) => {
   try {
@@ -172,6 +174,15 @@ export function buildHandoff() {
     scorecard: buildScorecard({ queue: q }),
     retro: latestRetro(),
     harnessNotes: readNotes(),
+    bible: (() => {
+      const b = readBible();
+      if (!b) return null;
+      const c = checkBible(b);
+      const r = latestReview();
+      const ideas = readIdeas();
+      return { title: b.answers.title, playLength: b.answers.playLength, signed: b.signed, open: b.phase?.open || 0, missing: c.missing, kept: c.kept, crossed: c.crossed, review: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: r.at } : null, drift: driftReport().items, ideas: { captured: ideas.filter((i) => i.stage === 'captured'), placed: ideas.filter((i) => i.stage === 'placed'), approved: ideas.filter((i) => i.stage === 'approved') } };
+    })(),
+    inbox: (read('studio/producer/INBOX.md') || '').split('\n').filter((l) => /^- \[\d{4}-\d\d-\d\d/.test(l)).filter((l) => Date.now() - Date.parse(l.slice(3, 19).replace(' ', 'T')) < 7 * 86400000).slice(-6),
     bugs,
     locks,
     gates,
@@ -197,6 +208,17 @@ export function renderHandoff(h) {
   if (h.plan.goal || h.plan.now) add(h.plan.goal ? `Goal: ${h.plan.goal.replace(/\n+/g, ' ')}` : '', h.plan.now, '', h.plan.milestones);
   else add('No studio/PLAN.md yet. Write one before assigning work (template in studio/MASTER.md).');
 
+  head('The game plan (studio/bible/BIBLE.md)');
+  if (!h.bible) add('No Game Bible yet. Before any build work, run `npm run intake` with the person who owns the game: play length first (a 15 to 30 minute demo is the easiest start), then the three phases and the layers.');
+  else {
+    const g = h.bible;
+    add(`${g.title || '(untitled)'}, ${PLAY_LENGTHS[g.playLength]?.label || 'play length not set'}: ${g.signed ? `signed by ${g.signed.by}; Phase ${g.open} of 3 is open` : `pre-production (${g.missing.length ? `${g.missing.length} thing(s) before it can be signed` : 'ready for a person to sign'})`}.`);
+    add(`- Layers kept: ${g.kept.join(', ') || 'none'}. Crossed out (never build): ${g.crossed.join(', ') || 'none'}.`);
+    add(g.review ? `- Director's last review: ${g.review.verdict || 'no verdict'} on Phase ${g.review.phase || '?'}, ${age(g.review.at)} (${g.review.file})` : '- No Director review yet.');
+    add(...g.drift.filter((d) => d.kind !== 'review-stale').slice(0, 5).map((d) => `- Drift: ${d.msg}`));
+    add('- Before you generate new tasks: `npm run director -- ping --reason "…"`, then build tasks from its answer with `--phase` and `--serves`.');
+  }
+
   head('The game (studio/game/GAME.md)');
   if (h.game) {
     const blank = (v) => !v || /^_.*_$/.test(v.trim());
@@ -217,6 +239,10 @@ export function renderHandoff(h) {
     ...(h.escalations.length > 3 ? [`- …and ${h.escalations.length - 3} older escalations since the last clean closed-loop pass`] : []),
     ...(h.gates && (h.gates.rows || []).some((r) => r.required && !r.ok) ? [`- Last verify failed: ${h.gates.rows.filter((r) => r.required && !r.ok).map((r) => r.id).join(', ')}`] : []),
     ...(h.meeting ? [`- Meeting still open: "${h.meeting.topic}" (end it with node harness/meeting.mjs end)`] : []),
+    ...(h.inbox || []).map((l) => `- Message ${l.slice(2)}`),
+    ...(h.bible?.ideas.captured.filter((i) => !i.routed).map((i) => `- New idea ${i.id}: ${i.title} (route it: npm run idea -- route ${i.id})`) || []),
+    ...(h.bible?.ideas.approved.map((i) => `- Approved idea ${i.id} isn't scheduled: task add "…" --idea ${i.id} --phase ${i.place?.phase}`) || []),
+    ...(h.bible?.ideas.placed.length ? [`- ${h.bible.ideas.placed.length} idea(s) wait for the Director's decision`] : []),
   ];
   add(...(first.length ? first : ['- Nothing urgent.']));
 

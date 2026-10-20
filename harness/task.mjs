@@ -6,9 +6,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emitEvent, REPO_ROOT } from './event.mjs';
+import { emitEvent, REPO_ROOT, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
-import { checkDone } from './done-check.mjs';
+import { checkDone, taskType } from './done-check.mjs';
+import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -270,7 +271,53 @@ export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
   return target;
 }
 
+/**
+ * The Game Bible's rules for new tasks. No Bible: everything is allowed (a project that hasn't run
+ * intake). With one, build tasks (type "change"):
+ *   - wait until a person signs the Bible (throwaway prototypes with --prototype are allowed),
+ *   - say which phase they belong to (--phase 1|2|3), and that phase must be open,
+ *   - say what they serve (--serves pillar:<name> or layer:<kept layer>) or come from an approved idea,
+ *   - can't touch a crossed-out layer.
+ * Any task with --idea needs that idea approved. Warns when the Director hasn't reviewed lately.
+ */
+export function gateTask({ title, role = 'builder', meta = {} }) {
+  const b = readBible();
+  const warnings = [];
+  if (meta.idea) {
+    const idea = readIdea(meta.idea);
+    if (!idea) return { ok: false, message: `No idea ${meta.idea} on the Idea Board.` };
+    if (!['approved', 'scheduled'].includes(idea.stage)) return { ok: false, message: `${meta.idea} is "${idea.stage}". Ideas go captured, shaped, placed, then approved by the Director before they become work (npm run idea -- show ${meta.idea}).` };
+  }
+  if (!b || taskType({ title, role }) !== 'change') return { ok: true, warnings };
+  const crossed = crossedLayersIn(title, b);
+  if (crossed.length) return { ok: false, message: `"${title}" touches a crossed-out layer: ${crossed.map((l) => l.label).join(', ')} (studio/bible/NOT-DOING.md). Only a person brings a layer back: npm run bible -- layer ${crossed[0].id} yes --by <name>.` };
+  if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return { ok: true, warnings };
+  if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
+  const phase = Number(meta.phase);
+  if (![1, 2, 3].includes(phase)) return { ok: false, message: 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' };
+  if (phase > (b.phase?.open || 1)) return { ok: false, message: `Phase ${phase} isn't open yet (Phase ${b.phase?.open || 1} is). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
+  const serves = String(meta.serves || '');
+  const pillarOk = /^pillar:/i.test(serves) && (b.pillars || []).some((p) => p.name.toLowerCase().startsWith(serves.slice(7).trim().toLowerCase()) && serves.slice(7).trim());
+  const layerId = /^layer:/i.test(serves) ? serves.slice(6).trim() : null;
+  const layerOk = layerId && b.layers?.[layerId]?.answer === 'yes';
+  if (!pillarOk && !layerOk && !meta.idea) {
+    const kept = LAYERS.filter((l) => b.layers?.[l.id]?.answer === 'yes').map((l) => `layer:${l.id}`);
+    return { ok: false, message: `Say what this serves: --serves ${[...(b.pillars || []).map((p) => `pillar:${p.name}`), ...kept].slice(0, 6).join(' | ')} (or --idea <approved idea>).${layerId && b.layers?.[layerId]?.answer === 'no' ? ` ${layerId} is crossed out.` : ''}` };
+  }
+  const r = latestReview();
+  const since = r ? r.at : 0;
+  const builds = readRecentEvents(5000).filter((e) => e.type === 'task.added' && e.meta?.build && Date.parse(e.ts) > since).length;
+  if (!r || Date.now() - r.at > 24 * 3600 * 1000 || builds >= 10) warnings.push(`The Director hasn't reviewed ${r ? `in ${builds >= 10 ? `${builds} build tasks` : 'over a day'}` : 'yet'}. Before generating more tasks: npm run director -- ping --reason "new tasks for Phase ${phase}"`);
+  return { ok: true, warnings };
+}
+
 export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
+  const gate = gateTask({ title, role, meta });
+  if (!gate.ok) {
+    emitEvent({ type: 'task.refused', agent, status: 'blocked', msg: `Not queued: ${title}. ${gate.message}` });
+    return { error: 'gated', message: gate.message };
+  }
+  if (taskType({ title, role }) === 'change') meta = { ...meta, build: true };
   const q = parseNextQueue();
   const all = [...q.inProgress, ...q.backlog, ...q.done];
   const maxNum = all.reduce((max, t) => {
@@ -293,7 +340,11 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     msg: `Queued ${newTask.id} [${newTask.priority}] (${newTask.role}): ${newTask.title}`,
     meta,
   });
-  return newTask;
+  if (meta.idea) {
+    const idea = readIdea(meta.idea);
+    writeIdea({ ...idea, stage: 'scheduled', tasks: [...new Set([...(idea.tasks || []), newTask.id])], history: [...(idea.history || []), { stage: 'scheduled', at: new Date().toISOString(), by: agent, note: newTask.id }] });
+  }
+  return gate.warnings.length ? { ...newTask, warnings: gate.warnings } : newTask;
 }
 
 function parseFlags(argv) {
@@ -405,13 +456,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs] [--size 1-5] [--caused-by T-012]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--prototype | --infra]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review or docs.`);
+    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review, docs or idea.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
@@ -426,8 +477,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       role: flags.role || 'builder',
       priority: flags.priority || 'P1',
       agent: typeof flags.agent === 'string' ? flags.agent : PRODUCER_NAME(),
-      meta: { ...(size ? { size } : {}), ...(causedBy ? { causedBy } : {}) },
+      meta: {
+        ...(size ? { size } : {}),
+        ...(causedBy ? { causedBy } : {}),
+        ...(flags.phase !== undefined ? { phase: Number(flags.phase) } : {}),
+        ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}),
+        ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
+        ...(flags.prototype ? { prototype: true } : {}),
+        ...(flags.infra ? { infra: true } : {}),
+      },
     });
+    if (created.error) {
+      console.error(`Not queued. ${created.message}`);
+      process.exit(1);
+    }
+    for (const w of created.warnings || []) console.error(`note: ${w}`);
     console.log(JSON.stringify(created, null, 2));
     process.exit(0);
   }

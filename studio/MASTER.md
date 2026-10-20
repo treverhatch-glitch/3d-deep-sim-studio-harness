@@ -8,10 +8,15 @@ in a chat.
 
 | Document | What it holds | Who updates it |
 | --- | --- | --- |
+| `studio/bible/BIBLE.md` | The Game Bible: pitch, play length, pillars, Phase 1/2/3, layers kept or crossed out, approved ideas. Written from `bible.json`. | Intake, `npm run bible`, the Director, the War Room (a person signs) |
+| `studio/bible/NOT-DOING.md` | Crossed-out layers and what the game must never be. Agents never build these. | Written from `bible.json`; only a person brings a layer back |
+| `studio/bible/reviews/` | The Director's dated reviews: verdict, what it checked, next tasks. | The Director |
+| `studio/bible/ideas/` | The Idea Board: captured, shaped, placed, decided, scheduled. | `npm run idea` and the War Room |
 | `studio/VISION_LOCK.md` | The pillars. Changing one needs a decision record. | Producer, with a person's approval |
 | `studio/game/GAME.md` | The game's fact sheet: pitch, state, pillars, engine, run commands, what agents must not touch. Written by `npm run onboard`. | A person fills in the top; rescans refresh the rest |
 | `studio/PLAN.md` | The master plan: goal, where we are now, milestones, risks. | Producer, when the phase or a milestone changes |
 | `studio/producer/LOG.md` | The Producer's notebook: what changed, why, what's next. Newest first. | Producer, every session (`node harness/handoff.mjs note "…"`) |
+| `studio/producer/INBOX.md` | Messages to the Producer from people in the War Room. | The War Room's message box |
 | `studio/decisions/` | Decision records: the question, the options, what was chosen and why. | Whoever proposes; a person approves |
 | `studio/NEXT.md` | The task queue. | `node harness/task.mjs` |
 | `studio/CURRENT_TASK.md` | The checkpoint for the task in progress. | `node harness/task.mjs` |

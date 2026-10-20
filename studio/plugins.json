@@ -159,6 +159,16 @@
       "division": "engine",
       "what": "Agent control of the Unity editor for the Engine Transfer division.",
       "enabled": false
+    },
+    {
+      "id": "voicestudio",
+      "name": "VoiceStudio",
+      "repo": "https://github.com/debpalash/VoiceStudio",
+      "license": "AGPL-3.0",
+      "division": "sound",
+      "what": "Local voice lines, dubbing, text-to-speech and transcription, no per-character fees. For dialogue, tutorial lines and localized audio when the game keeps a voice or narrative layer. Model weights and voices have their own terms.",
+      "install": "Installer or prebuilt app from the repo's README (review any install script before running it). Runs on CPU, faster with an NVIDIA or Apple Silicon GPU.",
+      "enabled": false
     }
   ]
 }

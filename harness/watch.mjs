@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
+import { collectIdeas } from './ideas.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -97,7 +98,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   } else if (findings.length && !dryRun) {
     emitEvent({ type: 'watch.report', agent: 'watch', msg: findings.map((f) => f.msg).join('; ').slice(0, 300) });
   }
-  const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null };
+  // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
+  const ideas = dryRun ? null : collectIdeas();
+  const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas };
   if (!dryRun) {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(path.join(STUDIO_STATE_DIR, 'watch-last.json'), JSON.stringify(report, null, 2) + '\n');

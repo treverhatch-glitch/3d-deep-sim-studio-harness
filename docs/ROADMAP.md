@@ -27,6 +27,11 @@ a part of the game the player plays: Phase 1 early game, Phase 2 mid game, Phase
 
 ## 2.8.0 — Pre-production, game phases, layers and the Director
 
+**Status: done (2.8.0)**, as described below, with these left for later: phase scenarios
+(`phase-1-early`, …) as a required check before a phase opens (today the gate is the Director's
+`phase-ready` verdict plus a person opening it), storyboard pictures, and an intake form in the War
+Room (the `POST /api/intake` endpoint is ready for it). Guide: `docs/GAME-BIBLE.md`.
+
 Today a new game gets a vision lock, a plan and planning guides, but nothing makes the studio
 settle the game before builders start. Agents then either put every mechanic in front of the player
 at once, or polish the early game forever with no mid-game shift or endgame payoff. And a game dev
@@ -170,13 +175,14 @@ moving through the stages. It reads files only, like the other tabs.
 
 | # | What | How | Status |
 | --- | --- | --- | --- |
-| H1 | Talk to the Producer | A "Message the Producer" box on the Ops tab writes to the Producer's inbox (no AI, behind the token). Replies show in the HUD. | planned |
+| H1 | Talk to the Producer | A "Message the Producer" box on the Ops tab writes to the Producer's inbox (no AI, behind the token); the briefing lists new messages first. Replies in the HUD come later. | done (2.8.0) |
 | H2 | Third tab: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | planned |
 | H3 | Phone access | Tailscale in the docs, never port-forwarding. A one-time login sets an `HttpOnly; SameSite=Strict` cookie for reads and the WebSocket, and writes still need the token header, so the token never sits in an address. | planned |
 | H4 | Phone alerts | ntfy or Telegram when a person is needed: a forced done, a Bible or phase sign-off, an idea waiting for approval, the spend cap, a Director verdict of "off course". | planned |
 | H5 | Agents on several machines | Make the HUB the single home for tasks, locks and events (agents call it with their token; locks keep a heartbeat so a dead remote worker's claims expire), so separate clones and cloud sandboxes share one studio. | planned |
 | H6 | Play the latest build | A link to the latest web build with the seed and phase scenario shown. | planned |
-| H7 | Fourth tab: Idea Board | See 2.8.0. | planned |
+| H8 | A friendly front end | The same flow (intake, sign, ideas, phases) for people who don't use GitHub or a terminal, on the HUB endpoints that exist now. Asks play length first and suggests a demo. | later |
+| H7 | Game plan view with the Idea Board | Phases, layers, crossed-out layers, approved ideas, the Idea Board, a box to pitch an idea, the Director's verdict and drift. | done (2.8.0) |
 
 ## Not here
 

@@ -14,7 +14,8 @@ Do **NOT** scan the entire repository. Load state in this order:
 2. `studio/NEXT.md` (or `node harness/task.mjs next`)
 3. `studio/memory/failures.md` (distilled notes only)
 4. `studio/llms.txt`
-5. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
+5. `studio/bible/BIBLE.md` and `NOT-DOING.md` (the game, its open phase, and what is never built)
+6. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
 
 See also `docs/READ-FIRST.md`.
 

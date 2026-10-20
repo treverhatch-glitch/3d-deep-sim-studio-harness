@@ -13,8 +13,8 @@ Windows, macOS, Linux or a cloud server.
 ## Now
 
 - **Stage**: harness phase 2, give every game a real start.
-- **Focus**: pre-production, the Game Bible with three game phases and opt-out layers, the Idea
-  Board and the Director (2.8.0).
+- **Focus**: the stress test in a private copy (a demo-length game through intake, Director and
+  Idea Board with real agents), then deeper skills and stricter slices (2.9.0).
 - **Blocked on**: nothing.
 
 ## Milestones
@@ -26,9 +26,9 @@ Windows, macOS, Linux or a cloud server.
 | M3 | Producer handoff | `npm run handoff` briefs a new Producer from files alone | done |
 | M4 | War Room v3 default | v3 is the page the HUB opens, with write actions behind the token | done (2.4.0) |
 | M5 | Runs anywhere | `npm run verify` passes on a clean Windows machine and in CI on Windows | done (2.7.0) |
-| M6 | A real start | Intake questions, Game Bible, three phases, layers kept or crossed out, R&D and storyboards; build tasks wait for a signed Bible | next (2.8.0) |
-| M7 | Director on duty | Pinged daily and before new tasks; reviews in `studio/bible/reviews/`; free drift report | planned (2.8.0) |
-| M7b | Idea Board | Ideas go captured, shaped, placed, approved, then scheduled; nothing unapproved becomes build work | planned (2.8.0) |
+| M6 | A real start | Intake questions, Game Bible, three phases, layers kept or crossed out, R&D and storyboards; build tasks wait for a signed Bible | done (2.8.0) |
+| M7 | Director on duty | Pinged daily and before new tasks; reviews in `studio/bible/reviews/`; free drift report | done (2.8.0) |
+| M7b | Idea Board | Ideas go captured, shaped, placed, approved, then scheduled; nothing unapproved becomes build work | done (2.8.0) |
 | M8 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | planned (2.9.0) |
 | M9 | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | planned (2.10.0) |
 | M10 | One studio across machines | The HUB holds tasks, locks and events, so cloud and multi-machine agents share them | planned |

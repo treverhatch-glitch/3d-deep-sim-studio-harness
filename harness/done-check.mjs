@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { isHash64 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
+import { parseReview, readIdea } from './bible.mjs';
 
 const PREFIX = [
   [/^(bug|fix)\b/i, 'bug'],
@@ -27,6 +28,9 @@ const PREFIX = [
   [/^review\b/i, 'review'],
   [/^docs?\b/i, 'docs'],
   [/^check forced done\b/i, 'none'],
+  [/^director review\b/i, 'direction'],
+  [/^idea\b/i, 'idea'],
+  [/^(plan|sign the game bible|ideas:)\b/i, 'none'],
 ];
 const BY_ROLE = {
   producer: 'none',
@@ -40,6 +44,9 @@ const BY_ROLE = {
   'fun-tester': 'fun',
   reviewer: 'review',
   'reference-scout': 'study',
+  director: 'direction',
+  rnd: 'idea',
+  planner: 'idea',
 };
 
 export const TYPES = {
@@ -51,6 +58,8 @@ export const TYPES = {
   study: { skill: 'studio/skills/study.md', means: 'a study.md of 120+ words under studio/research/, written after the task started' },
   review: { skill: 'studio/skills/review.md', means: 'a review note naming the task or commit it reviewed, with a verdict' },
   docs: { skill: 'studio/skills/docs.md', means: 'a changed .md file, and a full `npm run verify` after the last change' },
+  direction: { skill: 'studio/skills/direction.md', means: 'a dated review in studio/bible/reviews/ since the task started, naming the phase, what it checked, a verdict, and next tasks' },
+  idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
 
@@ -237,6 +246,21 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Review note since the task started', notes.length, 'no review note in studio/reviews/ since this task started');
     check('Note names what it reviewed (a task ID or commit)', notes.some((t) => /\bT-\d+\b|\b[0-9a-f]{7,40}\b/.test(t)), 'the review note doesn\'t name the task or commit it reviewed');
     check('Note gives a verdict', notes.some((t) => /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t)), 'the review note has no verdict (approve, request changes, or reject)');
+  }
+  if (type === 'direction') {
+    const reviews = newestSince(filesUnder('studio/bible/reviews', (n) => n.endsWith('.md') && n !== 'README.md'), since).map((f) => parseReview(abs(f))).filter(Boolean);
+    check('Review written in studio/bible/reviews/ since the task started', reviews.length, 'no review in studio/bible/reviews/ since this task started (`npm run director -- review` starts one)');
+    check('Review names the phase (Phase: 1|2|3)', reviews.some((r) => r.phase), 'the review has no "Phase: 1|2|3" line');
+    check('Review gives a verdict (on course, drifting, off course, phase-ready)', reviews.some((r) => r.verdict), 'the review has no "Verdict: on course|drifting|off course|phase-ready" line');
+    check('Review says what it checked (pillars or layers)', reviews.some((r) => /pillar:|layer:/i.test(r.checked)), 'the review has no "Checked: pillar:… layer:…" line');
+    check('Review lists next tasks', reviews.some((r) => r.next), 'the review has no "## Next" list');
+  }
+  if (type === 'idea') {
+    const id = (task.title.match(/\bI-\d+\b/) || [])[0];
+    const idea = id ? readIdea(id) : null;
+    check('Title names an idea (I-001)', idea, id ? `no idea ${id} on the Idea Board` : 'the title names no idea (I-001)');
+    const moved = idea && (idea.history || []).some((h) => Date.parse(h.at) >= since && ['shaped', 'placed', 'approved', 'parked', 'rejected'].includes(h.stage));
+    check('The idea moved to its next stage since the task started', moved, `${id || 'the idea'} hasn't moved since this task started (npm run idea -- shape|place|decide ${id || 'I-…'})`);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
   return { ok: missing.length === 0, type, since, checks, missing, ...TYPES[type] };

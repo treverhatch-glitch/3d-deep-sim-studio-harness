@@ -44,6 +44,10 @@ import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState, buildAgentDetail } from '../harness/hud.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
+import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
+import { readBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview } from '../harness/bible.mjs';
+import { runIntake } from '../harness/intake.mjs';
+import { addIdea } from '../harness/ideas.mjs';
 
 loadDotEnv();
 
@@ -497,7 +501,8 @@ export function createHubServer() {
       '/api/tasks', '/api/task', '/api/events', '/api/event', '/api/usage', '/usage',
       '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision', '/api/watch'
     ]);
-    if (req.method === 'POST' && writePaths.has(url.pathname) && !isWriteAuthorized(req)) {
+    // Every write needs the token header (the list above is kept for reference; new endpoints are covered too).
+    if (req.method === 'POST' && (writePaths.has(url.pathname) || url.pathname.startsWith('/api/')) && !isWriteAuthorized(req)) {
       return sendJson(res, 401, { ok: false, error: 'unauthorized' });
     }
 
@@ -518,6 +523,51 @@ export function createHubServer() {
         eventsFile: path.relative(REPO_ROOT, eventsFile),
         zeroToken: true,
       });
+    }
+
+    // Game Bible, intake and the Idea Board: the same data the CLI writes, so a friendlier UI can drive it later.
+    if (url.pathname === '/api/bible' && req.method === 'GET') {
+      const b = readBible();
+      const r = latestReview();
+      return sendJson(res, 200, { ok: true, bible: b, check: b ? checkBible(b) : null, suggested: b ? suggestedLayers(b.answers) : [], drift: driftReport(), latestReview: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: new Date(r.at).toISOString() } : null, ideas: readIdeas(), ...catalog() });
+    }
+    if (url.pathname === '/api/ideas' && req.method === 'GET') {
+      return sendJson(res, 200, { ok: true, ideas: readIdeas() });
+    }
+    if (url.pathname === '/api/ideas' && req.method === 'POST') {
+      const body = await readBody(req);
+      noteHuman(body.by || 'war-room-human');
+      const r = addIdea({ title: String(body.title || ''), detail: String(body.detail || ''), by: String(body.by || 'war-room-human').slice(0, 60) });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 201 : 400, r);
+    }
+    if (url.pathname === '/api/intake' && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = runIntake({ answers: body.answers || {}, layers: body.layers || {} });
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, check: r.check, queued: r.queued.map((t) => t.id) });
+    }
+    if (url.pathname === '/api/bible/sign' && req.method === 'POST') {
+      const body = await readBody(req);
+      const b = readBible();
+      if (!b) return sendJson(res, 400, { ok: false, error: 'No Game Bible yet: run the intake first.' });
+      const r = signBible(b, String(body.by || '').slice(0, 60));
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true } : { ok: false, error: r.message || 'not ready', missing: r.missing });
+    }
+    if (url.pathname === '/api/inbox' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      const msg = String(body.msg || '').trim().slice(0, 2000);
+      if (!msg) return sendJson(res, 400, { ok: false, error: 'empty message' });
+      noteHuman(by);
+      const inbox = path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
+      fs.mkdirSync(path.dirname(inbox), { recursive: true });
+      if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+      fs.appendFileSync(inbox, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **${by}**: ${msg.replace(/\n+/g, ' ')}\n`);
+      emitEvent({ type: 'human.message', agent: by, to: 'producer', msg: msg.slice(0, 300) });
+      broadcastSnapshot();
+      return sendJson(res, 201, { ok: true });
     }
 
     if (url.pathname === '/api/brief' && req.method === 'POST') {
@@ -632,7 +682,14 @@ export function createHubServer() {
           role: body.role || 'builder',
           priority: /^P[0-3]$/.test(body.priority) ? body.priority : 'P1',
           agent: body.agent || 'war-room-human',
-          meta: { ...(size >= 1 && size <= 5 ? { size } : {}), ...(/^T-\d+$/.test(body.causedBy || '') ? { causedBy: body.causedBy } : {}) },
+          meta: {
+            ...(size >= 1 && size <= 5 ? { size } : {}),
+            ...(/^T-\d+$/.test(body.causedBy || '') ? { causedBy: body.causedBy } : {}),
+            ...([1, 2, 3].includes(Number(body.phase)) ? { phase: Number(body.phase) } : {}),
+            ...(/^(pillar|layer):/.test(body.serves || '') ? { serves: String(body.serves).slice(0, 80) } : {}),
+            ...(/^I-\d+$/.test(body.idea || '') ? { idea: body.idea } : {}),
+            ...(body.prototype ? { prototype: true } : {}),
+          },
         });
       }
       broadcastSnapshot();
@@ -903,6 +960,8 @@ export function startHubCli() {
         if (r.findings.length) console.log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
         const retro = retroIfDue();
         if (retro) console.log(`[retro] wrote ${retro.file}: ${retro.suggestions.length} suggestion(s)`);
+        const dir = dailyPingIfDue();
+        if (dir) console.log(`[director] daily ping: ${dir.task}${dir.start?.started ? ' (Director started)' : ''}`);
       } catch (err) {
         console.error(`[watch] ${err.message}`);
       }

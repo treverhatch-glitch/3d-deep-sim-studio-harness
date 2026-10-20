@@ -248,7 +248,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const second = run(dir, `node scripts/onboard-game.mjs --path ${JSON.stringify(gameDir)} --name "Tiny"`);
   const sheet = fs.existsSync(path.join(dir, 'studio/game/GAME.md')) ? fs.readFileSync(path.join(dir, 'studio/game/GAME.md'), 'utf8') : '';
   report('onboard writes a fact sheet with engine and unrepeatable calls', first.status === 0 && /Phaser/.test(sheet) && /Math\.random: 1/.test(sheet), `${first.stdout}${first.stderr}`);
-  report('onboard leaves the game untouched and queues its tasks once', fs.readFileSync(path.join(gameDir, 'src/sim.js'), 'utf8') === before && /queued 8 task/.test(first.stdout) && /queued 0 task/.test(second.stdout), `${first.stdout}${second.stdout}`);
+  report('onboard leaves the game untouched and queues its tasks once', fs.readFileSync(path.join(gameDir, 'src/sim.js'), 'utf8') === before && /started an unsigned Game Bible/.test(first.stdout) && /queued 9 task/.test(first.stdout) && /queued 0 task/.test(second.stdout), `${first.stdout}${second.stdout}`);
   report('the Producer briefing shows the onboarded game', /## The game[\s\S]*Tiny: A tiny test game/.test(run(dir, 'node harness/handoff.mjs').stdout));
 }
 
@@ -336,6 +336,89 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('models:check --dry-run names what it would ask, and what has no key', mc.status === 0 && /would-check\s+openai-gpt/.test(mc.stdout) && /no-key/.test(mc.stdout), mc.stdout + mc.stderr);
   const kl = run(dir, 'node harness/kickoff.mjs --role builder --agent codex-a --model gpt-x --tool codex');
   report('kickoff --tool prints a headless launch line with the agent\'s name and model', kl.status === 0 && /STUDIO_LOCK_OWNER=codex-a STUDIO_AGENT_MODEL=gpt-x codex exec --sandbox workspace-write/.test(kl.stdout), kl.stdout);
+}
+
+// Pre-production: intake writes the Game Bible; build work waits for a person; phases, purpose and crossed-out layers are enforced.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const add = (args) => run(dir, `node harness/task.mjs add ${args}`, env);
+  report('without a Game Bible, build tasks are queued as before', add('"Research tree screen"').status === 0);
+  const intake = run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  const queue = () => fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const notDoing = fs.readFileSync(path.join(dir, 'studio/bible/NOT-DOING.md'), 'utf8');
+  report('intake writes the Bible and crosses out the layers answered no', intake.status === 0 && fs.existsSync(path.join(dir, 'studio/bible/BIBLE.md')) && /Tech or research tree/.test(notDoing), intake.stdout + intake.stderr);
+  report('intake queues pre-production once (studies, storyboard, R&D, the sign-off)', (queue().match(/Sign the Game Bible/g) || []).length === 1 && /Study: explore the building and bases layer/.test(queue()) && /Docs: storyboard/.test(queue()), queue());
+  const early = add('"Moss spreads after rain"');
+  report('build tasks wait until a person signs the Bible', early.status !== 0 && /pre-production/.test(early.stderr), early.stderr);
+  report('throwaway prototypes are allowed in pre-production', add('"Prototype: stepping stones" --prototype').status === 0);
+  const crossed = add('"Add a tech tree for moss" --prototype');
+  report('a task touching a crossed-out layer is refused, even as a prototype', crossed.status !== 0 && /crossed-out layer: Tech or research tree/.test(crossed.stderr), crossed.stderr);
+  report('an agent can\'t sign the Bible', run(dir, 'node harness/bible.mjs sign --by producer', env).status !== 0);
+  report('a person signs it and Phase 1 opens', run(dir, 'node harness/bible.mjs sign --by hatch', env).status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).phase.open === 1);
+  report('after signing, build tasks need a phase', /--phase 1/.test(add('"Moss spreads after rain"').stderr));
+  report('build tasks for a phase that isn\'t open are refused', /Phase 2 isn't open/.test(add('"Terraces" --phase 2 --serves pillar:Calm').stderr));
+  report('build tasks must say what they serve', /--serves pillar:Calm/.test(add('"Moss spreads after rain" --phase 1').stderr));
+  const ok = add('"Moss spreads after rain" --phase 1 --serves pillar:Readable');
+  report('a build task with a phase and a pillar is queued, with a nudge to ping the Director', ok.status === 0 && /npm run director -- ping/.test(ok.stderr), ok.stdout + ok.stderr);
+  const drift = run(dir, 'node harness/director.mjs drift', env).stdout;
+  report('the drift report flags old work on a crossed-out layer and work that serves nothing', /touches crossed-out tech-tree/.test(drift) && /serves no pillar/.test(drift), drift);
+
+  // The Director: one review task however many pings, a brief, a checked review, and the phase gate.
+  run(dir, 'node harness/director.mjs ping --reason "new tasks for Phase 1"', env);
+  const ping2 = run(dir, 'node harness/director.mjs ping --reason "check the visitor score"', env);
+  const reviewTasks = queue().match(/\*\*(T-\d+)\*\* \[P1\] \(`director`\) — Director review/g) || [];
+  const brief = fs.readFileSync(path.join(dir, '.studio/briefs/director.md'), 'utf8');
+  report('pings share one Director review task and its brief lists every reason', reviewTasks.length === 1 && /new tasks for Phase 1/.test(brief) && /check the visitor score/.test(brief) && /A Director is needed|STUDIO_DIRECTOR_CMD/.test(ping2.stdout + fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), `${reviewTasks.join(',')}\n${brief}`);
+  const rid = reviewTasks[0].match(/T-\d+/)[0];
+  run(dir, `node harness/task.mjs start ${rid} --agent director-1`, env);
+  const reviewFile = run(dir, 'node harness/director.mjs review', env).stdout.match(/studio\/bible\/reviews\/\S+\.md/)[0];
+  report('an unfilled review doesn\'t finish the Director\'s task', run(dir, `node harness/task.mjs done ${rid} --agent director-1`, env).status !== 0);
+  edit(dir, reviewFile, (s) => s.replace('Verdict: \n', 'Verdict: on course\n').replace('Checked: \n', 'Checked: pillar:Calm, layer:collections\n').replace('## Next\n', '## Next\n- Moss collection book\n'));
+  report('a filled review (phase, verdict, what it checked, next) finishes it', run(dir, `node harness/task.mjs done ${rid} --agent director-1`, env).status === 0);
+  report('Phase 2 won\'t open on an "on course" review', run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).status !== 0);
+  edit(dir, reviewFile, (s) => s.replace('Verdict: on course', 'Verdict: phase-ready'));
+  report('Phase 2 opens once the Director says Phase 1 is ready', run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).status === 0);
+
+  // STUDIO_DIRECTOR_CMD: a ping starts the Director once, then the cooldown holds; the daily ping fires once a day.
+  fs.writeFileSync(path.join(dir, 'fake-director.mjs'), "import fs from 'node:fs';\nfs.appendFileSync('director-started.txt', 'x\\n');\n");
+  fs.writeFileSync(path.join(dir, 'daily.mjs'), "import { dailyPingIfDue } from './harness/director.mjs';\nconsole.log(dailyPingIfDue() ? 'pinged' : 'skipped');\n");
+  const envD = { ...env, STUDIO_DIRECTOR_CMD: 'node fake-director.mjs' };
+  const auto1 = run(dir, 'node harness/director.mjs ping --reason "auto start"', envD);
+  run(dir, 'node harness/director.mjs ping --reason "auto again"', envD);
+  await new Promise((r) => setTimeout(r, 1500));
+  const starts = fs.existsSync(path.join(dir, 'director-started.txt')) ? fs.readFileSync(path.join(dir, 'director-started.txt'), 'utf8').trim().split(/\s+/).length : 0;
+  report('a ping starts STUDIO_DIRECTOR_CMD once, then waits out the cooldown', /was started/.test(auto1.stdout) && starts === 1, `${auto1.stdout} starts=${starts}`);
+  report('the daily Director ping fires once a day', run(dir, 'node daily.mjs', env).stdout.trim() === 'pinged' && run(dir, 'node daily.mjs', env).stdout.trim() === 'skipped');
+
+  // The Idea Board: nothing is built until the Director approves it.
+  run(dir, 'node harness/ideas.mjs add "Fireflies at dusk" --by hatch', env);
+  run(dir, 'node harness/ideas.mjs add "Snails redraw paths" --by hatch', env);
+  run(dir, 'node harness/watch.mjs', env);
+  run(dir, 'node harness/watch.mjs', env);
+  report('the watcher hands all new ideas to the Producer in one task', (queue().match(/Ideas: 2 new \(I-001, I-002\)/g) || []).length === 1, queue());
+  const early2 = add('"Fireflies glow" --phase 2 --idea I-001');
+  report('an idea that isn\'t approved can\'t become a task', early2.status !== 0 && /captured/.test(early2.stderr), early2.stderr);
+  run(dir, 'node harness/ideas.mjs route I-001 --by prod-1', env);
+  const shapeTask = (queue().match(/\*\*(T-\d+)\*\* \[P2\] \(`rnd`\) — Idea: shape I-001/) || [])[1];
+  run(dir, `node harness/task.mjs start ${shapeTask} --agent rnd-1`, env);
+  report('an R&D idea task isn\'t done until the idea moves', run(dir, `node harness/task.mjs done ${shapeTask} --agent rnd-1`, env).status !== 0);
+  run(dir, 'node harness/ideas.mjs shape I-001 --notes "Phase 2 ambience; visitors rate higher at dusk" --by rnd-1', env);
+  report('it is done once the idea is shaped', run(dir, `node harness/task.mjs done ${shapeTask} --agent rnd-1`, env).status === 0);
+  const placed = run(dir, 'node harness/ideas.mjs place I-001 --phase 2 --layer map-expansion --unlock "second terrace" --schedule "M2" --by planner-1', env);
+  report('placing an idea pings the Director', placed.status === 0 && /director\.ping[^\n]*Decide idea I-001/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), placed.stdout + placed.stderr);
+  report('the Director approves it', run(dir, 'node harness/ideas.mjs decide I-001 approve --by director-1 --note "fits Calm"', env).status === 0);
+  const sched = add('"Fireflies glow over the moss" --phase 2 --idea I-001');
+  const idea = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/ideas/I-001.json'), 'utf8'));
+  report('an approved idea becomes a task and is marked scheduled', sched.status === 0 && idea.stage === 'scheduled' && idea.tasks.length === 1 && /I-001 Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')), sched.stderr + JSON.stringify(idea));
+  const brief2 = run(dir, 'node harness/handoff.mjs', env).stdout;
+  report('the Producer briefing shows the game plan and the idea waiting to be routed', /## The game plan/.test(brief2) && /Phase 2 of 3 is open/.test(brief2) && /New idea I-002/.test(brief2), brief2.slice(0, 1500));
+
+  // A fresh studio starts in pre-production.
+  run(dir, 'node scripts/studio-reset.mjs --name "Next Game" --yes', env);
+  const after = add('"Build the first level"');
+  report('studio:reset starts an unsigned Bible, so build work waits for the intake', after.status !== 0 && /pre-production/.test(after.stderr) && /npm run intake/.test(queue()), after.stderr);
 }
 
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.

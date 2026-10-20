@@ -21,6 +21,7 @@ MCP tools that control an editor should stay on localhost.
 | [three.quarks](https://github.com/Alchemist0823/three.quarks) | Three.js particles | Presentation / juice only. |
 | [react-postprocessing](https://github.com/pmndrs/react-postprocessing) | Bloom, DOF, vignette | Presentation / polish only. |
 | [colyseus](https://github.com/colyseus/colyseus) | Multiplayer rooms and state sync | Only if a game needs multiplayer. Not part of the harness default. |
+| [VoiceStudio](https://github.com/debpalash/VoiceStudio) | Local voice lines, cloning, dubbing, text-to-speech and transcription (AGPL-3.0) | Optional, for games that keep a voice or narrative layer. Runs as its own app; see `docs/AUDIO-AND-NARRATIVE.md`. |
 
 ## Safety
 

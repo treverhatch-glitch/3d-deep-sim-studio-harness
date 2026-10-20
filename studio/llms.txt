@@ -12,6 +12,14 @@
   Manages `studio/NEXT.md` and synchronizes `studio/CURRENT_TASK.md`. `done` refuses until the task's done-check passes.
 - `npm run handoff` · `node harness/handoff.mjs note "<what, why, next>"`
   The Producer's briefing from files (plan, log, decisions, queue, claims, gates, bugs, sign-offs, meetings). `studio/MASTER.md` maps the key documents.
+- `npm run intake [-- --answers game.json | --questions]`
+  Pre-production: questions (play length first; a demo is the easiest start), three phases, every layer yes/explore/no. Writes `studio/bible/bible.json` and `BIBLE.md`, queues studies, storyboards, R&D and the person's sign-off.
+- `npm run bible -- [show | check | json | layer <id> yes|explore|no --by <name> | sign --by <person> | phase open <2|3> --by <name>]`
+  The Game Bible. Until a person signs, build tasks are refused; after, they need `--phase 1|2|3` and `--serves pillar:<name>|layer:<id>` (or `--idea I-001`), and can't touch a crossed-out layer. `--prototype` and `--infra` pass in pre-production.
+- `npm run director -- ping --reason "…" | review | drift`
+  The Director guards the Bible. Pinged daily by the HUB and by the Producer before it makes tasks; a ping queues one review task, writes `.studio/briefs/director.md`, and starts `STUDIO_DIRECTOR_CMD` (at most hourly). `drift` is a free report.
+- `npm run idea -- add "…" | route <id> | shape <id> --notes | place <id> --phase n | decide <id> approve|park|reject --by <name> | list`
+  The Idea Board: captured, shaped (R&D), placed (planner, pings the Director), decided, scheduled (`task add --idea`). The watcher hands new ideas to the Producer.
 - `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`
   A Producer meeting with several agents. Notes in `studio/meetings/`, actions become tasks.
 - `node harness/task.mjs pause <ID> --agent <you> --note "<where you stopped>"`
@@ -46,6 +54,7 @@
 - `node harness/status.mjs [--json]`
   Prints a 0-token studio snapshot combining queue, router matrix, and recent events.
 - `node hub/server.mjs` (home page: War Room v3; `?skin=tycoon` for the Studio view; the old page is at `/legacy` until it is removed)
+  Views: Ops, Studio Tycoon, Game plan (phases, layers, Idea Board, Director; `?skin=plan`). Endpoints: `GET /api/bible`, `POST /api/intake`, `POST /api/bible/sign`, `GET|POST /api/ideas`, `POST /api/inbox`.
   Click an agent for its drawer: current task, checklist, skill steps, hand-off notes, claims, score (`GET /api/agent?name=`; file reads only, no AI).
   Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:3847/?token=<HUB_TOKEN>`; `?view=mobile` for phones).
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`

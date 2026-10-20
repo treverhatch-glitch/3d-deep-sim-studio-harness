@@ -33,7 +33,7 @@ const archive = path.join(root, '.studio', 'archive', stamp);
 const rel = (p) => path.relative(root, p).replace(/\\/g, '/');
 
 // Folders whose files belong to the previous project (README.md files stay).
-const CLEAR = ['studio/meetings', 'studio/handoffs', 'studio/game', 'studio/research', 'studio/reviews', 'studio/memory/retros'];
+const CLEAR = ['studio/meetings', 'studio/handoffs', 'studio/game', 'studio/research', 'studio/reviews', 'studio/memory/retros', 'studio/bible'];
 const SIGNOFFS = [['studio/balance', /^decision-.*\.md$/], ['studio/fun', /^review-.*\.md$/]];
 const REWRITE = ['studio/PLAN.md', 'studio/producer/LOG.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md'];
 
@@ -102,7 +102,8 @@ _${name}: what the finished game is, in one or two sentences._
 
 | # | Milestone | Done means | Status |
 | --- | --- | --- | --- |
-| M1 | Playable core loop | The vertical slice wins and loses on purpose, goldens recorded | next |
+| M0 | Pre-production | Intake answered, Game Bible signed by a person (studio/bible/) | next |
+| M1 | Playable core loop | The vertical slice wins and loses on purpose, goldens recorded | later |
 | M2 | First content pass | _…_ | later |
 | M3 | Release candidate | Every required gate green, a person signed off balance and fun | later |
 
@@ -121,9 +122,9 @@ write('studio/producer/LOG.md', `# Producer log (\`studio/producer/LOG.md\`)
 > This is how a new Producer (another model, another tool) learns the reasons behind the plan.
 
 ## ${when} · studio-reset
-Fresh studio for ${name}. The previous project's notes are archived in ${rel(archive)}. Next: scaffold
-the cartridge (npm run new-game ${slug}), fill in the plan and the fact sheet with a person, then the
-first seeded playtest.
+Fresh studio for ${name}. The previous project's notes are archived in ${rel(archive)}. Next: the
+game intake with a person (npm run intake), which writes the Game Bible and queues pre-production;
+build tasks wait until a person signs it. Meanwhile scaffold the cartridge (npm run new-game ${slug}).
 `);
 write('studio/NEXT.md', `# Studio Task Queue (\`studio/NEXT.md\`)
 
@@ -133,9 +134,9 @@ write('studio/NEXT.md', `# Studio Task Queue (\`studio/NEXT.md\`)
 _No task currently in progress. Run \`node harness/task.mjs next\`._
 
 ## BACKLOG
-- [ ] **T-001** [P0] (\`producer\`) — Docs: write the goal and milestones for ${name} in \`studio/PLAN.md\` with a person
-- [ ] **T-002** [P0] (\`builder\`) — Scaffold the ${name} cartridge (\`npm run new-game ${slug}\`) and get \`npm run verify\` green
-- [ ] **T-003** [P1] (\`designer-calibrator\`) — Balance: define the TUNING table for ${name} and sweep the first knob
+- [ ] **T-001** [P0] (\`human\`) — Answer the game intake for ${name}: \`npm run intake\` (play length first; a 15 to 30 minute demo is the easiest start)
+- [ ] **T-002** [P0] (\`producer\`) — Docs: write the goal and milestones for ${name} in \`studio/PLAN.md\` with a person
+- [ ] **T-003** [P1] (\`builder\`) — Prototype: scaffold the ${name} cartridge (\`npm run new-game ${slug}\`) and get \`npm run verify\` green
 - [ ] **T-004** [P1] (\`qa-playtester\`) — Playtest: first seeded run of ${name} and read the report
 - [ ] **T-005** [P2] (\`reviewer\`) — Review: read the first merge and write a note in \`studio/reviews/\`
 
@@ -155,4 +156,9 @@ write('studio/CURRENT_TASK.md', `# Active Session State (\`studio/CURRENT_TASK.m
 - **Phase**: READY
 - **Last Note**: Fresh studio for ${name}. Producers: run \`npm run handoff\`.
 `);
-console.log(`[reset] done. Archived to ${rel(archive)}. Next: npm run handoff`);
+// A fresh, unsigned Game Bible: build tasks wait for the intake and a person's signature.
+const { emptyBible, writeBible } = await import('../harness/bible.mjs');
+const bible = emptyBible();
+bible.answers.title = name;
+writeBible(bible);
+console.log(`[reset] done. Archived to ${rel(archive)}. Next: npm run intake with the person who owns the game, then npm run handoff`);

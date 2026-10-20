@@ -1,0 +1,32 @@
+{
+  "answers": {
+    "title": "Moss Garden",
+    "fantasy": "Tend a small moss garden on a rainy hillside and grow it into a place visitors travel to see.",
+    "verb": "plant and tend",
+    "genres": ["management", "simulation"],
+    "playLength": "demo",
+    "session": "5-15 min",
+    "audience": "Cozy-game players who like slow, tidy progress",
+    "references": ["Viridi: tending small plants with no fail state", "Islanders: placement that scores by neighbours"],
+    "never": "Timers that punish you for leaving, or paid energy",
+    "win": "The garden earns its first visitor rating of five stones",
+    "lose": "Plants dry out if neglected, but the garden never ends",
+    "slice": "One bed, three moss types, rain on a seeded schedule, a visitor score",
+    "platforms": ["web"],
+    "art": "Soft low-poly, wet greens, overcast light",
+    "feelGreat": "Watching moss spread after rain",
+    "pillars": ["Calm: rules out timers that punish leaving", "Small and dense: rules out large maps", "Readable growth: rules out hidden stats"],
+    "phase1": "Plant moss by hand in one bed and water it; growth stalls once the bed is full, which makes you want more space.",
+    "phase2": "Open new terraces and lay stepping stones; visitors arrive and trample paths, so layout matters.",
+    "phase3": "A rainy-season festival tests the whole garden; a five-stone rating wins, then the garden stays open to keep tending."
+  },
+  "layers": {
+    "levels-xp": "no", "skills": "no", "tech-tree": "no", "unlocks": "no",
+    "gear-crafting": "no", "collections": { "answer": "yes", "phase": 1 }, "currency": "no",
+    "production-chains": "no", "upkeep-loans": "no", "markets": "no",
+    "map-expansion": { "answer": "yes", "phase": 2 }, "building": "explore", "hazards": "no",
+    "npc-needs": "no", "automation": "no", "factions": "no", "governance": "no", "multiplayer": "no",
+    "narrative": "no", "quests": "no", "victory": { "answer": "yes", "phase": 3 }, "endless": "no",
+    "prestige": "no", "meta-progression": "no"
+  }
+}

@@ -180,11 +180,12 @@ ${rows(inv.nondeterminism, ([k, v]) => `- ${k}: ${v}`)}
 `;
 
 const tasks = [
+  { title: `Answer the game intake for ${name} with its owner: npm run intake (what it is, its play length, its three phases, which layers it has)`, role: 'human', priority: 'P0' },
   { title: `Docs: fill in the "Fill in" part of studio/game/GAME.md for ${name}`, role: 'producer', priority: 'P1' },
   { title: `Docs: rewrite studio/PLAN.md for ${name} (goal, phase, milestones)`, role: 'producer', priority: 'P1' },
   { title: `Study: our own build of ${name} (what runs each frame, network calls, dead code)`, role: 'reference-scout', priority: 'P2' },
   { title: `Study: map ${name}'s game state, randomness and time (the sim boundary)`, role: 'reference-scout', priority: 'P1' },
-  { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/browser.adapter.mjs)`, role: 'builder', priority: 'P1' },
+  { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/browser.adapter.mjs)`, role: 'builder', priority: 'P1', meta: { infra: true } },
   { title: `Playtest: first seeded run of ${name}, then record its golden`, role: 'qa-playtester', priority: 'P2' },
   { title: `Docs: import ${name}'s known bugs into qa/reports with steps or a seed`, role: 'qa-playtester', priority: 'P2' },
   { title: `Review: choose which gates apply to ${name} now and which wait (studio/gates.json)`, role: 'reviewer', priority: 'P2' },
@@ -212,10 +213,17 @@ fs.writeFileSync(path.join(gameDir, 'inventory.json'), JSON.stringify(inventory,
 console.log('[onboard] wrote studio/game/inventory.json');
 
 const { parseNextQueue, addTask } = await import('../harness/task.mjs');
+const bibleMod = await import('../harness/bible.mjs');
+if (!bibleMod.hasBible()) {
+  const b = bibleMod.emptyBible();
+  b.answers.title = name;
+  bibleMod.writeBible(b);
+  console.log('[onboard] started an unsigned Game Bible (studio/bible/); build work waits for the intake and a person\'s signature');
+}
 const { addLogNote } = await import('../harness/producer-log.mjs');
 const q = parseNextQueue();
 const have = new Set([...q.inProgress, ...q.backlog, ...q.done].map((t) => t.title));
-const queued = tasks.filter((t) => !have.has(t.title)).map((t) => addTask(t));
+const queued = tasks.filter((t) => !have.has(t.title)).map((t) => addTask(t)).filter((t) => !t.error);
 console.log(`[onboard] queued ${queued.length} task(s)${queued.length ? `: ${queued.map((t) => t.id).join(', ')}` : ' (already queued)'}`);
 addLogNote(`Onboarded ${name} from ${shown} (${engine.join(', ') || 'engine not recognised'}). Fact sheet: studio/game/GAME.md. ${nondetTotal} unrepeatable calls to tame before goldens. Queued ${queued.length} onboarding task(s).`, process.env.STUDIO_LOCK_OWNER || 'producer');
 console.log('[onboard] next: npm run handoff, then fill in studio/game/GAME.md with the person who owns the game');

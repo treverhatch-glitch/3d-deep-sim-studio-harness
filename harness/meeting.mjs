@@ -87,7 +87,9 @@ export function endMeeting({ decisions = [], actions = [], agent = 'producer' } 
   for (const a of actions) {
     const [title, role = 'builder', priority = 'P2'] = a.split('|').map((x) => x.trim());
     if (!title) continue;
-    const t = addTask({ title, role, priority, agent });
+    let t = addTask({ title, role, priority, agent });
+    // A build action the Game Bible won't take yet (no phase, no pillar): the Producer turns it into a proper task.
+    if (t.error) t = addTask({ title: `Plan: turn "${title}" into a task (${t.message.split('.')[0]})`, role: 'producer', priority, agent });
     made.push(t);
   }
   if (made.length) appendToSection(m.file, 'Actions', made.map((t) => `- ${t.id} [${t.priority}] (\`${t.role}\`): ${t.title}`));

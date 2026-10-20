@@ -80,6 +80,7 @@ from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:t
 
 Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST-PRACTICES.md](docs/BEST-PRACTICES.md).
 Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-TOOLS.md](docs/AGENT-TOOLS.md).
+How a game starts (intake, phases, layers) and stays on course (Director, Idea Board): [docs/GAME-BIBLE.md](docs/GAME-BIBLE.md).
 What's next for the harness, and how each known gap gets fixed: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 MIT licensed.
