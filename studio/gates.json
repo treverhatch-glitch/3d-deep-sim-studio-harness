@@ -9,6 +9,7 @@
     { "id": "regressions", "command": "node qa/check-regressions.mjs", "required": true },
     { "id": "vertical-slice", "command": "node qa/vertical-slice.mjs", "required": true },
     { "id": "playtest", "command": "node qa/playtest.mjs --stage 1 --quiet", "required": true },
+    { "id": "browser-play", "command": "node qa/browser-play.mjs --no-shots", "required": true },
     { "id": "soak", "command": "node qa/soak.mjs --seeds 3 --ticks 300", "required": true },
     { "id": "tick-budget", "command": "node scripts/check-tick-budget.mjs", "required": true },
     { "id": "approvals", "command": "node scripts/check-approvals.mjs", "required": true },

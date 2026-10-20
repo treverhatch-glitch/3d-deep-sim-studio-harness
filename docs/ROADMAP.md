@@ -233,9 +233,9 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F5 | Questions with a deadline; the Producer's default applies and is logged, reviewable and reversible | done (2.16.0) |
 | F6 | The art department from day one: style sheet and placeholders, approved by the dev, the art reference in the Bible | done (2.17.0) |
 | F7 | War Room actions start the right agent; a Liaison chat in the Game plan | done (2.17.0) |
-| F8 | A Stage-2 browser gate that plays start to win with real input and checks the scene matches the sim (B6) | planned (2.18.0) |
-| F9 | Screenshot proof for renderer tasks, checked against the art reference | planned (2.18.0) |
-| F10 | Bugs carry a layer (sim, renderer, both); renderer bugs close with a browser regression (B8) | planned (2.18.0) |
+| F8 | A Stage-2 browser gate that plays start to win with real input and checks the scene matches the sim (B6) | done (2.18.0) |
+| F9 | Screenshot proof for renderer tasks, checked against the art reference | done (2.18.0) |
+| F10 | Bugs carry a layer (sim, renderer, both); renderer bugs close with a browser regression (B8) | done (2.18.0) |
 
 ## 2.10.0 and later — Verifiable results, data, and the platform
 

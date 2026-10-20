@@ -16,6 +16,12 @@
 If you can't, the watcher requeues the task once your claim expires and leaves your last messages
 for the next agent.
 
+**Work players see** (`--part renderer` or `both`): run `npm run play:browser`, then add the
+screenshots that show your change, one line each saying what it shows:
+`npm run proof -- add <task> qa/reports/<shot>.png "<what it shows, specific enough to be wrong>"`.
+Someone else checks them against the images and the art reference
+(`npm run proof -- check <task> --by <name> --verdict matches|wrong`) before the task is done.
+
 **Done means.** Changes for this task (commits tagged with it, or edits not yet committed), and a
 full `npm run verify` after your last change. If a hash changed, the golden was regenerated in the
 same commit.

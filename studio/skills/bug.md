@@ -24,6 +24,13 @@
 8. **Verify and hand off.** Run the full `npm run verify`. In the done note, say what the next agent
    should watch for.
 
+**Renderer bugs** (`task add … --type bug --part renderer`: the sim is right, the screen is wrong).
+A sim seed and tick can't pin them. Write `qa/regressions/browser/<task>.mjs` exporting
+`async function check({ page, sim, view })` that returns `{ ok, why }` and fails while the bug is
+there (read the page with Playwright, compare with `sim`). `npm run play:browser` runs it on the live
+build after playing start-to-win. Then add screenshots with `npm run proof` (below). `--part both`
+needs both kinds of regression.
+
 **Done means.** A regression with seed, tick and a pinned SHA-256 that fails on the code before the
 fix, the fix committed with the task's tag, a lesson whose heading names the task or bug, and a full
 verify after your last change.

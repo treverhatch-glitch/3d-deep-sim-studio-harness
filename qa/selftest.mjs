@@ -85,6 +85,11 @@ const SABOTAGE = {
   },
   docs: (d) => fs.writeFileSync(path.join(d, 'docs/STALE.md'), 'Run `npm run no-such-script` first.\n'),
   secrets: (d) => fs.writeFileSync(path.join(d, 'leak.txt'), `OPENAI_API_KEY=${'sk-'}${'a'.repeat(24)}\n`),
+  // A real game (not the template) with a browser build, and no browser to play it in: that must fail, not skip.
+  'browser-play': (d) => {
+    fs.cpSync(path.join(d, 'cartridges/example-sim'), path.join(d, 'cartridges/moss-game'), { recursive: true });
+    return { STUDIO_CARTRIDGE: 'moss-game' };
+  },
 };
 // What the failure must mention, so a gate that fails for an unrelated reason does not count.
 const EXPECT = {
@@ -102,6 +107,7 @@ const EXPECT = {
   'hub-smoke': /FAIL write without token is refused/,
   reviewer: /needs model-family and implementer-family/,
   assets: /stray\.glb has no record/,
+  'browser-play': /a real game needs the browser check/,
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
 };
@@ -982,6 +988,68 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   }
   report('the Liaison chat asks, then reads a brief back; a correction changes the same brief', turns.length === 3 && !turns[0].brief && /What should the player see first/.test(turns[0].reply) && turns[1].brief === turns[2].brief && /only in summer/.test(turns[2].reply) && /fireflies please/.test(fs.readFileSync(path.join(dir, 'studio/liaison/chat.md'), 'utf8')), chat.stdout + chat.stderr);
   report('nothing reaches the queue until the dev confirms the brief', !/Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')));
+}
+
+// The browser play gate: the example game is won with real key presses while the screen matches the sim;
+// a blank canvas, a frozen clock, a HUD that disagrees, the camera in a wall, or keys that never arrive all fail it.
+{
+  const dir = copyRepo();
+  const chromium = process.env.PLAYWRIGHT_CHROMIUM || ['/opt/pw-browsers/chromium'].find((p) => fs.existsSync(p));
+  const env = chromium ? { PLAYWRIGHT_CHROMIUM: chromium } : {};
+  const skip = run(dir, 'node qa/browser-play.mjs --no-shots', env);
+  report('without a browser, the template game only notes that the browser check was skipped', skip.status === 0 && /SKIP example-sim/.test(skip.stdout), skip.stdout + skip.stderr);
+  const played = fs.existsSync(path.join(root, 'node_modules', 'playwright')) && (fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction'), run(dir, 'node qa/browser-play.mjs --no-shots', env));
+  if (played && /PASS/.test(played.stdout)) {
+    report('the example game is won in the browser with real key presses, the screen matching the sim', /won at tick \d+, [1-9]\d* real inputs/.test(played.stdout), played.stdout);
+    const MAIN = 'web/example-sim/main.mjs';
+    const orig = fs.readFileSync(path.join(dir, MAIN), 'utf8');
+    const variant = (label, from, to, re) => {
+      if (!orig.includes(from)) return report(`${label} (the planted change no longer applies to ${MAIN})`, false);
+      fs.writeFileSync(path.join(dir, MAIN), orig.replace(from, to));
+      const r = run(dir, 'node qa/browser-play.mjs --no-shots', env);
+      report(label, r.status !== 0 && re.test(r.stderr), r.stderr + r.stdout);
+    };
+    variant('a blank canvas fails the browser check', "const ctx = canvas.getContext('2d');", 'const ctx = { fillRect() {} };', /BROWSER-BLANK/);
+    variant('a clock that never moves fails it', 'state = step(state, acts.length ? acts : null);', 'void acts;', /BROWSER-FROZEN/);
+    variant('a HUD that shows a different number from the sim fails it', "$('hud-credits').textContent = String(Math.floor(state.resources.credits));", "$('hud-credits').textContent = String(Math.floor(state.resources.credits) + 100);", /BROWSER-WIRING[^\n]*HUD credits/);
+    variant('the camera inside geometry fails it', 'camera: { inside: false },', 'camera: { inside: state.tick > 40 },', /camera is inside geometry/);
+    variant('keys that never reach the game fail it: start-to-win is not won', "if (e.key === 'b' || e.key === 'B') buy();", 'void e;', /BROWSER-NO-OUTCOME[^\n]*ended lost/);
+    fs.writeFileSync(path.join(dir, MAIN), orig);
+    fs.mkdirSync(path.join(dir, 'qa/regressions/browser'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'qa/regressions/browser/T-900.mjs'), "export async function check({ page }) {\n  const t = await page.locator('#end').innerText();\n  return { ok: t === 'You won.', why: `end text was \"${t}\"` };\n}\n");
+    const withReg = run(dir, 'node qa/browser-play.mjs --no-shots', env);
+    fs.writeFileSync(path.join(dir, 'qa/regressions/browser/T-900.mjs'), "export async function check() {\n  return { ok: false, why: 'the HUD flickers on win' };\n}\n");
+    const badReg = run(dir, 'node qa/browser-play.mjs --no-shots', env);
+    report('browser regressions run on the live page and fail the gate when they fail', withReg.status === 0 && badReg.status !== 0 && /BROWSER-REGRESSION: T-900\.mjs: the HUD flickers on win/.test(badReg.stderr), withReg.stdout + badReg.stderr);
+  } else console.log(`[selftest] SKIP playing in the browser (no Chromium here: ${(played ? played.stdout : 'Playwright not installed').trim().split('\n')[0]})`);
+}
+
+// Renderer work: bugs carry a part; a renderer bug closes with a browser regression, and screenshots need
+// a line each and a check by someone other than the builder.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  report('--part only takes sim, renderer or both', run(dir, 'node harness/task.mjs add "HUD lags" --type bug --part ui', env).status !== 0);
+  const id = JSON.parse(run(dir, 'node harness/task.mjs add "HUD shows last tick\'s credits" --type bug --part renderer', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${id} --agent builder-1`, env);
+  const before = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
+  report('a renderer bug asks for a browser regression and screenshots, not a sim seed and tick', /\[ \] Browser regression in qa\/regressions\/browser/.test(before) && /\[ \] Screenshots, each with a line/.test(before) && !/Regression saved with seed/.test(before), before);
+  fs.mkdirSync(path.join(dir, 'qa/regressions/browser'), { recursive: true });
+  fs.writeFileSync(path.join(dir, `qa/regressions/browser/${id}.mjs`), 'export async function check() { return { ok: true }; }\n');
+  fs.mkdirSync(path.join(dir, 'qa/reports'), { recursive: true });
+  fs.writeFileSync(path.join(dir, `qa/reports/browser_${Date.now() + 5000}.json`), JSON.stringify({ passed: true, at: new Date(Date.now() + 5000).toISOString(), regressions: [{ file: `qa/regressions/browser/${id}.mjs`, ok: true }] }));
+  fs.writeFileSync(path.join(dir, 'qa/reports/browser_1-end.png'), 'png');
+  const short = run(dir, `node harness/proof.mjs add ${id} qa/reports/browser_1-end.png "the HUD"`, env);
+  report('a screenshot needs a line that says what it shows', short.status !== 0 && /at least six words/.test(short.stderr), short.stderr);
+  run(dir, `node harness/proof.mjs add ${id} qa/reports/browser_1-end.png "the HUD reads 5839 credits the same tick the sim does" --by builder-1`, env);
+  report('the screenshot is kept with the proof, so it travels with the commit', fs.existsSync(path.join(dir, `studio/proof/${id}/browser_1-end.png`)) && /the HUD reads 5839 credits/.test(fs.readFileSync(path.join(dir, `studio/proof/${id}.md`), 'utf8')));
+  report('the builder can\'t check their own screenshots', run(dir, `node harness/proof.mjs check ${id} --by builder-1 --verdict matches`, env).status !== 0);
+  const wrong = run(dir, `node harness/proof.mjs check ${id} --by hatch --verdict wrong --note "the HUD in the image says 5739"`, env);
+  const mid = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
+  report('a check that says the image doesn\'t match keeps the task open, with the reason', wrong.status === 0 && /\[ \] Checked by someone other than the builder: the last check said they don't match: the HUD in the image says 5739/.test(mid), mid);
+  run(dir, `node harness/proof.mjs check ${id} --by hatch --verdict matches`, env);
+  const after = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
+  report('with a browser regression, a passing browser play after it, and checked screenshots, those checks pass', /\[x\] Browser regression/.test(after) && /\[x\] Browser play passed with the regression/.test(after) && /\[x\] Screenshots, each with a line/.test(after) && /\[x\] Checked by someone other than the builder/.test(after), after);
 }
 
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.

@@ -547,7 +547,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--prototype | --infra]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--prototype | --infra]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -563,6 +563,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const causedBy = typeof flags['caused-by'] === 'string' ? flags['caused-by'] : null;
+    if (flags.part !== undefined && !['sim', 'renderer', 'both'].includes(flags.part)) {
+      console.error('--part is which part of the game it touches: sim (rules and state), renderer (what is drawn and shown) or both. Renderer work closes with screenshots someone else checked; renderer bugs with a browser regression.');
+      process.exit(1);
+    }
     const created = addTask({
       title: `${prefix}${title}`,
       role: flags.role || 'builder',
@@ -574,6 +578,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(flags.phase !== undefined ? { phase: Number(flags.phase) } : {}),
         ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}),
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
+        ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
         ...(typeof flags['not-layer'] === 'string' ? { notLayer: flags['not-layer'] } : {}),

@@ -59,6 +59,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: npm run hud:check
         run: node qa/hud-check.mjs
+      # Plays the example game in Chromium with real key presses and checks the screen matches the sim.
+      - name: npm run play:browser
+        run: node qa/browser-play.mjs
 
   war-room-build:
     runs-on: ubuntu-latest

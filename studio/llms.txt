@@ -97,6 +97,9 @@
 - `npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…" | answer <id> <answer> --by <person> | reverse <id> <answer> --by <person> | list`
 - `npm run art [-- propose <file> --kind style|asset|concept --title "…" --task <ID> --by <agent> | approve D-001 --by <person> | changes D-001 "<what>" --by <person>]` — the art department's designs; an approved style sheet becomes the Bible's art reference, an approved asset is recorded in the ledger (docs/ART-DEPARTMENT.md)
 - War Room: a pitch starts R&D, a message the Producer, a confirmed Liaison brief its agent, design changes the art department (`wake` in harness/agent.mjs); the Game plan has a Liaison chat on a cheap model (POST /api/liaison)
+- `npm run play:browser [-- --url <dev server>]` — the browser play gate: plays start-to-win with real input, compares window.__view() with window.__sim, fails on blank, frozen, wiring mismatches or the camera inside geometry; runs qa/regressions/browser/*.mjs (docs/BROWSER-PLAY.md)
+- `npm run proof -- add <task> <png> "<what it shows>" | check <task> --by <name> --verdict matches|wrong` — screenshot proof for `--part renderer|both` tasks
+- `npm run task -- add "…" --part sim|renderer|both` — which part of the game a task touches; renderer bugs close with a browser regression
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

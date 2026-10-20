@@ -4,6 +4,17 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.18.0] — 2026-10-21
+### Added
+- **The browser play gate** (`npm run play:browser`, required gate `browser-play`, docs/BROWSER-PLAY.md): opens the game's browser build in Chromium and plays start-to-win with real key presses and clicks chosen by the scenario's policy, reading `window.__sim` and `window.__view()` in the same instant every step. Fails on script errors, a blank canvas, a frozen clock, a screen that disagrees with the sim, the camera inside geometry, or no win. Saves start, middle and end screenshots. Metal on macOS, a pointer-lock stand-in headless. A real game without a browser to play it in fails; only the template skips. Also runs in CI.
+- **The example game's browser build** (`web/example-sim/`): a small 2D view of the example sim with a HUD and real input, and the `browser` contract in its qa.mjs.
+- **Renderer work is proved, not assumed.** `task add --part sim|renderer|both`. Renderer and both tasks need screenshots with a line each saying what they show (`npm run proof -- add`, copied to `studio/proof/<task>/`) and a check by someone other than the builder (`npm run proof -- check --verdict matches|wrong`).
+- **Renderer bugs close with a browser regression** (`qa/regressions/browser/<task>.mjs`, a check on the live page) that a passing browser play ran after the fix, instead of a sim seed and tick (B8).
+### Fixed
+- Proof files (studio/proof/) are bookkeeping, so adding screenshots after a verify doesn't demand another verify.
+
+---
+
 ## [2.17.0] — 2026-10-21
 ### Added
 - **Art department from day one.** The Art division is on by default. Pre-production queues "Art: style sheet and five placeholder assets" for the new `art` role (`studio/roles/art.md`, `studio/skills/art.md`). `npm run art -- propose|approve|changes`: the game dev approves designs in the Game plan view (images shown, listed under Needs you). An approved style sheet becomes the Game Bible's art reference; an approved asset under `assets/` is recorded in the asset ledger with who approved it and its licence and source. "Ask for changes" gives the art department a task with the dev's words. Art tasks have their own done-check (the designs the title asks for were proposed). `docs/ART-DEPARTMENT.md`.

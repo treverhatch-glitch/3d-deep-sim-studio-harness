@@ -20,6 +20,10 @@ import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
 import { failsBefore } from '../qa/fails-before.mjs';
 import { modelFamily } from './families.mjs';
+import { proofStatus } from './proof.mjs';
+
+/** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
+export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
 
 /** The oldest commit tagged with this task (Studio-Task trailer), or null. */
 function firstTaggedCommit(taskId) {
@@ -122,7 +126,7 @@ function filesUnder(rel, test, deep = false) {
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
 // ---- what changed, and when ----
-const BOOKKEEPING = /^(\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/)|qa\/reports\/)/;
+const BOOKKEEPING = /^(\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
@@ -224,6 +228,8 @@ const words = (rel) => (fs.readFileSync(abs(rel), 'utf8').match(/[A-Za-z0-9]{2,}
  */
 export function checkDone(task, since = startedAt(task.id)) {
   const type = taskType(task);
+  const part = task.part || partOf(task.id);
+  const seen = part === 'renderer' || part === 'both';
   const checks = [];
   const check = (label, ok, why) => checks.push({ label, ok: Boolean(ok), why: ok ? null : why });
 
@@ -241,7 +247,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
       .map((f) => ({ f, j: readJson(f) }))
       .filter(({ j }) => j && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256));
-    check('Regression saved with seed, tick and a pinned hash', regs.length, 'no regression in qa/regressions/ with a seed, a tick and a pinned hash since this task started (save the replay, then `node qa/check-regressions.mjs --update`)');
+    if (part !== 'renderer') check('Regression saved with seed, tick and a pinned hash', regs.length, 'no regression in qa/regressions/ with a seed, a tick and a pinned hash since this task started (save the replay, then `node qa/check-regressions.mjs --update`)');
     const lessons = fs.existsSync(abs('studio/memory/failures.md')) ? fs.readFileSync(abs('studio/memory/failures.md'), 'utf8').match(/^### .+$/gm) || [] : [];
     const ids = [task.id, ...(task.title.match(/\b(BUG|REG)-[\w-]+/g) || []), ...regs.map(({ j }) => j.id).filter(Boolean)];
     const day = new Date(since).toISOString().slice(0, 10);
@@ -249,13 +255,22 @@ export function checkDone(task, since = startedAt(task.id)) {
     const dated = lessons.some((h) => (h.match(/\[(\d{4}-\d{2}-\d{2})\]/) || [])[1] >= day) && mtime('studio/memory/failures.md') >= since;
     // The regression has to catch the bug: replayed on the code before the fix, it must fail.
     const fix = firstTaggedCommit(task.id);
-    if (fix !== undefined && regs.length) {
+    if (part !== 'renderer' && fix !== undefined && regs.length) {
       if (!fix) check('Regression fails on the code before the fix', false, `no commit tagged Studio-Task: ${task.id} yet; commit the fix (with STUDIO_LOCK_OWNER set, the hook adds the tag), then this check replays the regression on the commit before it`);
       else {
         const results = regs.map(({ f }) => failsBefore(abs(f), `${fix}^`));
         const good = results.find((r) => r.ok);
         check('Regression fails on the code before the fix', good, results.map((r) => r.why).join('; '));
       }
+    }
+    if (seen) {
+      // A renderer bug can't be pinned by a sim hash: it closes with a check on the running page.
+      const bregs = newestSince(filesUnder('qa/regressions/browser', (n) => n.endsWith('.mjs')), since);
+      check('Browser regression in qa/regressions/browser/ since the task started', bregs.length, `no browser regression since this task started: add qa/regressions/browser/${task.id}.mjs exporting check({ page, sim, view }) that returns { ok, why } and fails on the bug (studio/skills/bug.md)`);
+      const lastChange = taskChanges(task.id, since).lastAt;
+      const plays = newestSince(filesUnder('qa/reports', (n) => /^browser_\d+\.json$/.test(n)), since).map((f) => readJson(f)).filter(Boolean);
+      const good = plays.filter((r) => r.passed && (Date.parse(r.at) || 0) >= lastChange && bregs.every((f) => (r.regressions || []).some((x) => x.file === f && x.ok)));
+      check('Browser play passed with the regression, after the last change', good.length, 'no passing browser play (npm run play:browser) that ran the new regression after your last change');
     }
     check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`bash scripts/distill-bug.sh\`)`);
     workAndVerify();
@@ -338,8 +353,13 @@ export function checkDone(task, since = startedAt(task.id)) {
     const moved = idea && (idea.history || []).some((h) => Date.parse(h.at) >= since && ['shaped', 'placed', 'approved', 'parked', 'rejected'].includes(h.stage));
     check('The idea moved to its next stage since the task started', moved, `${id || 'the idea'} hasn't moved since this task started (npm run idea -- shape|place|decide ${id || 'I-…'})`);
   }
+  if (seen && ['change', 'bug', 'system'].includes(type)) {
+    const pr = proofStatus(task.id, since);
+    check('Screenshots, each with a line saying what it shows', pr.shots && pr.fresh, `no screenshots for ${task.id} since it started: npm run play:browser, then npm run proof -- add ${task.id} <png> "<what it shows>"`);
+    check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
+  }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, since, checks, missing, ...TYPES[type] };
+  return { ok: missing.length === 0, type, part, since, checks, missing, ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

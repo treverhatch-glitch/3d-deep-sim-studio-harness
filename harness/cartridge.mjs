@@ -132,6 +132,7 @@ export async function loadCartridge(name = defaultCartridgeName()) {
     tuning,
     hasTuning: Object.keys(tuning).length > 0,
     scenarios: qa.scenarios || {},
+    browser: qa.browser || null,
     init: (seed, overrides) => mod.createInitialState(Number(seed) >>> 0, overrides ? { ...tuning, ...overrides } : undefined),
     step: (state, actions) => mod.step(state, actions && actions.length ? actions : null),
     invariants: (state) => normalizeFindings(mod.invariants ? mod.invariants(state) : [], state),
