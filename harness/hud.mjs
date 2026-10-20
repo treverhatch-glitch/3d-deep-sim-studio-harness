@@ -180,7 +180,12 @@ export function buildHudState() {
     agents.set(l.owner, a);
   }
   const divs = divisions();
+  const humans = new Set(['war-room-human', ...(readJson('.studio/humans.json', []) || [])]);
   const agentList = [...agents.values()].map((a) => {
+    if (humans.has(a.name)) {
+      const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
+      return { ...a, role: 'human', kind: 'human', room: 'production', status: idleMin !== null && idleMin > 15 ? 'idle' : 'working', idleMin };
+    }
     const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
     const role = roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
     const errored = /error|fail|escalate|bug|forced|not_done/.test(a.lastType || '');
@@ -191,6 +196,7 @@ export function buildHudState() {
       role,
       room: roomForRole(role, divs) || 'engineering',
       status: stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
+      kind: a.name === 'watch' ? 'script' : 'agent',
       idleMin,
     };
   });

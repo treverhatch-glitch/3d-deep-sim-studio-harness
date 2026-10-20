@@ -70,6 +70,22 @@ export function assertSafeBind(host = HOST) {
   return { ok: true };
 }
 
+// Names people use on War Room buttons: the HUD seats them in the Producer's office, not with the agents.
+function noteHuman(name) {
+  const file = path.join(STUDIO_STATE_DIR, 'humans.json');
+  let list = [];
+  try {
+    list = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    // first one
+  }
+  const n = String(name || '').slice(0, 40);
+  if (n && !list.includes(n)) {
+    fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify([...list, n]) + '\n');
+  }
+}
+
 function tokenMatches(given) {
   const t = hubToken();
   if (!t || !given) return false;
@@ -591,6 +607,7 @@ export function createHubServer() {
 
     if ((url.pathname === '/api/tasks' || url.pathname === '/api/task') && req.method === 'POST') {
       const body = await readBody(req);
+      noteHuman(body.agent || 'war-room-human');
       let result = null;
       if (body.action === 'start' && body.id) {
         result = startTask(body.id, body.agent || 'war-room-human');
@@ -723,6 +740,7 @@ export function createHubServer() {
 
     if (url.pathname === '/api/human/decision' && req.method === 'POST') {
       const body = await readBody(req);
+      noteHuman(body.agent || 'war-room-human');
       const kind = body.kind === 'fun' ? 'fun' : 'balance';
       const dir = path.join(REPO_ROOT, 'studio', kind);
       fs.mkdirSync(dir, { recursive: true });

@@ -504,7 +504,11 @@
     pattern.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.' && col[c]) out.push(`${x * PX}px ${(y - pattern.length + 1) * PX}px 0 0 ${col[c]}`); }));
     return out.join(',');
   };
-  const colours = (name, room) => { const h = hash(name); return { h: HAIR[h % HAIR.length], s: SKIN[(h >>> 3) % SKIN.length], e: '#000', t: SHIRT[room] || '#1e88e5', p: '#37474f' }; };
+  const colours = (name, room, kind) => {
+    if (kind === 'script') return { h: '#90a4ae', s: '#cfd8dc', e: '#00e5ff', t: '#607d8b', p: '#455a64' };
+    const h = hash(name);
+    return { h: HAIR[h % HAIR.length], s: SKIN[(h >>> 3) % SKIN.length], e: '#000', t: kind === 'human' ? '#2e7d32' : SHIRT[room] || '#1e88e5', p: '#37474f' };
+  };
 
   // What each division wears, so you can tell roles apart at a glance. Patterns line up with the sprite rows.
   const _ = '........';
@@ -523,6 +527,11 @@
     release: { p: ['..cccc..', '.ccccccc', _, _, _, _, '......kk', '......kw', _, _], c: { c: '#283593', k: '#6d4c41', w: '#ffffff' } }, // cap + clipboard
     devlog: { p: ['..cccc..', 'cccccc..', _, _, _, _, '......kk', '......kR', _, _], c: { c: '#ef5350', k: '#212121', R: '#f44336' } }, // cap + camera
     engine: { p: ['..yyyy..', '.yyyyyy.', 'yyyyyyyy', _, _, _, _, _, _, _], c: { y: '#fdd835' } }, // hard hat
+  };
+
+  const KIND_ACC = {
+    script: { p: ['...a....', '...a....', _, _, _, _, '.bbbbbb.', _, _, _, _], c: { a: '#ff5252', b: '#455a64' } }, // antenna, belt: the watcher is a script
+    human: { p: ['..yyyy..', '.yyyyyyy', _, _, _, _, _, _, _, _], c: { y: '#ffca28' } }, // gold cap: you
   };
 
   // Pixel art from character grids. A palette entry is a colour, or { c, k } to add a CSS class (for blinking parts).
@@ -824,12 +833,12 @@
   }
 
   function newPerson(a, roomId) {
-    const col = colours(a.name, roomId);
-    const acc = ACC[roomId];
+    const col = colours(a.name, roomId, a.kind);
+    const acc = KIND_ACC[a.kind] || ACC[roomId];
     const accShadow = acc ? `${shadowsFor(acc.p, acc.c)},` : '';
     const el = document.createElement('div');
     el.className = 'person';
-    el.title = `${a.name}${a.role ? ` (${a.role})` : ''}`;
+    el.title = a.kind === 'script' ? 'watch: the watcher, a script (no AI)' : a.kind === 'human' ? `${a.name}: you, through the War Room` : `${a.name}${a.role ? ` (${a.role})` : ''}`;
     el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="zz">z</span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
     crowd.appendChild(el);
     return el;
@@ -850,7 +859,7 @@
       crowd.appendChild(el);
       desks.set(a.name, el);
     }
-    el.querySelector('.tag').textContent = a.name;
+    el.querySelector('.tag').textContent = a.kind === 'script' ? 'watch (script)' : a.kind === 'human' ? `${a.name} (you)` : a.name;
     const score = (state?.scorecard || []).find((m) => m.model === a.model);
     el.querySelector('.bugs').textContent = score && score.bugs ? `${score.bugs} BUG${score.bugs > 1 ? 'S' : ''}` : '';
     el.querySelector('.model').textContent = a.model ? String(a.model).replace(/^(models\/|accounts\/[^/]+\/models\/)/, '') : '';

@@ -16,6 +16,7 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - **War Room v3 is the HUB's home page**, with buttons behind the token: start, pause, done and reopen tasks, add tasks (type, size, caused-by), sign off balance and fun, and run the watcher. The old React War Room is retired to `/legacy` for one release.
 - The watcher's list of uncommitted files leaves out the studio's own bookkeeping.
 - Sign-offs from the War Room count as signed in the briefing.
+- In the Studio view, people using War Room buttons sit in the Producer's office in a gold cap, and the watcher is a small robot (it is a script), so neither is mistaken for an agent.
 
 ---
 
