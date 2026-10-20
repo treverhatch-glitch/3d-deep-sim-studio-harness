@@ -820,8 +820,9 @@
         host.el.classList.add('nod');
       }
       say(w, t.msg);
-      setTimeout(() => {
+      w.visitT = setTimeout(() => {
         if (host) host.guests = Math.max(0, (host.guests || 1) - 1);
+        if (w.meeting) return; // called into a meeting meanwhile: the meeting walks them home
         walkPath(w, route(t.room, w.room, home(w)), () => {
           w.at = w.room;
           w.visiting = false;
@@ -1018,6 +1019,7 @@
       if (!p) return;
       const seat = seats[k];
       clearTimeout(p.pathT);
+      clearTimeout(p.visitT);
       p.visiting = false;
       p.meeting = true;
       p.el.classList.remove('typing', 'attention');
