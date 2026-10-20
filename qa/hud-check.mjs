@@ -42,7 +42,7 @@ const files = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : 
 if (files.length) for (const f of files) fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }), fs.existsSync(path.join(root, f)) && fs.copyFileSync(path.join(root, f), path.join(dir, f));
 else fs.cpSync(root, dir, { recursive: true, filter: (s) => !/[\\/](node_modules|\.git|\.studio)([\\/]|$)/.test(path.relative(root, s) ? `/${path.relative(root, s)}` : '') });
 fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
-const env = { ...process.env, STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_BACKUP_DIR: '' };
+const env = { ...process.env, STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_BACKUP_DIR: '', STUDIO_HEARTBEAT_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 wait' };
 const sh = (...args) => spawnSync(process.execPath, args, { cwd: dir, env, encoding: 'utf8' });
 const git = (...args) => spawnSync('git', ['-c', 'user.name=hud', '-c', 'user.email=hud@example.com', ...args], { cwd: dir, encoding: 'utf8' });
 git('init', '-q');
@@ -54,6 +54,7 @@ sh('harness/task.mjs', 'start', 'T-002', '--agent', 'balancer-1', '--model', 'ge
 sh('harness/event.mjs', '--type', 'task.progress', '--agent', 'balancer-1', '--task', 'T-002', '--msg', 'sweeping spawnCost 40..120');
 sh('harness/ideas.mjs', 'add', 'Night market events', '--by', 'hatch');
 sh('qa/playtest.mjs', '--stage', '1', '--quiet');
+sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 
 const port = await new Promise((resolve) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => {
@@ -171,6 +172,28 @@ try {
   check('unticking the box records a decline', /"how": "declined"/.test(read('studio/data-consent.json')));
   await wait(5500);
   check('the box stays unticked after the next refresh', !(await page.isChecked('#p-share')));
+  // The lever is on every view; pulling it turns MAX SPEED on for the whole studio.
+  await page.click('#plan [data-speed]');
+  await wait(2500);
+  const boost = JSON.parse(read('studio/mode.json') || '{}').boost;
+  check('the MAX SPEED lever turns boost on, and every view shows it', boost?.on === true && (await page.locator('[data-speed][aria-pressed="true"]').count()) === 3);
+  await page.click('#plan [data-mode="fast"]');
+  await wait(2000);
+  check('choosing a pace in the Game plan records it', JSON.parse(read('studio/mode.json') || '{}').mode === 'fast' && /Fast and furious/.test(await page.locator('#p-modemsg').innerText()));
+  check('the studio\'s question shows with its default and deadline', /Which floor first\?/.test(await page.locator('#p-asks').innerText()) && /if you don't answer by/.test(await page.locator('#p-asks').innerText()));
+  await page.click('#p-asks [data-answer="Food court"]');
+  await wait(1500);
+  check('answering it with one click records the answer', /"answer": "Food court"/.test(read('studio/asks/A-001.json')));
+  check('the signals strip shows the pace on every view', (await page.locator('[data-signals] .sig.pace').count()) === 3);
+  await page.click('#plan .switch[data-to="ops"]');
+  await wait(800);
+  await page.selectOption('#o-arole', 'builder');
+  await page.click('#o-agentform button');
+  await wait(4000);
+  check('Start agent launches one, and it shows with its heartbeat', /builder-/.test(await page.locator('#o-launched').innerText()) && /heartbeat/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-actmsg').innerText());
+  await page.locator('#o-launched [data-stopagent]').first().click();
+  await wait(4000);
+  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()));
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close();

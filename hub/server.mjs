@@ -47,6 +47,9 @@ import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
 import { learnIfDue } from '../harness/learn.mjs';
 import { runReportIfDue } from '../harness/run-report.mjs';
+import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
+import { startAgent, sessions as agentSessions } from '../harness/agent.mjs';
+import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
 import { readBriefs } from '../harness/liaison.mjs';
@@ -552,6 +555,41 @@ export function createHubServer() {
       const r = runIntake({ answers: body.answers || {}, layers: body.layers || {} });
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, check: r.check, queued: r.queued.map((t) => t.id) });
+    }
+    if (url.pathname === '/api/mode' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const r = body.mode ? setMode(String(body.mode), by, String(body.why || '').slice(0, 300)) : setBoost(Boolean(body.boost), by, body.hours ? Number(body.hours) : null);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, { ...r, text: r.ok ? describeMode(r.mode) : undefined });
+    }
+    if (url.pathname === '/api/agents' && req.method === 'POST') {
+      const body = await readBody(req);
+      noteHuman(String(body.by || 'war-room-human').slice(0, 60));
+      if (body.action === 'stop') {
+        const s = agentSessions().find((x) => x.agent === body.agent && x.running);
+        if (!s) return sendJson(res, 400, { ok: false, error: `${body.agent} isn't running` });
+        try {
+          process.kill(s.pid);
+        } catch {
+          // already gone
+        }
+        return sendJson(res, 200, { ok: true, stopping: s.agent });
+      }
+      const role = String(body.role || '').replace(/[^a-z0-9-]/gi, '').slice(0, 30);
+      const agent = String(body.agent || `${role}-${Date.now().toString(36).slice(-4)}`).replace(/[^a-z0-9._-]/gi, '').slice(0, 40);
+      const r = startAgent({ role, agent, tool: body.tool ? String(body.tool).replace(/[^a-z]/g, '') : undefined, model: body.model ? String(body.model).replace(/[^a-zA-Z0-9._:/-]/g, '').slice(0, 80) : undefined, task: /^T-\d+$/.test(body.task || '') ? body.task : null }, { detach: true });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, agent: r.agent, tool: r.tool, model: r.model } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/asks' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const r = body.action === 'reverse' ? await reverseAsk(String(body.id || ''), String(body.answer || ''), by) : answerAsk(String(body.id || ''), String(body.answer || ''), by);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ask: r.ask, task: r.task || null } : { ok: false, error: r.message });
     }
     if (url.pathname === '/api/stop' && req.method === 'POST') {
       const body = await readBody(req);

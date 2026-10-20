@@ -35,6 +35,27 @@
   .switch { border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 6px 12px; border-radius: 6px; }
   #ops .hold-strip { display: none; margin: 12px 20px 0; padding: 10px 14px; border-left: 4px solid var(--hold); background: rgba(255, 90, 95, .08); }
   #ops .hold-strip.on { display: block; }
+  .speed { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border: 2px solid currentColor; border-radius: 999px; padding: 3px 12px 3px 3px; background: transparent; color: inherit; font: 700 13px/1.2 system-ui, sans-serif; letter-spacing: .06em; }
+  .speed .knob { width: 20px; height: 20px; border-radius: 50%; background: #8a8f98; transition: transform .2s ease; }
+  .speed[aria-pressed="true"] { background: linear-gradient(90deg, #ff8a00, #ff3b30); color: #fff; border-color: #ff3b30; box-shadow: 0 0 14px rgba(255, 70, 30, .55); }
+  .speed[aria-pressed="true"] .knob { background: #fff; transform: translateX(2px) scale(1.1); }
+  .speed:focus-visible { outline: 3px solid var(--focus, #6cc6ff); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .speed .knob { transition: none; } }
+  #tycoon .speed { border-radius: 0; border-width: 3px; font: 10px/1.2 "Press Start 2P", monospace; padding: 4px 10px 4px 4px; color: #ffe9b5; }
+  #tycoon .speed .knob { border-radius: 0; }
+  .signals { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 20px; }
+  .signals:empty { display: none; }
+  .sig { border: 1px solid; border-radius: 6px; padding: 3px 10px; font-size: 14px; line-height: 1.4; max-width: 100%; overflow-wrap: anywhere; }
+  .sig b { font-weight: 700; margin-right: 4px; }
+  .sig.you { border-color: #f5b83d; } .sig.red { border-color: #ff5a5f; } .sig.stall { border-color: #c084fc; } .sig.pace { border-style: dashed; opacity: .85; }
+  #tycoon .signals { background: #4a2e1a; color: #ffe9b5; font: 16px VT323, monospace; }
+  #plan .modes { display: grid; gap: 8px; }
+  #plan .mode { text-align: left; border: 2px solid var(--line, #ccc); background: transparent; color: inherit; padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+  #plan .mode[aria-checked="true"] { border-color: var(--ink, #222); box-shadow: inset 4px 0 0 var(--ink, #222); }
+  #plan .mode b { display: block; }
+  #plan .ask { border-left: 4px solid #f5b83d; padding: 6px 10px; margin-bottom: 10px; }
+  #plan .ask .opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #o-launched .ag { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
   #ops .meet-strip { display: none; margin: 12px 20px 0; padding: 8px 14px; border-left: 4px solid var(--link); background: rgba(108, 198, 255, .08); }
@@ -408,7 +429,9 @@
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
     <button class="switch" data-to="plan">Game plan</button>
+    <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
+  <div class="signals" data-signals role="status" aria-live="polite"></div>
   <div class="meet-strip" id="o-meet"></div>
   <div class="hold-strip" id="o-stop" role="status"><h2>Studio stopped</h2><div id="o-stopmsg"></div></div>
   <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
@@ -433,6 +456,10 @@
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
           <button>Add task</button></form>
         <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <form id="o-agentform" class="act-row"><select id="o-arole" aria-label="Role for the new agent"><option>builder</option><option>qa-playtester</option><option>rnd</option><option>art</option><option>director</option><option>producer</option><option>reviewer</option><option>planner</option><option>liaison</option></select>
+          <select id="o-atool" aria-label="Agent tool"><option value="">tool from .env</option><option>claude</option><option>codex</option><option>agy</option><option>cursor</option><option>grok</option><option>aider</option><option>custom</option></select>
+          <input id="o-amodel" placeholder="model (blank: from .env)" aria-label="Model for the new agent" size="18"> <button>Start agent</button></form>
+        <div id="o-launched"></div>
         <form id="o-inbox" class="act-row"><input id="o-msg" placeholder="Message the Producer" aria-label="Message for the Producer's inbox" required> <button>Send</button></form>
         <p class="note" id="o-actmsg" role="status">Paste the HUB token from .env to use the buttons. Without it the page is read-only.</p>
       </section>
@@ -459,7 +486,9 @@
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
     <button class="switch" data-to="plan">Game plan</button>
+    <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </div>
+  <div class="signals" data-signals role="status" aria-live="polite"></div>
   <div class="office" id="t-office"><div id="t-crowd" aria-hidden="true"></div></div>
   <div class="dock">
     <div class="build"><span>Game in development</span><span class="bar"><i id="t-buildbar"></i></span><span id="t-buildpct">0%</span></div>
@@ -478,8 +507,21 @@
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
+  <div class="signals" data-signals role="status" aria-live="polite"></div>
   <main>
+    <div class="two">
+      <section id="p-pace">
+        <h2>How fast should the studio work? <small>you choose; change it any time</small></h2>
+        <div class="modes" id="p-modes" role="radiogroup" aria-label="Development pace"></div>
+        <p class="note" id="p-modemsg" role="status"></p>
+      </section>
+      <section>
+        <h2>The studio is asking you <small id="p-askcount"></small></h2>
+        <div id="p-asks"></div>
+      </section>
+    </div>
     <section id="p-shape"></section>
     <section>
       <h2>Idea Board <small>nothing here is built until the Director approves it</small></h2>
@@ -566,7 +608,7 @@
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Token': hubToken() }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) throw new Error('The HUB token was refused. Check HUB_TOKEN in .env.');
-    if (!res.ok || data.ok === false) throw new Error(data.result?.message || data.error || `HUB answered ${res.status}`);
+    if (!res.ok || data.ok === false) throw new Error(data.result?.message || data.error || data.message || `HUB answered ${res.status}`);
     return data;
   }
   const act = async (label, fn) => {
@@ -1356,7 +1398,10 @@
       const req = s.gates?.rows?.filter((r) => r.required) || [];
       const bad = req.filter((r) => !r.ok).length;
       build.className = `lamp-sign ${!req.length ? '' : bad ? 'bad' : 'ok'}`;
-      build.title = req.length ? `Last verify: ${req.length - bad} of ${req.length} gates green` : 'No verify run yet';
+      // Red means a check failed, never "an agent needs you": say which check.
+      const failing = req.filter((r) => !r.ok).map((r) => r.id);
+      build.querySelector('span').textContent = failing.length ? `RED: ${failing[0]}`.slice(0, 18) : 'BUILD';
+      build.title = req.length ? (failing.length ? `A check is red: ${failing.join(', ')}. Run npm run verify -- --only ${failing[0]}. (Not an agent waiting for you; that shows under "Needs you".)` : `Last verify: all ${req.length} required checks green`) : 'No verify run yet';
     }
     const tests = office.querySelector('[data-dyn="tests"]');
     if (tests) {
@@ -1541,9 +1586,77 @@
     }
   }, 5000);
   function render() {
+    renderChrome(state);
     if (document.body.dataset.skin === 'tycoon') renderTycoon(state);
     else renderOps(state);
   }
+
+  // ---------- On every view: the MAX SPEED lever, the pace, and three separate signals ----------
+  function renderChrome(s) {
+    if (!s) return;
+    const m = s.mode || {};
+    document.querySelectorAll('[data-speed]').forEach((b) => {
+      b.setAttribute('aria-pressed', m.boost ? 'true' : 'false');
+      b.querySelector('.lbl').textContent = m.boost ? `MAX SPEED ON${m.boostUntil ? ` · until ${hhmm(m.boostUntil)}` : ''}` : 'MAX SPEED';
+    });
+    const sig = s.signals || { needsYou: [], red: [], stalled: [] };
+    const chip = (cls, label, items, empty) => `<span class="sig ${cls}" title="${esc(items.join('\n') || empty)}"><b>${label}</b>${items.length ? `${esc(items[0]).slice(0, 110)}${items.length > 1 ? ` (+${items.length - 1})` : ''}` : esc(empty)}</span>`;
+    const html = [
+      `<span class="sig pace" title="${esc(m.text || '')}"><b>Pace</b>${esc(m.label || '')}${m.boost ? ' + MAX SPEED' : ''}${m.chosen === false ? ' (not chosen yet)' : ''}</span>`,
+      sig.needsYou.length ? chip('you', `Needs you (${sig.needsYou.length})`, sig.needsYou, '') : '',
+      sig.red.length ? chip('red', 'A check is red:', sig.red.map((g) => `${g} (npm run verify -- --only ${g})`), '') : '',
+      sig.stalled.length ? chip('stall', `Agent stalled (${sig.stalled.length})`, sig.stalled, '') : '',
+    ].join('');
+    document.querySelectorAll('[data-signals]').forEach((el) => { el.innerHTML = html; });
+    const launched = (s.launched || []).filter((a) => a.running);
+    $('o-launched').innerHTML = launched.length ? launched.map((a) => `<div class="ag"><span class="lamp ${a.stalled ? 'stalled' : 'working'}" aria-hidden="true"></span>${esc(a.agent)} · ${esc(a.role)} · ${esc(a.tool)}/${esc(a.model)}${a.task ? ` · ${esc(a.task)}` : ''} · heartbeat ${a.beatAgeMin ?? '?'} min ago <button type="button" data-stopagent="${esc(a.agent)}">Stop</button></div>`).join('') : '<p class="note">No agents started from here yet. Pick a role and press Start agent (the tool and model can come from .env).</p>';
+    // Game plan: the pace choice and the studio's questions.
+    if ($('p-modes')) {
+      $('p-modes').innerHTML = Object.entries(s.modes || {}).map(([id, x]) => `<button type="button" class="mode" role="radio" aria-checked="${m.chosen && m.id === id ? 'true' : 'false'}" data-mode="${esc(id)}"><b>${esc(x.label)}</b>${esc(x.pitch)}</button>`).join('');
+      $('p-modemsg').textContent = m.text || '';
+      const asks = s.asks || { open: [], decided: [] };
+      $('p-askcount').textContent = asks.open.length ? `${asks.open.length} waiting` : '';
+      $('p-asks').innerHTML = (asks.open.length ? asks.open.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}<div class="note">from ${esc(a.by)}${a.deadline ? `; if you don't answer by ${esc(hhmm(a.deadline))}, it goes with "${esc(a.default)}" because ${esc(a.why)}` : '; it waits for you'}</div><div class="opts">${(a.options.length ? a.options : ['yes', 'no']).map((o) => `<button type="button" data-ask="${esc(a.id)}" data-answer="${esc(o)}">${esc(o)}</button>`).join('')}</div></div>`).join('') : '<p class="note">No questions waiting.</p>')
+        + (asks.decided.length ? `<h3 class="sub">Decided without you</h3>${asks.decided.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}: went with "${esc(a.answer)}" (${esc(a.why)})<div class="opts">${a.options.filter((o) => o !== a.answer).map((o) => `<button type="button" data-reverse="${esc(a.id)}" data-answer="${esc(o)}">Change to ${esc(o)}</button>`).join('')}</div></div>`).join('')}` : '');
+    }
+  }
+  document.addEventListener('click', async (ev) => {
+    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse]');
+    if (!t) return;
+    const say = (msg) => { notify(msg); if ($('p-modemsg') && document.body.dataset.skin === 'plan') $('p-modemsg').textContent = msg; };
+    try {
+      if (t.dataset.speed !== undefined) {
+        const on = t.getAttribute('aria-pressed') !== 'true';
+        const r = await post('/api/mode', { boost: on, by: actor() });
+        say(r.text || (on ? 'MAX SPEED on.' : 'MAX SPEED off.'));
+      } else if (t.dataset.stopagent) {
+        await post('/api/agents', { action: 'stop', agent: t.dataset.stopagent, by: actor() });
+        say(`Stopping ${t.dataset.stopagent}; its work is handed back cleanly.`);
+      } else if (t.dataset.mode) {
+        const r = await post('/api/mode', { mode: t.dataset.mode, by: actor() });
+        say(r.text);
+      } else if (t.dataset.ask) {
+        await post('/api/asks', { id: t.dataset.ask, answer: t.dataset.answer, by: actor() });
+        say(`${t.dataset.ask} answered: ${t.dataset.answer}. The asking agent sees it on its next step.`);
+      } else if (t.dataset.reverse) {
+        const r = await post('/api/asks', { action: 'reverse', id: t.dataset.reverse, answer: t.dataset.answer, by: actor() });
+        say(`${t.dataset.reverse} changed to ${t.dataset.answer}; the Producer has ${r.task} to undo the earlier choice.`);
+      }
+      poll();
+    } catch (err) {
+      say(`Couldn't do that: ${err.message}. Set the HUB token in the Ops view.`);
+    }
+  });
+  $('o-agentform').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      const r = await post('/api/agents', { role: $('o-arole').value, tool: $('o-atool').value || undefined, model: $('o-amodel').value.trim() || undefined, by: actor() });
+      notify(`Started ${r.agent} (${r.tool}, ${r.model}). It takes the next ${$('o-arole').value} task; its output is in .studio/agents/${r.agent}.log.`);
+      poll();
+    } catch (err) {
+      notify(`Not started: ${err.message}`);
+    }
+  });
 
   async function poll() {
     try {

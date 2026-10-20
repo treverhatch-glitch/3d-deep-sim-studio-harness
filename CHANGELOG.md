@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.16.0] — 2026-10-21
+### Added
+- **Pace** (`npm run mode`, intake, the Game plan view): Precise and slow, Budget, Fast and furious, Extreme speed. It sets how many agents run at once, which work needs a cross-family review, whether agents start automatically, and how often the Director and Producer check in. Logged in `studio/mode.json`.
+- **MAX SPEED lever** in every War Room view: twice the agents (up to 12), automatic starts, the Director about four times as often and the Producer every hour. Optional `--hours` auto-off.
+- **The launcher** (`npm run agent`, the War Room's Start agent and Stop): starts any tool with the agent's kickoff and real model, the same way on Windows, macOS and Linux; heartbeats every 2 minutes; when an agent dies (usage limit, 429, auth, crash) it hands the task back, saves the uncommitted work as a patch, frees the claims, and can fail over to the next tool. Caps from the pace, the stop switch and the token cap. `STUDIO_<ROLE>_CMD`/`_TOOL`/`_MODEL`; the Director starts through it too. The watcher starts agents in fast paces.
+- **Questions with a deadline** (`npm run ask`): one-click answers in the Game plan; after the deadline the asker's default applies with its reason, logged in `studio/decisions/decided-without-you.md` and the run report, and the dev can reverse it. Never for signing, pillars, money or deleting; agents can't answer for a person.
+- **Three signals** on every view: Needs you (with the reason), A check is red (the gate's name; the BUILD lamp says it too), Agent stalled (no heartbeat). The pace is shown beside them.
+- Run report: pace, the agents the launcher ran, and what was decided without the dev. Preflight: pace and which roles can start on their own.
+### Changed
+- Hand-back notices say which role the task waits for, and point at saved work.
+- The War Room browser test covers the lever, the pace, questions and starting and stopping an agent: 37 checks.
+
+---
+
 ## [2.15.0] — 2026-10-21
 From the first real game run ("Next Floor", Jed, v2.14.0). Each fix was reproduced first and has a self-test.
 ### Fixed

@@ -24,6 +24,9 @@ import { buildLearned, writeLearned } from './learn.mjs';
 import { renderScorecard } from './scorecard.mjs';
 import { readNotes } from './notes.mjs';
 import { describeConsent } from './data-consent.mjs';
+import { describeMode } from './mode.mjs';
+import { sessions as agentSessions } from './agent.mjs';
+import { allAsks } from './ask.mjs';
 
 const read = (rel) => {
   try {
@@ -91,6 +94,9 @@ export function buildRunReport({ final = false } = {}) {
     learned,
     notes,
     consent: describeConsent(),
+    pace: describeMode(),
+    launched: agentSessions(),
+    decided: allAsks().filter((a) => a.status === 'decided' || a.status === 'reversed'),
   };
 }
 
@@ -102,7 +108,8 @@ export function renderRunReport(r) {
   L.push(`- Harness ${r.harness}, commit ${r.commit || '?'} (${r.commits} commits), ${r.frozen ? 'harness frozen for the run' : '**harness NOT frozen** (npm run preflight -- --fix)'}`);
   L.push(`- Running ${r.hoursSoFar} hours since the first event (${r.startedAt ? r.startedAt.slice(0, 16).replace('T', ' ') : 'none yet'} UTC)${r.stopped ? `; **stopped** by ${r.stopped.by}` : ''}`);
   L.push(`- Game Bible: ${r.bible ? `${r.bible.signed ? `signed by ${r.bible.signed}, Phase ${r.bible.phaseOpen} open` : 'not signed yet'}; ${r.bible.playLength || 'no play length'}; ${r.bible.kept} layers kept, ${r.bible.crossed} crossed out` : 'none yet'}`);
-  L.push(`- Data sharing: ${r.consent}`, '');
+  L.push(`- Data sharing: ${r.consent}`);
+  L.push(`- Pace: ${r.pace}`, '');
   L.push('## Progress', '');
   L.push(`${t.done} tasks done, ${t.inProgress} in progress, ${t.waiting} waiting.`, '');
   L.push('| Type | Done | Open |', '| --- | --- | --- |', ...Object.entries(t.byType).sort().map(([k, v]) => `| ${k} | ${v.done} | ${v.open} |`), '');
@@ -121,12 +128,14 @@ export function renderRunReport(r) {
     L.push(`**${label}** (${(n[k] || []).length})`, '', ...((n[k] || []).slice(0, 15).map((x) => `- ${x}`)), ...((n[k] || []).length ? [] : ['- None yet.']), '');
   }
   L.push("## The overseer's evaluations", '', ...((n.eval || []).length ? n.eval.slice(0, 10).map((x) => `- ${x}`) : ['- None yet. The overseer adds one at least every few hours: `npm run notes -- add --kind eval "..."`.']), '');
+  L.push('## Agents the launcher ran', '', ...(r.launched.length ? r.launched.map((s) => `- ${s.agent} (${s.role}, ${s.tool}/${s.model}): ${s.running ? 'running' : s.reason || 'ended'}${s.handed?.length ? `; handed back ${s.handed.map((h) => h.task).join(', ')}` : ''}`) : ['- None (agents were started by hand).']), '');
+  L.push('## Decided without you', '', ...(r.decided.length ? r.decided.map((a) => `- ${a.id}: ${a.question} → "${a.answer}" by ${a.by} (${a.why})${a.status === 'reversed' ? ` — reversed by ${a.answeredBy}` : ''}`) : ['- Nothing; every question was answered or is still open.']), '');
   L.push('## Needed a person', '', ...(r.needsPerson.length ? r.needsPerson.map((x) => `- ${x}`) : ['- Nothing.']), '');
   L.push('## Files', '', 'In `files/`: the Bible, plan, queue, lessons, harness notes, the latest playtest and gate run, retros, reviews, signed results, and `events.jsonl.gz` (every event of the run).', '');
   return L.join('\n');
 }
 
-const COPY = ['studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/STORYBOARD.md', 'studio/PLAN.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md', 'studio/memory/failures.md', 'studio/memory/LEARNED.md', 'studio/harness-notes/NOTES.md', 'studio/producer/LOG.md', 'studio/data-consent.json', '.studio/gates-last.json'];
+const COPY = ['studio/mode.json', 'studio/decisions/decided-without-you.md', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/STORYBOARD.md', 'studio/PLAN.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md', 'studio/memory/failures.md', 'studio/memory/LEARNED.md', 'studio/harness-notes/NOTES.md', 'studio/producer/LOG.md', 'studio/data-consent.json', '.studio/gates-last.json'];
 const COPY_DIRS = ['studio/memory/retros', 'studio/reviews', 'studio/bible/reviews', 'studio/bible/ideas', 'studio/signed', 'studio/meetings', 'studio/experiments'];
 
 export function writeRunReport({ to = process.env.STUDIO_RESULTS_DIR, final = false } = {}) {

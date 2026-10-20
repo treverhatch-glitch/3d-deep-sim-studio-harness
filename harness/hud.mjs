@@ -16,6 +16,9 @@ import { activeMeeting } from './meeting.mjs';
 import { buildScorecard } from './scorecard.mjs';
 import { taskType, checkDone } from './done-check.mjs';
 import { readTaskHandoff } from './task.mjs';
+import { effectiveMode, describeMode, MODES } from './mode.mjs';
+import { sessions as agentSessionsList } from './agent.mjs';
+import { openAsks, allAsks } from './ask.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -188,6 +191,7 @@ export function buildHudState() {
   }
   const divs = divisions();
   // People: names used on War Room buttons, and whoever signed the Game Bible.
+  const launchedNow = agentSessionsList();
   const humans = new Set(['war-room-human', ...(readJson('.studio/humans.json', []) || []), readJson('studio/bible/bible.json', {})?.signed?.by].filter(Boolean));
   const agentList = [...agents.values()].map((a) => {
     if (humans.has(a.name)) {
@@ -195,6 +199,7 @@ export function buildHudState() {
       return { ...a, role: 'human', kind: 'human', room: 'production', status: idleMin !== null && idleMin > 15 ? 'idle' : 'working', idleMin };
     }
     const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
+    const sess = launchedNow.find((x) => x.agent === a.name);
     const role = pname && a.name === pname ? 'producer' : roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
     const errored = /error|fail|escalate|bug|forced|not_done/.test(a.lastType || '');
     // Holding a task but silent for 30 minutes: probably out of usage or stuck (harness/watch.mjs).
@@ -203,7 +208,9 @@ export function buildHudState() {
       ...a,
       role,
       room: roomForRole(role, divs) || 'engineering',
-      status: stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
+      // The launcher's heartbeat is the truth for agents it started.
+      status: sess?.running ? (sess.stalled ? 'stalled' : 'working') : stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
+      launched: Boolean(sess?.running),
       kind: a.name === 'watch' ? 'script' : 'agent',
       // What kind of work it is doing, for the Studio view's animations.
       work: a.task && taskById.get(a.task) ? taskType(taskById.get(a.task)) : null,
@@ -254,6 +261,24 @@ export function buildHudState() {
     if (/^(Check forced done|Watch:)/i.test(t.title)) needs.push({ agent: t.title.startsWith('Watch:') ? 'watch' : 'producer', msg: t.title, task: t.id });
   }
 
+  // Three separate signals, each with its reason, so "an agent needs you", "a check is red" and
+  // "an agent died" never look the same.
+  const bibleNow = readJson('studio/bible/bible.json', null);
+  const launched = agentSessionsList();
+  const signals = {
+    needsYou: [
+      ...needs.map((n) => `${n.task ? `${n.task}: ` : ''}${n.msg}`),
+      ...(bibleNow && !bibleNow.signed ? ['The Game Bible is waiting for your signature (npm run bible -- check, then sign)'] : []),
+      ...(bibleNow?.amended ? [`The Bible changed after signing (${bibleNow.amended.changes.map((c) => c.field).join(', ')}): re-sign it so build work can go on`] : []),
+      ...openAsks().map((a) => `${a.id}: ${a.question}${a.deadline ? ` (if you don't answer in time, it goes with "${a.default}")` : ''}`),
+    ].slice(0, 12),
+    red: ((readJson('.studio/gates-last.json', null) || {}).rows || []).filter((r) => r.required && !r.ok).map((r) => r.id),
+    stalled: [
+      ...launched.filter((s) => s.stalled).map((s) => `${s.agent}: no heartbeat for ${s.beatAgeMin} min`),
+      ...agentList.filter((a) => a.status === 'stalled' && !launched.some((s) => s.agent === a.name && s.running)).map((a) => `${a.name}: holds ${a.task || 'a task'} but silent ${a.idleMin} min`),
+    ],
+  };
+
   // A meeting in progress: who is at the table (role names resolve to the agent doing that role).
   let meeting = null;
   const m = activeMeeting();
@@ -269,6 +294,11 @@ export function buildHudState() {
   return {
     generatedAt: new Date(now).toISOString(),
     stopped: readJson('.studio/STOP.json', null),
+    mode: { ...effectiveMode(), text: describeMode() },
+    modes: Object.fromEntries(Object.entries(MODES).map(([id, m]) => [id, { label: m.label, pitch: m.pitch }])),
+    asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
+    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null })),
+    signals,
     queue,
     progress: { done: queue.done.length, total, ratio: total ? queue.done.length / total : 0 },
     locks,

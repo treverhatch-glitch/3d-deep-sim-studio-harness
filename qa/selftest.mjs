@@ -847,6 +847,69 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('npm run idea -- --help prints how to use it', /Usage: npm run idea/.test(run(dir, 'node harness/ideas.mjs --help', env).stdout));
 }
 
+// The launcher: agents are started, watched and cleaned up; the mode's caps and MAX SPEED decide how many run.
+{
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 quota' };
+  const died = run(dir, 'node harness/agent.mjs start --role builder --agent builder-9 --model fake-1', env);
+  const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const patch = path.join(dir, '.studio/wip/T-003-builder-9.patch');
+  const ev = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
+  report('an agent that runs out of quota mid-task is cleaned up: task handed back, work saved as a patch, claims freed', died.status !== 0 && /usage limit/.test(died.stdout + ev) && /## BACKLOG[\s\S]*T-003/.test(q) && fs.existsSync(patch) && /docs\/fake\/builder-9\.md/.test(fs.readFileSync(patch, 'utf8')) && !fs.readdirSync(path.join(dir, '.studio/locks')).some((f) => /builder-9/.test(fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'))), died.stdout + died.stderr + q);
+  report('the launcher reports session start and end, with the tokens the agent printed', /agent\.session\.start/.test(ev) && /"type":"agent\.session\.end"[^\n]*"tokensIn":1200/.test(ev), ev.split('\n').filter((l) => /agent\.session/.test(l)).join('\n'));
+  fs.rmSync(path.join(dir, 'docs/fake'), { recursive: true, force: true });
+  const ok = run(dir, 'node harness/agent.mjs start --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
+  report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), ok.stdout + ok.stderr);
+  // Caps: Precise allows one builder; MAX SPEED doubles it.
+  const waitEnv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-004 wait' };
+  run(dir, 'node harness/mode.mjs set precise --by hatch', env);
+  run(dir, 'node harness/agent.mjs start --role builder --agent builder-1 --model fake-1 --detach', waitEnv);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 8000 && !/running/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  const second = run(dir, 'node harness/agent.mjs start --role builder --agent builder-2 --model fake-1 --detach', waitEnv);
+  report('the mode caps how many agents of a role run at once', second.status !== 0 && /allows 1/.test(second.stderr), second.stdout + second.stderr);
+  run(dir, 'node harness/mode.mjs boost on --by hatch --hours 1', env);
+  const boosted = run(dir, 'node harness/agent.mjs start --role builder --agent builder-2 --model fake-1 --detach', waitEnv);
+  report('MAX SPEED raises the caps', boosted.status === 0, boosted.stdout + boosted.stderr);
+  run(dir, 'node harness/task.mjs stop --by hatch', env);
+  report('no agent starts while the studio is stopped', run(dir, 'node harness/agent.mjs start --role builder --agent builder-3 --model fake-1', waitEnv).status !== 0);
+  run(dir, 'node harness/task.mjs resume --by hatch', env);
+  for (const a of ['builder-1', 'builder-2']) run(dir, `node harness/agent.mjs stop ${a}`, env);
+}
+
+// Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  report('the pace defaults to precise until the game dev chooses', /Precise and slow \(default/.test(run(dir, 'node harness/mode.mjs', env).stdout));
+  run(dir, 'node harness/mode.mjs set extreme --by hatch', env);
+  const ext = run(dir, 'node harness/mode.mjs', env).stdout;
+  run(dir, 'node harness/mode.mjs boost on --by hatch --hours 2', env);
+  const boosted = run(dir, 'node harness/mode.mjs', env).stdout;
+  report('Extreme speed starts agents itself; MAX SPEED doubles the agents and makes the Director and Producer check in more often', /up to 8 agents/.test(ext) && /Director every 6 h/.test(ext) && /up to 12 agents/.test(boosted) && /Producer every 1 h/.test(boosted) && /MAX SPEED on until/.test(boosted), ext + boosted);
+  const noWhy = run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m', env);
+  report('a timed question needs the reason behind its default', noWhy.status !== 0 && /--why/.test(noWhy.stderr), noWhy.stderr);
+  run(dir, 'node harness/ask.mjs "Which floor first?" --options "Cubicle,Food court" --default Cubicle --timeout 1m --why "it teaches the controls" --by prod-1', env);
+  const prot = run(dir, 'node harness/ask.mjs "Can we spend 20 USD on a sound pack?" --options "yes,no" --default yes --timeout 1m --why "cheap" --by prod-1', env);
+  report('questions about money, signing, pillars or deleting never get a deadline', /waits for a person/.test(prot.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).deadline === null, prot.stdout);
+  const a1 = path.join(dir, 'studio/asks/A-001.json');
+  fs.writeFileSync(a1, JSON.stringify({ ...JSON.parse(fs.readFileSync(a1, 'utf8')), deadline: new Date(Date.now() - 1000).toISOString() }));
+  const w = run(dir, 'node harness/watch.mjs', env);
+  const decided = JSON.parse(fs.readFileSync(a1, 'utf8'));
+  report('past its deadline, the default applies and is logged for the dev to review', decided.status === 'decided' && decided.answer === 'Cubicle' && /it teaches the controls/.test(fs.readFileSync(path.join(dir, 'studio/decisions/decided-without-you.md'), 'utf8')) && JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks/A-002.json'), 'utf8')).status === 'open', w.stdout + w.stderr);
+  report('an agent can\'t answer for the game dev', run(dir, 'node harness/ask.mjs answer A-002 yes --by prod-1', env).status !== 0);
+  const rev = run(dir, 'node harness/ask.mjs reverse A-001 "Food court" --by hatch', env);
+  report('the dev can reverse a decision made without them, which gives the Producer a task', rev.status === 0 && /Reverse A-001: hatch chose "Food court"/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), rev.stdout + rev.stderr);
+  const to = path.join(tmpRoot, `pace-report-${n}`);
+  run(dir, `node harness/run-report.mjs --to "${to}"`, env);
+  const rep = fs.readFileSync(path.join(to, fs.readdirSync(to)[0], 'REPORT.md'), 'utf8');
+  report('the run report shows the pace and what was decided without the dev', /Pace: Extreme speed/.test(rep) && /## Decided without you[\s\S]*A-001/.test(rep), rep.slice(0, 600));
+}
+
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
 {
   const http = await import('node:http');

@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addTask } from './task.mjs';
 import { QUESTION, DETAIL, readConsent, setConsent, markShown, describeConsent } from './data-consent.mjs';
+import { MODES, readMode, setMode, describeMode } from './mode.mjs';
 import { QUESTIONS, LAYERS, PLAY_LENGTHS, emptyBible, readBible, writeBible, applyAnswers, checkBible, suggestedLayers, setLayer, catalog, pendingFollowups, answerFollowup, crossedLayersIn, FOLLOWUPS } from './bible.mjs';
 import { routeChatCompletion } from './route.mjs';
 import { cheapChain } from './prepare-brief.mjs';
@@ -153,9 +154,27 @@ async function interactive(all) {
     const yes = (await rl.question(`\n${more.length} follow-up questions about the phases and the layers you kept help the studio build the right thing. Answer some now? y/n > `)).trim().toLowerCase().startsWith('y');
     if (yes) await askFollowups(rl, b);
   }
+  await askPace(rl);
   await askDataSharing(rl);
   rl.close();
   return runIntake({});
+}
+
+/** How fast the studio works: asked once; change it any time in the Game plan view or npm run mode. */
+async function askPace(rl) {
+  if (readMode().mode) return;
+  console.log('\nHow fast should the studio work?');
+  const ids = Object.keys(MODES);
+  ids.forEach((id, i) => console.log(`  ${i + 1}. ${MODES[id].label}: ${MODES[id].pitch}`));
+  let a = '';
+  try {
+    a = (await rl.question(`Pick 1-${ids.length} (Enter for 1, precise) > `)).trim();
+  } catch {
+    a = '';
+  }
+  const id = ids[Number(a) - 1] || ids.find((x) => x === a.toLowerCase()) || 'precise';
+  setMode(id, 'game dev (intake)', a ? '' : 'default at intake');
+  console.log(`  ${describeMode()}`);
 }
 
 /** Asked once, pre-ticked: Enter keeps sharing allowed; "n" declines. Changeable later with npm run data. */

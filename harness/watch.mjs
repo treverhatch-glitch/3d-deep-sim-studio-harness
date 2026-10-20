@@ -24,6 +24,9 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './even
 import { parseNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { collectIdeas } from './ideas.mjs';
+import { sessions, fillAgents, startAgent } from './agent.mjs';
+import { effectiveMode } from './mode.mjs';
+import { expireAsks } from './ask.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -56,6 +59,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   }
   const holder = new Map(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l]));
   const findings = [];
+  const agentSessions = sessions();
+  for (const s of agentSessions.filter((x) => x.stalled)) findings.push({ kind: 'stalled', agent: s.agent, msg: `${s.agent} (${s.role}) is running but its heartbeat stopped ${s.beatAgeMin} min ago`, producer: true });
 
   for (const t of q.inProgress) {
     const lock = holder.get(t.id);
@@ -68,7 +73,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${note}`, producer: false });
       continue;
     }
-    const lastHeard = heard.get(lock.owner) || 0;
+    // A launcher heartbeat counts as being heard from, even if the agent is quiet in the log.
+    const session = agentSessions.find((s) => s.agent === lock.owner);
+    const lastHeard = Math.max(heard.get(lock.owner) || 0, session?.running && session.lastBeat ? Date.parse(session.lastBeat) : 0);
     if (now - lastHeard > stallMin * 60000) {
       findings.push({ kind: 'stalled', task: t.id, agent: lock.owner, msg: `${lock.owner} holds ${t.id} but has been silent ${lastHeard ? `for ${ago(lastHeard)}` : 'since it claimed it'}`, producer: true });
     }
@@ -77,7 +84,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   for (const t of q.backlog) {
     const last = lastOnTask.get(t.id);
     if (last?.type === 'task.paused' && now - last.at > waitMin * 60000 && readTaskHandoff(t.id)) {
-      findings.push({ kind: 'waiting', task: t.id, msg: `${t.id} was handed back ${ago(last.at)} ago and nobody picked it up`, producer: true });
+      const wip = fs.existsSync(path.join(STUDIO_STATE_DIR, 'wip')) ? fs.readdirSync(path.join(STUDIO_STATE_DIR, 'wip')).find((f) => f.startsWith(`${t.id}-`)) : null;
+      findings.push({ kind: 'waiting', task: t.id, msg: `${t.id} was handed back ${ago(last.at)} ago and is waiting for a ${t.role || 'free'} agent (npm run agent -- start --role ${t.role || 'builder'} --agent <name>)${wip ? `; saved work in .studio/wip/${wip}` : ''}`, producer: true });
     }
   }
 
@@ -100,7 +108,11 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   }
   // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
   const ideas = dryRun ? null : collectIdeas();
-  const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas };
+  // The mode decides whether agents start on their own, and how often the Producer checks in.
+  const decided = dryRun ? [] : expireAsks(now);
+  const launched = dryRun ? null : fillAgents();
+  const checkin = dryRun ? null : producerCheckinIfDue(now, events);
+  const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas, launched: launched?.started || [], checkin, decided };
   if (!dryRun) {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(path.join(STUDIO_STATE_DIR, 'watch-last.json'), JSON.stringify(report, null, 2) + '\n');
@@ -108,11 +120,27 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   return report;
 }
 
+/** Every mode.producerEveryHours: tell the Producer to check in, and start a Producer agent if one can start on its own. */
+export function producerCheckinIfDue(now = Date.now(), events = readRecentEvents(3000)) {
+  const mode = effectiveMode();
+  const last = events.filter((e) => e.type === 'producer.checkin').at(-1);
+  if (last && now - Date.parse(last.ts) < mode.producerEveryHours * 3600000) return null;
+  emitEvent({ type: 'producer.checkin', agent: 'watch', to: 'producer', msg: `Producer check-in (${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, every ${mode.producerEveryHours} h): read the handoff, accept or reopen forced work, unblock stalled agents, keep the queue fed` });
+  const running = sessions().some((s) => s.running && s.role === 'producer');
+  if (!running && (process.env.STUDIO_PRODUCER_CMD || process.env.STUDIO_PRODUCER_TOOL || (mode.autoLaunch && process.env.STUDIO_AGENT_TOOL))) {
+    const r = startAgent({ role: 'producer', agent: process.env.STUDIO_PRODUCER_NAME || 'producer-1' }, { detach: true });
+    return { pinged: true, started: r.ok ? r.agent : null, why: r.ok ? null : r.message };
+  }
+  return { pinged: true, started: null };
+}
+
 function print(r) {
   if (!r.findings.length) console.log(`[watch] ${r.at} all quiet`);
   for (const f of r.findings) console.log(`[watch] ${f.kind.padEnd(9)} ${f.msg}`);
   if (r.pinged) console.log(`[watch] Producer pinged: ${r.pinged}`);
   else if (r.openWatchTask && r.findings.some((f) => f.producer)) console.log(`[watch] Producer already has ${r.openWatchTask} open; not pinging again`);
+  if (r.launched?.length) console.log(`[watch] started ${r.launched.join(', ')}`);
+  if (r.checkin) console.log(`[watch] Producer check-in${r.checkin.started ? `: started ${r.checkin.started}` : ''}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

@@ -28,6 +28,8 @@ import { parseNextQueue, addTask } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { readBible, checkBible, latestReview, crossedLayersIn, readIdeas, LAYERS, REVIEWS_DIR } from './bible.mjs';
 import { spendToday } from './route.mjs';
+import { effectiveMode } from './mode.mjs';
+import { startAgent } from './agent.mjs';
 
 const BRIEF = path.join(STUDIO_STATE_DIR, 'briefs', 'director.md');
 const PHASE_NAMES = { 1: 'early game', 2: 'mid game', 3: 'endgame' };
@@ -91,7 +93,15 @@ export function writeDirectorBrief(reasons = []) {
 
 function maybeStartDirector() {
   const cmd = process.env.STUDIO_DIRECTOR_CMD;
-  if (!cmd) return { started: false, why: 'STUDIO_DIRECTOR_CMD is not set' };
+  if (!cmd) {
+    // No custom command: the launcher can start one with the Director's (or the studio's) tool and model.
+    if (process.env.STUDIO_DIRECTOR_TOOL || process.env.STUDIO_AGENT_TOOL) {
+      const r = startAgent({ role: 'director', agent: 'director-1' }, { detach: true });
+      if (r.ok) emitEvent({ type: 'director.started', agent: 'director', to: 'producer', msg: `Started director-1 through the launcher (${r.tool}, ${r.model})` });
+      return r.ok ? { started: true } : { started: false, why: r.message };
+    }
+    return { started: false, why: 'no way to start a Director on its own: set STUDIO_DIRECTOR_TOOL (or STUDIO_AGENT_TOOL) and a model in .env, or STUDIO_DIRECTOR_CMD' };
+  }
   const coolMin = Number(process.env.STUDIO_DIRECTOR_COOLDOWN_MIN || 60);
   const lastStart = readRecentEvents(5000).filter((e) => e.type === 'director.started').pop();
   if (lastStart && Date.now() - Date.parse(lastStart.ts) < coolMin * 60000) return { started: false, why: `a Director was started ${Math.round((Date.now() - Date.parse(lastStart.ts)) / 60000)} min ago (cooldown ${coolMin} min)` };
@@ -122,11 +132,13 @@ export function pingDirector({ reason = 'Routine check', from = process.env.STUD
 }
 
 /** Once a day, if there is a Bible. Called by the HUB with the watcher. */
+/** The Director's routine check: daily by default, more often in faster modes and with MAX SPEED. */
 export function dailyPingIfDue() {
   if (!readBible()) return null;
-  const today = new Date().toISOString().slice(0, 10);
-  if (readRecentEvents(5000).some((e) => e.type === 'director.ping' && e.meta?.daily && e.ts.startsWith(today))) return null;
-  return pingDirector({ reason: 'Daily check', from: 'watch', daily: true });
+  const every = effectiveMode().directorEveryHours;
+  const last = readRecentEvents(5000).filter((e) => e.type === 'director.ping' && e.meta?.daily).at(-1);
+  if (last && Date.now() - Date.parse(last.ts) < every * 3600000) return null;
+  return pingDirector({ reason: every >= 24 ? 'Daily check' : `Routine check (every ${every} h in this mode)`, from: 'watch', daily: true });
 }
 
 export function startReview(phase) {

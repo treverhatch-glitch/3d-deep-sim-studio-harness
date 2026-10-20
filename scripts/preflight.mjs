@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from '../harness/event.mjs';
 import { findPython } from '../qa/run-python.mjs';
 import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
+import { launchableRoles } from '../harness/agent.mjs';
+import { effectiveMode, describeMode } from '../harness/mode.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -106,6 +108,12 @@ export function preflight() {
   // The game the gates test.
   const game = activeCartridge();
   row(isTemplateCartridge(game.name) ? 'warn' : 'ok', `Gates test the game "${game.name || 'none'}" (from ${game.from || 'nowhere'})`, isTemplateCartridge(game.name) ? 'still the template: once your game exists, npm run new-game <name> makes it the active game (studio/game.json)' : '');
+
+  // Pace and who can start on their own.
+  const mode = effectiveMode();
+  row(mode.chosen ? 'ok' : 'warn', `Pace: ${describeMode(mode)}`, mode.chosen ? '' : 'the game dev picks one at intake, in the Game plan view, or npm run mode -- set <mode> --by <name>');
+  const auto = launchableRoles();
+  row(auto.length || !mode.autoLaunch ? 'ok' : 'warn', auto.length ? `Agents that can start on their own: ${auto.join(', ')}` : 'No agent can start on its own', auto.length ? '' : mode.autoLaunch ? 'this pace starts agents automatically: set STUDIO_AGENT_TOOL and STUDIO_AGENT_MODEL (or per role, STUDIO_BUILDER_TOOL …) in .env' : 'fine: start agents by hand, from the War Room, or npm run agent -- start');
 
   // Tools.
   const py = findPython();

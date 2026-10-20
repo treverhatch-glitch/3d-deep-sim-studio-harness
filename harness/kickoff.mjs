@@ -120,6 +120,8 @@ Your job is decisions, not code:
 7. Route work by results: \`npm run scorecard\` shows bugs per model per 10 points of task size.
 8. Before handing a long or escalated task to a strong (expensive) model, run \`npm run brief -- <ID> --model\`: a cheap or local model compresses the history to 300 words and a script checks it.
 9. In a test run, the HUB writes the run report hourly when STUDIO_RESULTS_DIR is set; write one yourself after each milestone (\`npm run run-report\`) and a final one at the end (\`npm run run-report -- --final\`). If a person stops the studio (\`task start\` refuses), stop assigning and wait.
+10. Pace: \`npm run mode\` says how fast the game dev wants the studio to go (agents at once, reviews, how often you check in). Start agents within it: \`npm run agent -- start --role <role> --agent <name> --tool <tool> --model <model>\` (or the War Room's Start agent); the launcher hands back a dead agent's work. With MAX SPEED on, check in every hour and keep the queue fed.
+11. Ask the game dev instead of guessing: \`npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…"\`. If nobody answers in time your default applies and is logged for them to review. Never put signing, pillars, money or deleting on a timer.
 
 You are also the overseer. The studio's memory is its files, so whatever you learn and don't write down is lost:
 - Watch how the run goes, not just the game: agents following the loop or not, refusals and why, hand-backs, drift, spend, what the harness made easy or hard.
