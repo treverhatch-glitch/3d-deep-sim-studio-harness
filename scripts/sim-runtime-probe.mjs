@@ -35,6 +35,11 @@ if (globalThis.crypto) {
     configurable: true,
   });
 }
+// The Function constructors build code from strings; reaching them through any function's
+// prototype (`(() => {}).constructor('…')`) would get around every trap above.
+for (const fn of [function () {}, async function () {}, function* () {}, async function* () {}]) {
+  Object.defineProperty(Object.getPrototypeOf(fn), 'constructor', { value: trap('Function constructor'), configurable: true, writable: true });
+}
 process.hrtime = trap('process.hrtime');
 process.hrtime.bigint = trap('process.hrtime.bigint');
 for (const name of ['window', 'document', 'localStorage', 'navigator', 'requestAnimationFrame']) {

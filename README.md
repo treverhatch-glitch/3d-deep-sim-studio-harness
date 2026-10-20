@@ -32,7 +32,7 @@ npm run release               # syntax, required gates, closed-loop proof, read-
 ```
 
 Clone it, keep your copy private if you like, put keys only in `.env` (gitignored). The public repo
-contains no keys; `bash scripts/secret-scan.sh` checks exactly what git would publish.
+contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would publish.
 
 ## How work flows
 
@@ -80,5 +80,6 @@ from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:t
 
 Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST-PRACTICES.md](docs/BEST-PRACTICES.md).
 Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-TOOLS.md](docs/AGENT-TOOLS.md).
+What's next for the harness, and how each known gap gets fixed: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 MIT licensed.

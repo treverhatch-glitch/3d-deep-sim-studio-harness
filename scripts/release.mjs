@@ -9,6 +9,7 @@
  * 5. Checks CHANGELOG.md has an entry for the package.json version.
  * Exit 1 if anything fails.
  */
+import { findPython } from '../qa/run-python.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -39,7 +40,8 @@ js.push(path.join(root, 'hub', 'server.mjs'), path.join(root, 'hub', 'server.js'
 const bad = js.filter((f) => run(process.execPath, ['--check', f]).status !== 0);
 step(`syntax: ${js.length} JS module(s)`, bad.length === 0, bad.map((f) => `  ${path.relative(root, f)}`).join('\n'));
 const py = ['tools', 'qa'].flatMap((d) => walk(path.join(root, d), /\.py$/));
-const pyRes = run('python3', ['-m', 'py_compile', ...py], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+const python = findPython();
+const pyRes = python ? run(python.cmd, [...python.pre, '-m', 'py_compile', ...py], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } }) : { status: 1, stderr: 'no Python 3 found (tried python3, python, py -3)' };
 step(`syntax: ${py.length} Python file(s)`, pyRes.status === 0, pyRes.stderr);
 
 // 4 (before): what git sees now

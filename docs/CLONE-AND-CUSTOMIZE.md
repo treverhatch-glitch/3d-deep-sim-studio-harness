@@ -24,7 +24,7 @@ bash scripts/seed-demo-events.sh
 Edit `.env` (gitignored). The harness follows a strict **cost-saving priority order**:
 1. **Local model (`ollama-local` / Qwen2.5-Coder)** — `$0` offline
 2. **Free tiers & trial credits** — NVIDIA NIM, Groq, OpenRouter `:free`, Google Vertex `$300` credit
-3. **Paid escalation models** — Claude Opus/Sonnet, xAI Grok, OpenAI, Cursor Ultra (used after `node harness/prepare-brief.mjs` compresses context to `<= 300` words)
+3. **Paid escalation models** — Claude Opus/Sonnet, xAI Grok, OpenAI, Cursor Ultra (used after `npm run brief -- <ID> --model` compresses a task's history to 300 words)
 
 ---
 
@@ -41,8 +41,8 @@ Edit `.env` (gitignored). The harness follows a strict **cost-saving priority or
 ## Step 4: Launch the Mission Control War Room
 
 ```bash
-node hub/server.js
-# -> Open http://localhost:3847
+npm run hub
+# -> Open http://127.0.0.1:3847/?token=<HUB_TOKEN from .env>
 ```
 
 Use the **⚙ Gear** button in the top-right of the **Agent Eyes** panel to paste your local game URL (`http://localhost:5173/?playtest=1`), `noVNC` stream URL (`http://localhost:6080/vnc.html`), or screenshot stream without touching code.

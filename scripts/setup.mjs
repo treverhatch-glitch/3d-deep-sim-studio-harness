@@ -65,9 +65,9 @@ if (!fs.existsSync(eventsFile) || fs.statSync(eventsFile).size === 0) {
   });
 }
 
-// Install dependencies only if --install flag passed or requested
-if (process.argv.includes('--install')) {
-  console.log('[setup] Running npm install...');
+// Install dependencies when they are missing (or when --install asks for a fresh install)
+if (process.argv.includes('--install') || !fs.existsSync(path.join(rootDir, 'node_modules'))) {
+  console.log('[setup] Installing packages (npm install)...');
   execSync('npm install', { cwd: rootDir, stdio: 'inherit' });
 }
 
@@ -90,6 +90,6 @@ console.log('   npm run handoff                    # Producer briefing: plan, qu
 console.log('   npm run hub                        # War Room on :3847 (Studio view: /v3?skin=tycoon); runs the watcher');
 console.log('   npm run onboard -- --path <game> --name "<name>"   # Bring an existing game in');
 console.log('   npm run verify                     # Every gate');
-console.log('   node harness/prepare-brief.mjs     # Short brief from files to hand a strong model');
+console.log('   npm run brief -- <ID> [--model]     # 300-word brief for a strong model (cheap model drafts, script checks)');
 console.log('   node qa/playtest.mjs               # Run Stage 1 + Stage 2 QA');
 console.log('====================================================================');

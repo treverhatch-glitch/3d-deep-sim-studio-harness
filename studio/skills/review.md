@@ -4,7 +4,7 @@
 
 **Steps.**
 1. Read the diff and the task it closes, not the whole repo.
-2. Run `npm run verify` and `bash scripts/check-sim-isolation.sh`.
+2. Run `npm run verify` and `node scripts/check-sim-isolation.mjs`.
 3. Write `studio/reviews/<date>-<task>.md`: approve or request changes, with file and line for
    each point.
 

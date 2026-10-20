@@ -35,7 +35,7 @@ Agents must keep durable work in files, never trapped in chat history.
 - **Task ID:** T-XXX
 - **What was done:**
 - **Files changed:**
-- **Result / verification:** (`./scripts/check-sim-isolation.sh` + `node qa/playtest.mjs`)
+- **Result / verification:** (`node scripts/check-sim-isolation.mjs` + `node qa/playtest.mjs`)
 - **Follow-ups:** (or "none")
 ```
 

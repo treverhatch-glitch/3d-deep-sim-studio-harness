@@ -24,6 +24,7 @@ const RULES = [
   { id: 'NO_CRYPTO_RANDOM', re: /\bcrypto\s*\.\s*(getRandomValues|randomUUID|randomBytes|randomInt)\b|['"`](node:)?crypto['"`]/, reason: 'unseeded crypto randomness' },
   { id: 'NO_TIMERS', re: /\b(setTimeout|setInterval|setImmediate)\s*\(/, reason: 'timers make the sim depend on real time' },
   { id: 'NO_GLOBAL_ESCAPE', re: /\bglobalThis\b|\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(\s*['"`]/, reason: 'dynamic global access can hide any of the above' },
+  { id: 'NO_CONSTRUCTOR_ESCAPE', re: /\.\s*constructor\s*\.\s*constructor\b|\[\s*['"`]constructor['"`]\s*\]/, reason: 'reaching the Function constructor through a prototype can run any code' },
 ];
 
 function collect(dir, out = []) {

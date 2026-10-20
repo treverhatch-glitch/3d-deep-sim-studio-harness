@@ -62,7 +62,10 @@ export function buildFocus(taskId, agent = null) {
   const meetingNotes = fs.existsSync(path.join(REPO_ROOT, 'studio', 'meetings'))
     ? fs.readdirSync(path.join(REPO_ROOT, 'studio', 'meetings')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((f) => read(`studio/meetings/${f}`)).filter((t) => t && t.includes(taskId))
     : [];
-  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), mine, others, offLimits, lessons, gates, red, meetingNotes, agent };
+  const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
+  const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
+  const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
+  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords };
 }
 
 export function renderFocus(f) {
@@ -77,6 +80,8 @@ export function renderFocus(f) {
     if (steps) L.push('', `## Steps (${f.check.skill})`, steps);
     if (never) L.push('', '## Never', never);
   }
+  if (f.prepared) L.push('', '## Prepared brief', `A short summary of this task's history is in \`${f.prepared}\`. Read it instead of the event log.`);
+  else if (f.historyWords >= Number(process.env.STUDIO_PREPARE_MIN_WORDS || 500)) L.push('', '## Long history', `This task has ${f.historyWords} words of history. Run \`npm run brief -- ${f.task.id}\` for a 300-word summary (a cheap or local model drafts it, a script checks it).`);
   if (f.handoff) L.push('', '## Notes from whoever worked on this before', f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim());
   if (f.meetingNotes.length) L.push('', '## Mentioned in a meeting', ...f.meetingNotes.map((t) => `- ${(t.match(/^# (.+)$/m) || [, ''])[1]}`));
   L.push('', '## Stay in your lane');
@@ -100,7 +105,7 @@ export function writeFocus(taskId, agent = null) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${taskId}.md`);
   fs.writeFileSync(file, md);
-  return { file: path.relative(REPO_ROOT, file), md };
+  return { file: path.relative(REPO_ROOT, file).split(path.sep).join('/'), md };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

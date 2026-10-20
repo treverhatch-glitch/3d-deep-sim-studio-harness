@@ -21,7 +21,7 @@
 ### [2026-10-19] BUG-SEED-001 — Non-Deterministic Replay Drift at Tick 120
 - **What broke**: Re-running `{ "seed": 42069, "tick": 120 }` produced two different FNV-1a state hashes across runs.
 - **Root cause**: A helper called `Math.random()` and `Date.now()` instead of advancing `state.rngState` inside the fixed-step `step(state, action)` function.
-- **The fix that worked**: Replaced `Math.random()` with the seeded Mulberry32 PRNG stored in `state.rngState` and enforced `bash scripts/check-sim-isolation.sh` prior to commit.
+- **The fix that worked**: Replaced `Math.random()` with the seeded Mulberry32 PRNG stored in `state.rngState` and enforced `node scripts/check-sim-isolation.mjs` prior to commit.
 - **How to avoid it next time**: Implement the deterministic seed + tick system as the very first system in any new game cartridge, and never use `Math.random()` or wall-clock time in `src/sim/` or `cartridges/`.
 
 ### [2026-10-19] BUG-BLENDER-002 — Blind 3D Asset Scale & Origin Mismatch in Three.js

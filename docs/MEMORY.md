@@ -8,7 +8,7 @@ To prevent context bloat across hundreds of sessions, this harness separates **r
 
 | Tier | Location | Who Reads It | Policy |
 | :--- | :--- | :--- | :--- |
-| **Tier 1: Raw Telemetry (Append-Only)** | `.studio/events.jsonl`, `qa/reports/*.json` | War Room HUB (`hub/server.js`), `jq` / `duckdb` CLI filters | **Never** paste raw logs into an LLM chat window. |
+| **Tier 1: Raw Telemetry (Append-Only)** | `.studio/events.jsonl`, `qa/reports/*.json` | War Room HUB (`hub/server.mjs`), `jq` / `duckdb` CLI filters | **Never** paste raw logs into an LLM chat window. |
 | **Tier 2: Distilled Memory** | `studio/memory/failures.md`, `studio/CURRENT_TASK.md`, `studio/llms.txt` | Cheap context-preparer (`harness/prepare-brief.mjs`) & active coding agents | Read on task start; updated with 4-line distilled notes after every bug fix. |
 
 ---

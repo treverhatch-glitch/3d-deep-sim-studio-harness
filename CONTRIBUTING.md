@@ -20,5 +20,5 @@ See [`docs/CLONE-AND-CUSTOMIZE.md`](docs/CLONE-AND-CUSTOMIZE.md) for the full wa
 Before opening a PR to this public template repository:
 1. **Zero Secrets**: Verify no real API keys or tokens exist anywhere (`docs/SECRETS.md`).
 2. **Game-Agnostic**: Keep game-specific logic inside optional `cartridges/` examples rather than hardcoding a single game into `harness/` or `hub/`.
-3. **Simulation Isolation**: Run `bash scripts/check-sim-isolation.sh` and `node qa/playtest.mjs` and confirm both pass.
+3. **Simulation Isolation**: Run `node scripts/check-sim-isolation.mjs` and `node qa/playtest.mjs` and confirm both pass.
 4. **Distilled Memory**: If fixing a harness or QA bug, record a 4-bullet entry in `studio/memory/failures.md`.

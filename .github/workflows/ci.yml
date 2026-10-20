@@ -30,6 +30,20 @@ jobs:
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,reviewer
 
+  # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: npm run verify (required gates)
+        run: node scripts/run-gates.mjs --required-only
+
   war-room-build:
     runs-on: ubuntu-latest
     steps:

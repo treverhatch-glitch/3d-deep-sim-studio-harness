@@ -8,4 +8,4 @@ This repository is the full, open-source reference implementation of the **3D De
 4. **Zero-Server Multi-Model Failover Router** (`harness/route.mjs` & `harness/models.config.mjs` — `freecc:auto`)
 5. **Zero-Token React Flow War Room & Subscription Usage Panel** (`hub/WarRoom.tsx`, `hub/server.mjs`, `.studio/events.jsonl`, `.studio/usage.json`)
 6. **Two-Stage Programmatic & Visual QA** (`qa/playtest.mjs`, `qa/sim.adapter.mjs`)
-7. **3D Deep-Sim Purity & Late-Game Porting Bridges** (`docs/3D-DEEP-SIM.md`, `docs/BLENDER.md`, `docs/PORTING.md`, `scripts/check-sim-isolation.sh`)
+7. **3D Deep-Sim Purity & Late-Game Porting Bridges** (`docs/3D-DEEP-SIM.md`, `docs/BLENDER.md`, `docs/PORTING.md`, `scripts/check-sim-isolation.mjs`)

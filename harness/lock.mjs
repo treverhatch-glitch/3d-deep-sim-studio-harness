@@ -65,10 +65,46 @@ function readLock(file) {
   }
 }
 
+/**
+ * A short studio-wide mutex around "check for overlapping folder locks, then write". Each lock file
+ * is created atomically, but two agents claiming a folder and a file inside it at the same moment
+ * could both pass the overlap check before either writes. Stale after 10 s (a crashed claimer).
+ */
+function withMutex(fn) {
+  fs.mkdirSync(LOCK_DIR, { recursive: true });
+  const mutex = path.join(LOCK_DIR, '.mutex');
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(mutex, 'wx'));
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      try {
+        if (Date.now() - fs.statSync(mutex).mtimeMs > 10000) fs.rmSync(mutex, { force: true });
+      } catch {
+        /* gone already */
+      }
+      if (Date.now() > deadline) return { ok: false, reason: 'busy', message: 'Another agent is claiming right now; try again.' };
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(mutex, { force: true });
+  }
+}
+
 export function claim(key, owner, ttlSec = 3600) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   const k = normalizeKey(key);
+  return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec);
+}
+
+function claimUnlocked(k, owner, ttlSec) {
+  const check = { ok: true, owner };
   if (k.startsWith('path:')) {
     // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps.
     const at = k.slice(5);
@@ -89,7 +125,7 @@ export function claim(key, owner, ttlSec = 3600) {
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
     const existing = readLock(file);
-    if (!existing) return claim(k, check.owner, ttlSec);
+    if (!existing) return claimUnlocked(k, check.owner, ttlSec);
     if (existing.owner === check.owner) return { ok: true, lock: existing, reused: true };
     return { ok: false, reason: 'claimed', lock: existing };
   }

@@ -28,6 +28,8 @@
   Fresh plan, log and queue for a new game in your own copy; the old project's notes are archived to `.studio/archive/`.
 - `npm run kickoff -- --role <role> --agent <unique> --model <model> [--tool claude|codex|cursor|grok|agy|aider]`
   Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop. `--tool` adds a headless launch line (`docs/AGENT-TOOLS.md`).
+- `npm run brief -- <ID> [--model] [--template] [--force]`
+  Cheap prepare, strong act: a 300-word brief from a bounded window of the task's history. With `--model` a local or free model drafts it and a script checks it (sections, word cap, real files and task IDs). Skips the model when the history is short. Writes `.studio/briefs/<ID>.prepared.md`.
 - `npm run models:check [-- --dry-run]`
   Asks each provider you have a key for which models it serves (free model-list endpoints, no tokens); exits 1 if a configured model is gone.
 - `npm run focus -- <ID>` (written for you by `task start`)

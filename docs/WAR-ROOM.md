@@ -20,23 +20,23 @@ It passively watches local studio files (`.studio/events.jsonl`, `.studio/usage.
 | **4. Cyberpunk Terminal Dock & Command Deck** | `hub/TerminalDock.tsx` | Multi-tabbed `xterm.js` (`@xterm/xterm` + `@xterm/addon-fit`) terminal over WebSocket (`/ws`). Tab 1 streams color-coded `.studio/events.jsonl` with regex/role filtering; Tab 2 provides a live Studio Shell (with a safe Read-Only lock for public tunnels) + 5 tactical macro buttons. |
 | **5. Subscription Quota & Efficiency Telemetry Bar** | `hub/UsageTelemetry.tsx` | Reads/writes `.studio/usage.json` via `/api/usage`. Tracks **Grok/xAI**, **Cursor Ultra**, **Claude**, **Google Vertex ($300 credit)**, **NVIDIA NIM**, and **Groq**, plus the **RTK + QMD + Serena Efficiency Meter** and a `<dialog closedby="any">` quota editor modal. |
 | **6. "What's Next" Pipeline & Context Health** | `hub/NextQueue.tsx` | 3-column Kanban (`IN_PROGRESS`, `BACKLOG`, `DONE`) wired to `studio/NEXT.md` + `studio/done/` and a **Context Health Indicator** tracking `studio/CURRENT_TASK.md`, `studio/VISION_LOCK.md`, and `studio/llms.txt`. |
-| **7. Zero-Token WebSocket & REST Server** | `hub/server.js` / `hub/server.mjs` | Native Node.js HTTP + RFC 6455 WebSocket server watching studio files on disk. |
+| **7. Zero-Token WebSocket & REST Server** | `hub/server.mjs` | Native Node.js HTTP + RFC 6455 WebSocket server watching studio files on disk. |
 
 ---
 
 ## 2. Running the War Room Locally
 
 ```bash
-# Option A: Instant zero-build launch (serves standalone hub/index.html + WebSocket bridge)
-node hub/server.js
-# -> Open http://localhost:3847
+# Option A: no build (War Room v3 is the home page)
+npm run hub
+# -> Open http://127.0.0.1:3847/?token=<HUB_TOKEN from .env>
 
 # Option B: Vite HMR / Production bundle build for modular TypeScript components
 cd hub
 npm install
 npm run build
 cd ..
-node hub/server.js
+npm run hub
 ```
 
 ---

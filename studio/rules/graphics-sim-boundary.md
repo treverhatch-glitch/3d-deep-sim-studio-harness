@@ -17,4 +17,4 @@ Deep simulations (pathfinding heaps, multi-agent turnarounds, economy ticks, 50+
 - When adding a new system, decide first: **is this simulation or presentation?**
 - Never let a renderer import reach into simulation internals except through the public state snapshot and `dispatch(action)`.
 - Always update `studio/llms.txt` when the simulation's public API or tuning table changes.
-- Verify compliance with `./scripts/check-sim-isolation.sh` and `node scripts/check-sim-purity.mjs`.
+- Verify compliance with `node scripts/check-sim-isolation.mjs` and `node scripts/check-sim-purity.mjs`.

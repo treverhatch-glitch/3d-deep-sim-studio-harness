@@ -25,7 +25,7 @@ npm run studio:reset -- --name "Mini Farm" --yes
 npm run hooks:install                   # pre-commit refuses secrets and other agents' locked files
 ```
 
-In `.env` (gitignored; `bash scripts/secret-scan.sh` checks what git would publish):
+In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publish):
 
 | Setting | Why |
 | --- | --- |

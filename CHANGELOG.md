@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.7.0] — 2026-10-20
+### Added
+- **Cheap prepare, strong act is real** (`npm run brief -- <ID> --model`): reads a bounded window of the task's history (its last events, hand-off notes, matching lessons, newest QA result, files touched); a local or free model drafts a 300-word brief in five sections; a script checks it (sections, word cap, task named, only real files and task IDs) and throws a bad draft away for its own version. Skips the model when the history is short. The focus brief and kickoff prompts point to it; the Producer sees words in and out. Self-tested with a fake local model.
+- **Windows CI job** running every required gate on `windows-latest`.
+- **`docs` gate**: fails when a doc names an `npm run` script, or a `node`/`bash` file, that doesn't exist.
+- `docs/ROADMAP.md`: what's next and how each known gap gets fixed, including pre-production, three game phases with layers kept or crossed out, the Idea Board and the Director.
+### Fixed
+- Gates run on a clean Windows machine: the isolation check and secret scan are Node scripts (the `.sh` files call them, and the pre-commit hook uses the Node scan), and Python is found as `python3`, `python` or `py -3` (skipping the Windows Store alias), or set with `STUDIO_PYTHON`.
+- The focus brief path prints with forward slashes on Windows.
+- Purity can no longer be dodged through the Function constructor (`(() => {}).constructor(…)`, `.constructor.constructor`): flagged statically and trapped at runtime.
+- Claiming a folder and a file inside it at the same moment can no longer both succeed (short mutex around folder claims).
+- One read order for agents (`AGENTS.md`); docs say `npm run hub`; `npm run setup` installs packages when they're missing.
+
+---
+
 ## [2.6.0] — 2026-10-20
 ### Added
 - **Agent drawer in the War Room**: click any agent (a row in Ops, a person or desk in the Studio view) to see its current task, who assigned it and when, the done checklist ticking live, the skill's steps, hand-off notes, its claims, what it finished today, what it assigned (for the Producer), its recent activity and its scorecard. `GET /api/agent?name=`. It reads the studio's files when opened and every 2 seconds while open; no AI is used.

@@ -1,14 +1,12 @@
 # Read First
 
-Any new agent must read these files in order before doing other work:
+Read `AGENTS.md` first. Its section 1 is the one read order for every agent; this page doesn't
+repeat it, so the two can't disagree.
 
-1. `AGENTS.md` — operating rules, concurrent work rule, seed system, approval gates
-2. `docs/GAME-PLANNING.md` — how to plan a game (layers, loops, tech tree, references)
-3. `studio/CURRENT_TASK.md` — current checkpoint and status
-4. `studio/memory/failures.md` — distilled lessons from past bugs
-5. The concurrent work rule in `AGENTS.md` (do not edit files another agent has locked)
-
-Producers (including a new model taking over the role): run `npm run handoff` and read
-`studio/MASTER.md`, `studio/PLAN.md` and the newest entries in `studio/producer/LOG.md`.
+- Workers: `task start` writes a one-page brief (`.studio/briefs/<ID>.md`); read that instead of
+  the repo. Long history? `npm run brief -- <ID>`.
+- Producers (including a new model taking over the role): run `npm run handoff`; it covers the read
+  order and more. `studio/MASTER.md` maps every key document.
+- Planning a game: `docs/GAME-PLANNING.md`.
 
 Do not scan the whole repo. Start here.

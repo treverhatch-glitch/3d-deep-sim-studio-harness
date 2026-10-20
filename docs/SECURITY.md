@@ -23,5 +23,5 @@
 - Do not trust hardcoded demo seeds for real bugs.
 
 ## Secrets
-- `bash scripts/secret-scan.sh` scans what git would publish (tracked + untracked, not ignored), so a real `.env` never trips it.
+- `node scripts/secret-scan.mjs` scans what git would publish (tracked + untracked, not ignored), so a real `.env` never trips it.
 - Patterns cover OpenAI (incl. `sk-proj-`), Anthropic, OpenRouter, NVIDIA, Groq, xAI, Google, AWS, GitHub, Slack, Hugging Face, Replicate and private keys.

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,6 +37,15 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...process.env, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
+const runAsync = (dir, cmd, env = {}) =>
+  new Promise((resolve) => {
+    const c = spawn(cmd, { cwd: dir, shell: true, env: { ...process.env, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+    let stdout = '';
+    let stderr = '';
+    c.stdout.on('data', (d) => (stdout += d));
+    c.stderr.on('data', (d) => (stderr += d));
+    c.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
 const report = (label, ok, detail = '') => {
   console.log(`[selftest] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail.slice(-600)}`}`);
   if (!ok) failed += 1;
@@ -57,6 +66,7 @@ const SABOTAGE = {
   soak: (d) => edit(d, SIM, plantInvariant(150)),
   'tick-budget': () => ({ TICK_BUDGET_MS_PER_TICK: '0.0000001' }),
   'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req));', 'return true;')),
+  docs: (d) => fs.writeFileSync(path.join(d, 'docs/STALE.md'), 'Run `npm run no-such-script` first.\n'),
   secrets: (d) => fs.writeFileSync(path.join(d, 'leak.txt'), `OPENAI_API_KEY=${'sk-'}${'a'.repeat(24)}\n`),
 };
 // What the failure must mention, so a gate that fails for an unrelated reason does not count.
@@ -73,6 +83,7 @@ const EXPECT = {
   soak: /PLANTED/,
   'tick-budget': /ms\/tick >/,
   'hub-smoke': /FAIL write without token is refused/,
+  docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
 };
 const CANNOT = { selftest: 'this file' };
@@ -101,6 +112,18 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report(`gate ${gate.id} fails when broken${why ? ' (for the planted reason)' : ''}`, res.status !== 0 && (!why || why.test(out)), out);
 }
 
+// Purity: the Function constructor reached through a prototype is caught, statically and at runtime.
+{
+  const dir = copyRepo();
+  edit(dir, SIM, (s) => s.replace('const drift =', "const C = 'constr' + 'uctor'; const F = (() => {})[C]; F('return 1')();\n  const drift ="));
+  const res = run(dir, 'node scripts/check-sim-purity.mjs');
+  report('purity catches the Function constructor reached through a prototype', res.status !== 0 && /Function constructor/.test(`${res.stdout}${res.stderr}`), `${res.stdout}${res.stderr}`);
+  const dir2 = copyRepo();
+  edit(dir2, SIM, (s) => s.replace('const drift =', "const F = (() => {}).constructor.constructor;\n  const drift ="));
+  const res2 = run(dir2, 'node scripts/check-sim-purity.mjs');
+  report('purity flags .constructor.constructor in the source', res2.status !== 0 && /NO_CONSTRUCTOR_ESCAPE/.test(`${res2.stdout}${res2.stderr}`), `${res2.stdout}${res2.stderr}`);
+}
+
 // Golden stubs are not a pass.
 {
   const dir = copyRepo();
@@ -120,6 +143,17 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('task done refuses a non-owner', run(dir, 'node harness/task.mjs done T-002 --agent bob-1').status !== 0);
   run(dir, 'node scripts/balance-sweep.mjs --write');
   report('task done works for the owner once the check passes', run(dir, 'node harness/task.mjs done T-002 --agent alice-1').status === 0);
+}
+
+// Locks: agents claiming a folder and files inside it at the same moment can't all win.
+{
+  const dir = copyRepo();
+  const keys = ['path:cartridges', 'path:cartridges/example-sim', 'path:cartridges/example-sim/index.mjs', 'path:cartridges/example-sim/qa.mjs'];
+  const results = await Promise.all(keys.flatMap((k, i) => [0, 1].map((j) => runAsync(dir, `node harness/lock.mjs claim ${k} --owner racer-${i}-${j}`))));
+  const holders = new Set(fs.readdirSync(path.join(dir, '.studio/locks')).filter((f) => f.endsWith('.lock')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'))));
+  const paths = [...holders].map((l) => l.key.slice(5));
+  const overlap = paths.some((a, i) => paths.some((b, j) => i !== j && (a === b || b.startsWith(`${a}/`))));
+  report('parallel claims on a folder and its files leave no overlapping locks', !overlap && holders.size >= 1, `${paths.join(', ')} | exits ${results.map((r) => r.status).join(',')}`);
 }
 
 // Done-checks: each type of task refuses to close while its proof is missing, and forcing tells the Producer.
@@ -302,6 +336,42 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('models:check --dry-run names what it would ask, and what has no key', mc.status === 0 && /would-check\s+openai-gpt/.test(mc.stdout) && /no-key/.test(mc.stdout), mc.stdout + mc.stderr);
   const kl = run(dir, 'node harness/kickoff.mjs --role builder --agent codex-a --model gpt-x --tool codex');
   report('kickoff --tool prints a headless launch line with the agent\'s name and model', kl.status === 0 && /STUDIO_LOCK_OWNER=codex-a STUDIO_AGENT_MODEL=gpt-x codex exec --sandbox workspace-write/.test(kl.stdout), kl.stdout);
+}
+
+// Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.
+{
+  const dir = copyRepo();
+  const add = (cmd) => JSON.parse(run(dir, cmd).stdout).id;
+  const short = add('node harness/task.mjs add "Tidy the readme" --type docs');
+  const quick = run(dir, `node harness/prepare-brief.mjs ${short} --model`);
+  report('prepare skips the model when the history is short', quick.status === 0 && /no model was called/.test(quick.stdout), quick.stdout + quick.stderr);
+
+  const id = add('node harness/task.mjs add "Spawn overlap at tick 40" --type bug');
+  const lines = Array.from({ length: 40 }, (_, i) => JSON.stringify({ ts: new Date(Date.now() - (40 - i) * 60000).toISOString(), type: 'agent.note', agent: 'alice-1', task: id, target: 'cartridges/example-sim/index.mjs', msg: `try ${i}: changed spawn spacing, the replay at seed 1337 still overlaps two vehicles at tick 40 after the queue refills` }));
+  fs.appendFileSync(path.join(dir, '.studio/events.jsonl'), `${lines.join('\n')}\n`);
+  const fake = path.join(dir, 'fake-model.mjs');
+  fs.writeFileSync(fake, `import http from 'node:http'; import fs from 'node:fs';
+const s = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
+  const content = fs.readFileSync(process.argv[2], 'utf8');
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content } }], usage: { prompt_tokens: 900, completion_tokens: 120 } }));
+}); });
+s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
+  const reply = path.join(dir, 'fake-reply.md');
+  const server = spawn(process.execPath, [fake, reply], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
+  const env = { OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' };
+  fs.writeFileSync(reply, `## Goal\nFix ${id}: vehicles overlap at tick 40.\n\n## Relevant history\n- 40 tries changed spawn spacing; the seed 1337 replay still overlaps.\n\n## Known pitfalls\n- Spacing alone doesn't fix it; look at the queue refill.\n\n## Files to touch\n- cartridges/example-sim/index.mjs\n\n## Verify\n- node harness/done-check.mjs ${id}\n`);
+  const good = await runAsync(dir, `node harness/prepare-brief.mjs ${id} --model`, env);
+  const goodBrief = fs.readFileSync(path.join(dir, `.studio/briefs/${id}.prepared.md`), 'utf8');
+  report('a cheap model drafts the brief and the check accepts it', good.status === 0 && /Prepared by ollama-local \(fake-cheap\)/.test(goodBrief) && /queue refill/.test(goodBrief), good.stdout + good.stderr);
+  fs.writeFileSync(reply, `Here is everything: ${'long rambling text '.repeat(200)} see harness/does-not-exist.mjs and T-999`);
+  const bad = await runAsync(dir, `node harness/prepare-brief.mjs ${id} --model`, env);
+  const badBrief = fs.readFileSync(path.join(dir, `.studio/briefs/${id}.prepared.md`), 'utf8');
+  report('a draft that fails the check is thrown away and the script writes the brief', bad.status === 0 && /Prepared by a script/.test(badBrief) && /failed checks/.test(badBrief) && /missing section/.test(badBrief), badBrief);
+  server.kill();
+  const ev = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
+  report('the Producer sees each prepared brief with words in and out', /"type":"brief\.prepared"[^\n]*"to":"producer"[^\n]*words of history in/.test(ev));
 }
 
 // Agents get a one-page brief on start and a kickoff prompt; harness notes survive a studio reset.

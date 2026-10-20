@@ -23,7 +23,7 @@ See also `docs/READ-FIRST.md`.
 ## 2. Preferred Model Cost Order & Prepare Then Escalate
 
 1. Local model first, then free tiers, then paid.
-2. For long history or escalated bugs, run `node harness/prepare-brief.mjs` and give the strong model only `.studio/briefs/latest.md`.
+2. For long history or escalated bugs, run `npm run brief -- <ID> --model` (a cheap or local model drafts a 300-word brief and a script checks it) and give the strong model only `.studio/briefs/<ID>.prepared.md`.
 3. Skip prepare for already-short tasks.
 
 See `docs/ROUTING.md`.

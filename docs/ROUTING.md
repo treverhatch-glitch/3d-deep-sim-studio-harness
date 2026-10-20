@@ -14,18 +14,34 @@
 
 ## 2. Cheap Model Prepares, Strong Model Executes
 
-**Default for long history or escalated bugs:**
+The same shape as draft-then-verify decoding and bounded replay: a cheap model drafts, a script
+checks, and the strong model never re-reads the full history.
 
 ```bash
-node harness/prepare-brief.mjs
-node harness/route.mjs --role producer --prompt "$(cat .studio/briefs/latest.md)"
+npm run brief -- T-012 --model       # cheap or local model drafts, the script checks
+npm run brief -- T-012               # script only (the default unless STUDIO_PREPARE=model)
 ```
 
-Rules:
-- Use this path when context is long, logs are noisy, or a bug has escalated.
-- Skip it for already-short, clear tasks (the extra step costs more than it saves).
-- The strong model should receive the brief, not the raw logs.
-- Closed-loop does **not** auto-fix. It records the failure and escalates after N attempts.
+What `harness/prepare-brief.mjs` does:
+
+1. **Bounded window.** It reads only this task's last 25 events, its hand-off notes, the three
+   lessons in `studio/memory/failures.md` that match its title, the newest QA result and the files
+   the task touched. Never the whole log.
+2. **Skip when short.** Under `STUDIO_PREPARE_MIN_WORDS` (default 500) words of history, no model
+   is called; the strong agent reads the window as is. `--force` overrides.
+3. **Cheap draft.** With `--model` (or `STUDIO_PREPARE=model`) it asks only local and free providers,
+   local first (`STUDIO_PREPARE_CHAIN` to choose), for at most 300 words in five sections: Goal,
+   Relevant history, Known pitfalls, Files to touch, Verify. The daily spend cap applies.
+4. **Check.** The script rejects a draft that misses a section, runs over 300 words, doesn't name
+   the task, or names files or task IDs that don't exist, and writes its own version instead,
+   saying why.
+5. **Hand over.** The brief goes to `.studio/briefs/<ID>.prepared.md` (and `latest.md`). The
+   task's focus brief points to it, and a `brief.prepared` event tells the Producer who wrote it and
+   how many words went in and out. Token savings are not claimed; the words are counted.
+
+When to use it: long or handed-back tasks, escalated bugs, and before giving work to an expensive
+model. Skip it for short, clear tasks; the focus brief from `task start` is already enough.
+The closed loop still does not auto-fix: it records the failure and escalates after N attempts.
 
 ---
 

@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-bash scripts/secret-scan.sh --staged
+node scripts/secret-scan.mjs --staged
 node harness/lock.mjs check-staged ${STUDIO_LOCK_OWNER:+--owner "$STUDIO_LOCK_OWNER"}
 
 if git diff --cached --name-only | grep -qE '^(cartridges|src/sim)/'; then

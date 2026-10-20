@@ -81,6 +81,7 @@ Your job is decisions, not code:
 5. Write down what you decide and why: \`node harness/handoff.mjs note "what, why, next"\`. Change \`studio/PLAN.md\` when the phase moves.
 6. When the harness itself helps or gets in the way, record it: \`npm run notes -- add --kind well|bad|workaround|upgrade "…"\`.
 7. Route work by results: \`npm run scorecard\` shows bugs per model per 10 points of task size.
+8. Before handing a long or escalated task to a strong (expensive) model, run \`npm run brief -- <ID> --model\`: a cheap or local model compresses the history to 300 words and a script checks it.
 
 Never: edit game code yourself, push to a remote (a person pushes), put keys in files, or change the vision lock without a person.
 Before you stop: write a log note with what the next Producer should do.
@@ -94,7 +95,7 @@ Read \`AGENTS.md\`, \`studio/skills/README.md\`${hasRole ? ` and \`${roleFile}\`
 
 Loop:
 1. \`node harness/task.mjs next\` and pick the top task for \`${role}\` (the Producer sets priorities).
-2. \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`. It writes your one-page brief to \`.studio/briefs/<ID>.md\`: read that, it has the steps, what done means, notes from anyone before you, and what not to touch.
+2. \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`. It writes your one-page brief to \`.studio/briefs/<ID>.md\`: read that, it has the steps, what done means, notes from anyone before you, and what not to touch. If it says the history is long, run \`npm run brief -- <ID>\` and read the 300-word summary instead of the logs.
 3. Claim what you will edit: \`node harness/lock.mjs claim path:<folder> --owner ${agent}\`.
 4. Work in small steps; run the narrowest check first. Three failed tries: stop and hand back with a note.
 5. \`node harness/task.mjs done <ID> --agent ${agent}\`. If it refuses, do what it says is missing. Only \`--force\` with a reason; the Producer will check it.

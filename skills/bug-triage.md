@@ -12,4 +12,4 @@ Use this workflow when processing playtest reports (`qa/reports/`) or failing te
    ```bash
    ./scripts/append-event.sh TRIAGE src/sim/state.ts P0-01 nvidia-glm-flash
    ```
-6. Dispatch the fix to the `builder` failover chain (`node harness/route.mjs --role builder ...`) and verify with `./scripts/check-sim-isolation.sh` and `node qa/playtest.mjs`.
+6. Dispatch the fix to the `builder` failover chain (`node harness/route.mjs --role builder ...`) and verify with `node scripts/check-sim-isolation.mjs` and `node qa/playtest.mjs`.

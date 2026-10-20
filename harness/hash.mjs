@@ -2,7 +2,7 @@
  * harness/hash.mjs — the default 64-bit state hash for cartridges.
  *
  * Two 32-bit FNV-1a lanes over canonical JSON (keys sorted), printed as 16 hex chars.
- * tools/golden.py implements the same function, and `python3 qa/test-golden.py` proves
+ * tools/golden.py implements the same function, and `node qa/run-python.mjs qa/test-golden.py` proves
  * the two agree on every golden file. Changing this function changes every golden hash:
  * regenerate them in the same commit (`npm run golden -- --update`).
  */

@@ -24,9 +24,10 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   providers' terms; failover to a different provider is the safe way to keep agents working.
 - **Respect rate limits.** On a 429 the router cools that provider down instead of retrying; leave
   that behaviour on.
-- **Cheap model prepares, strong model executes.** `node harness/prepare-brief.mjs` writes a short
-  brief so the expensive model reads 300 words, not your whole history.
-- **Keys live only in `.env`.** It is gitignored; `bash scripts/secret-scan.sh` checks what git would
+- **Cheap model prepares, strong model executes.** `npm run brief -- <ID> --model` has a local or
+  free model draft a 300-word brief and a script check it, so the expensive model reads that, not
+  your whole history. It skips the model when the history is already short (`docs/ROUTING.md`).
+- **Keys live only in `.env`.** It is gitignored; `node scripts/secret-scan.mjs` checks what git would
   publish.
 
 ## Running a team of agents

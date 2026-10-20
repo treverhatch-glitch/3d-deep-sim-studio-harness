@@ -1,0 +1,191 @@
+# Harness roadmap (`docs/ROADMAP.md`)
+
+What the harness does next, and how. Built from outside reviews (Grok, and read-only reviews run on
+Windows) and the plans for pre-production, game phases, the Idea Board and the Director. Each item
+says what is wrong or missing, then the fix.
+
+Status words: **planned**, **doing**, **done (version)**.
+
+**Words used here.** A **stage** is where the studio is (pre-production, production). A **phase** is
+a part of the game the player plays: Phase 1 early game, Phase 2 mid game, Phase 3 endgame. A
+**layer** is one kind of progression or system (a tech tree, levels and XP, an economy, factions).
+
+---
+
+## 2.7.0 — Runs anywhere, and cheap prepare is real
+
+| # | Problem | Fix | Status |
+| --- | --- | --- | --- |
+| W1 | Gates and the pre-commit hook called `bash` and `python3`; on Windows `bash` is often missing and `python3` is the Microsoft Store stub (exit 9009), so 4 required gates failed on a clean machine. | `scripts/check-sim-isolation.mjs` and `scripts/secret-scan.mjs` in Node (the `.sh` files now just call them); `qa/run-python.mjs` finds a real Python 3 (`python3`, `python`, `py -3`, or `STUDIO_PYTHON`) and says how to install one; the hook and release use them. | done (2.7.0) |
+| W2 | `secret-scan.sh` needed `/dev/fd`. | Gone with the Node port. | done (2.7.0) |
+| W3 | The focus brief path printed with backslashes on Windows. | Repo paths are shown with forward slashes. | done (2.7.0) |
+| W4 | No proof it works on Windows. | A `windows-latest` CI job runs every required gate. | done (2.7.0) |
+| W5 | Docs disagreed: two read orders; three docs said `node hub/server.js`; `setup` only installed packages with `--install`. | One read order in `AGENTS.md`, which `READ-FIRST.md` points to; the docs say `npm run hub`; `setup` installs when `node_modules` is missing; a new required `docs` gate fails when a doc names an `npm run` script or a `node`/`bash` file that doesn't exist. | done (2.7.0) |
+| P1 | "Cheap prepare, strong act" was a template only. | `npm run brief -- <ID> --model`: a bounded window of the task's history, a local or free model drafts a 300-word brief, a script checks it (sections, word cap, real files, real task IDs) and throws a bad draft away. Skips the model when the history is short. Focus briefs and kickoff prompts point to it. Self-tested with a fake local model. | done (2.7.0) |
+| S5 | Purity could be dodged with `({}).constructor.constructor`. | The static check flags `.constructor.constructor` and `['constructor']`; the runtime probe traps the Function constructors on every function prototype. Self-tested both ways. | done (2.7.0) |
+| S6 | Claiming a folder and a file inside it at the same moment could both succeed. | A short studio-wide mutex around the overlap check and the write (stale after 10 s). Self-tested with eight parallel claims. | done (2.7.0) |
+
+## 2.8.0 — Pre-production, game phases, layers and the Director
+
+Today a new game gets a vision lock, a plan and planning guides, but nothing makes the studio
+settle the game before builders start. Agents then either put every mechanic in front of the player
+at once, or polish the early game forever with no mid-game shift or endgame payoff. And a game dev
+often doesn't know which progression layers the game needs until someone asks.
+
+### The Game Bible (`studio/bible/`)
+
+The authority on what the game is. Files, not chat:
+
+| File | Holds |
+| --- | --- |
+| `PITCH.md` | One paragraph: the fantasy, the main verb, session length, audience |
+| `PILLARS.md` | 3 to 5 pillars, each saying what it rules out |
+| `PHASES.md` | Phase 1, 2 and 3: what the player does and feels, and what pushes them to the next phase |
+| `LAYERS.md` | Every layer: kept (and the phase it enters), explore, or crossed out |
+| `STORYBOARD.md` | Beat sheets screen by screen across the three phases, plus loop diagrams |
+| `CONTENT.md` | Levels, unlocks, tech tree, economy curve across the phases (see 2.10.0) |
+| `REFERENCES.md`, `NOT-DOING.md` | Comparable games; everything crossed out, with why |
+| `IDEAS.md`, `ideas/` | The Idea Board (see the next section) |
+| `reviews/` | The Director's dated reviews |
+
+The vision lock points at the Bible. Only a person changes a locked pillar or brings back a
+crossed-out layer.
+
+### Phases: why, and how they are split
+
+**Why.** A phase describes how the player's relationship to the game changes, not a chore list.
+Naming the three phases makes the studio answer "what does minute 10 look like, and hour 2, and the
+end?" before building, gives each phase its own scenario and checks, and stops endgame work while
+the early game isn't fun yet. Players never see a checklist; the studio does.
+
+| Phase | The player | Moves on when | Proved by |
+| --- | --- | --- | --- |
+| **1 Early game** (footing) | Does the core verb by hand with one or two mechanics; low stakes, fast feedback, first win | The core loop works and doing it by hand starts to feel slow, which creates a wish for scale or tools | `phase-1-early` scenario + fun check + Director sign-off |
+| **2 Mid game** (scale and friction) | Goes from doing the verb to building the machine; kept layers solve phase-1 bottlenecks and add system pressure (upkeep, congestion, rivals) | The operation runs on its own and opens bigger goals | `phase-2-mid` scenario + balance sweep + Director sign-off |
+| **3 Endgame** (mastery) | Peak tests (crises, megaprojects), a final win, prestige or an endless sandbox | Wins, prestiges, or settles into self-directed play | `start-to-win` running 1 → 2 → 3 + soak + Director review |
+
+Build tasks carry `--phase 1|2|3`. Phase 2 build work opens when Phase 1's scenario and fun check
+pass; Phase 3 when Phase 2's do. Design, R&D and storyboards for later phases are allowed any time,
+because you have to know where the game is going to build its start well.
+
+### Layers: ask, keep or cross out
+
+`npm run intake` (and `npm run onboard` for an existing game) goes through a catalog of layers and
+asks about each one: **yes** (and which phase it enters), **explore** (R&D proposes two light
+versions), or **no**. It also suggests layers from the dev's earlier answers ("you said two-hour
+sessions of management: most games like that shift to automation in the mid game; keep it?"), so
+the dev hears about systems they didn't know to ask for.
+
+| Group | Layers |
+| --- | --- |
+| Growth | Levels and XP, skills and abilities, tech or research tree, unlocks by licence, rank or reputation, gear, loot and crafting, collections |
+| Economy | Currencies, production chains, upkeep and loans, markets and prices |
+| World | Map or space expansion, building and bases, hazards, wear and crisis events |
+| People | Crew, staff and NPC needs, automation and delegation, factions, politics and governance (votes, laws, democracy), social or multiplayer |
+| Story | Narrative beats, quests and contracts |
+| The end | Victory, endless sandbox, prestige or new game plus, meta-progression across runs |
+
+A **no** is recorded in `LAYERS.md` and `NOT-DOING.md` with the reason. Agents never make tasks for
+a crossed-out layer, and the drift report flags any task whose title or files match one (each layer
+has a short keyword list). A new game can start with Phase 1 and two layers, and grow.
+
+### Pre-production stage
+
+1. `npm run intake` asks about 12 core questions (fantasy, main verb, session length, audience,
+   three comparable games, what it must never be, how you win and lose, the first playable slice,
+   platforms, art direction, the one thing that has to feel great), then the three phases, then the
+   layer catalog. It writes the first Bible draft.
+2. An R&D team works it: reference scouts study the comparable games (`study` tasks); builders make
+   two or three throwaway prototypes as their own cartridges, including any "explore" layers; each
+   gets a fun check.
+3. A storyboard pass turns the phases into beat sheets and diagrams. Agents write and diagram;
+   pictures come later from an image model or Blender stills, never as the source of truth.
+4. The stage ends when the Bible's done-check passes and a person signs it in the War Room. Until
+   then `task add` refuses build tasks for the game; study, prototype and docs work is allowed.
+
+### The Director
+
+Role `director` (the Director of Knowledge, the master game overviewer). It guards and edits the
+Bible and gives the final word on where things fit in the game; it does not assign work. The
+Producer still generates, moderates and assigns tasks, from the Bible and for the open phase.
+
+- **A ping** queues a `director-review` task with the reason, writes the Director's brief
+  (`.studio/briefs/director.md`: the Bible, the open phase, kept and crossed-out layers, the plan,
+  what finished since the last review, the drift report, new ideas), and wakes the Director agent.
+  If none is running, the HUB starts one with `STUDIO_DIRECTOR_CMD` (a `kickoff --tool` line), under
+  the spend cap and at most once an hour; if that isn't set, the Producer and the person are told.
+- **On a ping the Director** 1. reads the docs its brief lists, 2. writes a dated review in
+  `studio/bible/reviews/`: on course, drifting or off course; whether the phase is ready to move on;
+  which pillars and layers the next work should serve; what to stop; suggested tasks. It works back
+  and forth with the Producer (`--to producer` events) until the Producer has what it needs.
+- **When:** daily (the HUB, like the retro); every time the Producer is about to generate tasks
+  (`npm run director -- ping --reason "…"`; `task add` warns if build tasks are added with no
+  review in the last day or 10 tasks); on a phase change; on a failed slice; when the drift report
+  crosses a line; when an idea reaches "placed" (next section).
+- **Free drift report** (a script): tasks serving no pillar, phase or layer; tasks touching a
+  crossed-out layer; later-phase build work while an earlier phase is red; a phase running long;
+  kept layers with no work.
+- **Every build task says what it serves:** `task add … --phase <1|2|3> --serves pillar:<name>|layer:<name>`.
+- **Done-check for `director-review`:** a dated review naming the phase, pillars and layers it
+  checked, a verdict, and next tasks.
+
+### The Idea Board (fourth War Room tab)
+
+Ideas come up during development. Sending them straight to builders is how games get messy, so
+every idea goes through stages, and only an approved idea becomes build work.
+
+| Stage | Who | What happens |
+| --- | --- | --- |
+| **Captured** | The game dev (Idea Board box, behind the token) or any agent | One line plus optional detail, saved as `studio/bible/ideas/I-001.md` |
+| **Shaped** | R&D | Expands it: what the player does, which phase and layer, what it costs, conflicts with pillars or crossed-out layers, a tiny prototype if needed |
+| **Placed** | Progression planner | Proposes where it lands in the player's progression (phase, layer, unlock point) and in the development schedule (which milestone, what it pushes back) |
+| **Approved / parked / rejected** | Director decides, Producer consulted | Approved ideas are written into the Bible (and `CONTENT.md`); parked ideas wait; rejected ideas keep the reason |
+| **Scheduled** | Producer | Only now: build tasks, each with `--idea I-001`. `task add` refuses an `--idea` that isn't approved |
+
+The watcher's regular pass (every 5 minutes, no AI) collects new ideas and gives the Producer one
+"Ideas: N new" task, never one per idea. The Bible only changes when an idea finishes planning and is
+approved.
+
+The tab shows the game's shape: the three phases as columns, the kept layers as rows (levels, tech
+tree, unlocks, factions…), crossed-out layers greyed, where each approved idea sits, and the cards
+moving through the stages. It reads files only, like the other tabs.
+
+## 2.9.0 — Deeper skills and stricter slices
+
+| # | Problem | Fix | Status |
+| --- | --- | --- | --- |
+| S1 | The bug skill is a short note; agents need the whole loop. | A full bug skill: triage and severity, reproduce from seed and tick, find the breaking commit (`git bisect` with the replay), smallest fix, a regression that fails before the fix and passes after, lesson, hand-off. The done-check proves "fails before" by replaying against the parent commit in a temporary folder. | planned |
+| S2 | No skill for "build this system, prove it, hand it off". | A `system` skill and task type: a one-page spec in the Bible (its phase and layer), the sim module, its invariants, a phase scenario in `qa.mjs`, goldens, a playtest, a short doc for the next agent. The done-check checks each piece. | planned |
+| S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | planned |
+| S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | planned |
+
+## 2.10.0 — Content and craft pipelines
+
+| # | Problem | Fix | Status |
+| --- | --- | --- | --- |
+| C1 | No content pipeline for a big game. | Content as data under `cartridges/<game>/content/` (JSON with a schema per kept layer, tagged by phase), checked by a gate, written by generators, with a sweep for the economy and unlock curve across the phases. Crossed-out layers need no content. | planned |
+| C2 | Art, audio and narrative are folders and notes, not tools. | One tool each that an agent drives and a gate checks (when the layer is kept): art through Blender presets plus a budget check; audio through a sound preset generator plus loudness and length checks; narrative as structured dialogue files with a lint (missing speakers, dead branches). | planned |
+
+## HUD, access and scale
+
+| # | What | How | Status |
+| --- | --- | --- | --- |
+| H1 | Talk to the Producer | A "Message the Producer" box on the Ops tab writes to the Producer's inbox (no AI, behind the token). Replies show in the HUD. | planned |
+| H2 | Third tab: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | planned |
+| H3 | Phone access | Tailscale in the docs, never port-forwarding. A one-time login sets an `HttpOnly; SameSite=Strict` cookie for reads and the WebSocket, and writes still need the token header, so the token never sits in an address. | planned |
+| H4 | Phone alerts | ntfy or Telegram when a person is needed: a forced done, a Bible or phase sign-off, an idea waiting for approval, the spend cap, a Director verdict of "off course". | planned |
+| H5 | Agents on several machines | Make the HUB the single home for tasks, locks and events (agents call it with their token; locks keep a heartbeat so a dead remote worker's claims expire), so separate clones and cloud sandboxes share one studio. | planned |
+| H6 | Play the latest build | A link to the latest web build with the seed and phase scenario shown. | planned |
+| H7 | Fourth tab: Idea Board | See 2.8.0. | planned |
+
+## Not here
+
+- Hatchfield's own loops (its airport loop, for example) are built in the Hatchfield repo, which
+  uses this harness. This repo stays a template with only the example game.
+- Agent frameworks (LangGraph, CrewAI, AutoGen): the queue, locks and gates already coordinate.
+
+## Sources
+
+- Grok notes on what agents still can't carry, what's worth adding, and phased progression (2026-10-20).
+- Read-only reviews of 2.6.0 on Windows (2026-10-20): gates, self-test, security, doc mismatches,
+  and a phased roadmap draft.
