@@ -1,3 +1,18 @@
+# Changelog
+
+## [2.2.0] — 2026-10-20
+### Added
+- Cartridge loader (`harness/cartridge.mjs`)
+- `npm run new-game <name>`
+- `npm run release` and `npm run hooks:install`
+- Start-to-win golden and example-sim TUNING / win-lose
+- Hub smoke and runtime sim probe
+
+### Fixed
+- Closed loop and playtest now prefer the failing tick
+- Golden stubs no longer pass
+- Secret scan and purity stay required
+
 # Changelog (`CHANGELOG.md`)
 
 All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are documented in this file.

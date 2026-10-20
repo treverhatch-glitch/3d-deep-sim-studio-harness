@@ -2,6 +2,12 @@
  * cartridges/example-sim/index.mjs — Reference Deterministic 3D Sim Cartridge
  */
 
+export const TUNING = {
+  spawnCost: 250,
+  winEntities: 6,
+  startEnergy: 500,
+};
+
 export function nextMulberry32(rngState) {
   let t = (rngState + 0x6d2b79f5) | 0;
   t = Math.imul(t ^ (t >>> 15), t | 1);
@@ -44,12 +50,14 @@ export function createInitialState(seed = 42069) {
     rngState: cleanSeed,
     tick: 0,
     paused: false,
-    resources: { credits: 10000, energy: 500 },
+    resources: { credits: 10000, energy: TUNING.startEnergy },
     entities: [
       { id: 'unit-1', kind: 'vehicle', x: 0, y: 0, z: 0, speed: 1 },
       { id: 'prop-1', kind: 'crate', x: 4, y: 0, z: -2, speed: 0 },
     ],
     actionLog: [],
+    won: false,
+    lost: false,
   };
 }
 
@@ -77,7 +85,7 @@ export function step(prevState, action = null) {
         z: Number(act.z || 0),
         speed: Number(act.speed ?? 1),
       });
-      state.resources.credits -= Number(act.cost ?? 250);
+      state.resources.credits -= Number(act.cost ?? TUNING.spawnCost);
     }
   }
 
@@ -99,9 +107,15 @@ export function step(prevState, action = null) {
     if (v && typeof v === 'object') return Object.values(v).some(bad);
     return false;
   }
+  if (state.entities.length >= TUNING.winEntities) state.won = true;
+  if (state.resources.energy <= 0 && !state.won) state.lost = true;
   if (bad(state)) throw new Error('non-finite sim state');
 
   return state;
+}
+
+export function outcome(state) {
+  return state.won ? 'won' : state.lost ? 'lost' : null;
 }
 
 export function replayToTick({ seed = 42069, tick = 120, actions = [] } = {}) {
@@ -148,4 +162,12 @@ export function mountPlaytestApi(targetWindow) {
   targetWindow.__hatch = api;
   targetWindow.__sim = api;
   return api;
+}
+
+export function invariants(state) {
+  const findings = [];
+  if (!Number.isFinite(state.resources.credits)) {
+    findings.push({ id: 'CREDITS', severity: 'P0', tick: state.tick, summary: 'credits not finite' });
+  }
+  return findings;
 }

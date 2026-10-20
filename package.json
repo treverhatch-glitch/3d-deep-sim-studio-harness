@@ -1,6 +1,6 @@
 {
   "name": "hatchfield-ai-studio-template",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Generalized 3D Deep Simulation & AI Game Studio Harness \u2014 vendor-neutral multi-agent roles, freecc:auto model failover router, prepare-then-escalate brief compressor, shared improving memory, zero-token Workflow UI HUB, and closed-loop seed-replay QA.",
   "type": "module",
   "license": "MIT",
@@ -37,7 +37,11 @@
     "test:golden": "python3 qa/test-golden.py",
     "verify": "node scripts/run-gates.mjs",
     "balance": "node scripts/balance-sweep.mjs",
-    "fun": "node scripts/fun-check.mjs"
+    "fun": "node scripts/fun-check.mjs",
+    "new-game": "node scripts/new-game.mjs",
+    "release": "node scripts/release.mjs",
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "probe": "node scripts/sim-runtime-probe.mjs"
   },
   "devDependencies": {
     "playwright": "^1.50.0",

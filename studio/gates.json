@@ -69,6 +69,22 @@
       "id": "fun",
       "command": "node scripts/fun-check.mjs",
       "required": false
+    },
+    {
+      "id": "playtest",
+      "command": "node qa/playtest.mjs --stage 1",
+      "required": true
+    },
+    {
+      "id": "soak",
+      "command": "node qa/soak.mjs",
+      "required": true
+    },
+    {
+      "id": "hub-smoke",
+      "command": "node qa/hub-smoke.mjs",
+      "required": true
     }
-  ]
+  ],
+  "cartridge": "example-sim"
 }

@@ -1,7 +1,9 @@
-# Fun notes
+# Fun proxy report
 
-No check yet. Run `npm run fun`.
+- seeds: 4
+- wins: 0
+- starved: 0
+- dead-time seeds: 0
+- human-review: required
 
-human-review: required
-Owner: fun-tester
-Human: unread
+Proxies only. A human decides if the slice is fun.

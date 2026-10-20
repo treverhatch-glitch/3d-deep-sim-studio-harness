@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+bash scripts/secret-scan.sh
+OWNER="${STUDIO_LOCK_OWNER:-}"
+if [ -z "$OWNER" ]; then
+  echo "[pre-commit] FAIL set STUDIO_LOCK_OWNER"
+  exit 1
+fi
+changed=$(git diff --cached --name-only || true)
+for file in $changed; do
+  [ -z "$file" ] && continue
+  node harness/lock.mjs status "file:$file" > /tmp/lock-status.json || true
+  if ! grep -q '"locked": true' /tmp/lock-status.json; then
+    echo "[pre-commit] FAIL $file has no lock"
+    exit 1
+  fi
+done
+echo "[pre-commit] PASS"
