@@ -42,6 +42,7 @@ export const DEFAULT_DIVISIONS = [
 
 const ROOM_FOR_ROLE = {
   producer: 'production',
+  watch: 'production',
   human: 'production',
   builder: 'engineering',
   'qa-playtester': 'qa',
@@ -171,11 +172,13 @@ export function buildHudState() {
     const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
     const role = roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
     const errored = /error|fail|escalate|bug|forced|not_done/.test(a.lastType || '');
+    // Holding a task but silent for 30 minutes: probably out of usage or stuck (harness/watch.mjs).
+    const stalled = Boolean(a.holds?.some((k) => k.startsWith('task:'))) && (idleMin === null || idleMin > 30);
     return {
       ...a,
       role,
       room: roomForRole(role, divs) || 'engineering',
-      status: errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
+      status: stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       idleMin,
     };
   });
@@ -215,7 +218,7 @@ export function buildHudState() {
     if (e.type === 'closedloop.escalate' || e.type === 'route.exhausted') needs.push({ ts: e.ts, agent: e.agent, msg: e.msg, task: e.task });
   }
   for (const t of [...queue.inProgress, ...queue.backlog]) {
-    if (/^Check forced done/i.test(t.title)) needs.push({ agent: 'producer', msg: t.title, task: t.id });
+    if (/^(Check forced done|Watch:)/i.test(t.title)) needs.push({ agent: t.title.startsWith('Watch:') ? 'watch' : 'producer', msg: t.title, task: t.id });
   }
 
   // A meeting in progress: who is at the table (role names resolve to the agent doing that role).

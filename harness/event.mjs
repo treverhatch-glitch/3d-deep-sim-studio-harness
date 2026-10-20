@@ -58,7 +58,7 @@ export function emitEvent(partial = {}) {
     type: partial.type || 'agent.info',
     agent: partial.agent || process.env.STUDIO_AGENT_ROLE || 'producer',
     provider: partial.provider || null,
-    model: partial.model || null,
+    model: partial.model || process.env.STUDIO_AGENT_MODEL || null,
     task: partial.task || null,
     to: partial.to || null,
     target: partial.target || partial.file || null,

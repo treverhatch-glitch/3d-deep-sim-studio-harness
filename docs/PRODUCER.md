@@ -30,6 +30,18 @@ Outgoing Producer: `node harness/handoff.mjs note "Handing over: …"` with what
 middle of. Incoming Producer: run the handoff, read the plan and the newest log entries, clear
 "Needs you first", then write your first note.
 
+## What reaches you, and what doesn't
+
+The Producer is the most expensive seat, so only decisions should reach it:
+
+| Who handles it | What |
+| --- | --- |
+| The router (automatic) | A provider or key runs out mid-call: fails over to the next one |
+| The watcher (`npm run watch`, a script) | Claims that expired: work goes back to the queue with a note. Silent agents, unclaimed handed-back work and provider outages: one `Watch:` task for you |
+| The agent itself | Handing a task back with `task pause --note` when it runs out or is swapped |
+| You, the Producer | `Watch:` and `Check forced done` tasks, meetings, the plan, who does what next |
+| The person | Design, balance, money, releases, anything that can't be undone |
+
 ## Meetings
 
 `node harness/meeting.mjs start "<topic>" --with builder,qa-playtester,designer-calibrator`

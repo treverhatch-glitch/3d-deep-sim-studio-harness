@@ -41,6 +41,39 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
 - **Gates decide "done".** An agent's claim that something works counts once `npm run verify` passes.
 - **Write lessons down.** After a fix, add a replay to `qa/regressions/` and four lines to
   `studio/memory/failures.md`, so every model learns it next session.
+- **Say which model is working.** Set `STUDIO_AGENT_MODEL` (or `task start --model`) once per
+  agent; every event carries it, and both War Room views show it at the agent's desk.
+
+## When an agent runs out of usage
+
+- **Model calls fail over on their own.** The router moves to the next provider or key when one is
+  rate limited or out, and logs it. That keeps an agent going; it doesn't replace one that stopped.
+- **Hand the task back before you stop.** `node harness/task.mjs pause <ID> --agent <you> --note
+  "where I stopped, what is left"` puts the task at the top of the queue with a note in
+  `studio/handoffs/<ID>.md`. The next agent, from any tool or provider, sees the note when it starts
+  the task. Same idea as the Producer's handoff, one level down.
+- **If it stops without a word, the watcher notices.** `npm run watch` (or `--loop 300`) is a script,
+  not a model, so it costs nothing. It requeues work whose claim expired, with a note naming the last
+  agent, and flags agents that hold a task but have gone quiet.
+
+## Keep the Producer for decisions
+
+- **Scripts watch, the Producer decides.** A free "manager" model watching other agents is usually
+  overkill: whether a task is still moving is a question about files and timestamps, and a script
+  answers it exactly. Use a cheap model only where judgment is needed, such as summarising a stalled
+  agent's half-finished diff into a handoff note.
+- **One ping, not a stream.** The watcher gives the Producer one `Watch:` task at a time with a
+  count, and doesn't add another until that one is done. Forced "done"s do the same with
+  `Check forced done`. Everything else goes to the event log and the War Room, which cost no tokens to
+  read.
+- **The ladder:** script (free, mechanical fixes) → cheap model (summaries, triage) → Producer (what
+  to do next, who does it) → you (design, balance, money, anything you can't undo).
+
+## Bringing in an existing game
+
+- **Scan, then fill in.** `npm run onboard -- --path ../my-game --name "My Game"` writes a fact
+  sheet (`studio/game/GAME.md`) from a read-only scan and queues the onboarding tasks; a person adds
+  the pitch, state, pillars and what agents must not touch. Full guide: `docs/ONBOARDING-A-GAME.md`.
 
 ## Keeping the repo clean for open source
 

@@ -126,7 +126,12 @@ export function buildHandoff() {
 
   const divisions = readJson('studio/divisions.json')?.divisions?.filter((d) => d.active || d.core).map((d) => d.name) || null;
   const plugins = readJson('studio/plugins.json')?.plugins?.filter((p) => p.enabled).map((p) => p.name) || [];
-  const forced = [...q.inProgress, ...q.backlog].filter((t) => /^Check forced done/i.test(t.title));
+  const forced = [...q.inProgress, ...q.backlog].filter((t) => /^(Check forced done|Watch:)/i.test(t.title));
+  const paused = q.backlog.filter((t) => fs.existsSync(path.join(REPO_ROOT, 'studio', 'handoffs', `${t.id}.md`)));
+  const watch = readJson('.studio/watch-last.json');
+  const sheet = read('studio/game/GAME.md');
+  const field = (label) => (sheet?.match(new RegExp(`\\*\\*${label}\\*\\*[^:]*:\\s*(.+)`)) || [, null])[1];
+  const gameInfo = sheet ? { name: (sheet.match(/^# (.+?):/m) || [, '?'])[1], pitch: field('Pitch'), state: field('State'), engine: field('Engine and tools'), offLimits: field('Off-limits'), updated: mtime('studio/game/GAME.md') } : null;
   const bugs = [...q.inProgress, ...q.backlog].filter((t) => /^(bug|fix)\b/i.test(t.title));
 
   return {
@@ -139,6 +144,9 @@ export function buildHandoff() {
     meetings,
     queue: { inProgress: q.inProgress.map((t) => ({ ...t, owner: owner.get(t.id) || null })), next: q.backlog.slice().sort((a, b) => a.priority.localeCompare(b.priority)).slice(0, 6), backlogSize: q.backlog.length, done: q.done.length },
     forced,
+    paused,
+    watch,
+    game: gameInfo,
     bugs,
     locks,
     gates,
@@ -164,6 +172,12 @@ export function renderHandoff(h) {
   if (h.plan.goal || h.plan.now) add(h.plan.goal ? `Goal: ${h.plan.goal.replace(/\n+/g, ' ')}` : '', h.plan.now, '', h.plan.milestones);
   else add('No studio/PLAN.md yet. Write one before assigning work (template in studio/MASTER.md).');
 
+  head('The game (studio/game/GAME.md)');
+  if (h.game) {
+    const blank = (v) => !v || /^_.*_$/.test(v.trim());
+    add(`${h.game.name}: ${blank(h.game.pitch) ? 'no pitch yet' : h.game.pitch}`, `- State: ${blank(h.game.state) ? 'not filled in' : h.game.state}`, `- Engine: ${h.game.engine || '?'}`, `- Off-limits: ${blank(h.game.offLimits) ? 'not filled in' : h.game.offLimits}`);
+  } else add('No game onboarded yet (the example cartridge only). Bring one in with npm run onboard -- --path <folder> --name "<name>".');
+
   head('Last notes from the Producer (studio/producer/LOG.md)');
   if (h.log.length) for (const e of h.log) add(`- ${e.heading}: ${e.body.replace(/\n+/g, ' ')}`);
   else add('- No log entries. The previous Producer left no reasons; check decisions and meetings.');
@@ -186,6 +200,8 @@ export function renderHandoff(h) {
   for (const t of h.queue.inProgress) add(`- Doing ${t.id} [${t.priority}] (${t.role}) ${t.title}${t.owner ? `, held by ${t.owner}` : ', nobody holds it'}`);
   for (const t of h.queue.next) add(`- Next ${t.id} [${t.priority}] (${t.role}) ${t.title}`);
 
+  if (h.paused.length) add(...h.paused.map((t) => `- Handed back ${t.id} (${t.role}) ${t.title}: notes in studio/handoffs/${t.id}.md`));
+
   head('Who holds what');
   add(...(h.locks.length ? h.locks.map((l) => `- ${l.owner}: ${l.key} until ${l.expiresAt}`) : ['- No claims.']));
 
@@ -197,6 +213,9 @@ export function renderHandoff(h) {
   add(h.playtest ? `- Latest playtest: ${h.playtest.passed ? 'passed' : `FAILED at tick ${h.playtest.failingTick}: ${h.playtest.finding}`} (seed ${h.playtest.seed}, ${h.playtest.ticks} ticks, ${h.playtest.file})` : '- No playtest yet.');
   if (h.lastFailure) add(`- Last recorded failure: ${h.lastFailure.cartridge} seed ${h.lastFailure.seed} tick ${h.lastFailure.tick}, ${age(h.lastFailure.updated)}. Replay: ${h.lastFailure.replay}`);
   add(...(h.bugs.length ? h.bugs.map((t) => `- Open bug ${t.id} [${t.priority}]: ${t.title}`) : ['- No open bug tasks.']));
+
+  if (h.watch) add(h.watch.findings.length ? `- Watcher (${h.watch.at}): ${h.watch.findings.map((f) => f.msg).join('; ')}` : `- Watcher (${h.watch.at}): all quiet`);
+  else add('- Watcher has not run. npm run watch (or --loop 300) keeps an eye on stalled and abandoned work for free.');
 
   head('Waiting on a person');
   add(...(h.signoffs.length ? h.signoffs.map((s) => `- ${s.title} (${s.file}, ${age(s.updated)}): ${s.signed ? 'signed off' : 'not signed off yet'}`) : ['- Nothing.']));

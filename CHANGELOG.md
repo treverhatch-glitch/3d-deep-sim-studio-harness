@@ -15,6 +15,10 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - **Producer handoff** (`npm run handoff`): a briefing built from files for whoever holds the Producer role (plan, log, decisions, what needs attention first, queue with owners, claims, gates, playtest, last failing seed, open bugs, sign-offs, lessons, meetings, last 24 hours, key documents). Saved to `.studio/briefs/producer.md`.
 - **Master documents**: `studio/MASTER.md` (the map of key documents and how to take over), `studio/PLAN.md` (the master plan), `studio/producer/LOG.md` (the Producer's reasons, newest first; `node harness/handoff.mjs note`).
 - **Meetings** (`harness/meeting.mjs`): the Producer meets several agents at once; notes in `studio/meetings/`, actions become tasks, the outcome goes into the Producer log. In the Studio view everyone walks to a meeting table and back.
+- **Handing work back**: `task pause <ID> --note` returns a task to the top of the queue with a note in `studio/handoffs/<ID>.md`; the next agent sees it on `task start`.
+- **Watcher** (`npm run watch`, `--loop`): a zero-token script that requeues work whose claim expired, flags silent agents, unclaimed handed-back work and provider outages, and gives the Producer one `Watch:` task at a time.
+- **Onboarding an existing game** (`npm run onboard`, `docs/ONBOARDING-A-GAME.md`): read-only scan of the game's folder, a fact sheet in `studio/game/GAME.md` that the Producer's briefing shows, and the onboarding tasks.
+- **Models in the War Room**: `STUDIO_AGENT_MODEL` or `task start --model` tags every event; desks show the model, and silent agents holding work fall asleep ("z") in the Studio view.
 - Events can name who they are for (`--to producer`).
 ### Changed
 - The self-test proves every done-check refuses unfinished work, that `--force` reaches the Producer, that the handoff briefing reflects the studio's state, and that meetings write notes and tasks.

@@ -179,6 +179,40 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('meeting actions become tasks and the outcome reaches the Producer log', /\(`qa-playtester`\) — Playtest: seeds 1-20/.test(queue) && /Meeting "Spawn pacing"/.test(log), `${queue}\n${log}`);
 }
 
+// Workers who stop hand back with a note; the watcher requeues abandoned work and pings the Producer once.
+{
+  const dir = copyRepo();
+  run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model test-model-1');
+  const pause = run(dir, 'node harness/task.mjs pause T-003 --agent cursor-a --note "Out of usage; adapter half done"');
+  const pick = run(dir, 'node harness/task.mjs start T-003 --agent claude-b');
+  report('task pause hands back with a note the next agent sees', pause.status === 0 && pick.status === 0 && /adapter half done/.test(pick.stderr), `${pause.stdout}${pause.stderr}${pick.stdout}${pick.stderr}`);
+  report('events carry the model an agent runs on', /"model":"test-model-1"/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')));
+  // T-004 in progress with no claim: abandoned.
+  edit(dir, 'studio/NEXT.md', (t) => t.replace(/- \[ \] (\*\*T-004\*\*.*)\n/, '').replace('## IN_PROGRESS\n', '## IN_PROGRESS\n- [>] **T-004** [P1] (`qa-playtester`) — Abandoned run\n'));
+  const w1 = run(dir, 'node harness/watch.mjs --stall 0');
+  const w2 = run(dir, 'node harness/watch.mjs --stall 0');
+  const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('watcher requeues work whose claim is gone, with a handoff note', w1.status === 0 && /- \[ \] \*\*T-004\*\*/.test(queue) && fs.existsSync(path.join(dir, 'studio/handoffs/T-004.md')), `${w1.stdout}${w1.stderr}\n${queue}`);
+  report('watcher pings the Producer once, not on every pass', (queue.match(/— Watch: /g) || []).length === 1 && /not pinging again/.test(w2.stdout), `${w1.stdout}${w2.stdout}`);
+}
+
+// Onboarding an existing game: read-only scan, fact sheet, tasks once, and the briefing shows it.
+{
+  const dir = copyRepo();
+  const gameDir = path.join(tmpRoot, `game-${n}`);
+  fs.mkdirSync(path.join(gameDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(gameDir, 'package.json'), JSON.stringify({ name: 'tiny', scripts: { dev: 'vite' }, dependencies: { phaser: '^3.90.0' } }));
+  fs.writeFileSync(path.join(gameDir, 'README.md'), '# Tiny\n\nA tiny test game.\n');
+  fs.writeFileSync(path.join(gameDir, 'src/sim.js'), 'export const roll = () => Math.random();\n');
+  const before = fs.readFileSync(path.join(gameDir, 'src/sim.js'), 'utf8');
+  const first = run(dir, `node scripts/onboard-game.mjs --path ${JSON.stringify(gameDir)} --name "Tiny"`);
+  const second = run(dir, `node scripts/onboard-game.mjs --path ${JSON.stringify(gameDir)} --name "Tiny"`);
+  const sheet = fs.existsSync(path.join(dir, 'studio/game/GAME.md')) ? fs.readFileSync(path.join(dir, 'studio/game/GAME.md'), 'utf8') : '';
+  report('onboard writes a fact sheet with engine and unrepeatable calls', first.status === 0 && /Phaser/.test(sheet) && /Math\.random: 1/.test(sheet), `${first.stdout}${first.stderr}`);
+  report('onboard leaves the game untouched and queues its tasks once', fs.readFileSync(path.join(gameDir, 'src/sim.js'), 'utf8') === before && /queued 8 task/.test(first.stdout) && /queued 0 task/.test(second.stdout), `${first.stdout}${second.stdout}`);
+  report('the Producer briefing shows the onboarded game', /## The game[\s\S]*Tiny: A tiny test game/.test(run(dir, 'node harness/handoff.mjs').stdout));
+}
+
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
 {
   const dir = copyRepo();

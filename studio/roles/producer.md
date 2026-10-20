@@ -26,3 +26,4 @@ Every architectural change follows:
 6. Order studies like any task (`--type study`): another game's layout, or a bug hunt through our own build (`docs/GAME-STUDY.md`).
 7. Call a meeting when a decision needs several roles at once: `node harness/meeting.mjs start "<topic>" --with builder,qa-playtester`, record remarks with `say`, and `end` with `--decision` and `--action "title|role|P2"`. Notes land in `studio/meetings/`, actions become tasks, and the outcome goes into your log.
 8. When you decide something or end a session, write it down: `node harness/handoff.mjs note "what changed, why, what next"`. Change `studio/PLAN.md` when the phase or a milestone changes.
+9. `Watch:` tasks come from the watcher (`npm run watch`, a script): stalled agents, handed-back work nobody took, provider outages. Reassign or wait; the details are in `npm run watch`. Mechanical fixes (requeueing expired claims) are already done for you.

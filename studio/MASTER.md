@@ -9,6 +9,7 @@ in a chat.
 | Document | What it holds | Who updates it |
 | --- | --- | --- |
 | `studio/VISION_LOCK.md` | The pillars. Changing one needs a decision record. | Producer, with a person's approval |
+| `studio/game/GAME.md` | The game's fact sheet: pitch, state, pillars, engine, run commands, what agents must not touch. Written by `npm run onboard`. | A person fills in the top; rescans refresh the rest |
 | `studio/PLAN.md` | The master plan: goal, where we are now, milestones, risks. | Producer, when the phase or a milestone changes |
 | `studio/producer/LOG.md` | The Producer's notebook: what changed, why, what's next. Newest first. | Producer, every session (`node harness/handoff.mjs note "…"`) |
 | `studio/decisions/` | Decision records: the question, the options, what was chosen and why. | Whoever proposes; a person approves |
@@ -16,6 +17,7 @@ in a chat.
 | `studio/CURRENT_TASK.md` | The checkpoint for the task in progress. | `node harness/task.mjs` |
 | `studio/memory/failures.md` | Lessons from fixed bugs, four bullets each. | Whoever fixes a bug |
 | `studio/meetings/` | Notes from Producer meetings: who came, what was decided, tasks made. | `node harness/meeting.mjs` |
+| `studio/handoffs/` | Notes on tasks an agent handed back (out of usage, swapped, stuck). | `node harness/task.mjs pause`, the watcher |
 
 ## Look up when needed
 

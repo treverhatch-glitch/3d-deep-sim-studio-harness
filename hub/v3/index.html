@@ -47,6 +47,7 @@
   .lamp { width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; background: var(--quiet); }
   .lamp.working { background: var(--go); box-shadow: 0 0 10px var(--go); }
   .lamp.idle { background: var(--standby); }
+  .lamp.stalled { background: transparent; border: 3px solid var(--standby); }
   .lamp.needs-attention { background: var(--hold); box-shadow: 0 0 10px var(--hold); }
   .cue .who { font-weight: 600; }
   .cue .what { grid-column: 2; color: var(--quiet); font-size: 13.5px; overflow-wrap: anywhere; }
@@ -194,6 +195,11 @@
   .desk.big .equip { left: 40px; }
   .desk .tag { position: absolute; top: 20px; left: -6px; width: 76px; text-align: center; font-size: 17px; line-height: 1.1; background: var(--panel); border: 2px solid var(--frame); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .desk.big .tag { left: 14px; background: #ffd54f; }
+  .desk .model { position: absolute; top: 3px; left: 3px; right: 3px; height: 14px; padding: 0 2px; text-align: center; font-size: 14px; line-height: 14px; color: #e0f7fa; background: #263238; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .desk .model:empty { display: none; }
+  .person .zz { position: absolute; bottom: 42px; left: 22px; font: 10px "Press Start 2P", monospace; color: #fff; text-shadow: 2px 2px 0 #263238; display: none; }
+  .person.asleep .zz { display: block; animation: zz 2s ease-in-out infinite; }
+  @keyframes zz { 0% { opacity: 0; transform: translate(0, 4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -12px); } }
   .desk.on .scr { animation: scr .7s steps(2) infinite; }
   .desk.alert .scr { fill: #ff5252; animation: dim .6s steps(2) infinite; }
   @keyframes scr { 50% { fill: #e0f7fa; } }
@@ -258,7 +264,7 @@
   <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
   <main>
     <div>
-      <section><h2>Agents on cue <small>last 24 h</small></h2><div id="o-agents"></div><p class="note">Green: working. Amber: idle over 15 min. Red: last action failed or escalated.</p></section>
+      <section><h2>Agents on cue <small>last 24 h</small></h2><div id="o-agents"></div><p class="note">Green: working. Amber: idle over 15 min. Amber ring: holds a task but silent 30 min (out of usage or stuck). Red: last action failed or escalated.</p></section>
       <section><h2>Claims</h2><div id="o-locks"></div></section>
     </div>
     <section>
@@ -634,6 +640,7 @@
     p.el.classList.remove('facing-left');
     p.el.classList.toggle('typing', p.status === 'working');
     p.el.classList.toggle('attention', p.status === 'needs-attention');
+    p.el.classList.toggle('asleep', p.status === 'stalled');
   }
 
   function say(p, msg) {
@@ -718,7 +725,7 @@
     const el = document.createElement('div');
     el.className = 'person';
     el.title = `${a.name}${a.role ? ` (${a.role})` : ''}`;
-    el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
+    el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="zz">z</span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
     crowd.appendChild(el);
     return el;
   }
@@ -734,12 +741,13 @@
       el.dataset.room = roomId;
       const big = roomId === 'production' && i === 0;
       el.className = `desk${big ? ' big' : ''}`;
-      el.innerHTML = `<span class="equip">${EQUIP[roomId] || EQUIP.engineering}</span><span class="tag"></span>`;
+      el.innerHTML = `<span class="equip">${EQUIP[roomId] || EQUIP.engineering}</span><span class="tag"></span><span class="model"></span>`;
       crowd.appendChild(el);
       desks.set(a.name, el);
     }
     el.querySelector('.tag').textContent = a.name;
-    el.title = `${a.name}: ${a.lastMsg || 'no activity yet'}`;
+    el.querySelector('.model').textContent = a.model ? String(a.model).replace(/^(models\/|accounts\/[^/]+\/models\/)/, '') : '';
+    el.title = `${a.name}${a.model ? ` on ${a.model}` : ''}: ${a.lastMsg || 'no activity yet'}`;
     el.classList.toggle('on', a.status === 'working');
     el.classList.toggle('alert', a.status === 'needs-attention');
     el.style.left = `${pt.x - 6}px`;

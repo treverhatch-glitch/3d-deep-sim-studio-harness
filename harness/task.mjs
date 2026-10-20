@@ -102,7 +102,19 @@ export function syncCurrentTaskCheckpoint(activeTask, note = '') {
   fs.writeFileSync(CURRENT_TASK_FILE, content, 'utf8');
 }
 
-export function startTask(taskId, agent = null) {
+export const HANDOFF_DIR = path.join(REPO_ROOT, 'studio', 'handoffs');
+const handoffFile = (id) => path.join(HANDOFF_DIR, `${id}.md`);
+
+/** Notes left on a task by agents who stopped working on it, oldest first. */
+export function readTaskHandoff(taskId) {
+  try {
+    return fs.readFileSync(handoffFile(taskId), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+export function startTask(taskId, agent = null, { model = null } = {}) {
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
@@ -125,8 +137,9 @@ export function startTask(taskId, agent = null) {
   }
   writeNextQueue(q);
   syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
-  emitEvent({ type: 'task.start', agent, task: target.id, status: 'editing', msg: `Started ${target.id}: ${target.title}` });
-  return { ...target, owner: agent };
+  const handoff = readTaskHandoff(target.id);
+  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}` });
+  return { ...target, owner: agent, ...(handoff ? { handoff } : {}) };
 }
 
 /**
@@ -190,6 +203,34 @@ export function completeTask(taskId, note = '', agent = null, { force = false } 
     return { ...target, forced: true, check, followUp: followUp.id };
   }
   return target;
+}
+
+/**
+ * Hand a task back: the agent is out of usage, being swapped, or stuck. The task goes to the top of
+ * the queue, the claim is released, and the note tells the next agent where things stand.
+ * The watcher (harness/watch.mjs) does the same for claims that expired with no word.
+ */
+export function pauseTask(taskId, agent = null, note = '', { force = false } = {}) {
+  const lock = lockStatus(`task:${taskId}`);
+  if (lock.locked && lock.lock.owner !== agent && !force) {
+    return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}. Only that owner can hand it back.` };
+  }
+  const q = parseNextQueue();
+  const idx = q.inProgress.findIndex((t) => t.id === taskId);
+  if (idx === -1) return null;
+  const [target] = q.inProgress.splice(idx, 1);
+  target.status = 'backlog';
+  q.backlog.unshift(target);
+  writeNextQueue(q);
+  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
+  const who = agent || lock.lock?.owner || 'unknown';
+  fs.mkdirSync(HANDOFF_DIR, { recursive: true });
+  const file = handoffFile(taskId);
+  const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
+  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${note || 'No note left.'}\n`);
+  syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}` });
+  return { ...target, handoffFile: path.relative(REPO_ROOT, file) };
 }
 
 export function addTask({ title, role = 'builder', priority = 'P1' }) {
@@ -263,7 +304,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
     }
-    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null);
+    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, { model: typeof flags.model === 'string' ? flags.model : null });
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);
@@ -272,7 +313,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(started.error === 'locked' ? `Task "${targetId}" is claimed by ${started.lock?.owner}. Pick another task.` : started.message);
       process.exit(1);
     }
+    if (started.handoff) console.error(`Picking up where someone else stopped. Notes (studio/handoffs/${started.id}.md):\n${started.handoff}`);
     console.log(JSON.stringify(started, null, 2));
+    process.exit(0);
+  }
+
+  if (cmd === 'pause') {
+    const targetId = arg1;
+    const res = targetId && pauseTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, typeof flags.note === 'string' ? flags.note : '', { force: Boolean(flags.force) });
+    if (!res) {
+      console.error('Usage: node harness/task.mjs pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"');
+      process.exit(1);
+    }
+    if (res.error) {
+      console.error(res.message);
+      process.exit(1);
+    }
+    console.log(`${res.id} is back at the top of the queue. Notes: ${res.handoffFile}`);
     process.exit(0);
   }
 
@@ -318,5 +375,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> | done <ID> | add "<Title>"]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>"]');
 }
