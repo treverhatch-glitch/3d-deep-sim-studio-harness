@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Studio Floor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=Press+Start+2P&family=VT323&display=swap" />
+<style>
+  /* ---------- shared ---------- */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { min-height: 100vh; }
+  button { font: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .skin { display: none; }
+  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon { display: block; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ---------- Ops: a stage manager's cue board ---------- */
+  body[data-skin="ops"] {
+    --bg: #1d2530; --panel: #252f3c; --line: #34404f; --ink: #e8edf2; --quiet: #93a1b2;
+    --go: #3ddc84; --standby: #f5b83d; --hold: #ff5a5f; --link: #6cc6ff; --focus: #6cc6ff;
+    background: var(--bg); color: var(--ink); font: 15px/1.45 Barlow, system-ui, sans-serif;
+  }
+  #ops header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  #ops h1 { margin: 0; font: 700 26px/1 "Barlow Condensed", sans-serif; letter-spacing: .01em; }
+  #ops .now { color: var(--quiet); max-width: 52ch; }
+  #ops .now b { color: var(--ink); font-weight: 600; }
+  #ops .spacer { flex: 1; }
+  .meter { display: flex; align-items: center; gap: 10px; }
+  .meter .bar { width: 140px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .meter .bar i { display: block; width: 0; height: 100%; background: var(--go); }
+  .switch { border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 6px 12px; border-radius: 6px; }
+  #ops .hold-strip { display: none; margin: 12px 20px 0; padding: 10px 14px; border-left: 4px solid var(--hold); background: rgba(255, 90, 95, .08); }
+  #ops .hold-strip.on { display: block; }
+  #ops .hold-strip h2 { margin: 0 0 4px; font: 600 18px/1.2 "Barlow Condensed", sans-serif; color: var(--hold); }
+  #ops main { display: grid; grid-template-columns: minmax(250px, 1fr) minmax(320px, 1.6fr) minmax(280px, 1.1fr); gap: 16px; padding: 16px 20px 24px; }
+  #ops section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+  #ops section + section { margin-top: 16px; }
+  #ops h2 { margin: 0 0 10px; font: 600 19px/1.2 "Barlow Condensed", sans-serif; }
+  #ops h2 small { font: 400 13px Barlow, sans-serif; color: var(--quiet); margin-left: 6px; }
+  .cue { display: grid; grid-template-columns: 14px 1fr; gap: 4px 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .cue:first-of-type { border-top: 0; }
+  .lamp { width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; background: var(--quiet); }
+  .lamp.working { background: var(--go); box-shadow: 0 0 10px var(--go); }
+  .lamp.idle { background: var(--standby); }
+  .lamp.needs-attention { background: var(--hold); box-shadow: 0 0 10px var(--hold); }
+  .cue .who { font-weight: 600; }
+  .cue .what { grid-column: 2; color: var(--quiet); font-size: 13.5px; overflow-wrap: anywhere; }
+  .lock { font-size: 13.5px; padding: 6px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  .lock:first-of-type { border-top: 0; }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .filters button { border: 1px solid var(--line); background: transparent; color: var(--quiet); border-radius: 14px; padding: 2px 10px; font-size: 13px; }
+  .filters button[aria-pressed="true"] { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+  .timeline { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow: auto; }
+  .timeline li { display: grid; grid-template-columns: 52px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+  .timeline li:first-child { border-top: 0; }
+  .timeline time { color: var(--quiet); font-variant-numeric: tabular-nums; font-size: 13px; padding-top: 1px; }
+  .timeline .who { font-weight: 600; margin-right: 6px; }
+  .timeline .kind { color: var(--quiet); font-size: 13px; }
+  .timeline .msg { overflow-wrap: anywhere; }
+  .timeline li.bad .msg { color: #ffb3b5; }
+  .timeline li.good .kind { color: var(--go); }
+  .lane h3 { margin: 10px 0 4px; font: 600 15px/1.2 "Barlow Condensed", sans-serif; color: var(--quiet); }
+  .task { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .task:first-of-type { border-top: 0; }
+  .task .pri { display: inline-block; min-width: 26px; font-weight: 600; }
+  .pri.P0 { color: var(--hold); } .pri.P1 { color: var(--standby); }
+  dl.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
+  dl.facts dt { color: var(--quiet); }
+  dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; }
+  .divs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .divs span { font-size: 13px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--line); color: var(--quiet); }
+  .divs span.on { color: var(--ink); border-color: var(--go); }
+  .note { color: var(--quiet); font-size: 13px; margin: 8px 0 0; }
+  @media (max-width: 1000px) {
+    #ops main { grid-template-columns: 1fr; padding: 12px 16px; }
+    #ops header { padding: 12px 16px; }
+    .meter .bar { width: 90px; }
+    .timeline { max-height: none; }
+  }
+
+  /* ---------- Tycoon: a pixel game studio ---------- */
+  body[data-skin="tycoon"] {
+    --sky: #7ec8e3; --wall: #f6e7c8; --floor-a: #d9a066; --floor-b: #cf9358; --ink: #2b1d14; --panel: #fff6e0;
+    --frame: #5a3a22; --go: #4caf50; --hold: #e53935; --focus: #1e88e5;
+    background: var(--sky); color: var(--ink); font: 22px/1.1 VT323, monospace;
+  }
+  #tycoon .top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px; background: var(--frame); color: #ffe9b5; border-bottom: 4px solid #3b2414; }
+  #tycoon .top h1 { margin: 0; font: 13px/1.4 "Press Start 2P", monospace; color: #fff; }
+  #tycoon .stat { display: flex; gap: 6px; align-items: baseline; }
+  #tycoon .stat b { font: 12px "Press Start 2P", monospace; color: #fff; }
+  #tycoon .top .spacer { flex: 1; }
+  #tycoon .top .switch { background: #ffe9b5; color: var(--frame); border: 3px solid #3b2414; border-radius: 0; font: 11px "Press Start 2P", monospace; padding: 6px 10px; }
+  #tycoon .office { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; padding: 12px 14px 120px; }
+  .room { position: relative; min-height: 236px; overflow: hidden; border: 4px solid var(--frame); background:
+      linear-gradient(var(--wall) 0 34px, transparent 34px),
+      repeating-linear-gradient(90deg, var(--floor-a) 0 22px, var(--floor-b) 22px 44px); image-rendering: pixelated; }
+  .room .plate { position: absolute; top: 6px; left: 8px; font: 10px/1.3 "Press Start 2P", monospace; color: var(--frame); }
+  .room .count { position: absolute; top: 6px; right: 8px; font-size: 20px; color: var(--frame); }
+  .room .desks { position: absolute; inset: 96px 8px 8px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px 14px; }
+  .room.locked { filter: grayscale(.9) brightness(.62); }
+  .room.locked::after { content: attr(data-hint); position: absolute; inset: 40px 8px 8px; display: grid; place-items: center; text-align: center; color: #fff; font-size: 20px; text-shadow: 2px 2px 0 #000; }
+  .worker { position: relative; width: 64px; height: 70px; }
+  .desk { position: absolute; bottom: 0; left: 0; width: 64px; height: 18px; background: #8d5a32; border-top: 4px solid #a8703f; }
+  .monitor { position: absolute; bottom: 18px; left: 34px; width: 22px; height: 16px; background: #263238; border: 3px solid #455a64; }
+  .monitor.on { background: #80deea; }
+  .monitor.alert { background: #ff8a80; }
+  .sprite { position: absolute; bottom: 18px; left: 6px; width: 4px; height: 4px; }
+  .worker.working .sprite { animation: bob .6s steps(2) infinite; }
+  @keyframes bob { 50% { transform: translateY(-2px); } }
+  .tag { position: absolute; bottom: -22px; left: -4px; width: 76px; text-align: center; font-size: 17px; background: var(--panel); border: 2px solid var(--frame); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bubble { position: absolute; bottom: 74px; left: -4px; z-index: 2; max-width: 150px; width: max-content; padding: 4px 6px; background: #fff; border: 3px solid #000; font-size: 18px; line-height: 1; }
+  .bubble::after { content: ""; position: absolute; bottom: -9px; left: 22px; border: 6px solid transparent; border-top-color: #000; }
+  #tycoon .dock { position: fixed; left: 0; right: 0; bottom: 0; background: var(--frame); color: #ffe9b5; border-top: 4px solid #3b2414; padding: 8px 14px; }
+  #tycoon .build { display: flex; align-items: center; gap: 12px; }
+  #tycoon .build .bar { flex: 1; height: 18px; background: #3b2414; border: 3px solid #ffe9b5; }
+  #tycoon .build .bar i { display: block; width: 0; height: 100%; background: repeating-linear-gradient(90deg, #8bc34a 0 10px, #7cb342 10px 20px); }
+  #tycoon .ticker { overflow: hidden; white-space: nowrap; margin-top: 6px; }
+  #tycoon .ticker span { display: inline-block; padding-left: 100%; animation: tick 40s linear infinite; }
+  @keyframes tick { to { transform: translateX(-100%); } }
+  #tycoon .legend { font-size: 18px; margin-top: 4px; opacity: .85; }
+  @media (max-width: 600px) { #tycoon .office { grid-template-columns: 1fr 1fr; } .room { min-height: 170px; } body[data-skin="tycoon"] { font-size: 19px; } }
+</style>
+</head>
+<body data-skin="ops">
+
+<!-- Ops skin -->
+<div id="ops" class="skin">
+  <header>
+    <h1>Studio floor</h1>
+    <div class="now" id="o-now">Loading…</div>
+    <div class="spacer"></div>
+    <div class="meter" title="Tasks done out of all tasks in studio/NEXT.md"><span id="o-prog">0 of 0 tasks done</span><span class="bar"><i id="o-progbar"></i></span></div>
+    <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
+    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+  </header>
+  <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
+  <main>
+    <div>
+      <section><h2>Agents on cue <small>last 24 h</small></h2><div id="o-agents"></div><p class="note">Green: working. Amber: idle over 15 min. Red: last action failed or escalated.</p></section>
+      <section><h2>Claims</h2><div id="o-locks"></div></section>
+    </div>
+    <section>
+      <h2>Activity</h2>
+      <div class="filters" id="o-filters" role="toolbar" aria-label="Filter activity by agent"></div>
+      <ol class="timeline" id="o-timeline"></ol>
+    </section>
+    <div>
+      <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
+      <section><h2>Latest playtest</h2><div id="o-play"></div></section>
+      <section><h2>Model calls today</h2><div id="o-router"></div></section>
+      <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
+      <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
+    </div>
+  </main>
+</div>
+
+<!-- Tycoon skin -->
+<div id="tycoon" class="skin">
+  <div class="top">
+    <h1>Your Studio</h1>
+    <span class="stat" title="Tasks done in studio/NEXT.md">Shipped <b id="t-done">0</b></span>
+    <span class="stat" title="Open P0 and P1 tasks">Bugs <b id="t-bugs">0</b></span>
+    <span class="stat" title="Gates green in the last verify">Fans <b id="t-fans">–</b></span>
+    <span class="stat" title="Lessons in studio/memory/failures.md">Research <b id="t-research">0</b></span>
+    <span class="stat" title="Real tokens reported by providers through the router today">Tokens used <b id="t-tokens">0</b></span>
+    <span class="stat" title="Local time">Day <b id="t-clock">--:--</b></span>
+    <span class="spacer"></span>
+    <button class="switch" data-to="ops">Ops view</button>
+  </div>
+  <div class="office" id="t-office"></div>
+  <div class="dock">
+    <div class="build"><span>Game in development</span><span class="bar"><i id="t-buildbar"></i></span><span id="t-buildpct">0%</span></div>
+    <div class="ticker" aria-live="off"><span id="t-ticker">Waiting for the first event…</span></div>
+    <div class="legend">Every number is read from the studio files. Locked rooms are divisions that are switched off.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const hhmm = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+  const ago = (m) => (m == null ? '' : m < 1 ? 'now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`);
+  const short = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+  let state = null;
+  let filter = null;
+  const seen = new Set();
+  let primed = false;
+  const bubbles = new Map(); // agent -> { msg, until }
+
+  // Skin: ?skin=tycoon wins, then the remembered choice.
+  const fromUrl = new URL(location.href).searchParams.get('skin');
+  const setSkin = (s) => { document.body.dataset.skin = s; store.set('hudSkin', s); if (state) render(); };
+  setSkin(fromUrl === 'tycoon' || fromUrl === 'ops' ? fromUrl : store.get('hudSkin') || 'ops');
+  document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
+
+
+  function tone(e) {
+    if (/escalate|exhausted|error|fail|bug|denied/.test(e.type || '') || /FAIL/.test(e.msg || '')) return 'bad';
+    if (/pass|done|success/.test(e.type || '')) return 'good';
+    return '';
+  }
+
+  // ---------- Ops ----------
+  function renderOps(s) {
+    const cur = s.queue.inProgress[0];
+    $('o-now').innerHTML = cur ? `Now: <b>${esc(cur.id)}</b> ${esc(short(cur.title, 90))}` : 'Nothing in progress. Pull the next task from the queue.';
+    $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done`;
+    $('o-progbar').style.width = `${Math.round(s.progress.ratio * 100)}%`;
+    if (s.gates?.rows) {
+      const req = s.gates.rows.filter((r) => r.required);
+      const green = req.filter((r) => r.ok).length;
+      $('o-gates').textContent = `Gates: ${green} of ${req.length} green, ${hhmm(s.gates.at)}${s.gates.partial ? ' (partial run)' : ''}`;
+    }
+    $('o-hold').classList.toggle('on', s.needs.length > 0);
+    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${esc(hhmm(n.ts))} · ${esc(n.agent)}: ${esc(n.msg)}${n.task ? ` (<code>${esc(n.task)}</code>)` : ''}</div>`).join('');
+
+    $('o-agents').innerHTML = s.agents.length
+      ? s.agents.map((a) => `<div class="cue"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
+      : '<p class="note">No agent has written an event yet. Agents appear here when they run any harness command.</p>';
+    $('o-locks').innerHTML = s.locks.length
+      ? s.locks.map((l) => `<div class="lock"><b>${esc(l.owner)}</b> holds <code>${esc(l.key)}</code> until ${esc(hhmm(l.expiresAt))}</div>`).join('')
+      : '<p class="note">No claims. Agents claim with <code>node harness/lock.mjs claim</code>.</p>';
+
+    const names = [...new Set(s.events.map((e) => e.agent).filter(Boolean))].slice(0, 10);
+    $('o-filters').innerHTML = [`<button aria-pressed="${!filter}" data-f="">All</button>`, ...names.map((n) => `<button aria-pressed="${filter === n}" data-f="${esc(n)}">${esc(n)}</button>`)].join('');
+    $('o-filters').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.f || null; renderOps(state); }));
+    $('o-timeline').innerHTML = s.events
+      .filter((e) => !filter || e.agent === filter)
+      .slice(0, 80)
+      .map((e) => `<li class="${tone(e)}"><time>${hhmm(e.ts)}</time><div><span class="who">${esc(e.agent || '')}</span><span class="kind">${esc(e.type || '')}</span><div class="msg">${esc(e.msg || '')}</div></div></li>`)
+      .join('');
+
+    const lane = (label, list, n) => `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span></div>`).join('') || '<p class="note">Empty</p>'}`;
+    $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, 5) + lane('Next up', s.queue.backlog, 5) + lane('Done', s.queue.done, 3);
+
+    const p = s.playtest;
+    $('o-play').innerHTML = p
+      ? `<dl class="facts"><dt>Result</dt><dd style="color:${p.passed ? 'var(--go)' : 'var(--hold)'}">${p.passed ? 'Passed' : 'Failed'}${p.outcome ? `, ${esc(p.outcome)}` : ''} at tick ${esc(p.ticksRun)}</dd><dt>Cartridge</dt><dd>${esc(p.cartridge)} · ${esc(p.scenario || 'no scenario')} · seed ${esc(p.seed)}</dd>${p.failingTick ? `<dt>Failing tick</dt><dd>${esc(p.failingTick)}: ${esc(p.finding)}</dd>` : ''}<dt>State hash</dt><dd><code>${esc(p.hash)}</code></dd><dt>Report</dt><dd><code>${esc(p.report)}</code></dd><dt>When</dt><dd>${esc(hhmm(p.at))}</dd></dl>`
+      : '<p class="note">No playtest yet. Run <code>node qa/playtest.mjs --stage 1</code>.</p>';
+
+    const prov = Object.entries(s.router.providers);
+    $('o-router').innerHTML = (prov.length
+      ? `<dl class="facts">${prov.map(([id, v]) => `<dt>${esc(id)}</dt><dd>${v.calls} calls · ${v.tokensIn.toLocaleString()} in / ${v.tokensOut.toLocaleString()} out</dd>`).join('')}</dl>`
+      : '<p class="note">No routed calls today. Counts come from the router, as reported by each provider.</p>') +
+      `<p class="note">Failovers today: ${s.router.failovers}. All providers busy: ${s.router.exhausted}.</p>`;
+    $('o-divs').innerHTML = s.divisions.map((d) => `<span class="${d.active ? 'on' : ''}" title="${d.active ? 'On' : 'Off'}">${esc(d.name)}</span>`).join('');
+    $('o-rtk').innerHTML = s.rtk
+      ? `<pre style="margin:0;white-space:pre-wrap;font-size:13px">${esc(s.rtk)}</pre><p class="note">Measured by rtk on the output it filtered.</p>`
+      : '<p class="note">rtk is not installed, so nothing is measured. Run <code>npm run setup:token-savers</code>. Total tokens saved can\'t be measured honestly: nobody knows what an agent would have read otherwise.</p>';
+  }
+
+  // ---------- Tycoon ----------
+  const PATTERN = ['..hhhh..', '.hhhhhh.', '.hssssh.', '.sesses.', '.ssssss.', '..tttt..', '.tttttt.', '.tttttt.', '..pppp..', '..p..p..'];
+  const HAIR = ['#3e2723', '#212121', '#ffb300', '#8d6e63', '#c62828', '#5d4037', '#f5f5f5'];
+  const SKIN = ['#ffcc99', '#e0ac69', '#c68642', '#8d5524', '#f1c27d'];
+  const SHIRT = { production: '#7b1fa2', engineering: '#1e88e5', qa: '#43a047', design: '#fb8c00', review: '#6d4c41', sound: '#00897b', art: '#d81b60', '3d': '#3949ab', localization: '#00acc1', ui: '#8e24aa', narrative: '#5e35b1', release: '#f4511e', devlog: '#546e7a', engine: '#455a64' };
+  const hash = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  function sprite(name, room) {
+    const h = hash(name);
+    const col = { h: HAIR[h % HAIR.length], s: SKIN[(h >>> 3) % SKIN.length], e: '#000', t: SHIRT[room] || '#1e88e5', p: '#37474f' };
+    const px = 4;
+    const shadows = [];
+    PATTERN.forEach((row, y) => [...row].forEach((c, x) => { if (c !== '.') shadows.push(`${x * px}px ${(y - PATTERN.length) * px}px 0 0 ${col[c]}`); }));
+    return `<span class="sprite" style="box-shadow:${shadows.join(',')}"></span>`;
+  }
+
+  function renderTycoon(s) {
+    $('t-done').textContent = s.progress.done;
+    $('t-bugs').textContent = [...s.queue.inProgress, ...s.queue.backlog].filter((t) => t.priority === 'P0' || t.priority === 'P1').length;
+    if (s.gates?.rows) { const req = s.gates.rows.filter((r) => r.required); $('t-fans').textContent = `${req.filter((r) => r.ok).length}/${req.length}`; }
+    $('t-research').textContent = s.lessons;
+    $('t-tokens').textContent = Object.values(s.router.providers).reduce((a, v) => a + v.tokensIn + v.tokensOut, 0).toLocaleString();
+    $('t-clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const pct = Math.round(s.progress.ratio * 100);
+    $('t-buildbar').style.width = `${pct}%`;
+    $('t-buildpct').textContent = `${pct}%`;
+    $('t-ticker').textContent = s.events.slice(0, 12).map((e) => `${hhmm(e.ts)} ${e.agent}: ${short(e.msg, 70)}`).join('   ★   ') || 'Quiet day at the studio.';
+
+    const now = Date.now();
+    $('t-office').innerHTML = s.divisions.map((d) => {
+      const staff = s.agents.filter((a) => a.room === d.id);
+      const workers = staff.map((a) => {
+        const b = bubbles.get(a.name);
+        const bubble = b && b.until > now ? `<span class="bubble">${esc(short(b.msg, 60))}</span>` : '';
+        const screen = a.status === 'needs-attention' ? 'alert' : a.status === 'working' ? 'on' : '';
+        return `<div class="worker ${a.status}" title="${esc(a.name)}: ${esc(a.lastMsg || '')}">${bubble}<span class="monitor ${screen}"></span>${sprite(a.name, d.id)}<span class="desk"></span><span class="tag">${esc(a.name)}</span></div>`;
+      }).join('');
+      const hint = d.active ? '' : 'Locked: switch on in studio/divisions.json';
+      return `<div class="room ${d.active ? '' : 'locked'}" data-hint="${esc(hint)}"><span class="plate">${esc(d.name)}</span><span class="count">${staff.length ? `${staff.length} staff` : ''}</span><div class="desks">${workers}</div></div>`;
+    }).join('');
+  }
+
+  function render() {
+    if (document.body.dataset.skin === 'tycoon') renderTycoon(state);
+    else renderOps(state);
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/hud', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HUD ${res.status}`);
+      state = await res.json();
+      for (const e of state.events.slice(0, 20).reverse()) {
+        const key = e.id || `${e.ts}${e.msg}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (primed && e.agent) bubbles.set(e.agent, { msg: e.msg, until: Date.now() + 9000 });
+      }
+      primed = true;
+      render();
+    } catch (err) {
+      $('o-now').textContent = `Can't reach the HUB (${err.message}). Is node hub/server.mjs running?`;
+    }
+  }
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

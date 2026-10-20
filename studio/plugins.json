@@ -1,0 +1,118 @@
+{
+  "about": "Outside tools agents can use. Nothing here is vendored: each plugin installs from its own project. Turn one on with `node harness/plugins.mjs enable <id>`; `node harness/plugins.mjs mcp` prints the MCP config for every enabled plugin. Pin versions; bump them on purpose.",
+  "plugins": [
+    {
+      "id": "rtk",
+      "name": "rtk",
+      "repo": "https://github.com/rtk-ai/rtk",
+      "license": "Apache-2.0",
+      "division": "core",
+      "what": "Filters shell output before an agent reads it, and measures what it filtered (rtk gain).",
+      "install": "bash scripts/setup-token-savers.sh",
+      "enabled": false
+    },
+    {
+      "id": "qmd",
+      "name": "qmd",
+      "repo": "https://github.com/tobi/qmd",
+      "license": "MIT",
+      "division": "core",
+      "what": "Local search over the studio's markdown, so agents read the right paragraph instead of whole docs.",
+      "install": "npm install -g @tobilu/qmd",
+      "mcp": { "command": "qmd", "args": ["mcp"] },
+      "enabled": false
+    },
+    {
+      "id": "serena",
+      "name": "Serena",
+      "repo": "https://github.com/oraios/serena",
+      "license": "MIT",
+      "division": "core",
+      "what": "Symbol-level code lookup and edits over LSP for large codebases.",
+      "install": "uv (https://docs.astral.sh/uv/)",
+      "mcp": { "command": "uvx", "args": ["--from", "git+https://github.com/oraios/serena@v2.1.0", "serena", "start-mcp-server", "--context", "ide", "--project", "."] },
+      "enabled": false
+    },
+    {
+      "id": "playwright-mcp",
+      "name": "Playwright MCP",
+      "repo": "https://github.com/microsoft/playwright-mcp",
+      "license": "Apache-2.0",
+      "division": "qa",
+      "what": "Browser control for agents: accessibility snapshots, screenshots, console.",
+      "mcp": { "command": "npx", "args": ["-y", "@playwright/mcp@0.0.83", "--headless", "--caps=vision"] },
+      "enabled": true
+    },
+    {
+      "id": "chrome-devtools-mcp",
+      "name": "Chrome DevTools MCP",
+      "repo": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "license": "Apache-2.0",
+      "division": "qa",
+      "what": "Performance traces, network, console with source maps, Lighthouse audits for the web build.",
+      "mcp": { "command": "npx", "args": ["-y", "chrome-devtools-mcp@1.11.0", "--headless", "--no-usage-statistics"] },
+      "enabled": false
+    },
+    {
+      "id": "rea",
+      "name": "REA (Reverse Engineer Anything)",
+      "repo": "https://github.com/morluto/rea",
+      "license": "MIT",
+      "division": "game-study",
+      "what": "Lets agents study how existing software is built: web bundles, Electron apps, Godot PCK and Unity IL2CPP metadata, native binaries with Ghidra. Findings come back with evidence.",
+      "install": "npx rea-agents@6.7.0 setup (asks before changing agent configs)",
+      "mcp": { "command": "npx", "args": ["-y", "rea-agents@6.7.0", "mcp"] },
+      "approval": "human",
+      "rules": "docs/GAME-STUDY.md",
+      "enabled": false
+    },
+    {
+      "id": "watch-skill",
+      "name": "Watch Skill",
+      "repo": "https://github.com/oxbshw/watch-skill",
+      "license": "MIT",
+      "division": "ui",
+      "what": "Indexes screen recordings into timestamped frames, OCR text and transcripts that agents can search. Use your own recordings.",
+      "install": "pip install 'watch-skill[standard]==1.4.3'",
+      "status": "trial",
+      "enabled": false
+    },
+    {
+      "id": "blender-mcp",
+      "name": "Blender MCP",
+      "repo": "https://github.com/ahujasid/blender-mcp",
+      "license": "MIT",
+      "division": "3d",
+      "what": "Agents create and edit Blender scenes; complements the headless presets in tools/blender.",
+      "enabled": false
+    },
+    {
+      "id": "blender-orchestrator",
+      "name": "blender-orchestrator",
+      "repo": "https://github.com/mlolson/blender-orchestrator",
+      "license": "see repo",
+      "division": "3d",
+      "what": "Agent-driven Blender control (already in .mcp.json).",
+      "mcp": { "command": "npx", "args": ["-y", "github:mlolson/blender-orchestrator#a9dfb32d41709dd013b3c6ca0802bb869040656d"] },
+      "enabled": false
+    },
+    {
+      "id": "godot-ai",
+      "name": "godot-ai",
+      "repo": "https://github.com/hi-godot/godot-ai",
+      "license": "MIT",
+      "division": "engine",
+      "what": "Agent control of the Godot editor for the Engine Transfer division.",
+      "enabled": false
+    },
+    {
+      "id": "unity-mcp",
+      "name": "Unity MCP",
+      "repo": "https://github.com/CoplayDev/unity-mcp",
+      "license": "MIT",
+      "division": "engine",
+      "what": "Agent control of the Unity editor for the Engine Transfer division.",
+      "enabled": false
+    }
+  ]
+}

@@ -41,6 +41,7 @@ import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR
 import { startTask, completeTask, addTask, NEXT_FILE } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
+import { buildHudState } from '../harness/hud.mjs';
 
 loadDotEnv();
 
@@ -505,6 +506,15 @@ export function createHubServer() {
       const briefRes = buildPreparedBrief();
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, ...briefRes });
+    }
+
+    if (url.pathname === '/api/hud' && req.method === 'GET') {
+      return sendJson(res, 200, buildHudState());
+    }
+
+    if ((url.pathname === '/v3' || url.pathname === '/v3/') && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(fs.readFileSync(path.join(__dirname, 'v3', 'index.html'), 'utf8'));
     }
 
     if (url.pathname === '/api/state' && req.method === 'GET') {

@@ -27,6 +27,13 @@ for (const gate of gates) {
 
 console.log('\n[gates] summary');
 for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.required ? '' : '  (optional)'}`);
+// The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
+try {
+  fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), rows }, null, 2));
+} catch {
+  // read-only checkout: the board just shows "not run"
+}
 const failed = rows.filter((r) => !r.ok && r.required);
 if (failed.length) {
   console.error(`[gates] ${failed.length} required gate(s) failed: ${failed.map((r) => r.id).join(', ')}`);
