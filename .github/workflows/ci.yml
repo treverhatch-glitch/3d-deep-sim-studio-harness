@@ -28,7 +28,7 @@ jobs:
         run: node scripts/release.mjs
       - name: Optional gates (report only)
         if: always()
-        run: node scripts/run-gates.mjs --only balance,fun,renderer-budget
+        run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,hud
 
   # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).
   windows:

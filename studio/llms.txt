@@ -82,6 +82,7 @@
   Views: Ops, Studio Tycoon, Game plan (phases, layers, Idea Board, Director; `?skin=plan`). Endpoints: `GET /api/bible`, `POST /api/intake`, `POST /api/bible/sign`, `GET|POST /api/ideas`, `POST /api/inbox`.
   Click an agent for its drawer: current task, checklist, skill steps, hand-off notes, claims, score (`GET /api/agent?name=`; file reads only, no AI).
   Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:3847/?token=<HUB_TOKEN>`; `?view=mobile` for phones).
+- `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.
 - `node scripts/check-sim-purity.mjs`

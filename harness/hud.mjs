@@ -187,14 +187,15 @@ export function buildHudState() {
     agents.set(l.owner, a);
   }
   const divs = divisions();
-  const humans = new Set(['war-room-human', ...(readJson('.studio/humans.json', []) || [])]);
+  // People: names used on War Room buttons, and whoever signed the Game Bible.
+  const humans = new Set(['war-room-human', ...(readJson('.studio/humans.json', []) || []), readJson('studio/bible/bible.json', {})?.signed?.by].filter(Boolean));
   const agentList = [...agents.values()].map((a) => {
     if (humans.has(a.name)) {
       const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
       return { ...a, role: 'human', kind: 'human', room: 'production', status: idleMin !== null && idleMin > 15 ? 'idle' : 'working', idleMin };
     }
     const idleMin = a.lastSeen ? Math.round((now - Date.parse(a.lastSeen)) / 60000) : null;
-    const role = roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
+    const role = pname && a.name === pname ? 'producer' : roomForRole(a.name, divs) ? a.name : roleOfTask.get(a.task) || null;
     const errored = /error|fail|escalate|bug|forced|not_done/.test(a.lastType || '');
     // Holding a task but silent for 30 minutes: probably out of usage or stuck (harness/watch.mjs).
     const stalled = Boolean(a.holds?.some((k) => k.startsWith('task:'))) && (idleMin === null || idleMin > 30);

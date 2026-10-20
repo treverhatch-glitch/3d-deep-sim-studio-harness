@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Studio Floor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%231f2933%27/%3E%3Crect x=%273%27 y=%273%27 width=%274%27 height=%274%27 fill=%27%2334d399%27/%3E%3Crect x=%279%27 y=%273%27 width=%274%27 height=%274%27 fill=%27%23fbbf24%27/%3E%3Crect x=%273%27 y=%279%27 width=%2710%27 height=%274%27 fill=%27%2360a5fa%27/%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=Press+Start+2P&family=VT323&display=swap" />
 <style>
@@ -94,7 +95,7 @@
     #ops main { grid-template-columns: 1fr; padding: 12px 16px; }
     #ops header { padding: 12px 16px; }
     .meter .bar { width: 90px; }
-    .timeline { max-height: none; }
+    .timeline { max-height: 55vh; }
   }
 
 
@@ -423,7 +424,7 @@
         <div class="act-row"><input id="o-name" placeholder="Your name" aria-label="Your name, shown on what you do"> <input id="o-token" type="password" placeholder="HUB token" aria-label="HUB token from .env" autocomplete="off"> <button id="o-save" type="button">Use</button></div>
         <form id="o-add" class="act-row"><input id="o-title" placeholder="New task" aria-label="New task title" required>
           <select id="o-role" aria-label="Role"><option>builder</option><option>qa-playtester</option><option>designer-calibrator</option><option>reviewer</option><option>reference-scout</option><option>fun-tester</option><option>asset-3d</option><option>producer</option></select>
-          <select id="o-type" aria-label="Kind of task"><option value="">change</option><option>bug</option><option>study</option><option>balance</option><option>fun</option><option>playtest</option><option>review</option><option>docs</option></select>
+          <select id="o-type" aria-label="Kind of task"><option value="">change</option><option>bug</option><option>study</option><option>balance</option><option>fun</option><option>playtest</option><option>review</option><option>docs</option><option>system</option></select>
           <select id="o-pri" aria-label="Priority"><option>P0</option><option selected>P1</option><option>P2</option><option>P3</option></select>
           <select id="o-size" aria-label="Size, 1 easy to 5 big"><option value="">size</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
@@ -447,7 +448,7 @@
   <div class="top">
     <h1>Your Studio</h1>
     <span class="stat" title="Tasks done in studio/NEXT.md">Shipped <b id="t-done">0</b></span>
-    <span class="stat" title="Open P0 and P1 tasks">Bugs <b id="t-bugs">0</b></span>
+    <span class="stat" title="Open bug tasks (titles starting Bug or Fix)">Bugs <b id="t-bugs">0</b></span>
     <span class="stat" title="Gates green in the last verify">Fans <b id="t-fans">–</b></span>
     <span class="stat" title="Lessons in studio/memory/failures.md">Research <b id="t-research">0</b></span>
     <span class="stat" title="Real tokens reported by providers through the router today">Tokens used <b id="t-tokens">0</b></span>
@@ -829,7 +830,10 @@
     const ro = !hubToken();
     const btn = (act, id, label) => `<button class="act" data-act="${act}" data-id="${esc(id)}" ${ro ? 'disabled title="Needs the HUB token"' : ''}>${label}</button>`;
     const acts = { 'In progress': (t) => btn('pause', t.id, 'Pause') + btn('done', t.id, 'Done'), 'Next up': (t) => btn('start', t.id, 'Start'), Done: (t) => btn('reopen', t.id, 'Reopen') };
-    const lane = (label, list, n) => `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${acts[label](t)}</div>`).join('') || '<p class="note">Empty</p>'}`;
+    // Most urgent first; the file order breaks ties. The rest are counted, not hidden silently.
+    const rank = { P0: 0, P1: 1, P2: 2, P3: 3 };
+    const byPri = (list) => list.map((t, i) => [t, i]).sort((a, b) => (rank[a[0].priority] ?? 9) - (rank[b[0].priority] ?? 9) || a[1] - b[1]).map(([t]) => t);
+    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${acts[label](t)}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
     $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, 6) + lane('Next up', s.queue.backlog, 8) + lane('Done', s.queue.done, 3);
     $('o-act').classList.toggle('ro', ro);
     $('o-actstate').textContent = ro ? 'read-only' : `as ${actor()}`;
@@ -1351,7 +1355,7 @@
 
   function renderTycoon(s) {
     $('t-done').textContent = s.progress.done;
-    $('t-bugs').textContent = [...s.queue.inProgress, ...s.queue.backlog].filter((t) => t.priority === 'P0' || t.priority === 'P1').length;
+    $('t-bugs').textContent = [...s.queue.inProgress, ...s.queue.backlog].filter((t) => /^(bug|fix)\b/i.test(t.title)).length;
     if (s.gates?.rows) { const req = s.gates.rows.filter((r) => r.required); $('t-fans').textContent = `${req.filter((r) => r.ok).length}/${req.length}`; }
     $('t-research').textContent = s.lessons;
     $('t-tokens').textContent = Object.values(s.router.providers).reduce((a, v) => a + v.tokensIn + v.tokensOut, 0).toLocaleString();

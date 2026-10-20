@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.13.1] — 2026-10-20
+### Added
+- **`npm run hud:check`** (optional gate `hud`): opens the War Room in Chromium on a throwaway copy of the studio and uses it like a person: all three views at desktop and phone sizes (no errors, nothing off the side), the agent drawer, adding a task, messaging the Producer, live updates, pitching an idea, answering a follow-up, and the sharing box. 27 checks; skips without a browser.
+### Fixed
+- The queue's "Next up" lists the most urgent first and says how many more are in `studio/NEXT.md`; a task added from the page was hidden past the eighth.
+- The Studio view's "Bugs" counted every open P0 and P1 task; it now counts bug tasks.
+- The Producer (`STUDIO_PRODUCER_NAME`) and whoever signed the Game Bible sit in the Producer's office, not Engineering.
+- The page has an icon (the missing favicon was a 404 on every load). On phones the activity list scrolls in place instead of pushing the controls far down.
+- `system` is in the War Room's task-type list.
+
+---
+
 ## [2.13.0] — 2026-10-20
 ### Fixed
 - **Node and Python now hash every state alike.** Canonical JSON is built directly in both: keys in code-point order (`JSON.stringify` moved integer-like keys such as `"0"`, `"10"` to the front) and numbers in JavaScript's layout (Python wrote `1e-05` for `0.00001` and `1e-07` for `1e-7`). Emoji keys sorted differently too. `qa/hash-vectors.json` holds 20 edge cases both languages must match; a 5,000-state fuzz agreed. No existing golden changed.
