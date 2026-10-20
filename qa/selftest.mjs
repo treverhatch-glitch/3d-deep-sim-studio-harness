@@ -20,6 +20,10 @@ const SKIP = new Set(['.git', 'node_modules', '.env', 'dist']);
 let failed = 0;
 let n = 0;
 
+// The self-test never reads the live studio: every copy starts from the template's board and an
+// empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
+const FIXTURE = path.join(root, 'qa', 'fixtures', 'studio');
+const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art'];
 function copyRepo() {
   const dest = path.join(tmpRoot, `copy-${++n}`);
   fs.cpSync(root, dest, {
@@ -31,15 +35,23 @@ function copyRepo() {
       return !SKIP.has(top) && !rel.startsWith('qa/reports/') && !rel.startsWith('.studio/') && !rel.includes('__pycache__');
     },
   });
+  for (const rel of LIVE_STATE) fs.rmSync(path.join(dest, rel), { recursive: true, force: true });
+  for (const dir of ['studio/reviews', 'studio/bible/reviews', 'studio/experiments']) {
+    const d = path.join(dest, dir);
+    if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) if (f.toLowerCase() !== 'readme.md') fs.rmSync(path.join(d, f), { recursive: true, force: true });
+  }
+  fs.cpSync(FIXTURE, path.join(dest, 'studio'), { recursive: true });
   return dest;
 }
 const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readFileSync(path.join(dir, rel), 'utf8')));
-const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...process.env, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+// A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
+const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k)));
+const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
 const runAsync = (dir, cmd, env = {}) =>
   new Promise((resolve) => {
-    const c = spawn(cmd, { cwd: dir, shell: true, env: { ...process.env, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+    const c = spawn(cmd, { cwd: dir, shell: true, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
     let stdout = '';
     let stderr = '';
     c.stdout.on('data', (d) => (stdout += d));
@@ -175,7 +187,9 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 {
   const dir = copyRepo();
   report('lock refuses a shared owner name', run(dir, 'node harness/lock.mjs claim task:T-9 --owner cursor').status !== 0);
-  run(dir, 'node harness/lock.mjs claim path:cartridges --owner alice-1');
+  const wide = run(dir, 'node harness/lock.mjs claim path:studio --owner alice-1');
+  report('lock refuses a whole top-level folder without a reason, and says how to narrow it', wide.status !== 0 && /too-wide/.test(wide.stdout) && /narrowest/.test(wide.stdout), wide.stdout);
+  run(dir, 'node harness/lock.mjs claim path:cartridges --owner alice-1 --wide "moving every cartridge"');
   report('lock refuses a second owner on a covered path', run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim/index.mjs --owner bob-1').status !== 0);
   report('task start refuses work with no owner', run(dir, 'node harness/task.mjs start T-002').status !== 0);
   report('task start succeeds for the first owner', run(dir, 'node harness/task.mjs start T-002 --agent alice-1').status === 0);
@@ -189,7 +203,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 {
   const dir = copyRepo();
   const keys = ['path:cartridges', 'path:cartridges/example-sim', 'path:cartridges/example-sim/index.mjs', 'path:cartridges/example-sim/qa.mjs'];
-  const results = await Promise.all(keys.flatMap((k, i) => [0, 1].map((j) => runAsync(dir, `node harness/lock.mjs claim ${k} --owner racer-${i}-${j}`))));
+  const results = await Promise.all(keys.flatMap((k, i) => [0, 1].map((j) => runAsync(dir, `node harness/lock.mjs claim ${k} --owner racer-${i}-${j} --wide race`))));
   const holders = new Set(fs.readdirSync(path.join(dir, '.studio/locks')).filter((f) => f.endsWith('.lock')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'))));
   const paths = [...holders].map((l) => l.key.slice(5));
   const overlap = paths.some((a, i) => paths.some((b, j) => i !== j && (a === b || b.startsWith(`${a}/`))));
@@ -771,6 +785,68 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the static renderer scan fails nine lights', scan.status !== 0 && /9 lights > 8/.test(scan.stderr), scan.stderr);
 }
 
+// First real run (Jed, v2.14.0): fixes for what blocked or misled it.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  // B2: new-game makes the new game the one the gates test.
+  const ng = run(dir, 'node scripts/new-game.mjs night-shift', env);
+  const game = fs.existsSync(path.join(dir, 'studio/game.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'studio/game.json'), 'utf8')) : {};
+  const gates = run(dir, 'node scripts/run-gates.mjs --only golden', env).stdout;
+  report('new-game writes studio/game.json and the gate run names the game it tested', ng.status === 0 && game.cartridge === 'night-shift' && /testing the game "night-shift" \(from studio\/game\.json\)/.test(gates), ng.stdout + ng.stderr + gates);
+  fs.rmSync(path.join(dir, 'studio/game.json'));
+  // B13: intake takes references as a newline string; then sign.
+  const answers = JSON.parse(fs.readFileSync(path.join(dir, 'studio/templates/intake-example.json'), 'utf8'));
+  answers.answers.references = 'Viridi: tending\nIslanders: placement';
+  fs.writeFileSync(path.join(dir, 'answers.json'), JSON.stringify(answers));
+  const intake = run(dir, 'node harness/intake.mjs --answers answers.json', env);
+  report('intake accepts "one per line" answers as a newline string', intake.status === 0 && /- Islanders: placement/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')), intake.stdout + intake.stderr);
+  run(dir, 'node harness/bible.mjs sign --by jed --via "discord message 42"', env);
+  const signed = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).signed;
+  report('sign records where a remote approval came from', signed?.via === 'discord message 42', JSON.stringify(signed));
+  // B12: the refusal names the word; --not-layer lets a different meaning through, logged.
+  const mood = run(dir, 'node harness/task.mjs add "Renderer: give each room its own mood" --phase 1 --serves pillar:Calm', env);
+  report('a scope refusal names the word that matched and the layer', mood.status !== 0 && /the word "mood"/.test(mood.stderr) && /--not-layer npc-needs/.test(mood.stderr), mood.stderr);
+  const ok = run(dir, 'node harness/task.mjs add "Renderer: give each room its own mood" --phase 1 --serves pillar:Calm --not-layer npc-needs', env);
+  report('--not-layer queues it and tells the Director', ok.status === 0 && /task\.scope_override/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), ok.stdout + ok.stderr);
+  // B7: changing the design after signing holds new build work until a person re-signs.
+  answers.answers.verb = 'fight floor by floor';
+  fs.writeFileSync(path.join(dir, 'answers.json'), JSON.stringify(answers));
+  run(dir, 'node harness/intake.mjs --answers answers.json', env);
+  const held = run(dir, 'node harness/task.mjs add "Build the stairwell" --phase 1 --serves pillar:Calm', env);
+  report('a design change after signing holds new build tasks until a person re-signs', held.status !== 0 && /changed after jed signed it \(verb\)/.test(held.stderr), held.stderr);
+  run(dir, 'node harness/bible.mjs sign --by jed', env);
+  report('re-signing lets build work go on and keeps the earlier signature in history', run(dir, 'node harness/task.mjs add "Build the stairwell" --phase 1 --serves pillar:Calm', env).status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).signHistory?.length === 1);
+  const noDecision = run(dir, 'node harness/bible.mjs pillars set "A: x" "B: y" "C: z" --by jed', env);
+  fs.mkdirSync(path.join(dir, 'studio/decisions'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/decisions/pillars.md'), 'Why the pillars changed.\n');
+  const pillars = run(dir, 'node harness/bible.mjs pillars set "Fight: rules out stealth" "Ride: rules out menus" "Floors: rules out open world" --by jed --decision studio/decisions/pillars.md', env);
+  report('pillars change only with a person and a decision file, and the Bible is signed with them', noDecision.status !== 0 && pillars.status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).pillars[0].name === 'Fight', pillars.stdout + pillars.stderr);
+  // task next by role, task show.
+  const next = JSON.parse(run(dir, 'node harness/task.mjs next --role producer --agent prod-1', env).stdout || '{}');
+  report('task next gives the caller its own role\'s work', next.role === 'producer', JSON.stringify(next));
+  const show = run(dir, `node harness/task.mjs show ${next.id}`, env);
+  report('task show prints a task with its lane, type and checklist', show.status === 0 && /"lane": "waiting"/.test(show.stdout) && /"checklist"/.test(show.stdout), show.stdout.slice(0, 400));
+  // B9: work committed before a hand-back counts when someone else closes the task.
+  const t = JSON.parse(run(dir, 'node harness/task.mjs add "Docs: write the floor list" --role producer', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${t} --agent writer-1`, env);
+  fs.writeFileSync(path.join(dir, 'docs/FLOORS.md'), '# Floors\n\nF1 Cubicle Hell.\n');
+  git('add docs/FLOORS.md');
+  git(`commit -q -m floors --no-verify --trailer "Studio-Task: ${t}"`);
+  run(dir, `node harness/task.mjs pause ${t} --agent writer-1 --note "written, needs closing"`, env);
+  run(dir, `node harness/task.mjs start ${t} --agent writer-2`, env);
+  const dc = run(dir, `node harness/done-check.mjs ${t}`, env).stdout;
+  report('done-check counts commits tagged with the task from before a hand-back', /\[x\] Docs changed for this task/.test(dc), dc);
+  // Forcing with a person's acceptance is logged, without a follow-up task.
+  const forced = run(dir, `node harness/task.mjs done ${t} --agent writer-2 --force --reason "fixture" --accepted-by jed`, env);
+  report('a forced done accepted by a person is logged without a follow-up task', forced.status === 0 && /accepted by jed/.test(forced.stderr) && !/Check forced done/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), forced.stdout + forced.stderr);
+  report('npm run idea -- --help prints how to use it', /Usage: npm run idea/.test(run(dir, 'node harness/ideas.mjs --help', env).stdout));
+}
+
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
 {
   const http = await import('node:http');
@@ -874,7 +950,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('add -A');
   git('commit -q -m init --no-verify');
   run(dir, 'node scripts/install-hooks.mjs');
-  run(dir, 'node harness/lock.mjs claim path:cartridges --owner alice-1');
+  run(dir, 'node harness/lock.mjs claim path:cartridges --owner alice-1 --wide "selftest"');
   edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// touch\n`);
   git('add cartridges/example-sim/qa.mjs');
   report('pre-commit blocks a file locked by another agent', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m x', { STUDIO_LOCK_OWNER: 'bob-1' }).status !== 0);

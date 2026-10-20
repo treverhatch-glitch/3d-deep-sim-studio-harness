@@ -96,10 +96,17 @@ function withMutex(fn) {
   }
 }
 
-export function claim(key, owner, ttlSec = 3600) {
+/** Top-level folders: claiming one blocks every other agent, so it needs a stated reason. */
+export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'hub', 'scripts', 'docs', 'tools', 'assets', 'public']);
+
+export function claim(key, owner, ttlSec = 3600, { wide = null } = {}) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   const k = normalizeKey(key);
+  if (k.startsWith('path:') && WIDE_PATHS.has(k.slice(5).replace(/\/+$/, '')) && !wide) {
+    const at = k.slice(5).replace(/\/+$/, '');
+    return { ok: false, reason: 'too-wide', message: `path:${at} is a whole top-level folder and would block every other agent. Claim the narrowest folder or file you will edit (for example path:${at || '<folder>'}/<subfolder or file>), or pass --wide "<why you need all of it>".` };
+  }
   return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec);
 }
 
@@ -204,7 +211,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log('Usage: node harness/lock.mjs claim|release|status <key> --owner <unique-name> | list | check-staged');
     process.exit(1);
   }
-  if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600)));
+  if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null }));
   if (cmd === 'release') out(release(maybeKey, owner));
   if (cmd === 'status') out(status(maybeKey), true);
   void rest;

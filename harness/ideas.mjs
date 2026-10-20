@@ -77,11 +77,13 @@ export function shapeIdea(id, { notes, by = 'rnd' }) {
   const { idea, error } = need(id, ['captured', 'parked']);
   if (error) return { ok: false, message: error };
   if (!String(notes || '').trim()) return { ok: false, message: 'Shaping needs --notes: what the player does with it, its phase and layer, its cost, and any conflicts.' };
-  const shaped = step({ ...idea, shape: { notes: String(notes).slice(0, 4000), by, at: now() } }, 'shaped', by);
+  const NOTES_CAP = 20000;
+  const cut = String(notes).length > NOTES_CAP;
+  const shaped = step({ ...idea, shape: { notes: String(notes).slice(0, NOTES_CAP), by, at: now(), ...(cut ? { cut: String(notes).length } : {}) } }, 'shaped', by);
   const t = addTask({ title: `Idea: place ${id} ${idea.title}`.slice(0, 160), role: 'planner', priority: 'P2', agent: by });
   writeIdea({ ...shaped, placeTask: t.id || null });
   emitEvent({ type: 'idea.shaped', agent: by, to: 'producer', msg: `${id} shaped by ${by}; ${t.id ? `${t.id} places it` : t.message}` });
-  return { ok: true, task: t.id };
+  return { ok: true, task: t.id, warning: cut ? `the notes were ${String(notes).length} characters; the first ${NOTES_CAP} were kept. Put the rest in a study file and link it.` : null };
 }
 
 export function placeIdea(id, { phase, layer = null, unlock = '', schedule = '', by = 'planner' }) {
@@ -129,6 +131,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else positional.push(argv[i]);
   }
   const [cmd = 'list', a1, a2] = positional;
+  if (argv.includes('--help') || argv.includes('-h') || cmd === 'help') {
+    console.log('Usage: npm run idea -- add "<title>" | route <id> | shape <id> --notes "…" | place <id> --phase n [--layer id] --unlock "…" --schedule "…" | decide <id> approve|park|reject --by <name> | list | show <id> | collect');
+    process.exit(0);
+  }
   const who = flag('by') || process.env.STUDIO_LOCK_OWNER;
   const done = (res, okMsg) => {
     if (!res || res.ok === false) {
@@ -140,7 +146,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   };
   if (cmd === 'add') done(addIdea({ title: positional.slice(1).join(' '), detail: flag('detail') || '', by: who || 'game-dev', source: flag('source') }), (r) => `${r.idea.id} captured. The watcher hands new ideas to the Producer; nothing is built until the Director approves it.`);
   if (cmd === 'route') done(routeIdea(a1, who || 'producer'), (r) => `${a1} goes to R&D: ${r.task}`);
-  if (cmd === 'shape') done(shapeIdea(a1, { notes: flag('notes'), by: who || 'rnd' }), (r) => `${a1} shaped; ${r.task || 'no'} task to place it`);
+  if (cmd === 'shape') done(shapeIdea(a1, { notes: flag('notes'), by: who || 'rnd' }), (r) => `${a1} shaped; ${r.task || 'no'} task to place it${r.warning ? `\nWarning: ${r.warning}` : ''}`);
   if (cmd === 'place') done(placeIdea(a1, { phase: flag('phase'), layer: flag('layer'), unlock: flag('unlock') || '', schedule: flag('schedule') || '', by: who || 'planner' }), (r) => `${a1} placed; the Director decides (${r.director})`);
   if (cmd === 'decide') done(decideIdea(a1, a2, { by: who, note: flag('note') || '' }), (r) => `${a1} ${r.stage}`);
   if (cmd === 'collect') {

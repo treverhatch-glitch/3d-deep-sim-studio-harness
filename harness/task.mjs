@@ -139,7 +139,45 @@ export function clearStop(by = 'war-room-human') {
   return was;
 }
 
+const PRI = { P0: 0, P1: 1, P2: 2, P3: 3 };
+/**
+ * The next task for one agent: what it already holds, else the most urgent unclaimed task for its
+ * role (or with no role), never another agent's work in progress.
+ */
+export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()) {
+  const held = agent ? q.inProgress.find((t) => lockStatus(`task:${t.id}`).lock?.owner === agent) : null;
+  if (held) return { task: held, held: true };
+  const open = q.backlog
+    .map((t, i) => [t, i])
+    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role))
+    .sort((a, b) => (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
+  return { task: open[0]?.[0] || null, held: false };
+}
+
+/** Everything known about one task, for agents and people: status, owner, meta, hand-off notes, checklist. */
+export function showTask(taskId, q = parseNextQueue()) {
+  const lane = q.inProgress.some((t) => t.id === taskId) ? 'in progress' : q.backlog.some((t) => t.id === taskId) ? 'waiting' : q.done.some((t) => t.id === taskId) ? 'done' : null;
+  if (!lane) return null;
+  const task = [...q.inProgress, ...q.backlog, ...q.done].find((t) => t.id === taskId);
+  const events = readRecentEvents(50000).filter((e) => e.task === taskId);
+  const meta = events.find((e) => e.type === 'task.added')?.meta || {};
+  const handoff = path.join(HANDOFF_DIR, `${taskId}.md`);
+  const check = lane === 'done' ? null : checkDone(task);
+  return {
+    ...task,
+    lane,
+    type: taskType(task),
+    owner: lockStatus(`task:${taskId}`).lock?.owner || null,
+    meta,
+    history: events.slice(-12).map((e) => `${String(e.ts).slice(0, 16)} ${e.type} ${e.agent}: ${e.msg}`),
+    handoff: fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : null,
+    brief: fs.existsSync(path.join(STUDIO_STATE_DIR, 'briefs', `${taskId}.md`)) ? `.studio/briefs/${taskId}.md` : null,
+    checklist: check ? check.checks.map((c) => `[${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : null,
+  };
+}
+
 export function startTask(taskId, agent = null, { model = null } = {}) {
+  if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   const stop = readStop();
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
@@ -181,7 +219,7 @@ export function startTask(taskId, agent = null, { model = null } = {}) {
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '' } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
@@ -230,9 +268,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false } 
       task: target.id,
       status: 'forced',
       to: 'producer',
-      msg: `Forced ${target.id} done without: ${check.missing[0]}`,
-      meta: { type: check.type, missing: check.missing },
+      msg: `Forced ${target.id} done without: ${check.missing[0]}${reason ? ` (reason: ${reason})` : ''}${acceptedBy ? `, accepted by ${acceptedBy}` : ''}`,
+      meta: { type: check.type, missing: check.missing, reason: reason || null, acceptedBy: acceptedBy || null },
     });
+    // A person already accepted it with a reason: logged, no follow-up task (the run report lists it).
+    if (acceptedBy && reason) return { ...target, forced: true, check, followUp: null, acceptedBy };
     const followUp = addTask({ title: `Check forced done ${target.id} (${check.type}): ${check.missing[0]}`, role: 'producer', priority: 'P1' });
     return { ...target, forced: true, check, followUp: followUp.id };
   }
@@ -314,9 +354,12 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
     if (!['approved', 'scheduled'].includes(idea.stage)) return { ok: false, message: `${meta.idea} is "${idea.stage}". Ideas go captured, shaped, placed, then approved by the Director before they become work (npm run idea -- show ${meta.idea}).` };
   }
   if (!b || !['change', 'system'].includes(taskType({ title, role }))) return { ok: true, warnings };
-  const crossed = crossedLayersIn(title, b);
-  if (crossed.length) return { ok: false, message: `"${title}" touches a crossed-out layer: ${crossed.map((l) => l.label).join(', ')} (studio/bible/NOT-DOING.md). Only a person brings a layer back: npm run bible -- layer ${crossed[0].id} yes --by <name>.` };
+  const notLayers = new Set(String(meta.notLayer || '').split(',').filter(Boolean));
+  const crossed = crossedLayersIn(title, b).filter((l) => !notLayers.has(l.id));
+  if (crossed.length) return { ok: false, message: `"${title}" touches a crossed-out layer: ${crossed.map((l) => `${l.label} (the word "${l.word}")`).join(', ')} (studio/bible/NOT-DOING.md). If the task really is about that, only a person brings the layer back: npm run bible -- layer ${crossed[0].id} yes --by <name>. If the word means something else here, reword the title, or add --not-layer ${crossed[0].id} (logged for the Director's drift report).` };
+  if (notLayers.size) emitEvent({ type: 'task.scope_override', agent: meta.by || PRODUCER_NAME(), to: 'director', msg: `"${title}" queued with --not-layer ${[...notLayers].join(',')}: the title matched a crossed-out layer's keyword, and the author says it is not about that layer` });
   if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return { ok: true, warnings };
+  if (b.signed && b.amended) return { ok: false, message: `The Game Bible changed after ${b.signed.by} signed it (${b.amended.changes.map((c) => c.field).join(', ')}). New build tasks wait until a person re-signs the new design: npm run bible -- sign --by <name> [--via "<where they approved>"]. Work already queued carries on.` };
   if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
   const phase = Number(meta.phase);
   if (![1, 2, 3].includes(phase)) return { ok: false, message: 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' };
@@ -398,12 +441,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const q = parseNextQueue();
 
   if (cmd === 'next') {
-    const active = q.inProgress[0] || q.backlog[0] || null;
-    if (!active) {
-      console.log('No tasks in IN_PROGRESS or BACKLOG.');
+    const role = typeof flags.role === 'string' ? flags.role : process.env.STUDIO_ROLE || null;
+    const agent = typeof flags.agent === 'string' ? flags.agent : process.env.STUDIO_LOCK_OWNER || null;
+    const { task, held } = nextFor({ role, agent }, q);
+    if (!task) {
+      console.log(role ? `Nothing waiting for the ${role} role.` : 'No unclaimed tasks waiting.');
       process.exit(0);
     }
-    console.log(JSON.stringify(active, null, 2));
+    if (held) console.error(`You already hold ${task.id}; finish it or hand it back first.`);
+    console.log(JSON.stringify(task, null, 2));
+    process.exit(0);
+  }
+
+  if (cmd === 'show') {
+    const t = arg1 && showTask(arg1, q);
+    if (!t) {
+      console.error(arg1 ? `No task ${arg1}.` : 'Usage: npm run task -- show <TASK_ID>');
+      process.exit(1);
+    }
+    console.log(JSON.stringify(t, null, 2));
     process.exit(0);
   }
 
@@ -474,7 +530,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force]');
       process.exit(1);
     }
-    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force) });
+    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '' });
     if (!done) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);
@@ -483,7 +539,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(done.message);
       process.exit(1);
     }
-    if (done.forced) console.error(`Forced past the ${done.check.type} check. The Producer has ${done.followUp} to run it.`);
+    if (done.forced) console.error(done.followUp ? `Forced past the ${done.check.type} check. The Producer has ${done.followUp} to run it. (With --reason "..." --accepted-by <person>, a person's acceptance is logged instead.)` : `Forced past the ${done.check.type} check, accepted by ${done.acceptedBy}; logged for the run report.`);
     console.log(JSON.stringify(done, null, 2));
     process.exit(0);
   }
@@ -520,6 +576,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
+        ...(typeof flags['not-layer'] === 'string' ? { notLayer: flags['not-layer'] } : {}),
       },
     });
     if (created.error) {

@@ -202,11 +202,25 @@ export function parsePillars(lines) {
 }
 
 /** Merge intake answers (any subset) into a Bible. Unknown keys are ignored. */
+/** Answers that change what the game is: after signing, changing one needs a new signature. */
+export const CORE_ANSWERS = ['fantasy', 'verb', 'playLength', 'win', 'lose', 'slice', 'never', 'feelGreat'];
+const LIST_IDS = new Set(QUESTIONS.filter((q) => q.kind === 'list').map((q) => q.id));
+const asList = (v) => (Array.isArray(v) ? v : String(v).split(/\r?\n/)).map((x) => (typeof x === 'string' ? x.trim() : x)).filter(Boolean);
+
+/** Record a change to a signed Bible: it stays signed for history, but build work waits for a new signature. */
+function amend(b, field, from, to) {
+  if (!b.signed || JSON.stringify(from ?? null) === JSON.stringify(to ?? null)) return;
+  b.amended = b.amended || { since: now(), changes: [] };
+  b.amended.changes.push({ field, from: from ?? null, to, at: now() });
+}
+
 export function applyAnswers(b, input = {}) {
   const ids = new Set(QUESTIONS.map((q) => q.id));
   b.skipped = [];
-  for (const [k, v] of Object.entries(input.answers || input)) {
-    if (!ids.has(k) || v === undefined || v === null || v === '') continue;
+  for (const [k, raw] of Object.entries(input.answers || input)) {
+    if (!ids.has(k) || raw === undefined || raw === null || raw === '') continue;
+    // "One per line" questions accept a list or a newline string.
+    const v = LIST_IDS.has(k) && k !== 'pillars' ? asList(raw) : raw;
     // Once signed, pillars are locked: changing one is a person's decision (studio/decisions/), not an intake answer.
     if (k === 'pillars' && b.signed) {
       b.skipped.push('pillars are locked after signing; record a decision and edit them with a person');
@@ -214,8 +228,13 @@ export function applyAnswers(b, input = {}) {
     }
     if (k === 'pillars') b.pillars = parsePillars(v);
     else if (k === 'voice') b.voice = { ...(b.voice || {}), tone: String(v).trim() };
-    else if (/^phase[123]$/.test(k)) b.phases[k.slice(5)] = { ...(b.phases[k.slice(5)] || {}), player: String(v).trim() };
-    else b.answers[k] = v;
+    else if (/^phase[123]$/.test(k)) {
+      amend(b, k, b.phases[k.slice(5)]?.player, String(v).trim());
+      b.phases[k.slice(5)] = { ...(b.phases[k.slice(5)] || {}), player: String(v).trim() };
+    } else {
+      if (CORE_ANSWERS.includes(k)) amend(b, k, b.answers[k], v);
+      b.answers[k] = v;
+    }
   }
   for (const [id, v] of Object.entries(input.layers || {})) {
     const answer = typeof v === 'string' ? v : v?.answer;
@@ -248,6 +267,7 @@ export function checkBible(b) {
   if (pillars.length < 3 || pillars.length > 5) missing.push(`3 to 5 pillars (has ${pillars.length})`);
   if (pillars.some((p) => !p.rulesOut)) warnings.push('a pillar is stronger when it says what it rules out ("name: what it rules out")');
   for (const n of [1, 2, 3]) if (!b.phases?.[n]?.player) missing.push(`Phase ${n}: what the player does (phase${n})`);
+  if (b.amended) warnings.push(`changed after signing (${b.amended.changes.map((c) => c.field).join(', ')}): new build tasks wait until a person re-signs (npm run bible -- sign --by <name>)`);
   const unanswered = LAYERS.filter((l) => !b.layers?.[l.id]);
   if (unanswered.length) missing.push(`answer every layer yes, explore or no (${unanswered.length} left: ${unanswered.slice(0, 6).map((l) => l.id).join(', ')}${unanswered.length > 6 ? ', …' : ''})`);
   const kept = LAYERS.filter((l) => b.layers?.[l.id]?.answer === 'yes');
@@ -259,15 +279,18 @@ export function checkBible(b) {
   return { ok: missing.length === 0, missing, warnings, kept: kept.map((l) => l.id), crossed: LAYERS.filter((l) => b.layers?.[l.id]?.answer === 'no').map((l) => l.id) };
 }
 
-export function signBible(b, by) {
+export function signBible(b, by, { via = null } = {}) {
   const c = checkBible(b);
   if (!c.ok) return { ok: false, error: 'not-ready', missing: c.missing };
   if (!by || /^(producer|director|builder|agent|unknown)$/i.test(by) || by === process.env.STUDIO_PRODUCER_NAME) return { ok: false, error: 'person', message: 'A person signs the Bible, not an agent: pass --by <your name> (or use the War Room).' };
-  b.signed = { by, at: now() };
-  b.phase = { open: 1, history: [...(b.phase?.history || []), { phase: 1, at: now(), by, reason: 'Bible signed' }] };
+  const resign = Boolean(b.signed);
+  if (b.signed) b.signHistory = [...(b.signHistory || []), { ...b.signed, amended: b.amended || null }];
+  b.signed = { by, at: now(), ...(via ? { via: String(via).slice(0, 200) } : {}) };
+  if (resign) delete b.amended;
+  else b.phase = { open: 1, history: [...(b.phase?.history || []), { phase: 1, at: now(), by, reason: 'Bible signed' }] };
   writeBible(b);
-  emitEvent({ type: 'bible.signed', agent: by, to: 'producer', msg: `${by} signed the Game Bible. Pre-production is over; Phase 1 (early game) is open for build tasks.` });
-  return { ok: true, bible: b };
+  emitEvent({ type: 'bible.signed', agent: by, to: 'producer', msg: resign ? `${by} re-signed the Game Bible${via ? ` (approved via ${via})` : ''}; build work can go on with the amended design.` : `${by} signed the Game Bible${via ? ` (approved via ${via})` : ''}. Pre-production is over; Phase 1 (early game) is open for build tasks.` });
+  return { ok: true, bible: b, resign };
 }
 
 /** The newest Director review: { file, at, phase, verdict }. */
@@ -308,11 +331,17 @@ export function openPhase(b, n, { by, force = null } = {}) {
   return { ok: true };
 }
 
-/** Crossed-out layers a task title touches. */
+/** Crossed-out layers a task title touches, each with the word that matched (`word`). */
 export function crossedLayersIn(title, b = readBible()) {
   if (!b) return [];
   const t = ` ${String(title).toLowerCase()} `;
-  return LAYERS.filter((l) => b.layers?.[l.id]?.answer === 'no' && l.keywords.some((k) => new RegExp(`[^a-z0-9]${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^a-z0-9]`).test(t)));
+  const out = [];
+  for (const l of LAYERS) {
+    if (b.layers?.[l.id]?.answer !== 'no') continue;
+    const word = l.keywords.find((k) => new RegExp(`[^a-z0-9]${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^a-z0-9]`).test(t));
+    if (word) out.push({ ...l, word });
+  }
+  return out;
 }
 
 // ---- Ideas (stored here so the task gate can read them without import cycles) ----
@@ -371,7 +400,7 @@ export function renderBible(b) {
     const label = (k) => (k.startsWith('phase:') ? `Phase ${k.slice(6)}` : LAYERS.find((l) => l.id === k)?.label || k);
     for (const about of [...new Set(fu.map((f) => f.about))]) L.push('', `### ${label(about)}`, ...fu.filter((f) => f.about === about).map((f) => `- ${f.q} **${f.a}**`));
   }
-  const refs = a.references || [];
+  const refs = a.references ? asList(a.references) : [];
   if (refs.length) L.push('', '## References', ...refs.map((r) => `- ${r}`));
   const ideas = readIdeas().filter((i) => i.stage === 'approved' || i.stage === 'scheduled');
   if (ideas.length) L.push('', '## Approved ideas', ...ideas.map((i) => `- ${i.id} ${i.title}${i.place ? ` (Phase ${i.place.phase}${i.place.layer ? `, ${i.place.layer}` : ''})` : ''}`));
@@ -461,12 +490,42 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'sign') {
-    const res = signBible(b, flag('by'));
+    const res = signBible(b, flag('by'), { via: flag('via') });
     if (!res.ok) {
       console.error(res.message || `Not ready to sign:\n${res.missing.map((m) => `  [ ] ${m}`).join('\n')}`);
       process.exit(1);
     }
-    console.log('Signed. Pre-production is over; Phase 1 (early game) is open for build tasks.');
+    console.log(res.resign ? 'Re-signed. The amended design is the Bible now; build tasks can be queued again.' : 'Signed. Pre-production is over; Phase 1 (early game) is open for build tasks.');
+    process.exit(0);
+  }
+  if (cmd === 'pillars' && rest[0] === 'set') {
+    // Pillars change only by a person, with a written decision; the new pillars are signed by that person.
+    const by = flag('by');
+    const decision = flag('decision');
+    if (!by || /^(producer|director|builder|agent|unknown)$/i.test(by) || by === process.env.STUDIO_PRODUCER_NAME) {
+      console.error('A person changes pillars: --by <your name>.');
+      process.exit(1);
+    }
+    if (!decision || !fs.existsSync(path.resolve(REPO_ROOT, decision))) {
+      console.error('Say why in a decision file first (studio/decisions/<date>-pillars.md), then pass --decision <that file>.');
+      process.exit(1);
+    }
+    const lines = rest.slice(1);
+    const next = parsePillars(lines);
+    if (next.length < 3 || next.length > 5) {
+      console.error('Give 3 to 5 pillars, each as one quoted argument: "name: what it rules out".');
+      process.exit(1);
+    }
+    const before = b.pillars;
+    b.pillars = next;
+    if (b.signed) {
+      b.signHistory = [...(b.signHistory || []), { ...b.signed, amended: { changes: [{ field: 'pillars', from: before, to: next, at: now() }] } }];
+      b.signed = { by, at: now(), via: `pillars changed with ${decision}` };
+      delete b.amended;
+    }
+    writeBible(b);
+    emitEvent({ type: 'bible.pillars', agent: by, to: 'director', msg: `${by} changed the pillars (${decision}): ${next.map((p) => p.name).join(', ')}` });
+    console.log(`Pillars changed by ${by}${b.signed ? ', and the Bible is signed with them' : ''}. The Director checks open work against them on its next review.`);
     process.exit(0);
   }
   if (cmd === 'phase' && rest[0] === 'open') {

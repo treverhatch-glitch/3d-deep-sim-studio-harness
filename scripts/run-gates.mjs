@@ -15,13 +15,16 @@ const argv = process.argv.slice(2);
 const only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
 const gates = (cfg.gates || []).filter((g) => (!only || only.has(g.id)) && !(argv.includes('--required-only') && g.required === false));
 
+const { activeCartridge } = await import('../harness/cartridge.mjs');
+const active = activeCartridge();
+console.log(`[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
 const rows = [];
 for (const gate of gates) {
   const start = Date.now();
   const res = spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
   const ok = res.status === 0;
   const required = gate.required !== false;
-  rows.push({ id: gate.id, ok, required, ms: Date.now() - start });
+  rows.push({ id: gate.id, ok, required, ms: Date.now() - start, cartridge: active.name });
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
 }
 
@@ -30,7 +33,7 @@ for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WA
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), rows }, null, 2));
+  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), cartridge: active.name, rows }, null, 2));
 } catch {
   // read-only checkout: the board just shows "not run"
 }

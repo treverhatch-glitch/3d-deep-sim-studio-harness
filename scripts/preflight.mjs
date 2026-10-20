@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from '../harness/event.mjs';
 import { findPython } from '../qa/run-python.mjs';
+import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -101,6 +102,10 @@ export function preflight() {
   row('ok', keys.length ? `Router keys set: ${keys.join(', ')}` : 'No router keys set', keys.length ? '' : 'fine when agents run in their own tools (Claude Code, Codex, ...)');
   const cap = Number(envVal('STUDIO_DAILY_TOKEN_CAP') || 0);
   if (keys.length) row(cap > 0 ? 'ok' : 'warn', `Daily token cap: ${cap ? cap.toLocaleString() : 'none'}`, cap ? '' : 'set STUDIO_DAILY_TOKEN_CAP before running with paid keys');
+
+  // The game the gates test.
+  const game = activeCartridge();
+  row(isTemplateCartridge(game.name) ? 'warn' : 'ok', `Gates test the game "${game.name || 'none'}" (from ${game.from || 'nowhere'})`, isTemplateCartridge(game.name) ? 'still the template: once your game exists, npm run new-game <name> makes it the active game (studio/game.json)' : '');
 
   // Tools.
   const py = findPython();

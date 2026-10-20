@@ -10,8 +10,10 @@ npm run playtest -- --cartridge my-game
 node harness/replay.mjs --cartridge my-game --seed 7 --tick 300
 ```
 
-Pick the cartridge with `--cartridge <name>`, the `STUDIO_CARTRIDGE` env var, or `"cartridge"` in
-`studio/gates.json` (the default for every tool). Folders starting with `_` are templates, not games.
+Pick the cartridge with `--cartridge <name>`, the `STUDIO_CARTRIDGE` env var, or `studio/game.json`
+(`npm run new-game <name>` writes it, so your game becomes the default for every tool; it is never
+frozen in a test run). `"cartridge"` in `studio/gates.json` is only the template's fallback. Every
+gate run prints which game it tested. Folders starting with `_` are templates, not games.
 
 ## The contract
 

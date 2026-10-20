@@ -31,8 +31,9 @@ STUDIO_RESULTS_DIR=<synced folder for results>
 STUDIO_DAILY_TOKEN_CAP=<a number, if you add router keys>
 ```
 
-On Windows with Google Drive for desktop, a folder shared with you appears under
-`G:\My Drive\` once you add a shortcut to it in My Drive. Keys are optional: agents running in their
+With Google Drive for desktop, a folder shared with you appears once you add a shortcut to it in My
+Drive: on Windows under `G:\My Drive\` (the letter may differ), on macOS under
+`~/Library/CloudStorage/GoogleDrive-<your account>/My Drive/`. Keys are optional: agents running in their
 own tools (Claude Code, Codex, Cursor) don't need router keys. Never commit `.env`.
 
 Run `npm run preflight` again. It should say READY.

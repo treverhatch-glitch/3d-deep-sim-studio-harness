@@ -45,6 +45,11 @@ Backups hold your game's plans and the studio's notes. Share the folder with no 
 Drive, Share, then General access, then Restricted. A folder anyone with the link can edit lets
 anyone read, delete or plant files in your backups. Keep the folder's link out of the public repo.
 
+## Google Drive on macOS
+
+Drive for desktop mounts at `~/Library/CloudStorage/GoogleDrive-<your account>/My Drive/`. In `.env`:
+`STUDIO_BACKUP_DIR=/Users/<you>/Library/CloudStorage/GoogleDrive-<account>/My Drive/<folder name>`
+
 ## Google Drive on Windows
 
 1. Install Google Drive for desktop and sign in. Your Drive appears as a drive letter (often `G:`).

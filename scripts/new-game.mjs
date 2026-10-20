@@ -59,6 +59,8 @@ write(goldenFiles[0], {
 });
 write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
 
+// This is the studio's game now: gates and playtests default to it (studio/game.json is never frozen).
+if (!process.argv.includes('--keep-active')) fs.writeFileSync(path.join(root, 'studio', 'game.json'), `${JSON.stringify({ cartridge: name, since: new Date().toISOString() }, null, 2)}\n`);
 emitEvent({ type: 'game.new', agent: 'producer', target: `cartridges/${name}`, msg: `New cartridge ${name}: slice won at tick ${slice.ticksRun}` });
 console.log(`[new-game] cartridges/${name}/ created
 [new-game] qa/golden/${name}-start-to-win.json  won at tick ${slice.ticksRun}, sha256 ${slice.sha256.slice(0, 16)}…
@@ -67,4 +69,4 @@ console.log(`[new-game] cartridges/${name}/ created
 Next:
   npm run verify                                  every gate, now including ${name}
   npm run playtest -- --cartridge ${name}         play it tick by tick
-  set "cartridge": "${name}" in studio/gates.json to make it the default`);
+  ${process.argv.includes('--keep-active') ? `set it active in studio/game.json when ready` : `studio/game.json now names ${name}: gates and playtests test it by default`}`);

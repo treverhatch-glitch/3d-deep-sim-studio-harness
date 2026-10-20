@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.15.0] — 2026-10-21
+From the first real game run ("Next Floor", Jed, v2.14.0). Each fix was reproduced first and has a self-test.
+### Fixed
+- **B1, verify could never pass after `studio:reset`.** The self-test now starts every copy from a fixture board and an empty pre-production state (`qa/fixtures/studio/`), never the live studio, and runs with a clean environment (no inherited `STUDIO_LOCK_OWNER`, cartridge, folders or keys). Reproduced Jed's case (reset, a started task, the owner exported): 17/17 required gates green.
+- **B2, gates tested the template.** The active game lives in `studio/game.json` (written by `new-game`, never frozen). Every gate run prints which game it tested; preflight warns while it is still the template.
+- **B9, closing a handed-back task.** done-check counts commits tagged with the task from before its latest start. A forced done with `--reason` and `--accepted-by <person>` is logged without a follow-up task.
+- **B11, over-broad locks.** Claims on whole top-level folders are refused unless `--wide "<why>"` is given; the refusal says how to narrow it.
+- **B12, scope-guard false positives.** The refusal names the matched word and layer; `--not-layer <id>` queues the task and tells the Director.
+- **B7, signed Bible rewritten silently.** Changing the core answers or phases after signing marks the Bible amended and holds new build tasks until a person re-signs (earlier signatures kept in `signHistory`). `bible pillars set … --by <person> --decision <file>`; `bible sign --via "<where they approved>"`.
+- **B13:** intake accepts "one per line" answers as a newline string; `.gitignore` uses `/references/`; reports to keep go in `qa/reports/kept/`; new `task show <ID>`; `task next --role --agent` gives your own role's work, never another agent's; `idea --help`; shaping notes keep 20,000 characters and warn when cut; the idea done-check names the real idea; the Director kickoff handles storyboard tasks; macOS Drive paths in the docs.
+
+---
+
 ## [2.14.2] — 2026-10-21
 ### Fixed
 - Preflight reported router keys that weren't set: an empty `KEY=` line in `.env` borrowed the next line as its value. Found while setting up the first real test on Windows.

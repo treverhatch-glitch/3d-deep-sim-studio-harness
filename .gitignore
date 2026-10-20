@@ -19,6 +19,8 @@ hub/dist/
 # QA output (keep the folder, not the runs)
 qa/reports/*
 !qa/reports/.gitkeep
+# Reports and screenshots a task needs to keep (a bug's evidence, a playtest sign-off) go here and are committed
+!qa/reports/kept/
 test-results/
 playwright-report/
 
@@ -46,4 +48,4 @@ Thumbs.db
 studio/memory/LEARNED.md
 
 # The reference library's media (npm run ref); the index in studio/references/ is kept
-references/
+/references/

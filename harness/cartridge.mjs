@@ -9,7 +9,8 @@
  *   cartridges/<name>/qa.mjs     optional: scenarios { name: { seed, maxTicks, actions?, policy? } }
  *                                optional: createAdapter() for a custom or browser-backed adapter
  *
- * Pick the cartridge with --cartridge <name>, STUDIO_CARTRIDGE, or "cartridge" in studio/gates.json.
+ * Pick the cartridge with --cartridge <name>, STUDIO_CARTRIDGE, studio/game.json (new-game writes it),
+ * or "cartridge" in studio/gates.json (the template's fallback).
  */
 
 import fs from 'node:fs';
@@ -32,8 +33,35 @@ export function listCartridges() {
     .sort();
 }
 
+/** The game this studio is building: studio/game.json, written by new-game (never frozen in a test run). */
+export const GAME_FILE = path.join(REPO_ROOT, 'studio', 'game.json');
+export function activeCartridge() {
+  if (process.env.STUDIO_CARTRIDGE) return { name: process.env.STUDIO_CARTRIDGE, from: 'STUDIO_CARTRIDGE' };
+  try {
+    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    if (g.cartridge) return { name: g.cartridge, from: 'studio/game.json' };
+  } catch {
+    // no game file yet
+  }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(GATES_FILE, 'utf8'));
+    if (cfg.cartridge) return { name: cfg.cartridge, from: 'studio/gates.json' };
+  } catch {
+    // no config
+  }
+  const first = listCartridges()[0] || null;
+  return { name: first, from: first ? 'first cartridge' : null };
+}
+export const isTemplateCartridge = (name) => !name || name === 'example-sim' || /^[_.]/.test(name);
+
 export function defaultCartridgeName() {
   if (process.env.STUDIO_CARTRIDGE) return process.env.STUDIO_CARTRIDGE;
+  try {
+    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    if (g.cartridge) return g.cartridge;
+  } catch {
+    // no game file yet
+  }
   try {
     const cfg = JSON.parse(fs.readFileSync(GATES_FILE, 'utf8'));
     if (cfg.cartridge) return cfg.cartridge;

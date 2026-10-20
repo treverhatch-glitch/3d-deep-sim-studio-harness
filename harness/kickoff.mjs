@@ -90,7 +90,8 @@ Set up once in your shell: \`${env}\`
 The Game Bible (\`studio/bible/\`) is the authority on what the game is; you guard it. The Producer creates and assigns tasks; you tell it whether the work is on course and what the next work should serve. Read \`${roleFile}\` and \`studio/skills/direction.md\`. Don't scan the repo.
 
 When you are started (by a ping, daily, or by a person):
-1. \`node harness/task.mjs next\` and start the open \`Director review\` task: \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`.
+1. \`node harness/task.mjs next --role director --agent ${agent}\` and start what it gives you (a \`Director review\`, a storyboard, or another task for your role): \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`.
+   Not a review (a storyboard, a doc)? Do that task from its brief (\`.studio/briefs/<ID>.md\`) and skill, then go to step 6. Steps 2 to 5 are for \`Director review\` tasks only.
 2. Read \`.studio/briefs/director.md\` (why you were pinged, what finished, the drift report, ideas waiting), then the docs it lists.
 3. \`npm run director -- review\`, fill in Phase, Verdict, Checked and Next.
 4. Decide placed ideas: \`npm run idea -- decide <id> approve|park|reject --by ${agent} --note "…"\`.
@@ -137,7 +138,7 @@ Set up once in your shell: \`${env}\`
 Read \`AGENTS.md\`, \`studio/skills/README.md\`${hasRole ? ` and \`${roleFile}\`` : ''}. Don't scan the rest of the repo; your task brief tells you what to open.
 
 Loop:
-1. \`node harness/task.mjs next\` and pick the top task for \`${role}\` (the Producer sets priorities).
+1. \`node harness/task.mjs next --role ${role} --agent ${agent}\` gives your most urgent task (or the one you already hold). \`node harness/task.mjs show <ID>\` shows its notes and checklist.
 2. \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`. It writes your one-page brief to \`.studio/briefs/<ID>.md\`: read that, it has the steps, what done means, notes from anyone before you, and what not to touch. If it says the history is long, run \`npm run brief -- <ID>\` and read the 300-word summary instead of the logs.
 3. Claim what you will edit: \`node harness/lock.mjs claim path:<folder> --owner ${agent}\`.
 4. Work in small steps; run the narrowest check first. Three failed tries: stop and hand back with a note.

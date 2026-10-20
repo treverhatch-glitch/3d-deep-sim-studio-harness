@@ -133,7 +133,7 @@ function walkSince(rel, since, out, depth = 0) {
     else if (!BOOKKEEPING.test(child) && mtime(child) >= since) out.push(child);
   }
 }
-/** Evidence that work happened for this task: tagged commits, untagged commits since the start, or edits on disk. */
+/** Evidence that work happened for this task: commits tagged with it (any time), untagged commits since the start, or edits on disk. */
 export function taskChanges(taskId, since) {
   const files = new Set();
   let lastAt = 0;
@@ -149,6 +149,19 @@ export function taskChanges(taskId, since) {
       const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
       if (!touched.length) continue;
       commits.push({ hash, at: Number(ct) * 1000, tagged: tagged.includes(taskId) });
+      touched.forEach((n) => files.add(n));
+      lastAt = Math.max(lastAt, Number(ct) * 1000);
+    }
+    // Work committed for this task before its latest start (handed back, then picked up) still counts.
+    const seen = new Set(commits.map((c) => c.hash));
+    const tagged = git('log', '-n2000', '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', '--name-only') || '';
+    for (const block of tagged.split('\x1e').slice(1)) {
+      const [head, ...names] = block.trim().split('\n');
+      const [hash, ct, tasks] = head.split('\t');
+      if (seen.has(hash) || !(tasks || '').split(',').map((x) => x.trim()).includes(taskId)) continue;
+      const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
+      if (!touched.length) continue;
+      commits.push({ hash, at: Number(ct) * 1000, tagged: true, earlier: true });
       touched.forEach((n) => files.add(n));
       lastAt = Math.max(lastAt, Number(ct) * 1000);
     }
@@ -302,7 +315,7 @@ export function checkDone(task, since = startedAt(task.id)) {
   if (type === 'idea') {
     const id = (task.title.match(/\bI-\d+\b/) || [])[0];
     const idea = id ? readIdea(id) : null;
-    check('Title names an idea (I-001)', idea, id ? `no idea ${id} on the Idea Board` : 'the title names no idea (I-001)');
+    check(`Title names an idea (${id || 'I-…'})`, idea, id ? `no idea ${id} on the Idea Board` : 'the title names no idea (like I-001)');
     const moved = idea && (idea.history || []).some((h) => Date.parse(h.at) >= since && ['shaped', 'placed', 'approved', 'parked', 'rejected'].includes(h.stage));
     check('The idea moved to its next stage since the task started', moved, `${id || 'the idea'} hasn't moved since this task started (npm run idea -- shape|place|decide ${id || 'I-…'})`);
   }
