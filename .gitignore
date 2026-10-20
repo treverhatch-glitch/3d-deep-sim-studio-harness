@@ -41,3 +41,9 @@ Thumbs.db
 .serena/cache/
 .qmd/
 3D DEEP-SIM RULES/
+
+# Written by npm run learn from the files it summarises
+studio/memory/LEARNED.md
+
+# The reference library's media (npm run ref); the index in studio/references/ is kept
+references/

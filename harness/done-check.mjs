@@ -45,6 +45,7 @@ const BY_ROLE = {
   reviewer: 'review',
   'reference-scout': 'study',
   director: 'direction',
+  liaison: 'none',
   rnd: 'idea',
   planner: 'idea',
 };

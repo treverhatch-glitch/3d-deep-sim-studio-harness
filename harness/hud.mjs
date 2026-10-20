@@ -56,6 +56,7 @@ const ROOM_FOR_ROLE = {
   reviewer: 'review',
   'reference-scout': 'design',
   director: 'production',
+  liaison: 'production',
   rnd: 'design',
   planner: 'design',
   'asset-3d': '3d',

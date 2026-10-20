@@ -25,6 +25,7 @@ import { latestRetro } from './retro.mjs';
 import { readNotes } from './notes.mjs';
 import { readBible, checkBible, latestReview, readIdeas, PLAY_LENGTHS } from './bible.mjs';
 import { driftReport } from './director.mjs';
+import { repeats, staleSuggestions } from './learn.mjs';
 
 const read = (rel) => {
   try {
@@ -174,6 +175,8 @@ export function buildHandoff() {
     scorecard: buildScorecard({ queue: q }),
     retro: latestRetro(),
     harnessNotes: readNotes(),
+    repeats: repeats().slice(0, 5),
+    staleSuggestions: staleSuggestions().slice(0, 3),
     bible: (() => {
       const b = readBible();
       if (!b) return null;
@@ -279,11 +282,16 @@ export function renderHandoff(h) {
     add(`From ${h.retro.file}. Accept or reject each in your log; tick the box when it's handled.`, ...(open.length ? open.map((l) => l.replace('- [ ] ', '- ')) : ['- Nothing open.']));
   } else add('- No retro yet. The HUB writes one a day; npm run retro writes one now.');
 
+  head('What keeps happening (npm run learn)');
+  add(...(h.repeats.length ? h.repeats.map((r) => `- ${r.type} on ${r.days.length} days: ${r.sample}${r.lesson ? ` (lesson "${r.lesson}" didn't stick)` : ' (no lesson yet)'}`) : ['- Nothing has repeated on two different days.']));
+  add(...h.staleSuggestions.map((s) => `- Retros keep suggesting (${s.retros.length}x, never handled): ${s.text}`));
+
   head('Known harness issues and workarounds (studio/harness-notes/NOTES.md)');
   const hn = h.harnessNotes;
   add(...hn.bad.slice(0, 4).map((l) => `- Doesn't work: ${l.replace(/^\[[^\]]*\]\s*/, '')}`), ...hn.workaround.slice(0, 4).map((l) => `- Workaround: ${l.replace(/^\[[^\]]*\]\s*/, '')}`));
   if (!hn.bad.length && !hn.workaround.length) add('- None recorded.');
-  add(`- ${hn.well.length} things that worked and ${hn.upgrade.length} upgrade ideas on file. Add yours: npm run notes -- add --kind well|bad|workaround|upgrade "…"`);
+  add(...(hn.eval || []).slice(0, 2).map((l) => `- Last evaluation: ${l}`));
+  add(`- ${hn.well.length} things that worked and ${hn.upgrade.length} upgrade ideas on file. Add yours: npm run notes -- add --kind well|bad|workaround|upgrade|eval "…"`);
 
   head('Lessons (studio/memory/failures.md)');
   add(...(h.lessons.length ? h.lessons.map((l) => `- ${l}`) : ['- None recorded.']));

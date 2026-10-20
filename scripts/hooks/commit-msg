@@ -5,6 +5,9 @@
 set -euo pipefail
 MSG_FILE="$1"
 ROOT="$(git rev-parse --show-toplevel)"
+add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --trailer "$1: $2" "$MSG_FILE"; }
+# Experiments: STUDIO_EXPERIMENT=X-001 tags the commit, so `npm run experiment -- drop` can find it.
+[ -n "${STUDIO_EXPERIMENT:-}" ] && add "Studio-Experiment" "$STUDIO_EXPERIMENT"
 [ -n "${STUDIO_LOCK_OWNER:-}" ] || exit 0
 TASKS="$(cd "$ROOT" && node -e "
 import('./harness/lock.mjs').then(({ listLocks }) => {
@@ -12,7 +15,14 @@ import('./harness/lock.mjs').then(({ listLocks }) => {
   process.stdout.write(mine.map((l) => l.key.slice(5)).join(', '));
 }).catch(() => {});
 " 2>/dev/null || true)"
-add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --trailer "$1: $2" "$MSG_FILE"; }
+EXPS="$(cd "$ROOT" && STUDIO_TASKS="$TASKS" node -e "
+import('./harness/event.mjs').then(({ readRecentEvents }) => {
+  const held = new Set((process.env.STUDIO_TASKS || '').split(', ').filter(Boolean));
+  const exps = readRecentEvents(20000).filter((e) => e.type === 'task.added' && held.has(e.task) && e.meta?.experiment).map((e) => e.meta.experiment);
+  process.stdout.write([...new Set(exps)].join(', '));
+}).catch(() => {});
+" 2>/dev/null || true)"
+[ -n "$EXPS" ] && add "Studio-Experiment" "$EXPS"
 add "Studio-Agent" "$STUDIO_LOCK_OWNER"
 [ -n "${STUDIO_AGENT_MODEL:-}" ] && add "Studio-Model" "$STUDIO_AGENT_MODEL"
 [ -n "$TASKS" ] && add "Studio-Task" "$TASKS"

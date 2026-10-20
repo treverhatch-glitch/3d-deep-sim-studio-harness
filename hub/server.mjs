@@ -45,7 +45,11 @@ import { buildHudState, buildAgentDetail } from '../harness/hud.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
-import { readBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview } from '../harness/bible.mjs';
+import { learnIfDue } from '../harness/learn.mjs';
+import { readRefs } from '../harness/refs.mjs';
+import { readExperiments } from '../harness/experiment.mjs';
+import { readBriefs } from '../harness/liaison.mjs';
+import { readBible, writeBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview, pendingFollowups, answerFollowup } from '../harness/bible.mjs';
 import { runIntake } from '../harness/intake.mjs';
 import { addIdea } from '../harness/ideas.mjs';
 
@@ -529,7 +533,7 @@ export function createHubServer() {
     if (url.pathname === '/api/bible' && req.method === 'GET') {
       const b = readBible();
       const r = latestReview();
-      return sendJson(res, 200, { ok: true, bible: b, check: b ? checkBible(b) : null, suggested: b ? suggestedLayers(b.answers) : [], drift: driftReport(), latestReview: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: new Date(r.at).toISOString() } : null, ideas: readIdeas(), ...catalog() });
+      return sendJson(res, 200, { ok: true, bible: b, check: b ? checkBible(b) : null, followups: b ? pendingFollowups(b) : [], suggested: b ? suggestedLayers(b.answers) : [], drift: driftReport(), latestReview: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: new Date(r.at).toISOString() } : null, ideas: readIdeas(), refs: readRefs().map((r) => ({ id: r.id, game: r.game, feature: r.feature, at: r.at, kept: r.files.length, url: r.url || null })), experiments: readExperiments().map((x) => ({ id: x.id, title: x.title, status: x.status, idea: x.idea })), briefs: readBriefs().slice(-8).map((b) => ({ id: b.id, kind: b.kind, title: b.title, stage: b.stage, by: b.confirmed?.by || b.from })), ...catalog() });
     }
     if (url.pathname === '/api/ideas' && req.method === 'GET') {
       return sendJson(res, 200, { ok: true, ideas: readIdeas() });
@@ -537,7 +541,7 @@ export function createHubServer() {
     if (url.pathname === '/api/ideas' && req.method === 'POST') {
       const body = await readBody(req);
       noteHuman(body.by || 'war-room-human');
-      const r = addIdea({ title: String(body.title || ''), detail: String(body.detail || ''), by: String(body.by || 'war-room-human').slice(0, 60) });
+      const r = addIdea({ title: String(body.title || ''), detail: String(body.detail || ''), by: String(body.by || 'war-room-human').slice(0, 60), source: 'dev-pitched' });
       broadcastSnapshot();
       return sendJson(res, r.ok ? 201 : 400, r);
     }
@@ -546,6 +550,15 @@ export function createHubServer() {
       const r = runIntake({ answers: body.answers || {}, layers: body.layers || {} });
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, check: r.check, queued: r.queued.map((t) => t.id) });
+    }
+    if (url.pathname === '/api/followups' && req.method === 'POST') {
+      const body = await readBody(req);
+      const b = readBible();
+      if (!b) return sendJson(res, 400, { ok: false, error: 'No Game Bible yet: run the intake first.' });
+      let saved = 0;
+      for (const [k, v] of Object.entries(body.answers || {})) if (typeof v === 'string' && v.trim() && answerFollowup(b, k, v.slice(0, 2000), String(body.by || 'war-room-human').slice(0, 60))) saved += 1;
+      writeBible(b);
+      return sendJson(res, 200, { ok: true, saved, left: pendingFollowups(b).length });
     }
     if (url.pathname === '/api/bible/sign' && req.method === 'POST') {
       const body = await readBody(req);
@@ -960,6 +973,8 @@ export function startHubCli() {
         if (r.findings.length) console.log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
         const retro = retroIfDue();
         if (retro) console.log(`[retro] wrote ${retro.file}: ${retro.suggestions.length} suggestion(s)`);
+        const learned = learnIfDue();
+        if (learned) console.log(`[learn] rewrote ${learned.file}${learned.backup ? `; backed up to ${learned.backup}` : ''}`);
         const dir = dailyPingIfDue();
         if (dir) console.log(`[director] daily ping: ${dir.task}${dir.start?.started ? ' (Director started)' : ''}`);
       } catch (err) {

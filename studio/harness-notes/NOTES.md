@@ -7,6 +7,7 @@
 
 ## Worked well
 
+- [2026-10-20 · producer] Experiments as tagged commits, not branches: dropping one adds undo commits, so it is safe in the shared checkout. Testing found that a later --only drop has to be remembered, or a full drop tries to undo the same lines twice.
 - [2026-10-20 · producer] Walking a fresh studio through intake, sign-off, the Director and an idea end to end found four rough edges before release: too many explore studies, prototypes flagged as drift, a repeated briefing line, and intake able to change locked pillars after signing.
 - [2026-10-20 · producer] Cheap prepare, strong act is real code now: a bounded window, a cheap draft and a script check that throws bad drafts away (`npm run brief -- <ID> --model`).
 - [2026-10-20 · producer] Done-checks by task type caught unfinished balance and review work in every test run; agents fixed what the refusal named instead of arguing.
@@ -35,13 +36,13 @@
 
 ## Workarounds in use
 
+- [2026-10-20 · producer] Commits made with --no-verify skip the commit-msg hook, so they carry no Studio-Task or Studio-Experiment trailer. Don't use --no-verify on game work.
 - [2026-10-20 · producer] On a suspicious "done", the Producer reruns `node harness/done-check.mjs <ID>` and reads the diff before accepting.
 - [2026-10-20 · producer] File bugs with `--caused-by <task>` whenever the cause is known, so the scorecard has confirmed bugs, not just suspects.
 - [2026-10-20 · producer] Record HUD videos from Chromium's screencast frames and encode with the system ffmpeg.
 
 ## Upgrade ideas
 
-- [2026-10-20 · producer] The game dev's seat (ROADMAP 2.9.0): a Liaison who converses, restates and gets confirmation before a brief reaches the Producer and Director; follow-up questions per layer; references with timestamped videos; assets with an owned or reference-only record; experiments on tracked branches that can be kept or taken back.
 - [2026-10-20 · producer] Layer keyword matching is a heuristic (it caught "levels" meaning maps and "weather" meaning rain in testing). Watch for false refusals in the stress test; the Director's drift report is the backstop.
 - [2026-10-20 · producer] Make each phase's scenario (phase-1-early, …) a required check before the phase opens, on top of the Director's verdict.
 - [2026-10-20 · producer] An intake form in the War Room on POST /api/intake: the first piece of a friendlier front end.

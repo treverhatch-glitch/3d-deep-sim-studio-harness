@@ -6,6 +6,10 @@
  *   npm run intake -- --answers game.json   apply answers from a file (an agent, a script or a future UI)
  *   npm run intake -- --questions           print the questions and the layer catalog as JSON
  *   npm run intake -- --ask < answers.txt   ask without a terminal (one answer per line; for scripts and tests)
+ *   npm run intake -- --followups            follow-up questions about the phases and each kept or explore layer
+ *   npm run intake -- --followups --model    also let a cheap model write extra questions from your answers (checked)
+ *   npm run intake -- --followups --json     the unanswered follow-ups as JSON (for a UI or the Liaison)
+ *   npm run intake -- --followups --answers f.json   answers as { "<key>": "<answer>" }
  *
  * Answers file: { "answers": { "title": "…", "playLength": "demo", "pillars": ["name: rules out"],
  * "phase1": "…", … }, "layers": { "tech-tree": "no", "levels-xp": { "answer": "yes", "phase": 1 } } }
@@ -21,7 +25,9 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addTask } from './task.mjs';
-import { QUESTIONS, LAYERS, PLAY_LENGTHS, emptyBible, readBible, writeBible, applyAnswers, checkBible, suggestedLayers, setLayer, catalog } from './bible.mjs';
+import { QUESTIONS, LAYERS, PLAY_LENGTHS, emptyBible, readBible, writeBible, applyAnswers, checkBible, suggestedLayers, setLayer, catalog, pendingFollowups, answerFollowup, crossedLayersIn, FOLLOWUPS } from './bible.mjs';
+import { routeChatCompletion } from './route.mjs';
+import { cheapChain } from './prepare-brief.mjs';
 
 /** Queue pre-production work once, when the Bible has a title and its layers are answered. */
 export function queuePreproduction(b) {
@@ -111,6 +117,7 @@ async function interactive(all) {
     if (v !== undefined) applyAnswers(b, { [q.id]: v });
     writeBible(b);
     if (q.id === 'playLength' && b.answers.playLength) console.log(`  ${PLAY_LENGTHS[b.answers.playLength].involvement}`);
+    if (q.id === 'origin' && b.answers.origin === 'existing' && !fs.existsSync(path.join(REPO_ROOT, 'studio', 'game', 'GAME.md'))) console.log('  Bring it in with a read-only scan first: npm run onboard -- --path <its folder> --name "<name>". Carry on here meanwhile; answer what you know.');
   }
   const suggested = new Set(suggestedLayers(b.answers));
   console.log('\nLayers: kinds of progression and systems. Answer y (yes), e (explore: R&D tries it first) or n (no: crossed out, never built).');
@@ -140,14 +147,92 @@ async function interactive(all) {
     setLayer(b, l.id, { answer, phase, why, by: 'intake' }, { emit: false });
     writeBible(b);
   }
+  const more = pendingFollowups(b);
+  if (more.length) {
+    const yes = (await rl.question(`\n${more.length} follow-up questions about the phases and the layers you kept help the studio build the right thing. Answer some now? y/n > `)).trim().toLowerCase().startsWith('y');
+    if (yes) await askFollowups(rl, b);
+  }
   rl.close();
   return runIntake({});
+}
+
+async function askFollowups(rl, b) {
+  console.log('Press Enter to skip one; `npm run intake -- --followups` asks the rest later.');
+  for (const f of pendingFollowups(b)) {
+    const a = (await rl.question(`\n[${f.about}] ${f.q}\n> `)).trim();
+    if (a) {
+      answerFollowup(b, f.key, a);
+      writeBible(b);
+    }
+  }
+}
+
+/** A cheap model writes extra follow-ups from the dev's own answers; a script keeps only good ones. */
+export async function modelFollowups(b, { max = 6 } = {}) {
+  const abouts = ['phase:1', 'phase:2', 'phase:3', ...LAYERS.filter((l) => ['yes', 'explore'].includes(b.layers?.[l.id]?.answer)).map((l) => l.id)];
+  const res = await routeChatCompletion({
+    role: 'preparer',
+    customChain: cheapChain(),
+    maxTokens: 600,
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: `You help a game studio understand a game its developer described. Write up to ${max} short follow-up questions a designer would ask next, about details the answers leave open. One per line as "<about> | <question>", where <about> is one of: ${abouts.join(', ')}. No other text.` },
+      { role: 'user', content: JSON.stringify({ answers: b.answers, pillars: b.pillars, phases: b.phases, kept: abouts, followups: Object.values(b.followups || {}).filter((f) => f.a).map((f) => `${f.q} ${f.a}`) }) },
+    ],
+  });
+  if (!res.ok) return { ok: false, message: res.capped ? 'The daily spend cap is reached.' : 'No cheap provider answered; the fixed questions still work.' };
+  const known = new Set([...Object.values(FOLLOWUPS).flat(), ...Object.values(b.followups || {}).map((f) => f.q)].map((q) => q.toLowerCase()));
+  const kept = [];
+  for (const line of String(res.content || '').split('\n')) {
+    const m = line.match(/^\s*[-*\d.)]*\s*([a-z0-9:-]+)\s*\|\s*(.+\?)\s*$/i);
+    if (!m || !abouts.includes(m[1]) || m[2].length > 200 || known.has(m[2].toLowerCase()) || crossedLayersIn(m[2], b).length) continue;
+    known.add(m[2].toLowerCase());
+    kept.push({ about: m[1], q: m[2].trim() });
+    if (kept.length >= max) break;
+  }
+  const start = Object.keys(b.followups || {}).filter((k) => k.startsWith('ai#')).length;
+  kept.forEach((f, i) => (b.followups = { ...(b.followups || {}), [`ai#${start + i + 1}`]: { ...f, a: '', source: 'model' } }));
+  writeBible(b);
+  return { ok: true, added: kept.length, by: `${res.provider} (${res.model})` };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   if (argv.includes('--questions')) {
     console.log(JSON.stringify(catalog(), null, 2));
+    process.exit(0);
+  }
+  if (argv.includes('--followups')) {
+    const b = readBible();
+    if (!b) {
+      console.error('No Game Bible yet: run `npm run intake` first.');
+      process.exit(1);
+    }
+    if (argv.includes('--model')) {
+      const m = await modelFollowups(b);
+      console.log(m.ok ? `${m.added} extra question(s) from ${m.by}, checked by a script.` : m.message);
+    }
+    const ai = argv.indexOf('--answers');
+    if (ai >= 0) {
+      const given = JSON.parse(fs.readFileSync(path.resolve(argv[ai + 1]), 'utf8'));
+      let n = 0;
+      for (const [k, v] of Object.entries(given)) if (answerFollowup(b, k, v)) n += 1;
+      writeBible(b);
+      console.log(`Saved ${n} follow-up answer(s). ${pendingFollowups(b).length} left.`);
+    } else if (argv.includes('--json')) {
+      console.log(JSON.stringify(pendingFollowups(b), null, 2));
+    } else if (process.stdin.isTTY || argv.includes('--ask')) {
+      const rl = await lineSource();
+      try {
+        await askFollowups(rl, b);
+      } catch (err) {
+        if (err?.code !== 'ABORT_ERR') throw err;
+      }
+      rl.close();
+      console.log(`Saved. ${pendingFollowups(readBible()).length} follow-up(s) left; answers are in studio/bible/BIBLE.md under "Details".`);
+    } else {
+      console.log(`${pendingFollowups(b).length} follow-up(s) waiting. Answer in a terminal, or pass --json / --answers <file>.`);
+    }
     process.exit(0);
   }
   const i = argv.indexOf('--answers');

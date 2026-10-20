@@ -14,8 +14,8 @@ Windows, macOS, Linux or a cloud server.
 
 - **Stage**: harness phase 2, give every game a real start.
 - **Focus**: the stress test in a private copy (a demo-length game through intake, Director and
-  Idea Board with real agents), then the game dev's seat (2.9.0): the Liaison, follow-up questions,
-  references and assets, experiments.
+  Idea Board, the Liaison and experiments with real agents, the head model as overseer), then agent
+  identity and the game's voice.
 - **Blocked on**: nothing.
 
 ## Milestones
@@ -30,7 +30,8 @@ Windows, macOS, Linux or a cloud server.
 | M6 | A real start | Intake questions, Game Bible, three phases, layers kept or crossed out, R&D and storyboards; build tasks wait for a signed Bible | done (2.8.0) |
 | M7 | Director on duty | Pinged daily and before new tasks; reviews in `studio/bible/reviews/`; free drift report | done (2.8.0) |
 | M7b | Idea Board | Ideas go captured, shaped, placed, approved, then scheduled; nothing unapproved becomes build work | done (2.8.0) |
-| M8 | The game dev's seat | New or existing game; follow-up questions; references with videos; assets with provenance; the Liaison's confirmed briefs to Producer and Director; labelled ideas; experiments you can keep or take back; deeper agent identity; the game's voice | next (2.9.0) |
+| M8 | The game dev's seat | New or existing game; follow-up questions; a kept reference library; assets with a recorded statement of use; the Liaison's confirmed briefs to Producer and Director; labelled ideas; experiments you can keep or take back; a stronger learning loop with backups | done (2.9.0) |
+| M8b | Agent identity and the game's voice | Richer role cards, lessons per role, player personas for playtests, a voice and tone guide in the Bible | next |
 | M9 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | planned (2.10.0) |
 | M9b | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | planned (2.11.0) |
 | M10 | One studio across machines | The HUB holds tasks, locks and events, so cloud and multi-machine agents share them | planned |

@@ -2,7 +2,7 @@
 /**
  * harness/ideas.mjs — the Idea Board. Ideas never go straight to builders.
  *
- *   npm run idea -- add "<title>" [--detail "…"] [--by <name>]      captured
+ *   npm run idea -- add "<title>" [--detail "…"] [--by <name>] [--source dev-confirmed|dev-pitched|agent|playtest]   captured
  *   npm run idea -- route <id>                                          Producer: queue R&D to shape it
  *   npm run idea -- shape <id> --notes "…"                              R&D: shaped (queues placing)
  *   npm run idea -- place <id> --phase 1|2|3 [--layer <id>] --unlock "…" --schedule "…"
@@ -26,19 +26,26 @@ import { pingDirector } from './director.mjs';
 const now = () => new Date().toISOString();
 const step = (idea, stage, by, note = '') => ({ ...idea, stage, history: [...(idea.history || []), { stage, at: now(), by, note }] });
 
-export function addIdea({ title, detail = '', by = 'game-dev' }) {
+/** Where an idea came from, shown as a label on the board. Dev-confirmed ideas are routed first. */
+export const SOURCES = { 'dev-confirmed': 'dev, confirmed', 'dev-pitched': 'dev, pitched', agent: 'agent', playtest: 'playtest' };
+const AGENTISH = /^(producer|director|liaison|builder|rnd|planner|reviewer|watch|agent|qa|claude|codex|cursor|grok|gemini)(-|$)/i;
+
+export function addIdea({ title, detail = '', by = 'game-dev', source = null, brief = null }) {
   if (!String(title || '').trim()) return { ok: false, message: 'An idea needs a title.' };
+  if (source && !SOURCES[source]) return { ok: false, message: `--source is one of ${Object.keys(SOURCES).join(', ')}.` };
   const n = readIdeas().reduce((m, i) => Math.max(m, Number(i.id.slice(2))), 0) + 1;
-  const idea = step({ id: `I-${String(n).padStart(3, '0')}`, title: String(title).trim().slice(0, 160), detail: String(detail).slice(0, 2000), by, at: now(), tasks: [] }, 'captured', by);
+  const src = source || (AGENTISH.test(by) ? 'agent' : 'dev-pitched');
+  const idea = step({ id: `I-${String(n).padStart(3, '0')}`, title: String(title).trim().slice(0, 160), detail: String(detail).slice(0, 4000), by, source: src, brief, at: now(), tasks: [] }, 'captured', by);
   fs.mkdirSync(IDEAS_DIR, { recursive: true });
   writeIdea(idea);
-  emitEvent({ type: 'idea.captured', agent: by, to: 'producer', msg: `Idea ${idea.id} captured: ${idea.title}` });
+  emitEvent({ type: 'idea.captured', agent: by, to: 'producer', msg: `Idea ${idea.id} (${SOURCES[src]}) captured: ${idea.title}` });
   return { ok: true, idea };
 }
 
 /** The watcher's pass: one Producer task for all new ideas. */
 export function collectIdeas() {
-  const fresh = readIdeas().filter((i) => i.stage === 'captured' && !i.announced);
+  const order = Object.keys(SOURCES);
+  const fresh = readIdeas().filter((i) => i.stage === 'captured' && !i.announced && !i.routed).sort((a, b) => order.indexOf(a.source || 'dev-pitched') - order.indexOf(b.source || 'dev-pitched'));
   if (!fresh.length) return null;
   const q = parseNextQueue();
   const open = [...q.inProgress, ...q.backlog].find((t) => /^Ideas:/.test(t.title));
@@ -131,7 +138,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(okMsg(res));
     process.exit(0);
   };
-  if (cmd === 'add') done(addIdea({ title: positional.slice(1).join(' '), detail: flag('detail') || '', by: who || 'game-dev' }), (r) => `${r.idea.id} captured. The watcher hands new ideas to the Producer; nothing is built until the Director approves it.`);
+  if (cmd === 'add') done(addIdea({ title: positional.slice(1).join(' '), detail: flag('detail') || '', by: who || 'game-dev', source: flag('source') }), (r) => `${r.idea.id} captured. The watcher hands new ideas to the Producer; nothing is built until the Director approves it.`);
   if (cmd === 'route') done(routeIdea(a1, who || 'producer'), (r) => `${a1} goes to R&D: ${r.task}`);
   if (cmd === 'shape') done(shapeIdea(a1, { notes: flag('notes'), by: who || 'rnd' }), (r) => `${a1} shaped; ${r.task || 'no'} task to place it`);
   if (cmd === 'place') done(placeIdea(a1, { phase: flag('phase'), layer: flag('layer'), unlock: flag('unlock') || '', schedule: flag('schedule') || '', by: who || 'planner' }), (r) => `${a1} placed; the Director decides (${r.director})`);
@@ -150,7 +157,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'list') {
     const stage = flag('stage');
     const list = readIdeas().filter((i) => !stage || i.stage === stage);
-    console.log(list.length ? list.map((i) => `${i.id} [${i.stage}] ${i.title}${i.place ? ` (Phase ${i.place.phase}${i.place.layer ? `, ${i.place.layer}` : ''})` : ''}`).join('\n') : 'No ideas yet: npm run idea -- add "<title>"');
+    console.log(list.length ? list.map((i) => `${i.id} [${i.stage}] (${SOURCES[i.source] || 'dev, pitched'}) ${i.title}${i.place ? ` (Phase ${i.place.phase}${i.place.layer ? `, ${i.place.layer}` : ''})` : ''}`).join('\n') : 'No ideas yet: npm run idea -- add "<title>"');
     process.exit(0);
   }
   console.log('Usage: npm run idea -- add "<title>" | route <id> | shape <id> --notes "…" | place <id> --phase n [--layer id] --unlock "…" --schedule "…" | decide <id> approve|park|reject --by <name> | list | show <id> | collect');

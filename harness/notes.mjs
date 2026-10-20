@@ -4,7 +4,8 @@
  * workarounds in use, and upgrade ideas. They survive `npm run studio:reset`, so every new project
  * (and every new Producer) starts with what the last ones learned about running the studio.
  *
- *   npm run notes -- add --kind well|bad|workaround|upgrade "text" [--agent name]
+ *   npm run notes -- add --kind well|bad|workaround|upgrade|eval "text" [--agent name]
+ *   (eval: the overseer's evaluation of a session or run: what worked, what didn't, a score, what to change)
  *   npm run notes -- list [--kind bad]
  *   npm run notes -- export          markdown to bring back upstream (harness only: no game code or data)
  */
@@ -14,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 
 export const NOTES_FILE = path.join(REPO_ROOT, 'studio', 'harness-notes', 'NOTES.md');
-export const KINDS = { well: 'Worked well', bad: "Didn't work", workaround: 'Workarounds in use', upgrade: 'Upgrade ideas' };
+export const KINDS = { well: 'Worked well', bad: "Didn't work", workaround: 'Workarounds in use', upgrade: 'Upgrade ideas', eval: 'Overseer evaluations' };
 
 const HEADER = `# Harness notes (\`studio/harness-notes/NOTES.md\`)
 

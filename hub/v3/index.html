@@ -135,6 +135,9 @@
   .card { background: #fff; border: 1px solid var(--rule); border-top: 3px solid var(--idea); padding: 7px 9px; margin-bottom: 8px; font-size: 14px; overflow-wrap: anywhere; }
   .card .meta { color: var(--quiet); font-size: 12.5px; }
   .card.rejected { border-top-color: var(--cut); opacity: .7; }
+  .card .label { display: inline-block; font-size: 11.5px; padding: 0 6px; margin: 0 4px 3px 0; border: 1px solid var(--rule); border-radius: 8px; color: var(--quiet); }
+  .card.src-dev-confirmed .label:first-child { border-color: var(--open); color: var(--open); font-weight: 600; }
+  .card .label.new { border-color: var(--idea); color: var(--idea); font-weight: 600; }
   .card.parked { border-top-color: var(--shut); }
   .card.approved, .card.scheduled { border-top-color: var(--open); }
   .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
@@ -144,6 +147,9 @@
   #plan button.go { border: 2px solid var(--ink); background: var(--ink); color: var(--paper); padding: 6px 14px; font-weight: 600; }
   #plan .note { color: var(--quiet); font-size: 13px; margin: 6px 0 0; }
   #plan ul.drift { margin: 6px 0 0; padding-left: 18px; }
+  #plan label.fu { display: grid; gap: 4px; margin-bottom: 10px; flex-basis: 100%; }
+  #plan label.fu small { color: var(--quiet); }
+  #plan h3.sub { margin: 12px 0 4px; font: 600 16px/1.2 "Barlow Condensed", sans-serif; color: var(--quiet); }
   #plan .verdict { font: 700 18px/1.2 "Barlow Condensed", sans-serif; }
   @media (max-width: 900px) { .phases, .board, .two { grid-template-columns: 1fr; } .phase { border-left: 0; border-top: 2px solid var(--ink); } .phase:first-child { border-top: 0; } #plan header, #plan main { padding-left: 16px; padding-right: 16px; } }
 
@@ -475,6 +481,17 @@
     </section>
     <div class="two">
       <section>
+        <h2>Questions for you <small id="p-fucount"></small></h2>
+        <form id="p-fu"></form>
+        <p class="note" id="p-fumsg" role="status">Answers go into the Game Bible under "Details". Skip any; ask a Liaison to go through them with you in conversation.</p>
+      </section>
+      <section>
+        <h2>Experiments and references</h2>
+        <div id="p-exp"></div>
+      </section>
+    </div>
+    <div class="two">
+      <section>
         <h2>Pitch an idea</h2>
         <form id="p-idea"><input id="p-ititle" placeholder="The idea in one line" aria-label="Idea title" required maxlength="160"><textarea id="p-idetail" placeholder="Anything else: what the player would do, why it's fun" aria-label="Idea detail" maxlength="2000"></textarea><button class="go">Pitch it</button></form>
         <p class="note" id="p-msg" role="status">R&amp;D shapes it, a planner places it in the game, the Director decides. Needs the HUB token (set it in the Ops view).</p>
@@ -585,6 +602,11 @@
 
   // ---------- Game plan view ----------
   let plan = null;
+  let lastFuKeys = null;
+  // "New" on an idea card means changed since this browser last looked at the board.
+  const lastSeenIdeas = Number(store.get('ideasSeen') || 0);
+  addEventListener('beforeunload', () => store.set('ideasSeen', String(Date.now())));
+  setTimeout(() => store.set('ideasSeen', String(Date.now())), 15000);
   const PH = { 1: 'Early game', 2: 'Mid game', 3: 'Endgame' };
   const STAGE_COLS = [['Captured', ['captured']], ['Being worked out', ['shaped', 'placed']], ['Approved', ['approved', 'scheduled']], ['Parked or rejected', ['parked', 'rejected']]];
   function renderPlan() {
@@ -615,9 +637,22 @@
       $('p-shape').innerHTML = `<h2>The game's shape <small>phases left to right; a layer starts where it enters and carries on</small></h2><div class="phases">${col(1)}${col(2)}${col(3)}</div>${cut.length ? `<div class="cut">Not doing: ${cut.map((l) => `<s>${esc(l.label)}</s>`).join(' ')}</div>` : ''}`;
     }
     $('p-board').innerHTML = STAGE_COLS.map(([title, stages]) => {
-      const cards = p.ideas.filter((i) => stages.includes(i.stage)).map((i) => `<div class="card ${esc(i.stage)}"><b>${esc(i.id)}</b> ${esc(i.title)}<div class="meta">${esc(i.stage)}${i.place ? `, Phase ${i.place.phase}${i.place.layer ? `, ${esc(i.place.layer)}` : ''}` : ''}${i.by ? `, from ${esc(i.by)}` : ''}</div></div>`).join('');
+      const LABEL = { 'dev-confirmed': 'dev, confirmed', 'dev-pitched': 'dev, pitched', agent: 'agent', playtest: 'playtest' };
+      const cards = p.ideas.filter((i) => stages.includes(i.stage)).map((i) => {
+        const fresh = Date.parse(i.updatedAt || i.at) > lastSeenIdeas;
+        return `<div class="card ${esc(i.stage)} src-${esc(i.source || 'dev-pitched')}"><span class="label">${esc(LABEL[i.source] || 'dev, pitched')}</span>${fresh ? '<span class="label new">new</span>' : ''}<br><b>${esc(i.id)}</b> ${esc(i.title)}<div class="meta">${esc(i.stage)}${i.routed && i.stage === 'captured' ? ', with R&amp;D' : ''}${i.place ? `, Phase ${i.place.phase}${i.place.layer ? `, ${esc(i.place.layer)}` : ''}` : ''}${i.by ? `, from ${esc(i.by)}` : ''}</div></div>`;
+      }).join('');
       return `<div class="stage"><h3>${title}</h3>${cards || '<p class="note">None.</p>'}</div>`;
     }).join('');
+    const fu = (p.followups || []).slice(0, 4);
+    $('p-fucount').textContent = p.followups?.length ? `${p.followups.length} waiting` : '';
+    const fuKeys = fu.map((f) => f.key).join(',');
+    // Only redraw the form when the questions change, so typed answers aren't wiped by the next poll.
+    if (fuKeys !== lastFuKeys) $('p-fu').innerHTML = fu.length ? `${fu.map((f) => `<label class="fu"><span>${esc(f.q)} <small>${esc(f.about)}${f.source === 'model' ? ', suggested by a model' : ''}</small></span><input data-key="${esc(f.key)}" aria-label="${esc(f.q)}"></label>`).join('')}<button class="go">Save answers</button>` : '<p class="note">Nothing waiting.</p>';
+    lastFuKeys = fuKeys;
+    const exps = (p.experiments || []).map((x) => `<div class="card ${x.status === 'dropped' ? 'rejected' : x.status === 'kept' ? 'approved' : ''}"><b>${esc(x.id)}</b> ${esc(x.title)}<div class="meta">${esc(x.status)}${x.idea ? `, ${esc(x.idea)}` : ''}</div></div>`).join('');
+    const refs = (p.refs || []).slice(-6).map((r) => `<li>${esc(r.id)} ${esc(r.game)}: ${esc(r.feature)}${r.at ? ` at ${esc(r.at)}` : ''} <small>(${r.kept ? 'kept' : 'link only'})</small></li>`).join('');
+    $('p-exp').innerHTML = `${exps || '<p class="note">No experiments. <code>npm run experiment -- start "…"</code></p>'}<h3 class="sub">Reference library</h3>${refs ? `<ul class="drift">${refs}</ul>` : '<p class="note">Empty. <code>npm run ref -- add &lt;link or file&gt; --game … --feature …</code></p>'}`;
     const r = p.latestReview;
     const drift = (p.drift?.items || []).filter((i) => i.kind !== 'no-bible');
     $('p-director').innerHTML = `${r ? `<p><span class="verdict">${esc(r.verdict || 'no verdict')}</span> on Phase ${esc(r.phase || '?')}, ${esc(hhmm(r.at))} ${esc(new Date(r.at).toLocaleDateString())}. <code>${esc(r.file)}</code></p>` : '<p>No review yet. The HUB pings the Director daily, and the Producer pings it before making new tasks.</p>'}${drift.length ? `<p class="note">Drift report (free, from scripts):</p><ul class="drift">${drift.map((i) => `<li>${esc(i.msg)}</li>`).join('')}</ul>` : '<p class="note">Nothing drifting.</p>'}`;
@@ -646,6 +681,20 @@
       pollPlan();
     } catch (err) {
       $('p-msg').textContent = `Couldn't pitch it: ${err.message}`;
+    }
+  });
+  $('p-fu').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const answers = {};
+    $('p-fu').querySelectorAll('input[data-key]').forEach((i) => { if (i.value.trim()) answers[i.dataset.key] = i.value.trim(); });
+    if (!Object.keys(answers).length) return;
+    try {
+      const r = await post('/api/followups', { answers, by: actor() });
+      $('p-fumsg').textContent = `Saved ${r.saved}. ${r.left} left.`;
+      lastFuKeys = null;
+      pollPlan();
+    } catch (err) {
+      $('p-fumsg').textContent = `Couldn't save: ${err.message}`;
     }
   });
   $('o-inbox').addEventListener('submit', (ev) => {

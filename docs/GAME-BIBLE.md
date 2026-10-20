@@ -26,6 +26,16 @@ art, the one thing that must feel great, 3 to 5 pillars, and the three phases.
 
 Start with a demo, then grow it phase by phase.
 
+**New or existing?** The first question. An existing game gets a read-only scan first
+(`npm run onboard -- --path <folder> --name "<name>"`), and the intake carries on with what you know.
+
+**Follow-up questions.** After the first round, the intake offers follow-ups: two fixed questions
+for each phase and for every layer you kept or are exploring ("How many tiers does the tech tree
+have, and what does the first unlock solve?"). They never need a model. Add `--model` and a cheap or
+local model writes a few more from your own answers; a script drops any that repeat, run long, or
+touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, the Game plan view, or in
+conversation with the Liaison. Answers land in `BIBLE.md` under "Details".
+
 ## 2. Phases: the three parts of the game the player plays
 
 | Phase | The player | Moves on when |
@@ -98,10 +108,74 @@ Ideas never go straight to builders.
 6. **Scheduled**: the Producer makes the build tasks with `--idea I-001`; `task add` refuses an idea
    that isn't approved.
 
-## 7. In the War Room
+## 7. The Liaison: talk to the studio any time
+
+The Liaison (role `liaison`, `npm run kickoff -- --role liaison --agent liaison-1 --tool claude`) is
+the agent the game dev talks to. It asks until it understands, sorts what it heard into an idea, a
+direction, an asset or a question, reads it back in plain words and asks "Shall I push it on?". Only
+a clear yes moves it:
+
+| Kind | Where it goes |
+| --- | --- |
+| idea | The Idea Board, labelled "dev, confirmed", straight to R&D, and the Director is pinged |
+| direction | A Producer task to turn it into work, and the Director checks it against the Bible |
+| asset | A Producer task to record it (owned or reference only) |
+| question | A Producer task to answer you |
+
+Nothing running stops. Commands: `npm run liaison -- draft | change | confirm | drop | list`.
+Ideas on the board carry where they came from: dev confirmed, dev pitched, agent, playtest.
+
+## 8. References: keep what you design from
+
+```bash
+npm run ref -- add <link or file> --game "A Short Hike" --feature "climbing stamina" --at 0:42 --take "…" --avoid "…"
+npm run ref -- attach R-001 <file>       # a clip you saved, a screenshot
+npm run ref -- frames R-001              # stills for agents whose model reads images (needs ffmpeg)
+```
+
+Each reference gets a folder with the media and a note. Set `STUDIO_REFERENCE_DIR` to a Google Drive,
+Dropbox or OneDrive folder on your computer and the library syncs and stays reachable as development
+goes on; otherwise it is `references/` in the repo (ignored by git). A link to a file is downloaded.
+A link to a web page (a YouTube video, a store page) is kept as a link with its timestamp: save the
+clip with the site's own download or offline feature, or record it yourself, and `attach` it. Check a
+source's terms before downloading from it. References are never shipped.
+
+## 9. Your own assets
+
+```bash
+npm run asset -- add boat.glb --use game --owner "Hatch" --licence "own work" --by hatch
+npm run asset -- add map.png --use reference --game "our old prototype" --feature "island shape"
+```
+
+**Use in the game:** you state you own it or hold a licence; the file goes to `assets/` and
+`studio/assets/manifest.json` records who said so, when, the licence and a checksum. The harness
+records the statement but can't verify it, and this isn't legal advice: a product built on this needs
+proper terms from a lawyer. **Reference only:** it goes to the reference library and never ships. The
+`assets` gate fails when a file in `assets/` has no record or changed since, or when game code points
+at the reference library.
+
+## 10. Experiments: try it, keep it, or take it back out
+
+```bash
+npm run experiment -- start "Glowing moss at night"     # X-001
+npm run experiment -- task X-001 "night glow prototype"  # work inside it
+npm run experiment -- drop X-001 --by hatch --only cartridges/my-game/glow.mjs   # take back part
+npm run experiment -- drop X-001 --by hatch               # or all of it
+npm run experiment -- keep X-001 --by hatch
+```
+
+Every commit for an experiment carries a `Studio-Experiment: X-001` trailer (its tasks add it, or
+set `STUDIO_EXPERIMENT=X-001`), so `drop` finds exactly what to remove even after other work landed
+on top. Dropping adds commits that undo it, which is safe while other agents share the checkout; a
+part that later work changed is refused rather than guessed. Inside the game, keep a prototype behind
+a switch in TUNING (`experiments: { X001: true }`). Commits made with `--no-verify` skip the hook and
+aren't tagged.
+
+## 11. In the War Room
 
 The **Game plan** view shows the three phases side by side with the layers that enter each, the
-crossed-out layers, approved ideas pinned where they land, the Idea Board's stages, a box to pitch an
+crossed-out layers, approved ideas pinned where they land, the Idea Board with source labels and
+"new" marks, follow-up questions to answer, experiments and the reference library, a box to pitch an
 idea, and the Director's latest verdict with the drift report. It reads files only (no AI). The Ops
 view has a box to message the Producer; messages land in `studio/producer/INBOX.md` and its briefing.
 
@@ -114,5 +188,6 @@ view has a box to message the Producer; messages land in `studio/producer/INBOX.
 | `POST /api/bible/sign` | A person signs (`{ by }`) |
 | `GET /api/ideas`, `POST /api/ideas` | List ideas; pitch one (`{ title, detail, by }`) |
 | `POST /api/inbox` | Message the Producer (`{ msg, by }`) |
+| `POST /api/followups` | Answer follow-up questions (`{ answers: { "<key>": "…" }, by }`) |
 
 Writes need the HUB token header, like every other write.

@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.9.0] — 2026-10-20
+### Added
+- **The Liaison** (`npm run liaison`, role `liaison`, `kickoff --role liaison`): the agent the game dev talks to. It asks until it understands, sorts what it heard (idea, direction, asset, question), reads it back and asks "Shall I push it on?". Only the dev's yes sends it on: ideas to the Idea Board as "dev, confirmed" and straight to R&D with a Director ping; directions to a Producer task with the Director checking the fit; assets and questions to the Producer. Nothing running stops.
+- **Labels on the Idea Board**: dev confirmed, dev pitched, agent, playtest, and "new" since you last looked. Dev-confirmed ideas go first.
+- **Experiments** (`npm run experiment`): start one, work in it (its tasks, or `STUDIO_EXPERIMENT`), and every commit carries a `Studio-Experiment` trailer. `keep` it, or `drop` it in full or `--only` some files: undo commits that leave other work in place, refused rather than guessed where later work changed the same lines.
+- **Reference library** (`npm run ref`): games, features, timestamps, what to take and avoid, with the media downloaded and kept in a folder per reference, in `references/` or `STUDIO_REFERENCE_DIR` (a synced Google Drive folder works). Web pages stay links until you attach a saved copy. `frames` pulls stills for image-reading models.
+- **Game assets with a recorded statement** (`npm run asset`): a person states they own a file or hold a licence; it goes to `assets/` with who said so, when, the licence and a checksum. Reference-only files go to the library. New required **`assets` gate**: every shipped file recorded and unchanged, and no game code pointing at the reference library.
+- **Intake**: first question "new or existing?"; **follow-up questions** for each phase and kept or explore layer from a fixed bank, plus `--model` questions from a cheap model checked by a script; answer in a terminal, with `--answers`, through the Liaison, or in the War Room.
+- **A stronger learning loop** (`npm run learn`): the same failure on two or more days and the lesson that didn't stick, retro suggestions raised again and again, the overseer's evaluations (`notes --kind eval`). The HUB rewrites `studio/memory/LEARNED.md` daily and backs every learning file up to `STUDIO_BACKUP_DIR`, with a one-file `STUDIO-MEMORY.md`. The Producer's kickoff makes it the overseer of the run; `docs/STRESS-TEST.md` has the head model's first message.
+- War Room Game plan view: follow-up questions to answer, experiments and the reference library. Endpoint `POST /api/followups`.
+
+---
+
 ## [2.8.0] — 2026-10-20
 ### Added
 - **Game Bible** (`studio/bible/bible.json`, written out as `BIBLE.md` and `NOT-DOING.md`): the game as structured data a future front end can drive. `npm run bible` shows what's missing, signs it (a person, not an agent), and opens phases.

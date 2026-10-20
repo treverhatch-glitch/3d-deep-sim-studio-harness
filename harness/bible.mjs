@@ -41,6 +41,7 @@ export const PLAY_LENGTHS = {
 
 /** The intake questions, in order. `kind`: text, list (several lines), choice, multi. */
 export const QUESTIONS = [
+  { id: 'origin', kind: 'choice', options: ['new', 'existing'], ask: 'Starting from scratch (new), or bringing a game that already exists (existing)?' },
   { id: 'title', kind: 'text', ask: 'Working title of the game?' },
   { id: 'fantasy', kind: 'text', ask: 'What does the player get to be or do? (the fantasy, one sentence)' },
   { id: 'verb', kind: 'text', ask: 'The main thing the player does, minute to minute (one verb or short phrase)?' },
@@ -89,6 +90,58 @@ export const LAYERS = [
   { id: 'prestige', group: 'The end', label: 'Prestige or new game plus', ask: 'Can the player restart with bonuses (prestige, new game plus)?', keywords: ['prestige', 'new game plus', 'ng+', 'rebirth'], suggest: [] },
   { id: 'meta-progression', group: 'The end', label: 'Meta-progression across runs', ask: 'Does progress carry over between runs?', keywords: ['meta progression', 'meta-progression', 'between runs', 'permanent upgrade'], suggest: ['roguelike'] },
 ];
+
+
+/** Follow-up questions per kept or explore layer, and per phase. Always available: no model, no keys. */
+export const FOLLOWUPS = {
+  'phase:1': ['What does the very first minute look like, before the player has learned anything?', 'What is the first small win, and how long until it happens?'],
+  'phase:2': ['What bottleneck from Phase 1 pushes the player into Phase 2, and what solves it?', 'What new pressure appears in the mid game that wasn\'t there before?'],
+  'phase:3': ['What is the hardest test the game asks of the player?', 'What does the player see or feel when they finish (or decide to keep playing)?'],
+  'levels-xp': ['What earns XP, and what does a new level give the player?', 'Roughly how many levels, and how long should the first one take?'],
+  skills: ['How does the player get a new skill: choose it, earn it, or find it?', 'Name one skill early, one mid, one late.'],
+  'tech-tree': ['How many tiers does the tree have, and what does the first unlock solve?', 'Is research paid with time, money, or something else?'],
+  unlocks: ['What are the tiers called (licences, ranks, reputation levels), and what does each open?', 'How does the player earn the next tier?'],
+  'gear-crafting': ['Where does gear come from: drops, shops, or crafting?', 'What is one recipe or item the player will remember?'],
+  collections: ['What is collected, and how many are there in total?', 'What does finishing a set give the player?'],
+  currency: ['What currencies are there, and what is each one spent on?', 'Where does money come from early, and where does it go late?'],
+  'production-chains': ['What is the first chain (raw to finished), and how many steps?', 'What happens when a chain breaks or backs up?'],
+  'upkeep-loans': ['What costs money every day or every turn?', 'Can the player borrow, and what happens if they can\'t pay?'],
+  markets: ['Which prices move, and what moves them?', 'Can the player influence a market, or only react to it?'],
+  'map-expansion': ['How does the playable space grow, and how big is it at the end?', 'What makes a new area worth opening?'],
+  building: ['What can the player build, and on what grid or shape rules?', 'Can buildings be moved, upgraded, or destroyed?'],
+  hazards: ['What can go wrong, and how often?', 'Can the player prevent it, or only recover from it?'],
+  'npc-needs': ['Which needs or traits matter, and how does the player see them?', 'What happens when needs are ignored?'],
+  automation: ['What is the first thing the player stops doing by hand?', 'How does the player set up or direct the automation?'],
+  factions: ['Which factions are there, and what does each want?', 'How does standing go up or down, and what does it change?'],
+  governance: ['What does the player decide (votes, laws, policies), and how often?', 'Who pushes back, and what happens when they do?'],
+  multiplayer: ['Together or against each other, and how many players?', 'What does one player see of the others?'],
+  narrative: ['Who tells the story, and when does the player hear it?', 'Does the story change with the player\'s choices?'],
+  quests: ['Where do quests or contracts come from, and how many at once?', 'Give one example quest from each phase.'],
+  victory: ['What exactly triggers the win?', 'What happens after the win?'],
+  endless: ['What keeps endless play interesting after the main goals?', 'Does anything get harder or change over time?'],
+  prestige: ['What resets on prestige, and what carries over?', 'Why would a player choose to reset?'],
+  'meta-progression': ['What carries over between runs?', 'How does a new player\'s first run differ from their tenth?'],
+};
+
+/** Follow-ups still unanswered: the phases, and every layer answered yes or explore. */
+export function pendingFollowups(b) {
+  const keys = ['phase:1', 'phase:2', 'phase:3', ...LAYERS.filter((l) => ['yes', 'explore'].includes(b.layers?.[l.id]?.answer)).map((l) => l.id)];
+  const out = [];
+  for (const k of keys) (FOLLOWUPS[k] || []).forEach((q, i) => {
+    const key = `${k}#${i + 1}`;
+    if (!b.followups?.[key]?.a) out.push({ key, about: k, q, source: 'bank' });
+  });
+  for (const [key, f] of Object.entries(b.followups || {})) if (f.source === 'model' && !f.a) out.push({ key, about: f.about, q: f.q, source: 'model' });
+  return out;
+}
+
+export function answerFollowup(b, key, a, by = 'game-dev') {
+  const known = pendingFollowups(b).concat(Object.entries(b.followups || {}).map(([k, f]) => ({ key: k, about: f.about, q: f.q, source: f.source })));
+  const f = known.find((x) => x.key === key);
+  if (!f) return false;
+  b.followups = { ...(b.followups || {}), [key]: { about: f.about, q: f.q, a: String(a).trim(), source: f.source, by, at: new Date().toISOString() } };
+  return true;
+}
 
 const now = () => new Date().toISOString();
 const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
@@ -297,6 +350,12 @@ export function renderBible(b) {
     const v = b.layers?.[l.id];
     const ans = !v ? '_not asked_' : v.answer === 'no' ? '~~crossed out~~' : v.answer;
     L.push(`| ${v?.answer === 'no' ? `~~${l.label}~~` : l.label} | ${ans} | ${v?.phase || ''} | ${v?.why || ''} |`);
+  }
+  const fu = Object.values(b.followups || {}).filter((f) => f.a);
+  if (fu.length) {
+    L.push('', '## Details (follow-up answers)');
+    const label = (k) => (k.startsWith('phase:') ? `Phase ${k.slice(6)}` : LAYERS.find((l) => l.id === k)?.label || k);
+    for (const about of [...new Set(fu.map((f) => f.about))]) L.push('', `### ${label(about)}`, ...fu.filter((f) => f.about === about).map((f) => `- ${f.q} **${f.a}**`));
   }
   const refs = a.references || [];
   if (refs.length) L.push('', '## References', ...refs.map((r) => `- ${r}`));

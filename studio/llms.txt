@@ -20,6 +20,18 @@
   The Director guards the Bible. Pinged daily by the HUB and by the Producer before it makes tasks; a ping queues one review task, writes `.studio/briefs/director.md`, and starts `STUDIO_DIRECTOR_CMD` (at most hourly). `drift` is a free report.
 - `npm run idea -- add "…" | route <id> | shape <id> --notes | place <id> --phase n | decide <id> approve|park|reject --by <name> | list`
   The Idea Board: captured, shaped (R&D), placed (planner, pings the Director), decided, scheduled (`task add --idea`). The watcher hands new ideas to the Producer.
+- `npm run intake -- --followups [--model | --json | --answers f.json]`
+  Follow-up questions per phase and per kept or explore layer (a fixed bank; `--model` adds checked ones from a cheap model).
+- `npm run liaison -- draft --kind idea|direction|asset|question --title … --summary … | change | confirm <B-id> --by <dev> | drop | list`
+  The Liaison turns a conversation into a brief, reads it back, and only on the dev's yes sends it to the Producer and the Director.
+- `npm run experiment -- start "…" | task X-001 "…" | keep X-001 --by <name> | drop X-001 --by <name> [--only paths] | list`
+  Tracked experiments: commits tagged `Studio-Experiment`, taken back out in full or in part with undo commits.
+- `npm run ref -- add <url|file> --game … --feature … [--at 1:23] | attach R-001 <file> | frames R-001 | list`
+  The reference library (media kept in `references/` or `STUDIO_REFERENCE_DIR`, index in `studio/references/`). Never shipped.
+- `npm run asset -- add <file> --use game --owner … --licence … --by <person>` · `--use reference`
+  Game assets with a recorded statement of who may use them (`studio/assets/manifest.json`); the `assets` gate checks every shipped file.
+- `npm run learn [-- backup --to <folder>]`
+  What keeps happening, lessons that didn't stick, suggestions never handled, the overseer's evaluations; daily by the HUB, backed up to `STUDIO_BACKUP_DIR`.
 - `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`
   A Producer meeting with several agents. Notes in `studio/meetings/`, actions become tasks.
 - `node harness/task.mjs pause <ID> --agent <you> --note "<where you stopped>"`

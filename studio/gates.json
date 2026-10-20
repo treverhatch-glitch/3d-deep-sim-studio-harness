@@ -13,6 +13,7 @@
     { "id": "tick-budget", "command": "node scripts/check-tick-budget.mjs", "required": true },
     { "id": "approvals", "command": "node scripts/check-approvals.mjs", "required": true },
     { "id": "hub-smoke", "command": "node qa/hub-smoke.mjs", "required": true },
+    { "id": "assets", "command": "node scripts/check-assets.mjs", "required": true },
     { "id": "docs", "command": "node scripts/check-docs.mjs", "required": true },
     { "id": "secrets", "command": "node scripts/secret-scan.mjs", "required": true },
     { "id": "selftest", "command": "node qa/selftest.mjs", "required": true },

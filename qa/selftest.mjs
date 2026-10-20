@@ -66,6 +66,10 @@ const SABOTAGE = {
   soak: (d) => edit(d, SIM, plantInvariant(150)),
   'tick-budget': () => ({ TICK_BUDGET_MS_PER_TICK: '0.0000001' }),
   'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req));', 'return true;')),
+  assets: (d) => {
+    fs.mkdirSync(path.join(d, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'assets/stray.glb'), 'not recorded');
+  },
   docs: (d) => fs.writeFileSync(path.join(d, 'docs/STALE.md'), 'Run `npm run no-such-script` first.\n'),
   secrets: (d) => fs.writeFileSync(path.join(d, 'leak.txt'), `OPENAI_API_KEY=${'sk-'}${'a'.repeat(24)}\n`),
 };
@@ -83,6 +87,7 @@ const EXPECT = {
   soak: /PLANTED/,
   'tick-budget': /ms\/tick >/,
   'hub-smoke': /FAIL write without token is refused/,
+  assets: /stray\.glb has no record/,
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
 };
@@ -419,6 +424,117 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   run(dir, 'node scripts/studio-reset.mjs --name "Next Game" --yes', env);
   const after = add('"Build the first level"');
   report('studio:reset starts an unsigned Bible, so build work waits for the intake', after.status !== 0 && /pre-production/.test(after.stderr) && /npm run intake/.test(queue()), after.stderr);
+}
+
+// Experiments: tagged commits can be kept, or taken back out in part or in full, leaving other work alone.
+{
+  const dir = copyRepo();
+  const git = (cmd, env = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, env);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  run(dir, 'node scripts/install-hooks.mjs');
+  run(dir, 'node harness/experiment.mjs start "Glowing moss at night" --by hatch');
+  const X = { STUDIO_EXPERIMENT: 'X-001' };
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// night glow\n`);
+  fs.writeFileSync(path.join(dir, 'cartridges/example-sim/glow.txt'), 'glow\n');
+  git('add -A');
+  git('commit -q -m "night glow"', X);
+  edit(dir, 'cartridges/example-sim/index.mjs', (s) => `${s}\n// unrelated work\n`);
+  git('commit -qam "unrelated"');
+  const tagged = run(dir, 'git log --format=%B -n 2').stdout;
+  report('commits made with STUDIO_EXPERIMENT carry the experiment trailer, others don\'t', (tagged.match(/Studio-Experiment: X-001/g) || []).length === 1, tagged);
+  const part = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch --only cartridges/example-sim/glow.txt');
+  report('dropping part of an experiment takes out only that part', part.status === 0 && !fs.existsSync(path.join(dir, 'cartridges/example-sim/glow.txt')) && /night glow/.test(fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8')), part.stdout + part.stderr);
+  const full = run(dir, 'node harness/experiment.mjs drop X-001 --by hatch');
+  const qa = fs.readFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), 'utf8');
+  const idx = fs.readFileSync(path.join(dir, 'cartridges/example-sim/index.mjs'), 'utf8');
+  const rec = JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-001.json'), 'utf8'));
+  report('dropping the rest takes it all out and leaves other work in place', full.status === 0 && !/night glow/.test(qa) && /unrelated work/.test(idx) && rec.status === 'dropped', full.stdout + full.stderr);
+  run(dir, 'node harness/experiment.mjs start "Snails redraw paths" --by hatch');
+  const t = run(dir, 'node harness/experiment.mjs task X-002 "snail trail prototype"').stdout.match(/T-\d+/)[0];
+  run(dir, `node harness/task.mjs start ${t} --agent builder-x`);
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}// snail trail\n`);
+  git('commit -qam "snail trail"', { STUDIO_LOCK_OWNER: 'builder-x' });
+  report('work on an experiment\'s task is tagged with the experiment', /Studio-Experiment: X-002/.test(run(dir, 'git log -1 --format=%B').stdout), run(dir, 'git log -1 --format=%B').stdout);
+  report('keeping an experiment records the decision', run(dir, 'node harness/experiment.mjs keep X-002 --by hatch').status === 0 && JSON.parse(fs.readFileSync(path.join(dir, 'studio/experiments/X-002.json'), 'utf8')).status === 'kept');
+}
+
+// The Liaison: nothing moves until the game dev confirms; then it reaches the Producer and the Director.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_LOCK_OWNER: 'liaison-1' };
+  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  run(dir, 'node harness/bible.mjs sign --by hatch', env);
+  const d = run(dir, 'node harness/liaison.mjs draft --kind idea --title "Night tide" --summary "At night the moss glows and visitors rate higher" --from hatch', env);
+  report('a draft is read back to the game dev and asks to push it on', /Shall I push it on\?/.test(d.stdout) && /Night tide/.test(d.stdout), d.stdout);
+  report('nothing reaches the Idea Board before the game dev confirms', !fs.existsSync(path.join(dir, 'studio/bible/ideas/I-001.json')));
+  report('an agent can\'t confirm for the game dev', run(dir, 'node harness/liaison.mjs confirm B-001 --by liaison-1', env).status !== 0);
+  const c = run(dir, 'node harness/liaison.mjs confirm B-001 --by hatch --quote "yes push it"', env);
+  const idea = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/ideas/I-001.json'), 'utf8'));
+  const q = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('a confirmed idea is labelled dev-confirmed, goes straight to R&D, and pings the Director', c.status === 0 && idea.source === 'dev-confirmed' && /\(`rnd`\) — Idea: shape I-001/.test(q) && /\(`director`\) — Director review: New dev-confirmed idea I-001/.test(q), c.stdout + c.stderr + q);
+  run(dir, 'node harness/liaison.mjs draft --kind direction --title "Slower rain" --summary "Rain takes twice as long" --from hatch', env);
+  run(dir, 'node harness/liaison.mjs confirm B-002 --by hatch', env);
+  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('a confirmed direction becomes a Producer task and joins the Director\'s open review', /\(`producer`\) — Plan: turn the game dev's direction into tasks: Slower rain/.test(q2) && (q2.match(/Director review/g) || []).length === 1, q2);
+}
+
+// The learning loop: the same failure on two days is flagged, with the lesson that didn't stick.
+{
+  const dir = copyRepo();
+  const day = (d, msg) => JSON.stringify({ ts: `${d}T10:00:00.000Z`, type: 'closedloop.escalate', agent: 'watch', msg });
+  fs.appendFileSync(path.join(dir, '.studio/events.jsonl'), `${[day('2026-10-01', 'BUG-11 replay drift at tick 120: Math.random in a helper'), day('2026-10-03', 'BUG-19 replay drift at tick 340: Math.random in a helper')].join('\n')}\n`);
+  const l = run(dir, 'node harness/learn.mjs');
+  report('npm run learn flags a failure seen on two days and the lesson that didn\'t stick', /on 2 days/.test(l.stdout) && /didn't stick: "\[2026-10-19\] BUG-SEED-001/.test(l.stdout), l.stdout);
+  const to = path.join(tmpRoot, `backup-${n}`);
+  const b = run(dir, `node harness/learn.mjs backup --to "${to}"`);
+  const made = fs.existsSync(to) ? fs.readdirSync(to) : [];
+  report('npm run learn -- backup copies the studio\'s memory, with a one-file version', b.status === 0 && made.length === 1 && fs.existsSync(path.join(to, made[0], 'STUDIO-MEMORY.md')) && fs.existsSync(path.join(to, made[0], 'studio/memory/failures.md')), b.stdout + b.stderr);
+  run(dir, 'node harness/notes.mjs add --kind eval "score 3; agents followed the loop; two forced dones"');
+  report('the overseer\'s evaluations are kept with the harness notes', /## Overseer evaluations[\s\S]*score 3/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')));
+}
+
+// The dev's seat: references are kept, assets carry who may use them, follow-up questions get asked.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  fs.writeFileSync(path.join(dir, 'clip.mp4'), 'a saved clip');
+  const r1 = run(dir, 'node harness/refs.mjs add clip.mp4 --game "A Short Hike" --feature "climbing stamina" --at 0:42 --take "feathers as stamina"', env);
+  const lib = fs.readdirSync(path.join(dir, 'references'));
+  report('a reference file is kept in the library with a note, and listed in LIBRARY.md', r1.status === 0 && lib.length === 1 && fs.existsSync(path.join(dir, 'references', lib[0], 'clip.mp4')) && /climbing stamina/.test(fs.readFileSync(path.join(dir, 'studio/references/LIBRARY.md'), 'utf8')), r1.stdout + r1.stderr);
+  const libDir = path.join(tmpRoot, `drive-${n}`);
+  run(dir, 'node harness/refs.mjs add clip.mp4 --game "Viridi" --feature "watering"', { ...env, STUDIO_REFERENCE_DIR: libDir });
+  report('STUDIO_REFERENCE_DIR puts the library in another folder (a synced drive)', fs.existsSync(libDir) && fs.readdirSync(libDir).length === 1);
+  fs.writeFileSync(path.join(dir, 'boat.glb'), 'model');
+  report('an agent can\'t declare a game asset', run(dir, 'node harness/assets.mjs add boat.glb --use game --owner Hatch --licence "own work" --by builder-1', env).status !== 0);
+  const a = run(dir, 'node harness/assets.mjs add boat.glb --use game --owner Hatch --licence "own work" --by hatch', env);
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8'));
+  report('a person declares a game asset: it is copied to assets/ with who said so and a checksum', a.status === 0 && man.assets[0].declaredBy === 'hatch' && /hatch stated that Hatch owns this file/.test(man.assets[0].statement) && fs.existsSync(path.join(dir, 'assets/boat.glb')), a.stdout + a.stderr);
+  report('the assets gate passes with every shipped file recorded', run(dir, 'node scripts/check-assets.mjs').status === 0);
+  fs.appendFileSync(path.join(dir, 'assets/boat.glb'), 'changed');
+  report('the assets gate fails when a recorded file changed', /changed since hatch recorded it/.test(run(dir, 'node scripts/check-assets.mjs').stdout));
+  fs.writeFileSync(path.join(dir, 'assets/boat.glb'), 'model');
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// const look = 'references/R-001-a-short-hike/clip.mp4';\n`);
+  report('the assets gate fails when game code points at the reference library', /points at the reference library/.test(run(dir, 'node scripts/check-assets.mjs').stdout));
+
+  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  const pending = JSON.parse(run(dir, 'node harness/intake.mjs --followups --json', env).stdout);
+  report('follow-up questions cover the phases and every kept or explore layer, and none that are crossed out', pending.some((f) => f.about === 'phase:1') && pending.some((f) => f.about === 'collections') && pending.some((f) => f.about === 'building') && !pending.some((f) => f.about === 'tech-tree'), JSON.stringify(pending.map((f) => f.about)));
+  fs.writeFileSync(path.join(dir, 'fu.json'), JSON.stringify({ 'phase:1#1': 'Tap a bed to plant moss', 'collections#1': 'Twelve moss types' }));
+  run(dir, 'node harness/intake.mjs --followups --answers fu.json', env);
+  report('follow-up answers land in the Bible under Details', /## Details[\s\S]*Twelve moss types/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')));
+  const fake = path.join(dir, 'fake-model.mjs');
+  fs.writeFileSync(fake, `import http from 'node:http';
+const content = 'phase:1 | How fast does moss spread after rain?\\nnot-a-layer | Is this kept?\\ntech-tree | What does research unlock?\\nphase:2 | What does a visitor do on a path?';
+const s = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 10 } })); }); });
+s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
+  const server = spawn(process.execPath, [fake], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
+  const m = await runAsync(dir, 'node harness/intake.mjs --followups --model --json', { ...env, OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' });
+  server.kill();
+  const ai = Object.values(JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).followups || {}).filter((f) => f.source === 'model').map((f) => f.q);
+  report('a cheap model adds follow-ups from the answers; questions about crossed-out or unknown layers are dropped', ai.length === 2 && ai.includes('How fast does moss spread after rain?') && !ai.some((q) => /research|kept/.test(q)), m.stdout + JSON.stringify(ai));
 }
 
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.

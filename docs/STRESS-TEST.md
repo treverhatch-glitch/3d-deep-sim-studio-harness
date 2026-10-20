@@ -35,6 +35,8 @@ In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publ
 | `STUDIO_DAILY_TOKEN_CAP` | **Set this first.** Calls past it are refused and the Producer is told |
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
+| `STUDIO_BACKUP_DIR` | A Google Drive, Dropbox or OneDrive folder on your computer. The HUB copies the studio's memory there daily (`npm run learn -- backup` any time) |
+| `STUDIO_REFERENCE_DIR` | Where the reference library keeps media; a synced folder keeps it reachable |
 | `STUDIO_DIRECTOR_CMD` | The launch line from `npm run kickoff -- --role director --agent director-1 --tool …`, so pings start the Director |
 
 Before any agent starts, check the models: `npm run models:check`. It asks each provider you have a
@@ -47,6 +49,21 @@ Give each agent its opening prompt: `npm run kickoff -- --role builder --agent c
 Run every agent in this one checkout, not in separate worktrees, so they share the queue and locks. It sets the agent's name and model and gives it the work loop;
 `task start` then hands it a one-page brief per task. Commits get `Studio-Agent`, `Studio-Model` and
 `Studio-Task` trailers, so every change can be traced to who made it, on what model, for which task.
+
+### The head model's first message
+
+Give the Producer (the head model) its kickoff prompt, then this, so the run teaches the harness as
+well as building the game:
+
+> You are the overseer of this run as well as its Producer. Remember: the studio's memory is its
+> files, so anything you don't write down is lost. Throughout the run, watch how it goes (agents
+> following the loop, refusals and why, hand-backs, drift, spend, what the harness made easy or hard)
+> and write it down: `npm run notes -- add --kind eval|well|bad|workaround|upgrade "…"`. At the end of
+> each session, score it 1 to 5 with what worked, what didn't and what to change. Read `npm run learn`
+> each session and act on the top item. Never delete earlier notes; add newer ones.
+
+Start a Liaison too (`npm run kickoff -- --role liaison --agent liaison-1 --tool …`) and talk to it
+whenever you have an idea, a change, a reference or an asset; the studio keeps running.
 
 ## 3. Run it
 
@@ -65,7 +82,8 @@ Run every agent in this one checkout, not in separate worktrees, so they share t
 | Which models made the most bugs for the work they did? | `npm run scorecard` |
 | What did the studio learn, and what should change? | `studio/memory/retros/`, the Producer log |
 | Where did agents stall, run out or get refused? | `studio/handoffs/`, `npm run watch`, the retro |
-| What did the harness do well or badly? | `npm run notes -- list`, then `npm run notes -- export` to bring it upstream |
+| What did the harness do well or badly? | `npm run notes -- list` (the overseer's evaluations included), then `npm run notes -- export` to bring it upstream |
+| What keeps happening, and did lessons stick? | `npm run learn` (`studio/memory/LEARNED.md`); the backups in `STUDIO_BACKUP_DIR` |
 | What did it cost? | Tokens per provider in the War Room's "Model calls today", `.studio/runs/` |
 
 Keep the private copy's notes. The lessons that are about the harness rather than your game are worth
