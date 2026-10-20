@@ -90,7 +90,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   if (forProducer.length && !open && !dryRun) {
     const counts = ['stalled', 'waiting', 'exhausted'].map((k) => [k, forProducer.filter((f) => f.kind === k).length]).filter(([, n]) => n);
     const words = { stalled: 'stalled', waiting: 'waiting for an agent', exhausted: 'provider outage' };
-    pinged = addTask({ title: `Watch: ${counts.map(([k, n]) => `${n} ${words[k]}`).join(', ')} (run npm run watch for details)`, role: 'producer', priority: 'P1' });
+    pinged = addTask({ agent: 'watch', title: `Watch: ${counts.map(([k, n]) => `${n} ${words[k]}`).join(', ')} (run npm run watch for details)`, role: 'producer', priority: 'P1' });
     emitEvent({ type: 'watch.alert', agent: 'watch', to: 'producer', task: pinged.id, msg: forProducer.map((f) => f.msg).join('; ').slice(0, 300) });
   } else if (findings.length && !dryRun) {
     emitEvent({ type: 'watch.report', agent: 'watch', msg: findings.map((f) => f.msg).join('; ').slice(0, 300) });

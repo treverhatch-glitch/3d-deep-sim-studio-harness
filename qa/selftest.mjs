@@ -183,9 +183,11 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 {
   const dir = copyRepo();
   run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model test-model-1');
+  run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner cursor-a');
   const pause = run(dir, 'node harness/task.mjs pause T-003 --agent cursor-a --note "Out of usage; adapter half done"');
   const pick = run(dir, 'node harness/task.mjs start T-003 --agent claude-b');
   report('task pause hands back with a note the next agent sees', pause.status === 0 && pick.status === 0 && /adapter half done/.test(pick.stderr), `${pause.stdout}${pause.stderr}${pick.stdout}${pick.stderr}`);
+  report('handing back frees the agent\'s folder claims for the next agent', run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner claude-b').status === 0);
   report('events carry the model an agent runs on', /"model":"test-model-1"/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')));
   // T-004 in progress with no claim: abandoned.
   edit(dir, 'studio/NEXT.md', (t) => t.replace(/- \[ \] (\*\*T-004\*\*.*)\n/, '').replace('## IN_PROGRESS\n', '## IN_PROGRESS\n- [>] **T-004** [P1] (`qa-playtester`) — Abandoned run\n'));

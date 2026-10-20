@@ -278,12 +278,8 @@ export function buildStudioSnapshot() {
     { tokensIn: 0, tokensOut: 0, tokensSaved: 0, failovers: 0, errors: 0 }
   );
 
-  const checkInTaxAvoided = Math.max(
-    events.length * 4200,
-    totals.tokensSaved,
-    Number(usage?.tokenSavers?.avoidedCheckInTokens || 0),
-    Number(usage?.tokenSavers?.tokensSavedToday || 0)
-  );
+  // Only savings a tool measured and reported (tokensSaved on events, e.g. from rtk). No estimates.
+  const checkInTaxAvoided = totals.tokensSaved;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -309,10 +305,9 @@ export function buildStudioSnapshot() {
       totalEvents: events.length,
       ...totals,
       estimatedTokensSaved: checkInTaxAvoided,
-      rtkCompressionPct: Number(usage?.tokenSavers?.rtkCompressionPct || 84),
-      estimatedDollarsPreserved: Number(
-        usage?.tokenSavers?.estimatedDollarsPreserved || ((checkInTaxAvoided / 1000000) * 15).toFixed(2)
-      ),
+      rtkCompressionPct: Number(usage?.tokenSavers?.rtkCompressionPct || 0),
+      measured: checkInTaxAvoided > 0,
+      estimatedDollarsPreserved: Number(usage?.tokenSavers?.estimatedDollarsPreserved || 0),
     },
     recentEvents: events.slice(-40).reverse(),
   };
@@ -337,7 +332,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const t = snap.queue.backlog[0];
     console.log(` Next Up         : [${t.id}] (${t.role}) ${t.title}`);
   }
-  console.log(` Token Telemetry : ${snap.telemetry.tokensIn} in / ${snap.telemetry.tokensOut} out | ~${snap.telemetry.estimatedTokensSaved.toLocaleString()} saved (${snap.telemetry.rtkCompressionPct}% RTK) | ${snap.telemetry.failovers} failovers`);
+  console.log(` Token Telemetry : ${snap.telemetry.tokensIn} in / ${snap.telemetry.tokensOut} out | ${snap.telemetry.measured ? `${snap.telemetry.estimatedTokensSaved.toLocaleString()} saved (measured)` : 'savings not measured'} | ${snap.telemetry.failovers} failovers`);
   console.log(` Subscriptions   : ${(snap.usage.subscriptions || []).length} tracked in .studio/usage.json`);
   console.log('--------------------------------------------------------------------');
   console.log(' Recent Events (.studio/events.jsonl):');

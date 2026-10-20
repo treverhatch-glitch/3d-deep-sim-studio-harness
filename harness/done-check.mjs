@@ -61,7 +61,7 @@ export function taskType(task) {
 
 /** When the work started: the last task.start event, else when it was queued, else the beginning of time. */
 export function startedAt(taskId) {
-  const events = readRecentEvents(0);
+  const events = readRecentEvents(20000);
   let added = 0;
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];

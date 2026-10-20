@@ -86,8 +86,10 @@ console.log(` Memory Ledger     : studio/memory/failures.md (${fs.existsSync(pat
 console.log(` Env Configuration : .env (${fs.existsSync(envFile) ? 'Present (gitignored)' : 'Not created'})`);
 console.log('--------------------------------------------------------------------');
 console.log(' Next Commands:');
-console.log('   bash scripts/seed-demo-events.sh   # Seed demo events for War Room');
-console.log('   node hub/server.js                 # Launch Mission Control War Room (:3847)');
-console.log('   node harness/prepare-brief.mjs     # Cheap model prepares <=300w brief');
+console.log('   npm run handoff                    # Producer briefing: plan, queue, health, what needs you');
+console.log('   npm run hub                        # War Room on :3847 (Studio view: /v3?skin=tycoon); runs the watcher');
+console.log('   npm run onboard -- --path <game> --name "<name>"   # Bring an existing game in');
+console.log('   npm run verify                     # Every gate');
+console.log('   node harness/prepare-brief.mjs     # Short brief from files to hand a strong model');
 console.log('   node qa/playtest.mjs               # Run Stage 1 + Stage 2 QA');
 console.log('====================================================================');

@@ -42,6 +42,17 @@ const mtime = (rel) => {
     return null;
   }
 };
+// When a document last changed: its last commit if it has no local edits (a fresh clone resets
+// file times), otherwise the file's own time.
+const changed = (rel) => {
+  const m = mtime(rel);
+  if (m == null) return null;
+  const dirty = spawnSync('git', ['status', '--porcelain', '--', rel], { cwd: REPO_ROOT, encoding: 'utf8' });
+  if (dirty.status !== 0 || dirty.stdout.trim()) return m;
+  const log = spawnSync('git', ['log', '-1', '--format=%ct', '--', rel], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const t = Number(log.stdout.trim()) * 1000;
+  return log.status === 0 && t ? t : m;
+};
 const age = (ms) => {
   if (ms == null) return 'missing';
   const m = Math.round((Date.now() - ms) / 60000);
@@ -116,13 +127,13 @@ export function buildHandoff() {
 
   // Key documents from the master index, with how fresh each is.
   const master = read('studio/MASTER.md') || '';
-  const docs = [...new Set([...master.matchAll(/^\| `([^`]+)`/gm)].map((m) => m[1]))].map((rel) => ({ rel, updated: mtime(rel.replace(/\/$/, '')) }));
+  const docs = [...new Set([...master.matchAll(/^\| `([^`]+)`/gm)].map((m) => m[1]))].map((rel) => ({ rel, updated: changed(rel.replace(/\/$/, '')) }));
 
   const firstLine = (rel) => (read(rel) || '').split('\n').find((l) => l.trim()) || null;
   const signoff = (rel) => {
     const t = read(rel);
     if (t == null) return null;
-    return { file: rel, title: firstLine(rel).replace(/^#\s*/, ''), updated: mtime(rel), signed: /signed off|approved by|human-review:\s*(done|approved)/i.test(t) };
+    return { file: rel, title: firstLine(rel).replace(/^#\s*/, ''), updated: changed(rel), signed: /signed off|approved by|human-review:\s*(done|approved)/i.test(t) };
   };
 
   const divisions = readJson('studio/divisions.json')?.divisions?.filter((d) => d.active || d.core).map((d) => d.name) || null;

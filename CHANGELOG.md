@@ -25,6 +25,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - `studio/MASTER.md` and `studio/PLAN.md` are required by the session check.
 ### Fixed
 - `.studio/usage.json` and the status fallback showed invented token savings and quota use. They now show zeros until something is actually measured.
+- The status command and the old War Room estimated "tokens saved" from the number of events (and showed 84% and $4.68 by default). They now show only savings a tool measured.
+- Handing a task back now frees the agent's folder and file claims too, so the next agent can take the same files.
+- An agent named like `grok-producer` sits in the Producer's office, not Engineering.
+- A fresh clone starts with a current starter queue and an idle checkpoint instead of notes from an older version.
+- `npm run setup` pointed at a file that doesn't exist (`hub/server.js`); it now lists the current commands.
+- The briefing's "how fresh" times use each document's last commit, so a fresh clone doesn't show everything as "1 min ago".
+- Tasks queued by a meeting or the watcher are attributed to whoever queued them.
 
 ---
 

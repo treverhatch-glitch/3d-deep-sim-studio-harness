@@ -69,7 +69,7 @@ const ROOM_FOR_ROLE = {
   'engine-porter': 'engine',
 };
 // Custom roles named after their division ("sound-mixer", "art-lead") land in that room.
-const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || divs.find((d) => role && (role === d.id || role.startsWith(`${d.id}-`)))?.id || null;
+const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || (/(^|-)producer($|-)/.test(role || '') ? 'production' : null) || divs.find((d) => role && (role === d.id || role.startsWith(`${d.id}-`)))?.id || null;
 
 // Events that mean "an agent reports to the Producer" in the Studio view.
 const TO_PRODUCER = new Set(['task.done', 'task.forced', 'task.not_done', 'task.lock_denied', 'closedloop.escalate']);

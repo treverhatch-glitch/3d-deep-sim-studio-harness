@@ -415,9 +415,9 @@
     function renderAll() {
       if (!state) return;
       document.getElementById('roleCount').textContent = state.rolesCount || (state.roles || []).length;
-      document.getElementById('rtkBadge').textContent = `${state.telemetry?.rtkCompressionPct || 84}% Bash Saved via RTK`;
+      document.getElementById('rtkBadge').textContent = (state.telemetry?.rtkCompressionPct ? `${state.telemetry.rtkCompressionPct}% shell output saved (rtk)` : 'rtk not measured');
       document.getElementById('tokensSavedVal').textContent = Number(state.telemetry?.estimatedTokensSaved || 0).toLocaleString();
-      document.getElementById('dollarsSavedVal').textContent = `$${state.telemetry?.estimatedDollarsPreserved || '4.68'}`;
+      document.getElementById('dollarsSavedVal').textContent = (state.telemetry?.estimatedDollarsPreserved ? `$${state.telemetry.estimatedDollarsPreserved}` : 'not measured');
       document.getElementById('syncClock').textContent = `Updated ${new Date(state.generatedAt).toLocaleTimeString()}`;
 
       // Subscriptions

@@ -87,7 +87,7 @@ export function endMeeting({ decisions = [], actions = [], agent = 'producer' } 
   for (const a of actions) {
     const [title, role = 'builder', priority = 'P2'] = a.split('|').map((x) => x.trim());
     if (!title) continue;
-    const t = addTask({ title, role, priority });
+    const t = addTask({ title, role, priority, agent });
     made.push(t);
   }
   if (made.length) appendToSection(m.file, 'Actions', made.map((t) => `- ${t.id} [${t.priority}] (\`${t.role}\`): ${t.title}`));

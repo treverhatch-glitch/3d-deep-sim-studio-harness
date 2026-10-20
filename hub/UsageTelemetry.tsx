@@ -50,11 +50,11 @@ export const UsageTelemetry: React.FC<UsageTelemetryProps> = ({
 }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [draftSubs, setDraftSubs] = useState<SubscriptionQuotaItem[]>(usage.subscriptions || []);
-  const [rtkPct, setRtkPct] = useState<number>(usage.tokenSavers?.rtkCompressionPct ?? 84);
+  const [rtkPct, setRtkPct] = useState<number>(usage.tokenSavers?.rtkCompressionPct ?? 0);
 
   useEffect(() => {
     setDraftSubs(usage.subscriptions || []);
-    setRtkPct(usage.tokenSavers?.rtkCompressionPct ?? 84);
+    setRtkPct(usage.tokenSavers?.rtkCompressionPct ?? 0);
   }, [usage]);
 
   // Fallback for browsers without native <dialog closedby="any"> support
@@ -116,13 +116,9 @@ export const UsageTelemetry: React.FC<UsageTelemetryProps> = ({
     ]);
   };
 
-  const tokensSavedToday = Math.max(
-    estimatedTokensSaved,
-    Number(usage.tokenSavers?.tokensSavedToday || 0),
-    Number(usage.tokenSavers?.avoidedCheckInTokens || 0)
-  );
-  const dollarsPreserved =
-    usage.tokenSavers?.estimatedDollarsPreserved ?? Number(((tokensSavedToday / 1_000_000) * 15).toFixed(2));
+  // Only measured savings (reported by tools such as rtk); nothing is estimated.
+  const tokensSavedToday = Math.max(estimatedTokensSaved, Number(usage.tokenSavers?.tokensSavedToday || 0));
+  const dollarsPreserved = Number(usage.tokenSavers?.estimatedDollarsPreserved || 0);
 
   return (
     <section

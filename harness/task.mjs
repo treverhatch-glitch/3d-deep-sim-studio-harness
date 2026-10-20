@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from './event.mjs';
-import { claim, release, status as lockStatus } from './lock.mjs';
+import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
 import { checkDone } from './done-check.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -224,6 +224,11 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   writeNextQueue(q);
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   const who = agent || lock.lock?.owner || 'unknown';
+  // The agent is stopping: free its folder and file claims too, unless it still holds another task.
+  const freed = [];
+  const mine = listLocks().filter((l) => l.owner === who);
+  if (!mine.some((l) => l.key.startsWith('task:'))) for (const l of mine) if (release(l.key, who).ok !== false) freed.push(l.key);
+  if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
@@ -233,7 +238,7 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   return { ...target, handoffFile: path.relative(REPO_ROOT, file) };
 }
 
-export function addTask({ title, role = 'builder', priority = 'P1' }) {
+export function addTask({ title, role = 'builder', priority = 'P1', agent = 'producer' }) {
   const q = parseNextQueue();
   const all = [...q.inProgress, ...q.backlog, ...q.done];
   const maxNum = all.reduce((max, t) => {
@@ -251,7 +256,7 @@ export function addTask({ title, role = 'builder', priority = 'P1' }) {
   writeNextQueue(q);
   emitEvent({
     type: 'task.added',
-    agent: 'producer',
+    agent,
     task: newTask.id,
     msg: `Queued ${newTask.id} [${newTask.priority}] (${newTask.role}): ${newTask.title}`,
   });
