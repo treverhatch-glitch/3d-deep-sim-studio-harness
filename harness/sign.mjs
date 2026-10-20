@@ -14,8 +14,13 @@
  * the public key goes in studio/keys/ so anyone with the repo can check. Publish the fingerprint
  * somewhere you control so others know the key is yours.
  *
- * `verify --replay` re-runs every golden: the strongest check, because it proves the code in hand
- * still produces the signed results, not only that someone signed them.
+ * The manifest binds code, inputs and outputs: a SHA-256 over each cartridge's files, each golden and
+ * regression file's own SHA-256 (seed, tick, actions) and the state SHA-256 it pins. Signing refuses a
+ * gate run that is red, partial, missing a required gate, or older than the last game change.
+ *
+ * `verify --replay` checks the code in hand is the signed code, then re-runs the goldens,
+ * regressions, purity and isolation checks and the vertical slice: proof the code still produces
+ * the signed results, not only that someone signed them.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,8 +58,41 @@ function pinned(dir) {
   if (!fs.existsSync(full)) return [];
   return fs.readdirSync(full).filter((f) => f.endsWith('.json')).sort().map((f) => {
     const j = JSON.parse(fs.readFileSync(path.join(full, f), 'utf8'));
-    return { file: `${dir}/${f}`, cartridge: j.cartridge || null, sha256: j.sha256 || null };
+    // fileSha256 binds the inputs too (seed, tick, actions, scenario), not only the end state.
+    return { file: `${dir}/${f}`, cartridge: j.cartridge || null, sha256: j.sha256 || null, actionsSha256: j.actionsSha256 || null, fileSha256: fileSha(path.join(full, f)) };
   });
+}
+
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ent.name === 'node_modules' || ent.name === '__pycache__' || ent.name.startsWith('.')) continue;
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) walk(full, out);
+    else out.push(full);
+  }
+  return out;
+}
+
+/** One SHA-256 over a folder: every file's path and SHA-256, sorted. Changes if any file is added, removed or edited. */
+export function treeSha(dir) {
+  const files = walk(dir).map((f) => `${rel(f)}\u0000${fileSha(f)}`).sort();
+  return files.length ? crypto.createHash('sha256').update(files.join('\n')).digest('hex') : null;
+}
+
+/** The code that produces results: each cartridge, plus the harness files that run and hash it. */
+export function codeHashes() {
+  const cdir = path.join(REPO_ROOT, 'cartridges');
+  const names = fs.existsSync(cdir) ? fs.readdirSync(cdir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name).sort() : [];
+  return {
+    cartridges: names.map((name) => ({ name, sha256: treeSha(path.join(cdir, name)) })),
+    harnessSha256: crypto.createHash('sha256').update(['harness/cartridge.mjs', 'harness/hash.mjs'].map((f) => `${f}\u0000${fileSha(path.join(REPO_ROOT, f))}`).join('\n')).digest('hex'),
+  };
+}
+
+/** Newest edit to game code or pinned results, so a gate run older than it describes another build. */
+function lastResultChange() {
+  return ['cartridges', 'src', 'qa/golden', 'qa/regressions'].flatMap((d) => walk(path.join(REPO_ROOT, d))).reduce((m, f) => Math.max(m, fs.statSync(f).mtimeMs), 0);
 }
 
 export function buildManifest({ by, note = '' }) {
@@ -65,7 +103,22 @@ export function buildManifest({ by, note = '' }) {
   try {
     const g = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last.json'), 'utf8'));
     const req = (g.rows || []).filter((r) => r.required);
-    gates = { at: g.at, requiredPassed: req.filter((r) => r.ok).length, required: req.length, failed: req.filter((r) => !r.ok).map((r) => r.id), partial: Boolean(g.partial) };
+    let expected = [];
+    try {
+      expected = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'gates.json'), 'utf8')).gates.filter((x) => x.required).map((x) => x.id);
+    } catch {
+      expected = [];
+    }
+    const ran = new Set((g.rows || []).map((r) => r.id));
+    gates = {
+      at: g.at,
+      requiredPassed: req.filter((r) => r.ok).length,
+      required: req.length,
+      failed: req.filter((r) => !r.ok).map((r) => r.id),
+      missing: expected.filter((id) => !ran.has(id)),
+      fresh: (Date.parse(g.at) || 0) >= lastResultChange(),
+      partial: Boolean(g.partial),
+    };
   } catch {
     gates = null;
   }
@@ -76,6 +129,7 @@ export function buildManifest({ by, note = '' }) {
     uncommittedGameChanges: Boolean(dirty),
     goldens: pinned('qa/golden'),
     regressions: pinned('qa/regressions'),
+    code: codeHashes(),
     gates,
     bibleSha256: fileSha(path.join(REPO_ROOT, 'studio', 'bible', 'bible.json')),
     assetsSha256: fileSha(path.join(REPO_ROOT, 'studio', 'assets', 'manifest.json')),
@@ -90,7 +144,9 @@ export function signResult({ by, note = '', allowRed = false }) {
   if (!fs.existsSync(PRIVATE)) return { ok: false, message: 'No signing key yet: npm run sign -- keygen' };
   const manifest = buildManifest({ by, note });
   if (!manifest.gates) return { ok: false, message: 'No gate run recorded. Run npm run verify first, so the result is checked before it is signed.' };
-  if ((manifest.gates.failed.length || manifest.gates.partial) && !allowRed) return { ok: false, message: `The last verify wasn't fully green (${manifest.gates.failed.join(', ') || 'partial run'}). Fix it and run npm run verify, or pass --allow-red to sign it as it is (the manifest records the failures).` };
+  const g = manifest.gates;
+  const red = [g.failed.length ? `failed: ${g.failed.join(', ')}` : '', g.missing.length ? `required gates that never ran: ${g.missing.join(', ')}` : '', g.partial ? 'a partial run (--only)' : '', g.fresh ? '' : 'older than the last change to the game or its goldens'].filter(Boolean);
+  if (red.length && !allowRed) return { ok: false, message: `The last verify can't vouch for this build (${red.join('; ')}). Run npm run verify, or pass --allow-red to sign it as it is (the manifest records why).` };
   if (manifest.goldens.some((g) => !g.sha256)) return { ok: false, message: 'A golden has no sha256. Run npm run golden -- --update first.' };
   const privateKey = crypto.createPrivateKey(fs.readFileSync(PRIVATE));
   const publicPem = fs.readFileSync(PUBLIC, 'utf8');
@@ -127,10 +183,30 @@ export function verifyResult(file, { replay = false } = {}) {
       if (cur !== g.sha256) problems.push(`${g.file}: the repo pins ${cur || 'nothing'}, the signed result says ${g.sha256}`);
     }
     const rerun = [spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-golden.mjs')], { cwd: REPO_ROOT, encoding: 'utf8' }), spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-regressions.mjs')], { cwd: REPO_ROOT, encoding: 'utf8' })];
-    rerun.forEach((r, i) => {
-      if (r.status !== 0) problems.push(`re-running the ${i ? 'regressions' : 'goldens'} failed:\n${(r.stdout + r.stderr).trim().split('\n').slice(-4).join('\n')}`);
-    });
-    if (!problems.length) notes.push('re-ran every golden and regression: this code produces the signed results');
+    for (const g of [...doc.manifest.goldens, ...doc.manifest.regressions].filter((x) => x.fileSha256)) {
+      const cur = fileSha(path.join(REPO_ROOT, g.file));
+      if (cur && cur !== g.fileSha256) problems.push(`${g.file}: its inputs changed since signing (seed, tick, actions or scenario)`);
+    }
+    if (doc.manifest.code) {
+      const now = codeHashes();
+      for (const c of doc.manifest.code.cartridges) {
+        const cur = now.cartridges.find((x) => x.name === c.name)?.sha256;
+        if (cur !== c.sha256) problems.push(`cartridges/${c.name}: the code differs from the signed code`);
+      }
+      if (now.harnessSha256 !== doc.manifest.code.harnessSha256) notes.push('the harness runner or hash files differ from the signed ones (results still re-checked below)');
+    }
+    const checks = [
+      ['goldens', 'qa/check-golden.mjs'],
+      ['regressions', 'qa/check-regressions.mjs'],
+      ['purity check', 'scripts/check-sim-purity.mjs'],
+      ['isolation check', 'scripts/check-sim-isolation.mjs'],
+      ['vertical slice', 'qa/vertical-slice.mjs'],
+    ];
+    for (const [label, script] of checks) {
+      const r = spawnSync(process.execPath, [path.join(REPO_ROOT, script)], { cwd: REPO_ROOT, encoding: 'utf8' });
+      if (r.status !== 0) problems.push(`re-running the ${label} failed:\n${(r.stdout + r.stderr).trim().split('\n').slice(-4).join('\n')}`);
+    }
+    if (!problems.length) notes.push('re-ran every golden and regression, the purity and isolation checks and the vertical slice on the signed code: this code produces the signed results');
   }
   return { ok: problems.length === 0, problems, notes, manifest: doc.manifest };
 }

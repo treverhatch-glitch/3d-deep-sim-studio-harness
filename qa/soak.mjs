@@ -26,8 +26,8 @@ for (const name of names) {
       if (r.findings.length) {
         console.error(`[soak] FAIL ${label}: tick ${r.failingTick} ${r.findings[0].id} — ${r.findings[0].summary}`);
         failed += 1;
-      } else if (again.hash !== r.hash) {
-        console.error(`[soak] FAIL ${label}: non-deterministic ${r.hash} != ${again.hash}`);
+      } else if (again.sha256 !== r.sha256) {
+        console.error(`[soak] FAIL ${label}: non-deterministic sha256 ${r.sha256.slice(0, 16)}… != ${again.sha256.slice(0, 16)}…`);
         failed += 1;
       }
     }

@@ -35,10 +35,11 @@
 - `studio/personas/*.md` (first-timer, calm player, min-maxer, explorer; add your own)
   Players the studio judges through; `npm run fun` reads the game through each persona with a `lens:`.
 - `npm run sign -- keygen | result --by <name> | verify <file> [--replay] | fingerprint`
-  Ed25519-signed manifests of verified results (goldens' SHA-256, gates, commit). `docs/SIGNED-RESULTS-AND-DATA.md`.
-- `npm run trajectories -- preview | export --consent "…" --licence "…" [--with-briefs] [--with-diffs]`
-  Opt-in, scrubbed, labelled records of finished tasks for evaluating or training models; `.studio/exports/`.
-- `npm run learn [-- backup --to <folder>]`
+  Ed25519-signed manifests binding code (cartridge tree SHA-256), inputs (spec file SHA-256) and outputs (state SHA-256); refuses stale or incomplete gate runs. `docs/SIGNED-RESULTS-AND-DATA.md`.
+- `npm run trajectories -- preview | export --licence "…" [--consent "…"] [--with-briefs] [--with-diffs]` (refused if the game dev declined: `npm run data`)
+- `npm run data [-- allow | decline --by <name>]` — the sharing question, pre-ticked to allow; every change kept with who and when
+  Scrubbed, labelled records of finished tasks for evaluating or training models; `.studio/exports/`.
+- `npm run learn [-- backup --to <folder> | restore --from <folder> --to <dir> [--at <time>] | prune --keep 30]` — backups store each file content once, gzipped (docs/BACKUPS.md)
   What keeps happening, lessons that didn't stick, suggestions never handled, the overseer's evaluations; daily by the HUB, backed up to `STUDIO_BACKUP_DIR`.
 - `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`
   A Producer meeting with several agents. Notes in `studio/meetings/`, actions become tasks.

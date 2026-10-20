@@ -1,0 +1,105 @@
+{
+  "note": "Canonical JSON and SHA-256 that Node (qa/selftest.mjs) and Python (qa/test-golden.py) must both produce. Inputs are JSON text; canonical is the exact text hashed.",
+  "vectors": [
+    {
+      "input": "{\"0\":4,\"2\":2,\"10\":1,\"-1\":3}",
+      "canonical": "{\"-1\":3,\"0\":4,\"10\":1,\"2\":2}",
+      "sha256": "d5590940a918f9529543fcc80ca0f7b8593ae481255b9e2bbcd93e94a9708ad8"
+    },
+    {
+      "input": "{\"x\":0.00001}",
+      "canonical": "{\"x\":0.00001}",
+      "sha256": "8a532d80ed64868e7d2786e6a6339b465fe0f03db6399590aa520d054875ce8c"
+    },
+    {
+      "input": "{\"x\":1e-7}",
+      "canonical": "{\"x\":1e-7}",
+      "sha256": "43c8e92bd5552bd45030718eb9366d6d6500623793c248666d77dca01ba337c0"
+    },
+    {
+      "input": "{\"x\":0.000001}",
+      "canonical": "{\"x\":0.000001}",
+      "sha256": "2d6412ab0155bb89d63b73dbf83334b26b39d03e8c832cc253c6a6caceba9733"
+    },
+    {
+      "input": "{\"x\":0.0001}",
+      "canonical": "{\"x\":0.0001}",
+      "sha256": "dabf62dd3991a10b0387fe6421e7e7b839eb811e2dff9276ad71d75af293a3ff"
+    },
+    {
+      "input": "{\"x\":10000000000000000}",
+      "canonical": "{\"x\":10000000000000000}",
+      "sha256": "d9ea702067d662ee3f58b5c6d52a45908d3759be54b49ff5689eabdae1b0a9d8"
+    },
+    {
+      "input": "{\"x\":1e+21}",
+      "canonical": "{\"x\":1e+21}",
+      "sha256": "f4bcbb57bdf54b5b595d88096406c936d86bf0b6dd316d0ad2b4d2504c610403"
+    },
+    {
+      "input": "{\"x\":123456789012345680000}",
+      "canonical": "{\"x\":123456789012345680000}",
+      "sha256": "ec4f4dc0c9c640773ba5ed968ebe171399d9ff3ae36d57c3ebadc5cd2acffad5"
+    },
+    {
+      "input": "{\"x\":0}",
+      "canonical": "{\"x\":0}",
+      "sha256": "5bff452c5ed93f2e87a23984db5a15050c6477335fdec955b70063bb2d692bf1"
+    },
+    {
+      "input": "{\"x\":0.30000000000000004}",
+      "canonical": "{\"x\":0.30000000000000004}",
+      "sha256": "65b5c2b75dd049c607da86614690e4e9d2d95b4c92775b134c684e0ed64cb706"
+    },
+    {
+      "input": "{\"x\":5e-324}",
+      "canonical": "{\"x\":5e-324}",
+      "sha256": "b84783c4103b7ffa2567356c19ecae80b2fb4d6796f5eaaa528e412ffa545427"
+    },
+    {
+      "input": "{\"x\":9007199254740994}",
+      "canonical": "{\"x\":9007199254740994}",
+      "sha256": "7ec09b9bc1dfa172bceabc14675604f7de01e69cfd224279d3a11a67ba8ba223"
+    },
+    {
+      "input": "{\"x\":1.5e+300}",
+      "canonical": "{\"x\":1.5e+300}",
+      "sha256": "42d0c5fcafbbf7992f8210a8d9d53256dfd3d6d6d16630fb057e69e42e9b5141"
+    },
+    {
+      "input": "{\"x\":-1e-7}",
+      "canonical": "{\"x\":-1e-7}",
+      "sha256": "f4c492715aef48f148a208ba79fe6ca8414bc56956af9856649e9b9faba512ab"
+    },
+    {
+      "input": "{\"😀\":1,\"�\":2,\"a\":3}",
+      "canonical": "{\"a\":3,\"�\":2,\"😀\":1}",
+      "sha256": "a704a1ed59a14034c70c335f02d60b278cc889f23471808543b0b3b08552990f"
+    },
+    {
+      "input": "{\"s\":\"line sep\\u0001\\\"\\\\é\"}",
+      "canonical": "{\"s\":\"line sep\\u0001\\\"\\\\é\"}",
+      "sha256": "e93fce030508c0d53ea4424643ddb9370d658d5cf0215f4c242e05935ac36d4e"
+    },
+    {
+      "input": "{\"Ab\":1,\"aB\":2,\"_\":3}",
+      "canonical": "{\"Ab\":1,\"_\":3,\"aB\":2}",
+      "sha256": "de96b250aff9378e4048bda3ea106dbf413b40c58a686fe8a16191de4f5537d1"
+    },
+    {
+      "input": "{\"grid\":{\"0\":[1,2],\"1\":[3],\"9\":[0.5],\"10\":[]}}",
+      "canonical": "{\"grid\":{\"0\":[1,2],\"1\":[3],\"10\":[],\"9\":[0.5]}}",
+      "sha256": "8d6f8c18bc6276bfb662f174c6cf247e755793fbd1d693b86bf37fa2c4ad7bf6"
+    },
+    {
+      "input": "{\"a\":[0,1e+21,1e-7,2.5e-8,1e+300]}",
+      "canonical": "{\"a\":[0,1e+21,1e-7,2.5e-8,1e+300]}",
+      "sha256": "5750a0c585c6b4ff88efb335b68a4c3d03ccc4a5a83cb20677ce481e7c170d59"
+    },
+    {
+      "input": "[]",
+      "canonical": "[]",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}

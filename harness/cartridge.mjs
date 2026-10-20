@@ -188,6 +188,8 @@ export function runScenario(cart, scenarioName, { seed, tuning } = {}) {
     failingTick,
     findings,
     actions,
+    // The whole run, not just where it ended: the actions the policy chose, tick by tick.
+    actionsSha256: sha256(actions),
     hash: cart.hash(state),
     sha256: cart.sha256(state),
     state,

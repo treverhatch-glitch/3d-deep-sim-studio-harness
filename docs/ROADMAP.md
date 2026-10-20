@@ -188,7 +188,21 @@ while the agents keep working.
 | S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | done (2.12.0) |
 | S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | done (2.12.0) |
 
-## 2.13.0 — Content and craft pipelines
+## 2.13.0 — Trust in the results, and safe memory
+
+From a read-only review of 2.11.0 by Gemini on Windows (2026-10-20), each finding reproduced first.
+
+| # | Problem | Fix | Status |
+| --- | --- | --- | --- |
+| T1 | Node and Python wrote different canonical JSON for integer-like keys, floats below 0.0001 and emoji keys, so those states hashed differently. | Both build the text directly: code-point key order, JavaScript's number layout. 20 shared vectors and a 5,000-state fuzz agree byte for byte. | done (2.13.0) |
+| T2 | The slice, soak, balance sweep and playtest compared the 64-bit display hash. | All compare SHA-256; playtest reports carry `finalSha256` and the done-check requires it. | done (2.13.0) |
+| T3 | A scenario golden pinned only the end state. | It also pins `actionsSha256`, the SHA-256 of every action taken. | done (2.13.0) |
+| T4 | A custom `hashState()` broke the Python gate; Python never checked regressions. | `hashKind: custom` goldens are checked on SHA-256 in Python; regressions are replayed in Python too. | done (2.13.0) |
+| T5 | Signed results didn't bind code or inputs, and trusted any gate run. | Cartridge tree SHA-256, spec file SHA-256; refuses gate runs that are stale or missing a required gate; `verify --replay` also checks the code and re-runs purity, isolation and the slice. | done (2.13.0) |
+| T6 | Backups copied everything every day. | Content stored once, gzipped; restore and prune; screenshots capped. | done (2.13.0) |
+| T7 | No place to record the game dev's answer on sharing data. | `npm run data`, intake and a pre-ticked box in the Game plan view; exports stop if declined and record the basis. | done (2.13.0) |
+
+## 2.14.0 — Content and craft pipelines
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |

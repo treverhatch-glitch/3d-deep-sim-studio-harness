@@ -55,6 +55,7 @@ write(goldenFiles[0], {
   expect: { outcome: slice.outcome, tick: slice.ticksRun },
   hash: slice.hash,
   sha256: slice.sha256,
+  actionsSha256: slice.actionsSha256,
 });
 write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
 

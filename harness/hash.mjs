@@ -15,20 +15,45 @@
  * See docs/HASH.md.
  */
 
-export function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = canonical(value[key]);
-      return acc;
-    }, {});
+/** Object keys in Unicode code-point order (Python's order), not UTF-16 unit order. */
+export function compareKeys(a, b) {
+  const x = [...a];
+  const y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d) return d;
   }
-  return value;
+  return x.length - y.length;
+}
+
+/**
+ * Canonical JSON text, built directly so nothing reorders it. JSON.stringify on an object puts
+ * integer-like keys ("0", "2", "10") first in numeric order whatever order they were added in, so
+ * the text is built here: keys in code-point order, no spaces, numbers as JavaScript writes them
+ * (tools/golden.py writes numbers the same way), -0 as 0, NaN and Infinity as null, undefined
+ * object fields left out and undefined array items as null.
+ */
+export function canonicalJson(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number') return Number.isFinite(value) ? JSON.stringify(Object.is(value, -0) ? 0 : value) : 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value.toJSON === 'function') return canonicalJson(value.toJSON());
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined || typeof v === 'function' ? 'null' : canonicalJson(v))).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).filter((k) => value[k] !== undefined && typeof value[k] !== 'function').sort(compareKeys);
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return 'null';
+}
+
+/** Kept for callers that want a sorted copy; hashing uses canonicalJson. */
+export function canonical(value) {
+  return JSON.parse(canonicalJson(value));
 }
 
 /** The exact bytes both hashes read. */
 export function canonicalBytes(state) {
-  return new TextEncoder().encode(JSON.stringify(canonical(state)));
+  return new TextEncoder().encode(canonicalJson(state));
 }
 
 const FNV64_OFFSET = 0xcbf29ce484222325n;

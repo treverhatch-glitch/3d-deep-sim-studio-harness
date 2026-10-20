@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import re
+from decimal import Decimal
 from pathlib import Path
 
 FNV64_OFFSET = 0xCBF29CE484222325
@@ -25,16 +26,61 @@ FNV64_PRIME = 0x100000001B3
 MASK64 = 0xFFFFFFFFFFFFFFFF
 
 
-def canonical(value):
-    if isinstance(value, list):
-        return [canonical(v) for v in value]
+def js_number(x) -> str:
+    """A number written exactly as JavaScript's JSON.stringify writes it (ECMAScript Number::toString).
+
+    Python and JavaScript both find the shortest digits that round-trip; they differ in layout
+    (0.00001 vs 1e-05, 1e-7 vs 1e-07, 1e16 vs 1e+16, 3.0 vs 3), so the layout is rebuilt here.
+    """
+    if isinstance(x, bool):
+        return "true" if x else "false"
+    if isinstance(x, int):
+        x = float(x) if abs(x) > 2**53 else x
+        if isinstance(x, int):
+            return str(x)
+    if x != x or x in (float("inf"), float("-inf")):
+        return "null"
+    if x == 0:
+        return "0"
+    sign = "-" if x < 0 else ""
+    _, digits, exp = Decimal(repr(abs(x))).as_tuple()
+    s = "".join(map(str, digits)).rstrip("0") or "0"
+    exp += len(digits) - len(s)
+    k = len(s)
+    n = k + exp
+    if k <= n <= 21:
+        out = s + "0" * (n - k)
+    elif 0 < n <= 21:
+        out = s[:n] + "." + s[n:]
+    elif -6 < n <= 0:
+        out = "0." + "0" * (-n) + s
+    else:
+        e = n - 1
+        out = (s if k == 1 else s[0] + "." + s[1:]) + "e" + ("+" if e >= 0 else "-") + str(abs(e))
+    return sign + out
+
+
+def canonical_json(value) -> str:
+    """Canonical JSON text, identical to harness/hash.mjs canonicalJson(): keys sorted by code point."""
+    if value is None:
+        return "null"
+    if isinstance(value, (bool, int, float)):
+        return js_number(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(canonical_json(v) for v in value) + "]"
     if isinstance(value, dict):
-        return {k: canonical(value[k]) for k in sorted(value)}
-    return value
+        return "{" + ",".join(json.dumps(k, ensure_ascii=False) + ":" + canonical_json(value[k]) for k in sorted(value)) + "}"
+    raise TypeError(f"not JSON: {type(value).__name__}")
+
+
+def canonical(value):
+    return json.loads(canonical_json(value))
 
 
 def canonical_bytes(state) -> bytes:
-    return json.dumps(canonical(state), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return canonical_json(state).encode("utf-8")
 
 
 def hash64(state) -> str:

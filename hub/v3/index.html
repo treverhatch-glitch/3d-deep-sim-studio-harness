@@ -149,6 +149,8 @@
   #plan ul.drift { margin: 6px 0 0; padding-left: 18px; }
   #plan label.fu { display: grid; gap: 4px; margin-bottom: 10px; flex-basis: 100%; }
   #plan label.fu small { color: var(--quiet); }
+  #plan label.consent { display: flex; gap: 10px; align-items: flex-start; }
+  #plan label.consent input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
   #plan h3.sub { margin: 12px 0 4px; font: 600 16px/1.2 "Barlow Condensed", sans-serif; color: var(--quiet); }
   #plan .verdict { font: 700 18px/1.2 "Barlow Condensed", sans-serif; }
   @media (max-width: 900px) { .phases, .board, .two { grid-template-columns: 1fr; } .phase { border-left: 0; border-top: 2px solid var(--ink); } .phase:first-child { border-top: 0; } #plan header, #plan main { padding-left: 16px; padding-right: 16px; } }
@@ -501,6 +503,11 @@
         <div id="p-director"></div>
       </section>
     </div>
+    <section>
+      <h2>Sharing the studio's records</h2>
+      <label class="fu consent"><input type="checkbox" id="p-share" checked> <span id="p-shareq">Share this studio's work records with AI research partners?</span></label>
+      <p class="note" id="p-sharemsg" role="status"></p>
+    </section>
   </main>
 </div>
 
@@ -657,12 +664,22 @@
     const drift = (p.drift?.items || []).filter((i) => i.kind !== 'no-bible');
     $('p-director').innerHTML = `${r ? `<p><span class="verdict">${esc(r.verdict || 'no verdict')}</span> on Phase ${esc(r.phase || '?')}, ${esc(hhmm(r.at))} ${esc(new Date(r.at).toLocaleDateString())}. <code>${esc(r.file)}</code></p>` : '<p>No review yet. The HUB pings the Director daily, and the Producer pings it before making new tasks.</p>'}${drift.length ? `<p class="note">Drift report (free, from scripts):</p><ul class="drift">${drift.map((i) => `<li>${esc(i.msg)}</li>`).join('')}</ul>` : '<p class="note">Nothing drifting.</p>'}`;
   }
+  function renderConsent(c) {
+    if (!c) return;
+    const box = $('p-share');
+    if (document.activeElement !== box) box.checked = c.share;
+    $('p-shareq').textContent = c.question;
+    $('p-sharemsg').textContent = `${c.detail} Now: ${c.text}.`;
+    // Showing the question is recorded once, so an export can say the dev saw it and left it ticked.
+    if (!c.shown && hubToken()) post('/api/data-consent', { shown: true, by: actor() }).catch(() => {});
+  }
   async function pollPlan() {
     try {
       const res = await fetch('/api/bible', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HUB ${res.status}`);
       plan = await res.json();
       renderPlan();
+      renderConsent(plan.dataConsent);
     } catch (err) {
       $('p-state').textContent = `Can't reach the HUB (${err.message}).`;
     }
@@ -681,6 +698,15 @@
       pollPlan();
     } catch (err) {
       $('p-msg').textContent = `Couldn't pitch it: ${err.message}`;
+    }
+  });
+  $('p-share').addEventListener('change', async (ev) => {
+    try {
+      const r = await post('/api/data-consent', { share: ev.target.checked, by: actor() });
+      $('p-sharemsg').textContent = `Saved. Now: ${r.text}.`;
+    } catch (err) {
+      ev.target.checked = !ev.target.checked;
+      $('p-sharemsg').textContent = `Couldn't save it: ${err.message}. Set the HUB token in the Ops view.`;
     }
   });
   $('p-fu').addEventListener('submit', async (ev) => {

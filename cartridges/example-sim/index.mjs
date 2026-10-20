@@ -30,15 +30,29 @@ export function nextMulberry32(rngState) {
   return { value: floatVal, rngState: nextState };
 }
 
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = canonical(value[key]);
-      return acc;
-    }, {});
+// Canonical JSON, the same text as harness/hash.mjs canonicalJson(): keys in code-point order,
+// built directly because JSON.stringify moves integer-like keys ("0", "10") to the front.
+function byCodePoint(a, b) {
+  const x = [...a];
+  const y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+    const d = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (d) return d;
   }
-  return value;
+  return x.length - y.length;
+}
+
+function canonicalJson(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number') return Number.isFinite(value) ? JSON.stringify(Object.is(value, -0) ? 0 : value) : 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value.toJSON === 'function') return canonicalJson(value.toJSON());
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined || typeof v === 'function' ? 'null' : canonicalJson(v))).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).filter((k) => value[k] !== undefined && typeof value[k] !== 'function').sort(byCodePoint);
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return 'null';
 }
 
 /**
@@ -48,7 +62,7 @@ function canonical(value) {
  */
 export function hashSimState(state) {
   let h = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(JSON.stringify(canonical(state)))) {
+  for (const byte of new TextEncoder().encode(canonicalJson(state))) {
     h ^= BigInt(byte);
     h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
   }

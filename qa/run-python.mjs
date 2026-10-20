@@ -25,6 +25,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.error('[python] FAIL no Python 3 found (tried python3, python, py -3). Install it from https://www.python.org/downloads/ (on Windows tick "Add python.exe to PATH"), or set STUDIO_PYTHON.');
     process.exit(1);
   }
-  const r = spawnSync(py.cmd, [...py.pre, ...process.argv.slice(2)], { stdio: 'inherit' });
+  const r = spawnSync(py.cmd, [...py.pre, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
   process.exit(r.status ?? 1);
 }

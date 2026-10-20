@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
-import { isHash64, isSha256 } from '../harness/hash.mjs';
+import { hash64, isHash64, isSha256 } from '../harness/hash.mjs';
 
 const GOLDEN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'golden');
 const update = process.argv.includes('--update');
@@ -55,6 +55,10 @@ for (const file of files) {
     spec.cartridge = name;
     spec.hash = result.hash;
     spec.sha256 = result.sha256;
+    // A cartridge may use its own display hash; Python then checks only the SHA-256.
+    if (result.hash !== hash64(result.state)) spec.hashKind = 'custom';
+    else delete spec.hashKind;
+    if (spec.scenario) spec.actionsSha256 = result.actionsSha256;
     if (spec.scenario) spec.expect = { ...(spec.expect || {}), outcome: result.outcome, tick: result.ticksRun };
     delete spec.note;
     fs.writeFileSync(full, JSON.stringify(spec, null, 2) + '\n');
@@ -72,6 +76,10 @@ for (const file of files) {
   }
   if (!isHash64(spec.hash) || result.hash !== spec.hash) {
     fail(`${file}: display hash expected ${spec.hash} got ${result.hash} (sha256 matches: the cartridge's display hash changed; regenerate)`);
+    continue;
+  }
+  if (spec.scenario && spec.actionsSha256 !== result.actionsSha256) {
+    fail(`${file}: ${spec.actionsSha256 ? `actions sha256 expected ${spec.actionsSha256} got ${result.actionsSha256} (same end state reached a different way)` : 'scenario goldens pin actionsSha256 too. Run: npm run golden -- --update'}`);
     continue;
   }
   if (spec.expect?.outcome !== undefined && result.outcome !== spec.expect.outcome) {

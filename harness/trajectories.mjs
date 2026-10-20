@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * harness/trajectories.mjs — export the studio's finished work as training and evaluation records.
- * Opt-in: nothing is exported without the game dev's consent and terms.
+ * Nothing is exported if the game dev declined sharing (npm run data; pre-ticked to allow) or without terms.
  *
- *   npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs] [--with-diffs] [--since 2026-10-01]
+ *   npm run trajectories -- export --licence "<terms>" [--consent "<who agrees>"] [--with-briefs] [--with-diffs] [--since 2026-10-01]
  *   npm run trajectories -- preview          how many records, and what an export would hold (writes nothing)
  *
  * One record per finished task: the task (type, role, size, phase, what it served), the model and
@@ -30,6 +30,7 @@ import { taskType } from './done-check.mjs';
 import { taggedCommits, traceBugs, DEFAULT_SIZE } from './scorecard.mjs';
 import { scrub } from './secrets.mjs';
 import { modelFamily } from './families.mjs';
+import { readConsent, describeConsent } from './data-consent.mjs';
 
 const OUT_DIR = path.join(STUDIO_STATE_DIR, 'exports');
 
@@ -105,7 +106,11 @@ export function buildRecords({ withBriefs = false, withDiffs = false, since = nu
 }
 
 export function exportTrajectories({ consent, licence, withBriefs = false, withDiffs = false, since = null }) {
-  if (!consent || !licence) return { ok: false, message: 'Exports are opt-in. Say who agrees and on what terms: --consent "<who agrees to this export>" --licence "<terms for its use>".' };
+  const answer = readConsent();
+  if (!answer.share) return { ok: false, message: `The game dev declined sharing (${describeConsent(answer)}). Nothing is exported; they can change it with npm run data -- allow --by <name>.` };
+  if (!licence) return { ok: false, message: 'Say the terms this export is shared under: --licence "<terms for its use>".' };
+  // The studio's recorded answer stands in when no one is named; --consent adds who agreed to this export.
+  consent = consent || `game dev: ${describeConsent(answer)}`;
   const { records, scrubbed } = buildRecords({ withBriefs, withDiffs, since });
   if (!records.length) return { ok: false, message: 'No finished tasks to export yet.' };
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -127,6 +132,7 @@ export function exportTrajectories({ consent, licence, withBriefs = false, withD
     withBriefs,
     withDiffs,
     consent,
+    consentRecord: { share: answer.share, how: answer.how, shown: answer.shown, by: answer.by, at: answer.at },
     licence,
     scrubbedSecrets: scrubbed,
     at: new Date().toISOString(),
@@ -153,7 +159,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } else {
     const { records, scrubbed } = buildRecords({ withBriefs: argv.includes('--with-briefs') });
     const labels = records.reduce((a, r) => ({ ...a, [r.label]: (a[r.label] || 0) + 1 }), {});
-    console.log(`${records.length} finished task(s) could be exported (${Object.entries(labels).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}); ${scrubbed} key-shaped strings would be removed. Nothing written. Export needs --consent and --licence.`);
+    console.log(`Sharing: ${describeConsent()}.`);
+    console.log(`${records.length} finished task(s) could be exported (${Object.entries(labels).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'}); ${scrubbed} key-shaped strings would be removed. Nothing written. Export needs --licence.`);
     if (records[0]) console.log(JSON.stringify(records[0], null, 2));
   }
 }

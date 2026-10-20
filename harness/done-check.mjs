@@ -256,7 +256,7 @@ export function checkDone(task, since = startedAt(task.id)) {
   if (type === 'playtest') {
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).map((f) => ({ f, j: readJson(f) })).filter(({ j }) => j?.stage1);
     check('Playtest report since the task started', reps.length, 'no playtest report in qa/reports/ since this task started (`npm run playtest:stage1`)');
-    const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && j.stage1.finalHash && (j.passed || j.stage1.failingTick != null));
+    const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
   }
   if (type === 'study') {

@@ -25,6 +25,7 @@ import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { addTask } from './task.mjs';
+import { QUESTION, DETAIL, readConsent, setConsent, markShown, describeConsent } from './data-consent.mjs';
 import { QUESTIONS, LAYERS, PLAY_LENGTHS, emptyBible, readBible, writeBible, applyAnswers, checkBible, suggestedLayers, setLayer, catalog, pendingFollowups, answerFollowup, crossedLayersIn, FOLLOWUPS } from './bible.mjs';
 import { routeChatCompletion } from './route.mjs';
 import { cheapChain } from './prepare-brief.mjs';
@@ -152,8 +153,24 @@ async function interactive(all) {
     const yes = (await rl.question(`\n${more.length} follow-up questions about the phases and the layers you kept help the studio build the right thing. Answer some now? y/n > `)).trim().toLowerCase().startsWith('y');
     if (yes) await askFollowups(rl, b);
   }
+  await askDataSharing(rl);
   rl.close();
   return runIntake({});
+}
+
+/** Asked once, pre-ticked: Enter keeps sharing allowed; "n" declines. Changeable later with npm run data. */
+async function askDataSharing(rl) {
+  if (readConsent().shown) return;
+  let a = '';
+  try {
+    a = (await rl.question(`\n${QUESTION}\n${DETAIL}\n[x] Yes  (Enter keeps it; type n to decline) > `)).trim().toLowerCase();
+  } catch {
+    a = '';
+  }
+  if (a.startsWith('n')) setConsent(false, 'game dev (intake)');
+  else if (a.startsWith('y')) setConsent(true, 'game dev (intake)');
+  else markShown('game dev (intake)');
+  console.log(`  Sharing: ${describeConsent()}. Change it any time: npm run data -- decline --by <name>`);
 }
 
 async function askFollowups(rl, b) {

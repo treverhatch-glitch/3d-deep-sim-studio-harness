@@ -51,6 +51,7 @@ import { readExperiments } from '../harness/experiment.mjs';
 import { readBriefs } from '../harness/liaison.mjs';
 import { readBible, writeBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview, pendingFollowups, answerFollowup } from '../harness/bible.mjs';
 import { runIntake } from '../harness/intake.mjs';
+import { readConsent, setConsent, markShown, describeConsent, QUESTION as DATA_QUESTION, DETAIL as DATA_DETAIL } from '../harness/data-consent.mjs';
 import { addIdea } from '../harness/ideas.mjs';
 
 loadDotEnv();
@@ -533,7 +534,7 @@ export function createHubServer() {
     if (url.pathname === '/api/bible' && req.method === 'GET') {
       const b = readBible();
       const r = latestReview();
-      return sendJson(res, 200, { ok: true, bible: b, check: b ? checkBible(b) : null, followups: b ? pendingFollowups(b) : [], suggested: b ? suggestedLayers(b.answers) : [], drift: driftReport(), latestReview: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: new Date(r.at).toISOString() } : null, ideas: readIdeas(), refs: readRefs().map((r) => ({ id: r.id, game: r.game, feature: r.feature, at: r.at, kept: r.files.length, url: r.url || null })), experiments: readExperiments().map((x) => ({ id: x.id, title: x.title, status: x.status, idea: x.idea })), briefs: readBriefs().slice(-8).map((b) => ({ id: b.id, kind: b.kind, title: b.title, stage: b.stage, by: b.confirmed?.by || b.from })), ...catalog() });
+      return sendJson(res, 200, { ok: true, dataConsent: { ...readConsent(), text: describeConsent(), question: DATA_QUESTION, detail: DATA_DETAIL }, bible: b, check: b ? checkBible(b) : null, followups: b ? pendingFollowups(b) : [], suggested: b ? suggestedLayers(b.answers) : [], drift: driftReport(), latestReview: r ? { file: r.file, verdict: r.verdict, phase: r.phase, at: new Date(r.at).toISOString() } : null, ideas: readIdeas(), refs: readRefs().map((r) => ({ id: r.id, game: r.game, feature: r.feature, at: r.at, kept: r.files.length, url: r.url || null })), experiments: readExperiments().map((x) => ({ id: x.id, title: x.title, status: x.status, idea: x.idea })), briefs: readBriefs().slice(-8).map((b) => ({ id: b.id, kind: b.kind, title: b.title, stage: b.stage, by: b.confirmed?.by || b.from })), ...catalog() });
     }
     if (url.pathname === '/api/ideas' && req.method === 'GET') {
       return sendJson(res, 200, { ok: true, ideas: readIdeas() });
@@ -550,6 +551,16 @@ export function createHubServer() {
       const r = runIntake({ answers: body.answers || {}, layers: body.layers || {} });
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, check: r.check, queued: r.queued.map((t) => t.id) });
+    }
+    if (url.pathname === '/api/data-consent' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      if (body.shown && body.share === undefined) {
+        markShown(by);
+        return sendJson(res, 200, { ok: true, consent: readConsent(), text: describeConsent() });
+      }
+      const r = setConsent(body.share !== false, by);
+      return sendJson(res, r.ok ? 200 : 400, { ...r, text: describeConsent() });
     }
     if (url.pathname === '/api/followups' && req.method === 'POST') {
       const body = await readBody(req);

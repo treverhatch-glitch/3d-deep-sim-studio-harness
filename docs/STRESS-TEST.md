@@ -35,7 +35,9 @@ In `.env` (gitignored; `node scripts/secret-scan.mjs` checks what git would publ
 | `STUDIO_DAILY_TOKEN_CAP` | **Set this first.** Calls past it are refused and the Producer is told |
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
-| `STUDIO_BACKUP_DIR` | A Google Drive, Dropbox or OneDrive folder on your computer. The HUB copies the studio's memory there daily (`npm run learn -- backup` any time) |
+| `STUDIO_BACKUP_DIR` | A Google Drive, Dropbox or OneDrive folder on your computer, shared with no one. The HUB backs up the studio's memory there daily, storing only what changed (`npm run learn -- backup` any time; `docs/BACKUPS.md`) |
+| `STUDIO_BACKUP_KEEP` | Daily backups kept, plus the first of each month (default 60) |
+| `STUDIO_BACKUP_MEDIA` | Newest screenshots kept in backups (default 20; 0 for none) |
 | `STUDIO_REFERENCE_DIR` | Where the reference library keeps media; a synced folder keeps it reachable |
 | `STUDIO_DIRECTOR_CMD` | The launch line from `npm run kickoff -- --role director --agent director-1 --tool …`, so pings start the Director |
 

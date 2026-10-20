@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.13.0] — 2026-10-20
+### Fixed
+- **Node and Python now hash every state alike.** Canonical JSON is built directly in both: keys in code-point order (`JSON.stringify` moved integer-like keys such as `"0"`, `"10"` to the front) and numbers in JavaScript's layout (Python wrote `1e-05` for `0.00001` and `1e-07` for `1e-7`). Emoji keys sorted differently too. `qa/hash-vectors.json` holds 20 edge cases both languages must match; a 5,000-state fuzz agreed. No existing golden changed.
+- Determinism checks in the vertical slice, soak, balance sweep and playtest compare **SHA-256**, not the display hash. Playtest reports record `finalSha256`, and the playtest done-check requires it.
+- Python output on Windows is UTF-8 (`PYTHONIOENCODING`), so `…` in output can't throw.
+### Added
+- Scenario goldens pin **`actionsSha256`**: the same end reached by different actions fails.
+- A cartridge with its own display hash is marked `hashKind: custom`; Python then checks SHA-256 only. `qa/test-golden.py` also replays every regression, and `check-regressions` checks the display hash.
+- **Signed results bind code, inputs and outputs:** a SHA-256 over each cartridge's files, each golden's and regression's file SHA-256, and the harness runner. Signing refuses gate runs that are stale or missing a required gate. `verify --replay` checks the code matches and re-runs purity, isolation and the vertical slice as well.
+- **Backups that save space** (`docs/BACKUPS.md`): each file content stored once, gzipped; `latest/` with plain copies and STUDIO-MEMORY.md; `restore --at`; `prune` (the HUB keeps 60 daily plus one a month). Also keeps the newest 50 playtest reports and 20 screenshots.
+- **The data-sharing answer** (`npm run data`): intake and the Game plan view ask whether the studio's records may be shared with AI research partners, pre-ticked to allow. Declining stops every export; manifests record whether the answer was the default, confirmed or declined.
+
+---
+
 ## [2.12.0] — 2026-10-20
 ### Added
 - **A bug's regression must fail before the fix.** The bug done-check replays the regression on the code before the task's first `Studio-Task` commit, in a temporary git worktree (`qa/fails-before.mjs`, cached). A regression that passes there too guards nothing and is refused. The bug skill now covers the whole loop: triage, reproduce, `git bisect run` with the replay, smallest fix, pinned SHA-256, lesson, hand-off.

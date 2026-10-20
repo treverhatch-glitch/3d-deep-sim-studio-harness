@@ -142,6 +142,12 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('the example cartridge\'s own display hash equals the harness hash64', cartMod.hashSimState(s0) === h.hash64(s0));
   const crypto = await import('node:crypto');
   report('sha256 is SHA-256 of the canonical JSON as UTF-8', h.sha256({ b: 1, a: 'é' }) === crypto.createHash('sha256').update('{"a":"é","b":1}', 'utf8').digest('hex') && h.isSha256(h.sha256({})));
+  // The same vectors are checked in Python by qa/test-golden.py, so both languages write identical bytes.
+  const { vectors } = JSON.parse(fs.readFileSync(path.join(root, 'qa/hash-vectors.json'), 'utf8'));
+  const wrong = vectors.filter((v) => h.canonicalJson(JSON.parse(v.input)) !== v.canonical || h.sha256(JSON.parse(v.input)) !== v.sha256);
+  report(`canonical JSON matches all ${vectors.length} shared hash vectors (integer-like keys, tiny floats, emoji keys)`, wrong.length === 0, wrong.map((v) => v.input).join('\n'));
+  report('the example cartridge\'s display hash agrees on every hash vector', vectors.every((v) => cartMod.hashSimState(JSON.parse(v.input)) === h.hash64(JSON.parse(v.input))));
+  report('integer-like keys keep code-point order (JSON.stringify would move them)', h.canonicalJson({ 10: 1, 2: 2, '-1': 3 }) === '{"-1":3,"10":1,"2":2}');
 }
 
 // Golden stubs are not a pass.
@@ -149,6 +155,20 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const dir = copyRepo();
   edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, '"sha256": "REPLACE_AFTER_FIRST_RUN"'));
   report('golden stub hash fails (no silent rewrite)', run(dir, 'node qa/check-golden.mjs').status !== 0);
+}
+
+// A scenario golden pins the actions taken, not only the end state; a custom display hash still passes Python on SHA-256.
+{
+  const dir = copyRepo();
+  edit(dir, 'qa/golden/example-sim-start-to-win.json', (s) => s.replace(/"actionsSha256": "[0-9a-f]{64}"/, `"actionsSha256": "${'1'.repeat(64)}"`));
+  const res = run(dir, 'node qa/check-golden.mjs');
+  report('a scenario that reaches the same end by other actions fails the golden', res.status !== 0 && /same end state reached a different way/.test(res.stderr), res.stderr);
+  const dir2 = copyRepo();
+  edit(dir2, SIM, (s) => s.replace('export function hashSimState(state) {', 'export function hashSimState(state) {\n  if (state) return String(state.tick ?? 0).padStart(16, "0");'));
+  run(dir2, 'npm run golden -- --update');
+  run(dir2, 'node qa/check-regressions.mjs --update');
+  const py = run(dir2, 'node qa/run-python.mjs qa/test-golden.py');
+  report('a cartridge with its own display hash is marked hashKind custom and passes Python on SHA-256', /"hashKind": "custom"/.test(fs.readFileSync(path.join(dir2, 'qa/golden/example-1337.json'), 'utf8')) && py.status === 0, py.stdout + py.stderr);
 }
 
 // Locks and task claims.
@@ -505,7 +525,20 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const to = path.join(tmpRoot, `backup-${n}`);
   const b = run(dir, `node harness/learn.mjs backup --to "${to}"`);
   const made = fs.existsSync(to) ? fs.readdirSync(to) : [];
-  report('npm run learn -- backup copies the studio\'s memory, with a one-file version', b.status === 0 && made.length === 1 && fs.existsSync(path.join(to, made[0], 'STUDIO-MEMORY.md')) && fs.existsSync(path.join(to, made[0], 'studio/memory/failures.md')), b.stdout + b.stderr);
+  const store = path.join(to, made[0] || 'none');
+  report('npm run learn -- backup copies the studio\'s memory, with a one-file version', b.status === 0 && made.length === 1 && fs.existsSync(path.join(store, 'latest/STUDIO-MEMORY.md')) && fs.existsSync(path.join(store, 'latest/studio/memory/failures.md')), b.stdout + b.stderr);
+  const objects = () => fs.readdirSync(path.join(store, 'objects')).reduce((k, d) => k + fs.readdirSync(path.join(store, 'objects', d)).length, 0);
+  const before = objects();
+  run(dir, `node harness/learn.mjs backup --to "${to}"`);
+  report('a second backup stores only what changed', objects() - before <= 3 && fs.readdirSync(path.join(store, 'history')).length === 2, `${before} -> ${objects()} objects`);
+  edit(dir, 'studio/memory/failures.md', (s) => `${s}\n### lost line\n`);
+  run(dir, `node harness/learn.mjs backup --to "${to}"`);
+  const first = fs.readdirSync(path.join(store, 'history')).sort()[0].replace('.json', '');
+  const back = path.join(tmpRoot, `restore-${n}`);
+  const r = run(dir, `node harness/learn.mjs restore --from "${to}" --to "${back}" --at ${first}`);
+  report('restore brings back a file as it was at an earlier backup', r.status === 0 && !/lost line/.test(fs.readFileSync(path.join(back, 'studio/memory/failures.md'), 'utf8')), r.stdout + r.stderr);
+  const pr = run(dir, `node harness/learn.mjs prune --from "${to}" --keep 1`);
+  report('prune keeps the newest backups and the first of the month', pr.status === 0 && fs.readdirSync(path.join(store, 'history')).length === 2, pr.stdout + pr.stderr);
   run(dir, 'node harness/notes.mjs add --kind eval "score 3; agents followed the loop; two forced dones"');
   report('the overseer\'s evaluations are kept with the harness notes', /## Overseer evaluations[\s\S]*score 3/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')));
 }
@@ -579,22 +612,35 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date().toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  const allGates = (ok = true) => JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: gates.filter((g) => g.required).map((g) => ({ id: g.id, required: true, ok })) });
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  run(dir, 'node harness/sign.mjs keygen');
+  const partialSign = run(dir, 'node harness/sign.mjs result --by hatch');
+  report('signing refuses a gate run that skipped required gates', partialSign.status !== 0 && /required gates that never ran/.test(partialSign.stderr), partialSign.stderr);
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: '2020-01-01T00:00:00.000Z', rows: JSON.parse(allGates()).rows }));
+  const staleSign = run(dir, 'node harness/sign.mjs result --by hatch');
+  report('signing refuses a gate run older than the last game change', staleSign.status !== 0 && /older than the last change/.test(staleSign.stderr), staleSign.stderr);
+  fs.rmSync(path.join(dir, '.studio/keys'), { recursive: true, force: true });
+  fs.rmSync(path.join(dir, 'studio/keys'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates());
   report('signing needs a key first', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
   const kg = run(dir, 'node harness/sign.mjs keygen');
   report('keygen keeps the private key out of git and the public key in studio/keys', kg.status === 0 && fs.existsSync(path.join(dir, '.studio/keys/studio-ed25519.pem')) && fs.existsSync(path.join(dir, 'studio/keys/studio-ed25519.pub.pem')) && git('check-ignore -q .studio/keys/studio-ed25519.pem').status === 0, kg.stdout + kg.stderr);
   const sr = run(dir, 'node harness/sign.mjs result --by hatch --note "slice 1"');
   const signed = path.join(dir, 'studio/signed', fs.readdirSync(path.join(dir, 'studio/signed'))[0]);
   const doc = JSON.parse(fs.readFileSync(signed, 'utf8'));
-  report('a signed result lists every golden\'s SHA-256, the gates and the commit', sr.status === 0 && doc.manifest.goldens.length === 2 && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.sha256)) && doc.manifest.gates.required === 1 && /^[0-9a-f]{40}$/.test(doc.manifest.commit), sr.stdout + sr.stderr);
+  report('a signed result lists every golden\'s SHA-256, the gates and the commit', sr.status === 0 && doc.manifest.goldens.length === 2 && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.sha256)) && doc.manifest.gates.required === gates.filter((g) => g.required).length && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.fileSha256)) && /^[0-9a-f]{64}$/.test(doc.manifest.code.cartridges[0]?.sha256) && /^[0-9a-f]{40}$/.test(doc.manifest.commit), sr.stdout + sr.stderr);
   const v = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
   report('verify --replay checks the signature and re-runs the goldens', v.status === 0 && /this code produces the signed results/.test(v.stdout), v.stdout + v.stderr);
   const tampered = path.join(dir, 'tampered.json');
   fs.writeFileSync(tampered, JSON.stringify({ ...doc, manifest: { ...doc.manifest, signedBy: 'someone-else' } }));
   report('a changed manifest fails verification', run(dir, `node harness/sign.mjs verify "${tampered}"`).status !== 0);
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// edited after signing\n`);
+  const codeChanged = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
+  report('verify --replay fails when the cartridge code differs from the signed code', codeChanged.status !== 0 && /differs from the signed code/.test(codeChanged.stderr), codeChanged.stdout + codeChanged.stderr);
   edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'1'.repeat(64)}"`));
   report('verify --replay fails when the repo no longer produces the signed results', run(dir, `node harness/sign.mjs verify "${signed}" --replay`).status !== 0);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date().toISOString(), rows: [{ id: 'golden', required: true, ok: false }] }));
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), allGates(false));
   report('signing refuses a red verify unless told to record it', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
 }
 
@@ -619,14 +665,20 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, `node harness/task.mjs reopen ${b} --reason "missed a file"`, env);
   run(dir, `node harness/task.mjs start ${b} --agent prod-1`, env);
   run(dir, `node harness/task.mjs done ${b} --agent prod-1`, env);
-  report('trajectory export refuses without consent and terms', run(dir, 'node harness/trajectories.mjs export', env).status !== 0);
+  report('trajectory export refuses without terms', run(dir, 'node harness/trajectories.mjs export', env).status !== 0);
+  const shown = run(dir, 'node harness/data-consent.mjs', env).stdout;
+  report('the data-sharing question starts ticked (allowed by default)', /\[x\] Yes/.test(shown) && /allowed by default/.test(shown), shown);
+  run(dir, 'node harness/data-consent.mjs decline --by hatch', env);
+  const refused = run(dir, 'node harness/trajectories.mjs export --licence "internal evaluation only"', env);
+  report('after the game dev declines, nothing is exported, whatever flags are passed', refused.status !== 0 && /declined sharing/.test(refused.stderr) && !fs.existsSync(path.join(dir, '.studio/exports')), refused.stdout + refused.stderr);
+  run(dir, 'node harness/data-consent.mjs allow --by hatch', env);
   const ex = run(dir, 'node harness/trajectories.mjs export --consent "hatch, for the studio\'s own model tests" --licence "internal evaluation only"', env);
   const out = fs.readdirSync(path.join(dir, '.studio/exports'));
   const jsonl = fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.jsonl'))), 'utf8');
   const recs = jsonl.trim().split('\n').map((l) => JSON.parse(l));
   const man = JSON.parse(fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.manifest.json'))), 'utf8'));
   report('an export writes one labelled record per finished task, with its commits', ex.status === 0 && recs.length === 2 && recs.find((r) => r.id === a)?.label === 'clean' && recs.find((r) => r.id === a)?.commits.length === 1 && recs.find((r) => r.id === b)?.label === 'caused-bug', ex.stdout + ex.stderr + jsonl);
-  report('exported text is scrubbed of key-shaped strings, and the manifest records consent and a SHA-256', !jsonl.includes(key) && /\[removed\]/.test(jsonl) && man.consent && man.licence && /^[0-9a-f]{64}$/.test(man.sha256) && man.scrubbedSecrets >= 1, JSON.stringify(man));
+  report('exported text is scrubbed of key-shaped strings, and the manifest records consent and a SHA-256', !jsonl.includes(key) && /\[removed\]/.test(jsonl) && man.consent && man.licence && man.consentRecord?.how === 'confirmed' && /^[0-9a-f]{64}$/.test(man.sha256) && man.scrubbedSecrets >= 1, JSON.stringify(man));
 }
 
 // A bug's regression must fail on the code before the fix, or it guards nothing.

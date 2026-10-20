@@ -14,13 +14,23 @@ npm run sign -- result --by hatch --note "Phase 1 slice"
 npm run sign -- verify studio/signed/<file>.json --replay
 ```
 
-A signed result is a manifest of the studio's verified state: every golden's and regression's
-SHA-256, the last gate run, the harness version and commit, the Game Bible's and asset manifest's
-SHA-256, who signed and when, signed with Ed25519 (Node's built-in crypto). Signing refuses a red or
-partial verify unless you pass `--allow-red`, which records the failures in the manifest.
+A signed result is a manifest that binds code, inputs and outputs, signed with Ed25519 (Node's
+built-in crypto):
 
-`verify` checks the signature and the key. `--replay` also re-runs every golden and regression: that
-proves the code in hand still produces what was signed, not just that someone signed it. Publish
+- **Code:** a SHA-256 over each cartridge's files (paths and contents), and one over the harness
+  files that run and hash it.
+- **Inputs:** each golden's and regression's own file SHA-256 (seed, tick, actions, scenario).
+- **Outputs:** the state SHA-256 each one pins, and the actions SHA-256 for scenarios.
+- The last gate run, the harness version and commit, the Game Bible's and asset manifest's SHA-256,
+  who signed and when.
+
+Signing refuses a gate run that is red, partial, missing any required gate from `studio/gates.json`,
+or older than the last change to the game or its goldens, unless you pass `--allow-red`, which
+records why in the manifest.
+
+`verify` checks the signature and the key. `--replay` also checks the code in hand is the signed
+code, then re-runs the goldens, regressions, purity and isolation checks and the vertical slice: that
+proves this code produces what was signed, not just that someone signed it, even outside git. Publish
 your key's fingerprint (`npm run sign -- fingerprint`) somewhere you control, so others can tell your
 signatures from anyone else's.
 
@@ -31,11 +41,16 @@ review, and any bug later traced back to it. That is the kind of data used to ev
 train them with automatic pass/fail grading.
 
 ```bash
+npm run data                                # the sharing question and the current answer
 npm run trajectories -- preview
-npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs] [--with-diffs]
+npm run trajectories -- export --licence "<terms>" [--consent "<who agrees>"] [--with-briefs] [--with-diffs]
 ```
 
-- **Opt-in.** Nothing is exported without consent and terms; both go in the manifest.
+- **Allowed unless declined.** Intake and the Game plan view ask the game dev whether the studio's
+  records may be shared with AI research partners. The box starts ticked; unticking it, or
+  `npm run data -- decline --by <name>`, stops every export. Each change is kept with who and when
+  (`studio/data-consent.json`), and every manifest records the answer it relied on: `default` (left
+  ticked), `confirmed` (a deliberate yes) or `declined`. Terms (`--licence`) are always needed.
 - **Scrubbed.** Every text field is cleaned of key-shaped strings with the secret scan's patterns.
 - **Labelled.** `clean` (done first time, nothing came back), `needed-fixes` (refused, forced or
   reviewed with changes), `caused-bug` (reopened, or a bug traced back to it).
@@ -57,6 +72,10 @@ live in `.studio/` and are never committed. Exporting is a separate, deliberate 
 
 Not legal advice; talk to a lawyer before a deal.
 
+- **A pre-ticked box is weaker than a yes.** In the EU and UK a pre-ticked box doesn't count as
+  consent for personal data, and Thailand's PDPA also expects consent to be clear. The records are
+  mostly about work, not people, but agent names, notes and briefs can name people. For a deal, ask
+  game devs to confirm (`how: confirmed` in the manifest), or export only `confirmed` studios.
 - **Your consent and the game dev's.** If the studio builds someone else's game, their code and
   ideas are in the records. Get it in writing.
 - **Model providers' terms.** Several providers' terms limit using their outputs to develop models

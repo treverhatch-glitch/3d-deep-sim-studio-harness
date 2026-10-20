@@ -66,9 +66,9 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, s
       break;
     }
     if (t === mid) {
-      const before = adapter.getHash();
+      const before = cart.sha256(adapter.getState());
       adapter.deserialize(adapter.serialize());
-      const after = adapter.getHash();
+      const after = cart.sha256(adapter.getState());
       if (before !== after) {
         add({ id: 'QA-STAGE1-SERIALIZATION-DRIFT', severity: 'P0', summary: 'save/load changed the state hash', expected: before, actual: after }, state.tick ?? t);
         break;
@@ -79,10 +79,11 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, s
   }
 
   const finalHash = adapter.getHash();
+  const finalSha256 = cart.sha256(adapter.getState());
   if (!findings.length) {
     const again = replay(cart, { seed, tick: ticksRun, actions });
-    if (again.hash !== finalHash) {
-      add({ id: 'QA-STAGE1-NONDETERMINISTIC', severity: 'P0', summary: 'replaying the same seed and actions gave a different hash', expected: finalHash, actual: again.hash }, ticksRun);
+    if (again.sha256 !== finalSha256) {
+      add({ id: 'QA-STAGE1-NONDETERMINISTIC', severity: 'P0', summary: 'replaying the same seed and actions gave a different state (sha256)', expected: finalSha256, actual: again.sha256 }, ticksRun);
     }
     const expected = sc?.expect;
     if (expected && outcome && outcome !== expected) {
@@ -105,6 +106,7 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, s
     tick: failingTick,
     outcome,
     finalHash,
+    finalSha256,
     actions,
     durationMs: Date.now() - startMs,
     passed: findings.length === 0,
@@ -251,6 +253,7 @@ function formatMarkdownReport(report) {
           `- **Ticks run**: \`${report.stage1.ticksRun}\` · **Outcome**: \`${report.stage1.outcome ?? 'none'}\``,
           `- **Failing tick**: \`${report.stage1.failingTick ?? 'none'}\``,
           `- **State hash (display, FNV-1a 64)**: \`${report.stage1.finalHash}\``,
+          `- **State SHA-256 (verification)**: \`${report.stage1.finalSha256}\``,
           `- **Replay**: \`node harness/replay.mjs --trace .studio/last-seed-failure.json\` after a closed-loop failure`,
           `- **Duration**: \`${report.stage1.durationMs}ms\``,
         ].join('\n')

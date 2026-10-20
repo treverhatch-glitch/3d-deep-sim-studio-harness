@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, loadCartridge, replay } from '../harness/cartridge.mjs';
-import { isSha256 } from '../harness/hash.mjs';
+import { hash64, isSha256 } from '../harness/hash.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'regressions');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : [];
@@ -28,6 +28,8 @@ for (const file of files) {
     spec.cartridge = name;
     spec.hash = result.hash;
     spec.sha256 = result.sha256;
+    if (result.hash !== hash64(result.state)) spec.hashKind = 'custom';
+    else delete spec.hashKind;
     fs.writeFileSync(full, JSON.stringify(spec, null, 2) + '\n');
     console.log(`[regressions] updated ${file} -> sha256 ${result.sha256.slice(0, 16)}…`);
     continue;
@@ -40,6 +42,9 @@ for (const file of files) {
     failed += 1;
   } else if (result.sha256 !== spec.sha256) {
     console.error(`[regressions] FAIL ${file}: sha256 expected ${spec.sha256} got ${result.sha256}`);
+    failed += 1;
+  } else if (spec.hash !== undefined && spec.hash !== result.hash) {
+    console.error(`[regressions] FAIL ${file}: display hash expected ${spec.hash} got ${result.hash} (sha256 matches: the cartridge's display hash changed; regenerate)`);
     failed += 1;
   } else {
     console.log(`[regressions] PASS ${file} (${name}, sha256 ${result.sha256.slice(0, 16)}…)`);

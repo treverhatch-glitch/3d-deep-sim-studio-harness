@@ -4,7 +4,7 @@
  *
  * Plays scenarios['start-to-win'] from cartridges/<name>/qa.mjs twice, then checks:
  *   it ends in its expected outcome (default "won"), never breaks an invariant, is deterministic,
- *   and its final hash matches qa/golden/<name>-start-to-win.json.
+ *   and its final SHA-256 (and the SHA-256 of the actions it took) match qa/golden/<name>-start-to-win.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,8 +38,8 @@ for (const name of names) {
     fail(`${name}: tick ${a.failingTick} ${a.findings[0].id} — ${a.findings[0].summary}`);
     continue;
   }
-  if (a.hash !== b.hash) {
-    fail(`${name}: two runs disagree (${a.hash} vs ${b.hash})`);
+  if (a.sha256 !== b.sha256 || a.actionsSha256 !== b.actionsSha256) {
+    fail(`${name}: two runs disagree (sha256 ${a.sha256.slice(0, 16)}… vs ${b.sha256.slice(0, 16)}…)`);
     continue;
   }
   if (a.outcome !== expected) {
@@ -52,8 +52,12 @@ for (const name of names) {
     continue;
   }
   const golden = JSON.parse(fs.readFileSync(goldenFile, 'utf8'));
-  if (golden.hash !== a.hash) {
-    fail(`${name}: slice hash ${a.hash} != golden ${golden.hash}`);
+  if (golden.sha256 !== a.sha256) {
+    fail(`${name}: slice sha256 ${a.sha256} != golden ${golden.sha256}`);
+    continue;
+  }
+  if (golden.actionsSha256 && golden.actionsSha256 !== a.actionsSha256) {
+    fail(`${name}: the slice reached the same end by different actions (actionsSha256 ${a.actionsSha256.slice(0, 16)}… != golden ${golden.actionsSha256.slice(0, 16)}…)`);
     continue;
   }
   console.log(`[slice] PASS ${name}: ${a.outcome} at tick ${a.ticksRun}, ${a.actions.length} action(s), hash ${a.hash}`);

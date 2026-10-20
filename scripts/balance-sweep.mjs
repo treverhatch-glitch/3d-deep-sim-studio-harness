@@ -43,7 +43,7 @@ const rows = [];
 const hashes = new Set();
 for (const value of values) {
   const runs = seeds.map((seed) => runScenario(cart, scenario, { seed, tuning: { [knob]: value } }));
-  runs.forEach((r) => hashes.add(r.hash));
+  runs.forEach((r) => hashes.add(r.sha256));
   const wins = runs.filter((r) => r.outcome === 'won');
   const winRate = wins.length / runs.length;
   const med = median(wins.map((r) => r.ticksRun));
