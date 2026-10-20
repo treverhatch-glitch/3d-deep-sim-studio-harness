@@ -97,7 +97,7 @@ export function preflight() {
   }
 
   // Keys and the spend cap (names only, never values).
-  const keys = [...envText.matchAll(/^([A-Z0-9_]*(?:API_KEY|_TOKEN)(?:_\d+)?)=\s*(\S+)/gm)].map((m) => m[1]).filter((k) => k !== 'HUB_TOKEN');
+  const keys = [...envText.matchAll(/^([A-Z0-9_]*(?:API_KEY|_TOKEN)(?:_\d+)?)=[ \t]*([^\s]+)/gm)].map((m) => m[1]).filter((k) => k !== 'HUB_TOKEN');
   row('ok', keys.length ? `Router keys set: ${keys.join(', ')}` : 'No router keys set', keys.length ? '' : 'fine when agents run in their own tools (Claude Code, Codex, ...)');
   const cap = Number(envVal('STUDIO_DAILY_TOKEN_CAP') || 0);
   if (keys.length) row(cap > 0 ? 'ok' : 'warn', `Daily token cap: ${cap ? cap.toLocaleString() : 'none'}`, cap ? '' : 'set STUDIO_DAILY_TOKEN_CAP before running with paid keys');

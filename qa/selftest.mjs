@@ -919,6 +919,9 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   fs.writeFileSync(path.join(dir, '.env'), `STUDIO_RESULTS_DIR=\nHUB_TOKEN=change-me-local-only\nSTUDIO_RESULTS_DIR=${to2}\n`);
   const fromEnv = run(dir, 'node harness/run-report.mjs', env);
   report('settings in .env reach every command, and a value added below the empty example line wins', fromEnv.status === 0 && fs.existsSync(to2), fromEnv.stdout + fromEnv.stderr);
+  fs.writeFileSync(path.join(dir, '.env'), 'GEMINI_API_KEY=\r\nVERTEX_API_KEY=\r\nNVIDIA_API_KEY=\r\nXAI_API_KEY=\r\n');
+  const pf = run(dir, 'node scripts/preflight.mjs --quick', env).stdout;
+  report('preflight sees no keys when every key line is empty (an empty line never borrows the next)', /No router keys set/.test(pf), pf);
   fs.rmSync(path.join(dir, '.env'));
   report('the run report writes REPORT.md, a snapshot and the event log to the results folder', rr.status === 0 && /Final report/.test(rep) && /the brief missed the golden step/.test(rep) && fs.readdirSync(path.join(to, made[0], 'snapshots')).length === 1 && fs.existsSync(path.join(to, made[0], 'files/events.jsonl.gz')), rr.stdout + rr.stderr + rep.slice(0, 400));
 }

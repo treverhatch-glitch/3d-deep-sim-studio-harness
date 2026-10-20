@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.14.2] — 2026-10-21
+### Fixed
+- Preflight reported router keys that weren't set: an empty `KEY=` line in `.env` borrowed the next line as its value. Found while setting up the first real test on Windows.
+
+---
+
 ## [2.14.1] — 2026-10-21
 ### Added
 - **`npm run review -- <ID> [--local]`**: a model from another company reviews a task's tagged commits (and its spec, for system tasks) through the router, and writes the review with `model-family:`, `implementer-family:` and one verdict. `--local` uses only your Ollama model, so a studio with one company's models can still close system tasks. Refuses a same-family reviewer; a reply with no clear verdict counts as changes.
