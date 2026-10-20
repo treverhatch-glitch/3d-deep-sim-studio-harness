@@ -25,15 +25,23 @@ Full-resolution screenshots consume thousands of vision tokens and slow down age
 ## 3. Commands
 
 ```bash
-# Run Stage 1 (Programmatic seed+tick trajectory) + Stage 2 (Playwright + UISentinel)
-node qa/playtest.mjs
+# Stage 1 plays the default cartridge's start-to-win scenario tick by tick; Stage 2 needs a served URL
+node qa/playtest.mjs [--cartridge name] [--scenario start-to-win] [--stage 1|2] [--url http://127.0.0.1:5173/?playtest=1]
 
-# Replay a specific failing seed and tick deterministically
-node harness/replay.mjs --seed 42069 --tick 120
+# Replay a seed and tick, or the exact failure the closed loop recorded (stops on the failing tick)
+node harness/replay.mjs --seed 42069 --tick 120 [--cartridge name]
+node harness/replay.mjs --trace .studio/last-seed-failure.json
 
-# Run the full Closed-Loop Auto-Bug + Retry gate (escalates after 3 failures)
+# Closed loop: playtest -> record failing tick + actions -> escalate after 3 failures (never edits code)
 node harness/closed-loop.mjs
 
-# Run minimal Playwright accessibility-first visual check against a local URL
+# Goldens, regressions, slice, soak, and proof that every gate can fail
+npm run golden            # npm run golden -- --update after an intended change
+node qa/check-regressions.mjs
+node qa/vertical-slice.mjs
+npm run soak
+npm run selftest
+
+# Accessibility-first visual check against a local URL
 node qa/visual-check.mjs http://127.0.0.1:5173/?playtest=1
 ```

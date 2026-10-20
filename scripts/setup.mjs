@@ -10,6 +10,7 @@
  * 4. Prints a clean readiness summary at 0% LLM token cost.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
@@ -28,7 +29,6 @@ const dirs = [
   'studio/daily/videos',
   'studio/done',
   'qa/reports',
-  'cartridges/example-sim',
 ];
 
 for (const rel of dirs) {
@@ -39,7 +39,18 @@ for (const rel of dirs) {
 const envFile = path.join(rootDir, '.env');
 const envExample = path.join(rootDir, '.env.example');
 if (!fs.existsSync(envFile) && fs.existsSync(envExample)) {
-  fs.copyFileSync(envExample, envFile);
+  // Fresh .env with a random HUB_TOKEN, so the War Room never runs on the public placeholder.
+  const token = crypto.randomBytes(24).toString('hex');
+  const text = fs.readFileSync(envExample, 'utf8').replace(/^HUB_TOKEN=.*$/m, `HUB_TOKEN=${token}`);
+  fs.writeFileSync(envFile, text, { mode: 0o600 });
+  console.log('[setup] wrote .env with a random HUB_TOKEN (gitignored). Open the War Room at http://127.0.0.1:3847/?token=<that value>');
+}
+
+// Install the pre-commit hook (secret scan + lock check + sim gates)
+try {
+  execSync('node scripts/install-hooks.mjs', { cwd: rootDir, stdio: 'inherit' });
+} catch {
+  console.warn('[setup] could not install git hooks; run npm run hooks:install');
 }
 
 // Verify or initialize .studio/events.jsonl
@@ -48,12 +59,8 @@ if (!fs.existsSync(eventsFile) || fs.statSync(eventsFile).size === 0) {
   emitEvent({
     type: 'setup.init',
     agent: 'producer',
-    provider: 'local-ollama',
-    model: 'qwen2.5-coder:14b',
     status: 'IDLE',
-    task: 'T-001',
     target: 'studio/NEXT.md',
-    tokensSaved: 4200,
     msg: 'Studio harness initialized via npm run setup (event log verified)',
   });
 }

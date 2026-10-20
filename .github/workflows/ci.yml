@@ -5,30 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  checks:
+  release-gate:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20', '22']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - name: Syntax check
-        run: |
-          node --check harness/models.config.mjs
-          node --check harness/route.mjs
-          node --check harness/event.mjs
-          node --check harness/task.mjs
-          node --check harness/lock.mjs
-          node --check hub/server.mjs
-          node --check qa/playtest.mjs
-          node --check cartridges/example-sim/index.mjs
-      - name: Run gates
-        run: node scripts/run-gates.mjs
-      - name: Closed-loop must fail when simulated
-        run: |
-          set +e
-          node harness/closed-loop.mjs --simulate-fail
-          code=$?
-          set -e
-          test "$code" -eq 1
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Syntax, every required gate (incl. the self-test that proves each gate can fail),
+      # the closed-loop failure proof, read-only gates, and the changelog entry.
+      - name: npm run release
+        run: node scripts/release.mjs
+      - name: Optional gates (report only)
+        if: always()
+        run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,reviewer

@@ -101,15 +101,16 @@ export const AgentEyesViewport: React.FC<AgentEyesViewportProps> = ({
   };
 
   const fps = frameData?.fps ?? config.targetFps ?? 30;
-  const latencyMs = frameData?.latencyMs ?? 14;
+  const latencyMs = frameData?.latencyMs ?? 0;
+  // Never invent numbers: show placeholders until a real frame or playtest result arrives.
   const sim = frameData?.simTelemetry || {
-    tick: 120,
-    seed: 42069,
-    hash: '1b29485e',
-    entities: 48,
-    credits: 12450,
-    paused: false,
-    api: 'window.__sim (?playtest=1)',
+    tick: 0,
+    seed: 0,
+    hash: 'no playtest yet',
+    entities: 0,
+    credits: 0,
+    paused: true,
+    api: 'run a playtest to fill this',
   };
 
   return (

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from './event.mjs';
-import { claim, release } from './lock.mjs';
+import { claim, release, status as lockStatus } from './lock.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -101,17 +101,12 @@ export function syncCurrentTaskCheckpoint(activeTask, note = '') {
   fs.writeFileSync(CURRENT_TASK_FILE, content, 'utf8');
 }
 
-export function startTask(taskId, agentOverride = null) {
-  const owner = agentOverride || 'agent';
-  const lockRes = claim(`task:${taskId}`, owner);
+export function startTask(taskId, agent = null) {
+  if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
+  const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
-    emitEvent({
-      type: 'task.lock_denied',
-      agent: owner,
-      task: taskId,
-      status: 'blocked',
-      msg: `Task ${taskId} already claimed`,
-    });
+    if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };
+    emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId} already claimed by ${lockRes.lock?.owner}` });
     return { error: 'locked', lock: lockRes.lock || null };
   }
 
@@ -120,27 +115,25 @@ export function startTask(taskId, agentOverride = null) {
   if (!target) {
     const idx = q.backlog.findIndex((t) => t.id === taskId);
     if (idx === -1) {
-      release(`task:${taskId}`, owner);
+      release(`task:${taskId}`, agent);
       return null;
     }
     [target] = q.backlog.splice(idx, 1);
-    if (agentOverride) target.role = agentOverride;
     target.status = 'in_progress';
     q.inProgress.unshift(target);
   }
   writeNextQueue(q);
-  syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role})`);
-  emitEvent({
-    type: 'task.start',
-    agent: target.role,
-    task: target.id,
-    status: 'editing',
-    msg: `Started ${target.id}: ${target.title}`,
-  });
-  return target;
+  syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
+  emitEvent({ type: 'task.start', agent, task: target.id, status: 'editing', msg: `Started ${target.id}: ${target.title}` });
+  return { ...target, owner: agent };
 }
 
-export function completeTask(taskId, note = '') {
+/** Only the lock owner can finish a claimed task, unless force is set (a person in the War Room). */
+export function completeTask(taskId, note = '', agent = null, { force = false } = {}) {
+  const lock = lockStatus(`task:${taskId}`);
+  if (lock.locked && lock.lock.owner !== agent && !force) {
+    return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
+  }
   const q = parseNextQueue();
   let idx = q.inProgress.findIndex((t) => t.id === taskId);
   let target = null;
@@ -156,17 +149,11 @@ export function completeTask(taskId, note = '') {
   if (note) target.title = `${target.title} _(✓ ${note})_`;
   q.done.unshift(target);
   writeNextQueue(q);
-  release(`task:${taskId}`, target.role);
+  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
 
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
-  emitEvent({
-    type: 'task.done',
-    agent: target.role,
-    task: target.id,
-    status: 'done',
-    msg: `Completed ${target.id}: ${target.title}`,
-  });
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', msg: `Completed ${target.id}: ${target.title}` });
   return target;
 }
 
@@ -238,17 +225,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'start') {
     const targetId = arg1 || q.backlog[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs start <TASK_ID>');
+      console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
     }
-    const started = startTask(targetId, flags.agent || null);
+    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null);
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);
     }
-    if (started.error === 'locked') {
-      console.error(`Task "${targetId}" is locked.`);
-      console.log(JSON.stringify(started, null, 2));
+    if (started.error) {
+      console.error(started.error === 'locked' ? `Task "${targetId}" is claimed by ${started.lock?.owner}. Pick another task.` : started.message);
       process.exit(1);
     }
     console.log(JSON.stringify(started, null, 2));
@@ -258,12 +244,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> [--note "..."]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force]');
       process.exit(1);
     }
-    const done = completeTask(targetId, flags.note || '');
+    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force) });
     if (!done) {
       console.error(`Task "${targetId}" not found.`);
+      process.exit(1);
+    }
+    if (done.error) {
+      console.error(done.message);
       process.exit(1);
     }
     console.log(JSON.stringify(done, null, 2));

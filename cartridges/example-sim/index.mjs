@@ -1,12 +1,25 @@
 /**
- * cartridges/example-sim/index.mjs — Reference Deterministic 3D Sim Cartridge
+ * cartridges/example-sim/index.mjs — reference deterministic sim cartridge.
+ *
+ * A tiny economy: units earn credits, each new unit costs more, power runs down every tick.
+ * Win by reaching TUNING.winCredits before power runs out. Lose on negative credits or no power.
+ * Pure: no DOM, no Three.js, no Math.random, no wall clock. Seeded Mulberry32 only.
  */
 
-export const TUNING = {
-  spawnCost: 250,
-  winEntities: 6,
-  startEnergy: 500,
-};
+export const TUNING = Object.freeze({
+  startCredits: 1500,
+  startEnergy: 600, // ticks of power; 0 power = lost
+  energyPerTick: 1,
+  baseIncome: 20, // credits per tick
+  unitIncome: 12, // credits per working unit per tick
+  unitUpkeep: 4, // credits per working unit per tick
+  spawnCost: 400, // first extra unit
+  spawnCostGrowth: 60, // each further unit costs this much more
+  driftRange: 40, // seeded income noise per tick
+  winCredits: 25000,
+});
+
+const UNIT_KINDS = new Set(['vehicle', 'sensor']);
 
 export function nextMulberry32(rngState) {
   let t = (rngState + 0x6d2b79f5) | 0;
@@ -28,6 +41,7 @@ function canonical(value) {
   return value;
 }
 
+/** Same function as harness/hash.mjs, kept here so the cartridge ports on its own. */
 export function hashSimState(state) {
   const json = JSON.stringify(canonical(state));
   let h1 = 0x811c9dc5;
@@ -43,23 +57,28 @@ export function hashSimState(state) {
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
 
-export function createInitialState(seed = 42069) {
+export function createInitialState(seed = 42069, tuning = TUNING) {
   const cleanSeed = Number(seed) >>> 0;
+  const t = { ...TUNING, ...tuning };
   return {
     seed: cleanSeed,
     rngState: cleanSeed,
     tick: 0,
     paused: false,
-    resources: { credits: 10000, energy: TUNING.startEnergy },
+    won: false,
+    lost: false,
+    tuning: t,
+    resources: { credits: t.startCredits, energy: t.startEnergy },
     entities: [
       { id: 'unit-1', kind: 'vehicle', x: 0, y: 0, z: 0, speed: 1 },
       { id: 'prop-1', kind: 'crate', x: 4, y: 0, z: -2, speed: 0 },
     ],
     actionLog: [],
-    won: false,
-    lost: false,
   };
 }
+
+export const unitCount = (state) => state.entities.filter((e) => UNIT_KINDS.has(e.kind)).length;
+export const nextUnitCost = (state) => state.tuning.spawnCost + state.tuning.spawnCostGrowth * (unitCount(state) - 1);
 
 function normalizeActions(action) {
   if (!action) return [];
@@ -67,51 +86,68 @@ function normalizeActions(action) {
 }
 
 export function step(prevState, action = null) {
-  if (prevState.paused && (!action || (action.type && action.type !== 'RESUME'))) {
-    return prevState;
-  }
+  const actions = normalizeActions(action);
+  if (prevState.paused && !actions.some((a) => a.type === 'RESUME')) return prevState;
   const state = structuredClone(prevState);
+  const t = state.tuning;
   state.tick += 1;
 
-  for (const act of normalizeActions(action)) {
-    if (!act || !act.type) continue;
-    state.actionLog.push({ tick: state.tick, action: act });
+  for (const act of actions) {
+    if (!act.type) continue;
+    if (act.type === 'PAUSE') state.paused = true;
+    if (act.type === 'RESUME') state.paused = false;
     if (act.type === 'SPAWN_ENTITY' || act.type === 'spawn') {
+      const kind = act.kind || 'crate';
+      const cost = UNIT_KINDS.has(kind) ? nextUnitCost(state) : 0;
+      const ok = state.resources.credits >= cost;
+      state.actionLog.push({ tick: state.tick, action: act, ok });
+      if (!ok) continue;
       state.entities.push({
         id: act.id || `entity-${state.tick}-${state.entities.length}`,
-        kind: act.kind || 'crate',
+        kind,
         x: Number(act.x || 0),
         y: 0,
         z: Number(act.z || 0),
-        speed: Number(act.speed ?? 1),
+        speed: UNIT_KINDS.has(kind) ? 1 : 0,
       });
-      state.resources.credits -= Number(act.cost ?? TUNING.spawnCost);
+      state.resources.credits -= cost;
+      continue;
     }
+    state.actionLog.push({ tick: state.tick, action: act, ok: true });
   }
 
   const rng = nextMulberry32(state.rngState);
   state.rngState = rng.rngState;
-  const drift = Math.round((rng.value - 0.45) * 40);
-  state.resources.credits += 25 + drift;
-  state.resources.energy = Math.max(0, state.resources.energy - 1);
+  const drift = Math.round((rng.value - 0.45) * t.driftRange);
+  const units = unitCount(state);
+  state.resources.credits += t.baseIncome + units * (t.unitIncome - t.unitUpkeep) + drift;
+  state.resources.energy = Math.max(0, state.resources.energy - t.energyPerTick);
 
   for (const ent of state.entities) {
-    if (ent.speed > 0) {
-      ent.x = Number((ent.x + ent.speed * 0.5).toFixed(3));
-    }
+    if (ent.speed > 0) ent.x = Number((ent.x + ent.speed * 0.5).toFixed(3));
   }
 
-  function bad(v) {
-    if (typeof v === 'number') return !Number.isFinite(v);
-    if (Array.isArray(v)) return v.some(bad);
-    if (v && typeof v === 'object') return Object.values(v).some(bad);
-    return false;
+  if (!state.won && !state.lost) {
+    if (state.resources.credits >= t.winCredits) state.won = true;
+    else if (state.resources.credits < 0 || state.resources.energy <= 0) state.lost = true;
   }
-  if (state.entities.length >= TUNING.winEntities) state.won = true;
-  if (state.resources.energy <= 0 && !state.won) state.lost = true;
-  if (bad(state)) throw new Error('non-finite sim state');
-
   return state;
+}
+
+export function invariants(state) {
+  const findings = [];
+  const { credits, energy } = state.resources;
+  if (!Number.isFinite(credits)) findings.push({ id: 'CREDITS_NONFINITE', severity: 'P0', summary: `credits is ${credits}` });
+  if (energy < 0 || energy > state.tuning.startEnergy) {
+    findings.push({ id: 'ENERGY_RANGE', severity: 'P0', summary: `energy ${energy} outside 0..${state.tuning.startEnergy}` });
+  }
+  const ids = new Set();
+  for (const e of state.entities) {
+    if (ids.has(e.id)) findings.push({ id: 'DUPLICATE_ID', severity: 'P1', summary: `entity id ${e.id} used twice` });
+    ids.add(e.id);
+  }
+  if (state.won && state.lost) findings.push({ id: 'WON_AND_LOST', severity: 'P0', summary: 'state is both won and lost' });
+  return findings;
 }
 
 export function outcome(state) {
@@ -133,6 +169,7 @@ export function replayToTick({ seed = 42069, tick = 120, actions = [] } = {}) {
   return { seed, tick: state.tick, hash: hashSimState(state), state };
 }
 
+/** Browser bridge for ?playtest=1. The host page passes its window in; the sim never touches globals. */
 export function mountPlaytestApi(targetWindow) {
   if (!targetWindow) return null;
   let current = createInitialState(42069);
@@ -149,10 +186,19 @@ export function mountPlaytestApi(targetWindow) {
       current = step(current, action);
       return current;
     },
-    getState() { return current; },
-    getHash() { return hashSimState(current); },
-    serialize() { return JSON.stringify(current); },
-    deserialize(raw) { current = JSON.parse(raw); return current; },
+    getState() {
+      return current;
+    },
+    getHash() {
+      return hashSimState(current);
+    },
+    serialize() {
+      return JSON.stringify(current);
+    },
+    deserialize(raw) {
+      current = JSON.parse(raw);
+      return current;
+    },
     replay(payload) {
       const res = replayToTick(payload);
       current = res.state;
@@ -162,12 +208,4 @@ export function mountPlaytestApi(targetWindow) {
   targetWindow.__hatch = api;
   targetWindow.__sim = api;
   return api;
-}
-
-export function invariants(state) {
-  const findings = [];
-  if (!Number.isFinite(state.resources.credits)) {
-    findings.push({ id: 'CREDITS', severity: 'P0', tick: state.tick, summary: 'credits not finite' });
-  }
-  return findings;
 }

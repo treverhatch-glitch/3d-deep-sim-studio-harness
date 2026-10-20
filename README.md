@@ -1,76 +1,77 @@
-# 3D Deep Simulation & AI Game Studio Harness (`hatchfield-ai-studio-template`)
+# 3D Deep-Sim Studio Harness
 
-A generalized, zero-vendor-lock-in **AI Game Studio Harness** built for scaling 100,000+ line **3D Deep Simulation** games on a **$0 out-of-pocket AI budget**.
+A file-based workflow harness for building deep simulation games with any mix of AI agents and people.
+It is not a game engine. You bring the game; the harness keeps many agents from breaking it.
 
-Synthesized from a 17-repository architecture audit (`Claude-Code-Game-Studios`, `UltraGameStudio`, `OhMyGame`, `VibeGame`, `Recursive Game Creator`, `rtk-ai/rtk`, `tobi/qmd`, `oraios/serena`, `microsoft/playwright-mcp`, `mhjabreel/uisentinel`, `johnfn/ts2gd`, `nickna/SharpTS`), this template strips away heavy desktop wrappers and gives you executable Node.js + Bash infrastructure out of the box.
+- **Pure sim cartridges.** Your simulation lives in `cartridges/<name>/` with no renderer, DOM, randomness
+  or clock. Presentation reads state and never writes it, so the sim can be replayed, tested and ported.
+- **Seed + tick replay.** Every run is reproducible from a seed and an action list. A failure is recorded
+  as the exact tick the cartridge broke on, and `node harness/replay.mjs --trace` stops on that tick.
+- **64-bit golden hashes.** Pinned hashes for replays and a start-to-win vertical slice, checked in Node
+  and independently in Python.
+- **Locks and gates.** Agents claim tasks and paths with unique owners; a pre-commit hook refuses files
+  locked by someone else and staged secrets. `npm run verify` runs every gate; `npm run release` is the
+  one command before a merge.
+- **A closed QA loop that records and escalates.** It never edits code.
+- **A zero-token War Room.** A local page that tails the event log. Writes and the live socket need a
+  token; it refuses to listen beyond localhost without one.
 
----
+The first game built with it is Hatchfield (an airport sim), but nothing here depends on it.
 
-## Key Capabilities
-
-1. **No Agent Caps & No Vendor Lock-In (`harness/agents.mjs`, `studio/roles/`)**
-   - Ships with the **5 lean starter roles**: `producer`, `designer-calibrator`, `builder`, `qa-playtester`, and `reviewer`.
-   - Add an **unlimited** number of custom agents, departments, or swarms in `studio/roles/**/*.md`.
-   - Includes the **Grok Bot Executive Producer** optimization preset (`studio/presets/grok-producer.md`), while keeping the Head/Producer agent 100% swappable (`STUDIO_PRODUCER_PRESET=grok|gemini|claude|openai|ollama|auto`).
-2. **External Context & Direction Memory System (`AGENTS.md`, `CLAUDE.md`, `studio/`)**
-   - Universal root `AGENTS.md` + 3-line `CLAUDE.md` `@`-import.
-   - `studio/VISION_LOCK.md` & `studio/decisions/` (ADR architecture records).
-   - `studio/llms.txt` (compact engine & harness API sheet so agents don't read full source files).
-   - `studio/CURRENT_TASK.md` + `scripts/pre-compact.sh` & `scripts/session-start.sh` lifecycle hooks.
-   - `studio/NEXT.md` + `node harness/task.mjs` ("What's Next" Markdown queue manager).
-   - `scripts/setup-token-savers.sh` wiring `rtk` (60–90% bash output compression), `tobi/qmd` (local Markdown RAG), `oraios/serena` (LSP symbol lookup), `jq`, and `duckdb`.
-3. **Zero-Server Plug-and-Play Model Router (`harness/route.mjs` & `harness/models.config.mjs`)**
-   - Implements the `freecc:auto` failover pattern across **Vertex Gemini**, **NVIDIA NIM** (GLM 5.3 Flash / Nemotron Ultra), **Groq**, **OpenRouter**, **xAI Grok**, **Anthropic Claude**, **OpenAI**, and **local Ollama**.
-   - Instant failover on HTTP `429` / `5xx` / quota exhaustion with a persistent 30s+ cooldown ledger (`.studio/cooldowns.json`) and per-run ledger (`.studio/runs/<run-id>/ledger.json`).
-4. **Zero-Token Passive Workflow UI HUB (`hub/server.mjs`, `hub/WarRoom.tsx`, `docs/WAR-ROOM.md`)**
-   - Appends 1-line JSON events via `scripts/append-event.sh` and `harness/event.mjs` to `.studio/events.jsonl` (mirrored to `/tmp/agent-events.jsonl`).
-   - Renders a **4-Quadrant React Flow Sci-Fi Mission Control War Room** (`reactflow` agent topology, **Live Agent View** with `noVNC` stream / latest QA screenshot / playtest preview switcher, and **Subscription Usage Panel** reading `.studio/usage.json`) plus a **Responsive Mobile Command Feed** at **0% LLM token cost**.
-5. **Two-Stage Programmatic & Visual QA (`qa/playtest.mjs` & `qa/sim.adapter.mjs`)**
-   - **Stage 1**: Drives simulation trajectories via `?playtest=1` (`window.__sim`) or headless Node adapter to catch frozen ticks, `NaN` drift, save/load entity loss, and determinism bugs.
-   - **Stage 2**: Runs Playwright accessibility snapshots (`ariaSnapshot`), console error gates, UISentinel layout overflow checks, and targeted screenshots into `qa/reports/`.
-6. **Generalized 3D Deep-Sim Rules, Blender Orchestrator & Porting Bridges (`docs/3D-DEEP-SIM.md`, `docs/BLENDER.md`, `docs/PORTING.md`)**
-   - Enforces pure-TypeScript deterministic simulation (`node scripts/check-sim-purity.mjs` + `bash scripts/check-sim-isolation.sh` + `studio/rules/graphics-sim-boundary.md`), Three.js `InstancedMesh`/PBR budgets, headless Blender `bpy` `.glb` generation (`tools/blender/generate_glb.py`), and `mlolson/blender-orchestrator` MCP (`https://github.com/mlolson/blender-orchestrator`) for agent-driven Blender control and optional AI mesh generation.
-   - Late-game porting guides for **Tauri v2**, **Godot 4** (`ts2gd` + `godot-mcp`), and **Unity** (`SharpTS`).
-
----
-
-## Documentation Index (`docs/`)
-
-- [`docs/SETUP.md`](docs/SETUP.md) & [`docs/CLONE-AND-CUSTOMIZE.md`](docs/CLONE-AND-CUSTOMIZE.md) — Quickstart (`npm run setup`) & cloning guide
-- [`docs/MEMORY.md`](docs/MEMORY.md) & [`studio/memory/failures.md`](studio/memory/failures.md) — Shared improving memory (Hermes Agent 4-bullet distillation rule)
-- [`docs/BLENDER.md`](docs/BLENDER.md) & [`docs/BLENDER-ORCHESTRATOR.md`](docs/BLENDER-ORCHESTRATOR.md) — Headless Blender `bpy` procedural `.glb` generation (`crate`, `cone`, `vehicle`) + [`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator) MCP bridge
-- [`docs/WAR-ROOM.md`](docs/WAR-ROOM.md) — Mission Control War Room HUD, Live Agent View (`noVNC` / WebRTC / CDP / HMR), and Subscription Usage Panel (`.studio/usage.json`)
-- [`docs/WORK-ORGANIZATION.md`](docs/WORK-ORGANIZATION.md) & [`docs/DAILY-SUMMARY.md`](docs/DAILY-SUMMARY.md) — Task lifecycle (`studio/NEXT.md` → `studio/CURRENT_TASK.md` → `studio/done/` → `studio/daily/`)
-- [`docs/GROKBOT-LOCAL-AGENT.md`](docs/GROKBOT-LOCAL-AGENT.md) — Optional Grok Bot Local-Agent route (`https://github.com/robbin/grokbot-local-agent`)
-- [`docs/ROUTING.md`](docs/ROUTING.md) — Multi-model failover (`Local → Free → Paid`), 5-line endpoint guide, and **"Cheap Model Prepares (`<=300w`), Strong Model Executes"** (`harness/prepare-brief.mjs`)
-- [`qa/README.md`](qa/README.md) — `?playtest=1` (`window.__hatch` / `window.__sim`), seed+tick replay (`harness/replay.mjs`), closed-loop gate (`harness/closed-loop.mjs`), and accessibility-first QA (`qa/visual-check.mjs`)
-- [`docs/SECRETS.md`](docs/SECRETS.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CHANGELOG.md`](CHANGELOG.md) — Secret hygiene & contribution workflow
-- [`docs/3D-DEEP-SIM.md`](docs/3D-DEEP-SIM.md) & [`docs/PORTING.md`](docs/PORTING.md) — Pure-TS simulation architecture & Tauri v2 / Godot 4 / Unity 5-step porting checklist
-
----
-
-## Quickstart
+## Start
 
 ```bash
-# 1. One-command setup (creates .studio/, .env, and verifies .studio/events.jsonl)
-npm run setup
-bash scripts/seed-demo-events.sh
-
-# 2. Prepare a <=300-word brief with a cheap/local model before escalating to a strong model
-node harness/prepare-brief.mjs
-
-# 3. Inspect loaded studio roles (including asset-3d & playtester) & failover matrix
-node harness/agents.mjs list
-node harness/route.mjs --status
-
-# 4. Run Sim-Isolation check, Deterministic Seed Replay, & Closed-Loop QA
-bash scripts/check-sim-isolation.sh
-node harness/replay.mjs --seed 42069 --tick 120
-node harness/closed-loop.mjs
-
-# 5. Roll daily summary & launch the Zero-Token Mission Control War Room (:3847)
-bash scripts/daily-summary.sh
-node hub/server.js
-# -> Open http://127.0.0.1:3847 (or http://127.0.0.1:3847/health)
+npm run setup                 # .env with a random HUB_TOKEN, git hooks, .studio/ state
+npm run verify                # every gate in studio/gates.json
+npm run new-game my-game      # your own cartridge, with real goldens, passing on day one
+npm run playtest -- --cartridge my-game
+npm run hub                   # War Room on http://127.0.0.1:3847/?token=<HUB_TOKEN from .env>
+npm run release               # syntax, required gates, closed-loop proof, read-only gates, changelog
 ```
 
+Clone it, keep your copy private if you like, put keys only in `.env` (gitignored). The public repo
+contains no keys; `bash scripts/secret-scan.sh` checks exactly what git would publish.
+
+## How work flows
+
+1. `studio/NEXT.md` is the queue. `node harness/task.mjs start T-002 --agent <unique-name>` claims a task;
+   a second agent is refused until it is done (`task.mjs done T-002 --agent <same-name>`).
+2. Claim the files you will touch: `node harness/lock.mjs claim path:cartridges/my-game --owner <name>`.
+3. Change the sim, then `npm run verify`. If you meant to change behaviour: `npm run golden -- --update`.
+4. `node harness/closed-loop.mjs` plays the slice; on failure it writes `.studio/last-seed-failure.json`
+   and a bug report, then escalates after 3 attempts.
+5. `npm run balance` sweeps one `TUNING` knob across seeds; `npm run fun` checks cheap fun proxies.
+   A person still signs both off in `studio/balance/` and `studio/fun/`.
+
+## The gates (`studio/gates.json`)
+
+| Gate | Fails when |
+| --- | --- |
+| `purity` | the sim touches DOM, renderers, randomness, the clock, timers or `globalThis` (static scan + runtime traps), or there are 0 sim files |
+| `isolation` | presentation imports or DOM access appear in sim folders, or there are 0 sim files |
+| `golden`, `golden-py` | a replay hash differs, a hash is a stub, a game has no golden, or Python's hash of the replayed state disagrees |
+| `regressions` | a fixed bug's pinned replay changes or has no hash |
+| `vertical-slice` | a game's `start-to-win` scenario does not win, is not deterministic, or drifts from its golden |
+| `playtest` | the cartridge throws, freezes, breaks an invariant, drifts on save/load, or replays differently |
+| `soak`, `tick-budget` | many seeds expose a failure, or a tick costs more than 1 ms |
+| `hub-smoke` | the War Room accepts a write or socket without the token, a foreign Host, or a placeholder token |
+| `secrets` | a key-shaped string would be committed |
+| `selftest` | any required gate cannot be shown to fail when its rule is broken |
+
+## Where things are
+
+| Path | What |
+| --- | --- |
+| `AGENTS.md` | Rules every agent follows (Claude, Cursor, Codex, Gemini, Grok, people) |
+| `cartridges/` | Game sims and the contract ([cartridges/README.md](cartridges/README.md)) |
+| `harness/` | Loader, replay, closed loop, tasks, locks, events, model router |
+| `qa/` | Playtest, goldens, regressions, slice, soak, HUB smoke test, self-test |
+| `scripts/` | Gates, setup, new-game, release, balance and fun sweeps, hooks |
+| `studio/` | Queue, current task, roles, rules, decisions, memory, balance and fun notes |
+| `hub/` | The War Room server and pages |
+| `docs/` | Longer guides: routing, Blender, porting, War Room, security |
+
+Model routing (`harness/route.mjs`) fails over between local, free-tier and paid providers using keys
+from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:token-savers`.
+
+MIT licensed.

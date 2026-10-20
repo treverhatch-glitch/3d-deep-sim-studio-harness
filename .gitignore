@@ -26,6 +26,10 @@ playwright-report/
 public/assets/*.glb
 *.blend1
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # OS / editor
 .DS_Store
 Thumbs.db

@@ -1,32 +1,38 @@
 #!/usr/bin/env node
-import { replayToTick } from '../cartridges/example-sim/index.mjs';
+/**
+ * qa/soak.mjs — many seeds, long runs: determinism and invariants for every game cartridge.
+ *   node qa/soak.mjs --seeds 8 --ticks 500 [--cartridge name]
+ */
+import { cartridgeFromArgv, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? Number(process.argv[i + 1]) : fallback;
 }
 const seeds = arg('--seeds', 5);
-const ticks = arg('--ticks', 100);
+const ticks = arg('--ticks', 300);
+const names = process.argv.includes('--cartridge') ? [cartridgeFromArgv()] : listCartridges();
 
-function hasBadNumber(value) {
-  if (typeof value === 'number') return !Number.isFinite(value);
-  if (Array.isArray(value)) return value.some(hasBadNumber);
-  if (value && typeof value === 'object') return Object.values(value).some(hasBadNumber);
-  return false;
-}
-
-for (let i = 0; i < seeds; i++) {
-  const seed = 1000 + i;
-  const a = replayToTick({ seed, tick: ticks, actions: [] });
-  const b = replayToTick({ seed, tick: ticks, actions: [] });
-  if (a.hash !== b.hash) {
-    console.error(`[soak] FAIL seed ${seed}: ${a.hash} != ${b.hash}`);
-    process.exit(1);
+let failed = 0;
+for (const name of names) {
+  const cart = await loadCartridge(name);
+  for (let i = 0; i < seeds; i++) {
+    const seed = 1000 + i * 7919;
+    const runs = [replay(cart, { seed, tick: ticks })];
+    for (const sc of Object.keys(cart.scenarios)) runs.push(runScenario(cart, sc, { seed }));
+    for (const r of runs) {
+      const again = r.scenario ? runScenario(cart, r.scenario, { seed }) : replay(cart, { seed, tick: ticks });
+      const label = `${name} seed ${seed}${r.scenario ? ` ${r.scenario}` : ''}`;
+      if (r.findings.length) {
+        console.error(`[soak] FAIL ${label}: tick ${r.failingTick} ${r.findings[0].id} — ${r.findings[0].summary}`);
+        failed += 1;
+      } else if (again.hash !== r.hash) {
+        console.error(`[soak] FAIL ${label}: non-deterministic ${r.hash} != ${again.hash}`);
+        failed += 1;
+      }
+    }
   }
-  if (hasBadNumber(a.state)) {
-    console.error(`[soak] FAIL seed ${seed}: non-finite state`);
-    process.exit(1);
-  }
-  console.log(`[soak] PASS seed ${seed} hash ${a.hash}`);
+  console.log(`[soak] ${name}: ${seeds} seeds x (${ticks}-tick replay + ${Object.keys(cart.scenarios).length} scenario(s)) checked`);
 }
-console.log(`[soak] ${seeds} seeds x ${ticks} ticks ok`);
+if (failed) process.exit(1);
+console.log('[soak] ok');

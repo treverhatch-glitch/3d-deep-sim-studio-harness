@@ -1,7 +1,7 @@
 {
-  "name": "hatchfield-ai-studio-template",
+  "name": "3d-deep-sim-studio-harness",
   "version": "2.2.0",
-  "description": "Generalized 3D Deep Simulation & AI Game Studio Harness \u2014 vendor-neutral multi-agent roles, freecc:auto model failover router, prepare-then-escalate brief compressor, shared improving memory, zero-token Workflow UI HUB, and closed-loop seed-replay QA.",
+  "description": "Agent-agnostic, file-based workflow harness for deep simulation games: pure sim cartridges, seed + tick replay, 64-bit golden hashes, locks, gates, a closed QA loop and a zero-token War Room.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -36,12 +36,15 @@
     "golden:py": "python3 tools/golden.py --check qa/golden",
     "test:golden": "python3 qa/test-golden.py",
     "verify": "node scripts/run-gates.mjs",
-    "balance": "node scripts/balance-sweep.mjs",
-    "fun": "node scripts/fun-check.mjs",
+    "balance": "node scripts/balance-sweep.mjs --write",
+    "fun": "node scripts/fun-check.mjs --write",
     "new-game": "node scripts/new-game.mjs",
     "release": "node scripts/release.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
-    "probe": "node scripts/sim-runtime-probe.mjs"
+    "selftest": "node qa/selftest.mjs",
+    "soak": "node qa/soak.mjs --seeds 8 --ticks 600",
+    "hub:smoke": "node qa/hub-smoke.mjs",
+    "lock": "node harness/lock.mjs"
   },
   "devDependencies": {
     "playwright": "^1.50.0",

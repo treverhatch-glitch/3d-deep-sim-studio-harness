@@ -1,90 +1,23 @@
 {
+  "cartridge": "example-sim",
   "gates": [
-    {
-      "id": "session",
-      "command": "node scripts/verify-session.mjs",
-      "required": true
-    },
-    {
-      "id": "purity",
-      "command": "node scripts/check-sim-purity.mjs",
-      "required": true
-    },
-    {
-      "id": "isolation",
-      "command": "bash scripts/check-sim-isolation.sh",
-      "required": true
-    },
-    {
-      "id": "golden",
-      "command": "node qa/check-golden.mjs",
-      "required": true
-    },
-    {
-      "id": "golden-py",
-      "command": "python3 qa/test-golden.py",
-      "required": true
-    },
-    {
-      "id": "approvals",
-      "command": "node scripts/check-approvals.mjs",
-      "required": true
-    },
-    {
-      "id": "regressions",
-      "command": "node qa/check-regressions.mjs",
-      "required": true
-    },
-    {
-      "id": "vertical-slice",
-      "command": "node qa/vertical-slice.mjs",
-      "required": true
-    },
-    {
-      "id": "tick-budget",
-      "command": "node scripts/check-tick-budget.mjs",
-      "required": true
-    },
-    {
-      "id": "selftest",
-      "command": "node qa/selftest.mjs",
-      "required": true
-    },
-    {
-      "id": "renderer-budget",
-      "command": "node scripts/check-renderer-budget.mjs",
-      "required": false
-    },
-    {
-      "id": "secrets",
-      "command": "bash scripts/secret-scan.sh",
-      "required": true
-    },
-    {
-      "id": "balance",
-      "command": "node scripts/balance-sweep.mjs",
-      "required": false
-    },
-    {
-      "id": "fun",
-      "command": "node scripts/fun-check.mjs",
-      "required": false
-    },
-    {
-      "id": "playtest",
-      "command": "node qa/playtest.mjs --stage 1",
-      "required": true
-    },
-    {
-      "id": "soak",
-      "command": "node qa/soak.mjs",
-      "required": true
-    },
-    {
-      "id": "hub-smoke",
-      "command": "node qa/hub-smoke.mjs",
-      "required": true
-    }
-  ],
-  "cartridge": "example-sim"
+    { "id": "session", "command": "node scripts/verify-session.mjs", "required": true },
+    { "id": "purity", "command": "node scripts/check-sim-purity.mjs", "required": true },
+    { "id": "isolation", "command": "bash scripts/check-sim-isolation.sh", "required": true },
+    { "id": "golden", "command": "node qa/check-golden.mjs", "required": true },
+    { "id": "golden-py", "command": "python3 qa/test-golden.py", "required": true },
+    { "id": "regressions", "command": "node qa/check-regressions.mjs", "required": true },
+    { "id": "vertical-slice", "command": "node qa/vertical-slice.mjs", "required": true },
+    { "id": "playtest", "command": "node qa/playtest.mjs --stage 1 --quiet", "required": true },
+    { "id": "soak", "command": "node qa/soak.mjs --seeds 3 --ticks 300", "required": true },
+    { "id": "tick-budget", "command": "node scripts/check-tick-budget.mjs", "required": true },
+    { "id": "approvals", "command": "node scripts/check-approvals.mjs", "required": true },
+    { "id": "hub-smoke", "command": "node qa/hub-smoke.mjs", "required": true },
+    { "id": "secrets", "command": "bash scripts/secret-scan.sh", "required": true },
+    { "id": "selftest", "command": "node qa/selftest.mjs", "required": true },
+    { "id": "balance", "command": "node scripts/balance-sweep.mjs", "required": false },
+    { "id": "fun", "command": "node scripts/fun-check.mjs", "required": false },
+    { "id": "renderer-budget", "command": "node scripts/check-renderer-budget.mjs", "required": false },
+    { "id": "reviewer", "command": "node scripts/check-reviewer.mjs", "required": false }
+  ]
 }

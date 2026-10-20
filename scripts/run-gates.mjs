@@ -1,24 +1,35 @@
 #!/usr/bin/env node
+/**
+ * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id]
+ * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates || [];
-let failed = 0;
+const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
+const argv = process.argv.slice(2);
+const only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+const gates = (cfg.gates || []).filter((g) => (!only || only.has(g.id)) && !(argv.includes('--required-only') && g.required === false));
+
+const rows = [];
 for (const gate of gates) {
-  if (gate.required === false && process.argv.includes('--required-only')) continue;
-  try {
-    execSync(gate.command, { cwd: root, stdio: 'inherit' });
-    console.log(`[gates] PASS ${gate.id}`);
-  } catch {
-    console.error(`[gates] FAIL ${gate.id}`);
-    failed += 1;
-    if (gate.required !== false) {
-      // keep going so the report shows every failure
-    }
-  }
+  const start = Date.now();
+  const res = spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
+  const ok = res.status === 0;
+  const required = gate.required !== false;
+  rows.push({ id: gate.id, ok, required, ms: Date.now() - start });
+  console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
 }
-if (failed) process.exit(1);
-console.log(`[gates] ${gates.length} gate(s) ok`);
+
+console.log('\n[gates] summary');
+for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.required ? '' : '  (optional)'}`);
+const failed = rows.filter((r) => !r.ok && r.required);
+if (failed.length) {
+  console.error(`[gates] ${failed.length} required gate(s) failed: ${failed.map((r) => r.id).join(', ')}`);
+  process.exit(1);
+}
+console.log(`[gates] ${rows.filter((r) => r.ok).length}/${rows.length} passed, all required gates green`);

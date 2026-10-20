@@ -1,21 +1,33 @@
-# Changelog
-
-## [2.2.0] — 2026-10-20
-### Added
-- Cartridge loader (`harness/cartridge.mjs`)
-- `npm run new-game <name>`
-- `npm run release` and `npm run hooks:install`
-- Start-to-win golden and example-sim TUNING / win-lose
-- Hub smoke and runtime sim probe
-
-### Fixed
-- Closed loop and playtest now prefer the failing tick
-- Golden stubs no longer pass
-- Secret scan and purity stay required
-
 # Changelog (`CHANGELOG.md`)
 
 All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are documented in this file.
+
+---
+
+## [2.2.0] — 2026-10-20
+### Fixed
+- **Purity gate was bypassable**: aliases (`const r = Math.random`), destructuring, `Date()`, `globalThis[...]`, dynamic `import('three')`, `crypto.randomUUID`, timers and `performance['now']` all passed. Now a wider static scan plus a runtime probe that plays every cartridge with those globals trapped.
+- **Isolation gate exemptions**: any line containing `playtest`, `__sim` or `__hatch` was skipped. Removed; `.js/.cjs/.jsx` now scanned.
+- **Secret scan missed the providers this harness routes to** (OpenAI `sk-proj-`, OpenRouter, NVIDIA, Groq, xAI, Google OAuth) and flagged a developer's own ignored `.env`. It now scans exactly what git would publish.
+- **Golden stubs passed**: a missing or `REPLACE…` hash was silently rewritten and the gate passed. Now it fails unless `--update`; a game with no golden fails; Python re-hashes the real replayed state.
+- **Regressions without a hash passed.** Now they fail.
+- **Optional gates failed `npm run verify`**; optional failures now warn only.
+- **Gates dirtied tracked files** (`studio/balance/latest.md`, `studio/fun/latest.md` on every run). They write only with `--write`; `npm run release` fails if a gate changes a tracked file.
+- **Locks**: anyone could `task done` a task claimed by another agent, and the lock leaked; `task start` without `--agent` said "locked". `file:` and `path:` keys could collide and nested path locks overlapped. All fixed; shared tool and role names are refused as owners.
+- **HUB**: the War Room page never sent the token, so its buttons and socket always got 401; a foreign Host header was served (DNS rebinding); `0.0.0.0` started with no token; the `.env.example` placeholder token unlocked writes if left unchanged; `GET /api/brief` wrote a file; frame telemetry and boot events showed invented numbers. All fixed and covered by `qa/hub-smoke.mjs`.
+- **Closed loop recorded "ticks run" as the failing tick** and parsed stdout. It now records the tick the cartridge failed on, from a JSON report, and the trace replays to that tick.
+- **Balance sweep was not a sweep**: it subtracted credits outside the sim and the example had no win state (0/4 wins everywhere).
+
+### Added
+- `harness/cartridge.mjs`: load any cartridge by name (`--cartridge`, `STUDIO_CARTRIDGE`, or `studio/gates.json`); every tool uses it.
+- `npm run new-game <name>`: copies `cartridges/_template`, plays it, writes real golden files.
+- `example-sim` gets a `TUNING` table, win/lose outcomes and invariants; `qa.mjs` scenarios with a `start-to-win` policy.
+- Vertical slice with a golden hash (`qa/golden/example-sim-start-to-win.json`), checked by `qa/vertical-slice.mjs` for every game.
+- `studio/balance/sweep.json` + a real `TUNING` sweep; fun proxies from real runs (idle vs played).
+- `qa/selftest.mjs` now proves every required gate fails for its planted reason, after a clean-copy control, plus locks, claims, the pre-commit hook, the closed loop and new-game.
+- `npm run hooks:install` (also run by setup): `scripts/hooks/pre-commit` blocks staged secrets and files locked by another owner.
+- `npm run release`: syntax, required gates, closed-loop proof, read-only gates, changelog entry.
+- Gates: `playtest`, `soak`, `hub-smoke`; `npm run setup` writes a random `HUB_TOKEN`.
 
 ---
 

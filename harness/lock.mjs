@@ -1,60 +1,97 @@
 #!/usr/bin/env node
 /**
- * harness/lock.mjs — Atomic claim/release locks
- * Owner is required and cannot be a shared default.
+ * harness/lock.mjs — atomic claim/release locks so two agents never edit the same thing.
+ *
+ *   node harness/lock.mjs claim   task:T-001        --owner cursor-win2 [--ttl 3600]
+ *   node harness/lock.mjs claim   path:src/sim/     --owner codex-a      (a folder lock covers everything under it)
+ *   node harness/lock.mjs release <key>             --owner <same owner>
+ *   node harness/lock.mjs status  <key>
+ *   node harness/lock.mjs list
+ *   node harness/lock.mjs check-staged [--owner me]  (pre-commit: refuse staged files locked by someone else)
+ *
+ * Owners must be unique per running agent: tool and role names that several agents share are refused.
+ * `file:` is accepted as an alias of `path:`.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 
 const LOCK_DIR = path.join(REPO_ROOT, '.studio', 'locks');
-const SHARED_OWNERS = new Set(['', 'unknown', 'agent', 'cursor', 'default']);
+export const SHARED_OWNERS = new Set([
+  '', 'unknown', 'agent', 'default', 'ai', 'bot', 'me', 'user', 'human',
+  'cursor', 'claude', 'codex', 'gemini', 'grok', 'copilot', 'aider', 'windsurf', 'cline',
+  'producer', 'builder', 'qa', 'qa-playtester', 'playtester', 'reviewer', 'designer', 'designer-calibrator', 'balancer',
+]);
+
+/** task:T-001 stays as is; path:/file: keys become path:<repo-relative posix path>. */
+export function normalizeKey(key) {
+  const raw = String(key || '').trim();
+  const m = /^(path|file):(.*)$/.exec(raw);
+  if (!m) return raw;
+  let p = m[2].replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (path.isAbsolute(p)) p = path.relative(REPO_ROOT, p).replace(/\\/g, '/');
+  return `path:${p}`;
+}
 
 function lockPath(key) {
-  const safe = String(key).replace(/[^a-zA-Z0-9._-]/g, '_');
-  return path.join(LOCK_DIR, `${safe}.lock`);
+  const k = normalizeKey(key);
+  const slug = k.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60);
+  const digest = crypto.createHash('sha1').update(k).digest('hex').slice(0, 10);
+  return path.join(LOCK_DIR, `${slug}.${digest}.lock`);
 }
 
 function assertOwner(owner) {
   const value = String(owner || '').trim();
   if (SHARED_OWNERS.has(value.toLowerCase())) {
-    return { ok: false, reason: 'owner-required', message: 'Pass a unique --owner. Shared names are rejected.' };
+    return { ok: false, reason: 'owner-required', message: `Pass a unique --owner (e.g. cursor-win2, claude-a). "${value}" is shared by many agents.` };
   }
   return { ok: true, owner: value };
+}
+
+function readLock(file) {
+  try {
+    const lock = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (lock.expiresAt && Date.parse(lock.expiresAt) < Date.now()) {
+      fs.rmSync(file, { force: true });
+      return null;
+    }
+    return lock;
+  } catch {
+    return null;
+  }
 }
 
 export function claim(key, owner, ttlSec = 3600) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
+  const k = normalizeKey(key);
+  if (k.startsWith('path:')) {
+    // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps.
+    const at = k.slice(5);
+    const overlap = listLocks().find((l) => {
+      if (!l.key.startsWith('path:') || l.owner === check.owner) return false;
+      const other = l.key.slice(5);
+      return other === '' || at === '' || at === other || at.startsWith(`${other}/`) || other.startsWith(`${at}/`);
+    });
+    if (overlap) return { ok: false, reason: 'claimed', lock: overlap };
+  }
   fs.mkdirSync(LOCK_DIR, { recursive: true });
-  const file = lockPath(key);
+  const file = lockPath(k);
   const now = Date.now();
-  const payload = {
-    key,
-    owner: check.owner,
-    claimedAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + ttlSec * 1000).toISOString(),
-  };
+  const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString() };
   try {
-    const fd = fs.openSync(file, 'wx');
-    fs.writeFileSync(fd, JSON.stringify(payload, null, 2));
-    fs.closeSync(fd);
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), { flag: 'wx' });
     return { ok: true, lock: payload };
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
-    try {
-      const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (existing.expiresAt && Date.parse(existing.expiresAt) < now) {
-        fs.unlinkSync(file);
-        return claim(key, check.owner, ttlSec);
-      }
-      if (existing.owner === check.owner) return { ok: true, lock: existing, reused: true };
-      return { ok: false, reason: 'claimed', lock: existing };
-    } catch {
-      return { ok: false, reason: 'claimed' };
-    }
+    const existing = readLock(file);
+    if (!existing) return claim(k, check.owner, ttlSec);
+    if (existing.owner === check.owner) return { ok: true, lock: existing, reused: true };
+    return { ok: false, reason: 'claimed', lock: existing };
   }
 }
 
@@ -62,55 +99,78 @@ export function release(key, owner) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   const file = lockPath(key);
-  if (!fs.existsSync(file)) return { ok: true, released: false };
-  try {
-    const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (existing.owner && existing.owner !== check.owner) {
-      return { ok: false, reason: 'not-owner', lock: existing };
-    }
-  } catch {}
-  fs.unlinkSync(file);
+  const existing = fs.existsSync(file) ? readLock(file) : null;
+  if (!existing) return { ok: true, released: false };
+  if (existing.owner !== check.owner) return { ok: false, reason: 'not-owner', lock: existing };
+  fs.rmSync(file, { force: true });
   return { ok: true, released: true };
 }
 
 export function status(key) {
   const file = lockPath(key);
-  if (!fs.existsSync(file)) return { locked: false };
-  try {
-    const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (existing.expiresAt && Date.parse(existing.expiresAt) < Date.now()) {
-      fs.unlinkSync(file);
-      return { locked: false, expired: true };
-    }
-    return { locked: true, lock: existing };
-  } catch {
-    return { locked: true };
+  const lock = fs.existsSync(file) ? readLock(file) : null;
+  return lock ? { locked: true, lock } : { locked: false };
+}
+
+export function listLocks() {
+  if (!fs.existsSync(LOCK_DIR)) return [];
+  return fs
+    .readdirSync(LOCK_DIR)
+    .filter((f) => f.endsWith('.lock'))
+    .map((f) => readLock(path.join(LOCK_DIR, f)))
+    .filter(Boolean);
+}
+
+/** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. */
+export function coveringLock(relFile, locks = listLocks()) {
+  const p = normalizeKey(`path:${relFile}`).slice(5);
+  return locks
+    .filter((l) => l.key.startsWith('path:'))
+    .map((l) => ({ lock: l, at: l.key.slice(5) }))
+    .filter(({ at }) => at === '' || p === at || p.startsWith(`${at}/`))
+    .sort((a, b) => b.at.length - a.at.length)[0]?.lock || null;
+}
+
+/** For pre-commit: staged files locked by another owner fail; STUDIO_LOCK_STRICT=1 also requires your own lock. */
+export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT === '1', files } = {}) {
+  const staged = files || execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const locks = listLocks();
+  const problems = [];
+  for (const file of staged) {
+    const lock = coveringLock(file, locks);
+    if (lock && lock.owner !== owner) problems.push(`${file} is locked by ${lock.owner} (${lock.key}, until ${lock.expiresAt})`);
+    else if (!lock && strict) problems.push(`${file} has no lock. Run: node harness/lock.mjs claim path:${file} --owner ${owner || '<you>'}`);
   }
+  return { ok: problems.length === 0, checked: staged.length, problems };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  const [cmd, key, ...rest] = process.argv.slice(2);
-  const ownerFlag = rest.indexOf('--owner');
-  const owner = ownerFlag >= 0 ? rest[ownerFlag + 1] : '';
-  const ttlFlag = rest.indexOf('--ttl');
-  const ttl = ttlFlag >= 0 ? Number(rest[ttlFlag + 1]) : 3600;
-  if (!cmd || !key) {
-    console.log('Usage: node harness/lock.mjs claim|release|status <key> --owner <unique-name>');
-    process.exit(1);
-  }
-  if (cmd === 'claim') {
-    const res = claim(key, owner, ttl);
+  const [cmd, maybeKey, ...rest] = process.argv.slice(2);
+  const all = process.argv.slice(2);
+  const flag = (name) => (all.includes(name) ? all[all.indexOf(name) + 1] : undefined);
+  const owner = flag('--owner') || process.env.STUDIO_LOCK_OWNER || '';
+  const out = (res, ok = res.ok) => {
     console.log(JSON.stringify(res, null, 2));
-    process.exit(res.ok ? 0 : 1);
-  }
-  if (cmd === 'release') {
-    const res = release(key, owner);
-    console.log(JSON.stringify(res, null, 2));
-    process.exit(res.ok ? 0 : 1);
-  }
-  if (cmd === 'status') {
-    console.log(JSON.stringify(status(key), null, 2));
+    process.exit(ok ? 0 : 1);
+  };
+  if (cmd === 'list') out({ ok: true, locks: listLocks() });
+  if (cmd === 'check-staged') {
+    const res = checkStaged(owner);
+    if (!res.ok) {
+      console.error('[locks] FAIL');
+      for (const p of res.problems) console.error(`  x ${p}`);
+      process.exit(1);
+    }
+    console.log(`[locks] PASS ${res.checked} staged file(s)`);
     process.exit(0);
   }
+  if (!cmd || !maybeKey || maybeKey.startsWith('--')) {
+    console.log('Usage: node harness/lock.mjs claim|release|status <key> --owner <unique-name> | list | check-staged');
+    process.exit(1);
+  }
+  if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600)));
+  if (cmd === 'release') out(release(maybeKey, owner));
+  if (cmd === 'status') out(status(maybeKey), true);
+  void rest;
   process.exit(1);
 }

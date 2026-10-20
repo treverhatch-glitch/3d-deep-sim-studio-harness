@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
+# Git pre-commit hook. Installed by `npm run hooks:install` (sets core.hooksPath=scripts/hooks).
+# Blocks a commit that: stages a key-shaped secret, touches files another agent has locked,
+# or (when the sim changed) breaks sim purity or a golden hash.
+# Set STUDIO_LOCK_OWNER to your unique agent name. STUDIO_LOCK_STRICT=1 also requires your own lock.
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
-bash scripts/secret-scan.sh
-OWNER="${STUDIO_LOCK_OWNER:-}"
-if [ -z "$OWNER" ]; then
-  echo "[pre-commit] FAIL set STUDIO_LOCK_OWNER"
-  exit 1
+
+bash scripts/secret-scan.sh --staged
+node harness/lock.mjs check-staged ${STUDIO_LOCK_OWNER:+--owner "$STUDIO_LOCK_OWNER"}
+
+if git diff --cached --name-only | grep -qE '^(cartridges|src/sim)/'; then
+  node scripts/check-sim-purity.mjs >/dev/null || { echo "[pre-commit] FAIL sim purity: run node scripts/check-sim-purity.mjs"; exit 1; }
+  node qa/check-golden.mjs >/dev/null || { echo "[pre-commit] FAIL golden hashes changed: if intended, npm run golden -- --update and commit them together"; exit 1; }
 fi
-changed=$(git diff --cached --name-only || true)
-for file in $changed; do
-  [ -z "$file" ] && continue
-  node harness/lock.mjs status "file:$file" > /tmp/lock-status.json || true
-  if ! grep -q '"locked": true' /tmp/lock-status.json; then
-    echo "[pre-commit] FAIL $file has no lock"
-    exit 1
-  fi
-done
 echo "[pre-commit] PASS"

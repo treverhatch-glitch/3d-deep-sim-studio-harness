@@ -47,49 +47,64 @@ loadDotEnv();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.HUB_PORT || 3847);
 const HOST = process.env.HUB_HOST || '127.0.0.1';
-const HUB_TOKEN = process.env.HUB_TOKEN || '';
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const WEAK_TOKEN = /change-?me|example|placeholder|your[-_]?token|^(test|secret|token|password)$/i;
+
+/** The write token, or '' when unset, shorter than 24 chars, or a known placeholder (writes then stay off). */
+export function hubToken() {
+  const t = String(process.env.HUB_TOKEN || '').trim();
+  return t.length >= 24 && !WEAK_TOKEN.test(t) ? t : '';
+}
+
+export const isLoopback = (host) => LOOPBACK.has(String(host || '').toLowerCase());
+
+/** Refuse to listen beyond this machine unless a strong token protects reads and writes. */
+export function assertSafeBind(host = HOST) {
+  if (isLoopback(host)) return { ok: true };
+  if (!hubToken()) {
+    return { ok: false, reason: `HUB_HOST=${host} exposes the HUB beyond this machine. Set a strong HUB_TOKEN (24+ random chars) first, or bind 127.0.0.1 and use Tailscale/SSH forwarding.` };
+  }
+  return { ok: true };
+}
+
+function tokenMatches(given) {
+  const t = hubToken();
+  if (!t || !given) return false;
+  const a = Buffer.from(String(given));
+  const b = Buffer.from(t);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const headerToken = (req) => String(req.headers['x-hub-token'] || req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+const cookieToken = (req) => {
+  const m = /(?:^|;\s*)hub_token=([^;]+)/.exec(req.headers.cookie || '');
+  return m ? decodeURIComponent(m[1]) : '';
+};
+
+/** Loopback bind: the Host header must name this machine (blocks DNS rebinding). Remote bind: token required. */
+function hostAllowed(req) {
+  if (!isLoopback(HOST)) return true;
+  const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  const extra = String(process.env.HUB_ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return LOOPBACK.has(host) || extra.includes(host);
+}
+
+function isReadAuthorized(req, url) {
+  if (isLoopback(HOST)) return true;
+  return tokenMatches(headerToken(req)) || tokenMatches(url.searchParams.get('token')) || tokenMatches(cookieToken(req));
+}
 
 const sseClients = new Set();
 const wsClients = new Set();
 
 // Latest Playwright CDP screencast frame + UISentinel + window.__sim overlay state
 let latestFramePayload = {
-  updatedAt: new Date().toISOString(),
+  updatedAt: null,
   frameDataUrl: null,
-  fps: 30,
-  latencyMs: 14,
+  fps: null,
+  latencyMs: null,
   viewport: { width: 1280, height: 720 },
-  simTelemetry: {
-    tick: 120,
-    seed: 42069,
-    hash: '1b29485e',
-    entities: 48,
-    credits: 12450,
-    paused: false,
-    api: 'window.__sim (?playtest=1)',
-  },
-  uisentinelBoxes: [
-    {
-      id: 'hud-top-bar',
-      selector: '#sim-telemetry-bar',
-      x: 24,
-      y: 18,
-      width: 460,
-      height: 44,
-      status: 'pass',
-      label: 'UISentinel PASS: #sim-telemetry-bar (0px overflow)',
-    },
-    {
-      id: 'instanced-viewport',
-      selector: 'canvas#three-sim-canvas',
-      x: 24,
-      y: 76,
-      width: 820,
-      height: 520,
-      status: 'pass',
-      label: 'Three.js InstancedMesh Canvas (Draw Calls: 18 / 60 FPS)',
-    },
-  ],
+  simTelemetry: null, // filled by POST /api/frame or the run-playtest macro, never invented
+  uisentinelBoxes: [],
 };
 
 // RFC 6455 WebSocket Frame Helpers (Zero External Dependencies)
@@ -196,11 +211,7 @@ export function ensureEventsFile() {
     emitEvent({
       type: 'hub.boot',
       agent: 'producer',
-      provider: 'vertex-gemini-pro',
-      model: 'gemini-2.5-pro',
-      durationMs: 1200,
-      tokensSaved: 4200,
-      msg: 'Workflow UI HUB initialized (0% LLM token passive telemetry active)',
+      msg: 'Workflow HUB started (reads files only, no model calls)',
     });
   }
   return eventsFile;
@@ -248,11 +259,9 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Writes need the token in a header. A cookie or query string is never enough for a write (no CSRF).
 function isWriteAuthorized(req) {
-  if (!HUB_TOKEN) return false;
-  const header = req.headers['x-hub-token'] || req.headers['authorization'] || '';
-  const token = String(header).replace(/^Bearer\s+/i, '').trim();
-  return token === HUB_TOKEN;
+  return tokenMatches(headerToken(req));
 }
 
 function runCommandCapture(cmd, cwd = REPO_ROOT, timeoutMs = 25000) {
@@ -306,17 +315,27 @@ async function executeTacticalMacro(macro, args = {}) {
       msg: 'Running Two-Stage ?playtest=1 trajectory + visual layout check',
     });
     broadcastSnapshot();
-    const res = await runCommandCapture('node qa/playtest.mjs --stage 1');
+    const res = await runCommandCapture('node qa/playtest.mjs --stage 1 --quiet --out .studio/last-playtest.json', REPO_ROOT, 120000);
     const out = (res.stdout || res.stderr).trim();
-    latestFramePayload = {
-      ...latestFramePayload,
-      updatedAt: new Date().toISOString(),
-      simTelemetry: {
-        ...latestFramePayload.simTelemetry,
-        tick: latestFramePayload.simTelemetry.tick + 120,
-        credits: latestFramePayload.simTelemetry.credits + 1850,
-      },
-    };
+    try {
+      const s1 = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'last-playtest.json'), 'utf8')).stage1 || {};
+      latestFramePayload = {
+        ...latestFramePayload,
+        updatedAt: new Date().toISOString(),
+        simTelemetry: {
+          cartridge: s1.cartridge,
+          scenario: s1.scenario,
+          seed: s1.seed,
+          tick: s1.ticksRun,
+          failingTick: s1.failingTick,
+          outcome: s1.outcome,
+          hash: s1.finalHash,
+          api: 'headless cartridge (qa/playtest.mjs)',
+        },
+      };
+    } catch {
+      // no report: keep the last real telemetry
+    }
     broadcastWs({ type: 'frame', data: latestFramePayload });
     broadcastWs({
       type: 'terminal.output',
@@ -331,11 +350,10 @@ async function executeTacticalMacro(macro, args = {}) {
     const snap = buildStudioSnapshot();
     const report = [
       '=== RTK + QMD + SERENA TOKEN EFFICIENCY REPORT ===',
-      `RTK Bash Output Compression : ${snap.telemetry.rtkCompressionPct}% average reduction`,
-      `QMD Local Markdown RAG      : ACTIVE (Top-3 section retrieval)`,
-      `Serena TypeScript LSP       : ACTIVE (Symbol-level body lookup)`,
-      `Total Input Tokens Saved    : ${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens`,
-      `Estimated Budget Preserved  : $${snap.telemetry.estimatedDollarsPreserved}`,
+      'Estimates only: summed from tokensSaved fields that agents write into events (docs/TELEMETRY.md).',
+      `RTK output compression (est.) : ${snap.telemetry.rtkCompressionPct}%`,
+      `Input tokens saved (est.)     : ${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens`,
+      `Budget preserved (est.)       : $${snap.telemetry.estimatedDollarsPreserved}`,
     ].join('\n');
     emitEvent({
       type: 'telemetry.rtk_gain',
@@ -444,11 +462,21 @@ async function executeTacticalMacro(macro, args = {}) {
 
 export function createHubServer() {
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const url = new URL(req.url || '/', 'http://hub.local');
+
+    if (!hostAllowed(req)) {
+      return sendJson(res, 403, { ok: false, error: 'host not allowed (set HUB_ALLOWED_HOSTS to add one)' });
+    }
+    if (!isReadAuthorized(req, url)) {
+      return sendJson(res, 401, { ok: false, error: 'token required when the HUB listens beyond localhost' });
+    }
+    if (!isLoopback(HOST) && tokenMatches(url.searchParams.get('token'))) {
+      res.setHeader('Set-Cookie', `hub_token=${encodeURIComponent(hubToken())}; HttpOnly; SameSite=Strict; Path=/`);
+    }
 
     const writePaths = new Set([
       '/api/tasks', '/api/task', '/api/events', '/api/event', '/api/usage', '/usage',
-      '/api/config', '/api/frame', '/api/macro', '/api/brief'
+      '/api/config', '/api/frame', '/api/macro', '/api/brief', '/api/human/decision'
     ]);
     if (req.method === 'POST' && writePaths.has(url.pathname) && !isWriteAuthorized(req)) {
       return sendJson(res, 401, { ok: false, error: 'unauthorized' });
@@ -473,7 +501,7 @@ export function createHubServer() {
       });
     }
 
-    if (url.pathname === '/api/brief' && (req.method === 'GET' || req.method === 'POST')) {
+    if (url.pathname === '/api/brief' && req.method === 'POST') {
       const briefRes = buildPreparedBrief();
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, ...briefRes });
@@ -548,14 +576,15 @@ export function createHubServer() {
       const body = await readBody(req);
       let result = null;
       if (body.action === 'start' && body.id) {
-        result = startTask(body.id, body.agent || null);
+        result = startTask(body.id, body.agent || 'war-room-human');
       } else if (body.action === 'done' && body.id) {
-        result = completeTask(body.id, body.note || 'Marked done from Mission Control War Room');
+        // A person with the HUB token may close any task; the lock is released either way.
+        result = completeTask(body.id, body.note || 'Marked done from the War Room', body.agent || 'war-room-human', { force: true });
       } else if (body.action === 'add' && body.title) {
         result = addTask({ title: body.title, role: body.role || 'builder', priority: body.priority || 'P1' });
       }
       broadcastSnapshot();
-      return sendJson(res, 200, { ok: Boolean(result), result, snapshot: buildStudioSnapshot() });
+      return sendJson(res, 200, { ok: Boolean(result) && !result.error, result, snapshot: buildStudioSnapshot() });
     }
 
     if (url.pathname === '/api/frame' && req.method === 'GET') {
@@ -663,7 +692,6 @@ export function createHubServer() {
     }
 
     if (url.pathname === '/api/human/decision' && req.method === 'POST') {
-      if (!isWriteAuthorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
       const body = await readBody(req);
       const kind = body.kind === 'fun' ? 'fun' : 'balance';
       const dir = path.join(REPO_ROOT, 'studio', kind);
@@ -693,17 +721,29 @@ export function createHubServer() {
       socket.destroy();
       return;
     }
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const headerToken = req.headers['x-hub-token'] || '';
-    const queryToken = url.searchParams.get('token') || '';
-    const token = String(headerToken || queryToken).replace(/^Bearer\s+/i, '').trim();
-    if (!HUB_TOKEN || token !== HUB_TOKEN) {
+    const url = new URL(req.url || '/', 'http://hub.local');
+    if (!hostAllowed(req)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const given = headerToken(req) || url.searchParams.get('token') || cookieToken(req);
+    if (!tokenMatches(given)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }
-    const origin = req.headers.origin || '';
-    if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)) {
+    // Same-origin pages only: the page's origin must name the host it connected to (or loopback).
+    const origin = String(req.headers.origin || '');
+    const sameOrigin = (() => {
+      try {
+        const o = new URL(origin);
+        return o.host === req.headers.host || isLoopback(o.hostname.replace(/^\[|\]$/g, '')) || isLoopback(o.hostname);
+      } catch {
+        return false;
+      }
+    })();
+    if (origin && !sameOrigin) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -776,12 +816,20 @@ export function createHubServer() {
 }
 
 export function startHubCli() {
+  const bind = assertSafeBind(HOST);
+  if (!bind.ok) {
+    console.error(`[hub] REFUSED: ${bind.reason}`);
+    process.exit(1);
+  }
+  if (!hubToken()) {
+    console.warn('[hub] HUB_TOKEN is unset, short, or a placeholder: the page is read-only. Run `npm run setup` to generate one.');
+  }
   const server = createHubServer();
   server.listen(PORT, HOST, () => {
     console.log('====================================================================');
     console.log(' 3D DEEP-SIM WORKFLOW UI HUB — ZERO-TOKEN MISSION CONTROL WAR ROOM');
     console.log('====================================================================');
-    console.log(` Desktop War Room (4-Quadrant) : http://localhost:${PORT}`);
+    console.log(` Desktop War Room (4-Quadrant) : http://localhost:${PORT}${hubToken() ? '/?token=<HUB_TOKEN from .env>' : ' (read-only: no HUB_TOKEN)'}`);
     console.log(` Mobile Command Feed (<768px)  : http://localhost:${PORT}/?view=mobile`);
     console.log(` WebSocket Terminal & Stream   : ws://localhost:${PORT}/ws`);
     console.log(` Events Ledger                 : ${path.relative(REPO_ROOT, eventsFile)}`);

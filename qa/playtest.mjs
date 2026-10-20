@@ -1,120 +1,110 @@
 #!/usr/bin/env node
 /**
- * qa/playtest.mjs — Two-Stage Programmatic & Visual QA Runner
+ * qa/playtest.mjs — two-stage playtest for any cartridge.
  *
- * Combines:
- *  - Stage 1 (Programmatic State Trajectory QA — Recursive Game Creator pattern):
- *    Drives the simulation through `qa/sim.adapter.mjs` or `?playtest=1`
- *    (`window.__sim`) to catch frozen-tick P0s, NaN/Infinity drift, save/load
- *    serialization loss, and non-deterministic RNG regressions without relying
- *    on brittle pixel clicking.
- *  - Stage 2 (Visual, Accessibility Tree & Layout QA — Playwright MCP + UISentinel):
- *    If a browser target URL (`--url` or `PLAYTEST_URL`) is reachable and
- *    Playwright is available, inspects the DOM accessibility tree (`ariaSnapshot`),
- *    console errors, viewport overflow / HUD overlap rules (UISentinel pattern),
- *    and captures targeted screenshots.
+ *   node qa/playtest.mjs [--cartridge name] [--scenario start-to-win] [--seed 1337] [--ticks N]
+ *                        [--stage 1|2] [--url http://127.0.0.1:5173/?playtest=1] [--out report.json]
  *
- * Writes structured, diffable reports to `qa/reports/` using `studio/templates/bug.md`.
+ * Stage 1 loads cartridges/<name> through harness/cartridge.mjs (its qa.mjs adapter when it has one)
+ * and plays a scenario one tick at a time. It stops at the first tick that throws, freezes or breaks an
+ * invariant and records THAT tick from the cartridge's own state, plus every action taken, so
+ * `node harness/replay.mjs --trace` reproduces it. It also checks save/load and determinism.
+ * Stage 2 opens the game in Playwright when a URL is serving: console errors, layout overflow, a screenshot.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReferenceSimAdapter, hashCanonicalState } from './sim.adapter.mjs';
-import { createCartridgeAdapter } from './cartridge-adapter.mjs';
 import { emitEvent, REPO_ROOT } from '../harness/event.mjs';
+import { cartridgeFromArgv, groupActions, loadCartridge, replay } from '../harness/cartridge.mjs';
 
 const REPORTS_DIR = path.join(REPO_ROOT, 'qa', 'reports');
-const BUG_TEMPLATE_PATH = path.join(REPO_ROOT, 'studio', 'templates', 'bug.md');
+const STAGE1 = 'Stage 1 (cartridge)';
 
 /**
- * Stage 1: Programmatic Trajectory & Determinism Suite
+ * Stage 1: play the cartridge tick by tick and stop at the first real failure.
  */
-export async function runStage1ProgrammaticQA({ seed = 1337, ticks = 200, adapterFactory = createCartridgeAdapter } = {}) {
+export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, scenario } = {}) {
   const startMs = Date.now();
+  const cart = await loadCartridge(cartridge || cartridgeFromArgv([]));
+  const scName = scenario || (cart.scenarios['start-to-win'] ? 'start-to-win' : null);
+  const sc = scName ? cart.scenarios[scName] : null;
+  if (scenario && !sc) throw new Error(`cartridge ${cart.name} has no scenario "${scenario}"`);
+  const maxTicks = Number(ticks || sc?.maxTicks || 200);
+  const scripted = groupActions(sc?.actions || []);
+  const adapter = cart.createAdapter();
   const findings = [];
-  const adapterA = adapterFactory();
+  const actions = [];
+  const add = (f, tick) => findings.push({ stage: STAGE1, expected: 'no violation', actual: f.summary, ...f, tick });
 
-  // 1. Initialize & verify baseline state
-  const initial = adapterA.init(seed);
-  const startTick = initial.tick;
-
-  // 2. Drive programmatic policy trajectory (spawn + step ticks)
-  adapterA.dispatch({ type: 'spawn', kind: 'sensor', x: 6, z: -6 });
-  const midState = adapterA.step(Math.floor(ticks / 2));
-
-  // Guard 1: Frozen-tick P0 check
-  if (midState.tick <= startTick) {
-    findings.push({
-      id: 'QA-STAGE1-FROZEN-TICK',
-      severity: 'P0',
-      stage: 'Stage 1 (Programmatic API)',
-      summary: `Simulation tick did not advance after step(${Math.floor(ticks / 2)})`,
-      expected: `tick > ${startTick}`,
-      actual: `tick === ${midState.tick}`,
-    });
+  let state = adapter.init(seed);
+  let outcome = null;
+  let ticksRun = 0;
+  const mid = Math.max(1, Math.floor(maxTicks / 2));
+  for (let t = 1; t <= maxTicks; t++) {
+    const acts = [...(scripted.get(t) || [])];
+    if (typeof sc?.policy === 'function') {
+      const extra = sc.policy(adapter.getState(), t);
+      if (extra) acts.push(...(Array.isArray(extra) ? extra : [extra]));
+    }
+    for (const action of acts) actions.push({ tick: t, action });
+    const before = adapter.getState().tick;
+    try {
+      state = adapter.step(1, acts.length ? acts : null);
+    } catch (err) {
+      add({ id: 'QA-STAGE1-STEP-THREW', severity: 'P0', summary: `step threw: ${String(err?.message || err)}` }, t);
+      break;
+    }
+    ticksRun = t;
+    if (!(state.tick > before) && !state.paused) {
+      add({ id: 'QA-STAGE1-FROZEN-TICK', severity: 'P0', summary: `tick stayed at ${before} after step()` }, t);
+      break;
+    }
+    const broken = adapter.invariants(state);
+    if (broken.length) {
+      for (const f of broken) add(f, state.tick ?? t);
+      break;
+    }
+    if (t === mid) {
+      const before = adapter.getHash();
+      adapter.deserialize(adapter.serialize());
+      const after = adapter.getHash();
+      if (before !== after) {
+        add({ id: 'QA-STAGE1-SERIALIZATION-DRIFT', severity: 'P0', summary: 'save/load changed the state hash', expected: before, actual: after }, state.tick ?? t);
+        break;
+      }
+    }
+    outcome = cart.outcome(state);
+    if (outcome) break;
   }
 
-  // Guard 2: Serialization round-trip check (catches lost entities/flights on save/load)
-  const savedJson = adapterA.serialize();
-  const hashBeforeSave = adapterA.getHash();
-  adapterA.deserialize(savedJson);
-  const hashAfterRestore = adapterA.getHash();
-  if (hashBeforeSave !== hashAfterRestore) {
-    findings.push({
-      id: 'QA-STAGE1-SERIALIZATION-DRIFT',
-      severity: 'P0',
-      stage: 'Stage 1 (Programmatic API)',
-      summary: 'Save/Load JSON round-trip altered canonical state hash',
-      expected: hashBeforeSave,
-      actual: hashAfterRestore,
-    });
+  const finalHash = adapter.getHash();
+  if (!findings.length) {
+    const again = replay(cart, { seed, tick: ticksRun, actions });
+    if (again.hash !== finalHash) {
+      add({ id: 'QA-STAGE1-NONDETERMINISTIC', severity: 'P0', summary: 'replaying the same seed and actions gave a different hash', expected: finalHash, actual: again.hash }, ticksRun);
+    }
+    const expected = sc?.expect;
+    if (expected && outcome && outcome !== expected) {
+      add({ id: 'QA-STAGE1-UNEXPECTED-OUTCOME', severity: 'P1', summary: `scenario ${scName} ended "${outcome}"`, expected, actual: outcome }, ticksRun);
+    }
+    if (expected && !outcome && ticksRun >= (sc.maxTicks ?? Infinity)) {
+      add({ id: 'QA-STAGE1-NO-OUTCOME', severity: 'P1', summary: `scenario ${scName} never ended in ${sc.maxTicks} ticks`, expected, actual: 'none' }, ticksRun);
+    }
   }
 
-  // Finish remaining ticks
-  const finalA = adapterA.step(ticks - Math.floor(ticks / 2));
-  const finalHashA = adapterA.getHash();
-
-  // Guard 3: Domain & numerical invariants (NaN / Infinity check)
-  for (const v of adapterA.invariants(finalA)) {
-    findings.push({
-      id: v.id,
-      severity: v.severity,
-      stage: 'Stage 1 (Programmatic API)',
-      summary: v.message,
-      expected: 'All state invariants satisfied',
-      actual: v.message,
-    });
-  }
-
-  // Guard 4: Determinism replay check (second independent instance with identical seed + actions)
-  const adapterB = adapterFactory();
-  adapterB.init(seed);
-  adapterB.dispatch({ type: 'spawn', kind: 'sensor', x: 6, z: -6 });
-  adapterB.step(ticks);
-  const finalHashB = adapterB.getHash();
-
-  if (finalHashA !== finalHashB) {
-    findings.push({
-      id: 'QA-STAGE1-NONDETERMINISTIC',
-      severity: 'P0',
-      stage: 'Stage 1 (Programmatic API)',
-      summary: 'Two identical seeded runs produced different state hashes',
-      expected: finalHashA,
-      actual: finalHashB,
-    });
-  }
-
-  const actions = [{ tick: 1, action: { type: 'spawn', kind: 'sensor', x: 6, z: -6 } }];
-  const failingTick = findings.find((f) => f.tick != null)?.tick ?? (findings.length ? finalA.tick : null);
+  const failingTick = findings.length ? findings[0].tick ?? null : null;
   return {
     stage: 1,
-    adapter: adapterA.name || 'custom-sim-adapter',
+    cartridge: cart.name,
+    adapter: adapter.name,
+    scenario: scName,
     seed,
-    ticksRun: finalA.tick,
+    ticksRun,
     failingTick,
     tick: failingTick,
-    finalHash: finalHashA,
+    outcome,
+    finalHash,
     actions,
     durationMs: Date.now() - startMs,
     passed: findings.length === 0,
@@ -253,13 +243,15 @@ function formatMarkdownReport(report) {
     `- **Stage 1 (Programmatic \`?playtest=1\` / Adapter)**: ${report.stage1 ? (report.stage1.passed ? 'PASS' : 'FAIL') : 'SKIPPED'}`,
     `- **Stage 2 (Visual Playwright + UISentinel)**: ${report.stage2 ? `${report.stage2.passed ? 'PASS' : 'FAIL'} (${report.stage2.mode})` : 'SKIPPED'}`,
     '',
-    '## Stage 1 Telemetry (Recursive Game Creator Trajectory)',
+    '## Stage 1 (cartridge)',
     report.stage1
       ? [
-          `- **Adapter**: \`${report.stage1.adapter}\``,
-          `- **Seed**: \`${report.stage1.seed}\``,
-          `- **Ticks Executed**: \`${report.stage1.ticksRun}\``,
-          `- **Canonical State Hash (FNV-1a)**: \`${report.stage1.finalHash}\``,
+          `- **Cartridge**: \`${report.stage1.cartridge}\` (adapter \`${report.stage1.adapter}\`)`,
+          `- **Scenario**: \`${report.stage1.scenario ?? 'none'}\` · **Seed**: \`${report.stage1.seed}\``,
+          `- **Ticks run**: \`${report.stage1.ticksRun}\` · **Outcome**: \`${report.stage1.outcome ?? 'none'}\``,
+          `- **Failing tick**: \`${report.stage1.failingTick ?? 'none'}\``,
+          `- **State hash (64-bit)**: \`${report.stage1.finalHash}\``,
+          `- **Replay**: \`node harness/replay.mjs --trace .studio/last-seed-failure.json\` after a closed-loop failure`,
           `- **Duration**: \`${report.stage1.durationMs}ms\``,
         ].join('\n')
       : '_Stage 1 not run._',
@@ -316,40 +308,41 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const args = parseCli(process.argv.slice(2));
   const stageFilter = args.stage ? Number(args.stage) : 0; // 0 = both stages
   const seed = Number(args.seed || 1337);
-  const ticks = Number(args.ticks || 200);
-  const runId = `qa_${Date.now()}`;
+  const runId = `qa_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${seed}`;
 
-  emitEvent({
-    type: 'qa.start',
-    agent: 'qa-playtester',
-    msg: `Starting Two-Stage QA (${runId}, seed=${seed}, ticks=${ticks})`,
-  });
+  emitEvent({ type: 'qa.start', agent: 'qa-playtester', msg: `Starting playtest ${runId}` });
 
-  const stage1 = stageFilter === 2 ? null : await runStage1ProgrammaticQA({ seed, ticks });
+  let stage1 = null;
+  if (stageFilter !== 2) {
+    try {
+      stage1 = await runStage1ProgrammaticQA({ seed, ticks: args.ticks ? Number(args.ticks) : undefined, cartridge: args.cartridge, scenario: args.scenario });
+    } catch (err) {
+      stage1 = { stage: 1, passed: false, seed, failingTick: null, actions: [], findings: [{ id: 'QA-STAGE1-LOAD', severity: 'P0', stage: STAGE1, summary: String(err?.message || err), expected: 'cartridge loads', actual: 'error' }] };
+    }
+  }
   const stage2 = stageFilter === 1 ? null : await runStage2VisualQA({ url: args.url, runId });
 
   const passed = (stage1 ? stage1.passed : true) && (stage2 ? stage2.passed : true);
-  const report = {
-    runId,
-    timestamp: new Date().toISOString(),
-    passed,
-    stage1,
-    stage2,
-  };
+  const report = { runId, timestamp: new Date().toISOString(), passed, stage1, stage2 };
 
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const jsonFile = path.join(REPORTS_DIR, `${runId}.json`);
   const mdFile = path.join(REPORTS_DIR, `${runId}.md`);
   fs.writeFileSync(jsonFile, JSON.stringify(report, null, 2), 'utf8');
   fs.writeFileSync(mdFile, formatMarkdownReport(report), 'utf8');
+  if (args.out && args.out !== true) {
+    fs.mkdirSync(path.dirname(path.resolve(REPO_ROOT, args.out)), { recursive: true });
+    fs.writeFileSync(path.resolve(REPO_ROOT, args.out), JSON.stringify(report, null, 2), 'utf8');
+  }
 
   emitEvent({
     type: passed ? 'qa.pass' : 'qa.bug',
     agent: 'qa-playtester',
     status: passed ? 'ok' : 'error',
-    msg: `QA ${runId} ${passed ? 'PASSED' : 'FAILED'} (hash=${stage1?.finalHash || 'n/a'}, report=${path.relative(REPO_ROOT, mdFile).replace(/\\/g, '/')})`,
+    msg: `QA ${runId} ${passed ? 'PASSED' : `FAILED at tick ${stage1?.failingTick ?? '?'}`} (${stage1?.cartridge || 'n/a'}, hash=${stage1?.finalHash || 'n/a'}, report=${path.relative(REPO_ROOT, mdFile).replace(/\\/g, '/')})`,
   });
 
-  console.log(JSON.stringify(report, null, 2));
+  if (args.quiet) console.log(`[playtest] ${passed ? 'PASS' : 'FAIL'} ${path.relative(REPO_ROOT, mdFile)}`);
+  else console.log(JSON.stringify(report, null, 2));
   process.exit(passed ? 0 : 1);
 }

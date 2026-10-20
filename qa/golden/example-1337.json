@@ -1,5 +1,6 @@
 {
-  "name": "example-sim-1337",
+  "name": "example-sim seed 1337, two spawns on tick 1, 50 ticks",
+  "cartridge": "example-sim",
   "seed": 1337,
   "tick": 50,
   "actions": [
@@ -22,6 +23,5 @@
       }
     }
   ],
-  "hash": "7bc5e0e0ba85eb17",
-  "cartridge": "example-sim"
+  "hash": "0380281a907f1695"
 }

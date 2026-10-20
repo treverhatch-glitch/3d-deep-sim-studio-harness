@@ -1,0 +1,11 @@
+{
+  "cartridge": "example-sim",
+  "scenario": "start-to-win",
+  "knob": "spawnCost",
+  "values": [200, 400, 800, 1200, 1600, 2400],
+  "seeds": [1, 7, 42, 1337, 2024, 9001],
+  "target": {
+    "winRate": [0.8, 1.0],
+    "medianTick": [250, 450]
+  }
+}

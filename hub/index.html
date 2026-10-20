@@ -205,8 +205,8 @@
         <span id="rtkBadge" style="padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);border:1px solid #10b981;color:#34d399;font-size:10px;font-weight:700;">
           84% Bash Saved via RTK
         </span>
-        <span>Tokens Saved Today: <strong id="tokensSavedVal" style="color:#38bdf8;">248,500</strong></span>
-        <span>Value Preserved: <strong id="dollarsSavedVal" style="color:#34d399;">$4.68</strong></span>
+        <span>Tokens saved (est.): <strong id="tokensSavedVal" style="color:#38bdf8;">248,500</strong></span>
+        <span>Value preserved (est.): <strong id="dollarsSavedVal" style="color:#34d399;">$4.68</strong></span>
       </div>
       <span style="font-size:10px;color:#64748b;" id="syncClock">Synced</span>
     </div>
@@ -242,7 +242,7 @@
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="color:#00F0FF;font-weight:700;">👁 AGENT EYES MULTIPLEXER</span>
           <span id="fpsBadge" style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.16);border:1px solid #10b981;color:#34d399;">
-            30 FPS // 14ms
+            no stream yet
           </span>
         </div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;">
@@ -316,6 +316,30 @@
   </dialog>
 
   <script>
+    // Write token: taken once from ?token=..., kept for this tab only, removed from the address bar.
+    const HUB = (() => {
+      let token = '';
+      try {
+        const u = new URL(location.href);
+        token = u.searchParams.get('token') || sessionStorage.getItem('hubToken') || '';
+        if (u.searchParams.has('token')) {
+          sessionStorage.setItem('hubToken', token);
+          u.searchParams.delete('token');
+          history.replaceState(null, '', u.toString());
+        }
+      } catch {}
+      return {
+        token: () => token,
+        headers: () => (token ? { 'Content-Type': 'application/json', 'X-Hub-Token': token } : { 'Content-Type': 'application/json' }),
+        askIfDenied(res) {
+          if (res.status === 401) {
+            const t = prompt('This action needs the HUB_TOKEN from your .env');
+            if (t) { token = t.trim(); try { sessionStorage.setItem('hubToken', token); } catch {} }
+          }
+          return res;
+        },
+      };
+    })();
     let state = null;
     let frameState = null;
     let activeViewportSource = localStorage.getItem('warRoom.viewport.activeSource') || 'cdp';
@@ -527,7 +551,7 @@
       });
       fetch('/api/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ viewport: { activeSource: src } }),
       });
       renderViewport();
@@ -536,7 +560,7 @@
     function renderViewport() {
       const stage = document.getElementById('viewportStage');
       if (!stage) return;
-      const sim = frameState?.simTelemetry || { tick: 120, seed: 42069, hash: '1b29485e', entities: 48, api: 'window.__sim (?playtest=1)' };
+      const sim = frameState?.simTelemetry || { tick: '–', seed: '–', hash: 'no playtest yet', api: 'Run Playtest to fill this' };
       const hud = `<div style="position:absolute;bottom:8px;right:8px;background:rgba(6,8,14,0.9);border:1px solid #00F0FF;border-radius:5px;padding:5px 9px;font-size:10px;display:flex;gap:10px;">
         <strong style="color:#00F0FF;">${sim.api}</strong>
         <span>TICK: <strong>${sim.tick}</strong></span>
@@ -588,7 +612,7 @@
       btn.textContent = readOnlyShell ? '🔒 Tunnel Read-Only: ON' : '🔓 Live PTY Shell: UNLOCKED';
       fetch('/api/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ terminal: { readOnlyShell } }),
       });
     }
@@ -605,9 +629,9 @@
     function runMacro(macro, extra = {}) {
       fetch('/api/macro', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ macro, ...extra }),
-      }).then((r) => r.json()).then((res) => {
+      }).then((r) => HUB.askIfDenied(r).json()).then((res) => {
         if (res.snapshot) { state = res.snapshot; renderAll(); }
       });
     }
@@ -619,9 +643,9 @@
     function taskAction(action, id) {
       fetch('/api/tasks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ action, id }),
-      }).then((r) => r.json()).then((res) => {
+      }).then((r) => HUB.askIfDenied(r).json()).then((res) => {
         if (res.snapshot) { state = res.snapshot; renderAll(); }
       });
     }
@@ -632,9 +656,9 @@
       if (!input.value.trim()) return;
       fetch('/api/tasks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ action: 'add', title: input.value.trim(), role: 'builder', priority: 'P1' }),
-      }).then((r) => r.json()).then((res) => {
+      }).then((r) => HUB.askIfDenied(r).json()).then((res) => {
         input.value = '';
         if (res.snapshot) { state = res.snapshot; renderAll(); }
       });
@@ -662,9 +686,9 @@
       });
       fetch('/api/usage', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: HUB.headers(),
         body: JSON.stringify({ ...state.usage, subscriptions: subs }),
-      }).then((r) => r.json()).then((res) => {
+      }).then((r) => HUB.askIfDenied(r).json()).then((res) => {
         if (res.usage) { state.usage = res.usage; renderAll(); }
         document.getElementById('quotaDialog').close();
       });
@@ -675,8 +699,13 @@
     fetch('/api/frame').then((r) => r.json()).then((f) => { frameState = f; renderViewport(); });
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.onmessage = (evt) => {
+    // With a token: WebSocket (live terminal + macros). Without one: read-only state over SSE.
+    if (!HUB.token()) {
+      const es = new EventSource('/api/stream');
+      es.onmessage = (evt) => { try { state = JSON.parse(evt.data); renderAll(); } catch {} };
+    }
+    ws = HUB.token() ? new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(HUB.token())}`) : null;
+    if (ws) ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === 'init') {

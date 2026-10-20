@@ -11,22 +11,29 @@
 - `node harness/task.mjs [next | list | start <ID> | done <ID> | add "<Title>" --role <role> --priority P0..P3]`
   Manages `studio/NEXT.md` and synchronizes `studio/CURRENT_TASK.md`.
 - `node harness/event.mjs --type <event.type> --agent <role> [--task <ID>] --msg "<summary>"`
-  Appends a zero-token telemetry line to `.studio/events.jsonl` and `/tmp/agent-events.jsonl`.
+  Appends a zero-token telemetry line to `.studio/events.jsonl` (mirror only if AGENT_EVENTS_MIRROR is set).
 - `node harness/status.mjs [--json]`
   Prints a 0-token studio snapshot combining queue, router matrix, and recent events.
 - `node hub/server.mjs`
-  Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:4177` Desktop 4-Quadrant War Room; `?view=mobile` Mobile Command Feed).
-- `node qa/playtest.mjs [--stage 1|2] [--seed 1337] [--ticks 200] [--url http://127.0.0.1:5173/?playtest=1]`
+  Starts the Zero-Token Passive Workflow UI HUB (`http://127.0.0.1:3847/?token=<HUB_TOKEN>`; `?view=mobile` for phones).
+- `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.
 - `node scripts/check-sim-purity.mjs`
-  Verifies zero DOM, Three.js, `Math.random()`, or `Date.now()` leaks in `src/sim/` or `cartridges/*/sim/`.
+  Static scan + runtime traps: no DOM, renderers, randomness, clock or timers in `src/sim/` or `cartridges/`.
 
-## 2. Simulation Cartridge Contract (`qa/sim.adapter.mjs` & `window.__sim`)
-Every 3D simulation cartridge mounted in this studio exposes a pure-TypeScript core:
-- `init(seed: number): SimState` — Creates a deterministic initial state with seeded `sfc32` RNG array `[a, b, c, d]`.
-- `step(ticks?: number): SimState` — Advances fixed-timestep simulation by integer ticks.
-- `dispatch(action: Action): { ok: boolean, reason?: string }` — Applies a serializable command at a tick boundary.
-- `getState(): SimState` — Returns plain JSON state (numbers, strings, booleans, arrays, plain objects only).
-- `serialize(): string` / `deserialize(json: string): SimState` — Lossless save/load round-trip.
-- `getHash(): string` — Canonical quantized 32-bit FNV-1a state hash for cross-engine port verification.
-- `invariants(state: SimState): Violation[]` — Returns P0/P1/P2 invariant violations (e.g., NaN, negative resources, stranded units).
+## 2. Simulation Cartridge Contract (`cartridges/README.md`, loaded by `harness/cartridge.mjs`)
+`cartridges/<name>/index.mjs`:
+- `createInitialState(seed, tuning?)` — plain JSON state; seeded Mulberry32 RNG state lives inside it.
+- `step(state, actions|null)` — one fixed tick, returns a new state; `actions` is an array.
+- `invariants(state)` — `[{ id, severity: 'P0'|'P1'|'P2', summary }]` (NaN/Infinity check added by the harness).
+- `outcome(state)` — `'won' | 'lost' | null`. `TUNING` — every balance number in one table.
+- `hashState(state)` optional — default is the 64-bit hash in `harness/hash.mjs` (= `tools/golden.py`).
+`cartridges/<name>/qa.mjs`: `scenarios['start-to-win'] = { seed, maxTicks, policy(state, tick), expect: 'won' }`.
+
+## 3. Everyday commands
+- `npm run new-game <name>` · `npm run verify` · `npm run release`
+- `node qa/playtest.mjs --stage 1 [--cartridge name] [--scenario start-to-win]` — stops on the first failing tick
+- `node harness/replay.mjs --trace .studio/last-seed-failure.json` — reproduce a closed-loop failure
+- `npm run golden -- --update` — after an intended sim change; commit hashes with the change
+- `npm run balance` / `npm run fun` — sweep `TUNING` (studio/balance/sweep.json) / fun proxies
+- `node harness/lock.mjs claim path:<dir> --owner <unique>` · `node harness/task.mjs start <ID> --agent <unique>`

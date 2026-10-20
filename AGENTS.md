@@ -30,15 +30,18 @@ See `docs/ROUTING.md`.
 
 ---
 
-## 3. Seed System & Closed-Loop QA
+## 3. Cartridges, Seed System & Closed-Loop QA
 
-1. Every new game **MUST** implement a deterministic seed + fixed-tick system early.
-2. Failures are recorded as `{ seed, tick, description, actions }`.
-3. Replay with:
-   - `node harness/replay.mjs --seed <seed> --tick <tick>`
-   - or `node harness/replay.mjs --trace .studio/last-seed-failure.json`
-4. Closed loop (`node harness/closed-loop.mjs`) records the real failure and escalates after `MAX_FIX_ATTEMPTS` (default 3). It does **not** auto-fix code.
-5. After a human or strong model fixes a bug, distill the lesson into `studio/memory/failures.md`.
+1. The game sim lives in `cartridges/<name>/` and follows the contract in `cartridges/README.md`.
+   Start one with `npm run new-game <name>`. Pick it with `--cartridge <name>` or `"cartridge"` in `studio/gates.json`.
+2. Every cartridge has a deterministic seed + fixed tick, a `TUNING` table, and a `start-to-win` scenario in `qa.mjs`.
+3. Failures are recorded as `{ cartridge, seed, tick, description, actions }` where `tick` is the tick the cartridge broke on.
+4. Replay with:
+   - `node harness/replay.mjs --seed <seed> --tick <tick> [--cartridge <name>]`
+   - or `node harness/replay.mjs --trace .studio/last-seed-failure.json` (stops on the failing tick)
+5. Closed loop (`node harness/closed-loop.mjs`) records the real failure and escalates after `MAX_FIX_ATTEMPTS` (default 3). It does **not** auto-fix code.
+6. A sim change that changes behaviour changes hashes: `npm run golden -- --update` and commit the hashes with the change.
+7. After a human or strong model fixes a bug, add a replay to `qa/regressions/` and distill the lesson into `studio/memory/failures.md`.
 
 ---
 
@@ -47,19 +50,21 @@ See `docs/ROUTING.md`.
 Logging `editing` is not enough. Use the lock helper.
 
 ### Before starting work
-1. Claim the task or file:
-   `node harness/lock.mjs claim task:T-001 --owner your-agent`
-   or `node harness/lock.mjs claim path:src/sim/foo.ts --owner your-agent`
-2. If claim fails, do not edit. Wait or pick another task.
-3. Prefer `node harness/task.mjs start <ID> --agent your-agent` — it refuses locked tasks.
+1. Use a unique owner name per running agent (`cursor-win2`, `claude-a`). Shared names such as `cursor`, `claude` or `builder` are refused.
+   Export it once: `export STUDIO_LOCK_OWNER=cursor-win2`.
+2. Claim the task: `node harness/task.mjs start <ID> --agent cursor-win2` (refuses work another agent claimed).
+3. Claim the files or folder: `node harness/lock.mjs claim path:src/sim/ --owner cursor-win2` (a folder lock covers everything under it).
+4. If a claim fails, do not edit. Wait or pick another task.
+5. `npm run hooks:install` once per clone: the pre-commit hook refuses staged files locked by someone else and staged secrets.
 
 ### While working
 - Stay inside what you claimed.
 - Do not edit files locked by someone else.
 
 ### When finished
-- `node harness/lock.mjs release <key> --owner your-agent`
-- Or `node harness/task.mjs done <ID>`
+- `node harness/lock.mjs release <key> --owner cursor-win2`
+- `node harness/task.mjs done <ID> --agent cursor-win2` (only the owner can finish a claimed task)
+- `npm run verify` before calling it done; `npm run release` before a merge
 - Update `CURRENT_TASK.md`
 
 ### Producer
@@ -91,7 +96,7 @@ Require explicit human or Producer approval before:
 - Fixed timestep only.
 - Seeded RNG only.
 - JSON-serializable state only.
-- Run `scripts/check-sim-isolation.sh` before calling work done.
+- Run `npm run verify` before calling work done. The purity gate also plays every cartridge with randomness, clock, timers and DOM trapped.
 - Snapshot state before risky changes (`scripts/snapshot-state.sh`).
 
 ---

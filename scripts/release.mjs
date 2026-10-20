@@ -1,24 +1,73 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
+/**
+ * scripts/release.mjs — the one command to run before you tag, merge or hand off.  `npm run release`
+ *
+ * 1. Syntax-checks every JS module and Python tool.
+ * 2. Runs every required gate (scripts/run-gates.mjs --required-only).
+ * 3. Proves the closed loop still records and exits 1 on a failure.
+ * 4. Fails if any gate modified a tracked file (gates must be read-only).
+ * 5. Checks CHANGELOG.md has an entry for the package.json version.
+ * Exit 1 if anything fails.
+ */
 import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const steps = [
-  ['syntax', 'node --check harness/cartridge.mjs && node --check scripts/release.mjs'],
-  ['gates', 'node scripts/run-gates.mjs'],
-  ['closed-loop', 'node harness/closed-loop.mjs --simulate-fail; test $? -eq 1'],
-];
-for (const [label, cmd] of steps) {
-  try {
-    execSync(cmd, { stdio: 'inherit', shell: true });
-    console.log(`[release] PASS ${label}`);
-  } catch {
-    console.error(`[release] FAIL ${label}`);
-    process.exit(1);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const steps = [];
+const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
+const step = (label, ok, detail = '') => {
+  steps.push({ label, ok });
+  console.log(`[release] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail}`}`);
+};
+
+function walk(dir, re, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (!['node_modules', 'dist', '.git', '__pycache__'].includes(e.name)) walk(full, re, out);
+    } else if (re.test(e.name)) out.push(full);
   }
+  return out;
 }
-const changelog = fs.existsSync('CHANGELOG.md') ? fs.readFileSync('CHANGELOG.md', 'utf8') : '';
-if (!changelog.includes('2.2.0')) {
-  console.error('[release] FAIL changelog missing 2.2.0');
+
+// 1. Syntax
+const js = ['harness', 'qa', 'scripts', 'cartridges', 'tools'].flatMap((d) => walk(path.join(root, d), /\.(mjs|js)$/));
+js.push(path.join(root, 'hub', 'server.mjs'), path.join(root, 'hub', 'server.js'));
+const bad = js.filter((f) => run(process.execPath, ['--check', f]).status !== 0);
+step(`syntax: ${js.length} JS module(s)`, bad.length === 0, bad.map((f) => `  ${path.relative(root, f)}`).join('\n'));
+const py = ['tools', 'qa'].flatMap((d) => walk(path.join(root, d), /\.py$/));
+const pyRes = run('python3', ['-m', 'py_compile', ...py], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+step(`syntax: ${py.length} Python file(s)`, pyRes.status === 0, pyRes.stderr);
+
+// 4 (before): what git sees now
+const isGit = run('git', ['rev-parse', '--is-inside-work-tree']).stdout.trim() === 'true';
+const tracked = () => (isGit ? run('git', ['diff', '--name-only']).stdout.trim() : '');
+const before = tracked();
+
+// 2. Gates
+const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only'], { cwd: root, stdio: 'inherit' });
+step('required gates', gates.status === 0);
+
+// 3. Closed loop still fails loudly
+const loop = run(process.execPath, [path.join(root, 'harness', 'closed-loop.mjs'), '--simulate-fail']);
+step('closed loop exits 1 on a simulated failure', loop.status === 1, loop.stdout + loop.stderr);
+
+// 4 (after)
+const after = tracked();
+step('gates left tracked files unchanged', before === after, `changed by gates:\n${after}`);
+
+// 5. Changelog
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const changelog = fs.existsSync(path.join(root, 'CHANGELOG.md')) ? fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') : '';
+step(`CHANGELOG.md has an entry for ${version}`, changelog.includes(version));
+
+const failed = steps.filter((s) => !s.ok);
+console.log(`\n[release] ${steps.length - failed.length}/${steps.length} steps passed`);
+if (failed.length) {
+  console.error(`[release] NOT READY: ${failed.map((s) => s.label).join('; ')}`);
   process.exit(1);
 }
-console.log('[release] READY 2.2.0');
+console.log(`[release] READY ${version}`);
