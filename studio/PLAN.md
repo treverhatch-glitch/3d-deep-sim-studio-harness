@@ -13,8 +13,8 @@ Windows, macOS, Linux or a cloud server.
 ## Now
 
 - **Stage**: harness phase 2, give every game a real start.
-- **Focus**: keep upgrading before the stress test: agent identity and the game's voice, signed
-  results and opt-in trajectory export. Then the stress test in a private copy.
+- **Focus**: keep upgrading before the stress test: deeper skills and stricter slices (2.12.0).
+  Then the stress test in a private copy.
 - **Blocked on**: nothing.
 
 ## Milestones
@@ -30,10 +30,10 @@ Windows, macOS, Linux or a cloud server.
 | M7 | Director on duty | Pinged daily and before new tasks; reviews in `studio/bible/reviews/`; free drift report | done (2.8.0) |
 | M7b | Idea Board | Ideas go captured, shaped, placed, approved, then scheduled; nothing unapproved becomes build work | done (2.8.0) |
 | M8 | The game dev's seat | New or existing game; follow-up questions; a kept reference library; assets with a recorded statement of use; the Liaison's confirmed briefs to Producer and Director; labelled ideas; experiments you can keep or take back; a stronger learning loop with backups | done (2.9.0) |
-| M8b | Agent identity and the game's voice | Richer role cards, lessons per role, player personas for playtests, a voice and tone guide in the Bible | next |
-| M8c | Verifiable results | SHA-256 goldens and regressions (done, 2.10.0); signed result manifests; opt-in trajectory export | in progress |
-| M9 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | planned (2.11.0) |
-| M9b | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | planned (2.12.0) |
+| M8b | Agent identity and the game's voice | Richer role cards, lessons per role, player personas for playtests, a voice and tone guide in the Bible | done (2.11.0) |
+| M8c | Verifiable results and data | SHA-256 goldens and regressions (2.10.0); signed result manifests and opt-in trajectory export (2.11.0) | done (2.11.0) |
+| M9 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | planned (2.12.0) |
+| M9b | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | planned (2.13.0) |
 | M10 | One studio across machines | The HUB holds tasks, locks and events, so cloud and multi-machine agents share them | planned |
 | M11 | First real game joins | A second cartridge passes every gate with its own goldens and Bible | later |
 

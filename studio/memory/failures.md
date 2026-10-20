@@ -12,6 +12,7 @@
 - **Root cause**: <1 sentence identifying the exact cause>
 - **The fix that worked**: <1 sentence describing the minimal code/config change>
 - **How to avoid it next time**: <1 actionable rule for future agents>
+- **Role**: <the role that should learn it, e.g. builder; optional, puts it in that role's briefs>
 ```
 
 ---

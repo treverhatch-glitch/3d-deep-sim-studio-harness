@@ -550,6 +550,83 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('a cheap model adds follow-ups from the answers; questions about crossed-out or unknown layers are dropped', ai.length === 2 && ai.includes('How fast does moss spread after rain?') && !ai.some((q) => /research|kept/.test(q)), m.stdout + JSON.stringify(ai));
 }
 
+// Agent identity and the game's voice: briefs carry who the agent is, where its role gets refused,
+// lessons filed for the role, and the voice; the fun check reads the game through the personas.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const id = JSON.parse(run(dir, 'node harness/task.mjs add "Wire the moss table"', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${id} --agent builder-1`, env);
+  run(dir, `node harness/task.mjs done ${id} --agent builder-1`, env);
+  edit(dir, 'studio/memory/failures.md', (s) => `${s}\n### [2026-10-20] BUG-ROLE-1 — Golden edited instead of the bug\n- **What broke**: x\n- **Root cause**: y\n- **The fix that worked**: z\n- **How to avoid it next time**: fix the code, then regenerate\n- **Role**: builder\n`);
+  run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
+  run(dir, `node harness/focus.mjs ${id} --agent builder-1`, env);
+  const brief = fs.readFileSync(path.join(dir, `.studio/briefs/${id}.md`), 'utf8');
+  report('a focus brief says who the agent is, from its role card', /## Who you are \(studio\/roles\/builder\.md\)/.test(brief) && /Good work looks like/.test(brief), brief.slice(0, 800));
+  report('a focus brief lists where agents in that role get refused most', /## Where `builder` agents get refused most[\s\S]*1x: /.test(brief), brief);
+  report('a focus brief carries lessons filed for the role', /## Lessons filed for `builder`[\s\S]*BUG-ROLE-1/.test(brief), brief);
+  report('a focus brief for work players see carries the game\'s voice', /## The game's voice[\s\S]*Tone: Quiet, warm/.test(brief), brief);
+  const fun = run(dir, 'node scripts/fun-check.mjs').stdout;
+  report('the fun check reads the game through every persona with a lens', /## Through the personas/.test(fun) && /The first-timer: first win after/.test(fun) && /The min-maxer:/.test(fun) && /The calm player:/.test(fun) && /The explorer:/.test(fun), fun);
+}
+
+// Signed results: a signature proves who vouched; tampering breaks it; --replay re-runs the goldens.
+{
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date().toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  report('signing needs a key first', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
+  const kg = run(dir, 'node harness/sign.mjs keygen');
+  report('keygen keeps the private key out of git and the public key in studio/keys', kg.status === 0 && fs.existsSync(path.join(dir, '.studio/keys/studio-ed25519.pem')) && fs.existsSync(path.join(dir, 'studio/keys/studio-ed25519.pub.pem')) && git('check-ignore -q .studio/keys/studio-ed25519.pem').status === 0, kg.stdout + kg.stderr);
+  const sr = run(dir, 'node harness/sign.mjs result --by hatch --note "slice 1"');
+  const signed = path.join(dir, 'studio/signed', fs.readdirSync(path.join(dir, 'studio/signed'))[0]);
+  const doc = JSON.parse(fs.readFileSync(signed, 'utf8'));
+  report('a signed result lists every golden\'s SHA-256, the gates and the commit', sr.status === 0 && doc.manifest.goldens.length === 2 && doc.manifest.goldens.every((g) => /^[0-9a-f]{64}$/.test(g.sha256)) && doc.manifest.gates.required === 1 && /^[0-9a-f]{40}$/.test(doc.manifest.commit), sr.stdout + sr.stderr);
+  const v = run(dir, `node harness/sign.mjs verify "${signed}" --replay`);
+  report('verify --replay checks the signature and re-runs the goldens', v.status === 0 && /this code produces the signed results/.test(v.stdout), v.stdout + v.stderr);
+  const tampered = path.join(dir, 'tampered.json');
+  fs.writeFileSync(tampered, JSON.stringify({ ...doc, manifest: { ...doc.manifest, signedBy: 'someone-else' } }));
+  report('a changed manifest fails verification', run(dir, `node harness/sign.mjs verify "${tampered}"`).status !== 0);
+  edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'1'.repeat(64)}"`));
+  report('verify --replay fails when the repo no longer produces the signed results', run(dir, `node harness/sign.mjs verify "${signed}" --replay`).status !== 0);
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date().toISOString(), rows: [{ id: 'golden', required: true, ok: false }] }));
+  report('signing refuses a red verify unless told to record it', run(dir, 'node harness/sign.mjs result --by hatch').status !== 0);
+}
+
+// Trajectory export: opt-in only, one labelled record per finished task, secrets scrubbed.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const a = JSON.parse(run(dir, 'node harness/task.mjs add "Plan: the moss table" --role producer', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${a} --agent prod-1 --model model-a`, env);
+  fs.writeFileSync(path.join(dir, 'notes.md'), 'plan\n');
+  git(`add -A`);
+  git(`commit -q -m plan --no-verify --trailer "Studio-Task: ${a}"`);
+  run(dir, `node harness/task.mjs done ${a} --agent prod-1`, env);
+  const key = `${'sk-'}${'z'.repeat(24)}`;
+  const b = JSON.parse(run(dir, `node harness/task.mjs add "Plan: rotate ${key}" --role producer`, env).stdout).id;
+  run(dir, `node harness/task.mjs start ${b} --agent prod-1`, env);
+  run(dir, `node harness/task.mjs done ${b} --agent prod-1`, env);
+  run(dir, `node harness/task.mjs reopen ${b} --reason "missed a file"`, env);
+  run(dir, `node harness/task.mjs start ${b} --agent prod-1`, env);
+  run(dir, `node harness/task.mjs done ${b} --agent prod-1`, env);
+  report('trajectory export refuses without consent and terms', run(dir, 'node harness/trajectories.mjs export', env).status !== 0);
+  const ex = run(dir, 'node harness/trajectories.mjs export --consent "hatch, for the studio\'s own model tests" --licence "internal evaluation only"', env);
+  const out = fs.readdirSync(path.join(dir, '.studio/exports'));
+  const jsonl = fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.jsonl'))), 'utf8');
+  const recs = jsonl.trim().split('\n').map((l) => JSON.parse(l));
+  const man = JSON.parse(fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.manifest.json'))), 'utf8'));
+  report('an export writes one labelled record per finished task, with its commits', ex.status === 0 && recs.length === 2 && recs.find((r) => r.id === a)?.label === 'clean' && recs.find((r) => r.id === a)?.commits.length === 1 && recs.find((r) => r.id === b)?.label === 'caused-bug', ex.stdout + ex.stderr + jsonl);
+  report('exported text is scrubbed of key-shaped strings, and the manifest records consent and a SHA-256', !jsonl.includes(key) && /\[removed\]/.test(jsonl) && man.consent && man.licence && /^[0-9a-f]{64}$/.test(man.sha256) && man.scrubbedSecrets >= 1, JSON.stringify(man));
+}
+
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.
 {
   const dir = copyRepo();

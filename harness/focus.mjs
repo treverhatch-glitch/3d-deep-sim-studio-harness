@@ -62,10 +62,39 @@ export function buildFocus(taskId, agent = null) {
   const meetingNotes = fs.existsSync(path.join(REPO_ROOT, 'studio', 'meetings'))
     ? fs.readdirSync(path.join(REPO_ROOT, 'studio', 'meetings')).filter((f) => f.endsWith('.md') && f !== 'README.md').map((f) => read(`studio/meetings/${f}`)).filter((t) => t && t.includes(taskId))
     : [];
+  // Who this role is, the refusals agents in this role hit most, and lessons filed for the role.
+  const roleText = read(`studio/roles/${task.role}.md`) || '';
+  const identity = (roleText.split(/^## Who you are\s*$/m)[1] || '').split(/^## /m)[0].trim();
+  const sig = (m) => String(m).replace(/\bT-\d+\b/g, '#').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+  const refusals = new Map();
+  const roleOf = new Map(events.filter((e) => e.type === 'task.added' && e.task).map((e) => [e.task, (e.msg.match(/\(([^)]+)\):/) || [])[1]]));
+  for (const e of events.filter((x) => x.type === 'task.not_done' && roleOf.get(x.task) === task.role && x.msg)) {
+    const why = e.msg.replace(/^T-\d+ not done yet:\s*/, '');
+    const k = sig(why);
+    refusals.set(k, { why, n: (refusals.get(k)?.n || 0) + 1 });
+  }
+  const roleRefusals = [...refusals.values()].sort((a, b) => b.n - a.n).slice(0, 3);
+  const roleLessons = ((read('studio/memory/failures.md') || '').split('## Recorded Distilled Notes')[1] || '')
+    .split(/^### /m)
+    .slice(1)
+    .filter((l) => new RegExp(`^- \\*\\*Role\\*\\*:.*\\b${task.role.replace(/[-]/g, '\\-')}\\b`, 'mi').test(l))
+    .slice(-2)
+    .map((l) => l.trim());
+  const voice = (() => {
+    try {
+      return JSON.parse(read('studio/bible/bible.json') || 'null')?.voice || null;
+    } catch {
+      return null;
+    }
+  })();
   const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
-  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords };
+  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice };
+}
+
+export function renderVoice(v) {
+  return [v.tone ? `- Tone: ${v.tone}` : '', ...(v.do || []).map((x) => `- Do: ${x}`), ...(v.dont || []).map((x) => `- Don't: ${x}`), ...(v.never || []).length ? [`- Never say: ${v.never.join(', ')}`] : [], ...(v.examples || []).map((x) => `- Sounds like: "${x}"`)].filter(Boolean).join('\n');
 }
 
 export function renderFocus(f) {
@@ -73,7 +102,9 @@ export function renderFocus(f) {
   const L = [];
   L.push(`# Focus: ${f.task.id} ${f.task.title}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
+  if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
+  if (f.roleRefusals?.length) L.push('', `## Where \`${f.task.role}\` agents get refused most`, ...f.roleRefusals.map((r) => `- ${r.n}x: ${r.why}`), 'Do these before you run done.');
   if (f.skill) {
     const steps = part(f.skill, 'Steps');
     const never = part(f.skill, 'Never');
@@ -89,6 +120,8 @@ export function renderFocus(f) {
   L.push(f.others.length ? `- Others hold (don't edit): ${f.others.map((l) => `\`${l.key}\` (${l.owner})`).join(', ')}` : '- Nobody else holds anything right now.');
   if (f.offLimits && !/^_.*_$/.test(f.offLimits.trim())) L.push(`- Off-limits for agents (studio/game/GAME.md): ${f.offLimits}`);
   if (f.lessons.length) L.push('', '## Lessons that look related (studio/memory/failures.md)', ...f.lessons.map((l) => `### ${l.text}`));
+  if (f.roleLessons?.length) L.push('', `## Lessons filed for \`${f.task.role}\``, ...f.roleLessons.map((l) => `### ${l}`));
+  if (f.voice && ['docs', 'change', 'idea'].includes(f.check.type)) L.push('', '## The game\'s voice (anything the player reads or hears)', renderVoice(f.voice));
   L.push('', '## Gates right now');
   L.push(f.gates ? (f.red.length ? `- Last verify had failures: ${f.red.join(', ')}. Don't make them worse; say so if your task can't pass because of them.` : `- Last verify was green (${f.gates.at}).`) : '- No verify recorded yet.');
   L.push('', '## Finish or hand back');

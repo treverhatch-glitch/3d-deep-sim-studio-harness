@@ -17,6 +17,8 @@ in a chat.
 | `studio/experiments/` | Tracked experiments: open, kept or dropped. | `npm run experiment` |
 | `studio/references/LIBRARY.md` | The reference library: games, features, timestamps, what to take and avoid. | `npm run ref` |
 | `studio/assets/manifest.json` | Every shipped asset and who stated they may use it. | `npm run asset` (a person) |
+| `studio/personas/` | The players the studio judges through. | A person, or the Producer with one |
+| `studio/signed/`, `studio/keys/` | Signed results and the studio's public key (the private key stays in `.studio/keys/`). | `npm run sign` |
 | `studio/VISION_LOCK.md` | The pillars. Changing one needs a decision record. | Producer, with a person's approval |
 | `studio/game/GAME.md` | The game's fact sheet: pitch, state, pillars, engine, run commands, what agents must not touch. Written by `npm run onboard`. | A person fills in the top; rescans refresh the rest |
 | `studio/PLAN.md` | The master plan: goal, where we are now, milestones, risks. | Producer, when the phase or a milestone changes |

@@ -2,7 +2,7 @@
 /**
  * scripts/check-assets.mjs — every file the game ships has a record of who may use it.
  *
- * Fails when a file in assets/ (or cartridges/<name>/assets/) has no record in
+ * Fails when a file in assets/, public/assets/ or cartridges/<name>/assets/ has no record in
  * studio/assets/manifest.json, changed since it was recorded, or when game code points at the
  * reference library (references/ or STUDIO_REFERENCE_DIR). Record files with `npm run asset -- add`.
  * No assets at all is fine.
@@ -33,7 +33,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const shipped = [...walk(path.join(root, 'assets'))];
+const shipped = [...walk(path.join(root, 'assets')), ...walk(path.join(root, 'public', 'assets'))];
 const carts = path.join(root, 'cartridges');
 if (fs.existsSync(carts)) for (const c of fs.readdirSync(carts)) shipped.push(...walk(path.join(carts, c, 'assets')));
 

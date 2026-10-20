@@ -157,7 +157,7 @@ moving through the stages. It reads files only, like the other tabs.
 
 ## 2.9.0 — The game dev's seat: a Liaison, follow-up questions, references, assets, experiments
 
-**Status: G1 to G7 and G10 done (2.9.0); G8 (deeper agent identity) and G9 (the game's voice) next.**
+**Status: G1 to G7 and G10 done (2.9.0); G8 and G9 done (2.11.0).**
 
 **Why.** The studio runs on agents, but the game is the game dev's. Today they can answer the intake,
 pitch an idea and message the Producer. They can't yet hold a real conversation about what they mean,
@@ -175,11 +175,11 @@ while the agents keep working.
 | G5 | The Liaison: a conversation, then a confirmed brief | A new role, `liaison`: the agent the game dev talks to, any time. It asks until it understands, sorts what it heard into an **idea** (new feature: Idea Board), a **direction** (change to something that exists), an **asset** (G4) or a **question**, then restates it in plain words and asks the dev to confirm. Only a confirmed brief moves on, to both the Producer (work) and the Director (where it fits in the game's logic and phases). Nothing already running stops; the brief is just new input. The conversation runs in the dev's own agent tool first (a kickoff prompt and a skill), and later as a chat panel in the War Room through the router (a cheap model by default, under the spend cap and the token). | done (2.9.0) |
 | G6 | Labels on the Idea Board | Each idea shows where it came from: **dev, confirmed** (from the Liaison), **dev, pitched** (the quick box), **agent**, **playtest**, and whether it's new since the dev last looked. Dev-confirmed ideas are routed first. | done (2.9.0) |
 | G7 | Experiments you can keep or take back | `npm run experiment -- start "<what>"` opens a tracked experiment (X-001): its own git branch, a `Studio-Experiment` commit trailer, and, inside the game, a flag in the TUNING table so a prototype can be played without touching the main path. `keep` merges it; `drop` removes every commit tagged with it (or deletes the branch if unmerged); `drop --only <files or parts>` takes back just those. The registry (`studio/experiments/`) lists each experiment's idea, files, tasks and status, and the Game plan view shows them. Goldens are regenerated in the same commit either way. | done (2.9.0) |
-| G8 | Deeper agent identity | Richer role cards: who the agent is, what good work looks like, its common mistakes (from the scorecard and retros), the questions it should ask, and a worked example. Lessons filed per role, so a builder reads builder lessons. Player personas for playtests and fun checks (a calm player, a min-maxer, a first-timer), so agents judge the game from a player's side. | planned |
+| G8 | Deeper agent identity | Richer role cards: who the agent is, what good work looks like, its common mistakes (from the scorecard and retros), the questions it should ask, and a worked example. Lessons filed per role, so a builder reads builder lessons. Player personas for playtests and fun checks (a calm player, a min-maxer, a first-timer), so agents judge the game from a player's side. | done (2.11.0) |
 | G10 | A stronger learning loop | `npm run learn`: the same failure on two or more days, and the lesson that didn't stick; retro suggestions raised again and again; the overseer's evaluations (`notes --kind eval`). Rewritten daily by the HUB and backed up with every learning file to `STUDIO_BACKUP_DIR` (a synced Google Drive folder works), plus one combined file. The Producer's prompt makes it the overseer of every run. | done (2.9.0) |
-| G9 | The game's voice | A voice and tone section in the Bible (how the game talks: UI text, tutorial lines, dialogue, with do and don't examples), read by every agent that writes words the player sees. With VoiceStudio (optional), the same script files turn into voice lines. | planned |
+| G9 | The game's voice | A voice and tone section in the Bible (how the game talks: UI text, tutorial lines, dialogue, with do and don't examples), read by every agent that writes words the player sees. With VoiceStudio (optional), the same script files turn into voice lines. | done (2.11.0) |
 
-## 2.11.0 — Deeper skills and stricter slices
+## 2.12.0 — Deeper skills and stricter slices
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ while the agents keep working.
 | S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | planned |
 | S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | planned |
 
-## 2.12.0 — Content and craft pipelines
+## 2.13.0 — Content and craft pipelines
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -203,9 +203,9 @@ person using the harness on their own.
 | # | What | How | Status |
 | --- | --- | --- | --- |
 | V1 | Verification hashes | Goldens and regressions pin SHA-256 of the canonical state, checked in Node and Python; the HUD keeps a fast FNV-1a 64 display hash (now one true 64-bit lane). `docs/HASH.md`. | done (2.10.0) |
-| V2 | Signed results | A hash proves two states match, not who produced them. Sign result manifests (the golden, the gate report, the cartridge version, the creator) with Ed25519 from Node's built-in crypto; keys stay in the private copy. Needed before any marketplace or credits. | planned |
-| V3 | Trajectory export, opt-in | `npm run trajectories -- export`: each finished task as one record (the brief, the plan, the diff summary, the done-check, gates and review outcome, bugs traced back to it), with secrets scrubbed and the game dev's consent and licence on every record. Local only by default. Uses: evaluating and routing models today; fine-tuning a local model on a studio's own successful work; and, with consent and terms, datasets for others. Off unless the game dev turns it on. | planned |
-| V4 | Optional public timestamp receipts | Stage 3 and later, opt-in and never required: write the SHA-256 of a signed manifest to a public ledger as a receipt that a version existed at a time. Free route: OpenTimestamps (anchored in Bitcoin, no wallet). Paid route for a marketplace: a low-cost chain, posted server-side so users never need a wallet. Verification stays off-chain (replays, gates, signatures); a receipt proves a hash existed at a time, not ownership and not that the code works. No tokens. | later |
+| V2 | Signed results | A hash proves two states match, not who produced them. Sign result manifests (the golden, the gate report, the cartridge version, the creator) with Ed25519 from Node's built-in crypto; keys stay in the private copy. Needed before any marketplace or credits. | done (2.11.0) |
+| V3 | Trajectory export, opt-in | `npm run trajectories -- export`: each finished task as one record (the brief, the plan, the diff summary, the done-check, gates and review outcome, bugs traced back to it), with secrets scrubbed and the game dev's consent and licence on every record. Local only by default. Uses: evaluating and routing models today; fine-tuning a local model on a studio's own successful work; and, with consent and terms, datasets for others. Off unless the game dev turns it on. | done (2.11.0) |
+| V4 | Optional public timestamp receipts (see `docs/SIGNED-RESULTS-AND-DATA.md`) | Stage 3 and later, opt-in and never required: write the SHA-256 of a signed manifest to a public ledger as a receipt that a version existed at a time. Free route: OpenTimestamps (anchored in Bitcoin, no wallet). Paid route for a marketplace: a low-cost chain, posted server-side so users never need a wallet. Verification stays off-chain (replays, gates, signatures); a receipt proves a hash existed at a time, not ownership and not that the code works. No tokens. | later |
 
 ## HUD, access and scale
 

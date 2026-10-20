@@ -16,6 +16,7 @@
     "platforms": ["web"],
     "art": "Soft low-poly, wet greens, overcast light",
     "feelGreat": "Watching moss spread after rain",
+    "voice": "Quiet, warm, a little wry; short sentences",
     "pillars": ["Calm: rules out timers that punish leaving", "Small and dense: rules out large maps", "Readable growth: rules out hidden stats"],
     "phase1": "Plant moss by hand in one bed and water it; growth stalls once the bed is full, which makes you want more space.",
     "phase2": "Open new terraces and lay stepping stones; visitors arrive and trample paths, so layout matters.",

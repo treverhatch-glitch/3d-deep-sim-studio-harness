@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.11.0] — 2026-10-20
+### Added
+- **Agent identity**: core role cards (builder, playtester, reviewer, designer, fun tester, reference scout, 3D, Producer) gain "Who you are": what good work looks like, common mistakes, questions to ask, and an example. Every focus brief now includes it, plus where agents in that role get refused most (from the event log) and lessons filed for the role (`- **Role**:` in `failures.md`).
+- **Player personas** (`studio/personas/`: first-timer, calm player, min-maxer, explorer; add your own). `npm run fun` reads the game through each persona's lens: time to first win and dead time, pressure from waiting, room to optimise, variety of actions.
+- **The game's voice**: an intake question and three follow-ups (a winning line, a failing line, words to never use) build a voice guide in the Bible; `npm run bible -- voice` adds to it. Every brief for work players read or hear carries it.
+- **Signed results** (`npm run sign`): Ed25519 key pair (private key never committed), signed manifests of the verified state (goldens' and regressions' SHA-256, gates, commit, Bible and asset manifests), `verify --replay` re-runs the goldens. Refuses to sign a red verify unless recorded with `--allow-red`.
+- **Opt-in trajectory export** (`npm run trajectories`): one labelled record per finished task (clean, needed-fixes, caused-bug) with its commits and outcomes, scrubbed of secrets, with consent and terms in a manifest. `harness/secrets.mjs` shares the patterns with the secret scan.
+- `docs/SIGNED-RESULTS-AND-DATA.md`, including what a public receipt would and wouldn't prove.
+### Changed
+- The assets gate also covers `public/assets/`.
+
+---
+
 ## [2.10.0] — 2026-10-20
 ### Changed
 - **Two-tier hashing.** Golden files and regressions now pin **SHA-256** of the canonical state (64 hex), checked in Node and independently in Python. The display hash for the HUD and reports is now a true **FNV-1a 64-bit** hash (one lane, standard test vectors in the self-test) instead of two correlated 32-bit lanes. Both hash the same bytes: canonical JSON as UTF-8. `harness/hash.mjs` stays browser-safe (SHA-256 loads Node's crypto only when called), so cartridges keep no imports. All goldens and the regression were regenerated in this release. Node 22.3 or newer.

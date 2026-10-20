@@ -37,6 +37,22 @@ const longestGap = Math.max(
 );
 const choicesMatter = idleWins.length < wins.length || (idleTicks !== null && playTicks !== null && idleTicks >= playTicks * 1.25);
 
+// Through the players in studio/personas/: each known lens reads the same runs from that player's side.
+const best = wins.length ? Math.min(...wins.map((r) => r.ticksRun)) : null;
+const kinds = new Set(played.flatMap((r) => r.actions.map((a) => a.action?.type || a.action?.kind || 'action')));
+const idleLost = idle.filter((r) => r.outcome === 'lost');
+const LENSES = {
+  'first-timer': () => (playTicks === null ? 'never reaches a first win.' : `first win after about ${playTicks} ticks; the longest stretch with nothing to do is ${longestGap} ticks${playTicks && longestGap > playTicks * 0.25 ? ', long enough to feel stuck' : ''}.`),
+  'calm-player': () => (idleLost.length ? `doing nothing loses on ${idleLost.length}/${seeds.length} seeds${avg(idleLost.map((r) => r.ticksRun)) ? ` after about ${avg(idleLost.map((r) => r.ticksRun))} ticks` : ''}: check that the pressure feels fair, not rushed.` : 'never punished for waiting.'),
+  'min-maxer': () => (best === null ? 'nothing to optimise yet.' : `best run ${best} ticks against an average of ${playTicks}${best >= playTicks * 0.95 ? ': little room to play better than average' : ''}${choicesMatter ? '' : '; idling wins, so choices feel pointless'}.`),
+  explorer: () => `${kinds.size} kind(s) of action in the slice${kinds.size <= 2 ? ': little to discover yet' : ''}.`,
+};
+const personaDir = path.join(root, 'studio', 'personas');
+const personas = fs.existsSync(personaDir) ? fs.readdirSync(personaDir).filter((f) => f.endsWith('.md') && f !== 'README.md').map((f) => {
+  const t = fs.readFileSync(path.join(personaDir, f), 'utf8');
+  return { name: (t.match(/^# (.+)$/m) || [, f])[1], lens: (t.match(/^lens:\s*(\S+)/m) || [])[1] };
+}) : [];
+
 const report = [
   `# Fun proxy report: ${cart.name}`,
   '',
@@ -46,6 +62,7 @@ const report = [
   `- longest stretch with no player action: ${longestGap} ticks`,
   `- actions per 100 ticks: ${avg(played.map((r) => (100 * r.actions.length) / Math.max(1, r.ticksRun)))}`,
   '- human-review: required',
+  ...(personas.length ? ['', '## Through the personas (studio/personas/)', ...personas.map((p) => `- ${p.name}: ${LENSES[p.lens] ? LENSES[p.lens]() : 'no script lens; judge by hand.'}`)] : []),
   '',
   'Proxies only. A person signs the slice in studio/fun/review-YYYY-MM-DD.md.',
   '',

@@ -9,6 +9,8 @@
  *   npm run bible -- sign --by <person>    a person signs it: pre-production ends, Phase 1 opens
  *   npm run bible -- phase open <2|3> --by <person> [--force "reason"]
  *   npm run bible -- json                  the whole Bible plus the question and layer catalogs
+ *   npm run bible -- voice [--tone "…"] [--do "…"] [--dont "…"] [--never "a, b"] [--example "…"]
+ *                                          the game's voice: read by every agent writing what players see
  *
  * The authority is `studio/bible/bible.json`. `BIBLE.md` and `NOT-DOING.md` are written from it for
  * agents to read; edit the JSON through intake, this CLI, the Director, or the War Room, not by hand.
@@ -57,6 +59,7 @@ export const QUESTIONS = [
   { id: 'platforms', kind: 'multi', options: ['web', 'desktop', 'mobile', 'console'], ask: 'Where does it run?' },
   { id: 'art', kind: 'text', ask: 'Art direction in a few words (style, mood, references)?' },
   { id: 'feelGreat', kind: 'text', ask: 'The one thing that has to feel great?' },
+  { id: 'voice', kind: 'text', ask: 'How does the game talk to the player, in a few words (warm, dry, playful, epic…)?' },
   { id: 'pillars', kind: 'list', ask: '3 to 5 pillars, one per line as "name: what it rules out".' },
   { id: 'phase1', kind: 'text', ask: 'Phase 1, early game: what does the player do by hand, and what makes it start to feel slow or small?' },
   { id: 'phase2', kind: 'text', ask: 'Phase 2, mid game: how does the player scale up or build the machine, and what new pressure appears?' },
@@ -94,6 +97,9 @@ export const LAYERS = [
 
 /** Follow-up questions per kept or explore layer, and per phase. Always available: no model, no keys. */
 export const FOLLOWUPS = {
+  'voice:win': ['Write one line the game says when the player wins or finishes something big.'],
+  'voice:fail': ['Write one line the game says when the player fails or falls behind.'],
+  'voice:never': ['Which words or phrases should the game never use? (comma-separated)'],
   'phase:1': ['What does the very first minute look like, before the player has learned anything?', 'What is the first small win, and how long until it happens?'],
   'phase:2': ['What bottleneck from Phase 1 pushes the player into Phase 2, and what solves it?', 'What new pressure appears in the mid game that wasn\'t there before?'],
   'phase:3': ['What is the hardest test the game asks of the player?', 'What does the player see or feel when they finish (or decide to keep playing)?'],
@@ -125,7 +131,7 @@ export const FOLLOWUPS = {
 
 /** Follow-ups still unanswered: the phases, and every layer answered yes or explore. */
 export function pendingFollowups(b) {
-  const keys = ['phase:1', 'phase:2', 'phase:3', ...LAYERS.filter((l) => ['yes', 'explore'].includes(b.layers?.[l.id]?.answer)).map((l) => l.id)];
+  const keys = ['voice:win', 'voice:fail', 'voice:never', 'phase:1', 'phase:2', 'phase:3', ...LAYERS.filter((l) => ['yes', 'explore'].includes(b.layers?.[l.id]?.answer)).map((l) => l.id)];
   const out = [];
   for (const k of keys) (FOLLOWUPS[k] || []).forEach((q, i) => {
     const key = `${k}#${i + 1}`;
@@ -140,6 +146,9 @@ export function answerFollowup(b, key, a, by = 'game-dev') {
   const f = known.find((x) => x.key === key);
   if (!f) return false;
   b.followups = { ...(b.followups || {}), [key]: { about: f.about, q: f.q, a: String(a).trim(), source: f.source, by, at: new Date().toISOString() } };
+  // Voice answers also feed the voice guide every writing agent reads.
+  if (f.about === 'voice:win' || f.about === 'voice:fail') b.voice = { ...(b.voice || {}), examples: [...new Set([...(b.voice?.examples || []), String(a).trim()])] };
+  if (f.about === 'voice:never') b.voice = { ...(b.voice || {}), never: [...new Set([...(b.voice?.never || []), ...String(a).split(',').map((x) => x.trim()).filter(Boolean)])] };
   return true;
 }
 
@@ -204,6 +213,7 @@ export function applyAnswers(b, input = {}) {
       continue;
     }
     if (k === 'pillars') b.pillars = parsePillars(v);
+    else if (k === 'voice') b.voice = { ...(b.voice || {}), tone: String(v).trim() };
     else if (/^phase[123]$/.test(k)) b.phases[k.slice(5)] = { ...(b.phases[k.slice(5)] || {}), player: String(v).trim() };
     else b.answers[k] = v;
   }
@@ -337,6 +347,10 @@ export function renderBible(b) {
   L.push('## Pitch', `${a.fantasy || '_?_'} The main verb: **${a.verb || '?'}**.`, '');
   const pl = PLAY_LENGTHS[a.playLength];
   L.push(`- Play length: ${pl ? pl.label : '_?_'}${pl ? `. ${pl.involvement}` : ''}`, `- One sitting: ${a.session || '_?_'}`, `- For: ${a.audience || '_?_'}`, `- Genres: ${(a.genres || []).join(', ') || '_?_'}`, `- Platforms: ${(a.platforms || []).join(', ') || '_?_'}`, `- Art: ${a.art || '_?_'}`, `- Has to feel great: ${a.feelGreat || '_?_'}`, `- Win: ${a.win || '_?_'}`, `- Lose: ${a.lose || '_?_'}`, `- First playable slice: ${a.slice || '_?_'}`, `- Never: ${a.never || '_?_'}`, '');
+  if (b.voice && (b.voice.tone || b.voice.examples?.length || b.voice.do?.length)) {
+    const v = b.voice;
+    L.push('## Voice (how the game talks)', ...[v.tone ? `- Tone: ${v.tone}` : '', ...(v.do || []).map((x) => `- Do: ${x}`), ...(v.dont || []).map((x) => `- Don't: ${x}`), v.never?.length ? `- Never say: ${v.never.join(', ')}` : '', ...(v.examples || []).map((x) => `- Sounds like: "${x}"`)].filter(Boolean), '');
+  }
   L.push('## Pillars', ...(b.pillars?.length ? b.pillars.map((p) => `- **${p.name}**${p.rulesOut ? `: rules out ${p.rulesOut}` : ''}`) : ['_None yet._']), '');
   L.push('## Phases', '');
   const names = { 1: 'Early game', 2: 'Mid game', 3: 'Endgame' };
@@ -434,6 +448,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(err.message);
       process.exit(1);
     }
+  }
+  if (cmd === 'voice') {
+    const add = (k, v) => (v ? (b.voice = { ...(b.voice || {}), [k]: [...new Set([...(b.voice?.[k] || []), ...(k === 'never' ? v.split(',').map((x) => x.trim()).filter(Boolean) : [v])])] }) : null);
+    if (flag('tone')) b.voice = { ...(b.voice || {}), tone: flag('tone') };
+    add('do', flag('do'));
+    add('dont', flag('dont'));
+    add('never', flag('never'));
+    add('examples', flag('example'));
+    writeBible(b);
+    console.log(b.voice ? Object.entries(b.voice).map(([k, v]) => `${k}: ${[].concat(v).join(' | ')}`).join('\n') : 'No voice yet: --tone "…" --do "…" --dont "…" --never "a, b" --example "…"');
+    process.exit(0);
   }
   if (cmd === 'sign') {
     const res = signBible(b, flag('by'));

@@ -7,7 +7,8 @@ or a fun pass.
 1. Pick the seed and length up front: `node qa/playtest.mjs --stage 1 --seed 1337 --ticks 300`.
 2. Read the report in `qa/reports/`. A failure has a seed and a failing tick; that is a bug for
    someone else (`node harness/task.mjs add "<what broke>" --type bug`).
-3. For a fun pass: `npm run fun` (writes `studio/fun/latest.md`).
+3. For a fun pass: `npm run fun` (writes `studio/fun/latest.md`). Read the "Through the personas"
+   lines and say, for each problem, which persona in `studio/personas/` it hurts.
 
 **Done means.** A playtest report in `qa/reports/`, written after the task started, on the current
 build: seed, ticks run, final hash, and the failing tick if it failed. For a fun task: a fun report

@@ -30,6 +30,14 @@
   The reference library (media kept in `references/` or `STUDIO_REFERENCE_DIR`, index in `studio/references/`). Never shipped.
 - `npm run asset -- add <file> --use game --owner … --licence … --by <person>` · `--use reference`
   Game assets with a recorded statement of who may use them (`studio/assets/manifest.json`); the `assets` gate checks every shipped file.
+- `npm run bible -- voice [--tone …] [--do …] [--dont …] [--never "a, b"] [--example …]`
+  The game's voice; in every brief for work players read or hear.
+- `studio/personas/*.md` (first-timer, calm player, min-maxer, explorer; add your own)
+  Players the studio judges through; `npm run fun` reads the game through each persona with a `lens:`.
+- `npm run sign -- keygen | result --by <name> | verify <file> [--replay] | fingerprint`
+  Ed25519-signed manifests of verified results (goldens' SHA-256, gates, commit). `docs/SIGNED-RESULTS-AND-DATA.md`.
+- `npm run trajectories -- preview | export --consent "…" --licence "…" [--with-briefs]`
+  Opt-in, scrubbed, labelled records of finished tasks for evaluating or training models; `.studio/exports/`.
 - `npm run learn [-- backup --to <folder>]`
   What keeps happening, lessons that didn't stick, suggestions never handled, the overseer's evaluations; daily by the HUB, backed up to `STUDIO_BACKUP_DIR`.
 - `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`

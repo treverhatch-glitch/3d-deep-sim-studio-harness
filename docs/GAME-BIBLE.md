@@ -36,6 +36,11 @@ local model writes a few more from your own answers; a script drops any that rep
 touch a crossed-out layer. Answer any time: `npm run intake -- --followups`, the Game plan view, or in
 conversation with the Liaison. Answers land in `BIBLE.md` under "Details".
 
+**The game's voice.** One intake question (how the game talks, in a few words) and three
+follow-ups (a line for winning, a line for failing, words it must never use) make a voice guide in
+the Bible. Add to it any time: `npm run bible -- voice --do "…" --dont "…" --never "a, b" --example "…"`.
+Every agent writing something the player reads or hears gets it in its brief.
+
 ## 2. Phases: the three parts of the game the player plays
 
 | Phase | The player | Moves on when |

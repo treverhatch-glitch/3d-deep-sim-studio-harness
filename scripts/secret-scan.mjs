@@ -15,29 +15,9 @@ const args = process.argv.slice(2);
 const STAGED = args.includes('--staged');
 const ROOT = path.resolve(args.find((a) => !a.startsWith('--')) || '.');
 
-// Length-anchored so provider ids such as "xai-grok-4" or "sk-ant" in docs do not match.
-const PATTERNS = [
-  /sk-[A-Za-z0-9]{20,}/, // OpenAI legacy, DeepSeek, many others
-  /sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/, // OpenAI project / service keys
-  /sk-ant-[A-Za-z0-9_-]{20,}/, // Anthropic
-  /sk-or-v1-[A-Za-z0-9]{20,}/, // OpenRouter
-  /sk_live_[A-Za-z0-9]{16,}/, // Stripe
-  /rk_live_[A-Za-z0-9]{16,}/,
-  /nvapi-[A-Za-z0-9_-]{20,}/, // NVIDIA NIM
-  /gsk_[A-Za-z0-9]{20,}/, // Groq
-  /xai-[A-Za-z0-9]{20,}/, // xAI
-  /AIza[0-9A-Za-z_-]{30,}/, // Google API key
-  /ya29\.[0-9A-Za-z_-]{20,}/, // Google OAuth access token
-  /AKIA[0-9A-Z]{16}/, // AWS access key id
-  /gh[pousr]_[A-Za-z0-9]{30,}/, // GitHub tokens
-  /github_pat_[A-Za-z0-9_]{20,}/,
-  /glpat-[A-Za-z0-9_-]{16,}/, // GitLab
-  /xox[abposr]-[A-Za-z0-9-]{20,}/, // Slack
-  /hf_[A-Za-z0-9]{20,}/, // Hugging Face
-  /r8_[A-Za-z0-9]{20,}/, // Replicate
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-];
-const SKIP = /(^|\/)(secret-scan\.(mjs|sh)|package-lock\.json|[^/]*\.lock)$/;
+import { SECRET_PATTERNS as PATTERNS } from '../harness/secrets.mjs';
+
+const SKIP = /(^|\/)(secret-scan\.(mjs|sh)|secrets\.mjs|package-lock\.json|[^/]*\.lock)$/;
 
 function listFiles() {
   const git = (a) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
