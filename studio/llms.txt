@@ -17,7 +17,7 @@
 - `node harness/task.mjs pause <ID> --agent <you> --note "<where you stopped>"`
   Hands a task back (out of usage, swapped, stuck): top of the queue, claim released, note in `studio/handoffs/<ID>.md` shown to the next agent.
 - `npm run watch [-- --loop 300]`
-  Zero-token watcher: requeues work whose claim expired, flags silent agents and provider outages, pings the Producer with one `Watch:` task.
+  Zero-token watcher: requeues work whose claim expired, flags silent agents and provider outages, pings the Producer with one `Watch:` task. Runs on its own every 5 minutes while the HUB is up (`STUDIO_WATCH_INTERVAL`, 0 = off) and at `npm run session:start`.
 - `npm run onboard -- --path <game folder> --name "<name>" [--dry-run]`
   Brings an existing game in: read-only scan, `studio/game/GAME.md` fact sheet, onboarding tasks. Guide: `docs/ONBOARDING-A-GAME.md`.
 - `node harness/done-check.mjs <ID>`

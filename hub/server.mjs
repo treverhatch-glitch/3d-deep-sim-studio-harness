@@ -42,6 +42,7 @@ import { startTask, completeTask, addTask, NEXT_FILE } from '../harness/task.mjs
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState } from '../harness/hud.mjs';
+import { watchPass } from '../harness/watch.mjs';
 
 loadDotEnv();
 
@@ -846,8 +847,23 @@ export function startHubCli() {
     console.log(` Subscription Usage File       : ${path.relative(REPO_ROOT, USAGE_FILE)}`);
     console.log(` War Room Config File          : ${path.relative(REPO_ROOT, WAR_ROOM_CONFIG_FILE)}`);
     console.log(` LLM Token Cost                : 0% (Passive local WebSocket + SSE)`);
+    console.log(` Watcher                       : ${WATCH_EVERY > 0 ? `every ${WATCH_EVERY}s (STUDIO_WATCH_INTERVAL=0 turns it off)` : 'off'}`);
     console.log('====================================================================');
   });
+  // While the HUB is up, the watcher runs on its own: a script pass, no model, no tokens.
+  const WATCH_EVERY = Number(process.env.STUDIO_WATCH_INTERVAL ?? 300);
+  if (WATCH_EVERY > 0) {
+    const pass = () => {
+      try {
+        const r = watchPass();
+        if (r.findings.length) console.log(`[watch] ${r.findings.map((f) => f.msg).join(' | ')}`);
+      } catch (err) {
+        console.error(`[watch] ${err.message}`);
+      }
+    };
+    setTimeout(pass, 5000).unref();
+    setInterval(pass, WATCH_EVERY * 1000).unref();
+  }
   return server;
 }
 

@@ -21,6 +21,10 @@ skills say how a kind of work gets finished. Each file has four parts: **When**,
 
 Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you).
 
+**Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
+hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and
+at session start) catches agents that stop without a word.
+
 **Forcing.** `task done <ID> --force` finishes a task whose check failed. It is never silent: it
 writes a `task.forced` event, the War Room flags it, and the Producer gets a P1
 `Check forced done <ID>` task naming what was skipped. The Producer runs that check (or orders

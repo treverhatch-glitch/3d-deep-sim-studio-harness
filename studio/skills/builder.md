@@ -11,6 +11,11 @@
    you tried (`node harness/closed-loop.mjs` does this for playtest failures).
 5. Green: run the full `npm run verify`.
 
+**Running low on usage, or being swapped out?** Hand it back before you stop:
+`node harness/task.mjs pause <ID> --agent <you> --note "what is done, what is left, files touched"`.
+If you can't, the watcher requeues the task once your claim expires and leaves your last messages
+for the next agent.
+
 **Done means.** A full `npm run verify` passed after the task started. If a hash changed, the
 golden was regenerated in the same commit.
 

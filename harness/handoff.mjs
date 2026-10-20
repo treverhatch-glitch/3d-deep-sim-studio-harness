@@ -19,6 +19,7 @@ import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { readLog, addLogNote } from './producer-log.mjs';
 import { activeMeeting, MEETINGS_DIR } from './meeting.mjs';
+import { watchPass } from './watch.mjs';
 
 const read = (rel) => {
   try {
@@ -128,7 +129,8 @@ export function buildHandoff() {
   const plugins = readJson('studio/plugins.json')?.plugins?.filter((p) => p.enabled).map((p) => p.name) || [];
   const forced = [...q.inProgress, ...q.backlog].filter((t) => /^(Check forced done|Watch:)/i.test(t.title));
   const paused = q.backlog.filter((t) => fs.existsSync(path.join(REPO_ROOT, 'studio', 'handoffs', `${t.id}.md`)));
-  const watch = readJson('.studio/watch-last.json');
+  // Fresh, read-only watcher pass: what it would flag right now.
+  const watch = watchPass({ dryRun: true });
   const sheet = read('studio/game/GAME.md');
   const field = (label) => (sheet?.match(new RegExp(`\\*\\*${label}\\*\\*[^:]*:\\s*(.+)`)) || [, null])[1];
   const gameInfo = sheet ? { name: (sheet.match(/^# (.+?):/m) || [, '?'])[1], pitch: field('Pitch'), state: field('State'), engine: field('Engine and tools'), offLimits: field('Off-limits'), updated: mtime('studio/game/GAME.md') } : null;
@@ -214,8 +216,7 @@ export function renderHandoff(h) {
   if (h.lastFailure) add(`- Last recorded failure: ${h.lastFailure.cartridge} seed ${h.lastFailure.seed} tick ${h.lastFailure.tick}, ${age(h.lastFailure.updated)}. Replay: ${h.lastFailure.replay}`);
   add(...(h.bugs.length ? h.bugs.map((t) => `- Open bug ${t.id} [${t.priority}]: ${t.title}`) : ['- No open bug tasks.']));
 
-  if (h.watch) add(h.watch.findings.length ? `- Watcher (${h.watch.at}): ${h.watch.findings.map((f) => f.msg).join('; ')}` : `- Watcher (${h.watch.at}): all quiet`);
-  else add('- Watcher has not run. npm run watch (or --loop 300) keeps an eye on stalled and abandoned work for free.');
+  add(h.watch.findings.length ? `- Watcher right now: ${h.watch.findings.map((f) => f.msg).join('; ')}` : '- Watcher right now: all quiet');
 
   head('Waiting on a person');
   add(...(h.signoffs.length ? h.signoffs.map((s) => `- ${s.title} (${s.file}, ${age(s.updated)}): ${s.signed ? 'signed off' : 'not signed off yet'}`) : ['- Nothing.']));

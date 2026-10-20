@@ -52,7 +52,8 @@ standing with GitHub and model providers, and they keep a many-agent team fast a
   "where I stopped, what is left"` puts the task at the top of the queue with a note in
   `studio/handoffs/<ID>.md`. The next agent, from any tool or provider, sees the note when it starts
   the task. Same idea as the Producer's handoff, one level down.
-- **If it stops without a word, the watcher notices.** `npm run watch` (or `--loop 300`) is a script,
+- **If it stops without a word, the watcher notices.** The HUB runs it every 5 minutes and
+  `npm run session:start` runs it once; `npm run watch` runs it by hand. It is a script,
   not a model, so it costs nothing. It requeues work whose claim expired, with a note naming the last
   agent, and flags agents that hold a task but have gone quiet.
 

@@ -17,9 +17,10 @@
  *     and providers that ran out (route.exhausted) in the last hour.
  */
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
 
@@ -28,6 +29,17 @@ const arg = (name, fallback) => {
   return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? Number(process.argv[i + 1]) : fallback;
 };
 const ago = (ms) => `${Math.max(0, Math.round((Date.now() - ms) / 60000))} min`;
+
+// A free, mechanical summary for the next agent: what the last one said, and what is uncommitted.
+function trail(events, agent) {
+  const said = events.filter((e) => e.agent === agent && e.msg).slice(-3).map((e) => `- ${e.ts.slice(11, 16)} ${e.type}: ${e.msg}${e.target ? ` (${e.target})` : ''}`);
+  const st = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/NEXT\.md|studio\/CURRENT_TASK\.md|studio\/handoffs)/.test(l)) : [];
+  return [
+    said.length ? `Its last words:\n${said.join('\n')}` : 'It left no messages.',
+    dirty.length ? `Uncommitted changes in the repo (check before you continue):\n${dirty.slice(0, 8).map((l) => `- ${l.trim()}`).join('\n')}${dirty.length > 8 ? `\n- …and ${dirty.length - 8} more` : ''}` : 'No uncommitted changes.',
+  ].join('\n');
+}
 
 export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) {
   const now = Date.now();
@@ -50,9 +62,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     if (!lock) {
       // Nobody holds it any more: put it back where any agent can take it.
       if (/^Check forced done|^Watch:/i.test(t.title) || t.role === 'producer' || t.role === 'human') continue;
-      const note = last
-        ? `The claim ran out. Last heard from ${last.agent} ${ago(last.at)} ago (${last.type}). Check the files it was working on before continuing.`
-        : 'In progress with no claim and no activity on record.';
+      const note = last ? `The claim ran out. Last heard from ${last.agent} ${ago(last.at)} ago (${last.type}).\n${trail(events, last.agent)}` : 'In progress with no claim and no activity on record.';
       if (!dryRun) pauseTask(t.id, 'watch', note, { force: true });
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${note}`, producer: false });
       continue;
