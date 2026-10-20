@@ -179,7 +179,7 @@ while the agents keep working.
 | G10 | A stronger learning loop | `npm run learn`: the same failure on two or more days, and the lesson that didn't stick; retro suggestions raised again and again; the overseer's evaluations (`notes --kind eval`). Rewritten daily by the HUB and backed up with every learning file to `STUDIO_BACKUP_DIR` (a synced Google Drive folder works), plus one combined file. The Producer's prompt makes it the overseer of every run. | done (2.9.0) |
 | G9 | The game's voice | A voice and tone section in the Bible (how the game talks: UI text, tutorial lines, dialogue, with do and don't examples), read by every agent that writes words the player sees. With VoiceStudio (optional), the same script files turn into voice lines. | planned |
 
-## 2.10.0 — Deeper skills and stricter slices
+## 2.11.0 — Deeper skills and stricter slices
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -188,12 +188,24 @@ while the agents keep working.
 | S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | planned |
 | S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | planned |
 
-## 2.11.0 — Content and craft pipelines
+## 2.12.0 — Content and craft pipelines
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
 | C1 | No content pipeline for a big game. | Content as data under `cartridges/<game>/content/` (JSON with a schema per kept layer, tagged by phase), checked by a gate, written by generators, with a sweep for the economy and unlock curve across the phases. Crossed-out layers need no content. | planned |
 | C2 | Art, audio and narrative are folders and notes, not tools. | One tool each that an agent drives and a gate checks (when the layer is kept): art through Blender presets plus a budget check; audio through a sound preset generator plus loudness and length checks; narrative as structured dialogue files with a lint (missing speakers, dead branches). | planned |
+
+## 2.10.0 and later — Verifiable results, data, and the platform
+
+Groundwork for a platform where results are shared, sold or rewarded. Each piece is optional for a
+person using the harness on their own.
+
+| # | What | How | Status |
+| --- | --- | --- | --- |
+| V1 | Verification hashes | Goldens and regressions pin SHA-256 of the canonical state, checked in Node and Python; the HUD keeps a fast FNV-1a 64 display hash (now one true 64-bit lane). `docs/HASH.md`. | done (2.10.0) |
+| V2 | Signed results | A hash proves two states match, not who produced them. Sign result manifests (the golden, the gate report, the cartridge version, the creator) with Ed25519 from Node's built-in crypto; keys stay in the private copy. Needed before any marketplace or credits. | planned |
+| V3 | Trajectory export, opt-in | `npm run trajectories -- export`: each finished task as one record (the brief, the plan, the diff summary, the done-check, gates and review outcome, bugs traced back to it), with secrets scrubbed and the game dev's consent and licence on every record. Local only by default. Uses: evaluating and routing models today; fine-tuning a local model on a studio's own successful work; and, with consent and terms, datasets for others. Off unless the game dev turns it on. | planned |
+| V4 | Optional public timestamp receipts | Stage 3 and later, opt-in and never required: write the SHA-256 of a signed manifest to a public ledger as a receipt that a version existed at a time. Free route: OpenTimestamps (anchored in Bitcoin, no wallet). Paid route for a marketplace: a low-cost chain, posted server-side so users never need a wallet. Verification stays off-chain (replays, gates, signatures); a receipt proves a hash existed at a time, not ownership and not that the code works. No tokens. | later |
 
 ## HUD, access and scale
 

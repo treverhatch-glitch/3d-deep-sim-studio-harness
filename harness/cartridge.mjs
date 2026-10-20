@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
-import { hash64 } from './hash.mjs';
+import { hash64, sha256 } from './hash.mjs';
 
 export const CARTRIDGES_DIR = path.join(REPO_ROOT, 'cartridges');
 const GATES_FILE = path.join(REPO_ROOT, 'studio', 'gates.json');
@@ -108,6 +108,8 @@ export async function loadCartridge(name = defaultCartridgeName()) {
     step: (state, actions) => mod.step(state, actions && actions.length ? actions : null),
     invariants: (state) => normalizeFindings(mod.invariants ? mod.invariants(state) : [], state),
     hash: (state) => hashFn(state),
+    // Verification hash: always the harness's SHA-256 of the canonical state, whatever the cartridge's display hash is.
+    sha256: (state) => sha256(state),
     outcome: (state) => (mod.outcome ? mod.outcome(state) : state?.won ? 'won' : state?.lost ? 'lost' : null),
   };
   cart.createAdapter = () => (typeof qa.createAdapter === 'function' ? fillAdapter(qa.createAdapter(), cart) : makeAdapter(cart));
@@ -137,7 +139,7 @@ export function replay(cart, { seed = 1, tick = 100, actions = [], tuning } = {}
       break;
     }
   }
-  return { cartridge: cart.name, seed, tick, ticksRun, failingTick, findings, outcome: cart.outcome(state), hash: cart.hash(state), state };
+  return { cartridge: cart.name, seed, tick, ticksRun, failingTick, findings, outcome: cart.outcome(state), hash: cart.hash(state), sha256: cart.sha256(state), state };
 }
 
 /** Play a named scenario from qa.mjs (scripted actions and/or a pure policy) until won, lost or maxTicks. */
@@ -187,6 +189,7 @@ export function runScenario(cart, scenarioName, { seed, tuning } = {}) {
     findings,
     actions,
     hash: cart.hash(state),
+    sha256: cart.sha256(state),
     state,
   };
 }

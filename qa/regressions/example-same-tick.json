@@ -22,7 +22,8 @@
       }
     }
   ],
-  "hash": "665e61f25ea22e47",
+  "hash": "2d2f36d44a6b86d2",
   "description": "Two actions on tick 1 must both apply. Revert of the array-per-tick fix should change this hash.",
-  "cartridge": "example-sim"
+  "cartridge": "example-sim",
+  "sha256": "b648b54c39d429838641e7ba83fc72825757e75d569f1a4ff94c605457e208d9"
 }

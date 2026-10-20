@@ -5,7 +5,7 @@
   "actions": [
     { "tick": 1, "action": { "type": "spawn", "kind": "unit", "x": 0, "z": 0 } }
   ],
-  "hash": "REPLACE_WITH_64BIT",
-  "hashWidth": 64,
-  "note": "New games should commit a 64-bit golden before the first playable slice. Generate with node qa/check-golden.mjs --update or python tools/golden.py --update."
+  "hash": "REPLACE_WITH_DISPLAY_HASH",
+  "sha256": "REPLACE_WITH_SHA256",
+  "note": "Fill both with npm run golden -- --update. sha256 is the verification hash; hash is the 16-hex display hash. See docs/HASH.md."
 }

@@ -53,7 +53,7 @@ const run = () =>
     : replay(cart, { seed: args.seed, tick: args.tick, actions: args.actions, tuning: args.tuning });
 const a = run();
 const b = run();
-const deterministic = a.hash === b.hash;
+const deterministic = a.sha256 === b.sha256 && a.hash === b.hash;
 
 if (args.stateOut) fs.writeFileSync(args.stateOut, JSON.stringify(a.state));
 
@@ -78,7 +78,8 @@ if (!args.quiet) {
         actions: args.scenario ? a.actions.length : args.actions.length,
         deterministic,
         hash: a.hash,
-        hashVerify: b.hash,
+        sha256: a.sha256,
+        sha256Again: b.sha256,
         outcome: a.outcome,
         failingTick: a.failingTick,
         findings: a.findings,

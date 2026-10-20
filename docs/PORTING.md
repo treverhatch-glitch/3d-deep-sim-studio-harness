@@ -30,7 +30,7 @@ Because `src/sim/` and `cartridges/` are 100% pure TypeScript/JavaScript with ze
 When porting a validated TypeScript 3D deep-sim into **Unity 6 / LTS**:
 
 - [ ] **Step 1 — Verify Sim Purity & Seed Replay Baseline**:
-  Run `node scripts/check-sim-isolation.mjs` and `node harness/replay.mjs --seed 42069 --tick 120` to record your reference FNV-1a state hash (`hash`) and JSON snapshot at tick `120`.
+  Run `node scripts/check-sim-isolation.mjs` and `node harness/replay.mjs --seed 42069 --tick 120` to record your reference state hash (`sha256`) and JSON snapshot at tick `120`.
 - [ ] **Step 2 — Compile or Transpile `src/sim/` via `SharpTS`**:
   Use [`nickna/SharpTS`](https://github.com/nickna/SharpTS) (TypeScript-to-.NET IL/C# compiler) to compile `src/sim/` into a pure `.dll` assembly (or C# classes) and drop it into `Assets/Plugins/SimCore/`.
 - [ ] **Step 3 — Wire Unity's `FixedUpdate()` to Deterministic `step(state, action)`**:

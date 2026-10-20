@@ -80,7 +80,7 @@
 - `step(state, actions|null)` — one fixed tick, returns a new state; `actions` is an array.
 - `invariants(state)` — `[{ id, severity: 'P0'|'P1'|'P2', summary }]` (NaN/Infinity check added by the harness).
 - `outcome(state)` — `'won' | 'lost' | null`. `TUNING` — every balance number in one table.
-- `hashState(state)` optional — default is the 64-bit hash in `harness/hash.mjs` (= `tools/golden.py`).
+- `hashState(state)` optional — the display hash; default FNV-1a 64 in `harness/hash.mjs` (= `tools/golden.py`). Goldens and regressions pin the harness's SHA-256 of the state (`sha256`), never the display hash alone.
 `cartridges/<name>/qa.mjs`: `scenarios['start-to-win'] = { seed, maxTicks, policy(state, tick), expect: 'won' }`.
 
 ## 3. Everyday commands

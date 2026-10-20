@@ -250,7 +250,7 @@ function formatMarkdownReport(report) {
           `- **Scenario**: \`${report.stage1.scenario ?? 'none'}\` · **Seed**: \`${report.stage1.seed}\``,
           `- **Ticks run**: \`${report.stage1.ticksRun}\` · **Outcome**: \`${report.stage1.outcome ?? 'none'}\``,
           `- **Failing tick**: \`${report.stage1.failingTick ?? 'none'}\``,
-          `- **State hash (64-bit)**: \`${report.stage1.finalHash}\``,
+          `- **State hash (display, FNV-1a 64)**: \`${report.stage1.finalHash}\``,
           `- **Replay**: \`node harness/replay.mjs --trace .studio/last-seed-failure.json\` after a closed-loop failure`,
           `- **Duration**: \`${report.stage1.durationMs}ms\``,
         ].join('\n')

@@ -18,6 +18,7 @@
 
 ## Didn't work
 
+- [2026-10-20 · producer] The 64-bit display hash was two correlated 32-bit FNV lanes, weaker than its width and forgeable. Fixed in 2.10.0: SHA-256 verifies goldens and regressions; the display hash is a true FNV-1a 64.
 - [2026-10-20 · producer] Done-checks compared file times, so touching a file could pass a check. Mostly fixed in 2.6.0 (content checks); a balance sweep can still pass when the game hasn't changed.
 - [2026-10-20 · producer] Closed-loop failures can only be blamed on models as "suspected". Bug tasks now trace to a commit and model through trailers (2.6.0), but a failure with no bug task still can't.
 - [2026-10-20 · producer] Playwright's bundled video recorder needed an ffmpeg build that wasn't installed; screen recordings had to use Chromium's screencast instead.

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
@@ -57,10 +57,10 @@ const SABOTAGE = {
   // An alias a regex cannot see: only the runtime probe catches it.
   purity: (d) => edit(d, SIM, (s) => s.replace('const drift =', "const M = Math; const k = 'ran' + 'dom'; M[k]();\n  const drift =")),
   isolation: (d) => edit(d, SIM, (s) => `import * as THREE from 'three';\n${s}`),
-  golden: (d) => edit(d, 'qa/golden/example-1337.json', (s) => s.replace(/"hash": "[0-9a-f]{16}"/, '"hash": "0000000000000000"')),
-  'golden-py': (d) => edit(d, 'qa/golden/example-1337.json', (s) => s.replace(/"hash": "[0-9a-f]{16}"/, '"hash": "0000000000000000"')),
+  golden: (d) => edit(d, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'0'.repeat(64)}"`)),
+  'golden-py': (d) => edit(d, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'0'.repeat(64)}"`)),
   approvals: (d) => edit(d, 'cartridges/example-sim/qa.mjs', (s) => `// reference: https://unlisted-asset-store.example.org/pack\n${s}`),
-  regressions: (d) => edit(d, 'qa/regressions/example-same-tick.json', (s) => s.replace(/"hash": "[0-9a-f]{16}"/, '"hash": "0000000000000000"')),
+  regressions: (d) => edit(d, 'qa/regressions/example-same-tick.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, `"sha256": "${'0'.repeat(64)}"`)),
   'vertical-slice': (d) => edit(d, SIM, (s) => s.replace('winCredits: 25000', 'winCredits: 90000000')),
   playtest: (d) => edit(d, SIM, plantInvariant(37)),
   soak: (d) => edit(d, SIM, plantInvariant(150)),
@@ -78,10 +78,10 @@ const EXPECT = {
   session: /MISSING studio\/CURRENT_TASK\.md/,
   purity: /touched: Math\.random/,
   isolation: /three/,
-  golden: /expected 0000000000000000/,
-  'golden-py': /hash .* != golden 0000000000000000|python hash/,
+  golden: /sha256 expected 0{64}/,
+  'golden-py': /python sha256 [0-9a-f]{64} != golden 0{64}/,
   approvals: /unlisted URL https:\/\/unlisted-asset-store/,
-  regressions: /expected 0000000000000000/,
+  regressions: /sha256 expected 0{64}/,
   'vertical-slice': /expected "won"/,
   playtest: /\[playtest\] FAIL/,
   soak: /PLANTED/,
@@ -129,10 +129,23 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('purity flags .constructor.constructor in the source', res2.status !== 0 && /NO_CONSTRUCTOR_ESCAPE/.test(`${res2.stdout}${res2.stderr}`), `${res2.stdout}${res2.stderr}`);
 }
 
+// Hashes: the display hash is real FNV-1a 64 (standard vectors), the example cartridge's copy agrees with the
+// harness, and SHA-256 matches Node's own over the same canonical bytes.
+{
+  const h = await import(pathToFileURL(path.join(root, 'harness/hash.mjs')).href);
+  const enc = (s) => new TextEncoder().encode(s);
+  report('the display hash is standard FNV-1a 64-bit', h.fnv1a64(enc('')) === 'cbf29ce484222325' && h.fnv1a64(enc('a')) === 'af63dc4c8601ec8c' && h.fnv1a64(enc('foobar')) === '85944171f73967e8');
+  const cartMod = await import(pathToFileURL(path.join(root, 'cartridges/example-sim/index.mjs')).href);
+  const s0 = cartMod.createInitialState(1337);
+  report('the example cartridge\'s own display hash equals the harness hash64', cartMod.hashSimState(s0) === h.hash64(s0));
+  const crypto = await import('node:crypto');
+  report('sha256 is SHA-256 of the canonical JSON as UTF-8', h.sha256({ b: 1, a: 'é' }) === crypto.createHash('sha256').update('{"a":"é","b":1}', 'utf8').digest('hex') && h.isSha256(h.sha256({})));
+}
+
 // Golden stubs are not a pass.
 {
   const dir = copyRepo();
-  edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"hash": "[0-9a-f]{16}"/, '"hash": "REPLACE_AFTER_FIRST_RUN"'));
+  edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, '"sha256": "REPLACE_AFTER_FIRST_RUN"'));
   report('golden stub hash fails (no silent rewrite)', run(dir, 'node qa/check-golden.mjs').status !== 0);
 }
 

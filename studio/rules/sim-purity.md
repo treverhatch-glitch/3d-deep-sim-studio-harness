@@ -17,7 +17,7 @@ All code inside `src/sim/**` (or `cartridges/*/sim/**`) is governed by four stri
 
 ## 3. Seeded, Serializable RNG Inside `SimState`
 - **Forbidden**: `Math.random()`, `Date.now()`, `performance.now()`, `crypto.randomUUID()`.
-- **Required**: Store the PRNG state (`sfc32` 4-tuple `[a, b, c, d]`) directly inside `SimState.rng`. Given the same initial seed and `[tick, action]` log, two runs must produce the exact same 32-bit FNV-1a state hash.
+- **Required**: Store the PRNG state (`sfc32` 4-tuple `[a, b, c, d]`) directly inside `SimState.rng`. Given the same initial seed and `[tick, action]` log, two runs must produce the exact same state hash (SHA-256 of the canonical state; see docs/HASH.md).
 
 ## 4. Plain JSON State Only (Zero Lost Entities on Save/Load)
 - **Forbidden**: Class instances (`new MyEntity()`), `Map`, `Set`, `Date`, functions, or object reference pointers inside `SimState`.

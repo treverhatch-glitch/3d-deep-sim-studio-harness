@@ -24,7 +24,7 @@ Pick the cartridge with `--cartridge <name>`, the `STUDIO_CARTRIDGE` env var, or
 | `invariants(state)` | no | `[{ id, severity: 'P0'\|'P1'\|'P2', summary }]`. The harness adds a NaN/Infinity check for free. |
 | `outcome(state)` | no | `'won'`, `'lost'` or `null`. Defaults to `state.won` / `state.lost`. |
 | `TUNING` | no | Every balance number in one frozen table. `scripts/balance-sweep.mjs` sweeps it. |
-| `hashState(state)` | no | Defaults to the 64-bit hash in `harness/hash.mjs` (mirrored in `tools/golden.py`). |
+| `hashState(state)` | no | The display hash; defaults to FNV-1a 64 in `harness/hash.mjs`. Goldens and regressions are verified with the harness's own SHA-256 of the state, whatever this returns (`docs/HASH.md`). |
 
 `cartridges/<name>/qa.mjs` (optional, but `start-to-win` is required by the vertical-slice gate)
 

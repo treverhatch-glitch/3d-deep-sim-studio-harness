@@ -4,6 +4,14 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.10.0] — 2026-10-20
+### Changed
+- **Two-tier hashing.** Golden files and regressions now pin **SHA-256** of the canonical state (64 hex), checked in Node and independently in Python. The display hash for the HUD and reports is now a true **FNV-1a 64-bit** hash (one lane, standard test vectors in the self-test) instead of two correlated 32-bit lanes. Both hash the same bytes: canonical JSON as UTF-8. `harness/hash.mjs` stays browser-safe (SHA-256 loads Node's crypto only when called), so cartridges keep no imports. All goldens and the regression were regenerated in this release. Node 22.3 or newer.
+- `docs/HASH.md` explains what each hash is for, and what a hash does and doesn't prove.
+- Roadmap: signed results, opt-in trajectory export, and optional public timestamp receipts.
+
+---
+
 ## [2.9.0] — 2026-10-20
 ### Added
 - **The Liaison** (`npm run liaison`, role `liaison`, `kickoff --role liaison`): the agent the game dev talks to. It asks until it understands, sorts what it heard (idea, direction, asset, question), reads it back and asks "Shall I push it on?". Only the dev's yes sends it on: ideas to the Idea Board as "dev, confirmed" and straight to R&D with a Director ping; directions to a Producer task with the Director checking the fit; assets and questions to the Producer. Nothing running stops.

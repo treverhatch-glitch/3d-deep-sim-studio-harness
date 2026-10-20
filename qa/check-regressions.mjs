@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, loadCartridge, replay } from '../harness/cartridge.mjs';
-import { isHash64 } from '../harness/hash.mjs';
+import { isSha256 } from '../harness/hash.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'regressions');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : [];
@@ -27,21 +27,22 @@ for (const file of files) {
   if (update) {
     spec.cartridge = name;
     spec.hash = result.hash;
+    spec.sha256 = result.sha256;
     fs.writeFileSync(full, JSON.stringify(spec, null, 2) + '\n');
-    console.log(`[regressions] updated ${file} -> ${result.hash}`);
+    console.log(`[regressions] updated ${file} -> sha256 ${result.sha256.slice(0, 16)}…`);
     continue;
   }
   if (result.findings.length) {
     console.error(`[regressions] FAIL ${file}: tick ${result.failingTick} ${result.findings[0].id} — ${result.findings[0].summary}`);
     failed += 1;
-  } else if (!isHash64(spec.hash)) {
-    console.error(`[regressions] FAIL ${file}: no 64-bit hash pinned. Run: node qa/check-regressions.mjs --update`);
+  } else if (!isSha256(spec.sha256)) {
+    console.error(`[regressions] FAIL ${file}: no sha256 pinned. Run: node qa/check-regressions.mjs --update`);
     failed += 1;
-  } else if (result.hash !== spec.hash) {
-    console.error(`[regressions] FAIL ${file}: expected ${spec.hash} got ${result.hash}`);
+  } else if (result.sha256 !== spec.sha256) {
+    console.error(`[regressions] FAIL ${file}: sha256 expected ${spec.sha256} got ${result.sha256}`);
     failed += 1;
   } else {
-    console.log(`[regressions] PASS ${file} (${name}, ${result.hash})`);
+    console.log(`[regressions] PASS ${file} (${name}, sha256 ${result.sha256.slice(0, 16)}…)`);
   }
 }
 if (failed) process.exit(1);

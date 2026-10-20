@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Standalone 64-bit golden helper.
+"""Golden helper in Python: the same two hashes as harness/hash.mjs.
 
-Does not run the JS sim. It checks golden file shape and can hash a JSON state
-with the same 64-bit FNV-style function used by the example cartridge.
+Both read canonical JSON (keys sorted, no spaces) encoded as UTF-8:
+  hash64  FNV-1a 64-bit, 16 hex chars: the fast display hash. Not tamper-resistant.
+  sha256  SHA-256, 64 hex chars: the verification hash for goldens and regressions.
+
+It does not run the JS sim; qa/test-golden.py replays each golden in Node and hashes the result here.
 
 Usage:
   python tools/golden.py --check qa/golden
@@ -12,18 +15,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 from pathlib import Path
 
-
-def imul(a: int, b: int) -> int:
-    a &= 0xFFFFFFFF
-    b &= 0xFFFFFFFF
-    if a >= 0x80000000:
-        a -= 0x100000000
-    if b >= 0x80000000:
-        b -= 0x100000000
-    return (a * b) & 0xFFFFFFFF
+FNV64_OFFSET = 0xCBF29CE484222325
+FNV64_PRIME = 0x100000001B3
+MASK64 = 0xFFFFFFFFFFFFFFFF
 
 
 def canonical(value):
@@ -34,18 +33,20 @@ def canonical(value):
     return value
 
 
+def canonical_bytes(state) -> bytes:
+    return json.dumps(canonical(state), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
 def hash64(state) -> str:
-    raw = json.dumps(canonical(state), separators=(",", ":"), ensure_ascii=False)
-    h1 = 0x811C9DC5
-    h2 = 0x811C9DC5 ^ 0x01000193
-    for i, ch in enumerate(raw):
-        c = ord(ch)
-        h1 ^= c
-        h1 = imul(h1, 0x01000193)
-        h2 ^= c
-        h2 = imul(h2, 0x01000193)
-        h2 = (h2 + i) & 0xFFFFFFFF
-    return f"{h1:08x}{h2:08x}"
+    h = FNV64_OFFSET
+    for byte in canonical_bytes(state):
+        h ^= byte
+        h = (h * FNV64_PRIME) & MASK64
+    return f"{h:016x}"
+
+
+def sha256(state) -> str:
+    return hashlib.sha256(canonical_bytes(state)).hexdigest()
 
 
 def check_dir(path: Path) -> int:
@@ -55,13 +56,13 @@ def check_dir(path: Path) -> int:
         return 1
     failed = 0
     for file in files:
-        spec = json.loads(file.read_text())
-        digest = str(spec.get("hash", ""))
-        if len(digest) != 16 or digest.startswith("REPLACE"):
-            print(f"[golden.py] FAIL {file.name}: expected 64-bit hash, got {digest!r}")
+        spec = json.loads(file.read_text(encoding="utf-8"))
+        digest = str(spec.get("sha256", ""))
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            print(f"[golden.py] FAIL {file.name}: expected a sha256 (64 hex), got {digest!r}")
             failed += 1
         else:
-            print(f"[golden.py] PASS {file.name} ({digest})")
+            print(f"[golden.py] PASS {file.name} (sha256 {digest[:16]}…)")
     return 1 if failed else 0
 
 
@@ -71,8 +72,8 @@ def main() -> int:
     parser.add_argument("--hash", type=Path, help="json state file to hash")
     args = parser.parse_args()
     if args.hash:
-        state = json.loads(args.hash.read_text())
-        print(hash64(state))
+        state = json.loads(args.hash.read_text(encoding="utf-8"))
+        print(json.dumps({"sha256": sha256(state), "hash": hash64(state)}))
         return 0
     if args.check:
         return check_dir(args.check)

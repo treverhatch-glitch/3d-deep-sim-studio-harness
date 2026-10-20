@@ -65,4 +65,4 @@ Because `sim/` contains only pure TypeScript and plain JSON arrays/objects:
 
 ### Path C: Native **Unity / .NET** Port (`nickna/SharpTS`)
 1. Use **`nickna/SharpTS`** (TypeScript interpreter/transpiler for .NET) to run or translate pure-TS simulation modules into C# structs/classes.
-2. Bind `SimState` arrays to Unity `Graphics.DrawMeshInstanced` / Entities, verifying parity against the TypeScript FNV-1a state hash after every tick.
+2. Bind `SimState` arrays to Unity `Graphics.DrawMeshInstanced` / Entities, verifying parity against the TypeScript state hash (SHA-256 of the canonical state) after every tick.

@@ -41,20 +41,18 @@ function canonical(value) {
   return value;
 }
 
-/** Same function as harness/hash.mjs, kept here so the cartridge ports on its own. */
+/**
+ * The fast display hash: FNV-1a 64-bit over canonical JSON as UTF-8, the same function as
+ * harness/hash.mjs hash64(), kept here so the cartridge ports on its own. For the HUD and quick
+ * checks only; goldens and regressions are verified with SHA-256 by the harness.
+ */
 export function hashSimState(state) {
-  const json = JSON.stringify(canonical(state));
-  let h1 = 0x811c9dc5;
-  let h2 = 0x811c9dc5 ^ 0x01000193;
-  for (let i = 0; i < json.length; i++) {
-    const c = json.charCodeAt(i);
-    h1 ^= c;
-    h1 = Math.imul(h1, 0x01000193) >>> 0;
-    h2 ^= c;
-    h2 = Math.imul(h2, 0x01000193) >>> 0;
-    h2 = (h2 + i) >>> 0;
+  let h = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(JSON.stringify(canonical(state)))) {
+    h ^= BigInt(byte);
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
   }
-  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+  return h.toString(16).padStart(16, '0');
 }
 
 export function createInitialState(seed = 42069, tuning = TUNING) {

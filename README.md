@@ -7,8 +7,9 @@ It is not a game engine. You bring the game; the harness keeps many agents from 
   or clock. Presentation reads state and never writes it, so the sim can be replayed, tested and ported.
 - **Seed + tick replay.** Every run is reproducible from a seed and an action list. A failure is recorded
   as the exact tick the cartridge broke on, and `node harness/replay.mjs --trace` stops on that tick.
-- **64-bit golden hashes.** Pinned hashes for replays and a start-to-win vertical slice, checked in Node
-  and independently in Python.
+- **SHA-256 golden hashes.** Pinned SHA-256 hashes for replays and a start-to-win vertical slice,
+  checked in Node and independently in Python, with a fast 64-bit display hash for the HUD
+  (`docs/HASH.md`).
 - **Locks and gates.** Agents claim tasks and paths with unique owners; a pre-commit hook refuses files
   locked by someone else and staged secrets. `npm run verify` runs every gate; `npm run release` is the
   one command before a merge.

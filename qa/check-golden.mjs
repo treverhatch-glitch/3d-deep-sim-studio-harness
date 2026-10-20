@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * qa/check-golden.mjs — replay every qa/golden/*.json against its cartridge and compare 64-bit hashes.
+ * qa/check-golden.mjs — replay every qa/golden/*.json against its cartridge and compare hashes:
+ * SHA-256 (the verification hash) and the 16-hex display hash. See docs/HASH.md.
  *
  *   node qa/check-golden.mjs            check (fails on mismatch, stub hash, or a game with no golden)
  *   node qa/check-golden.mjs --update   rewrite hashes after an intended sim change (commit them together)
@@ -14,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
-import { isHash64 } from '../harness/hash.mjs';
+import { isHash64, isSha256 } from '../harness/hash.mjs';
 
 const GOLDEN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'golden');
 const update = process.argv.includes('--update');
@@ -53,19 +54,24 @@ for (const file of files) {
   if (update) {
     spec.cartridge = name;
     spec.hash = result.hash;
+    spec.sha256 = result.sha256;
     if (spec.scenario) spec.expect = { ...(spec.expect || {}), outcome: result.outcome, tick: result.ticksRun };
     delete spec.note;
     fs.writeFileSync(full, JSON.stringify(spec, null, 2) + '\n');
-    console.log(`[golden] updated ${file} -> ${result.hash}`);
+    console.log(`[golden] updated ${file} -> sha256 ${result.sha256.slice(0, 16)}…, display ${result.hash}`);
     continue;
   }
 
-  if (!isHash64(spec.hash)) {
-    fail(`${file}: hash "${spec.hash}" is a stub or not 64-bit. Run: npm run golden -- --update`);
+  if (!isSha256(spec.sha256)) {
+    fail(`${file}: sha256 "${spec.sha256 ?? ''}" is missing, a stub or not 256-bit. Run: npm run golden -- --update`);
     continue;
   }
-  if (result.hash !== spec.hash) {
-    fail(`${file}: expected ${spec.hash} got ${result.hash}`);
+  if (result.sha256 !== spec.sha256) {
+    fail(`${file}: sha256 expected ${spec.sha256} got ${result.sha256}`);
+    continue;
+  }
+  if (!isHash64(spec.hash) || result.hash !== spec.hash) {
+    fail(`${file}: display hash expected ${spec.hash} got ${result.hash} (sha256 matches: the cartridge's display hash changed; regenerate)`);
     continue;
   }
   if (spec.expect?.outcome !== undefined && result.outcome !== spec.expect.outcome) {
@@ -77,7 +83,7 @@ for (const file of files) {
     continue;
   }
   const what = spec.scenario ? `${spec.scenario} ${result.outcome} @ tick ${result.ticksRun}` : `seed ${spec.seed} tick ${spec.tick}`;
-  console.log(`[golden] PASS ${file} (${name}: ${what}, ${result.hash})`);
+  console.log(`[golden] PASS ${file} (${name}: ${what}, sha256 ${result.sha256.slice(0, 16)}…)`);
 }
 
 for (const name of listCartridges()) {

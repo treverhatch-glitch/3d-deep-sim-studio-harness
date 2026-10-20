@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
-import { isHash64 } from './hash.mjs';
+import { isSha256 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
 
@@ -210,7 +210,7 @@ export function checkDone(task, since = startedAt(task.id)) {
   if (type === 'bug') {
     const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
       .map((f) => ({ f, j: readJson(f) }))
-      .filter(({ j }) => j && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isHash64(j.hash));
+      .filter(({ j }) => j && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256));
     check('Regression saved with seed, tick and a pinned hash', regs.length, 'no regression in qa/regressions/ with a seed, a tick and a pinned hash since this task started (save the replay, then `node qa/check-regressions.mjs --update`)');
     const lessons = fs.existsSync(abs('studio/memory/failures.md')) ? fs.readFileSync(abs('studio/memory/failures.md'), 'utf8').match(/^### .+$/gm) || [] : [];
     const ids = [task.id, ...(task.title.match(/\b(BUG|REG)-[\w-]+/g) || []), ...regs.map(({ j }) => j.id).filter(Boolean)];

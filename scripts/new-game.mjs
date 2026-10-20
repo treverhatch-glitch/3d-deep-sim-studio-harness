@@ -5,7 +5,7 @@
  *   npm run new-game my-airport
  *
  * Copies cartridges/_template to cartridges/<name>, plays it, and writes two real golden files:
- *   qa/golden/<name>-start-to-win.json   (the vertical slice: scenario, outcome, tick, 64-bit hash)
+ *   qa/golden/<name>-start-to-win.json   (the vertical slice: scenario, outcome, tick, SHA-256 and display hash)
  *   qa/golden/<name>-seed-1.json         (a plain 100-tick replay with no actions)
  */
 import fs from 'node:fs';
@@ -54,13 +54,14 @@ write(goldenFiles[0], {
   seed: slice.seed,
   expect: { outcome: slice.outcome, tick: slice.ticksRun },
   hash: slice.hash,
+  sha256: slice.sha256,
 });
-write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, seed: 1, tick: 100, actions: [], hash: plain.hash });
+write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
 
 emitEvent({ type: 'game.new', agent: 'producer', target: `cartridges/${name}`, msg: `New cartridge ${name}: slice won at tick ${slice.ticksRun}` });
 console.log(`[new-game] cartridges/${name}/ created
-[new-game] qa/golden/${name}-start-to-win.json  won at tick ${slice.ticksRun}, hash ${slice.hash}
-[new-game] qa/golden/${name}-seed-1.json        hash ${plain.hash}
+[new-game] qa/golden/${name}-start-to-win.json  won at tick ${slice.ticksRun}, sha256 ${slice.sha256.slice(0, 16)}…
+[new-game] qa/golden/${name}-seed-1.json        sha256 ${plain.sha256.slice(0, 16)}…
 
 Next:
   npm run verify                                  every gate, now including ${name}

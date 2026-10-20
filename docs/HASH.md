@@ -1,12 +1,42 @@
 # Hashing
 
-New games use a 64-bit hash from the first golden file.
+Two tiers, both over the same bytes: the state as canonical JSON (keys sorted, no spaces), encoded
+as UTF-8. `harness/hash.mjs` and `tools/golden.py` implement both, and `qa/test-golden.py` proves Node
+and Python agree on every golden file.
 
-- Example golden: `qa/golden/example-1337.json`
-- New-game template: `studio/templates/golden.json`
-- JS check: `node qa/check-golden.mjs`
-- Python helper: `python tools/golden.py --check qa/golden`
+| Tier | Function | Size | Use it for | Don't use it for |
+| --- | --- | --- | --- | --- |
+| Display | `hash64()` (FNV-1a 64) | 16 hex | The HUD, playtest reports, a quick "did the state change?" inside a cartridge or a browser | Anything another party has to trust |
+| Verification | `sha256()` (SHA-256) | 64 hex | Golden files, regressions, exported trajectories, anything shared, sold or rewarded | Code inside a cartridge (it needs `node:crypto`) |
 
-`tools/golden.py` is standalone. It checks that golden files are 64-bit and can hash a JSON state. It does not run the JS sim.
+## Why two
 
-Do not change hash width after golden files exist unless you regenerate them in the same commit.
+- **Display** has to be cheap and run anywhere, including inside a cartridge with no imports, so it
+  is pure JS (BigInt). It is one true 64-bit FNV-1a lane, checked against the standard test vectors
+  in the self-test. (Before 2.10.0 it was two correlated 32-bit lanes, weaker than its width.)
+- **Verification** has to hold at scale and against someone trying: a 64-bit hash reaches even odds
+  of an accidental collision after about 4 billion distinct states, and FNV can be forged on purpose.
+  SHA-256 has no practical collisions, is built into Node and Python, and is the hash other tools
+  already trust.
+
+## What a hash proves, and what it doesn't
+
+A matching SHA-256 proves two states are byte-for-byte the same. It doesn't prove who produced a
+state, or that the code which produced it is honest: anyone can hash a state they made up. Trust
+comes from **replaying**: the verifier re-runs the seed and actions with the same cartridge and checks
+the SHA-256 itself, which is what `qa/check-golden.mjs` and `qa/test-golden.py` do. Proving *who*
+made a result needs a signature, a separate step on the roadmap.
+
+## Changing a hash
+
+Changing either function, the canonical form, or a cartridge's state changes every golden. Regenerate
+in the same commit:
+
+```bash
+npm run golden -- --update
+node qa/check-regressions.mjs --update
+```
+
+- JS checks: `node qa/check-golden.mjs`, `node qa/check-regressions.mjs`
+- Python: `node qa/run-python.mjs qa/test-golden.py`, `node qa/run-python.mjs tools/golden.py --check qa/golden`
+- Hash a state file in Python: `python tools/golden.py --hash state.json`
