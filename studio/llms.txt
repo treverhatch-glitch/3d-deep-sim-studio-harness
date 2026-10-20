@@ -26,6 +26,13 @@
   Bugs and slips per model (per 10 points of task size). Daily retrospective with suggestions in `studio/memory/retros/` (scripts, no tokens; the HUB writes one a day).
 - `npm run studio:reset -- --name "<game>" [--yes]`
   Fresh plan, log and queue for a new game in your own copy; the old project's notes are archived to `.studio/archive/`.
+- `npm run kickoff -- --role <role> --agent <unique> --model <model>`
+  Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop.
+- `npm run focus -- <ID>` (written for you by `task start`)
+  The agent's one-page brief in `.studio/briefs/<ID>.md`: done means, the skill's steps, notes from before, lanes, related lessons, finish commands.
+- `npm run notes -- add --kind well|bad|workaround|upgrade "…"` · `list` · `export`
+  Notes about the harness itself (`studio/harness-notes/NOTES.md`); kept across `studio:reset`.
+- Commits made with `STUDIO_LOCK_OWNER` set get `Studio-Agent`, `Studio-Model` and `Studio-Task` trailers (commit-msg hook).
 - `node harness/done-check.mjs <ID>`
   Shows a task's type, what done means for it, and what is missing. One skill per type in `studio/skills/`.
 - `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`

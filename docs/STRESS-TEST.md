@@ -34,8 +34,10 @@ In `.env` (gitignored; `bash scripts/secret-scan.sh` checks what git would publi
 | `STUDIO_PRODUCER_NAME` | So script events and your Producer agent show as one person |
 | `STUDIO_WATCH_INTERVAL` | 300 is fine; lower it to see hand-offs sooner during the test |
 
-Each agent sets its own `STUDIO_AGENT_MODEL` (or passes `--model` to `task start`) and uses a unique
-`--agent` name.
+Give each agent its opening prompt: `npm run kickoff -- --role builder --agent claude-a --model claude-opus-5-5`
+(one per agent, Producer included). It sets the agent's name and model and gives it the work loop;
+`task start` then hands it a one-page brief per task. Commits get `Studio-Agent`, `Studio-Model` and
+`Studio-Task` trailers, so every change can be traced to who made it, on what model, for which task.
 
 ## 3. Run it
 
@@ -53,6 +55,7 @@ Each agent sets its own `STUDIO_AGENT_MODEL` (or passes `--model` to `task start
 | Which models made the most bugs for the work they did? | `npm run scorecard` |
 | What did the studio learn, and what should change? | `studio/memory/retros/`, the Producer log |
 | Where did agents stall, run out or get refused? | `studio/handoffs/`, `npm run watch`, the retro |
+| What did the harness do well or badly? | `npm run notes -- list`, then `npm run notes -- export` to bring it upstream |
 | What did it cost? | Tokens per provider in the War Room's "Model calls today", `.studio/runs/` |
 
 Keep the private copy's notes. The lessons that are about the harness rather than your game are worth

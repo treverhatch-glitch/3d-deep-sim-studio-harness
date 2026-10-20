@@ -260,6 +260,20 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('studio:reset writes a fresh plan and queue and archives the old one', reset.status === 0 && /Mini Farm/.test(plan) && /npm run new-game mini-farm/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(dir, '.studio/archive')), `${reset.stdout}${reset.stderr}`);
 }
 
+// Agents get a one-page brief on start and a kickoff prompt; harness notes survive a studio reset.
+{
+  const dir = copyRepo();
+  const start = run(dir, 'node harness/task.mjs start T-003 --agent claude-a --model model-x');
+  const brief = fs.existsSync(path.join(dir, '.studio/briefs/T-003.md')) ? fs.readFileSync(path.join(dir, '.studio/briefs/T-003.md'), 'utf8') : '';
+  report('task start writes a focus brief with done-means, steps and finish commands', /Your brief: \.studio\/briefs\/T-003\.md/.test(start.stderr) && /## Done means/.test(brief) && /## Steps/.test(brief) && /task\.mjs done T-003 --agent claude-a/.test(brief), `${start.stderr}\n${brief}`);
+  const kick = run(dir, 'node harness/kickoff.mjs --role builder --agent claude-a --model model-x');
+  report('kickoff prints a paste-ready loop for the agent', kick.status === 0 && /export STUDIO_LOCK_OWNER=claude-a STUDIO_AGENT_MODEL=model-x/.test(kick.stdout) && /task\.mjs pause/.test(kick.stdout));
+  report('kickoff refuses a shared agent name', run(dir, 'node harness/kickoff.mjs --role builder --agent claude').status !== 0);
+  run(dir, 'node harness/notes.mjs add --kind workaround "Rerun the done-check by hand on suspicious work"');
+  run(dir, 'node scripts/studio-reset.mjs --name "Next Game" --yes');
+  report('harness notes survive a studio reset and show in the briefing', /Rerun the done-check by hand/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')) && /Workaround: Rerun the done-check by hand/.test(run(dir, 'node harness/handoff.mjs').stdout));
+}
+
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
 {
   const dir = copyRepo();
@@ -273,6 +287,12 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   git('add cartridges/example-sim/qa.mjs');
   report('pre-commit blocks a file locked by another agent', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m x', { STUDIO_LOCK_OWNER: 'bob-1' }).status !== 0);
   git('reset -q');
+  run(dir, 'node harness/lock.mjs claim task:T-004 --owner bob-1');
+  fs.writeFileSync(path.join(dir, 'studio/reviews/trailer-test.md'), 'x\n');
+  git('add studio/reviews/trailer-test.md');
+  run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m "trailer test"', { STUDIO_LOCK_OWNER: 'bob-1', STUDIO_AGENT_MODEL: 'model-y' });
+  const body = run(dir, 'git log -1 --format=%B').stdout;
+  report('commit-msg adds Studio-Agent, Studio-Model and Studio-Task trailers', /Studio-Agent: bob-1/.test(body) && /Studio-Model: model-y/.test(body) && /Studio-Task: T-004/.test(body), body);
   fs.writeFileSync(path.join(dir, 'notes.txt'), `key ${'gsk_'}${'b'.repeat(30)}\n`);
   git('add notes.txt');
   report('pre-commit blocks a staged secret', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m y', { STUDIO_LOCK_OWNER: 'bob-1' }).status !== 0);

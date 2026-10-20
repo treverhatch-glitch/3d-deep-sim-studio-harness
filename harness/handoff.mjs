@@ -22,6 +22,7 @@ import { activeMeeting, MEETINGS_DIR } from './meeting.mjs';
 import { watchPass } from './watch.mjs';
 import { buildScorecard, renderScorecard } from './scorecard.mjs';
 import { latestRetro } from './retro.mjs';
+import { readNotes } from './notes.mjs';
 
 const read = (rel) => {
   try {
@@ -170,6 +171,7 @@ export function buildHandoff() {
     game: gameInfo,
     scorecard: buildScorecard({ queue: q }),
     retro: latestRetro(),
+    harnessNotes: readNotes(),
     bugs,
     locks,
     gates,
@@ -250,6 +252,12 @@ export function renderHandoff(h) {
     const open = h.retro.text.split('\n').filter((l) => l.startsWith('- [ ] '));
     add(`From ${h.retro.file}. Accept or reject each in your log; tick the box when it's handled.`, ...(open.length ? open.map((l) => l.replace('- [ ] ', '- ')) : ['- Nothing open.']));
   } else add('- No retro yet. The HUB writes one a day; npm run retro writes one now.');
+
+  head('Known harness issues and workarounds (studio/harness-notes/NOTES.md)');
+  const hn = h.harnessNotes;
+  add(...hn.bad.slice(0, 4).map((l) => `- Doesn't work: ${l.replace(/^\[[^\]]*\]\s*/, '')}`), ...hn.workaround.slice(0, 4).map((l) => `- Workaround: ${l.replace(/^\[[^\]]*\]\s*/, '')}`));
+  if (!hn.bad.length && !hn.workaround.length) add('- None recorded.');
+  add(`- ${hn.well.length} things that worked and ${hn.upgrade.length} upgrade ideas on file. Add yours: npm run notes -- add --kind well|bad|workaround|upgrade "…"`);
 
   head('Lessons (studio/memory/failures.md)');
   add(...(h.lessons.length ? h.lessons.map((l) => `- ${l}`) : ['- None recorded.']));

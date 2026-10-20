@@ -59,7 +59,7 @@ Connects the `<video>` receiver to a local WHEP/WebRTC endpoint (default `http:/
 ### Source 3: Playwright CDP / High-Frequency Screencast (`POST /api/frame`)
 Streams base64 JPEG/PNG frames pushed by `qa/playtest.mjs` with an interactive HUD overlay showing:
 - **UISentinel** DOM bounding-box checks (`#sim-telemetry-bar`, `canvas#three-sim-canvas`)
-- **`?playtest=1` (`window.__sim` / `window.__hatch`)** deterministic tick, seed, state hash, and entity count.
+- **`?playtest=1` (`window.__sim`)** deterministic tick, seed, state hash, and entity count.
 
 Push a custom frame from any script or test runner:
 ```bash

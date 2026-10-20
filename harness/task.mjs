@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent, REPO_ROOT } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
 import { checkDone } from './done-check.mjs';
+import { writeFocus } from './focus.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -139,7 +140,14 @@ export function startTask(taskId, agent = null, { model = null } = {}) {
   syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
   const handoff = readTaskHandoff(target.id);
   emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}` });
-  return { ...target, owner: agent, ...(handoff ? { handoff } : {}) };
+  // One page for the agent: what done means, the steps, notes, lanes, lessons, commands.
+  let brief = null;
+  try {
+    brief = writeFocus(target.id, agent)?.file || null;
+  } catch {
+    // the brief is a help, never a blocker
+  }
+  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}) };
 }
 
 /**
@@ -343,6 +351,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(started.error === 'locked' ? `Task "${targetId}" is claimed by ${started.lock?.owner}. Pick another task.` : started.message);
       process.exit(1);
     }
+    if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Notes (studio/handoffs/${started.id}.md):\n${started.handoff}`);
     console.log(JSON.stringify(started, null, 2));
     process.exit(0);

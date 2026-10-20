@@ -14,6 +14,7 @@ import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { activeMeeting } from './meeting.mjs';
 import { buildScorecard } from './scorecard.mjs';
+import { taskType } from './done-check.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -157,6 +158,7 @@ export function buildHudState() {
   }
 
   // Agents: everyone who wrote an event in the last 24 h, with what they hold now.
+  const taskById = new Map([...queue.inProgress, ...queue.backlog, ...queue.done].map((t) => [t.id, t]));
   const roleOfTask = new Map([...queue.inProgress, ...queue.backlog, ...queue.done].map((t) => [t.id, t.role]));
   const agents = new Map();
   // Scripts log as "producer"; STUDIO_PRODUCER_NAME (e.g. grok-producer) merges them into one person.
@@ -197,12 +199,19 @@ export function buildHudState() {
       room: roomForRole(role, divs) || 'engineering',
       status: stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       kind: a.name === 'watch' ? 'script' : 'agent',
+      // What kind of work it is doing, for the Studio view's animations.
+      work: a.task && taskById.get(a.task) ? taskType(taskById.get(a.task)) : null,
       idleMin,
     };
   });
   // The Producer's office is never empty: the role exists even before it writes an event.
   if (!agentList.some((a) => a.room === 'production')) {
     agentList.push({ name: 'producer', role: 'producer', room: 'production', status: 'idle', events: 0, idleMin: null, placeholder: true });
+  }
+  // The watcher sits in the Producer's office as soon as it has run once, even with nothing to report.
+  const watchLast = readJson('.studio/watch-last.json');
+  if (watchLast && !agentList.some((a) => a.name === 'watch')) {
+    agentList.push({ name: 'watch', role: 'watch', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
   }
   const producerName = (pname && agentList.find((a) => a.name === pname)?.name) || agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
   const byName = new Map(agentList.map((a) => [a.name, a]));
@@ -260,6 +269,7 @@ export function buildHudState() {
     events: events.slice(-120).reverse(),
     talks,
     meeting,
+    watch: watchLast ? { at: watchLast.at, findings: (watchLast.findings || []).map((f) => f.msg), pinged: watchLast.pinged } : null,
     scorecard: scorecardCached(queue),
     needs: needs.slice(0, 10),
     gates,

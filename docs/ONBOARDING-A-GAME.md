@@ -35,7 +35,7 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
 | Fact sheet and plan | The Producer and supervisors need the same picture | `Docs: fill in … GAME.md`, `Docs: rewrite studio/PLAN.md` |
 | Study your own build | Know what runs every frame and what talks to the network before changing anything | `Study: our own build of …` |
 | Find the sim boundary | Which systems own game state, randomness and time | `Study: map … game state` |
-| Wrap, don't rewrite | A thin adapter gives the harness `init`, `step`, `getState` and a hash without touching the rest (`qa/hatchfield.adapter.mjs` is an example) | `Wrap … in a cartridge adapter` |
+| Wrap, don't rewrite | A thin adapter gives the harness `init`, `step`, `getState` and a hash without touching the rest (`qa/browser.adapter.mjs` is an example) | `Wrap … in a cartridge adapter` |
 | Make one run repeatable | Seed the RNG, fix the tick, then record the first golden | `Playtest: first seeded run …` |
 | Import known bugs | Each with steps or a seed, so it becomes a regression once fixed | `Docs: import … known bugs` |
 | Choose gates | Turn on what passes today; add the rest as the game gets there | `Review: choose which gates apply …` |

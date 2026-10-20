@@ -33,7 +33,7 @@ Edit `.env` (gitignored). The harness follows a strict **cost-saving priority or
 > **Mandatory Rule**: Implement your deterministic **Seed + Fixed-Tick** system (`{ seed, tick, rngState }`) as **one of the very first systems coded**.
 
 1. Copy [`cartridges/example-sim/index.mjs`](../cartridges/example-sim/index.mjs) or create `src/sim/index.ts`.
-2. Expose `window.__hatch` and `window.__sim` when `?playtest=1` is in the URL so `qa/playtest.mjs` and `node harness/replay.mjs --seed 42069 --tick 120` can replay any bug to the exact failing tick.
+2. Expose `window.__sim` when `?playtest=1` is in the URL so `qa/playtest.mjs` and `node harness/replay.mjs --seed 42069 --tick 120` can replay any bug to the exact failing tick.
 3. Lock your game's core pillars in [`studio/VISION_LOCK.md`](../studio/VISION_LOCK.md) and compact API surface in [`studio/llms.txt`](../studio/llms.txt).
 
 ---

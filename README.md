@@ -16,7 +16,9 @@ It is not a game engine. You bring the game; the harness keeps many agents from 
 - **A zero-token War Room.** A local page that tails the event log. Writes and the live socket need a
   token; it refuses to listen beyond localhost without one.
 
-The first game built with it is Hatchfield (an airport sim), but nothing here depends on it.
+No game ships in this repo except the example cartridge (`cartridges/example-sim`). Each game lives in
+its own repo or private copy and plugs in as a cartridge (`npm run new-game`) or through onboarding
+(`npm run onboard`).
 
 ## Start
 

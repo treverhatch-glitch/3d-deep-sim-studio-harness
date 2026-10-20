@@ -184,7 +184,7 @@ const tasks = [
   { title: `Docs: rewrite studio/PLAN.md for ${name} (goal, phase, milestones)`, role: 'producer', priority: 'P1' },
   { title: `Study: our own build of ${name} (what runs each frame, network calls, dead code)`, role: 'reference-scout', priority: 'P2' },
   { title: `Study: map ${name}'s game state, randomness and time (the sim boundary)`, role: 'reference-scout', priority: 'P1' },
-  { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/hatchfield.adapter.mjs)`, role: 'builder', priority: 'P1' },
+  { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/browser.adapter.mjs)`, role: 'builder', priority: 'P1' },
   { title: `Playtest: first seeded run of ${name}, then record its golden`, role: 'qa-playtester', priority: 'P2' },
   { title: `Docs: import ${name}'s known bugs into qa/reports with steps or a seed`, role: 'qa-playtester', priority: 'P2' },
   { title: `Review: choose which gates apply to ${name} now and which wait (studio/gates.json)`, role: 'reviewer', priority: 'P2' },

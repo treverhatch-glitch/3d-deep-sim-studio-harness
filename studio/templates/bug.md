@@ -4,7 +4,7 @@
 
 ```markdown
 ### [P0|P1|P2] <BUG-ID> — <One-line failure summary>
-- **Stage**: Stage 1 (Programmatic `?playtest=1` `window.__hatch` / `window.__sim`) | Stage 2 (Playwright `ariaSnapshot` / `uisentinel`)
+- **Stage**: Stage 1 (Programmatic `?playtest=1` `window.__sim`) | Stage 2 (Playwright `ariaSnapshot` / `uisentinel`)
 - **Closed-Loop Attempt**: `<attempt> / <maxRetries (default 3)>` (escalate to strong model or human after max retries)
 - **Deterministic Replay Payload**:
   ```json

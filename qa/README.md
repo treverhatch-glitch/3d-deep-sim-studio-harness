@@ -7,7 +7,7 @@ This directory implements a **closed-loop verification harness** synthesizing le
 ## 1. Why Direct State Access Beats Pure GUI Clicking (OhMyGame & Recursive Game Creator Critique)
 
 - **The Open-Loop Failure Mode (`OhMyGame` critique)**: Standard multi-agent frameworks generate code and blindly click canvas coordinates without knowing whether simulation entities actually moved, whether `NaN` corrupted the economy, or whether the RNG drifted.
-- **The Closed-Loop Solution (`Recursive Game Creator` pattern)**: When launched with `?playtest=1`, the game exposes `window.__hatch` (and alias `window.__sim`). Agents and `qa/playtest.mjs` drive ticks deterministically (`step(120)`), inspect the JSON state directly (`getState()`), and verify state hashes before touching the GUI.
+- **The Closed-Loop Solution (`Recursive Game Creator` pattern)**: When launched with `?playtest=1`, the game exposes `window.__sim` (and alias `window.__sim`). Agents and `qa/playtest.mjs` drive ticks deterministically (`step(120)`), inspect the JSON state directly (`getState()`), and verify state hashes before touching the GUI.
 
 ---
 
@@ -15,7 +15,7 @@ This directory implements a **closed-loop verification harness** synthesizing le
 
 Full-resolution screenshots consume thousands of vision tokens and slow down agent loops. Always follow this order:
 
-1. **Direct Sim State (`window.__hatch` / `window.__sim`)**: Verify `{ seed, tick, hash, entities }` via `qa/hatchfield.adapter.mjs`.
+1. **Direct Sim State (`window.__sim`)**: Verify `{ seed, tick, hash, entities }` via `qa/browser.adapter.mjs`.
 2. **Accessibility Snapshot (`microsoft/playwright-mcp` / `locator('body').ariaSnapshot()`)**: Inspect the semantic DOM tree in ~150 tokens (`qa/visual-check.mjs`).
 3. **Layout Bounds Check (`mhjabreel/uisentinel`)**: Detect viewport overflow or overlapping HUD panels programmatically.
 4. **Targeted Screenshots**: Capture `.png` screenshots **only** when a layout/visual invariant fails or when recording milestone B-roll for `studio/daily/`.

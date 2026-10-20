@@ -7,7 +7,7 @@
  *   2. `webrtc` — WebRTC Low-Latency Video Stream (`<video>` receiver)
  *   3. `cdp`    — Playwright CDP / High-Frequency Frame Stream (`/api/frame` + WS push)
  *                 with interactive `uisentinel` bounding-box overlay and `?playtest=1`
- *                 (`window.__sim` / `window.__hatch`) deterministic state telemetry.
+ *                 (`window.__sim`) deterministic state telemetry.
  *   4. `hmr`    — Live Game HMR Iframe (`http://localhost:5173?playtest=1`) with
  *                 "Take Manual Control" pointer-lock toggle.
  */
@@ -477,7 +477,7 @@ export const AgentEyesViewport: React.FC<AgentEyesViewportProps> = ({
           </div>
         )}
 
-        {/* ?playtest=1 (window.__sim / window.__hatch) Deterministic State HUD Overlay */}
+        {/* ?playtest=1 (window.__sim) Deterministic State HUD Overlay */}
         {config.showSimTelemetryOverlay && (
           <div
             style={{

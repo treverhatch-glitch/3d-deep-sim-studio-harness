@@ -50,6 +50,7 @@ See `docs/ROUTING.md`.
 Logging `editing` is not enough. Use the lock helper.
 
 ### Before starting work
+0. New agent? Get your opening prompt: `npm run kickoff -- --role <role> --agent <unique-name> --model <model>`. `task start` writes your one-page brief to `.studio/briefs/<ID>.md`; read it instead of scanning the repo.
 1. Use a unique owner name per running agent (`cursor-win2`, `claude-a`). Shared names such as `cursor`, `claude` or `builder` are refused.
    Export it once: `export STUDIO_LOCK_OWNER=cursor-win2`.
 2. Claim the task: `node harness/task.mjs start <ID> --agent cursor-win2` (refuses work another agent claimed).

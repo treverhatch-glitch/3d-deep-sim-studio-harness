@@ -18,6 +18,7 @@ in a chat.
 | `studio/memory/failures.md` | Lessons from fixed bugs, four bullets each. | Whoever fixes a bug |
 | `studio/meetings/` | Notes from Producer meetings: who came, what was decided, tasks made. | `node harness/meeting.mjs` |
 | `studio/handoffs/` | Notes on tasks an agent handed back (out of usage, swapped, stuck). | `node harness/task.mjs pause`, the watcher |
+| `studio/harness-notes/NOTES.md` | About the harness itself: what worked, what didn't, workarounds, upgrade ideas. Kept across projects. | Producer (`npm run notes -- add …`) |
 | `studio/memory/retros/` | Daily retrospectives: what went wrong and suggestions for the Producer to accept or reject. | `harness/retro.mjs` (the HUB writes one a day) |
 
 ## Look up when needed

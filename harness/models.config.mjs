@@ -78,7 +78,7 @@ export const PROVIDERS = {
     envKeys: ['OPENROUTER_API_KEY'],
     baseUrl: 'https://openrouter.ai/api/v1',
     extraHeaders: {
-      'HTTP-Referer': 'https://github.com/treverhatch-glitch/hatchfield-ai-studio-template',
+      'HTTP-Referer': 'https://github.com/treverhatch-glitch/3d-deep-sim-studio-harness',
       'X-Title': '3D Deep-Sim AI Studio Harness',
     },
   },

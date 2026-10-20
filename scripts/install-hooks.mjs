@@ -36,4 +36,4 @@ if (process.argv.includes('--check')) {
 }
 for (const f of fs.readdirSync(path.join(root, 'scripts', 'hooks'))) fs.chmodSync(path.join(root, 'scripts', 'hooks', f), 0o755);
 git('config', 'core.hooksPath', 'scripts/hooks');
-console.log('[hooks] installed: git now runs scripts/hooks/pre-commit. Set STUDIO_LOCK_OWNER to your agent name.');
+console.log('[hooks] installed: git now runs scripts/hooks/pre-commit and commit-msg (Studio-Agent/Model/Task trailers). Set STUDIO_LOCK_OWNER to your agent name.');

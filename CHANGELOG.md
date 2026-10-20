@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.5.0] — 2026-10-20
+### Added
+- **Focus briefs**: `task start` writes `.studio/briefs/<ID>.md`, one page an agent reads instead of the repo (done means, the skill's steps, notes from whoever worked on it before, meeting mentions, its claims and others', off-limits areas, related lessons, gate state, the exact finish and hand-back commands). `npm run focus -- <ID>` rebuilds it.
+- **Kickoff prompts** (`npm run kickoff -- --role … --agent … --model …`): a paste-ready opening prompt for any agent tool, Producer included.
+- **Harness notes** (`npm run notes`, `studio/harness-notes/NOTES.md`): what worked, what didn't, workarounds and upgrade ideas about the harness itself. Kept across `studio:reset`, shown in the briefing, exportable upstream.
+- **Commit trailers**: a commit-msg hook adds `Studio-Agent`, `Studio-Model` and `Studio-Task`, so every change traces to who made it, on what model, for which task.
+- **Studio view work animations**: debugging agents squash bugs, studies read a book, playtests hold a controller, balance work tips a scale, reviews sweep a magnifier, docs scribble, code changes float `{ }`. Reactions: confetti on done, a head shake on a refused done, a sweat drop on a forced one, a low battery on a hand-back.
+- **The watcher sleeps and wakes**: it dozes in the Producer's office between passes, then wakes on each pass, looks around with its beacon flashing and says what it found.
+### Changed
+- Hatchfield is fully separate: `qa/hatchfield.adapter.mjs` is now the generic `qa/browser.adapter.mjs`, the example game no longer sets `window.__hatch`, the playtest global is configurable (`PLAYTEST_GLOBAL`, default `__sim`), and the OpenRouter referer names this repo.
+
+---
+
 ## [2.4.0] — 2026-10-20
 ### Added
 - **Model scorecard** (`npm run scorecard`): per model, tasks finished, task points (size 1-5, default by type, `--size` on `task add`), confirmed bugs (a bug filed with `--caused-by <task>`, or a task reopened with `task reopen`), bugs per 10 points so harder work isn't punished for its size, closed-loop failures shared among suspects, and refused, forced and handed-back work. Shown in the Ops view, as a bug badge on desks in the Studio view, and in the Producer briefing.

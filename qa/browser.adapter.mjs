@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * qa/hatchfield.adapter.mjs — Unified `?playtest=1` (`window.__hatch` / `window.__sim`) Adapter
+ * qa/browser.adapter.mjs — Unified `?playtest=1` adapter. The game exposes its playtest API on
+ * `window.__sim` (or another global named by PLAYTEST_GLOBAL, for games that already use one).
  *
  * Bridges automated QA and agents directly to the simulation state (following the
  * Recursive Game Creator closed-loop pattern and OhMyGame open-loop critique:
  * agents inspect and step simulation state directly rather than blindly clicking GUI pixels).
  *
  * Supports:
- *   1. Browser-mounted `window.__hatch` or `window.__sim` (when running with `?playtest=1`)
+ *   1. Browser-mounted `window.__sim` (or PLAYTEST_GLOBAL) when running with `?playtest=1`
  *   2. Headless Node cartridge (`cartridges/example-sim/index.mjs`)
  *   3. Exact `{ seed, tick, description, actions }` deterministic replay
  */
@@ -23,7 +24,7 @@ import {
 export { createInitialState, step, replayToTick, hashSimState, mountPlaytestApi };
 
 /**
- * Drive either a Playwright `page` (exposing `window.__hatch` or `window.__sim`)
+ * Drive either a Playwright `page` (exposing `window.__sim` or PLAYTEST_GLOBAL)
  * or the local Node cartridge deterministically to `{ seed, tick, actions }`.
  */
 export async function runDeterministicTrajectory({
@@ -35,8 +36,8 @@ export async function runDeterministicTrajectory({
 } = {}) {
   if (page) {
     const browserResult = await page.evaluate(
-      ({ s, t, act }) => {
-        const api = window.__hatch || window.__sim;
+      ({ s, t, act, g }) => {
+        const api = window[g] || window.__sim;
         if (!api) return { mounted: false };
         if (typeof api.replay === 'function') {
           return { mounted: true, ...api.replay({ seed: s, tick: t, actions: act }) };
@@ -47,7 +48,7 @@ export async function runDeterministicTrajectory({
         const h = typeof api.getHash === 'function' ? api.getHash() : 'browser';
         return { mounted: true, seed: s, tick: st.tick ?? t, hash: h, state: st };
       },
-      { s: seed, t: tick, act: actions }
+      { s: seed, t: tick, act: actions, g: process.env.PLAYTEST_GLOBAL || '__sim' }
     );
     if (browserResult && browserResult.mounted) {
       return { mode: 'browser-window-api', description, ...browserResult };

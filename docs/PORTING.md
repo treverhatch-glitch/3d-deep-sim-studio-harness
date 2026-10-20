@@ -13,7 +13,7 @@ Because `src/sim/` and `cartridges/` are 100% pure TypeScript/JavaScript with ze
    npx tauri init
    ```
 2. Point `src-tauri/tauri.conf.json` `build.frontendDist` to `../dist` and `build.devUrl` to `http://localhost:5173`.
-3. Persist deterministic JSON saves (`window.__hatch.serialize()`) via `@tauri-apps/plugin-fs` and wire Steam achievements/cloud saves via the Rust `steamworks` crate.
+3. Persist deterministic JSON saves (`window.__sim.serialize()`) via `@tauri-apps/plugin-fs` and wire Steam achievements/cloud saves via the Rust `steamworks` crate.
 
 ---
 

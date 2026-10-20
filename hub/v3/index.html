@@ -250,6 +250,51 @@
   .person.facing-left .bubble { transform: scaleX(-1); }
   .person.facing-left .bubble.show { animation-name: popL; }
   @keyframes popL { 0% { transform: scaleX(-1) scale(0); } 70% { transform: scaleX(-1) scale(1.12); } 100% { transform: scaleX(-1); } }
+  /* What each agent is doing, at a glance: the work animations */
+  .person .fx { position: absolute; left: 0; bottom: 0; width: 32px; height: 40px; pointer-events: none; }
+  .person .fx > * { position: absolute; }
+  .person .fx svg.art { display: block; }
+  .fx .critter { left: -18px; bottom: -6px; animation: crawl 2.6s linear infinite; }
+  .fx .splat { left: 22px; bottom: -6px; opacity: 0; animation: splat 2.6s steps(1) infinite; }
+  .fx .pop { left: 0; bottom: 46px; font: 7px/1 "Press Start 2P", monospace; white-space: nowrap; opacity: 0; text-shadow: 1px 1px 0 #fff; }
+  .fx .squish { color: #c62828; animation: squish 2.6s infinite; }
+  @keyframes crawl { 0% { transform: translateX(0); opacity: 1; } 62% { transform: translateX(40px); opacity: 1; } 64%, 100% { transform: translateX(40px); opacity: 0; } }
+  @keyframes splat { 0%, 63% { opacity: 0; } 64%, 94% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes squish { 0%, 62% { opacity: 0; transform: translateY(4px); } 66% { opacity: 1; transform: none; } 90% { opacity: 1; } 100% { opacity: 0; } }
+  .person.work-bug .f1 { animation: stomp 2.6s ease-in-out infinite; }
+  @keyframes stomp { 0%, 52% { transform: none; } 58% { transform: translateY(-8px); } 63% { transform: translateY(1px); } 68%, 100% { transform: none; } }
+  .fx .book { left: 16px; bottom: 12px; }
+  .fx .q { left: 20px; color: #5e35b1; animation: rise 3.2s ease-out infinite; }
+  .fx .pad { left: 12px; bottom: 11px; }
+  .fx .plus { left: 18px; color: #2e7d32; animation: rise 2.2s ease-out infinite; }
+  .person.work-playtest .f1 { animation: bob .5s steps(2) infinite; }
+  .fx .tilt { left: 5px; bottom: 44px; transform-origin: 50% 100%; animation: tilt 2.2s ease-in-out infinite; }
+  @keyframes tilt { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(12deg); } }
+  .fx .lens { left: 10px; bottom: 14px; animation: peer 2.4s ease-in-out infinite; }
+  @keyframes peer { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(16px); } }
+  .fx .pencil { left: 22px; bottom: 14px; transform-origin: 50% 100%; animation: scribble .3s steps(2) infinite; }
+  @keyframes scribble { 50% { transform: rotate(18deg) translateX(2px); } }
+  .fx .sheet { left: 26px; bottom: 20px; width: 8px; height: 10px; background: #fffde7; border: 1px solid #9e9e9e; animation: fly 3s ease-out infinite; }
+  @keyframes fly { 0%, 40% { opacity: 0; transform: none; } 50% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -34px) rotate(40deg); } }
+  .fx .code { left: 14px; color: #2e7d32; animation: rise 2.8s ease-out infinite; }
+  @keyframes rise { 0%, 30% { opacity: 0; transform: translateY(0); } 45% { opacity: 1; } 100% { opacity: 0; transform: translateY(-18px); } }
+  /* Reactions to what just happened */
+  .confetti { position: absolute; left: 14px; bottom: 40px; pointer-events: none; }
+  .confetti i { position: absolute; width: 4px; height: 4px; background: var(--c); animation: burst 1.1s ease-out forwards; }
+  @keyframes burst { to { transform: translate(var(--dx), var(--dy)) rotate(200deg); opacity: 0; } }
+  .person.shake .f1 { animation: shake .12s linear 5; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+  .react { position: absolute; pointer-events: none; }
+  .react.no { left: 8px; bottom: 46px; font: 10px "Press Start 2P", monospace; color: #e53935; text-shadow: 1px 1px 0 #fff; animation: squish 1.6s forwards; }
+  .react.sweat { left: 26px; bottom: 30px; width: 4px; height: 6px; background: #4fc3f7; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; animation: drip .9s ease-in 3; }
+  @keyframes drip { 0% { opacity: 0; transform: none; } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
+  .react.battery { left: 6px; bottom: 46px; animation: dim .5s steps(2) 10; }
+  /* The watcher: a script that sleeps between passes and wakes up to look around */
+  .person.dim .frame { filter: brightness(.65) saturate(.6); }
+  .person .beacon { position: absolute; left: 12px; bottom: 44px; width: 4px; height: 4px; background: #ff5252; display: none; }
+  .person.scan .beacon { display: block; animation: dim .3s steps(2) infinite; box-shadow: 0 0 6px #ff5252; }
+  .person.scan .frame { transform-origin: 16px 0; animation: look 1.6s steps(1) infinite; }
+  @keyframes look { 50% { transform: scaleX(-1); } }
   #tycoon .dock { position: fixed; z-index: 99999; left: 0; right: 0; bottom: 0; background: var(--frame); color: #ffe9b5; border-top: 4px solid #3b2414; padding: 8px 14px; }
   #tycoon .build { display: flex; align-items: center; gap: 12px; }
   #tycoon .build .bar { flex: 1; height: 18px; background: #3b2414; border: 3px solid #ffe9b5; }
@@ -555,6 +600,74 @@
   const flip = (a, b, pal, s = 4, cls = '') => `<span class="flip ${cls}"><span class="fa">${art(a, pal, s)}</span><span class="fb">${art(b, pal, s)}</span></span>`;
   const prop = (style, html, extra = '') => `<div class="prop ${extra}" style="${style}">${html}</div>`;
 
+  // ----- work animations -----
+  const FXP = {
+    critter: art(['k...k', '.rrr.', 'krrrk', '.rrr.', 'k...k'], { k: '#3e2723', r: '#e53935' }, 2),
+    splat: art(['r.r.r', '.rrr.', 'rr.rr'], { r: '#b71c1c' }, 2),
+    book: flip(['.ww.ww.', 'wllbllw', 'wwwbwww', '.bbbbb.'], ['.ww.w..', 'wllbww.', 'wwwbwlw', '.bbbbb.'], { w: '#fffde7', l: '#9e9e9e', b: '#6d4c41' }, 3, 'always'),
+    pad: art(['.kkkkkk.', 'kwkkkkrk', 'kkkkkkgk', '.k....k.'], { k: '#37474f', w: '#eceff1', r: { c: '#ff5252', k: 'blink' }, g: '#69f0ae' }, 3),
+    scale: art(['.....y.....', 'yyyyyyyyyyy', 'y....y....y', 'pp...y...pp', '.....y.....', '...yyyyy...'], { y: '#8d6e63', p: '#ffca28' }, 2),
+    lens: art(['.kkk..', 'k.w.k.', 'k...k.', '.kkk..', '....k.', '.....k'], { k: '#37474f', w: '#e1f5fe' }, 3),
+    pencil: art(['y', 'y', 'y', 'y', 'p', 'k'], { y: '#fdd835', p: '#ffcc80', k: '#212121' }, 3),
+    battery: art(['kkkkkk.', 'krwwwkk', 'krwwwkk', 'kkkkkk.'], { k: '#212121', r: '#e53935', w: '#eceff1' }, 2),
+  };
+  const FX = {
+    bug: () => `<span class="critter">${FXP.critter}</span><span class="splat">${FXP.splat}</span><span class="pop squish">SQUISH!</span>`,
+    study: () => `<span class="book">${FXP.book}</span><span class="pop q">?</span>`,
+    playtest: () => `<span class="pad">${FXP.pad}</span><span class="pop plus">+1</span>`,
+    fun: () => `<span class="pad">${FXP.pad}</span><span class="pop plus">:)</span>`,
+    balance: () => `<span class="tilt">${FXP.scale}</span>`,
+    review: () => `<span class="lens">${FXP.lens}</span>`,
+    docs: () => `<span class="pencil">${FXP.pencil}</span><span class="sheet"></span>`,
+    change: () => `<span class="pop code">{ }</span>`,
+  };
+  function setWork(p, work) {
+    if (p.workShown === work) return;
+    p.workShown = work;
+    p.el.className = p.el.className.replace(/\bwork-\S+/g, '').trim();
+    p.el.querySelector('.fx').innerHTML = work && FX[work] && !reduceMotion ? FX[work]() : '';
+    if (work) p.el.classList.add(`work-${work}`);
+  }
+  // One-off reactions to what an agent just did.
+  function react(p, type) {
+    if (reduceMotion || !p) return;
+    const add = (html, ms) => {
+      const span = document.createElement('span');
+      span.innerHTML = html;
+      const el = span.firstElementChild;
+      p.el.appendChild(el);
+      setTimeout(() => el.remove(), ms);
+    };
+    if (type === 'task.done') {
+      const cols = ['#ffca28', '#e53935', '#43a047', '#1e88e5', '#ab47bc'];
+      add(`<span class="confetti">${Array.from({ length: 16 }, (_, k) => `<i style="--c:${cols[k % 5]};--dx:${Math.round(Math.cos(k * 0.39) * (18 + (k % 3) * 8))}px;--dy:${Math.round(-Math.abs(Math.sin(k * 0.39)) * 34 - 8)}px"></i>`).join('')}</span>`, 1300);
+    } else if (type === 'task.not_done') {
+      p.el.classList.add('shake');
+      setTimeout(() => p.el.classList.remove('shake'), 700);
+      add('<span class="react no">X</span>', 1700);
+    } else if (type === 'task.forced') {
+      add('<span class="react sweat"></span>', 2800);
+    } else if (type === 'task.paused') {
+      add(`<span class="react battery">${FXP.battery}</span>`, 5000);
+    }
+  }
+  const pendingFx = [];
+  let lastWatchAt = null;
+  function wakeWatcher(w) {
+    const p = people.get('watch');
+    if (!p || reduceMotion) return;
+    p.awake = true;
+    p.el.classList.remove('asleep', 'dim');
+    p.el.classList.add('scan');
+    say(p, w.findings.length ? `Beep! ${w.findings[0]}` : 'Beep. All quiet.');
+    clearTimeout(p.sleepT);
+    p.sleepT = setTimeout(() => {
+      p.awake = false;
+      p.el.classList.remove('scan');
+      applyStatus(p);
+    }, 6500);
+  }
+
   // ----- room props -----
   const P = {
     window: art(['ffffffffffffff', 'fbbbbbbfbbcbbf', 'fbbccbbfbcccbf', 'fbbbbbbfbbbbbf', 'fbbwbbbfbbbwwf', 'fbwwwbbfbwbwwf', 'fbwywbwfwwbywf', 'fbwwwwwfwywwwf', 'fbwywwwfwwwywf', 'ffffffffffffff'], { f: '#5d4037', b: '#90caf9', c: '#ffffff', w: '#546e7a', y: '#ffee58' }),
@@ -723,6 +836,7 @@
       if (Math.abs(dx) > 1) p.el.classList.toggle('facing-left', dx < 0);
       p.el.classList.add('walking');
       p.el.classList.remove('typing', 'attention');
+      setWork(p, null);
       p.el.style.transition = reduceMotion ? 'none' : `left ${ms}ms linear, top ${ms}ms linear`;
       place(p, pt.x, pt.y);
       p.pathT = setTimeout(next, ms + 20);
@@ -750,11 +864,19 @@
   }
 
   function applyStatus(p) {
-    if (p.walking || p.visiting || p.meeting) return;
+    if (p.walking || p.visiting || p.meeting) {
+      setWork(p, null);
+      return;
+    }
     p.el.classList.remove('facing-left');
-    p.el.classList.toggle('typing', p.status === 'working');
+    const working = p.status === 'working';
+    const work = working && (p.kind || 'agent') === 'agent' ? p.work || 'change' : null;
+    p.el.classList.toggle('typing', working && (work === 'change' || work === 'docs' || p.kind === 'human'));
     p.el.classList.toggle('attention', p.status === 'needs-attention');
-    p.el.classList.toggle('asleep', p.status === 'stalled');
+    const sleeping = p.status === 'stalled' || (p.kind === 'script' && !p.awake);
+    p.el.classList.toggle('asleep', sleeping);
+    p.el.classList.toggle('dim', p.kind === 'script' && !p.awake);
+    setWork(p, work);
   }
 
   function say(p, msg) {
@@ -840,7 +962,7 @@
     const el = document.createElement('div');
     el.className = 'person';
     el.title = a.kind === 'script' ? 'watch: the watcher, a script (no AI)' : a.kind === 'human' ? `${a.name}: you, through the War Room` : `${a.name}${a.role ? ` (${a.role})` : ''}`;
-    el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="zz">z</span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
+    el.innerHTML = `<span class="bubble"></span><span class="alarm">!</span><span class="zz">z</span><span class="beacon"></span><span class="fx"></span><span class="frame f1" style="box-shadow:${accShadow}${shadowsFor(STAND, col)}"></span><span class="frame f2" style="box-shadow:${accShadow}${shadowsFor(STEP, col)}"></span><span class="hands" style="box-shadow:0 0 0 0 ${col.s},-8px 0 0 0 ${col.s}"></span>`;
     crowd.appendChild(el);
     return el;
   }
@@ -936,6 +1058,8 @@
           void p.el.offsetWidth;
           people.set(a.name, p);
           p.status = a.status;
+          p.kind = a.kind || 'agent';
+          p.work = a.work || null;
           walkPath(p, [{ x: g.x + 2, y: g.y - 10 }, slotPt(g, i, d.id)]);
         } else if (p.room !== d.id) {
           // Moved to another division: walk over, and change into that division's outfit on arrival.
@@ -946,6 +1070,8 @@
           if (!p.visiting && !p.meeting) walkPath(p, route(from, d.id, slotPt(g, i, d.id)), () => { p.at = d.id; const old = p.el; p.el = newPerson(a, d.id); p.el.style.transition = 'none'; place(p, p.x, p.y); old.remove(); applyStatus(p); });
         } else {
           p.status = a.status;
+          p.kind = a.kind || 'agent';
+          p.work = a.work || null;
           p.i = i;
           const h = slotPt(g, i, d.id);
           if (!p.walking && !p.visiting && !p.meeting && (Math.abs(p.x - h.x) > 1 || Math.abs(p.y - h.y) > 1)) walkPath(p, [h]);
@@ -965,6 +1091,14 @@
       else p.el.remove();
     }
     syncMeeting(s.meeting);
+    while (pendingFx.length) {
+      const f = pendingFx.shift();
+      react(people.get(f.agent), f.type);
+    }
+    if (s.watch?.at && s.watch.at !== lastWatchAt) {
+      if (lastWatchAt !== null) wakeWatcher(s.watch);
+      lastWatchAt = s.watch.at;
+    }
     while (pendingTalks.length) visits.push(pendingTalks.shift());
     pumpVisits();
   }
@@ -1085,6 +1219,7 @@
         if (seen.has(key)) continue;
         seen.add(key);
         if (primed && e.agent && !talkIds.has(e.id)) bubbles.set(e.agent, { msg: e.msg, until: Date.now() + 9000 });
+        if (primed && e.agent && /^task\.(done|not_done|forced|paused)$/.test(e.type)) pendingFx.push({ agent: e.agent, type: e.type });
       }
       primed = true;
       render();

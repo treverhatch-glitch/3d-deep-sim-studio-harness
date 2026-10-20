@@ -205,7 +205,6 @@ export function mountPlaytestApi(targetWindow) {
       return res;
     },
   };
-  targetWindow.__hatch = api;
   targetWindow.__sim = api;
   return api;
 }

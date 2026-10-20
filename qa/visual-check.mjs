@@ -6,7 +6,7 @@
  *   "Accessibility tree first (`locator('body').ariaSnapshot()`), screenshots ONLY when needed."
  *
  * 1. Connects to `PLAYTEST_URL` (default `http://127.0.0.1:5173/?playtest=1`).
- * 2. Probes `window.__hatch` / `window.__sim` state directly.
+ * 2. Probes `window.__sim` (or PLAYTEST_GLOBAL) state directly.
  * 3. Captures the compact ARIA accessibility snapshot (~200 tokens instead of a 1MB PNG).
  * 4. Checks DOM bounding boxes (`uisentinel` pattern) for horizontal/vertical overflow.
  * 5. Captures a PNG screenshot ONLY if an error/overflow is detected or `--screenshot` is passed.
@@ -48,11 +48,11 @@ async function runVisualCheck() {
       ariaTree = await page.innerText('body').catch(() => '');
     }
 
-    // 2. Direct State Inspection (`window.__hatch` or `window.__sim`)
-    const simState = await page.evaluate(() => {
-      const api = window.__hatch || window.__sim;
+    // 2. Direct State Inspection (`window.__sim`, or the global named by PLAYTEST_GLOBAL)
+    const simState = await page.evaluate((g) => {
+      const api = window[g] || window.__sim;
       return api && typeof api.getState === 'function' ? api.getState() : null;
-    });
+    }, process.env.PLAYTEST_GLOBAL || '__sim');
 
     // 3. UISentinel Layout Overflow Check
     const layoutOverflow = await page.evaluate(() => {

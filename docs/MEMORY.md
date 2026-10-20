@@ -26,4 +26,4 @@ Whenever an agent fixes a bug or resolves a failing `qa/playtest.mjs` run, it **
 
 ## 3. Seeing & Acting in 3D (`blender-orchestrator`)
 
-Just as `qa/playtest.mjs` gives coding agents eyes on the running web game (`window.__hatch` / `window.__sim` + Playwright `ariaSnapshot`), 3D asset agents (`studio/roles/asset-3d.md`) use **[`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator)** (`docs/BLENDER-ORCHESTRATOR.md`) alongside headless `bpy` (`tools/blender/generate_glb.py`) so they can inspect the live Blender scene graph, render quick viewport previews, and record 3D asset lessons in `studio/memory/failures.md`.
+Just as `qa/playtest.mjs` gives coding agents eyes on the running web game (`window.__sim` + Playwright `ariaSnapshot`), 3D asset agents (`studio/roles/asset-3d.md`) use **[`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator)** (`docs/BLENDER-ORCHESTRATOR.md`) alongside headless `bpy` (`tools/blender/generate_glb.py`) so they can inspect the live Blender scene graph, render quick viewport previews, and record 3D asset lessons in `studio/memory/failures.md`.

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Git commit-msg hook. Installed by `npm run hooks:install` (core.hooksPath=scripts/hooks).
+# Adds trailers that tie a commit to the agent, its model and the task it holds, so a bug can be
+# traced to the exact change: Studio-Agent, Studio-Model, Studio-Task. Skipped when no agent is set.
+set -euo pipefail
+MSG_FILE="$1"
+ROOT="$(git rev-parse --show-toplevel)"
+[ -n "${STUDIO_LOCK_OWNER:-}" ] || exit 0
+TASKS="$(cd "$ROOT" && node -e "
+import('./harness/lock.mjs').then(({ listLocks }) => {
+  const mine = listLocks().filter((l) => l.owner === process.env.STUDIO_LOCK_OWNER && l.key.startsWith('task:'));
+  process.stdout.write(mine.map((l) => l.key.slice(5)).join(', '));
+}).catch(() => {});
+" 2>/dev/null || true)"
+add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --trailer "$1: $2" "$MSG_FILE"; }
+add "Studio-Agent" "$STUDIO_LOCK_OWNER"
+[ -n "${STUDIO_AGENT_MODEL:-}" ] && add "Studio-Model" "$STUDIO_AGENT_MODEL"
+[ -n "$TASKS" ] && add "Studio-Task" "$TASKS"
+exit 0
