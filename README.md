@@ -74,4 +74,6 @@ contains no keys; `bash scripts/secret-scan.sh` checks exactly what git would pu
 Model routing (`harness/route.mjs`) fails over between local, free-tier and paid providers using keys
 from `.env`. Token-saver tools (rtk, qmd, serena) are optional: `npm run setup:token-savers`.
 
+Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST-PRACTICES.md](docs/BEST-PRACTICES.md).
+
 MIT licensed.

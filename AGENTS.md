@@ -105,3 +105,11 @@ Require explicit human or Producer approval before:
 
 Optional external tools are listed in `docs/EXTERNAL-TOOLS.md`. Do not vendor them into this repo.
 
+
+---
+
+## 9. Best practices (recommended)
+
+Not rules, but they keep accounts in good standing and the team fast: commit locally and push in batches,
+stay in your own repos, use fine-grained tokens, use only keys you are entitled to (extra free accounts break most providers' terms), tools before freehand.
+See `docs/BEST-PRACTICES.md`.
