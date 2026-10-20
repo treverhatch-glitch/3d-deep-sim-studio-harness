@@ -36,7 +36,7 @@
   Players the studio judges through; `npm run fun` reads the game through each persona with a `lens:`.
 - `npm run sign -- keygen | result --by <name> | verify <file> [--replay] | fingerprint`
   Ed25519-signed manifests of verified results (goldens' SHA-256, gates, commit). `docs/SIGNED-RESULTS-AND-DATA.md`.
-- `npm run trajectories -- preview | export --consent "…" --licence "…" [--with-briefs]`
+- `npm run trajectories -- preview | export --consent "…" --licence "…" [--with-briefs] [--with-diffs]`
   Opt-in, scrubbed, labelled records of finished tasks for evaluating or training models; `.studio/exports/`.
 - `npm run learn [-- backup --to <folder>]`
   What keeps happening, lessons that didn't stick, suggestions never handled, the overseer's evaluations; daily by the HUB, backed up to `STUDIO_BACKUP_DIR`.
@@ -67,6 +67,10 @@
 - Commits made with `STUDIO_LOCK_OWNER` set get `Studio-Agent`, `Studio-Model` and `Studio-Task` trailers (commit-msg hook).
 - `node harness/done-check.mjs <ID>`
   Shows a task's type and its checklist (`[x]`/`[ ]`): content checks, not file times. One skill per type in `studio/skills/`.
+  `bug`: the regression must fail on the code before the first `Studio-Task` commit (`node qa/fails-before.mjs <regression.json> <commit>`, a temporary worktree).
+  `system`: spec in `studio/bible/systems/` ending in "## For the next agent", a `qa.mjs` scenario, goldens, a playtest, and an approving review whose `model-family:` differs from its `implementer-family:`.
+- `RENDER_URL=<build url> node scripts/check-renderer-budget.mjs`
+  Measures `window.__render = { drawCalls, triangles, lights, frameMs }` in Chromium against the budget in `studio/rules/renderer-budget.md`; static scan without `RENDER_URL`.
 - `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`
   Outside tools agents can use (`studio/plugins.json`): REA, Playwright MCP, Chrome DevTools MCP, Blender, Godot, Unity.
 - `node harness/event.mjs --type <event.type> --agent <role> [--task <ID>] [--to producer] --msg "<summary>"`

@@ -145,6 +145,11 @@ export function learningFiles() {
     const full = path.join(REPO_ROOT, dir);
     if (fs.existsSync(full)) for (const f of fs.readdirSync(full)) if (/\.(md|json)$/.test(f)) files.push(`${dir}/${f}`);
   }
+  // The raw material for any later export or study: the event log, task briefs and the last gate run.
+  // They live in .studio/ (never committed), so the backup is their only copy off this machine.
+  files.push('.studio/events.jsonl', '.studio/gates-last.json');
+  const briefs = path.join(REPO_ROOT, '.studio', 'briefs');
+  if (fs.existsSync(briefs)) for (const f of fs.readdirSync(briefs)) if (f.endsWith('.md')) files.push(`.studio/briefs/${f}`);
   return files.filter((f) => fs.existsSync(path.join(REPO_ROOT, f)));
 }
 
@@ -167,7 +172,7 @@ export function backup(to = process.env.STUDIO_BACKUP_DIR) {
     fs.copyFileSync(path.join(REPO_ROOT, f), target);
   }
   const combined = [`# Studio memory: ${title || slug}`, '', `Backed up ${new Date().toISOString()} from ${files.length} files.`, ''];
-  for (const f of files.filter((x) => x.endsWith('.md'))) combined.push('', `---`, '', `<!-- ${f} -->`, '', read(f).replace(/^# /m, `# ${f}: `));
+  for (const f of files.filter((x) => x.endsWith('.md') && !x.startsWith('.studio/'))) combined.push('', `---`, '', `<!-- ${f} -->`, '', read(f).replace(/^# /m, `# ${f}: `));
   fs.writeFileSync(path.join(dest, 'STUDIO-MEMORY.md'), combined.join('\n'));
   emitEvent({ type: 'learn.backup', agent: 'watch', msg: `Backed up ${files.length} learning files to ${dest}` });
   return { ok: true, dest, files: files.length };

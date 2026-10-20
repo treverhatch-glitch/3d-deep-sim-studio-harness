@@ -3,7 +3,7 @@
  * harness/trajectories.mjs — export the studio's finished work as training and evaluation records.
  * Opt-in: nothing is exported without the game dev's consent and terms.
  *
- *   npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs] [--since 2026-10-01]
+ *   npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs] [--with-diffs] [--since 2026-10-01]
  *   npm run trajectories -- preview          how many records, and what an export would hold (writes nothing)
  *
  * One record per finished task: the task (type, role, size, phase, what it served), the model and
@@ -29,6 +29,7 @@ import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { taggedCommits, traceBugs, DEFAULT_SIZE } from './scorecard.mjs';
 import { scrub } from './secrets.mjs';
+import { modelFamily } from './families.mjs';
 
 const OUT_DIR = path.join(STUDIO_STATE_DIR, 'exports');
 
@@ -41,7 +42,12 @@ function numstat(hash) {
   }, { insertions: 0, deletions: 0 });
 }
 
-export function buildRecords({ withBriefs = false, since = null } = {}) {
+function patch(hash) {
+  const r = spawnSync('git', ['show', '--format=', '--patch', hash, '--', '.', ':(exclude)studio', ':(exclude).studio', ':(exclude)package-lock.json'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout.slice(0, 20000) : '';
+}
+
+export function buildRecords({ withBriefs = false, withDiffs = false, since = null } = {}) {
   const q = parseNextQueue();
   const events = readRecentEvents(100000);
   const meta = new Map(events.filter((e) => e.type === 'task.added' && e.task).map((e) => [e.task, e.meta || {}]));
@@ -89,7 +95,8 @@ export function buildRecords({ withBriefs = false, since = null } = {}) {
       startedAt: started.get(t.id)?.ts || null,
       doneAt: d.ts,
       input: withBriefs && fs.existsSync(briefFile) ? clean(fs.readFileSync(briefFile, 'utf8')) : null,
-      commits: own.map((c) => ({ commit: c.hash.slice(0, 12), files: c.files, ...numstat(c.hash) })),
+      commits: own.map((c) => ({ commit: c.hash.slice(0, 12), files: c.files, ...numstat(c.hash), model: c.model || null, ...(withDiffs ? { diff: clean(patch(c.hash)) } : {}) })),
+      providers: [...new Set([d.model || started.get(t.id)?.model, ...own.map((c) => c.model)].filter(Boolean).map(modelFamily))],
       outcome: { refusedBeforeDone: refused, forced, reopened, bugsTracedBack: traced, reviews: verdicts },
       label,
     });
@@ -97,9 +104,9 @@ export function buildRecords({ withBriefs = false, since = null } = {}) {
   return { records, scrubbed: hits };
 }
 
-export function exportTrajectories({ consent, licence, withBriefs = false, since = null }) {
+export function exportTrajectories({ consent, licence, withBriefs = false, withDiffs = false, since = null }) {
   if (!consent || !licence) return { ok: false, message: 'Exports are opt-in. Say who agrees and on what terms: --consent "<who agrees to this export>" --licence "<terms for its use>".' };
-  const { records, scrubbed } = buildRecords({ withBriefs, since });
+  const { records, scrubbed } = buildRecords({ withBriefs, withDiffs, since });
   if (!records.length) return { ok: false, message: 'No finished tasks to export yet.' };
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
@@ -107,7 +114,23 @@ export function exportTrajectories({ consent, licence, withBriefs = false, since
   fs.writeFileSync(file, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const labels = records.reduce((a, r) => ({ ...a, [r.label]: (a[r.label] || 0) + 1 }), {});
-  const manifest = { kind: 'studio.trajectories', harness: pkg.version, file: path.basename(file), sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'), records: records.length, labels, withBriefs, consent, licence, scrubbedSecrets: scrubbed, at: new Date().toISOString() };
+  const providers = records.flatMap((r) => r.providers).reduce((a, p) => ({ ...a, [p]: (a[p] || 0) + 1 }), {});
+  const manifest = {
+    kind: 'studio.trajectories',
+    harness: pkg.version,
+    file: path.basename(file),
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),
+    records: records.length,
+    labels,
+    providers,
+    termsNote: `Records include work by models from: ${Object.keys(providers).join(', ') || 'unknown'}. Several providers' terms limit using their outputs to train other companies' models. Check each provider's current terms before sharing outside your studio.`,
+    withBriefs,
+    withDiffs,
+    consent,
+    licence,
+    scrubbedSecrets: scrubbed,
+    at: new Date().toISOString(),
+  };
   const manifestFile = file.replace(/\.jsonl$/, '.manifest.json');
   fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   emitEvent({ type: 'trajectories.export', agent: 'producer', msg: `Exported ${records.length} task records (${Object.entries(labels).map(([k, v]) => `${v} ${k}`).join(', ')}) with consent from ${consent}` });
@@ -121,12 +144,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
   };
   if (argv[0] === 'export') {
-    const r = exportTrajectories({ consent: flag('consent'), licence: flag('licence') || flag('license'), withBriefs: argv.includes('--with-briefs'), since: flag('since') });
+    const r = exportTrajectories({ consent: flag('consent'), licence: flag('licence') || flag('license'), withBriefs: argv.includes('--with-briefs'), withDiffs: argv.includes('--with-diffs'), since: flag('since') });
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);
     }
-    console.log(`Exported ${r.manifest.records} records to ${r.file} (${Object.entries(r.manifest.labels).map(([k, v]) => `${v} ${k}`).join(', ')}; ${r.manifest.scrubbedSecrets} key-shaped strings removed). Manifest with consent, terms and SHA-256 next to it.`);
+    console.log(`Exported ${r.manifest.records} records to ${r.file} (${Object.entries(r.manifest.labels).map(([k, v]) => `${v} ${k}`).join(', ')}; ${r.manifest.scrubbedSecrets} key-shaped strings removed). Manifest with consent, terms and SHA-256 next to it.\n${r.manifest.termsNote}`);
   } else {
     const { records, scrubbed } = buildRecords({ withBriefs: argv.includes('--with-briefs') });
     const labels = records.reduce((a, r) => ({ ...a, [r.label]: (a[r.label] || 0) + 1 }), {});

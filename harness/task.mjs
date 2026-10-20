@@ -288,7 +288,7 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
     if (!idea) return { ok: false, message: `No idea ${meta.idea} on the Idea Board.` };
     if (!['approved', 'scheduled'].includes(idea.stage)) return { ok: false, message: `${meta.idea} is "${idea.stage}". Ideas go captured, shaped, placed, then approved by the Director before they become work (npm run idea -- show ${meta.idea}).` };
   }
-  if (!b || taskType({ title, role }) !== 'change') return { ok: true, warnings };
+  if (!b || !['change', 'system'].includes(taskType({ title, role }))) return { ok: true, warnings };
   const crossed = crossedLayersIn(title, b);
   if (crossed.length) return { ok: false, message: `"${title}" touches a crossed-out layer: ${crossed.map((l) => l.label).join(', ')} (studio/bible/NOT-DOING.md). Only a person brings a layer back: npm run bible -- layer ${crossed[0].id} yes --by <name>.` };
   if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return { ok: true, warnings };
@@ -317,7 +317,7 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     emitEvent({ type: 'task.refused', agent, status: 'blocked', msg: `Not queued: ${title}. ${gate.message}` });
     return { error: 'gated', message: gate.message };
   }
-  if (taskType({ title, role }) === 'change') meta = { ...meta, build: true };
+  if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
   const q = parseNextQueue();
   const all = [...q.inProgress, ...q.backlog, ...q.done];
   const maxNum = all.reduce((max, t) => {
@@ -461,8 +461,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review, docs or idea.`);
+    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review, docs, idea or system.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';

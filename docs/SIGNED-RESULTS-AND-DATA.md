@@ -32,7 +32,7 @@ train them with automatic pass/fail grading.
 
 ```bash
 npm run trajectories -- preview
-npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs]
+npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--with-briefs] [--with-diffs]
 ```
 
 - **Opt-in.** Nothing is exported without consent and terms; both go in the manifest.
@@ -40,6 +40,32 @@ npm run trajectories -- export --consent "<who agrees>" --licence "<terms>" [--w
 - **Labelled.** `clean` (done first time, nothing came back), `needed-fixes` (refused, forced or
   reviewed with changes), `caused-bug` (reopened, or a bug traced back to it).
 - **Local.** Files go to `.studio/exports/` (never committed), with a manifest holding the SHA-256.
+- **Diffs, if you choose.** `--with-diffs` adds each commit's patch (studio records and lock files
+  left out, 20,000 characters at most, scrubbed). Diffs are the most useful part for training and
+  the most sensitive: they are your game's code.
+- **Providers named.** Each record lists the model families whose work is in it, and the manifest
+  counts them and repeats the warning below.
+
+### Collect now, decide later
+
+Collecting costs nothing and stays on your machine: the event log, briefs, tagged commits, reviews
+and done-checks are written as the studio works. What can't be done later is recreating history, so
+keep it: `npm run learn -- backup` (or `STUDIO_BACKUP_DIR`) copies the event log and briefs, which
+live in `.studio/` and are never committed. Exporting is a separate, deliberate step.
+
+### Before sharing with anyone else
+
+Not legal advice; talk to a lawyer before a deal.
+
+- **Your consent and the game dev's.** If the studio builds someone else's game, their code and
+  ideas are in the records. Get it in writing.
+- **Model providers' terms.** Several providers' terms limit using their outputs to develop models
+  that compete with theirs. Records full of one provider's output may not be yours to sell to
+  another lab. Check each provider's current terms, and prefer records from open-weight models or
+  your own work when the buyer trains models.
+- **What buyers value.** Verified outcomes: a task, the work, and whether it held up (checks,
+  review, bugs traced back). Sample exports from the example game and your own games are fine for
+  showing the shape of the data.
 
 Uses, in order: comparing and routing models (the scorecard already does a version of this);
 fine-tuning a local model on your own studio's good work; and, only with consent and terms,

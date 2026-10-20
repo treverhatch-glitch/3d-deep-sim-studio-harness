@@ -18,9 +18,20 @@ import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { isSha256 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
+import { failsBefore } from '../qa/fails-before.mjs';
+import { modelFamily } from './families.mjs';
+
+/** The oldest commit tagged with this task (Studio-Task trailer), or null. */
+function firstTaggedCommit(taskId) {
+  const out = git('log', '--reverse', '--format=%H%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)');
+  if (out === null) return undefined; // not a git checkout
+  const line = out.split('\n').find((l) => (l.split('\t')[1] || '').split(',').map((x) => x.trim()).includes(taskId));
+  return line ? line.split('\t')[0] : null;
+}
 
 const PREFIX = [
   [/^(bug|fix)\b/i, 'bug'],
+  [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
   [/^balance\b/i, 'balance'],
   [/^fun\b/i, 'fun'],
@@ -52,7 +63,7 @@ const BY_ROLE = {
 
 export const TYPES = {
   change: { skill: 'studio/skills/builder.md', means: 'changes exist for the task, and a full `npm run verify` passed after the last of them' },
-  bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned hash, a lesson naming the bug, changes for the fix, and a green verify after the last change' },
+  bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned SHA-256 that fails on the code before the fix, a lesson naming the bug, the fix committed with the task\'s tag, and a green verify after the last change' },
   balance: { skill: 'studio/skills/balance.md', means: 'a sweep of the current tuning, newer than the last game change; a person picks the number' },
   fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
   playtest: { skill: 'studio/skills/playtest.md', means: 'a playtest report on the current build with seed, ticks, hash, and the failing tick if it failed' },
@@ -60,6 +71,7 @@ export const TYPES = {
   review: { skill: 'studio/skills/review.md', means: 'a review note naming the task or commit it reviewed, with a verdict' },
   docs: { skill: 'studio/skills/docs.md', means: 'a changed .md file, and a full `npm run verify` after the last change' },
   direction: { skill: 'studio/skills/direction.md', means: 'a dated review in studio/bible/reviews/ since the task started, naming the phase, what it checked, a verdict, and next tasks' },
+  system: { skill: 'studio/skills/system.md', means: 'a spec with a hand-off in studio/bible/systems/, the sim change with a scenario in qa.mjs and updated goldens, a playtest of the current build, a green verify after the last change, and an approving review from another model family' },
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
@@ -217,6 +229,16 @@ export function checkDone(task, since = startedAt(task.id)) {
     const day = new Date(since).toISOString().slice(0, 10);
     const named = lessons.some((h) => ids.some((id) => h.includes(id)));
     const dated = lessons.some((h) => (h.match(/\[(\d{4}-\d{2}-\d{2})\]/) || [])[1] >= day) && mtime('studio/memory/failures.md') >= since;
+    // The regression has to catch the bug: replayed on the code before the fix, it must fail.
+    const fix = firstTaggedCommit(task.id);
+    if (fix !== undefined && regs.length) {
+      if (!fix) check('Regression fails on the code before the fix', false, `no commit tagged Studio-Task: ${task.id} yet; commit the fix (with STUDIO_LOCK_OWNER set, the hook adds the tag), then this check replays the regression on the commit before it`);
+      else {
+        const results = regs.map(({ f }) => failsBefore(abs(f), `${fix}^`));
+        const good = results.find((r) => r.ok);
+        check('Regression fails on the code before the fix', good, results.map((r) => r.why).join('; '));
+      }
+    }
     check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`bash scripts/distill-bug.sh\`)`);
     workAndVerify();
   }
@@ -247,6 +269,27 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Review note since the task started', notes.length, 'no review note in studio/reviews/ since this task started');
     check('Note names what it reviewed (a task ID or commit)', notes.some((t) => /\bT-\d+\b|\b[0-9a-f]{7,40}\b/.test(t)), 'the review note doesn\'t name the task or commit it reviewed');
     check('Note gives a verdict', notes.some((t) => /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t)), 'the review note has no verdict (approve, request changes, or reject)');
+  }
+  if (type === 'system') {
+    const specs = newestSince(filesUnder('studio/bible/systems', (n) => n.endsWith('.md') && n !== 'README.md'), since);
+    check('Spec written in studio/bible/systems/ since the task started', specs.length, 'no spec in studio/bible/systems/ since this task started (what it does, its phase and layer, its rules and invariants)');
+    check('Spec ends with a hand-off for the next agent', specs.some((f) => /^##\s*For the next agent/im.test(fs.readFileSync(abs(f), 'utf8')) && words(f) >= 80), 'the spec has no "## For the next agent" section, or is under 80 words');
+    const ch = taskChanges(task.id, since);
+    check('A scenario for it in the cartridge\'s qa.mjs', ch.files.some((f) => /^cartridges\/[^/]+\/qa\.mjs$/.test(f)), 'qa.mjs wasn\'t changed: add a scenario that exercises the system');
+    check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
+    const fresh2 = lastGameChange();
+    const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);
+    check('Playtest of the current build', reps.length, 'no playtest report newer than the last game change (npm run playtest:stage1)');
+    workAndVerify();
+    const implementer = (readRecentEvents(20000).filter((e) => e.type === 'task.start' && e.task === task.id).pop() || {}).model;
+    const notes = filesUnder('studio/reviews', (n) => n.endsWith('.md') && n !== 'README.md').map((f) => fs.readFileSync(abs(f), 'utf8')).filter((t) => new RegExp(`\\b${task.id}\\b`).test(t));
+    const approving = notes.filter((t) => /\b(approve[sd]?|lgtm)\b/i.test(t) && !/\b(request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t));
+    const cross = approving.filter((t) => {
+      const rev = (t.match(/model-family\s*:\s*(\S+)/i) || [])[1];
+      const impl = (t.match(/implementer-family\s*:\s*(\S+)/i) || [])[1] || (implementer ? modelFamily(implementer) : null);
+      return rev && impl && modelFamily(rev) !== modelFamily(impl) && modelFamily(rev) !== 'unknown';
+    });
+    check('Approved by a reviewer from another model family', cross.length, approving.length ? 'the approving review is from the same model family as the builder (or has no model-family line)' : `no review in studio/reviews/ names ${task.id} and approves it (with "model-family:" and "implementer-family:" lines)`);
   }
   if (type === 'direction') {
     const reviews = newestSince(filesUnder('studio/bible/reviews', (n) => n.endsWith('.md') && n !== 'README.md'), since).map((f) => parseReview(abs(f))).filter(Boolean);

@@ -52,8 +52,8 @@ export function traceBugs(bugIds, commits = taggedCommits()) {
   return out;
 }
 
-export const DEFAULT_SIZE = { docs: 1, playtest: 1, fun: 1, review: 1, study: 2, balance: 2, change: 3, bug: 3, none: 0 };
-const BUILDS = new Set(['change', 'bug']);
+export const DEFAULT_SIZE = { docs: 1, playtest: 1, fun: 1, review: 1, study: 2, balance: 2, change: 3, bug: 3, system: 4, direction: 1, idea: 1, none: 0 };
+const BUILDS = new Set(['change', 'bug', 'system']);
 
 export function buildScorecard({ events = readRecentEvents(20000), queue = parseNextQueue() } = {}) {
   const tasks = new Map([...queue.inProgress, ...queue.backlog, ...queue.done].map((t) => [t.id, { ...t }]));

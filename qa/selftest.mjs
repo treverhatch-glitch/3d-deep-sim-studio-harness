@@ -66,6 +66,7 @@ const SABOTAGE = {
   soak: (d) => edit(d, SIM, plantInvariant(150)),
   'tick-budget': () => ({ TICK_BUDGET_MS_PER_TICK: '0.0000001' }),
   'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req));', 'return true;')),
+  reviewer: (d) => fs.writeFileSync(path.join(d, 'studio/reviews/2026-10-20-T-001.md'), 'Review of T-001. Verdict: approve.\n'),
   assets: (d) => {
     fs.mkdirSync(path.join(d, 'assets'), { recursive: true });
     fs.writeFileSync(path.join(d, 'assets/stray.glb'), 'not recorded');
@@ -87,6 +88,7 @@ const EXPECT = {
   soak: /PLANTED/,
   'tick-budget': /ms\/tick >/,
   'hub-smoke': /FAIL write without token is refused/,
+  reviewer: /needs model-family and implementer-family/,
   assets: /stray\.glb has no record/,
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
@@ -625,6 +627,96 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const man = JSON.parse(fs.readFileSync(path.join(dir, '.studio/exports', out.find((f) => f.endsWith('.manifest.json'))), 'utf8'));
   report('an export writes one labelled record per finished task, with its commits', ex.status === 0 && recs.length === 2 && recs.find((r) => r.id === a)?.label === 'clean' && recs.find((r) => r.id === a)?.commits.length === 1 && recs.find((r) => r.id === b)?.label === 'caused-bug', ex.stdout + ex.stderr + jsonl);
   report('exported text is scrubbed of key-shaped strings, and the manifest records consent and a SHA-256', !jsonl.includes(key) && /\[removed\]/.test(jsonl) && man.consent && man.licence && /^[0-9a-f]{64}$/.test(man.sha256) && man.scrubbedSecrets >= 1, JSON.stringify(man));
+}
+
+// A bug's regression must fail on the code before the fix, or it guards nothing.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1500,', 'startCredits: 1400,'));
+  git('commit -qam "cheaper start" --no-verify --trailer "Studio-Task: T-900"');
+  const bug = JSON.parse(run(dir, 'node harness/task.mjs add "Starting credits wrong" --type bug', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${bug} --agent fixer-1`, env);
+  edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1400,', 'startCredits: 1500,'));
+  fs.copyFileSync(path.join(dir, 'qa/regressions/example-same-tick.json'), path.join(dir, 'qa/regressions/BUG-credits.json'));
+  edit(dir, 'qa/regressions/BUG-credits.json', (s) => s.replace('"REG-same-tick"', '"BUG-credits"'));
+  const uncommitted = run(dir, `node harness/done-check.mjs ${bug}`, env).stdout;
+  report('the bug check asks for the fix to be committed with the task\'s tag', /\[ \] Regression fails on the code before the fix: no commit tagged/.test(uncommitted), uncommitted);
+  git(`add -A`);
+  git(`commit -q -m "restore credits" --no-verify --trailer "Studio-Task: ${bug}"`);
+  const good = run(dir, `node harness/done-check.mjs ${bug}`, env).stdout;
+  report('a regression that fails on the code before the fix passes the check', /\[x\] Regression fails on the code before the fix/.test(good), good);
+  const bug2 = JSON.parse(run(dir, 'node harness/task.mjs add "Docs typo in the guide" --type bug', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${bug2} --agent fixer-2`, env);
+  fs.copyFileSync(path.join(dir, 'qa/regressions/example-same-tick.json'), path.join(dir, 'qa/regressions/BUG-typo.json'));
+  edit(dir, 'qa/regressions/BUG-typo.json', (s) => s.replace('"REG-same-tick"', '"BUG-typo"'));
+  fs.writeFileSync(path.join(dir, 'GUIDE.md'), 'fixed typo\n');
+  git('add -A');
+  git(`commit -q -m "typo" --no-verify --trailer "Studio-Task: ${bug2}"`);
+  const bad = run(dir, `node harness/done-check.mjs ${bug2}`, env).stdout;
+  report('a regression that also passes before the fix is refused: it doesn\'t catch the bug', /\[ \] Regression fails on the code before the fix: the regression passes on/.test(bad), bad);
+  report('checking before the fix leaves no worktree behind', !/fails-before-/.test(run(dir, 'git worktree list').stdout));
+}
+
+// System tasks: spec with hand-off, scenario, goldens, playtest, verify, and a review from another model family.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system', env).stdout).id;
+  run(dir, `node harness/task.mjs start ${id} --agent builder-1 --model claude-opus-5-5`, env);
+  const empty = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
+  report('a system task starts with everything missing', /is a "system" task/.test(empty) && /\[ \] Spec written/.test(empty) && /\[ \] Approved by a reviewer/.test(empty), empty);
+  fs.mkdirSync(path.join(dir, 'studio/bible/systems'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals; the invariant keeps ratings between 0 and 5.\n`);
+  edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// visitors scenario\n`);
+  edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1500,', 'startCredits: 1550,'));
+  run(dir, 'node qa/check-golden.mjs --update');
+  run(dir, 'node qa/check-regressions.mjs --update');
+  run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
+  git('add -A');
+  git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  fs.writeFileSync(path.join(dir, 'studio/reviews/2026-10-20-visitors.md'), `model-family: claude\nimplementer-family: anthropic\n\nReview of ${id}: rates look right. Verdict: approve.\n`);
+  const same = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
+  report('a system task refuses an approval from the builder\'s own model family', /\[x\] Spec ends with a hand-off/.test(same) && /\[x\] Goldens updated/.test(same) && /\[ \] Approved by a reviewer from another model family: the approving review is from the same model family/.test(same), same);
+  report('the reviewer gate refuses a review from the same family', run(dir, 'node scripts/check-reviewer.mjs').status !== 0);
+  fs.writeFileSync(path.join(dir, 'studio/reviews/2026-10-20-visitors.md'), `model-family: gpt-5\nimplementer-family: anthropic\n\nReview of ${id}: rates look right. Verdict: approve.\n`);
+  const ok = run(dir, `node harness/done-check.mjs ${id}`, env);
+  report('a system task is done with every piece and a cross-family approval', ok.status === 0 && /Ready to finish/.test(ok.stdout), ok.stdout);
+}
+
+// Renderer budget: measured in Chromium when a build is running; the static scan still catches too many lights.
+{
+  const dir = copyRepo();
+  const pages = fs.mkdtempSync(path.join(tmpRoot, 'render-'));
+  const page = (calls) => `<!doctype html><title>r</title><script>function f(){window.__render={drawCalls:${calls},triangles:1000,lights:2,frameMs:4};requestAnimationFrame(f)}f()</script>`;
+  fs.writeFileSync(path.join(pages, 'over.html'), page(420));
+  fs.writeFileSync(path.join(pages, 'under.html'), page(40));
+  fs.writeFileSync(path.join(pages, 'blank.html'), '<!doctype html><title>b</title>');
+  const chromium = process.env.PLAYWRIGHT_CHROMIUM || ['/opt/pw-browsers/chromium'].find((p) => fs.existsSync(p));
+  const env = { RENDER_SAMPLE_MS: '300', ...(chromium ? { PLAYWRIGHT_CHROMIUM: chromium } : {}) };
+  const url = (f) => pathToFileURL(path.join(pages, f)).href;
+  // Measured runs use this checkout, which has Playwright installed; the copies don't carry node_modules.
+  const probe = run(root, 'node scripts/check-renderer-budget.mjs', { ...env, RENDER_URL: url('under.html') });
+  if (/PASS measured/.test(probe.stdout)) {
+    const over = run(root, 'node scripts/check-renderer-budget.mjs', { ...env, RENDER_URL: url('over.html') });
+    report('the measured renderer budget fails a frame over the draw-call budget', over.status !== 0 && /drawCalls 420 > 150/.test(over.stderr), over.stderr + over.stdout);
+    const blank = run(root, 'node scripts/check-renderer-budget.mjs', { ...env, RENDER_URL: url('blank.html'), RENDER_READY_MS: '1500' });
+    report('a page without window.__render fails instead of passing', blank.status !== 0 && /never set window\.__render/.test(blank.stderr), blank.stderr);
+  } else {
+    console.log(`[selftest] SKIP measured renderer budget (no browser here: ${probe.stdout.trim().split('\n')[0]})`);
+  }
+  fs.writeFileSync(path.join(dir, 'cartridges/example-sim/lights.mjs'), Array.from({ length: 9 }, () => 'new PointLight();').join('\n'));
+  const scan = run(dir, 'node scripts/check-renderer-budget.mjs', env);
+  report('the static renderer scan fails nine lights', scan.status !== 0 && /9 lights > 8/.test(scan.stderr), scan.stderr);
 }
 
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.

@@ -7,13 +7,15 @@ skills say how a kind of work gets finished. Each file has four parts: **When**,
 "Done means" is not a promise in prose: `node harness/task.mjs done <ID>` runs
 `harness/done-check.mjs` and refuses while something is missing. See what a task still needs with
 `node harness/done-check.mjs <ID>`. The checks read content, not just file times: a review must name
-what it reviews and give a verdict, a bug needs a pinned regression and a lesson, a build needs real
+what it reviews and give a verdict, a bug needs a pinned regression that fails on the code before the fix and a lesson, a system needs a
+spec with a hand-off, a scenario, goldens, a playtest and an approval from another model family, a build needs real
 changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
 
 | Type | Picked by | Skill |
 | --- | --- | --- |
 | change | role `builder`, `asset-3d`, or anything unmatched | [builder.md](builder.md) |
 | bug | title starts with `Bug` or `Fix` (the closed loop queues `Fix BUG-…`) | [bug.md](bug.md) |
+| system | title `System:`, or `--type system` | [system.md](system.md) |
 | balance | role `designer-calibrator`, `balancer`, or title `Balance:` | [balance.md](balance.md) |
 | playtest / fun | role `qa-playtester`, `playtester`, `fun-tester`, or title `Playtest:` / `Fun:` | [playtest.md](playtest.md) |
 | study | role `reference-scout`, or title `Study:` | [study.md](study.md) |

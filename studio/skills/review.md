@@ -6,7 +6,8 @@
 1. Read the diff and the task it closes, not the whole repo.
 2. Run `npm run verify` and `node scripts/check-sim-isolation.mjs`.
 3. Write `studio/reviews/<date>-<task>.md`: approve or request changes, with file and line for
-   each point.
+   each point. Start it with two lines, `model-family: <yours, e.g. anthropic>` and
+   `implementer-family: <the builder's>`. They must differ; the reviewer gate checks every note.
 
 **Done means.** A review note in `studio/reviews/`, written after the task started, that names the
 task ID or commit it reviews and gives a verdict (approve, LGTM, request changes, reject, blocking).

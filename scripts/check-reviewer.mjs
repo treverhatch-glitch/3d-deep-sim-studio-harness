@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { modelFamily } from '../harness/families.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'studio', 'reviews');
@@ -21,7 +22,7 @@ for (const file of files) {
     failed += 1;
     continue;
   }
-  if (reviewer.toLowerCase() === implementer.toLowerCase()) {
+  if (modelFamily(reviewer) === modelFamily(implementer)) {
     console.error(`[reviewer] FAIL ${file} reviewer family matches implementer (${reviewer})`);
     failed += 1;
     continue;

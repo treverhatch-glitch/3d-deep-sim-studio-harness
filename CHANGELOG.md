@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.12.0] — 2026-10-20
+### Added
+- **A bug's regression must fail before the fix.** The bug done-check replays the regression on the code before the task's first `Studio-Task` commit, in a temporary git worktree (`qa/fails-before.mjs`, cached). A regression that passes there too guards nothing and is refused. The bug skill now covers the whole loop: triage, reproduce, `git bisect run` with the replay, smallest fix, pinned SHA-256, lesson, hand-off.
+- **`system` tasks** (`--type system`, skill `studio/skills/system.md`): a spec in `studio/bible/systems/` that ends with "## For the next agent", a scenario in `qa.mjs`, goldens, a playtest, a verify, and an approval from a reviewer of another model family.
+- **Cross-family review.** `harness/families.mjs` maps model names to their maker. Reviews start with `model-family:` and `implementer-family:`; the reviewer gate is now **required** and refuses a same-family approval.
+- **Measured renderer budget.** The game sets `window.__render = { drawCalls, triangles, lights, frameMs }` next to `__sim`; with `RENDER_URL`, `scripts/check-renderer-budget.mjs` samples it in Chromium and fails over the budget block in `studio/rules/renderer-budget.md`. The code scan remains as the fallback.
+- Trajectory export: `--with-diffs` (scrubbed patches), the model behind each commit, provider families per record, and a terms warning in the manifest.
+### Changed
+- Learning backups include the event log, the last gate run and task briefs, which live only in `.studio/`.
+- Roadmap: on-chain options as a later opt-in add-on (stamp, archive; fully on-chain games not planned) and data partnerships with AI labs.
+
+---
+
 ## [2.11.0] — 2026-10-20
 ### Added
 - **Agent identity**: core role cards (builder, playtester, reviewer, designer, fun tester, reference scout, 3D, Producer) gain "Who you are": what good work looks like, common mistakes, questions to ask, and an example. Every focus brief now includes it, plus where agents in that role get refused most (from the event log) and lessons filed for the role (`- **Role**:` in `failures.md`).

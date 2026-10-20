@@ -183,10 +183,10 @@ while the agents keep working.
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
-| S1 | The bug skill is a short note; agents need the whole loop. | A full bug skill: triage and severity, reproduce from seed and tick, find the breaking commit (`git bisect` with the replay), smallest fix, a regression that fails before the fix and passes after, lesson, hand-off. The done-check proves "fails before" by replaying against the parent commit in a temporary folder. | planned |
-| S2 | No skill for "build this system, prove it, hand it off". | A `system` skill and task type: a one-page spec in the Bible (its phase and layer), the sim module, its invariants, a phase scenario in `qa.mjs`, goldens, a playtest, a short doc for the next agent. The done-check checks each piece. | planned |
-| S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | planned |
-| S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | planned |
+| S1 | The bug skill is a short note; agents need the whole loop. | A full bug skill: triage and severity, reproduce from seed and tick, find the breaking commit (`git bisect` with the replay), smallest fix, a regression that fails before the fix and passes after, lesson, hand-off. The done-check proves "fails before" by replaying against the parent commit in a temporary folder. | done (2.12.0) |
+| S2 | No skill for "build this system, prove it, hand it off". | A `system` skill and task type: a one-page spec in the Bible (its phase and layer), the sim module, its invariants, a phase scenario in `qa.mjs`, goldens, a playtest, a short doc for the next agent. The done-check checks each piece. | done (2.12.0) |
+| S3 | The reviewer check is optional and passes with no reviews. | A phase slice or `system` task isn't done without a review from a different model family that names it and approves it; the reviewer gate becomes required for them. | done (2.12.0) |
+| S4 | Renderer budget greps for the word `Light`. | Measure it: the playtest loads the game in Chromium, reads the renderer's counters (draw calls, triangles, lights, frame time) through a hook next to `__sim`, and fails over the budget. The grep stays as a fallback when there's no browser build. | done (2.12.0) |
 
 ## 2.13.0 — Content and craft pipelines
 
@@ -205,7 +205,20 @@ person using the harness on their own.
 | V1 | Verification hashes | Goldens and regressions pin SHA-256 of the canonical state, checked in Node and Python; the HUD keeps a fast FNV-1a 64 display hash (now one true 64-bit lane). `docs/HASH.md`. | done (2.10.0) |
 | V2 | Signed results | A hash proves two states match, not who produced them. Sign result manifests (the golden, the gate report, the cartridge version, the creator) with Ed25519 from Node's built-in crypto; keys stay in the private copy. Needed before any marketplace or credits. | done (2.11.0) |
 | V3 | Trajectory export, opt-in | `npm run trajectories -- export`: each finished task as one record (the brief, the plan, the diff summary, the done-check, gates and review outcome, bugs traced back to it), with secrets scrubbed and the game dev's consent and licence on every record. Local only by default. Uses: evaluating and routing models today; fine-tuning a local model on a studio's own successful work; and, with consent and terms, datasets for others. Off unless the game dev turns it on. | done (2.11.0) |
+| V5 | Data partnerships | Talk to AI labs with sample exports from our own games: records with verified outcomes. Before any deal: written consent from every game dev whose work is in the records, terms per buyer, and a check of each model provider's terms (several limit using their outputs to train competing models). Collection is already on and local; export stays opt-in. | later |
 | V4 | Optional public timestamp receipts (see `docs/SIGNED-RESULTS-AND-DATA.md`) | Stage 3 and later, opt-in and never required: write the SHA-256 of a signed manifest to a public ledger as a receipt that a version existed at a time. Free route: OpenTimestamps (anchored in Bitcoin, no wallet). Paid route for a marketplace: a low-cost chain, posted server-side so users never need a wallet. Verification stays off-chain (replays, gates, signatures); a receipt proves a hash existed at a time, not ownership and not that the code works. No tokens. | later |
+
+## On-chain options (a paid add-on, later)
+
+Offered as an opt-in extra; a game dev who clicks no loses nothing. The game itself never needs a
+wallet, a token or a chain, so it can still ship on Steam and other stores that refuse games which
+issue or trade crypto or NFTs.
+
+| # | Option | What it means | Effort | Status |
+| --- | --- | --- | --- | --- |
+| B1 | Stamp | The SHA-256 of a signed release manifest (V2) written to a public chain: a receipt that this exact build existed at that time. OpenTimestamps for free; a low-cost chain posted server-side for a paid badge. | Easy: the manifests and hashes already exist. | later |
+| B2 | Archive | The web build itself stored on a permanent network (Arweave-style), with its stamp, so it can be played years later. Permanent means no takedowns: only for builds the dev owns outright, with every asset cleared. | Easy to medium. | later |
+| B3 | On-chain game | Ownership of items or game logic on a chain. Wallets, fees, security audits, store bans, and financial rules. A separate product, not an add-on. | Hard. | not planned |
 
 ## HUD, access and scale
 
