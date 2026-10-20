@@ -2,53 +2,53 @@
   "updatedAt": "2026-10-20T00:00:00Z",
   "zeroTokenHubActive": true,
   "tokenSavers": {
-    "rtkCompressionPct": 84,
-    "qmdRagActive": true,
-    "serenaLspActive": true,
-    "avoidedCheckInTokens": 248500,
-    "tokensSavedToday": 312400,
-    "estimatedDollarsPreserved": 4.68
+    "rtkCompressionPct": 0,
+    "qmdRagActive": false,
+    "serenaLspActive": false,
+    "avoidedCheckInTokens": 0,
+    "tokensSavedToday": 0,
+    "estimatedDollarsPreserved": 0
   },
   "subscriptions": [
     {
       "id": "grok",
       "name": "Grok (xAI Executive Producer)",
       "tier": "Grok Bot / Thin Producer",
-      "used": 14,
+      "used": 0,
       "limit": 100,
       "unit": "cycles",
-      "resetAt": "Rolling 24h (04h 12m)",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "cursor",
       "name": "Cursor Ultra",
       "tier": "IDE Agent / Fast Pool",
-      "used": 620,
+      "used": 0,
       "limit": 5000,
       "unit": "fast reqs",
-      "resetAt": "Monthly (18d left)",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "claude",
       "name": "Claude (Opus / Sonnet / Haiku)",
       "tier": "Anthropic Pro / Max",
-      "used": 18,
+      "used": 0,
       "limit": 45,
       "unit": "5h window msgs",
-      "resetAt": "01h 48m",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "argon",
       "name": "Argon / Google Vertex AI ($300 Credit)",
       "tier": "Gemini 2.5 Pro / Flash",
-      "used": 14.5,
+      "used": 0,
       "limit": 300.0,
       "unit": "USD credit",
-      "resetAt": "82d trial remaining",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "local",
@@ -57,28 +57,30 @@
       "used": 0,
       "limit": 999999,
       "unit": "unlimited local",
-      "resetAt": "Always Free ($0)",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "nvidia-nim",
       "name": "NVIDIA NIM (Free Tier)",
       "tier": "GLM 5.3 Flash / Nemotron",
-      "used": 142,
+      "used": 0,
       "limit": 1000,
       "unit": "req/day",
-      "resetAt": "Daily 00:00 UTC",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     },
     {
       "id": "groq-free",
       "name": "Groq Cloud (Free Tier)",
       "tier": "Llama 3.3 70B / Qwen",
-      "used": 310,
+      "used": 0,
       "limit": 14400,
       "unit": "req/day",
-      "resetAt": "Daily 00:00 UTC",
-      "status": "healthy"
+      "resetAt": "set your own",
+      "status": "not tracked"
     }
-  ]
+  ],
+  "measured": false,
+  "note": "Example quota tracker. Fill in your own plans and limits; nothing here is measured. Token savings stay 0 unless a tool such as rtk measures them."
 }

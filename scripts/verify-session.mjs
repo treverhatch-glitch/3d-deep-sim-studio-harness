@@ -15,6 +15,8 @@ const required = [
   'studio/NEXT.md',
   'studio/memory/failures.md',
   'docs/READ-FIRST.md',
+  'studio/MASTER.md',
+  'studio/PLAN.md',
 ];
 let failed = 0;
 for (const rel of required) {

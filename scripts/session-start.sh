@@ -19,6 +19,8 @@ else
 fi
 
 echo ""
+echo "Producer? Run: npm run handoff  (full briefing; key documents are mapped in studio/MASTER.md)"
+echo ""
 echo "--- Next Queued Task ---"
 if command -v node >/dev/null 2>&1; then
   (cd "${REPO_ROOT}" && node harness/task.mjs next) || true

@@ -33,16 +33,18 @@ export function readSubscriptionUsage() {
   } catch {
     // fallback below
   }
+  // Nothing recorded yet: report zeros, never invented savings (docs/TELEMETRY.md).
   return {
     updatedAt: new Date().toISOString(),
     zeroTokenHubActive: true,
+    measured: false,
     tokenSavers: {
-      rtkCompressionPct: 84,
-      qmdRagActive: true,
-      serenaLspActive: true,
-      avoidedCheckInTokens: 248500,
-      tokensSavedToday: 312400,
-      estimatedDollarsPreserved: 4.68,
+      rtkCompressionPct: 0,
+      qmdRagActive: false,
+      serenaLspActive: false,
+      avoidedCheckInTokens: 0,
+      tokensSavedToday: 0,
+      estimatedDollarsPreserved: 0,
     },
     subscriptions: [],
   };

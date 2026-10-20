@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
+import { activeMeeting } from './meeting.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -217,6 +218,16 @@ export function buildHudState() {
     if (/^Check forced done/i.test(t.title)) needs.push({ agent: 'producer', msg: t.title, task: t.id });
   }
 
+  // A meeting in progress: who is at the table (role names resolve to the agent doing that role).
+  let meeting = null;
+  const m = activeMeeting();
+  if (m) {
+    const onDuty = new Set(divs.filter((d) => d.active).map((d) => d.id));
+    const resolve = (who) => (byName.has(who) ? who : who === 'producer' ? producerName : agentList.find((a) => a.role === who)?.name || null);
+    const people = [...new Set([resolve(m.by) || producerName, ...m.attendees.map(resolve)].filter(Boolean))];
+    meeting = { topic: m.topic, room: onDuty.has(m.room) ? m.room : 'production', attendees: people, invited: m.attendees, by: m.by, startedAt: m.startedAt, file: m.file };
+  }
+
   const gates = readJson('.studio/gates-last.json');
   const total = queue.inProgress.length + queue.backlog.length + queue.done.length;
   return {
@@ -227,6 +238,7 @@ export function buildHudState() {
     agents: agentList.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen))),
     events: events.slice(-120).reverse(),
     talks,
+    meeting,
     needs: needs.slice(0, 10),
     gates,
     playtest: latestPlaytest(),

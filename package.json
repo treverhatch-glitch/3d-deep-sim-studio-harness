@@ -21,6 +21,8 @@
     "next": "node harness/task.mjs next",
     "event": "node harness/event.mjs",
     "status": "node harness/status.mjs",
+    "handoff": "node harness/handoff.mjs",
+    "meeting": "node harness/meeting.mjs",
     "playtest": "node qa/playtest.mjs",
     "playtest:stage1": "node qa/playtest.mjs --stage 1",
     "playtest:stage2": "node qa/playtest.mjs --stage 2",

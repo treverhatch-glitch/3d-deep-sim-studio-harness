@@ -155,6 +155,30 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('--force writes a task.forced event addressed to the Producer', /"type":"task\.forced"[^\n]*"to":"producer"/.test(events));
 }
 
+// The Producer handoff reflects the studio's real state, and meetings leave notes, tasks and a log entry.
+{
+  const dir = copyRepo();
+  run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner alice-1');
+  run(dir, 'node harness/task.mjs start T-003 --agent alice-1');
+  run(dir, 'node harness/task.mjs done T-003 --agent alice-1 --force');
+  const note = run(dir, 'node harness/handoff.mjs note "Chose spawnCost 400 because wins land on time" --agent producer');
+  const brief = run(dir, 'node harness/handoff.mjs');
+  const out = brief.stdout;
+  report('handoff briefing builds from files', brief.status === 0 && fs.existsSync(path.join(dir, '.studio/briefs/producer.md')), `${brief.stdout}${brief.stderr}`);
+  report('handoff shows the plan, the newest log note and decisions', note.status === 0 && /## The plan/.test(out) && /Chose spawnCost 400/.test(out) && /ADR-0001/.test(out), out);
+  report('handoff puts the forced check first and names who holds what', /## Needs you first[\s\S]*Check forced done T-003/.test(out) && /alice-1: path:cartridges\/example-sim/.test(out), out);
+
+  const start = run(dir, 'node harness/meeting.mjs start "Spawn pacing" --with builder,qa-playtester');
+  report('meeting starts and a second one is refused while it runs', start.status === 0 && run(dir, 'node harness/meeting.mjs start "Other" --with builder').status !== 0, `${start.stdout}${start.stderr}`);
+  run(dir, 'node harness/meeting.mjs say "Wins land at tick 298" --agent qa-playtester');
+  const end = run(dir, 'node harness/meeting.mjs end --decision "Keep spawnCost at 400" --action "Playtest: seeds 1-20|qa-playtester|P2"');
+  const notes = fs.readdirSync(path.join(dir, 'studio/meetings')).filter((f) => f !== 'README.md').map((f) => fs.readFileSync(path.join(dir, 'studio/meetings', f), 'utf8')).join('');
+  const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const log = fs.readFileSync(path.join(dir, 'studio/producer/LOG.md'), 'utf8');
+  report('meeting notes keep remarks, decisions and actions', end.status === 0 && /qa-playtester\*\*: Wins land/.test(notes) && /Keep spawnCost at 400/.test(notes) && /Playtest: seeds 1-20/.test(notes), `${end.stdout}${end.stderr}\n${notes}`);
+  report('meeting actions become tasks and the outcome reaches the Producer log', /\(`qa-playtester`\) — Playtest: seeds 1-20/.test(queue) && /Meeting "Spawn pacing"/.test(log), `${queue}\n${log}`);
+}
+
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
 {
   const dir = copyRepo();

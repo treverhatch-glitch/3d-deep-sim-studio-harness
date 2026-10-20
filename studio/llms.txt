@@ -10,6 +10,10 @@
   Executes `freecc:auto` multi-model failover routing across Vertex Gemini, NVIDIA NIM, Groq, OpenRouter, xAI Grok, Anthropic, OpenAI, and Ollama with 30s+ cooldowns in `.studio/cooldowns.json`.
 - `node harness/task.mjs [next | list | start <ID> | done <ID> [--force] | add "<Title>" --role <role> --priority P0..P3 [--type bug|study|balance|fun|playtest|review|docs]]`
   Manages `studio/NEXT.md` and synchronizes `studio/CURRENT_TASK.md`. `done` refuses until the task's done-check passes.
+- `npm run handoff` · `node harness/handoff.mjs note "<what, why, next>"`
+  The Producer's briefing from files (plan, log, decisions, queue, claims, gates, bugs, sign-offs, meetings). `studio/MASTER.md` maps the key documents.
+- `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`
+  A Producer meeting with several agents. Notes in `studio/meetings/`, actions become tasks.
 - `node harness/done-check.mjs <ID>`
   Shows a task's type, what done means for it, and what is missing. One skill per type in `studio/skills/`.
 - `node harness/plugins.mjs [list | enable <id> | disable <id> | mcp]`

@@ -12,9 +12,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - **War Room v3** (`/v3`): files-only HUD with two skins. Studio view: themed room per division, staff dressed by division, agents walk to the Producer's office to report and the Producer walks over to hand out work, live widgets (queue board, build light, test board, shipped trophies).
 - **Plugin registry** (`studio/plugins.json`, `harness/plugins.mjs`) and the game study guide (`docs/GAME-STUDY.md`).
 - `docs/BEST-PRACTICES.md`: recommendations, not rules.
+- **Producer handoff** (`npm run handoff`): a briefing built from files for whoever holds the Producer role (plan, log, decisions, what needs attention first, queue with owners, claims, gates, playtest, last failing seed, open bugs, sign-offs, lessons, meetings, last 24 hours, key documents). Saved to `.studio/briefs/producer.md`.
+- **Master documents**: `studio/MASTER.md` (the map of key documents and how to take over), `studio/PLAN.md` (the master plan), `studio/producer/LOG.md` (the Producer's reasons, newest first; `node harness/handoff.mjs note`).
+- **Meetings** (`harness/meeting.mjs`): the Producer meets several agents at once; notes in `studio/meetings/`, actions become tasks, the outcome goes into the Producer log. In the Studio view everyone walks to a meeting table and back.
 - Events can name who they are for (`--to producer`).
 ### Changed
-- The self-test proves every done-check refuses unfinished work and that `--force` reaches the Producer.
+- The self-test proves every done-check refuses unfinished work, that `--force` reaches the Producer, that the handoff briefing reflects the studio's state, and that meetings write notes and tasks.
+- `studio/MASTER.md` and `studio/PLAN.md` are required by the session check.
+### Fixed
+- `.studio/usage.json` and the status fallback showed invented token savings and quota use. They now show zeros until something is actually measured.
 
 ---
 

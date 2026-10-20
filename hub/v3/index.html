@@ -34,6 +34,8 @@
   .switch { border: 1px solid var(--line); background: transparent; color: var(--ink); padding: 6px 12px; border-radius: 6px; }
   #ops .hold-strip { display: none; margin: 12px 20px 0; padding: 10px 14px; border-left: 4px solid var(--hold); background: rgba(255, 90, 95, .08); }
   #ops .hold-strip.on { display: block; }
+  #ops .meet-strip { display: none; margin: 12px 20px 0; padding: 8px 14px; border-left: 4px solid var(--link); background: rgba(108, 198, 255, .08); }
+  #ops .meet-strip.on { display: block; }
   #ops .hold-strip h2 { margin: 0 0 4px; font: 600 18px/1.2 "Barlow Condensed", sans-serif; color: var(--hold); }
   #ops main { display: grid; grid-template-columns: minmax(250px, 1fr) minmax(320px, 1.6fr) minmax(280px, 1.1fr); gap: 16px; padding: 16px 20px 24px; }
   #ops section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
@@ -178,6 +180,13 @@
   @keyframes crate { to { left: 60px; } }
   .neon { padding: 3px 6px; border: 3px solid #4a148c; color: #7e57c2; font: 9px "Press Start 2P", monospace; background: #1a0b2e; }
   .room.busy .neon { color: #fff; text-shadow: 0 0 6px #e040fb; }
+  /* meeting table (on #t-crowd) */
+  .mtable { position: absolute; width: 96px; height: 26px; background: #6d3f1f; border-top: 6px solid #8d5a32; box-shadow: 0 0 0 2px #3b2414, 0 5px 0 2px rgba(0, 0, 0, .25); }
+  .mtable i { position: absolute; top: -10px; width: 12px; height: 8px; background: #fffde7; box-shadow: 1px 1px 0 #bdbdbd; }
+  .mtable b { position: absolute; top: -12px; width: 6px; height: 7px; background: #eceff1; border: 2px solid #5d4037; border-top: 0; }
+  .mtopic { position: absolute; padding: 3px 8px; background: #fff59d; border: 3px solid #5d4037; font-size: 17px; line-height: 1; white-space: nowrap; box-shadow: 3px 3px 0 rgba(0, 0, 0, .25); transform: translateX(-50%); }
+  .mtopic::before { content: "Meeting: "; font-weight: 700; }
+  .mtable.in, .mtopic.in { animation: pop .45s cubic-bezier(.2, 1.6, .4, 1) both; }
   /* desks and staff (on #t-crowd) */
   .desk { position: absolute; width: 64px; height: 22px; background: #8d5a32; border-top: 4px solid #a8703f; box-shadow: 0 0 0 2px #3b2414, 0 4px 0 2px rgba(0, 0, 0, .25); }
   .desk.big { width: 104px; background: #6d3f1f; border-top-color: #8d5a32; }
@@ -245,6 +254,7 @@
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
   </header>
+  <div class="meet-strip" id="o-meet"></div>
   <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
   <main>
     <div>
@@ -328,8 +338,10 @@
       const green = req.filter((r) => r.ok).length;
       $('o-gates').textContent = `Gates: ${green} of ${req.length} green, ${hhmm(s.gates.at)}${s.gates.partial ? ' (partial run)' : ''}`;
     }
+    $('o-meet').classList.toggle('on', Boolean(s.meeting));
+    $('o-meet').innerHTML = s.meeting ? `<b>Meeting in the ${esc(s.meeting.room)} room:</b> ${esc(s.meeting.topic)}. With ${esc(s.meeting.attendees.join(', '))}. Notes: <code>${esc(s.meeting.file)}</code>` : '';
     $('o-hold').classList.toggle('on', s.needs.length > 0);
-    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${esc(hhmm(n.ts))} · ${esc(n.agent)}: ${esc(n.msg)}${n.task ? ` (<code>${esc(n.task)}</code>)` : ''}</div>`).join('');
+    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task ? ` (<code>${esc(n.task)}</code>)` : ''}</div>`).join('');
 
     $('o-agents').innerHTML = s.agents.some((a) => !a.placeholder)
       ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
@@ -618,7 +630,7 @@
   }
 
   function applyStatus(p) {
-    if (p.walking || p.visiting) return;
+    if (p.walking || p.visiting || p.meeting) return;
     p.el.classList.remove('facing-left');
     p.el.classList.toggle('typing', p.status === 'working');
     p.el.classList.toggle('attention', p.status === 'needs-attention');
@@ -655,7 +667,7 @@
       const t = visits[i];
       const w = people.get(t.from);
       if (!w) { visits.splice(i--, 1); continue; }
-      if (w.visiting) continue;
+      if (w.visiting || w.meeting) continue;
       visits.splice(i--, 1);
       startVisit(w, t);
     }
@@ -678,7 +690,8 @@
     } else spot = { x: dest.x + dest.w / 2 - 16, y: dest.y - 30 };
     w.visiting = true;
     w.el.classList.remove('typing', 'attention');
-    walkPath(w, route(w.room, t.room, spot), () => {
+    walkPath(w, route(w.at || w.room, t.room, spot), () => {
+      w.at = t.room;
       if (host) {
         w.el.classList.toggle('facing-left', host.x < w.x);
         host.el.classList.remove('nod');
@@ -689,6 +702,7 @@
       setTimeout(() => {
         if (host) host.guests = Math.max(0, (host.guests || 1) - 1);
         walkPath(w, route(t.room, w.room, home(w)), () => {
+          w.at = w.room;
           w.visiting = false;
           applyStatus(w);
           pumpVisits();
@@ -791,7 +805,7 @@
         let p = people.get(a.name);
         if (!p) {
           // New hire: walks in from the hallway through the door.
-          p = { el: newPerson(a, d.id), room: d.id, i, x: g.left - GAP / 2 - 16, y: g.y - 10 };
+          p = { name: a.name, el: newPerson(a, d.id), room: d.id, at: d.id, i, x: g.left - GAP / 2 - 16, y: g.y - 10 };
           p.el.style.transition = 'none';
           place(p, p.x, p.y);
           void p.el.offsetWidth;
@@ -804,12 +818,12 @@
           p.room = d.id;
           p.i = i;
           p.status = a.status;
-          if (!p.visiting) walkPath(p, route(from, d.id, slotPt(g, i, d.id)), () => { const old = p.el; p.el = newPerson(a, d.id); p.el.style.transition = 'none'; place(p, p.x, p.y); old.remove(); applyStatus(p); });
+          if (!p.visiting && !p.meeting) walkPath(p, route(from, d.id, slotPt(g, i, d.id)), () => { p.at = d.id; const old = p.el; p.el = newPerson(a, d.id); p.el.style.transition = 'none'; place(p, p.x, p.y); old.remove(); applyStatus(p); });
         } else {
           p.status = a.status;
           p.i = i;
           const h = slotPt(g, i, d.id);
-          if (!p.walking && !p.visiting && (Math.abs(p.x - h.x) > 1 || Math.abs(p.y - h.y) > 1)) walkPath(p, [h]);
+          if (!p.walking && !p.visiting && !p.meeting && (Math.abs(p.x - h.x) > 1 || Math.abs(p.y - h.y) > 1)) walkPath(p, [h]);
           applyStatus(p);
         }
         const b = bubbles.get(a.name);
@@ -825,8 +839,70 @@
       if (g) walkPath(p, [{ x: g.x + 2, y: g.y - 10 }, { x: g.left - GAP / 2 - 16, y: g.y - 10 }], () => p.el.remove());
       else p.el.remove();
     }
+    syncMeeting(s.meeting);
     while (pendingTalks.length) visits.push(pendingTalks.shift());
     pumpVisits();
+  }
+
+  // Meetings: everyone invited walks to a table in the meeting room; when it ends they go back to their desks.
+  let meetKey = null;
+  let meetRoom = null;
+  const meetBits = [];
+  function seatsFor(roomId, n) {
+    const g = geo(roomId);
+    const x0 = Math.round(g.left + g.w / 2 - 48);
+    const yb = g.y - 84;
+    const seats = [
+      { x: x0 - 38, y: yb - 6, left: false },
+      { x: x0 + 2, y: yb - 30, left: false }, { x: x0 + 32, y: yb - 30, left: false }, { x: x0 + 62, y: yb - 30, left: true },
+      { x: x0 + 102, y: yb - 6, left: true },
+      { x: x0 + 2, y: yb + 30, left: false }, { x: x0 + 32, y: yb + 30, left: true }, { x: x0 + 62, y: yb + 30, left: true },
+    ];
+    for (let k = seats.length; k < n; k++) seats.push({ x: x0 - 30 + (k - 8) * 30, y: yb + 56, left: false });
+    return { x0, yb, seats };
+  }
+  function syncMeeting(m) {
+    const key = m ? `${m.startedAt}|${m.room}|${m.attendees.join(',')}` : null;
+    if (key === meetKey) return;
+    // Wrap up the last one.
+    meetBits.forEach((el) => el.remove());
+    meetBits.length = 0;
+    for (const p of people.values()) {
+      if (!p.meeting) continue;
+      p.meeting = false;
+      if (m && m.attendees.includes(p.name)) continue;
+      clearTimeout(p.pathT);
+      walkPath(p, route(p.at || meetRoom || p.room, p.room, home(p)), () => { p.at = p.room; applyStatus(p); pumpVisits(); });
+    }
+    meetKey = key;
+    meetRoom = m ? m.room : null;
+    if (!m || !geo(m.room)) return;
+    const { x0, yb, seats } = seatsFor(m.room, m.attendees.length);
+    const table = document.createElement('div');
+    table.className = `mtable${reduceMotion ? '' : ' in'}`;
+    table.style.cssText = `left:${x0}px;top:${yb - 32}px;z-index:${yb}`;
+    table.innerHTML = '<i style="left:10px"></i><i style="left:44px"></i><b style="left:30px"></b><b style="left:74px"></b>';
+    const banner = document.createElement('div');
+    banner.className = `mtopic${reduceMotion ? '' : ' in'}`;
+    banner.style.cssText = `left:${x0 + 48}px;top:${yb - 92}px;z-index:99000`;
+    banner.textContent = short(m.topic, 34);
+    banner.title = `${m.topic} (notes: ${m.file})`;
+    crowd.append(table, banner);
+    meetBits.push(table, banner);
+    m.attendees.forEach((name, k) => {
+      const p = people.get(name);
+      if (!p) return;
+      const seat = seats[k];
+      clearTimeout(p.pathT);
+      p.visiting = false;
+      p.meeting = true;
+      p.el.classList.remove('typing', 'attention');
+      walkPath(p, route(p.at || p.room, m.room, seat), () => {
+        p.at = m.room;
+        p.el.classList.toggle('facing-left', seat.left);
+        p.el.classList.remove('typing');
+      });
+    });
   }
 
   // Resizing moves the rooms: put everyone back at their desk.
@@ -838,6 +914,8 @@
         clearTimeout(p.pathT);
         p.walking = false;
         p.visiting = false;
+        p.meeting = false;
+        p.at = p.room;
         p.guests = 0;
         p.el.classList.remove('walking');
         p.el.style.transition = 'none';
@@ -845,6 +923,7 @@
         place(p, h.x, h.y);
         applyStatus(p);
       }
+      meetKey = '';
       if (state && document.body.dataset.skin === 'tycoon') renderTycoon(state);
     }, 150);
   });
@@ -853,10 +932,10 @@
   setInterval(() => {
     if (reduceMotion || document.body.dataset.skin !== 'tycoon') return;
     for (const p of people.values()) {
-      if (p.walking || p.visiting || p.status !== 'idle' || Math.random() > 0.35) continue;
+      if (p.walking || p.visiting || p.meeting || p.status !== 'idle' || Math.random() > 0.35) continue;
       const h = home(p);
       walkPath(p, [{ x: h.x + (Math.random() > 0.5 ? 40 : -12), y: h.y + 8 }]);
-      setTimeout(() => { if (!p.visiting && !p.walking) walkPath(p, [home(p)]); }, 2600);
+      setTimeout(() => { if (!p.visiting && !p.walking && !p.meeting) walkPath(p, [home(p)]); }, 2600);
     }
   }, 5000);
   function render() {

@@ -10,11 +10,11 @@ Every coding agent **MUST** follow these operating rules.
 
 Do **NOT** scan the entire repository. Load state in this order:
 
-1. `studio/CURRENT_TASK.md`
+1. `studio/CURRENT_TASK.md` (Producers: run `npm run handoff` instead; it covers this list and more)
 2. `studio/NEXT.md` (or `node harness/task.mjs next`)
 3. `studio/memory/failures.md` (distilled notes only)
 4. `studio/llms.txt`
-5. `studio/VISION_LOCK.md` and `studio/decisions/`
+5. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
 
 See also `docs/READ-FIRST.md`.
 
