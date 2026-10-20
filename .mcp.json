@@ -8,11 +8,11 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@4c4268f",
+        "git+https://github.com/oraios/serena@v2.1.0",
         "serena",
         "start-mcp-server",
         "--context",
-        "ide-assistant",
+        "ide",
         "--project",
         "."
       ]
@@ -21,7 +21,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@0.0.32",
+        "@playwright/mcp@0.0.83",
         "--headless",
         "--caps=vision"
       ]
@@ -30,9 +30,9 @@
       "command": "npx",
       "args": [
         "-y",
-        "github:mlolson/blender-orchestrator#main"
+        "github:mlolson/blender-orchestrator#a9dfb32d41709dd013b3c6ca0802bb869040656d"
       ],
-      "note": "Repo has no release tags. Pin to a full commit SHA when you freeze a setup."
+      "note": "Repo has no release tags; pinned to the main commit of 2026-10-20. Bump the SHA deliberately."
     }
   }
 }

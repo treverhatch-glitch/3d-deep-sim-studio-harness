@@ -15,11 +15,11 @@ Running `./scripts/setup-token-savers.sh` writes the `serena` entry into [`.mcp.
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena",
+        "git+https://github.com/oraios/serena@v2.1.0",
         "serena",
         "start-mcp-server",
         "--context",
-        "ide-assistant",
+        "ide",
         "--project",
         "."
       ]

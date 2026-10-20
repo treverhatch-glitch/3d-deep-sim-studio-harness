@@ -13,15 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['20', '22']
+        node: ['22', '24'] # the two supported LTS lines
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       # Syntax, every required gate (incl. the self-test that proves each gate can fail),
       # the closed-loop failure proof, read-only gates, and the changelog entry.
       - name: npm run release
@@ -29,3 +29,14 @@ jobs:
       - name: Optional gates (report only)
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,reviewer
+
+  war-room-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      # Builds the War Room with its pinned deps and type-checks the React components.
+      - name: npm run hub:build
+        run: npm run hub:build

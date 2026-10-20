@@ -266,7 +266,6 @@ export const UsageTelemetry: React.FC<UsageTelemetryProps> = ({
       {/* Modal Dialog to Edit/Add Quotas in .studio/usage.json */}
       <dialog
         ref={dialogRef}
-        // @ts-expect-error HTMLDialogElement closedby attribute
         closedby="any"
         aria-labelledby="quotaModalTitle"
         style={{

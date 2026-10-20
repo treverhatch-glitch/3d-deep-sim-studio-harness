@@ -71,11 +71,11 @@ cat > "${REPO_ROOT}/.mcp.json" <<'EOF'
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena",
+        "git+https://github.com/oraios/serena@v2.1.0",
         "serena",
         "start-mcp-server",
         "--context",
-        "ide-assistant",
+        "ide",
         "--project",
         "."
       ]
@@ -84,7 +84,7 @@ cat > "${REPO_ROOT}/.mcp.json" <<'EOF'
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@latest",
+        "@playwright/mcp@0.0.83",
         "--headless",
         "--caps=vision"
       ]
@@ -93,7 +93,7 @@ cat > "${REPO_ROOT}/.mcp.json" <<'EOF'
       "command": "npx",
       "args": [
         "-y",
-        "github:mlolson/blender-orchestrator"
+        "github:mlolson/blender-orchestrator#a9dfb32d41709dd013b3c6ca0802bb869040656d"
       ]
     }
   }
