@@ -843,6 +843,39 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   fs.writeFileSync(path.join(dir, 'notes.txt'), `key ${'gsk_'}${'b'.repeat(30)}\n`);
   git('add notes.txt');
   report('pre-commit blocks a staged secret', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m y', { STUDIO_LOCK_OWNER: 'bob-1' }).status !== 0);
+  git('reset -q');
+  fs.rmSync(path.join(dir, 'notes.txt'));
+  fs.writeFileSync(path.join(dir, '.studio/harness-frozen'), 'test run\n');
+  edit(dir, 'harness/hash.mjs', (s) => `${s}\n// tweak\n`);
+  git('add harness/hash.mjs');
+  const frozen = run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m z', { STUDIO_LOCK_OWNER: 'bob-1' });
+  report('a frozen harness refuses commits to harness files during a test run', frozen.status !== 0 && /harness is frozen/.test(frozen.stdout + frozen.stderr), frozen.stdout + frozen.stderr);
+  git('reset -q');
+  fs.writeFileSync(path.join(dir, 'studio/reviews/game-note.md'), 'game work\n');
+  git('add studio/reviews/game-note.md');
+  report('game and studio files still commit while the harness is frozen', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m g', { STUDIO_LOCK_OWNER: 'bob-1' }).status === 0);
+}
+
+// Test runs: the stop switch holds every start; the run report gathers results in one folder.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  run(dir, 'node harness/task.mjs stop --by hatch --reason "checking costs"', env);
+  const blocked = run(dir, 'node harness/task.mjs start T-001 --agent builder-1', env);
+  report('while the studio is stopped no task can start', blocked.status !== 0 && /studio is stopped/.test(blocked.stderr), blocked.stdout + blocked.stderr);
+  run(dir, 'node harness/task.mjs resume --by hatch', env);
+  report('after resuming, tasks start again', run(dir, 'node harness/task.mjs start T-001 --agent builder-1', env).status === 0);
+  const to = path.join(tmpRoot, `results-${n}`);
+  run(dir, 'npm run notes -- add --kind bad "the brief missed the golden step"', env);
+  const rr = run(dir, `node harness/run-report.mjs --to "${to}" --final`, env);
+  const made = fs.existsSync(to) ? fs.readdirSync(to) : [];
+  const rep = made[0] ? fs.readFileSync(path.join(to, made[0], 'REPORT.md'), 'utf8') : '';
+  const to2 = path.join(tmpRoot, `results-env-${n}`);
+  fs.writeFileSync(path.join(dir, '.env'), `STUDIO_RESULTS_DIR=\nHUB_TOKEN=change-me-local-only\nSTUDIO_RESULTS_DIR=${to2}\n`);
+  const fromEnv = run(dir, 'node harness/run-report.mjs', env);
+  report('settings in .env reach every command, and a value added below the empty example line wins', fromEnv.status === 0 && fs.existsSync(to2), fromEnv.stdout + fromEnv.stderr);
+  fs.rmSync(path.join(dir, '.env'));
+  report('the run report writes REPORT.md, a snapshot and the event log to the results folder', rr.status === 0 && /Final report/.test(rep) && /the brief missed the golden step/.test(rep) && fs.readdirSync(path.join(to, made[0], 'snapshots')).length === 1 && fs.existsSync(path.join(to, made[0], 'files/events.jsonl.gz')), rr.stdout + rr.stderr + rep.slice(0, 400));
 }
 
 // The closed loop records the tick the cartridge failed on, and the trace replays to it.

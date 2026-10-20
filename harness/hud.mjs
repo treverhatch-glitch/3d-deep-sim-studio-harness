@@ -268,6 +268,7 @@ export function buildHudState() {
   const total = queue.inProgress.length + queue.backlog.length + queue.done.length;
   return {
     generatedAt: new Date(now).toISOString(),
+    stopped: readJson('.studio/STOP.json', null),
     queue,
     progress: { done: queue.done.length, total, ratio: total ? queue.done.length / total : 0 },
     locks,

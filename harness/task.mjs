@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emitEvent, REPO_ROOT, readRecentEvents } from './event.mjs';
+import { emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
 import { checkDone, taskType } from './done-check.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
@@ -116,8 +116,33 @@ export function readTaskHandoff(taskId) {
   }
 }
 
+/** The studio-wide stop: while it is on, no task can be started. Agents finish their step, hand back and wait. */
+export const STOP_FILE = path.join(STUDIO_STATE_DIR, 'STOP.json');
+export function readStop() {
+  try {
+    return JSON.parse(fs.readFileSync(STOP_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+export function setStop(by = 'war-room-human', reason = '') {
+  const s = { by, reason: String(reason || '').slice(0, 300), at: new Date().toISOString() };
+  fs.mkdirSync(path.dirname(STOP_FILE), { recursive: true });
+  fs.writeFileSync(STOP_FILE, `${JSON.stringify(s, null, 2)}\n`);
+  emitEvent({ type: 'studio.stopped', agent: by, to: 'producer', status: 'blocked', msg: `Studio stopped by ${by}${s.reason ? `: ${s.reason}` : ''}. No new tasks start until it resumes.` });
+  return s;
+}
+export function clearStop(by = 'war-room-human') {
+  const was = readStop();
+  fs.rmSync(STOP_FILE, { force: true });
+  if (was) emitEvent({ type: 'studio.resumed', agent: by, to: 'producer', msg: `Studio resumed by ${by}` });
+  return was;
+}
+
 export function startTask(taskId, agent = null, { model = null } = {}) {
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
+  const stop = readStop();
+  if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
     if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };
@@ -384,6 +409,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'list') {
     console.log(JSON.stringify(q, null, 2));
+    process.exit(0);
+  }
+
+  if (cmd === 'stop') {
+    const s = setStop(typeof flags.by === 'string' ? flags.by : 'human', typeof flags.reason === 'string' ? flags.reason : '');
+    console.log(`Studio stopped by ${s.by}. No task can start; agents hand back what they hold. Resume: npm run task -- resume --by <name>`);
+    process.exit(0);
+  }
+  if (cmd === 'resume') {
+    console.log(clearStop(typeof flags.by === 'string' ? flags.by : 'human') ? 'Studio resumed. Agents can start tasks again.' : 'The studio was not stopped.');
     process.exit(0);
   }
 

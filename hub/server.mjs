@@ -38,7 +38,7 @@ import {
   WAR_ROOM_CONFIG_FILE,
 } from '../harness/status.mjs';
 import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR } from '../harness/event.mjs';
-import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE } from '../harness/task.mjs';
+import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE, readStop, setStop, clearStop } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState, buildAgentDetail } from '../harness/hud.mjs';
@@ -46,6 +46,7 @@ import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
 import { learnIfDue } from '../harness/learn.mjs';
+import { runReportIfDue } from '../harness/run-report.mjs';
 import { readRefs } from '../harness/refs.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
 import { readBriefs } from '../harness/liaison.mjs';
@@ -552,6 +553,15 @@ export function createHubServer() {
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, check: r.check, queued: r.queued.map((t) => t.id) });
     }
+    if (url.pathname === '/api/stop' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      if (body.stop === false) clearStop(by);
+      else setStop(by, body.reason);
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, stopped: readStop() });
+    }
     if (url.pathname === '/api/data-consent' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);
@@ -698,7 +708,7 @@ export function createHubServer() {
       } else if (body.action === 'reopen' && body.id) {
         result = reopenTask(body.id, body.note || 'Reopened from the War Room', body.agent || 'war-room-human');
       } else if (body.action === 'add' && body.title) {
-        const types = { bug: 'Bug', study: 'Study', balance: 'Balance', fun: 'Fun', playtest: 'Playtest', review: 'Review', docs: 'Docs' };
+        const types = { bug: 'Bug', study: 'Study', balance: 'Balance', fun: 'Fun', playtest: 'Playtest', review: 'Review', docs: 'Docs', system: 'System' };
         const prefix = types[body.type] && !String(body.title).toLowerCase().startsWith(body.type) ? `${types[body.type]}: ` : '';
         const size = Number(body.size);
         result = addTask({
@@ -986,6 +996,8 @@ export function startHubCli() {
         if (retro) console.log(`[retro] wrote ${retro.file}: ${retro.suggestions.length} suggestion(s)`);
         const learned = learnIfDue();
         if (learned) console.log(`[learn] rewrote ${learned.file}${learned.backup ? `; backed up to ${learned.backup}` : ''}`);
+        const report = runReportIfDue();
+        if (report?.ok) console.log(`[run-report] updated ${report.dest}`);
         const dir = dailyPingIfDue();
         if (dir) console.log(`[director] daily ping: ${dir.task}${dir.start?.started ? ' (Director started)' : ''}`);
       } catch (err) {

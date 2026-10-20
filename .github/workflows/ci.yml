@@ -44,6 +44,22 @@ jobs:
       - name: npm run verify (required gates)
         run: node scripts/run-gates.mjs --required-only
 
+  # Drives the War Room in Chromium: all three views, desktop and phone, every button.
+  war-room-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: npm run hud:check
+        run: node qa/hud-check.mjs
+
   war-room-build:
     runs-on: ubuntu-latest
     steps:

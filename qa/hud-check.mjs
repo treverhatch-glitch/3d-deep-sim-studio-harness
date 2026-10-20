@@ -37,7 +37,7 @@ const browser = await chromium.launch(exe ? { executablePath: exe } : {}).catch(
 
 // A throwaway studio: tracked files only, sharing node_modules.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-check-'));
-const listed = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' });
+const listed = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' });
 const files = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : [];
 if (files.length) for (const f of files) fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }), fs.existsSync(path.join(root, f)) && fs.copyFileSync(path.join(root, f), path.join(dir, f));
 else fs.cpSync(root, dir, { recursive: true, filter: (s) => !/[\\/](node_modules|\.git|\.studio)([\\/]|$)/.test(path.relative(root, s) ? `/${path.relative(root, s)}` : '') });
@@ -62,11 +62,21 @@ const port = await new Promise((resolve) => {
   });
 });
 const token = crypto.randomBytes(24).toString('hex');
-const hub = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: 'ignore' });
+const hub = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+let hubLog = '';
+hub.stdout.on('data', (d) => (hubLog += d));
+hub.stderr.on('data', (d) => (hubLog += d));
 const BASE = `http://127.0.0.1:${port}`;
 for (let i = 0; i < 60; i++) {
   if (await fetch(`${BASE}/api/state`).then((r) => r.ok, () => false)) break;
   await new Promise((r) => setTimeout(r, 200));
+}
+if (!(await fetch(`${BASE}/api/state`).then((r) => r.ok, () => false))) {
+  console.error(`[hud] FAIL the HUB did not start in the test copy:\n${hubLog.slice(-1500)}`);
+  hub.kill();
+  await browser.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  process.exit(1);
 }
 
 let failed = 0;
@@ -125,6 +135,14 @@ try {
   await page.click('#o-inbox button');
   await wait(1200);
   check('a message reaches the Producer\'s inbox', /balance sweep tonight/.test(read('studio/producer/INBOX.md')));
+  await page.click('#o-stopbtn');
+  await wait(2500);
+  check('Stop all agents stops the studio and says so', fs.existsSync(path.join(dir, '.studio/STOP.json')) && (await page.locator('#o-stop').isVisible()) && /Resume/.test(await page.locator('#o-stopbtn').innerText()));
+  await page.click('#o-stopbtn');
+  await wait(2500);
+  check('Resume clears it', !fs.existsSync(path.join(dir, '.studio/STOP.json')) && !(await page.locator('#o-stop').isVisible()));
+  const qbox = await page.locator('#o-queue').evaluate((e) => ({ scrolls: getComputedStyle(e).overflowY === 'auto', shown: e.querySelectorAll('.task').length }));
+  check('the queue lists every open task and scrolls in its box', qbox.scrolls && qbox.shown >= 10, JSON.stringify(qbox));
   sh('harness/event.mjs', '--type', 'task.progress', '--agent', 'balancer-1', '--task', 'T-002', '--msg', 'LIVE-CHECK 77');
   await wait(3000);
   check('new events appear without reloading', /LIVE-CHECK 77/.test(await page.locator('#o-timeline').innerText()));

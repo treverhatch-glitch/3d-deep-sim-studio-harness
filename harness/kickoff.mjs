@@ -118,6 +118,7 @@ Your job is decisions, not code:
 6. When the harness itself helps or gets in the way, record it: \`npm run notes -- add --kind well|bad|workaround|upgrade "…"\`.
 7. Route work by results: \`npm run scorecard\` shows bugs per model per 10 points of task size.
 8. Before handing a long or escalated task to a strong (expensive) model, run \`npm run brief -- <ID> --model\`: a cheap or local model compresses the history to 300 words and a script checks it.
+9. In a test run, the HUB writes the run report hourly when STUDIO_RESULTS_DIR is set; write one yourself after each milestone (\`npm run run-report\`) and a final one at the end (\`npm run run-report -- --final\`). If a person stops the studio (\`task start\` refuses), stop assigning and wait.
 
 You are also the overseer. The studio's memory is its files, so whatever you learn and don't write down is lost:
 - Watch how the run goes, not just the game: agents following the loop or not, refusals and why, hand-backs, drift, spend, what the harness made easy or hard.
@@ -125,7 +126,7 @@ You are also the overseer. The studio's memory is its files, so whatever you lea
 - Read \`npm run learn\` (what keeps happening, lessons that didn't stick, suggestions never handled) and turn the top item into a task, a skill change or a decision.
 - Never delete or rewrite earlier notes; add newer ones. They are backed up daily if STUDIO_BACKUP_DIR is set.
 
-Never: edit game code yourself, push to a remote (a person pushes), put keys in files, or change the vision lock without a person.
+Never: edit game code yourself, push to a remote (a person pushes), put keys in files, change the vision lock without a person, or change the harness itself during a test run (it is frozen; note problems instead).
 Before you stop: write a log note with what the next Producer should do, and your evaluation.
 `;
   }
@@ -147,7 +148,8 @@ Running low on usage or being stopped: \`node harness/task.mjs pause <ID> --agen
 Found a bug outside your task: \`node harness/task.mjs add "<what broke>" --type bug --caused-by <task, if you know it>\`.
 Need the Producer: \`node harness/event.mjs --type agent.ask --agent ${agent} --to producer --msg "<question>"\`.
 
-Never: edit files someone else holds, change a golden hash without regenerating it in the same commit, put keys in files, or push to a remote (a person pushes).
+If \`task start\` says the studio is stopped, finish your step, hand back what you hold and wait.
+Never: edit files someone else holds, change a golden hash without regenerating it in the same commit, put keys in files, push to a remote (a person pushes), or edit the harness (harness/, hub/, qa/ scripts, scripts/, studio/gates.json) during a test run: note the problem with \`npm run notes -- add --kind bad "…"\` instead.
 `;
 }
 

@@ -13,8 +13,8 @@ Windows, macOS, Linux or a cloud server.
 ## Now
 
 - **Stage**: harness phase 2, give every game a real start.
-- **Focus**: keep upgrading before the stress test: content and craft pipelines (2.14.0).
-  Then the stress test in a private copy, with real keys only there.
+- **Focus**: the first test run (docs/TEST-RUN.md), on a clone with the harness frozen. Then let
+  its report decide the next batch.
 - **Blocked on**: nothing.
 
 ## Milestones
@@ -34,7 +34,8 @@ Windows, macOS, Linux or a cloud server.
 | M8c | Verifiable results and data | SHA-256 goldens and regressions (2.10.0); signed result manifests and opt-in trajectory export (2.11.0) | done (2.11.0) |
 | M9 | Deeper skills, stricter slices | Full bug loop, `system` skill, required cross-family review, measured renderer budget | done (2.12.0) |
 | M9c | Trust in the results | Node and Python hash every state alike; SHA-256 everywhere; signed results bind code and inputs; deduplicated backups; the data-sharing answer | done (2.13.0) |
-| M9b | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | planned (2.14.0) |
+| M9d | Ready for the run | Preflight, frozen harness, stop switch, hourly run report to a shared folder, War Room tested in CI | done (2.14.0) |
+| M9b | Content and craft pipelines | Content as validated data; art, audio and narrative each with a tool and a check | after the first test (2.15.0) |
 | M10 | One studio across machines | The HUB holds tasks, locks and events, so cloud and multi-machine agents share them | planned |
 | M11 | First real game joins | A second cartridge passes every gate with its own goldens and Bible | later |
 

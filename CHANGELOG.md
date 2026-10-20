@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.14.0] — 2026-10-20
+### Added
+- **`npm run preflight [-- --fix]`**: checks a clone is ready for a test run (Node, hooks, `.env`, HUB token, Producer name, backup and results folders writable, Python, keys and cap, the required gates). `--fix` installs the hooks, freezes the harness (`.studio/harness-frozen`: the pre-commit hook refuses commits to harness files), turns off `git push` for the clone, and makes `.env` with a strong token.
+- **Stop all agents**: a War Room button and `npm run task -- stop | resume`. While stopped, no task can start; agents hand back and wait.
+- **`npm run run-report`**: REPORT.md (progress, whether the checks held, models, what repeated, the harness as agents found it, the overseer's evaluations, what needed a person), hourly snapshots and the run's files, in `STUDIO_RESULTS_DIR`. The HUB writes it hourly.
+- `docs/TEST-RUN.md`: clone, set up, run, finish.
+- CI runs the War Room browser test (`war-room-browser` job). The test also covers Stop and Resume and the queue: 30 checks.
+### Changed
+- The queue lists every open task and scrolls inside its box (newest done shown first).
+- Every command reads studio settings (`STUDIO_*`, `HUB_*`) from `.env`, not only the HUB, so backups and the Producer name work from the command line too. `.env.example` lists the backup, results and reference folders.
+- Kickoffs tell agents about the stop switch and the frozen harness; the Producer writes run reports.
+- War Room "add task" with the type `system` gets its prefix.
+
+---
+
 ## [2.13.1] — 2026-10-20
 ### Added
 - **`npm run hud:check`** (optional gate `hud`): opens the War Room in Chromium on a throwaway copy of the studio and uses it like a person: all three views at desktop and phone sizes (no errors, nothing off the side), the agent drawer, adding a task, messaging the Producer, live updates, pitching an idea, answering a follow-up, and the sharing box. 27 checks; skips without a browser.

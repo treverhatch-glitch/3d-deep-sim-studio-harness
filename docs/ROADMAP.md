@@ -202,7 +202,18 @@ From a read-only review of 2.11.0 by Gemini on Windows (2026-10-20), each findin
 | T6 | Backups copied everything every day. | Content stored once, gzipped; restore and prune; screenshots capped. | done (2.13.0) |
 | T7 | No place to record the game dev's answer on sharing data. | `npm run data`, intake and a pre-ticked box in the Game plan view; exports stop if declined and record the basis. | done (2.13.0) |
 
-## 2.14.0 — Content and craft pipelines
+## 2.14.0 — Ready for the run
+
+| # | What | Status |
+| --- | --- | --- |
+| R1 | `npm run preflight [-- --fix]`: checks a clone is ready; freezes the harness, turns off push, installs hooks | done (2.14.0) |
+| R2 | Stop all agents (War Room button, `task stop`/`resume`): no task starts while stopped | done (2.14.0) |
+| R3 | `npm run run-report`: REPORT.md, hourly snapshots and the run's files in a shared results folder | done (2.14.0) |
+| R4 | The browser test of the War Room runs in CI | done (2.14.0) |
+| R5 | Every command reads studio settings from `.env` (backup and results folders, Producer name) | done (2.14.0) |
+| R6 | Rehearsal mode with a fake model, phone alerts | after the first test |
+
+## 2.15.0 — Content and craft pipelines
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
@@ -239,7 +250,7 @@ issue or trade crypto or NFTs.
 | # | What | How | Status |
 | --- | --- | --- | --- |
 | H1 | Talk to the Producer | A "Message the Producer" box on the Ops tab writes to the Producer's inbox (no AI, behind the token); the briefing lists new messages first. Replies in the HUD come later. | done (2.8.0) |
-| H2 | Third tab: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | planned |
+| H2 | A fourth view: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | planned |
 | H3 | Phone access | Tailscale in the docs, never port-forwarding. A one-time login sets an `HttpOnly; SameSite=Strict` cookie for reads and the WebSocket, and writes still need the token header, so the token never sits in an address. | planned |
 | H4 | Phone alerts | ntfy or Telegram when a person is needed: a forced done, a Bible or phase sign-off, an idea waiting for approval, the spend cap, a Director verdict of "off course". | planned |
 | H5 | Agents on several machines | Make the HUB the single home for tasks, locks and events (agents call it with their token; locks keep a heartbeat so a dead remote worker's claims expire), so separate clones and cloud sandboxes share one studio. | planned |

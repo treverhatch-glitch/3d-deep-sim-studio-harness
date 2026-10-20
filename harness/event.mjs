@@ -19,6 +19,27 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
 export const STUDIO_STATE_DIR = path.join(REPO_ROOT, '.studio');
+
+// Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same
+// backup folder, Producer name and caps, not only the HUB. Keys are read only by the router.
+// A value already in the environment wins.
+(function loadStudioSettings() {
+  let text = '';
+  try {
+    text = fs.readFileSync(path.join(REPO_ROOT, '.env'), 'utf8');
+  } catch {
+    return;
+  }
+  // The last non-empty line for a name wins, so a value added at the bottom beats the example's empty one.
+  const found = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*((?:STUDIO|HUB|AGENT|PLAYTEST)_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    const v = m[2].replace(/^['"]|['"]$/g, '');
+    if (v !== '' || !(m[1] in found)) found[m[1]] = v;
+  }
+  for (const [k, v] of Object.entries(found)) if (process.env[k] === undefined) process.env[k] = v;
+})();
 export const DEFAULT_EVENTS_FILE = path.join(STUDIO_STATE_DIR, 'events.jsonl');
 
 export function getEventPaths() {
