@@ -114,6 +114,46 @@
   .acard .acts button.up { background: var(--ok); border-color: var(--ok); color: #fff; font-weight: 600; }
   #assets button:focus-visible, #assets input:focus-visible, .acard button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   @media (max-width: 600px) { #assets header, #assets main { padding-left: 16px; padding-right: 16px; } #assets .sheet { grid-template-columns: 1fr 1fr; } }
+  body[data-skin="arcade"] {
+    --void: #120d1f; --cab: #1d1533; --neon: #ff4fd8; --cyan: #3ef0ff; --lime: #b6ff3b; --txt: #efe8ff; --dim: #9d92c0; --focus: #3ef0ff;
+    background: radial-gradient(1200px 600px at 50% -10%, #2a1d4d, transparent), var(--void); color: var(--txt); font: 20px/1.25 VT323, monospace;
+  }
+  #arcade header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 18px; border-bottom: 2px solid #3a2b66; }
+  #arcade h1 { margin: 0; font: 18px/1 "Press Start 2P", monospace; color: var(--neon); text-shadow: 0 0 10px rgba(255, 79, 216, .7); letter-spacing: 2px; }
+  #arcade .state { color: var(--dim); }
+  #arcade .spacer { flex: 1; }
+  #arcade .switch { background: transparent; color: var(--cyan); border: 2px solid #3a2b66; padding: 5px 9px; font: 16px VT323, monospace; }
+  #arcade main.arc { display: grid; grid-template-columns: minmax(320px, 1.25fr) minmax(300px, 1fr); gap: 18px; padding: 16px 18px 40px; }
+  @media (max-width: 900px) { #arcade main.arc { grid-template-columns: 1fr; padding: 12px 16px 32px; } }
+  #arcade section { background: var(--cab); border: 2px solid #3a2b66; border-radius: 10px; padding: 14px; min-width: 0; }
+  #arcade h2 { margin: 0 0 8px; font: 13px/1.4 "Press Start 2P", monospace; color: var(--cyan); }
+  #arcade h2 small, #arcade h3 small { font: 16px VT323, monospace; color: var(--dim); margin-left: 6px; }
+  #arcade h3 { font: 11px/1.4 "Press Start 2P", monospace; color: var(--lime); margin: 16px 0 8px; }
+  #arcade .buildline { color: var(--dim); margin: 0 0 8px; }
+  #arcade .buildline b { color: var(--txt); font-weight: normal; }
+  #arcade .buildline button, #arcade .buildline select, #arcade .floors button { font: 16px VT323, monospace; background: #120d1f; color: var(--cyan); border: 1px solid #3a2b66; padding: 2px 8px; margin-left: 4px; }
+  #arcade .screen { position: relative; aspect-ratio: 16 / 10; background: #000; border: 3px solid #000; border-radius: 6px; box-shadow: 0 0 0 2px #3a2b66, 0 0 30px rgba(62, 240, 255, .15) inset; overflow: hidden; }
+  #arcade .screen iframe { width: 100%; height: 100%; border: 0; background: #000; }
+  #arcade .screen .none { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 24px; color: var(--dim); }
+  #arcade .screen.empty iframe { display: none; }
+  #arcade .screen.empty .none { display: grid; }
+  #arcade form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #arcade textarea { flex: 1 1 100%; min-height: 56px; background: #120d1f; color: var(--txt); border: 2px solid #3a2b66; border-radius: 6px; font: 18px VT323, monospace; padding: 6px 8px; }
+  #arcade select { background: #120d1f; color: var(--txt); border: 2px solid #3a2b66; font: 17px VT323, monospace; padding: 4px; }
+  #arcade button.go { background: var(--neon); color: #1d1533; border: 0; padding: 6px 14px; font: 11px "Press Start 2P", monospace; cursor: pointer; }
+  #arcade .hint { color: var(--dim); font-size: 17px; }
+  #arcade .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  #arcade .clips video, #arcade .clips img { width: 100%; border: 2px solid #3a2b66; border-radius: 4px; background: #000; }
+  #arcade .clips:empty::before { content: 'No clips yet. npm run clip records 20 seconds of the real build.'; color: var(--dim); grid-column: 1 / -1; }
+  #arcade .floors { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  #arcade .floors button[aria-selected="true"] { background: var(--cyan); color: #120d1f; }
+  #arcade canvas { width: 100%; height: auto; image-rendering: pixelated; background: #0b0814; border: 2px solid #3a2b66; border-radius: 6px; display: block; }
+  #arcade .xp { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  #arcade .xp .bar { flex: 1; height: 10px; background: #120d1f; border: 1px solid #3a2b66; }
+  #arcade .xp .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--lime), var(--cyan)); }
+  #arcade #r-level { font: 11px "Press Start 2P", monospace; color: var(--lime); }
+  #arcade .roomcard { min-height: 3.6em; border-left: 4px solid var(--neon); padding: 4px 10px; background: #120d1f; }
+  #arcade button:focus-visible, #arcade canvas:focus-visible, #arcade textarea:focus-visible, #arcade select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   #o-launched .ag { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
@@ -670,6 +710,44 @@
       </form>
       <p class="note" id="a-refmsg" role="status"></p>
       <div class="sheet refs" id="a-refs"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Arcade: play the last good build, take notes while playing, and walk the studio's dungeon (read-only) -->
+<div id="arcade" class="skin">
+  <header>
+    <h1>ARCADE</h1>
+    <span class="state" id="r-state"></span>
+    <span class="spacer"></span>
+    <button class="switch" data-to="ops">Ops view</button>
+    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="switch" data-to="plan">Game plan</button>
+    <button class="switch" data-to="assets">Asset studio</button>
+    <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
+  </header>
+  <div class="signals" data-signals role="status" aria-live="polite"></div>
+  <main class="arc">
+    <section class="cab">
+      <h2>Play the last good build</h2>
+      <p class="buildline" id="r-build">Loading…</p>
+      <div class="screen"><iframe id="r-frame" title="The game: the last build that passed the browser check" sandbox="allow-scripts allow-pointer-lock" allow="fullscreen; gamepad; autoplay"></iframe><p id="r-none" class="none">No build has passed the browser check yet. Each time <code>npm run play:browser</code> passes, that build is saved and plays here, while the agents keep working.</p></div>
+      <form id="r-note">
+        <textarea id="r-notetext" maxlength="2000" aria-label="What you noticed while playing" placeholder="What did you notice? (the HUD flickers on floor 2, the jump feels floaty…)" required></textarea>
+        <select id="r-notekind" aria-label="What kind of note"><option value="note">Note for the Producer</option><option value="bug">Bug: queue a fix</option><option value="idea">Idea: to the Idea Board</option></select>
+        <button class="go">Send note</button>
+      </form>
+      <p class="hint" id="r-notemsg" role="status">Notes are saved with the build you played, in studio/playtest/NOTES.md.</p>
+      <h3>Clips <small>npm run clip</small></h3>
+      <div class="clips" id="r-clips"></div>
+    </section>
+    <section class="dun">
+      <h2>The dungeon <small>read-only: changes nothing</small></h2>
+      <div class="floors" id="r-floors" role="tablist" aria-label="Floors"></div>
+      <canvas id="r-dungeon" width="592" height="360" tabindex="0" aria-label="The studio as a dungeon. Arrow keys or a click move your hero between rooms; each room is a task."></canvas>
+      <div class="xp"><span id="r-level">LV 1</span><span class="bar"><i id="r-xpbar"></i></span><span id="r-xp">0 XP</span></div>
+      <div class="roomcard" id="r-card" role="status" aria-live="polite">Walk into a room to see its task.</div>
+      <p class="hint">Each floor is a phase of the game; each room a task. Lit rooms are being worked on, by the party member standing there. Cleared rooms drop loot. Slimes are open bugs; a crowned one is a P0 boss.</p>
     </section>
   </main>
 </div>
@@ -1873,6 +1951,152 @@
       poll();
     } catch (err) {
       $('a-refmsg').textContent = `Couldn't add it: ${err.message}`;
+    }
+  });
+
+  // ---------- Arcade ----------
+  let arcBuild = null;
+  let arcFloor = null;
+  const hero = { col: 0, row: 0, x: 0, y: 0 };
+  let dun = { rooms: [], cols: 6, floor: 0 };
+  function renderArcade(s) {
+    const builds = s.builds || [];
+    const want = $('r-frame').dataset.want || 'latest';
+    const b = want === 'latest' ? builds[0] : builds.find((x) => x.id === want) || builds[0];
+    $('r-state').textContent = `${builds.length ? `${builds.length} saved build${builds.length > 1 ? 's' : ''}` : 'no saved build yet'} · ${s.queue.done.length} of ${s.queue.done.length + s.queue.inProgress.length + s.queue.backlog.length} rooms cleared`;
+    $('r-frame').closest('.screen').classList.toggle('empty', !b);
+    if (b && arcBuild !== b.id) {
+      arcBuild = b.id;
+      const src = `/play/${encodeURIComponent(b.id)}/${b.page}${b.query ? `?${b.query}` : ''}`;
+      $('r-frame').src = src;
+      $('r-build').innerHTML = `Build <b>${esc(b.id)}</b>${b.sha ? ` · commit ${esc(b.sha)}${b.dirty ? ' + work in progress' : ''}` : ''} · ${esc(b.outcome || 'played')}${b.ticks != null ? ` at tick ${b.ticks}` : ''} · saved ${esc(agoIso(b.at))} <button type="button" id="r-open">Open in a new tab</button><button type="button" id="r-copy">Copy link</button>${builds.length > 1 ? `<select id="r-older" aria-label="Play an older build">${builds.map((x, i) => `<option value="${i === 0 ? 'latest' : esc(x.id)}"${x.id === b.id ? ' selected' : ''}>${i === 0 ? 'Newest' : esc(x.id)}</option>`).join('')}</select>` : ''}`;
+      $('r-open').onclick = () => window.open(src, '_blank', 'noopener');
+      $('r-copy').onclick = async () => { try { await navigator.clipboard.writeText(new URL(src, location.href).href); $('r-notemsg').textContent = 'Link copied. On a phone, use npm run play -- --lan instead (this link works on this computer).'; } catch { $('r-notemsg').textContent = new URL(src, location.href).href; } };
+      if ($('r-older')) $('r-older').onchange = (e) => { $('r-frame').dataset.want = e.target.value; arcBuild = null; renderArcade(state); };
+    } else if (!b) $('r-build').textContent = 'Nothing to play yet.';
+    const clipSig = (s.clips || []).join('|');
+    if ($('r-clips').dataset.sig !== clipSig) {
+      $('r-clips').dataset.sig = clipSig;
+      $('r-clips').innerHTML = (s.clips || []).map((c) => (c.endsWith('.jpg') ? `<img src="/api/clip?file=${encodeURIComponent(c)}" alt="${esc(c)}">` : `<video src="/api/clip?file=${encodeURIComponent(c)}" controls muted preload="metadata" aria-label="${esc(c)}"></video>`)).join('');
+    }
+    buildDungeon(s);
+  }
+  // The dungeon: floors are phases (0 = the workshop: tasks with no phase), rooms are tasks.
+  function buildDungeon(s) {
+    const all = [...s.queue.inProgress.map((t) => ({ ...t, st: 'doing' })), ...s.queue.backlog.map((t) => ({ ...t, st: 'waiting' })), ...s.queue.done.map((t) => ({ ...t, st: 'done' }))];
+    const phase = (t) => (s.taskPhase || {})[t.id] || 0;
+    const floors = [...new Set(all.map(phase))].sort();
+    if (arcFloor === null || !floors.includes(arcFloor)) arcFloor = floors.includes(1) ? 1 : floors[0] || 0;
+    const fsig = floors.join(',') + arcFloor;
+    if ($('r-floors').dataset.sig !== fsig) {
+      $('r-floors').dataset.sig = fsig;
+      $('r-floors').innerHTML = floors.map((f) => `<button type="button" role="tab" aria-selected="${f === arcFloor}" data-floor="${f}">${f ? `Floor ${f}` : 'The workshop'}</button>`).join('');
+      $('r-floors').querySelectorAll('button').forEach((bt) => bt.onclick = () => { arcFloor = Number(bt.dataset.floor); hero.col = 0; hero.row = 0; buildDungeon(state); });
+    }
+    const rooms = all.filter((t) => phase(t) === arcFloor).sort((a, b) => ({ done: 0, doing: 1, waiting: 2 }[a.st] - { done: 0, doing: 1, waiting: 2 }[b.st]) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+    const cols = innerWidth < 600 ? 4 : 6;
+    dun = { rooms, cols, floor: arcFloor, holder: s.taskHolder || {}, agents: s.agents || [] };
+    const rows = Math.max(1, Math.ceil(rooms.length / cols));
+    const cv = $('r-dungeon');
+    const W = cols * 96 + 16;
+    const Hh = rows * 80 + 16;
+    if (cv.width !== W || cv.height !== Hh) { cv.width = W; cv.height = Hh; }
+    hero.col = Math.min(hero.col, cols - 1);
+    hero.row = Math.min(hero.row, rows - 1);
+    const pts = (t) => Number((t.title.match(/\bsize (\d)/) || [])[1]) || 1;
+    const xp = s.queue.done.reduce((n, t) => n + pts(t), 0);
+    const total = all.reduce((n, t) => n + pts(t), 0) || 1;
+    $('r-xp').textContent = `${xp} XP`;
+    $('r-level').textContent = `LV ${1 + Math.floor(Math.sqrt(xp))}`;
+    $('r-xpbar').style.width = `${Math.round((xp / total) * 100)}%`;
+    showRoom();
+  }
+  const roomAt = (c, r) => dun.rooms[r * dun.cols + c] || null;
+  const isBug = (t) => /^(bug|fix)\b/i.test(t.title);
+  function showRoom() {
+    const t = roomAt(hero.col, hero.row);
+    if (!t) { $('r-card').textContent = dun.rooms.length ? 'An empty corridor.' : 'Nothing on this floor yet: no tasks are planned for this phase.'; return; }
+    const who = dun.holder[t.id];
+    $('r-card').innerHTML = `<b>${esc(t.id)}</b> ${esc(short(t.title, 110))}<br>${t.st === 'done' ? 'Cleared: loot dropped.' : t.st === 'doing' ? `Being worked on${who ? ` by ${esc(who)}` : ''}.` : 'Still dark: waiting for an agent.'} ${isBug(t) && t.st !== 'done' ? (t.priority === 'P0' ? 'A boss lurks here (P0 bug).' : 'A slime lurks here (open bug).') : ''} <span style="opacity:.7">(${esc(t.role)}, ${esc(t.priority)})</span>`;
+  }
+  const PAL = { wall: '#2a2147', floorDark: '#17112b', floorLit: '#4a3b2a', floorDone: '#2f4a3a', torch: '#ffb347', chest: '#d4a017', slime: '#7cfc5a', boss: '#ff4f6e', hero: '#3ef0ff', party: '#ff4fd8', text: '#efe8ff' };
+  function px(g, x, y, w, h, c) { g.fillStyle = c; g.fillRect(x, y, w, h); }
+  function drawSprite(g, x, y, body, head) { px(g, x + 3, y, 6, 5, head); px(g, x + 2, y + 5, 8, 7, body); px(g, x + 2, y + 12, 3, 4, '#222'); px(g, x + 7, y + 12, 3, 4, '#222'); }
+  function drawDungeon(tms) {
+    const cv = $('r-dungeon');
+    const g = cv.getContext('2d');
+    px(g, 0, 0, cv.width, cv.height, '#0b0814');
+    const flick = reduceMotion ? 0 : Math.sin(tms / 180) * 0.5 + 0.5;
+    const rows = Math.max(1, Math.ceil(dun.rooms.length / dun.cols));
+    // corridors
+    for (let r = 0; r < rows; r++) px(g, 8, 8 + r * 80 + 36, dun.cols * 96, 8, '#1e1838');
+    for (let c = 0; c < dun.cols; c++) px(g, 8 + c * 96 + 44, 8, 8, rows * 80, '#1e1838');
+    dun.rooms.forEach((t, i) => {
+      const c = i % dun.cols;
+      const r = Math.floor(i / dun.cols);
+      const x = 12 + c * 96;
+      const y = 12 + r * 80;
+      px(g, x, y, 88, 72, PAL.wall);
+      px(g, x + 4, y + 4, 80, 64, t.st === 'done' ? PAL.floorDone : t.st === 'doing' ? PAL.floorLit : PAL.floorDark);
+      if (t.st === 'doing') { px(g, x + 6, y + 6, 4, 8, PAL.torch); g.globalAlpha = 0.25 + 0.2 * flick; px(g, x + 4, y + 4, 80, 64, PAL.torch); g.globalAlpha = 1; }
+      if (t.st === 'waiting') { g.globalAlpha = 0.55; px(g, x + 4, y + 4, 80, 64, '#000'); g.globalAlpha = 1; g.fillStyle = '#5b4f80'; g.font = '16px VT323, monospace'; g.fillText('?', x + 40, y + 40); }
+      if (t.st === 'done') { px(g, x + 60, y + 46, 14, 10, PAL.chest); px(g, x + 60, y + 50, 14, 2, '#7a5a00'); }
+      if (isBug(t) && t.st !== 'done') {
+        const boss = t.priority === 'P0';
+        const s2 = boss ? 2 : 1;
+        const bx = x + 50 - 4 * s2;
+        const by = y + 24 + (reduceMotion ? 0 : Math.round(Math.sin(tms / 300 + i) * 2));
+        px(g, bx, by + 4 * s2, 14 * s2, 8 * s2, boss ? PAL.boss : PAL.slime);
+        px(g, bx + 3 * s2, by + 6 * s2, 2 * s2, 2 * s2, '#000');
+        px(g, bx + 9 * s2, by + 6 * s2, 2 * s2, 2 * s2, '#000');
+        if (boss) { px(g, bx + 4, by, 20, 4, PAL.chest); px(g, bx + 4, by - 4, 4, 4, PAL.chest); px(g, bx + 12, by - 4, 4, 4, PAL.chest); px(g, bx + 20, by - 4, 4, 4, PAL.chest); }
+      }
+      const who = dun.holder[t.id];
+      if (who && t.st === 'doing') { drawSprite(g, x + 20, y + 30, PAL.party, '#f2c79b'); g.fillStyle = PAL.text; g.font = '14px VT323, monospace'; g.fillText(short(who, 12), x + 6, y + 66); }
+      g.fillStyle = '#c9bfff'; g.font = '14px VT323, monospace'; g.fillText(t.id, x + 6, y + 16);
+    });
+    // the hero glides to its room
+    const tx = 12 + hero.col * 96 + 36;
+    const ty = 12 + hero.row * 80 + 44;
+    hero.x += (tx - hero.x) * (reduceMotion ? 1 : 0.25);
+    hero.y += (ty - hero.y) * (reduceMotion ? 1 : 0.25);
+    drawSprite(g, Math.round(hero.x), Math.round(hero.y) - 16, PAL.hero, '#f2c79b');
+    px(g, Math.round(hero.x) + 1, Math.round(hero.y) - 19, 10, 3, '#ffd23f');
+  }
+  (function loop(tms) {
+    if (document.body.dataset.skin === 'arcade') drawDungeon(tms);
+    requestAnimationFrame(loop);
+  })(0);
+  $('r-dungeon').addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1], a: [-1, 0], d: [1, 0], w: [0, -1], s: [0, 1] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const rows = Math.max(1, Math.ceil(dun.rooms.length / dun.cols));
+    hero.col = Math.max(0, Math.min(dun.cols - 1, hero.col + d[0]));
+    hero.row = Math.max(0, Math.min(rows - 1, hero.row + d[1]));
+    showRoom();
+  });
+  $('r-dungeon').addEventListener('click', (e) => {
+    const cv = $('r-dungeon');
+    const r = cv.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * cv.width;
+    const y = ((e.clientY - r.top) / r.height) * cv.height;
+    hero.col = Math.max(0, Math.min(dun.cols - 1, Math.floor((x - 8) / 96)));
+    hero.row = Math.max(0, Math.floor((y - 8) / 80));
+    showRoom();
+    cv.focus();
+  });
+  $('r-note').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const text = $('r-notetext').value.trim();
+    if (!text) return;
+    try {
+      const r = await post('/api/playnote', { text, kind: $('r-notekind').value, build: arcBuild, by: actor() });
+      $('r-notetext').value = '';
+      $('r-notemsg').textContent = r.next;
+      poll();
+    } catch (err) {
+      $('r-notemsg').textContent = `Couldn't send it: ${err.message}. Set the HUB token in the Ops view.`;
     }
   });
 

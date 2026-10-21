@@ -104,6 +104,8 @@
 - `npm run task -- add "…" --part sim|renderer|both` — which part of the game a task touches; renderer bugs close with a browser regression
 - `npm run causes [-- accept "<cause>" --by <person> --why "…"]` — forced tasks grouped by why they were forced; accept a cause once for the run
 - `npm run new-studio -- --name "<game>" [--dir <folder>] [--port 3848]` — a second game gets its own studio (clone, .env, port, fresh board); never start a game in a folder by hand
+- `npm run play [-- --lan | list | --build <id>]` — serve the last build that passed `play:browser` (saved in .studio/builds/); the War Room's Arcade (view 5) plays it, takes playtest notes, shows clips and the read-only dungeon (docs/ARCADE.md)
+- `npm run clip [-- --seconds 20 --task T-012]` / `npm run shot [-- --query "floor=3"]` — an mp4 or a screenshot of the real build
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser
 - `node qa/playtest.mjs [--stage 1|2] [--cartridge name] [--scenario name] [--seed 1337] [--ticks N] [--url http://127.0.0.1:5173/?playtest=1]`
   Runs Stage 1 programmatic trajectory QA + Stage 2 Playwright accessibility/UISentinel layout QA and writes reports to `qa/reports/`.

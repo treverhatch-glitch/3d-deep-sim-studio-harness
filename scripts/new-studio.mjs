@@ -33,7 +33,8 @@ if (fs.existsSync(dir) && fs.readdirSync(dir).length) {
   process.exit(1);
 }
 const sh = (cmd, args, cwd = ROOT, quiet = false) => {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', shell: process.platform === 'win32', stdio: quiet ? 'pipe' : 'inherit' });
+  // Only npm needs a shell on Windows (npm.cmd); with a shell, arguments with spaces would split.
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', shell: process.platform === 'win32' && cmd === 'npm', stdio: quiet ? 'pipe' : 'inherit' });
   return r;
 };
 const step = (msg) => console.log(`\n[new-studio] ${msg}`);

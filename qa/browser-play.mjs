@@ -72,7 +72,7 @@ async function canvasColours(page) {
   }, png);
 }
 
-export async function playInBrowser({ cartridge, url: urlArg, shots = true } = {}) {
+export async function playInBrowser({ cartridge, url: urlArg, shots = true, video = null, maxMs = null, save = true } = {}) {
   const cart = await loadCartridge(cartridge || cartridgeFromArgv([]));
   const b = cart.browser;
   const report = { cartridge: cart.name, at: new Date().toISOString(), findings: [], screenshots: [], inputs: 0, checks: 0 };
@@ -105,7 +105,22 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true } = {
     report.screenshots.push(path.relative(REPO_ROOT, f).split(path.sep).join('/'));
   };
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const page = await ctx.newPage();
+    // A clip: Chromium's own screencast, one JPEG per painted frame (needs no Playwright ffmpeg build).
+    let cast = null;
+    if (video) {
+      cast = { frames: [], cdp: await ctx.newCDPSession(page) };
+      fs.mkdirSync(video, { recursive: true });
+      cast.cdp.on('Page.screencastFrame', ({ data, sessionId, metadata }) => {
+        const f = path.join(video, `frame_${String(cast.frames.length).padStart(5, '0')}.jpg`);
+        fs.writeFileSync(f, Buffer.from(data, 'base64'));
+        cast.frames.push({ f, t: metadata.timestamp });
+        cast.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
+      });
+      await cast.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, maxWidth: 960, maxHeight: 540, everyNthFrame: 2 });
+    }
+    report.cast = cast;
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => m.type() === 'error' && !/^Failed to load resource/.test(m.text()) && errors.push(m.text()));
@@ -143,7 +158,7 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true } = {
     // Play: the scenario's policy picks actions from the live state; real keys and clicks perform them.
     const sc = cart.scenarios[b?.scenario || 'start-to-win'];
     const expect = sc?.expect || 'won';
-    const until = Date.now() + Number(b?.maxMs || 30000);
+    const until = Date.now() + Number(maxMs || b?.maxMs || 30000);
     let outcome = null;
     let last = null;
     let midShot = false;
@@ -188,10 +203,22 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true } = {
     }
     if (errors.length) fail('BROWSER-SCRIPT-ERROR', `${errors.length} script error(s): ${errors.slice(0, 2).join(' | ')}`);
   } finally {
+    if (report.cast) {
+      await report.cast.cdp.send('Page.stopScreencast').catch(() => {});
+      const fr = report.cast.frames;
+      if (fr.length > 1) report.video = { dir: video, frames: fr.length, seconds: Math.max(0.1, fr[fr.length - 1].t - fr[0].t) };
+    }
+    delete report.cast;
     await browser.close();
     srv?.close();
   }
   report.passed = report.findings.length === 0;
+  // A pass means this build is playable: save it for npm run play and the Arcade (unchanged builds aren't saved twice).
+  if (report.passed && save && !urlArg && !process.env.PLAYTEST_URL) {
+    const { snapshotBuild } = await import('../harness/builds.mjs');
+    const s = snapshotBuild(cart, report);
+    if (s.ok) report.build = s.build.id;
+  }
   fs.mkdirSync(REPORTS, { recursive: true });
   report.file = `qa/reports/${runId}.json`;
   fs.writeFileSync(path.join(REPO_ROOT, report.file), `${JSON.stringify(report, null, 2)}\n`);

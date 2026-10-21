@@ -1058,6 +1058,13 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const played = fs.existsSync(path.join(root, 'node_modules', 'playwright')) && (fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction'), run(dir, 'node qa/browser-play.mjs --no-shots', env));
   if (played && /PASS/.test(played.stdout)) {
     report('the example game is won in the browser with real key presses, the screen matching the sim', /won at tick \d+, [1-9]\d* real inputs/.test(played.stdout), played.stdout);
+    const builds = run(dir, 'node harness/builds.mjs list', env).stdout;
+    run(dir, 'node qa/browser-play.mjs --no-shots', env);
+    report('a passing browser check saves the build for npm run play and the Arcade, once per change', (run(dir, 'node harness/builds.mjs list', env).stdout.match(/won at tick/g) || []).length === 1 && /won at tick/.test(builds) && fs.existsSync(path.join(dir, '.studio/builds', builds.split(/\s+/)[0], 'web/example-sim/index.html')), builds);
+    fs.writeFileSync(path.join(dir, 'clipjs.mjs'), "import { serveBuildFile } from './harness/builds.mjs';\nconst res = { writeHead() {}, end() {} };\nconsole.log(serveBuildFile('latest', '../../../package.json', res), serveBuildFile('latest', 'web/example-sim/main.mjs', res));\n");
+    report('a saved build serves only its own files', /^false true/.test(run(dir, 'node clipjs.mjs', env).stdout.trim()), run(dir, 'node clipjs.mjs', env).stdout);
+    const clip = run(dir, 'node qa/clip.mjs --seconds 6 --task T-001', env);
+    report('npm run clip records the real build and keeps the clip with the task', clip.status === 0 && /Saved qa\/reports\/clips\/clip_\w+\.(mp4|jpg)/.test(clip.stdout) && fs.readdirSync(path.join(dir, 'studio/proof/T-001')).length === 1, clip.stdout + clip.stderr);
     const MAIN = 'web/example-sim/main.mjs';
     const orig = fs.readFileSync(path.join(dir, MAIN), 'utf8');
     const variant = (label, from, to, re) => {

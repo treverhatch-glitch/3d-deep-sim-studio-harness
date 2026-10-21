@@ -73,6 +73,8 @@ const fakeModel = http.createServer((req, res) => {
 await new Promise((r) => fakeModel.listen(0, '127.0.0.1', r));
 env.OLLAMA_BASE_URL = `http://127.0.0.1:${fakeModel.address().port}/v1`;
 env.STUDIO_PREPARE_CHAIN = 'ollama-local';
+// A saved playable build for the Arcade: the browser check passes, so the build is kept.
+sh('qa/browser-play.mjs', '--no-shots');
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 
 const port = await new Promise((resolve) => {
@@ -111,7 +113,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try {
   for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
-    for (const skin of ['ops', 'tycoon', 'plan', 'assets']) {
+    for (const skin of ['ops', 'tycoon', 'plan', 'assets', 'arcade']) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h } });
       const page = await ctx.newPage();
       const errs = [];
@@ -236,14 +238,32 @@ try {
   await page.click('#a-ref button');
   await wait(2000);
   check('a labelled reference from the dev is listed for the art department', /the moss colour I want/.test(await page.locator('#a-refs').innerText()) && /the moss colour I want/.test(read('studio/art/references.json')), await page.locator('#a-refmsg').innerText());
-  await page.click('#assets .switch[data-to="ops"]');
+  // The Arcade (view 5): the last good build plays in the page; notes go out; the dungeon is read-only.
+  await page.click('#assets .switch[data-to="arcade"]');
+  await wait(3500);
+  const frameText = await page.frameLocator('#r-frame').locator('.hud').innerText().catch(() => '');
+  check('the Arcade plays the last build that passed the browser check', /\/play\/[^/]+\/web\/example-sim\/index\.html/.test(await page.locator('#r-frame').getAttribute('src')) && /Credits\s*\d+/.test(frameText) && /won at tick/.test(await page.locator('#r-build').innerText()), frameText + (await page.locator('#r-build').innerText()));
+  await page.locator('#r-dungeon').click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press('ArrowRight');
+  await wait(400);
+  check('the dungeon shows a task when the hero walks into its room', /T-\d+/.test(await page.locator('#r-card').innerText()), await page.locator('#r-card').innerText());
+  await page.fill('#r-notetext', 'the end screen text overlaps the HUD');
+  await page.selectOption('#r-notekind', 'bug');
+  await page.click('#r-note button');
+  await wait(1500);
+  check('a note taken while playing becomes a bug task, saved with the build it was about', /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md')) && /the end screen text overlaps/.test(read('studio/playtest/NOTES.md')), await page.locator('#r-notemsg').innerText());
+  await page.click('#arcade .switch[data-to="ops"]');
   await wait(800);
   await page.selectOption('#o-arole', 'builder');
   await page.click('#o-agentform button');
   await wait(4000);
   check('Start agent launches one, and it shows with its heartbeat', /builder-/.test(await page.locator('#o-launched').innerText()) && /heartbeat/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-actmsg').innerText());
-  await page.locator('#o-launched [data-stopagent]').first().click();
-  await wait(4000);
+  // Stop every agent started from the page (the bug note above woke a builder too).
+  for (let k = 0; k < 4 && (await page.locator('#o-launched [data-stopagent]').count()); k++) {
+    await page.locator('#o-launched [data-stopagent]').first().click();
+    await wait(3000);
+  }
+  await wait(1000);
   check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()));
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 } finally {

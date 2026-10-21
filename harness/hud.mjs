@@ -21,6 +21,7 @@ import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
 import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
+import { listBuilds } from './builds.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -391,6 +392,14 @@ export function buildHudState() {
     watch: watchLast ? { at: watchLast.at, findings: (watchLast.findings || []).map((f) => f.msg), pinged: watchLast.pinged } : null,
     scorecard: scorecardCached(queue),
     needs: needs.slice(0, 10),
+    // The Arcade: saved playable builds, recent clips, and which phase each task belongs to (for the dungeon).
+    builds: listBuilds().slice(0, 6),
+    clips: (() => {
+      const d = path.join(REPO_ROOT, 'qa', 'reports', 'clips');
+      return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => /\.(mp4|webm|jpg)$/.test(f)).sort().reverse().slice(0, 8) : [];
+    })(),
+    taskPhase: Object.fromEntries(events.filter((e) => e.type === 'task.added' && e.task && e.meta?.phase).map((e) => [e.task, Number(e.meta.phase)])),
+    taskHolder: Object.fromEntries(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l.owner])),
     causes: readAccepted(),
     gates,
     playtest: latestPlaytest(),

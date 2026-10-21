@@ -4,6 +4,16 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.21.0] — 2026-10-21
+### Added
+- **The Arcade** (War Room view 5, docs/ARCADE.md): play the last good build in the page while agents keep working, with older builds one click away; take notes while playing (to the Producer, as a bug for a builder, or as an idea), saved with the build in `studio/playtest/NOTES.md`; watch recent clips; and walk **the dungeon**, a read-only mini-game where floors are phases, rooms are tasks, the party is the agents at work, slimes are open bugs and P0 bugs are bosses.
+- **Saved playable builds**: every pass of the browser check saves the build it played in `.studio/builds/` (unchanged builds once; the last 6 kept). `npm run play` serves the newest on a fixed port, `--lan` for phones on the same Wi-Fi. Bundled games declare `browser.dist` and `browser.build`.
+- **`npm run clip`**: an mp4 of the real build played with real input (Chromium's screencast and ffmpeg), optionally kept with a task; **`npm run shot`**: one screenshot of the real build with extra query parameters.
+### Fixed
+- `npm run new-studio` on Windows: names with spaces no longer split (only npm runs through a shell).
+
+---
+
 ## [2.20.0] — 2026-10-21
 ### Added
 - **The Asset studio** (War Room view 4, `npm run art`, docs/ART-DEPARTMENT.md): every asset the art department makes, by number (#4) and round, with its picture (3D files spin in a viewer). Thumbs up, or "Change this" with your words, per card; or type "yellow gun #4 is still clunky, #7 is perfect" and each named asset gets the words for its next round. Sections: Waiting for you, In the works, Approved, References.

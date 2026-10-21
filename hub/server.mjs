@@ -43,6 +43,7 @@ import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState, buildAgentDetail, setDivision } from '../harness/hud.mjs';
 import { acceptCause } from '../harness/causes.mjs';
+import { serveBuildFile } from '../harness/builds.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
@@ -655,6 +656,49 @@ export function createHubServer() {
       const type = { svg: 'image/svg+xml', jpg: 'image/jpeg', glb: 'model/gltf-binary', gltf: 'model/gltf+json' }[ext] || `image/${ext}`;
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
       return res.end(fs.readFileSync(file));
+    }
+    // The Arcade: the last good build (and older ones) served for play while agents keep working.
+    if (url.pathname.startsWith('/play/') && req.method === 'GET') {
+      const [, , id, ...rest] = url.pathname.split('/');
+      if (serveBuildFile(id, rest.join('/'), res)) return;
+      return sendJson(res, 404, { ok: false, error: 'no such build or file (npm run play -- list)' });
+    }
+    if (url.pathname === '/api/clip' && req.method === 'GET') {
+      const name = path.basename(String(url.searchParams.get('file') || ''));
+      const file = path.join(REPO_ROOT, 'qa', 'reports', 'clips', name);
+      if (!/\.(mp4|webm|jpg)$/.test(name) || !fs.existsSync(file)) return sendJson(res, 404, { ok: false, error: 'no such clip' });
+      res.writeHead(200, { 'content-type': name.endsWith('.jpg') ? 'image/jpeg' : `video/${path.extname(name).slice(1)}`, 'cache-control': 'no-store' });
+      return res.end(fs.readFileSync(file));
+    }
+    if (url.pathname === '/api/playnote' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const text = String(body.text || '').trim().slice(0, 2000);
+      if (!text) return sendJson(res, 400, { ok: false, error: 'Write the note first.' });
+      const build = String(body.build || '').replace(/[^\w.-]/g, '').slice(0, 40) || 'no build';
+      const notes = path.join(REPO_ROOT, 'studio', 'playtest', 'NOTES.md');
+      fs.mkdirSync(path.dirname(notes), { recursive: true });
+      if (!fs.existsSync(notes)) fs.writeFileSync(notes, '# Playtest notes\n\n> Written while playing the saved builds in the War Room\'s Arcade. Newest last.\n');
+      fs.appendFileSync(notes, `\n- ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · ${by} · build ${build} · ${body.kind || 'note'}: ${text.replace(/\n+/g, ' ')}\n`);
+      let next;
+      if (body.kind === 'bug') {
+        const t = addTask({ title: `Bug: ${text.replace(/\s+/g, ' ')} (seen playing build ${build})`.slice(0, 180), role: 'builder', priority: 'P1', agent: by, meta: { playtest: build } });
+        next = t.id ? `${t.id} queued for a builder. ${wake('builder', { task: t.id, why: `a bug ${by} found playing` }).next}` : t.message;
+      } else if (body.kind === 'idea') {
+        const r = addIdea({ title: text.slice(0, 160), detail: `From playing build ${build}`, by, source: 'dev-pitched' });
+        const routed = r.ok ? routeIdea(r.idea.id, 'war-room') : null;
+        next = r.ok ? `${r.idea.id} is on the Idea Board. ${routed?.ok ? wake('rnd', { task: routed.task, why: `idea ${r.idea.id}` }).next : ''}` : r.message;
+      } else {
+        const inbox = path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
+        fs.mkdirSync(path.dirname(inbox), { recursive: true });
+        if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
+        fs.appendFileSync(inbox, `- [${new Date().toISOString().slice(0, 16).replace('T', ' ')}] **${by}** (playing build ${build}): ${text.replace(/\n+/g, ' ')}\n`);
+        emitEvent({ type: 'human.message', agent: by, to: 'producer', msg: `Playtest note (build ${build}): ${text.slice(0, 260)}` });
+        next = `In the Producer's inbox and studio/playtest/NOTES.md. ${wake('producer', { why: `a playtest note from ${by}` }).next}`;
+      }
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next });
     }
     if (url.pathname === '/api/causes' && req.method === 'POST') {
       const body = await readBody(req);
