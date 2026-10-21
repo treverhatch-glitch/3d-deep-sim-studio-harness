@@ -328,13 +328,15 @@ export function buildHudState() {
   const glog = spawnSync('git', ['log', '-n', '12', '--since=14 days ago', '--format=%h%x1f%an%x1f%(trailers:key=Golden-Reason,valueonly,separator=%x20)%x1f%(trailers:key=Golden-Diff,valueonly,separator=%x20)%x1f%(trailers:key=Studio-Agent,valueonly)', '--', 'qa/golden'], { cwd: REPO_ROOT, encoding: 'utf8' });
   for (const line of (glog.status === 0 ? glog.stdout : '').split('\n').filter(Boolean)) {
     const [sha, author, reason, diff, agent] = line.split('\x1f').map((x) => x.trim());
-    if (okGolden.has(sha)) continue;
+    // Only the studio's own changes: a commit by an agent (Studio-Agent) or one that gave a reason.
+    // A fresh clone's history (the template's own golden commits) is not something to check.
+    if (okGolden.has(sha) || (!agent && !reason)) continue;
     needs.push({ agent: agent || author, msg: `Recorded answers (goldens) changed in ${sha}: ${reason || 'no reason given'}${diff ? `. Moved: ${diff}` : ''}`, action: { type: 'golden-ok', sha, label: 'Looks right' } });
   }
   // A studio that stopped: work waiting, nothing running, nobody heard from in an hour.
   const lastActivity = events.filter((e) => e.agent && !['watch', 'war-room-human'].includes(e.agent)).pop();
   const quietMin = lastActivity ? Math.round((now - Date.parse(lastActivity.ts)) / 60000) : null;
-  if (queue.backlog.length && !queue.inProgress.length && !agentSessionsList().some((s) => s.running) && (quietMin === null || quietMin >= 60)) {
+  if (queue.backlog.length && !queue.inProgress.length && !agentSessionsList().some((s) => s.running) && quietMin !== null && quietMin >= 60) {
     needs.push({ agent: 'watch', msg: `The studio is idle${quietMin !== null ? ` (${quietMin >= 120 ? `${Math.round(quietMin / 60)} h` : `${quietMin} min`})` : ''} with ${queue.backlog.length} task${queue.backlog.length === 1 ? '' : 's'} waiting: start an agent in Ops, or choose a faster pace`, action: { type: 'start-producer', label: 'Start the Producer' } });
   }
   // Money, licences, publishing and deleting first; then what breaks play; then housekeeping.

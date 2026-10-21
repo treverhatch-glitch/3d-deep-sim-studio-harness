@@ -4,6 +4,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.22.1] — 2026-10-21
+### Fixed
+- "Needs you" no longer shows golden-change cards for a fresh clone's history: only commits by the studio's agents, or with a Golden-Reason, are checked.
+- The "studio is idle" alarm waits for the studio to have done something first, instead of firing on a brand-new studio.
+
+---
+
 ## [2.22.0] — 2026-10-21
 From the notes on run #1's overnight stop: the studio keeps itself running and uses the plan.
 ### Added

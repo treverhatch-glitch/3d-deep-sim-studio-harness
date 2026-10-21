@@ -221,7 +221,7 @@ try {
   await wait(2500);
   const waiting = await page.locator('#a-waiting').innerText();
   const imgOk = await page.locator('#a-waiting img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
-  check('the Asset studio shows each design by number and round, with its picture', /#1\s*Mossy pastel/.test(waiting) && /#2\s*Garden crate/.test(waiting) && /round 1/.test(waiting) && imgOk && /2 designs waiting in the Asset studio/.test(await page.locator('#assets [data-signals]').innerText()), waiting);
+  check('the Asset studio shows each design by number and round, with its picture', /#1\s*Mossy pastel/.test(waiting) && /#2\s*Garden crate/.test(waiting) && /round 1/.test(waiting) && imgOk && /2 designs waiting in the Asset studio/.test(await page.locator('#assets [data-signals] .sig.you').getAttribute('title')), waiting + (await page.locator('#assets [data-signals]').innerText()));
   await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('input[data-note]').fill('make it rounder, like a planter');
   await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('[data-art="changes"]').click();
   await wait(1500);
