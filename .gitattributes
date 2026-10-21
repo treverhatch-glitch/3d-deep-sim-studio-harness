@@ -7,3 +7,4 @@
 *.pdf binary
 *.glb binary
 *.png binary
+*.cmd text eol=crlf

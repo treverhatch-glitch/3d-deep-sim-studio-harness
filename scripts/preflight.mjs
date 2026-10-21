@@ -23,9 +23,10 @@ import { findPython } from '../qa/run-python.mjs';
 import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
 import { ensureGameId } from '../harness/game-id.mjs';
 import { launchableRoles } from '../harness/agent.mjs';
-import { effectiveMode, describeMode } from '../harness/mode.mjs';
+import { effectiveMode, describeMode, readMode, scopeOf, CLAUDE_MD, SCOPES } from '../harness/mode.mjs';
 import { cleanQuotaMarks } from '../harness/budget.mjs';
 import { readTrack, engineBin } from '../harness/engine.mjs';
+import { modelFamily } from '../harness/families.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -38,7 +39,7 @@ const ENV = path.join(REPO_ROOT, '.env');
 
 // The files a frozen clone must leave alone (the same list the pre-commit hook guards).
 const FROZEN_SUMS = path.join(STUDIO_STATE_DIR, 'harness-frozen.json');
-const FROZEN_RE = /^(harness|hub|scripts|tools|\.github)\/|^qa\/[^/]+\.(mjs|py)$|^studio\/gates\.json$|^AGENTS\.md$|^package\.json$/;
+const FROZEN_RE = /^(harness|hub|scripts|tools|\.github)\/|^qa\/[^/]+\.(mjs|py)$|^studio\/gates\.json$|^AGENTS(\.lite)?\.md$|^package\.json$/;
 function harnessFiles() {
   const out = [];
   const walk = (rel) => {
@@ -46,11 +47,11 @@ function harnessFiles() {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (!['node_modules', '.git', '__pycache__'].includes(e.name)) walk(r);
-      } else if (FROZEN_RE.test(r)) out.push(r);
+      } else if (e.isFile() && FROZEN_RE.test(r)) out.push(r);
     }
   };
   for (const top of ['harness', 'hub', 'scripts', 'tools', '.github', 'qa']) if (fs.existsSync(path.join(REPO_ROOT, top))) walk(top);
-  for (const f of ['studio/gates.json', 'AGENTS.md', 'package.json']) if (fs.existsSync(path.join(REPO_ROOT, f))) out.push(f);
+  for (const f of ['studio/gates.json', 'AGENTS.md', 'AGENTS.lite.md', 'package.json']) if (fs.existsSync(path.join(REPO_ROOT, f))) out.push(f);
   return out.sort();
 }
 export function harnessSums() {
@@ -205,6 +206,62 @@ export function preflight() {
   const py = findPython();
   row(py ? 'ok' : 'fail', `Python 3${py ? ` (${py.cmd})` : ''}`, py ? '' : 'install Python 3 (Windows: tick "Add python.exe to PATH")');
   row(fs.existsSync(path.join(REPO_ROOT, 'node_modules')) ? 'ok' : 'fail', 'npm install has been run', fs.existsSync(path.join(REPO_ROOT, 'node_modules')) ? '' : 'npm install');
+  // A lock whose version lags package.json is rewritten by the next npm install and then shows up as a
+  // changed file in every agent's hand-back. --fix sets the two version fields only (no dependency change).
+  try {
+    const pkgV = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).version;
+    const lockFile = path.join(REPO_ROOT, 'package-lock.json');
+    const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+    const lockFixed = lock.version !== pkgV && FIX;
+    if (lockFixed) {
+      lock.version = pkgV;
+      if (lock.packages?.['']) lock.packages[''].version = pkgV;
+      fs.writeFileSync(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
+    }
+    const lockV = JSON.parse(fs.readFileSync(lockFile, 'utf8')).version;
+    row(lockV === pkgV ? 'ok' : 'warn', lockV === pkgV ? 'package-lock.json matches package.json' : `package-lock.json says ${lockV}, package.json ${pkgV}`, lockV === pkgV ? (lockFixed ? 'fixed; commit package-lock.json' : '') : 'npm run preflight -- --fix sets it, then commit package-lock.json');
+  } catch {}
+  // Scope: what Claude Code auto-loads (CLAUDE.md) follows the studio's scope. The release ships the Lite
+  // CLAUDE.md for fresh clones; a studio that builds a game is Full unless someone chose Lite.
+  try {
+    const scope = scopeOf(readMode());
+    const cm = path.join(REPO_ROOT, 'CLAUDE.md');
+    const now = fs.existsSync(cm) ? fs.readFileSync(cm, 'utf8').replace(/\r\n/g, '\n') : '';
+    const want = CLAUDE_MD[scope];
+    const matches = now.trim() === want.trim() || (scope === 'full' && /@AGENTS\.md/.test(now)) || (scope === 'lite' && /@AGENTS\.lite\.md/.test(now) && !/@AGENTS\.md/.test(now));
+    if (!matches && FIX) fs.writeFileSync(cm, want);
+    row(matches || FIX ? 'ok' : 'warn', `Scope: ${SCOPES[scope]}${!matches && FIX ? ' (CLAUDE.md updated to match; commit it)' : ''}`, matches || FIX ? '' : `CLAUDE.md doesn't load ${scope === 'lite' ? 'AGENTS.lite.md' : 'AGENTS.md'}: npm run preflight -- --fix`);
+  } catch {}
+  // FIX 06 (test #3): before 2.26 the review fallback could end at the implementer's own family. Such a
+  // note, honestly marked as not an approval, then fails the reviewer gate after an update. --fix moves it
+  // to studio/reviews/same-family/ and records the cross-family review as owed.
+  try {
+    const rdir = path.join(REPO_ROOT, 'studio', 'reviews');
+    const same = [];
+    for (const f of fs.existsSync(rdir) ? fs.readdirSync(rdir).filter((n) => n.endsWith('.md') && n.toLowerCase() !== 'readme.md') : []) {
+      const text = fs.readFileSync(path.join(rdir, f), 'utf8');
+      const rev = (text.match(/model-family\s*:\s*(\S+)/i) || [])[1];
+      const imp = (text.match(/implementer-family\s*:\s*(\S+)/i) || [])[1];
+      if (rev && imp && modelFamily(rev) === modelFamily(imp) && /not (?:a |an )?(?:cross-family )?approval|same[- ]family/i.test(text)) same.push({ f, text });
+    }
+    if (same.length && FIX) {
+      // Same shape as harness/review.mjs oweReview (written here directly: preflight stays synchronous).
+      const owedFile = path.join(rdir, 'OWED.json');
+      let owed = [];
+      try {
+        owed = JSON.parse(fs.readFileSync(owedFile, 'utf8')).owed || [];
+      } catch {}
+      fs.mkdirSync(path.join(rdir, 'same-family'), { recursive: true });
+      for (const { f, text } of same) {
+        fs.writeFileSync(path.join(rdir, 'same-family', f), `> Moved here by preflight: a same-family review is a note, not an approval. The cross-family review is owed (studio/reviews/OWED.json).\n\n${text}`);
+        fs.unlinkSync(path.join(rdir, f));
+        const task = (f.match(/T-\d+/) || [])[0];
+        if (task && !owed.some((o) => o.task === task)) owed.push({ task, at: new Date().toISOString(), why: 'only a same-family review was written (moved to studio/reviews/same-family/)', nextTry: new Date().toISOString() });
+      }
+      fs.writeFileSync(owedFile, `${JSON.stringify({ owed }, null, 2)}\n`);
+    }
+    if (same.length) row(FIX ? 'ok' : 'warn', FIX ? `Moved ${same.length} same-family review note(s) to studio/reviews/same-family/; their reviews are owed` : `${same.length} same-family review note(s) in studio/reviews/ (${same.map((x) => x.f).slice(0, 3).join(', ')})`, FIX ? 'commit studio/reviews/' : 'npm run preflight -- --fix moves them and records the reviews as owed');
+  } catch {}
   const stopped = fs.existsSync(path.join(STUDIO_STATE_DIR, 'STOP.json'));
   row(stopped ? 'warn' : 'ok', stopped ? 'The studio is stopped' : 'The studio is not stopped', stopped ? 'npm run task -- resume --by <name>' : '');
 

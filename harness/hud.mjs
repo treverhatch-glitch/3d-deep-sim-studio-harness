@@ -41,6 +41,7 @@ import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
 import { holdReason, readHolds } from './task-hold.mjs';
 import { latestVerdict } from './verdict.mjs';
+import { tokenTotals } from './tokens.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -162,6 +163,20 @@ function scorecardCached(queue) {
   if (Date.now() - scoreCache.at < 30000) return scoreCache.value;
   scoreCache = { at: Date.now(), value: buildScorecard({ queue }).models.slice(0, 12) };
   return scoreCache.value;
+}
+
+// Measured tokens (agent.session.end), for the last 5 h, today and the whole log; rebuilt every 30 s.
+let tokenCache = { at: 0, value: null };
+function tokensCached() {
+  if (Date.now() - tokenCache.at < 30000) return tokenCache.value;
+  try {
+    const events = readRecentEvents(100000);
+    const pick = (t) => ({ total: t.total, byRole: t.byRole, byModel: t.byModel, byAgent: t.byAgent.slice(0, 12), untracked: t.untracked });
+    tokenCache = { at: Date.now(), value: { last5h: pick(tokenTotals({ since: '5h', events })), today: pick(tokenTotals({ since: 'today', events })), all: pick(tokenTotals({ since: 'all', events })), notCounted: 'Work outside the launcher (your own chat, IDE or terminal sessions) is not counted.' } };
+  } catch {
+    tokenCache = { at: Date.now(), value: null };
+  }
+  return tokenCache.value;
 }
 
 export function buildHudState() {
@@ -449,6 +464,7 @@ export function buildHudState() {
     divisions: divs,
     lessons: lessons(),
     rtk: rtkGain(),
+    tokenUse: tokensCached(),
   };
 }
 

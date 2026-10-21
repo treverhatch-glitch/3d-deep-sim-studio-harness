@@ -31,7 +31,7 @@ While [`tools/blender/generate_glb.py`](../tools/blender/generate_glb.py) handle
 
 1. **Launch Blender (or Live Virtual Display `:99`)**:
    - Local desktop: open Blender 4.x with the orchestrator socket active on port `3011`.
-   - Headless Linux / WSL2 / War Room stream: run `bash scripts/start-agent-display.sh` (`DISPLAY=:99`) so the live Blender viewport streams into the War Room's **1. noVNC :6080** panel.
+   - Headless Linux / WSL2 / War Room stream: run `node scripts/start-agent-display.mjs` (`DISPLAY=:99`) so the live Blender viewport streams into the War Room's **1. noVNC :6080** panel.
 2. **Inspect Scene State (See)**:
    - Query scene objects, world-space bounding boxes, triangle counts, and material slots before exporting.
 3. **Execute `bpy` Operations (Act)**:

@@ -130,6 +130,9 @@ ${r.scorecard.map((m) => `- ${m.model}: ${m.done} done, ${m.points} pts, ${m.bug
 /** Write today's retro unless one was written in the last `minHours`. */
 export function retroIfDue(minHours = 20) {
   const last = latestRetro();
+  // Never rewrite a day that already has a retro: the files are committed, and a rewrite showed up as a
+  // changed file in agents' hand-backs (Jed's run). A checkout also resets mtimes, so go by the date too.
+  if (last && last.date >= new Date().toISOString().slice(0, 10)) return null;
   const lastAt = last ? fs.statSync(path.join(REPO_ROOT, last.file)).mtimeMs : 0;
   return Date.now() - lastAt > minHours * 3600 * 1000 ? writeRetro() : null;
 }

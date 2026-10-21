@@ -3,7 +3,7 @@
 Once you clone this template and mount your 3D simulation cartridge:
 
 ## High Priority
-- **Token Savers (`rtk` + `qmd` + `serena`)** — Run `./scripts/setup-token-savers.sh --install` so agents strip 60–90% of bash noise, query Markdown via RAG, and inspect TypeScript symbols over LSP.
+- **Token Savers (`rtk` + `qmd` + `serena`)** — Run `node scripts/setup-token-savers.mjs --install` so agents strip 60–90% of bash noise, query Markdown via RAG, and inspect TypeScript symbols over LSP.
 - **API Keys for `freecc:auto` Failover** — Copy `.env.example` to `.env` and populate `GEMINI_API_KEY`, `NVIDIA_API_KEY`, and `GROQ_API_KEY` so `node harness/route.mjs` can fail over automatically.
 - **Optional Local Agent Offload** — Install [`robbin/grokbot-local-agent`](https://github.com/robbin/grokbot-local-agent) if using Grok Bot as a thin Producer (`docs/GROKBOT-LOCAL-AGENT.md`).
 

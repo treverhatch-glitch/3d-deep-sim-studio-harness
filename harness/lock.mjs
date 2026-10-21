@@ -149,6 +149,27 @@ export function release(key, owner) {
   return { ok: true, released: true };
 }
 
+/**
+ * Extend every claim an owner holds to at least `ttlSec` from now. The launcher calls it on each
+ * heartbeat, so a long task never loses its claim mid-work while the agent is alive (Jed's run: claims
+ * ran out under a working agent and the watcher requeued its task).
+ */
+export function renewOwner(owner, ttlSec = 3600) {
+  if (!owner || !fs.existsSync(LOCK_DIR)) return 0;
+  const until = Date.now() + ttlSec * 1000;
+  let n = 0;
+  for (const f of fs.readdirSync(LOCK_DIR).filter((x) => x.endsWith('.lock'))) {
+    const file = path.join(LOCK_DIR, f);
+    const lock = readLock(file);
+    if (!lock || lock.owner !== owner || Date.parse(lock.expiresAt) >= until - 60000) continue;
+    try {
+      fs.writeFileSync(file, JSON.stringify({ ...lock, expiresAt: new Date(until).toISOString(), renewedAt: new Date().toISOString() }, null, 2));
+      n += 1;
+    } catch {}
+  }
+  return n;
+}
+
 export function status(key) {
   const file = lockPath(key);
   const lock = fs.existsSync(file) ? readLock(file) : null;

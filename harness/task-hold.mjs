@@ -53,12 +53,31 @@ export function setHold(id, patch, { by = 'producer', msg = '' } = {}) {
 const doneIds = (q) => new Set(q.done.map((t) => t.id));
 const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
 
+/**
+ * A park with --until ends by itself (Jed's run: tasks parked "until Phase 2" stayed parked 5 h after it
+ * opened): a task id (done), phase:N (Phase N is open in the Game Bible), or a time.
+ */
+export function parkOver(until, done, now = Date.now()) {
+  if (!until) return false;
+  if (/^[A-Z]+-\d+$/.test(until)) return done.has(until);
+  const ph = String(until).match(/^phase:(\d+)$/i);
+  if (ph) {
+    try {
+      return (JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'bible', 'bible.json'), 'utf8')).phase?.open || 0) >= Number(ph[1]);
+    } catch {
+      return false;
+    }
+  }
+  const t = Date.parse(until);
+  return Number.isFinite(t) && t <= now;
+}
+
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
 export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   const h = holds[taskId];
   if (!h) return null;
-  if (h.parked) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}`;
   const done = doneIds(q);
+  if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}`;
   const waiting = (h.after || []).filter((id) => !done.has(id));
   if (waiting.length) return `waits for ${waiting.join(', ')}`;
   if (h.until && Date.parse(h.until) > now) return `blocked until ${hhmm(h.until)}${h.why ? `: ${h.why}` : ''}`;

@@ -20,7 +20,7 @@ Agents must keep durable work in files, never trapped in chat history.
 1. Read `studio/CURRENT_TASK.md`. If it has a clear next step in `IN_PROGRESS`, do that.
 2. If `studio/CURRENT_TASK.md` is idle or marked done, inspect `studio/NEXT.md` (or run `node harness/task.mjs next`).
 3. Take the highest-priority unchecked item (`node harness/task.mjs start <ID>`).
-4. Do the work, logging passive progress via `./scripts/append-event.sh` or `node harness/event.mjs`.
+4. Do the work, logging passive progress via `node scripts/append-event.mjs` or `node harness/event.mjs`.
 5. When finished:
    - Write a short summary in `studio/done/YYYY-MM-DD-short-title.md`.
    - Update `studio/CURRENT_TASK.md` and mark the item done in `studio/NEXT.md` (`node harness/task.mjs done <ID>`).

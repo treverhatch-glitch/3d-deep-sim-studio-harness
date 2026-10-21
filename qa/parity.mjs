@@ -10,6 +10,7 @@
  * gets the seeds and prints one JSON line per seed: {"seed":1,"outcome":"won","tick":300}.
  * No engine track: nothing to compare, and it passes with a note.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,16 @@ import { readTrack, engineCommand, logEngine } from '../harness/engine.mjs';
 export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   const t = readTrack();
   if (!t) return { ok: true, skipped: 'no engine track (npm run engine)' };
+  // Until a porter changes the template's sim, comparing it with another game only repeats one known
+  // failure in every builder's verify (test #3: 13 parity fails, all "still the template").
+  const game = activeCartridge().name;
+  const read = (p) => { try { return fs.readFileSync(path.join(REPO_ROOT, p), 'utf8'); } catch { return null; } };
+  const tpl = read('engine/_godot/sim/sim.gd');
+  // The template is a real port of the template game, so a copy of that game still compares.
+  const sameGame = read(`cartridges/${game}/index.mjs`) === read('cartridges/example-sim/index.mjs');
+  if (!sameGame && tpl && t.folder && /parity\.gd/.test(t.parity?.command || '') && read(path.join(t.folder, 'sim', 'sim.gd')) === tpl) {
+    return { ok: true, skipped: `the port in ${t.folder}/ is still the template; parity starts once a porter changes ${t.folder}/sim/sim.gd` };
+  }
   const cart = await loadCartridge(activeCartridge().name);
   const web = Object.fromEntries(seeds.map((seed) => {
     const r = runScenario(cart, 'start-to-win', { seed });

@@ -5,7 +5,7 @@ All components from the 17-Repository Audit, Master Specification, and Workflow 
 | Component | Status | Implementation |
 |------|--------|------|
 | **Visual HUB (War Room)** | **Default** | React Flow 4-Quadrant War Room (`hub/WarRoom.tsx` + `docs/WAR-ROOM.md`) with Live Agent View (`noVNC` / screenshot / preview), Subscription Usage Panel (`.studio/usage.json`), and zero-build HTML fallback (`hub/index.html`). |
-| **Event Log** | **Default** | `.studio/events.jsonl` (written by `scripts/append-event.sh` and `harness/event.mjs`, mirrored to `/tmp/agent-events.jsonl`, streamed by `hub/server.mjs`). |
+| **Event Log** | **Default** | `.studio/events.jsonl` (written by `node scripts/append-event.mjs` and `harness/event.mjs`, mirrored to `/tmp/agent-events.jsonl`, streamed by `hub/server.mjs`). |
 | **Subscription Usage Panel** | **Default** | Reads `.studio/usage.json` (`/usage` & `/api/usage`) to display Grok Bot, Vertex AI $300 credit, NVIDIA NIM, Groq, and RTK/QMD savings. |
 | **Blender & 3D Asset Bridge** | **Default** | Headless `bpy` generator (`tools/blender/generate_glb.py` + `docs/BLENDER.md`) + `mlolson/blender-orchestrator` wired in `.mcp.json`. |
 | **Sim Isolation & Boundary** | **Default** | `scripts/check-sim-isolation.mjs` + `scripts/check-sim-purity.mjs` enforcing `studio/rules/graphics-sim-boundary.md` and `studio/rules/sim-isolation.md`. |

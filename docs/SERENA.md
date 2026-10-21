@@ -6,7 +6,7 @@ Upstream: **https://github.com/oraios/serena**
 
 ## Pre-Configured in `.mcp.json`
 
-Running `./scripts/setup-token-savers.sh` writes the `serena` entry into [`.mcp.json`](../.mcp.json):
+Running `node scripts/setup-token-savers.mjs` writes the `serena` entry into [`.mcp.json`](../.mcp.json):
 
 ```json
 {

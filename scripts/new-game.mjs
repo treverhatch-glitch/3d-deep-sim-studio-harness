@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
 import { emitEvent } from '../harness/event.mjs';
+import { readMode, scopeOf, setScope } from '../harness/mode.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const name = process.argv[2];
@@ -64,6 +65,8 @@ write(goldenFiles[0], {
 write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, ...(ident ? { gameId: ident.id } : {}), seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
 
 // This is the studio's game now: gates and playtests default to it (studio/game.json is never frozen).
+// Keep the scope the studio had (a fresh clone is Lite until someone chooses); otherwise a real game would flip it to Full.
+if (!readMode().scope) setScope(scopeOf(), 'new-game');
 if (!process.argv.includes('--keep-active')) fs.writeFileSync(path.join(root, 'studio', 'game.json'), `${JSON.stringify({ cartridge: name, since: new Date().toISOString() }, null, 2)}\n`);
 emitEvent({ type: 'game.new', agent: 'producer', target: `cartridges/${name}`, msg: `New cartridge ${name}${ident ? ` (${ident.id})` : ''}: slice won at tick ${slice.ticksRun}` });
 console.log(`[new-game] cartridges/${name}/ created

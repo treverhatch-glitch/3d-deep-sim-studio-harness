@@ -6,7 +6,8 @@
  *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
  *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, shown with its heartbeat in the War Room
  *   npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
- *                        [--loop until-empty|N] [--by <producer or person>] [--open]   the same as start, as a hire:
+ *                        [--loop until-empty|N] [--by <producer or person>] [--open] [--foreground]   the same as start, as a hire
+ *                        (in the background unless --foreground):
  *                        the Producer hires on its own up to studio/budget.json producerMayHireUpTo (default 4), past
  *                        that the game dev is asked; --open switches the division on
  *   npm run agent -- pause <agent> [--note "…"]   its task goes back to the queue, then it stops
@@ -38,7 +39,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { kickoff } from './kickoff.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
-import { listLocks, release, claim } from './lock.mjs';
+import { listLocks, release, claim, renewOwner } from './lock.mjs';
+import { savePatch } from './wip.mjs';
 import { effectiveMode } from './mode.mjs';
 import { markExhausted, toolNamed } from './budget.mjs';
 import { setHold } from './task-hold.mjs';
@@ -155,6 +157,23 @@ export function sessions() {
   });
 }
 
+/**
+ * Sessions whose record says "running" but whose process is gone (killed with the shell that started it,
+ * a crash, a reboot) are marked ended, so the War Room and agent list stop showing them and the watcher
+ * hands their task back and frees their claims (test #3). Returns the agents marked.
+ */
+export function markGone() {
+  const gone = [];
+  for (const s of sessions()) {
+    if (s.status !== 'running' || s.running) continue;
+    const at = new Date().toISOString();
+    fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
+    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone' } });
+    gone.push(s.agent);
+  }
+  return gone;
+}
+
 // extra: the supervisor's budget allowance (up to two more agents while the plan is under its target).
 function caps(role, extra = 0) {
   const mode = { ...effectiveMode() };
@@ -173,21 +192,6 @@ function spentToday() {
   const today = new Date().toISOString().slice(0, 10);
   const used = readRecentEvents(50000).filter((e) => String(e.ts).startsWith(today)).reduce((n, e) => n + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0), 0);
   return { over: used >= cap, used, cap };
-}
-
-/** The uncommitted changes under an agent's claims (or every change when it claimed nothing), as a patch. */
-function savePatch(agent, taskId, claims) {
-  const paths = claims.filter((k) => k.startsWith('path:')).map((k) => k.slice(5)).filter(Boolean);
-  const scope = paths.length ? ['--', ...paths] : [];
-  const tracked = spawnSync('git', ['diff', 'HEAD', ...scope], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '';
-  const untracked = (spawnSync('git', ['ls-files', '--others', '--exclude-standard', ...scope], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').split('\n').filter(Boolean);
-  const extra = untracked.map((f) => spawnSync('git', ['diff', '--no-index', '--', '/dev/null', f], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').join('');
-  const patch = tracked + extra;
-  if (!patch.trim()) return null;
-  fs.mkdirSync(WIP_DIR, { recursive: true });
-  const file = path.join(WIP_DIR, `${taskId || 'no-task'}-${agent}.patch`);
-  fs.writeFileSync(file, patch);
-  return path.relative(REPO_ROOT, file).split(path.sep).join('/');
 }
 
 /**
@@ -211,11 +215,12 @@ export function tokensFrom(log) {
     }
     if (o.type === 'result' && o.usage) {
       const u = o.usage;
-      claude = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 };
+      claude = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, turns: Number(o.num_turns) || null };
       if (o.total_cost_usd != null) cost = Number(o.total_cost_usd);
     } else if (o.type === 'turn.completed' && o.usage) {
       const u = o.usage;
       codex.seen = true;
+      codex.turns = (codex.turns || 0) + 1;
       codex.in += Math.max(0, (u.input_tokens || 0) - (u.cached_input_tokens || 0));
       codex.cached += u.cached_input_tokens || 0;
       codex.out += u.output_tokens || 0;
@@ -224,8 +229,10 @@ export function tokensFrom(log) {
       plain = { in: (o.usage.input_tokens ?? o.usage.prompt_tokens) || 0, cacheRead: o.usage.cache_read_input_tokens || o.usage.cached_input_tokens || 0, out: (o.usage.output_tokens ?? o.usage.completion_tokens) || 0 };
     }
   }
-  const r = claude || (codex.seen ? { in: codex.in, cacheRead: codex.cached, out: codex.out } : plain);
-  return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null };
+  const r = claude || (codex.seen ? { in: codex.in, cacheRead: codex.cached, out: codex.out, turns: codex.turns } : plain);
+  // Turns too (2.28): each turn re-reads the whole context, so cost follows turns more than file size
+  // (Jed's sandbox A/B: a map-first workflow added turns and cost 27% more cache reads).
+  return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost, turns: r.turns || null } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null, turns: null };
 }
 
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
@@ -263,7 +270,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   }
   const tok = tokensFrom(log);
   const reason = trouble ? `provider: ${trouble}` : code === 0 ? (tasks.length ? 'finished without task done' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd, cacheRead: tok.cacheRead, otherToolLimit: other } });
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
   return { bad, trouble, handed, reason };
@@ -297,7 +304,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const c = claim(`path:${lane}`, agent, 6 * 3600);
     if (c && c.ok === false) return { ok: false, message: `Lane ${lane} is taken: ${c.message || 'claimed by another agent'}` };
   }
-  const prompt = kickoff({ role, agent, model })
+  const prompt = kickoff({ role, agent, model, launched: true })
     + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
@@ -343,6 +350,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const s = readJson(sessionFile(agent)) || session;
     const wip = wipSummary(agent);
     fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip }, null, 2));
+    renewOwner(agent);
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
   const code = await new Promise((resolve) => {
@@ -653,7 +661,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
     const base = { role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved') };
-    const r = startAgent(base, { detach: argv.includes('--detach') });
+    // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
+    // record stayed "running" with its claims held (test #3, engine-porter-1).
+    const r = startAgent(base, { detach: argv.includes('--detach') || (cmd === 'hire' && !argv.includes('--foreground')) });
     if (!r.ok) {
       if (r.needsApproval) {
         const { ask } = await import('./ask.mjs');

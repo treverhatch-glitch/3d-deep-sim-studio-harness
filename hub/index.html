@@ -202,11 +202,9 @@
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <strong style="color:#00F0FF;">⚡ RTK + QMD + SERENA EFFICIENCY METER</strong>
-        <span id="rtkBadge" style="padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);border:1px solid #10b981;color:#34d399;font-size:10px;font-weight:700;">
-          84% Bash Saved via RTK
-        </span>
-        <span>Tokens saved (est.): <strong id="tokensSavedVal" style="color:#38bdf8;">248,500</strong></span>
-        <span>Value preserved (est.): <strong id="dollarsSavedVal" style="color:#34d399;">$4.68</strong></span>
+        <span id="rtkBadge" style="padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);border:1px solid #10b981;color:#34d399;font-size:10px;font-weight:700;">rtk not measured</span>
+        <span>Tokens saved (measured by rtk): <strong id="tokensSavedVal" style="color:#38bdf8;">not measured</strong></span>
+        <span>Value preserved: <strong id="dollarsSavedVal" style="color:#34d399;">not measured</strong></span>
       </div>
       <span style="font-size:10px;color:#64748b;" id="syncClock">Synced</span>
     </div>
@@ -416,7 +414,7 @@
       if (!state) return;
       document.getElementById('roleCount').textContent = state.rolesCount || (state.roles || []).length;
       document.getElementById('rtkBadge').textContent = (state.telemetry?.rtkCompressionPct ? `${state.telemetry.rtkCompressionPct}% shell output saved (rtk)` : 'rtk not measured');
-      document.getElementById('tokensSavedVal').textContent = Number(state.telemetry?.estimatedTokensSaved || 0).toLocaleString();
+      document.getElementById('tokensSavedVal').textContent = state.telemetry?.measured ? Number(state.telemetry.estimatedTokensSaved).toLocaleString() : 'not measured';
       document.getElementById('dollarsSavedVal').textContent = (state.telemetry?.estimatedDollarsPreserved ? `$${state.telemetry.estimatedDollarsPreserved}` : 'not measured');
       document.getElementById('syncClock').textContent = `Updated ${new Date(state.generatedAt).toLocaleTimeString()}`;
 

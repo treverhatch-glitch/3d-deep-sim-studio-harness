@@ -12,7 +12,7 @@ node scripts/secret-scan.mjs --staged
 # Test runs freeze the harness (npm run preflight -- --fix writes .studio/harness-frozen): the game
 # changes, the harness that judges it doesn't. Record harness problems as notes instead.
 if [ -f .studio/harness-frozen ]; then
-  frozen="$(git diff --cached --name-only | grep -E '^(harness|hub|scripts|tools|\.github)/|^qa/[^/]+\.(mjs|py)$|^studio/gates\.json$|^AGENTS\.md$' || true)"
+  frozen="$(git diff --cached --name-only | grep -E '^(harness|hub|scripts|tools|\.github)/|^qa/[^/]+\.(mjs|py)$|^studio/gates\.json$|^AGENTS(\.lite)?\.md$' || true)"
   if [ -n "$frozen" ]; then
     echo "[pre-commit] FAIL the harness is frozen for this test run. Unstage these and record the problem instead:"
     echo "$frozen" | sed 's/^/  /'

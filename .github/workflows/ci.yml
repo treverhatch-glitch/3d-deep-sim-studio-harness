@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: npm run verify (required gates)
-        run: node scripts/run-gates.mjs --required-only
+        run: node scripts/run-gates.mjs --required-only --deep
 
   # Drives the War Room in Chromium: all three views, desktop and phone, every button.
   war-room-browser:

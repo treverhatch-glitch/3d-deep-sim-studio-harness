@@ -50,7 +50,8 @@
   .sig.you { border-color: #f5b83d; } .sig.red { border-color: #ff5a5f; } .sig.stall { border-color: #c084fc; } .sig.pace { border-style: dashed; opacity: .85; }
   #tycoon .signals { background: #4a2e1a; color: #ffe9b5; font: 16px VT323, monospace; }
   #plan .modes { display: grid; gap: 8px; }
-  #plan .mode { text-align: left; border: 2px solid var(--line, #ccc); background: transparent; color: inherit; padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+  #plan .two > section, #p-pace { min-width: 0; }
+  #plan .mode { white-space: normal; overflow-wrap: anywhere; max-width: 100%; text-align: left; border: 2px solid var(--line, #ccc); background: transparent; color: inherit; padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
   #plan .mode[aria-checked="true"] { border-color: var(--ink, #222); box-shadow: inset 4px 0 0 var(--ink, #222); }
   #plan .mode b { display: block; }
   #plan .ask { border-left: 4px solid #f5b83d; padding: 6px 10px; margin-bottom: 10px; }
@@ -220,6 +221,7 @@
   .act-row select { flex: 0 1 auto; }
   #ops button.act, .act-row button { border: 1px solid var(--link); background: transparent; color: var(--link); border-radius: 5px; padding: 3px 9px; font-size: 13px; }
   #ops button.act { margin-left: 4px; padding: 1px 7px; }
+  .act-row button.tokwin[aria-pressed="true"] { background: var(--link); color: var(--bg); }
   #ops button:disabled { opacity: .4; cursor: not-allowed; }
   #o-act.ro .act-row button, #o-act.ro .act-row select, #o-act.ro #o-title { opacity: .45; }
   table.score { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
@@ -593,6 +595,7 @@
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
       <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
       <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
+      <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
       <section><h2>Model calls today</h2><div id="o-router"></div></section>
       <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
       <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
@@ -1205,6 +1208,7 @@
     $('o-score').innerHTML = (s.scorecard || []).length
       ? `<table class="score"><tr><th>Model</th><th>Done</th><th>Pts</th><th>Bugs</th><th>/10 pts</th><th>Slips</th></tr>${s.scorecard.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.done}</td><td>${m.points}</td><td class="${m.bugs + (m.traced || 0) ? 'bad' : ''}" title="confirmed ${m.bugs}, traced through commits ${m.traced || 0}">${m.bugs + (m.traced || 0)}${m.suspected ? ` <span title="suspected from closed-loop failures">+${m.suspected}?</span>` : ''}</td><td>${m.per10 ?? '–'}</td><td title="done refused by a check / forced / handed back">${m.refused}/${m.forced}/${m.handedBack}</td></tr>`).join('')}</table>`
       : '<p class="note">No finished work yet. Models show up once agents report them.</p>';
+    renderTokens(s.tokenUse);
     const prov = Object.entries(s.router.providers);
     $('o-router').innerHTML = (prov.length
       ? `<dl class="facts">${prov.map(([id, v]) => `<dt>${esc(id)}</dt><dd>${v.calls} calls · ${v.tokensIn.toLocaleString()} in / ${v.tokensOut.toLocaleString()} out</dd>`).join('')}</dl>`
@@ -1215,6 +1219,27 @@
       ? `<pre style="margin:0;white-space:pre-wrap;font-size:13px">${esc(s.rtk)}</pre><p class="note">Measured by rtk on the output it filtered.</p>`
       : '<p class="note">rtk is not installed, so nothing is measured. Run <code>npm run setup:token-savers</code>. Total tokens saved can\'t be measured honestly: nobody knows what an agent would have read otherwise.</p>';
   }
+
+  // Tokens: only what each tool reported when its session ended (npm run tokens). Nothing estimated.
+  let tokWin = 'last5h';
+  let tokLast = null;
+  const big = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
+  function renderTokens(tk) {
+    tokLast = tk || tokLast;
+    const box = $('o-tokens');
+    if (!box) return;
+    document.querySelectorAll('.tokwin').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.w === tokWin)));
+    const w = tokLast?.[tokWin];
+    if (!w || !w.total.sessions) { box.innerHTML = '<p class="note">No agent session has ended in this window. Counts come from the tool\'s own report when a launched session ends.</p>'; return; }
+    const t = w.total;
+    const rows = w[$('o-tokby').value] || [];
+    const un = Object.entries(w.untracked || {});
+    box.innerHTML = `<dl class="facts"><dt>Sessions</dt><dd>${t.sessions} ended, ${t.measured} reported usage</dd><dt>In / out</dt><dd>${big(t.tokensIn)} / ${big(t.tokensOut)}</dd><dt>Cache reads</dt><dd>${big(t.cacheRead)}${t.measured ? ` (${big(t.cacheRead / t.measured)} per session${t.tasksDone ? `, ${big(t.cacheRead / t.tasksDone)} per task done` : ''})` : ''}</dd></dl>` +
+      `<table class="score"><tr><th>Name</th><th>Sessions</th><th>In</th><th>Out</th><th>Cache reads</th></tr>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.sessions}${r.measured < r.sessions ? ` <span title="sessions whose tool reported no usage">(${r.sessions - r.measured} not measured)</span>` : ''}</td><td>${big(r.tokensIn)}</td><td>${big(r.tokensOut)}</td><td>${big(r.cacheRead)}</td></tr>`).join('')}</table>` +
+      `<p class="note">${un.length ? `Not measured: ${un.map(([tool, n]) => `${n} ${esc(tool)} session${n === 1 ? '' : 's'}`).join(', ')}. ` : ''}${esc(tokLast.notCounted)}</p>`;
+  }
+  document.querySelectorAll('.tokwin').forEach((b) => b.addEventListener('click', () => { tokWin = b.dataset.w; renderTokens(); }));
+  $('o-tokby')?.addEventListener('change', () => renderTokens());
 
   // ---------- Tycoon ----------
   const STAND = ['..hhhh..', '.hhhhhh.', '.hssssh.', '.sesses.', '.ssssss.', '..tttt..', '.tttttt.', '.tttttt.', '..pppp..', '..p..p..'];
@@ -1992,6 +2017,12 @@
     if (d.model) {
       if (!viewerLoaded) {
         viewerLoaded = true;
+        // Compressed GLBs (meshopt, Draco) need their decoders named before the viewer loads (Jed's run:
+        // a meshopt-compressed GLB stayed blank in the Asset studio).
+        self.ModelViewerElement = Object.assign(self.ModelViewerElement || {}, {
+          meshoptDecoderLocation: 'https://cdn.jsdelivr.net/npm/meshoptimizer@0.21.0/meshopt_decoder.js',
+          dracoDecoderLocation: 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/',
+        });
         const sc = document.createElement('script');
         sc.type = 'module';
         sc.src = 'https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js';

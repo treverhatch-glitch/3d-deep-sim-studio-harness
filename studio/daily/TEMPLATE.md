@@ -1,6 +1,6 @@
 # Daily Summary — YYYY-MM-DD
 
-> Generate automatically with `bash scripts/daily-summary.sh` at 0% LLM token cost.
+> Generate with `npm run daily:summary` (runs on any OS).
 
 ## 1. What Happened
 - 

@@ -21,6 +21,7 @@ import { parseReview, readIdea } from './bible.mjs';
 import { failsBefore } from '../qa/fails-before.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
+import { listLocks, coveringLock } from './lock.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -34,6 +35,9 @@ function firstTaggedCommit(taskId) {
 }
 
 const PREFIX = [
+  // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
+  // (Jed's run: docs-gate bugs could only close with --force).
+  [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
   [/^(bug|fix)\b/i, 'bug'],
   [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
@@ -95,17 +99,28 @@ export function taskType(task) {
   return BY_ROLE[task?.role] || 'change';
 }
 
-/** When the work started: the last task.start event, else when it was queued, else the beginning of time. */
+/**
+ * When the work started: the first task.start since the task was last finished or reopened, else when it
+ * was queued, else the beginning of time. The first, not the last: a task handed back and picked up again
+ * keeps the work done before the hand-back (Jed's run: the second agent's done-check missed the first
+ * agent's commits and asked for changes that were already there).
+ */
 export function startedAt(taskId) {
   const events = readRecentEvents(20000);
   let added = 0;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
+  let first = 0;
+  let boundary = 0;
+  for (const e of events) {
     if (e.task !== taskId) continue;
-    if (e.type === 'task.start') return Date.parse(e.ts) || 0;
-    if (e.type === 'task.added' && !added) added = Date.parse(e.ts) || 0;
+    const at = Date.parse(e.ts) || 0;
+    if (e.type === 'task.added' && !added) added = at;
+    if (e.type === 'task.done' || e.type === 'task.forced' || e.type === 'task.reopened') {
+      first = 0;
+      boundary = at;
+    }
+    else if (e.type === 'task.start' && !first) first = at;
   }
-  return added;
+  return first || boundary || added;
 }
 
 const abs = (rel) => path.join(REPO_ROOT, rel);
@@ -130,7 +145,7 @@ function filesUnder(rel, test, deep = false) {
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
 // ---- what changed, and when ----
-const BOOKKEEPING = /^(\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
+const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
@@ -179,9 +194,15 @@ export function taskChanges(taskId, since) {
       lastAt = Math.max(lastAt, Number(ct) * 1000);
     }
     const status = git('status', '--porcelain') || '';
+    // Another agent's uncommitted work in its own claimed folder isn't this task's change (Jed's run: a
+    // Producer's Check forced done could never clear while builders had edits in progress).
+    const locks = listLocks();
+    const mine = locks.find((l) => l.key === `task:${taskId}`)?.owner || null;
     for (const line of status.split('\n').filter(Boolean)) {
       const f = line.slice(3).replace(/^"|"$/g, '').split(' -> ').pop();
       if (BOOKKEEPING.test(f)) continue;
+      const held = coveringLock(f, locks);
+      if (held && held.owner !== mine) continue;
       const m = mtime(f);
       if (m >= since) {
         files.add(f);

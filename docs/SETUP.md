@@ -3,17 +3,16 @@
 ## 1. Token Savers & MCP Bridges (Run First)
 
 ```bash
-chmod +x scripts/*.sh
-./scripts/setup-token-savers.sh --check
+node scripts/setup-token-savers.mjs --check
 ```
-This audits `rtk`, `qmd`, `uvx` (`serena`), `jq`, and `duckdb`, and writes `.mcp.json` (`qmd`, `serena`, `playwright`, `blender-orchestrator`) plus `.claude/settings.json` hooks (`SessionStart`, `PreCompact`).
+This audits `rtk`, `qmd`, `uvx` (`serena`), `jq`, and `duckdb`, and writes `.mcp.json` and the `.claude/settings.json` hooks (`SessionStart`, `PreCompact`) only if they are missing (both ship with the repo). Plain Node: it runs in PowerShell too.
 
 ## 2. Passive Event Log (`.studio/events.jsonl`)
 
-Agents append 1-line JSON events to `.studio/events.jsonl` via `./scripts/append-event.sh` or `node harness/event.mjs`:
+Agents append 1-line JSON events to `.studio/events.jsonl` via `node scripts/append-event.mjs` or `node harness/event.mjs`:
 
 ```bash
-./scripts/append-event.sh RUNNING_VITEST src/sim/clock.ts P0-12 nvidia-glm-flash
+node scripts/append-event.mjs RUNNING_VITEST src/sim/clock.ts P0-12 nvidia-glm-flash
 ```
 
 ## 3. Multi-Model Failover Router (`harness/route.mjs`)

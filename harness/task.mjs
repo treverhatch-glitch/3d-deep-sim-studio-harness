@@ -13,6 +13,7 @@ import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS }
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds } from './task-hold.mjs';
+import { savePatch } from './wip.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -254,6 +255,20 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     };
   }
 
+  // Forced past a failing check: the owner's uncommitted work in its claimed folders is saved as a patch
+  // first, so it isn't lost or committed later under another task (test #3: 12 forced, several with work
+  // left uncommitted that later tasks committed).
+  let forcedPatch = null;
+  if (!check.ok) {
+    const owner = lock.locked ? lock.lock.owner : agent;
+    const claims = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key) : [];
+    if (claims.length) {
+      try {
+        forcedPatch = savePatch(owner, taskId, claims, { suffix: '-forced' });
+      } catch {}
+    }
+  }
+
   target.status = 'done';
   if (note) target.title = `${target.title} _(✓ ${note})_`;
   q.done.unshift(target);
@@ -272,8 +287,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       task: target.id,
       status: 'forced',
       to: 'producer',
-      msg: `Forced ${target.id} done without: ${check.missing[0]}${reason ? ` (reason: ${reason})` : ''}${acceptedBy ? `, accepted by ${acceptedBy}` : ''}`,
-      meta: { type: check.type, missing: check.missing, reason: reason || null, acceptedBy: acceptedBy || null },
+      msg: `Forced ${target.id} done without: ${check.missing[0]}${reason ? ` (reason: ${reason})` : ''}${acceptedBy ? `, accepted by ${acceptedBy}` : ''}${forcedPatch ? `; uncommitted work saved to ${forcedPatch}` : ''}`,
+      meta: { type: check.type, missing: check.missing, reason: reason || null, acceptedBy: acceptedBy || null, patch: forcedPatch },
     });
     // A person already accepted it with a reason: logged, no follow-up task (the run report lists it).
     if (acceptedBy && reason) return { ...target, forced: true, check, followUp: null, acceptedBy };
@@ -292,7 +307,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       return { ...target, forced: true, check, followUp: open.id, joined: true };
     }
     const followUp = addTask({ title: `Check forced done ${target.id} (${check.type}): ${check.missing[0]}`, role: 'producer', priority: 'P1' });
-    return { ...target, forced: true, check, followUp: followUp.id };
+    return { ...target, forced: true, check, followUp: followUp.id, patch: forcedPatch };
   }
   return target;
 }
@@ -349,7 +364,12 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}` });
-  return { ...target, handoffFile: path.relative(REPO_ROOT, file) };
+  // "blocked by T-12" (or "waits for", "needs T-12 first") in the note: hold the task until T-12 is done,
+  // so it isn't picked up again only to be handed back for the same reason (Jed's run).
+  const deps = [...String(note || '').matchAll(/\b(?:blocked (?:by|on)|waits? (?:for|on)|needs|after)\s+((?:T-\d+(?:\s*(?:,|and)\s*)?)+)/gi)].flatMap((m) => m[1].match(/T-\d+/g) || []);
+  const open = deps.filter((d) => d !== target.id && !q.done.some((t) => t.id === d) && [...q.inProgress, ...q.backlog].some((t) => t.id === d));
+  if (open.length) setHold(target.id, { after: [...new Set([...(readHolds()[target.id]?.after || []), ...open])] }, { by: who, msg: `${target.id} waits for ${open.join(', ')} (from ${who}'s hand-back note)` });
+  return { ...target, handoffFile: path.relative(REPO_ROOT, file), waitsFor: open };
 }
 
 export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
@@ -549,14 +569,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const targetId = arg1;
     const res = targetId && pauseTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, typeof flags.note === 'string' ? flags.note : '', { force: Boolean(flags.force) });
     if (!res) {
-      console.error('Usage: node harness/task.mjs pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"');
+      if (!targetId) console.error('Usage: node harness/task.mjs pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"');
+      else {
+        // Say why (Jed's run: a bare usage line for a task that was already back in the queue or done).
+        const q = parseNextQueue();
+        const where = q.backlog.some((t) => t.id === targetId) ? 'is already in the queue (not in progress), so there is nothing to hand back' : q.done.some((t) => t.id === targetId) ? 'is done; to send it back use npm run task -- reopen ' + targetId + ' --reason "…"' : 'is not on the board (studio/NEXT.md)';
+        console.error(`${targetId} ${where}.`);
+      }
       process.exit(1);
     }
     if (res.error) {
       console.error(res.message);
       process.exit(1);
     }
-    console.log(`${res.id} is back at the top of the queue. Notes: ${res.handoffFile}`);
+    console.log(`${res.id} is back at the top of the queue${res.waitsFor?.length ? `, held until ${res.waitsFor.join(', ')} ${res.waitsFor.length === 1 ? 'is' : 'are'} done (from your note)` : ''}. Notes: ${res.handoffFile}`);
     process.exit(0);
   }
 
@@ -601,7 +627,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(0);
     }
     if (!arg1 || !all.some((t) => t.id === arg1)) {
-      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> ${cmd === 'block' ? '--until <T-ID|ISO time> ' : cmd === 'lane' ? '<folder|none> ' : ''}--by <name>${cmd === 'park' ? ' --why "…"' : ''}`);
+      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> ${cmd === 'block' ? '--until <T-ID|ISO time> ' : cmd === 'lane' ? '<folder|none> ' : ''}--by <name>${cmd === 'park' ? ' --why "…" [--until T-ID|phase:N|time]' : ''}`);
       process.exit(1);
     }
     if (cmd === 'park') {
@@ -609,8 +635,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error('Say why it is parked: --why "…" (the Producer and Director read it).');
         process.exit(1);
       }
-      setHold(arg1, { parked: { by, why: flags.why, at: new Date().toISOString() } }, { by, msg: `${by} parked ${arg1}: ${flags.why}` });
-      console.log(`${arg1} is parked: it won't start until someone runs npm run task -- unpark ${arg1} --by <name>.`);
+      const until = typeof flags.until === 'string' ? flags.until : null;
+      if (until && !/^[A-Z]+-\d+$/.test(until) && !/^phase:\d+$/i.test(until) && !Number.isFinite(Date.parse(until))) {
+        console.error('--until takes a task id (T-011), phase:2 (when Phase 2 opens) or a time (2026-10-22T09:00).');
+        process.exit(1);
+      }
+      const stamp = until && Number.isFinite(Date.parse(until)) && !/^[A-Z]+-\d+$/.test(until) && !/^phase:/i.test(until) ? new Date(Date.parse(until)).toISOString() : until;
+      setHold(arg1, { parked: { by, why: flags.why, at: new Date().toISOString(), ...(stamp ? { until: stamp } : {}) } }, { by, msg: `${by} parked ${arg1}${stamp ? ` until ${stamp}` : ''}: ${flags.why}` });
+      console.log(stamp ? `${arg1} is parked until ${stamp}; then it can start on its own.` : `${arg1} is parked: it won't start until someone runs npm run task -- unpark ${arg1} --by <name> (or park it with --until T-ID|phase:N|time).`);
     } else if (cmd === 'unpark') {
       setHold(arg1, { parked: null }, { by, msg: `${by} unparked ${arg1}` });
       console.log(`${arg1} can start again.`);

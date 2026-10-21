@@ -50,7 +50,7 @@ const tracked = () => (isGit ? run('git', ['diff', '--name-only']).stdout.trim()
 const before = tracked();
 
 // 2. Gates
-const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only'], { cwd: root, stdio: 'inherit' });
+const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep'], { cwd: root, stdio: 'inherit' });
 step('required gates', gates.status === 0);
 
 // 3. Closed loop still fails loudly
@@ -65,6 +65,13 @@ step('gates left tracked files unchanged', before === after, `changed by gates:\
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const changelog = fs.existsSync(path.join(root, 'CHANGELOG.md')) ? fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8') : '';
 step(`CHANGELOG.md has an entry for ${version}`, changelog.includes(version));
+// npm install rewrites package-lock.json's version to match package.json, so a lagging lock shows up as
+// a changed file in every studio after its first install (Jed's runs: "M package-lock.json" in every hand-back).
+let lockVersion = null;
+try {
+  lockVersion = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')).version;
+} catch {}
+step(`package-lock.json says ${version} too`, lockVersion === null || lockVersion === version, `package-lock.json has ${lockVersion}; set its two "version" fields to ${version}`);
 
 const failed = steps.filter((s) => !s.ok);
 console.log(`\n[release] ${steps.length - failed.length}/${steps.length} steps passed`);

@@ -21,7 +21,7 @@ Upstream: **https://github.com/robbin/grokbot-local-agent**
 | `grokbot-local-agent` | This Studio Template |
 |---------------------|--------------|
 | `pi-task` state in `~/.pi/tasks/<id>/` | Source of truth for delegated background work |
-| `events.jsonl` inside the task folder | Mirror or append lines via `scripts/append-event.sh` into `.studio/events.jsonl` so the HUB displays live nodes |
+| `events.jsonl` inside the task folder | Mirror or append lines via `node scripts/append-event.mjs` into `.studio/events.jsonl` so the HUB displays live nodes |
 | On-completion webhook (`PI_NOTIFY_URL`) | Grok Bot routine reads result, updates `studio/CURRENT_TASK.md`, writes `studio/done/` summary |
 | `--owner <agent-id>` | Use `--owner grok-producer` so tasks stay tied to the Executive Producer |
 
@@ -36,7 +36,7 @@ Upstream: **https://github.com/robbin/grokbot-local-agent**
    - Read the finished task’s `result.md` (or `rtk git diff`).
    - Update `studio/CURRENT_TASK.md` with the outcome and next step (`node harness/task.mjs done <ID>`).
    - Write a short summary entry in `studio/done/YYYY-MM-DD-short-title.md`.
-   - Append a completion line to `.studio/events.jsonl` via `./scripts/append-event.sh DONE src/sim/ P0-XX`.
+   - Append a completion line to `.studio/events.jsonl` via `node scripts/append-event.mjs DONE src/sim/ P0-XX`.
 5. When delegating from Grok Bot, prefer:
    ```bash
    pi-task run --owner grok-producer "Implement fixed-timestep turnaround system per studio/CURRENT_TASK.md"

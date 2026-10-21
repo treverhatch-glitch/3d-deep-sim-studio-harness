@@ -17,6 +17,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
 let gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates;
 const SKIP = new Set(['.git', 'node_modules', '.env', 'dist']);
+// Windows starts each process in about 1.5-2 s (Gemini's run on Hatch's PC: the 8 s supervisor runs timed
+// out), so time limits in these tests scale with the platform. STUDIO_SELFTEST_SLOW overrides the factor.
+const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
+const secs = (n) => `${Math.ceil(n * SLOW)}s`;
 let failed = 0;
 let n = 0;
 
@@ -960,7 +964,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node harness/mode.mjs set precise --by hatch', env);
   run(dir, 'node harness/agent.mjs start --role builder --agent builder-1 --model fake-1 --detach', waitEnv);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 && !/running/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/running/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
   const second = run(dir, 'node harness/agent.mjs start --role builder --agent builder-2 --model fake-1 --detach', waitEnv);
   report('the mode caps how many agents of a role run at once', second.status !== 0 && /allows 1/.test(second.stderr), second.stdout + second.stderr);
   run(dir, 'node harness/mode.mjs boost on --by hatch --hours 1', env);
@@ -982,7 +986,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('commit -q -m init --no-verify');
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
-  const sup = run(dir, 'node harness/supervisor.mjs --no-hub --until 9s --foreground', env);
+  const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
@@ -994,7 +998,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
   const t0 = Date.now();
   let lanes = [];
-  while (Date.now() - t0 < 8000 && lanes.length < 2) {
+  while (Date.now() - t0 < 8000 * SLOW && lanes.length < 2) {
     spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)']);
     lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8')).filter((x) => /path:docs\/lane-[ab]/.test(x));
   }
@@ -1038,7 +1042,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
   const hire = run(dir, `node harness/agent.mjs hire --role sound-designer --agent zed-1 --division sound --task ${tid} --by hatch --note "keep it subtle" --detach`, henv);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
   fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
   const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
   const zed = (hud.agents || []).find((a) => a.name === 'zed-1');
@@ -1097,11 +1101,11 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const c = id('node harness/task.mjs add "Floor two lighting" --role builder');
   run(dir, `node harness/agent.mjs start --role builder --agent stop-1 --task ${c} --detach`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' });
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 && !/stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(300);
+  while (Date.now() - t0 < 8000 * SLOW && !/stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(300);
   const st = run(dir, 'node harness/agent.mjs stop stop-1 --by jed', env);
   // Wait for the launcher to hand the task back (slower on Windows), then try to restart it.
   const t2 = Date.now();
-  while (Date.now() - t2 < 15000 && /stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(400);
+  while (Date.now() - t2 < 15000 * SLOW && /stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(400);
   const again = run(dir, `node harness/task.mjs start ${c} --agent other-1`, env);
   report('after agent stop, its task can\'t restart straight away (run #1: it restarted within seconds)', st.status === 0 && /won't restart before/.test(st.stdout) && again.status !== 0 && /can restart after/.test(again.stderr), st.stdout + again.stdout + again.stderr);
   run(dir, `node harness/task.mjs done ${c} --agent prod-1 --force --reason test --accepted-by selftest`, env);
@@ -1110,7 +1114,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   for (const t of ['Fix the elevator doors', 'Fix the gun direction']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
-  run(dir, 'node harness/supervisor.mjs --no-hub --until 5s --foreground', wenv);
+  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(5)} --foreground`, wenv);
   const live = () => JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"', env).stdout || '[]');
   const one = live();
   report('two builders without lanes never run at once, even in a fast pace (run #1: they edited the same files)', one.length === 1, JSON.stringify(one));
@@ -1118,7 +1122,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   // Wait for the launcher to hand the stopped agent's task back.
   const t1 = Date.now();
   let q0 = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
-  while (Date.now() - t1 < 10000 && (live().length || q0.backlog.filter((t) => /^Fix the/.test(t.title)).length < 2)) {
+  while (Date.now() - t1 < 10000 * SLOW && (live().length || q0.backlog.filter((t) => /^Fix the/.test(t.title)).length < 2)) {
     pause(400);
     q0 = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
   }
@@ -1129,7 +1133,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   // Other waiting builder tasks have no lane, so one of them would take the whole game: park them.
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder' && ![l1, l2].includes(x.id))) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   fs.writeFileSync(path.join(dir, 'studio/task-holds.json'), JSON.stringify({ tasks: Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks).map(([k, v]) => [k, { ...v, cooldownUntil: undefined }])) }));
-  run(dir, 'node harness/supervisor.mjs --no-hub --until 5s --foreground', wenv);
+  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(5)} --foreground`, wenv);
   const two = live();
   report('task lane gives each builder its own folder, and then they run side by side', two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
   const names = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
@@ -1138,7 +1142,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   pause(1500);
   // Two sessions ending the same bad way: stop starting, and ask once.
   for (const t of ['Polish one', 'Polish two', 'Polish three', 'Polish four']) run(dir, `node harness/task.mjs add "${t}" --role rnd`, env);
-  run(dir, 'node harness/supervisor.mjs --no-hub --until 8s --foreground', { ...env, STUDIO_RND_CMD: 'node -e "process.exit(127)"' });
+  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(8)} --foreground`, { ...env, STUDIO_RND_CMD: 'node -e "process.exit(127)"' });
   const sup = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   const rndRuns = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => /^rnd-s\d+\.json$/.test(f)).length;
   fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
@@ -1289,12 +1293,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const t4 = id('node harness/task.mjs add "Stop me mid-work" --role builder');
   run(dir, `node harness/agent.mjs start --role builder --agent mid-1 --task ${t4} --detach`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' });
   const tm = Date.now();
-  while (Date.now() - tm < 8000 && !fs.existsSync(path.join(dir, 'docs/fake/mid-1.md'))) pause(300);
+  while (Date.now() - tm < 8000 * SLOW && !fs.existsSync(path.join(dir, 'docs/fake/mid-1.md'))) pause(300);
   pause(500);
   run(dir, 'node harness/task.mjs stop --by jed --reason "harness update"', env);
   const wipF = path.join(dir, `.studio/wip/${t4}-mid-1.patch`);
   const tw = Date.now();
-  while (Date.now() - tw < 8000 && !fs.existsSync(wipF)) pause(300);
+  while (Date.now() - tw < 8000 * SLOW && !fs.existsSync(wipF)) pause(300);
   report('Stop all saves a running agent\'s uncommitted work as a patch, then hands its task back', fs.existsSync(wipF) && /docs\/fake\/mid-1\.md/.test(fs.readFileSync(wipF, 'utf8')) && /saved to \.studio\/wip\//.test(fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8')), fs.existsSync(path.join(dir, `studio/handoffs/${t4}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8') : 'no handoff');
   run(dir, 'node harness/task.mjs resume --by jed', env);
   run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason test --accepted-by selftest`, env);
@@ -1318,7 +1322,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   for (const s of liveNow) run(dir, `node harness/agent.mjs stop ${s}`, env);
   // A halt names the program, not "custom".
   for (const t of ['Probe one', 'Probe two', 'Probe three']) run(dir, `node harness/task.mjs add "${t}" --role rnd`, env);
-  run(dir, 'node harness/supervisor.mjs --no-hub --until 8s --foreground', { ...env, STUDIO_RND_CMD: 'no-such-agent-tool {agent}' });
+  run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(8)} --foreground`, { ...env, STUDIO_RND_CMD: 'no-such-agent-tool {agent}' });
   const halted = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).halted;
   report('when the supervisor halts, it names the program that wasn\'t found', /no-such-agent-tool wasn't found/.test(halted?.why || ''), JSON.stringify(halted));
   // Token counts from the tool's own final report; cache reads kept apart.
@@ -1456,7 +1460,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const hubP = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...CLEAN_ENV, HUB_PORT: String(hport), HUB_TOKEN: 'selftest-token' }, stdio: 'ignore' });
   const get = (p) => spawnSync(process.execPath, ['-e', `fetch('http://127.0.0.1:${hport}${p}').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40))).catch((e) => console.log('ERR', e.message))`], { encoding: 'utf8' }).stdout.trim();
   const th = Date.now();
-  while (Date.now() - th < 10000 && /^ERR/.test(get('/health'))) pause(300);
+  while (Date.now() - th < 10000 * SLOW && /^ERR/.test(get('/health'))) pause(300);
   const page = get('/play/209901010000-vite/index.html');
   const asset = get('/assets/index-abc.js');
   hubP.kill();
@@ -1552,7 +1556,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const wenv = { ...env, STUDIO_HEARTBEAT_SEC: '1', STUDIO_RND_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-001 wait' };
   const up = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 && !/rnd-1/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/rnd-1/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
   const again = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
   report('a pitch or message starts the role\'s agent, and a second one finds it already running', up.started === true && /R&D is starting now as rnd-1/.test(up.next) && again.started === false && /is running/.test(again.next), `${up.next} | ${again.next}`);
   run(dir, 'node harness/agent.mjs stop rnd-1', env);
@@ -1961,6 +1965,77 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('closed loop exits 1 and records failing tick 37 from the cartridge', loop.status === 1 && trace.tick === 37, `${loop.stdout}${loop.stderr}`);
   const rep = run(dir, 'node harness/replay.mjs --trace .studio/last-seed-failure.json');
   report('replaying the trace stops on tick 37', rep.status === 1 && /"failingTick": 37/.test(rep.stdout), rep.stdout);
+}
+
+// 2.28: measured tokens, Lite scope, park --until, a hand-back note that names a blocker, FIX 06, lock renewal.
+{
+  const dir = copyRepo();
+  const ev = path.join(dir, '.studio', 'events.jsonl');
+  const now = Date.now();
+  const at = (minAgo) => new Date(now - minAgo * 60000).toISOString();
+  const lines = [
+    { ts: at(30), type: 'agent.session.start', agent: 'builder-x1', model: 'claude-opus-5-5', meta: { role: 'builder', tool: 'claude' } },
+    { ts: at(20), type: 'task.done', agent: 'builder-x1', task: 'T-900' },
+    { ts: at(19), type: 'agent.session.end', agent: 'builder-x1', model: 'claude-opus-5-5', tokensIn: 1000, tokensOut: 200, meta: { role: 'builder', tool: 'claude', cacheRead: 50000, turns: 12 } },
+    { ts: at(15), type: 'agent.session.start', agent: 'art-x1', model: 'gemini', meta: { role: 'art', tool: 'agy' } },
+    { ts: at(10), type: 'agent.session.end', agent: 'art-x1', model: 'gemini', tokensIn: 0, tokensOut: 0, meta: { role: 'art', tool: 'agy' } },
+  ];
+  fs.appendFileSync(ev, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const tk = run(dir, 'node harness/tokens.mjs --since 5h --json');
+  let t = {};
+  try {
+    t = JSON.parse(tk.stdout);
+  } catch {}
+  report('npm run tokens sums what sessions reported and lists the ones that reported nothing', t.total?.cacheRead === 50000 && t.total?.tokensIn === 1000 && t.total?.turns === 12 && t.untracked?.agy === 1 && t.byRole?.find((r) => r.name === 'builder')?.tasksDone === 1, tk.stdout + tk.stderr);
+  const hud = JSON.parse(run(dir, `node -e "import('./harness/hud.mjs').then(m=>console.log(JSON.stringify(m.buildHudState().tokenUse)))"`).stdout || '{}');
+  report('the War Room gets the measured totals for the last 5 h', hud.last5h?.total?.cacheRead === 50000, JSON.stringify(hud).slice(0, 300));
+  const noFake = ['hub/index.html', 'hub/server.mjs', 'scripts/pre-compact.mjs', 'scripts/append-event.mjs', 'scripts/seed-demo-events.mjs'].filter((f) => /248,500|tokensSaved: \d|--tokens-saved \d|--saved \d/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  report('no made-up token numbers are left in the War Room or the scripts', noFake.length === 0, noFake.join(', '));
+
+  // Lite scope: 6 gates, AGENTS.lite.md, ten commands.
+  run(dir, 'node harness/mode.mjs scope lite --by hatch');
+  const lite = run(dir, 'node scripts/run-gates.mjs --only purity,isolation');
+  const help = run(dir, 'node harness/help.mjs');
+  const claudeMd = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+  report('Lite scope: CLAUDE.md loads AGENTS.lite.md, help shows ten commands', /@AGENTS\.lite\.md/.test(claudeMd) && !/@AGENTS\.md/.test(claudeMd) && (help.stdout.match(/npm(\.cmd)? run /g) || []).length <= 12 && lite.status === 0, claudeMd + help.stdout);
+  report('AGENTS.lite.md stays short (under 1k tokens)', fs.statSync(path.join(dir, 'AGENTS.lite.md')).size < 4000, String(fs.statSync(path.join(dir, 'AGENTS.lite.md')).size));
+  run(dir, 'node harness/mode.mjs scope full --by hatch');
+  report('Full scope puts AGENTS.md back in CLAUDE.md', /@AGENTS\.md/.test(fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8')));
+
+  // park --until: a park that ends by itself.
+  const add = (title) => (run(dir, `node harness/task.mjs add "${title}" --role builder --priority P2`).stdout.match(/T-\d+/) || [])[0];
+  const a = add('Park test A');
+  const b = add('Park test B');
+  run(dir, `node harness/task.mjs park ${a} --by hatch --why "wait" --until ${new Date(now - 60000).toISOString()}`);
+  run(dir, `node harness/task.mjs park ${b} --by hatch --why "wait" --until phase:9`);
+  const holds = run(dir, `node -e "import('./harness/task-hold.mjs').then(async (h)=>{const {parseNextQueue}=await import('./harness/task.mjs');const q=parseNextQueue();console.log(JSON.stringify([h.holdReason('${a}',q),h.holdReason('${b}',q)]))})"`);
+  let hr = [];
+  try {
+    hr = JSON.parse(holds.stdout.trim().split('\n').pop());
+  } catch {}
+  report('a park with --until ends by itself (a time passed), and holds until its phase opens', hr[0] === null && /parked by hatch/.test(hr[1] || ''), holds.stdout + holds.stderr);
+
+  // A hand-back note that names a blocker holds the task until the blocker is done.
+  const c = add('Blocked test C');
+  run(dir, `node harness/task.mjs start ${c} --agent sel-w1`, { STUDIO_LOCK_OWNER: 'sel-w1' });
+  const p = run(dir, `node harness/task.mjs pause ${c} --agent sel-w1 --note "blocked by ${a}: needs its floor first"`, { STUDIO_LOCK_OWNER: 'sel-w1' });
+  report('"blocked by T-x" in a hand-back note holds the task until T-x is done', /held until/.test(p.stdout) && (JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks?.[c]?.after || []).includes(a), p.stdout + p.stderr);
+  const p2 = run(dir, `node harness/task.mjs pause ${c} --agent sel-w1`, { STUDIO_LOCK_OWNER: 'sel-w1' });
+  report('pause says why when the task is not in progress', p2.status === 1 && /already in the queue/.test(p2.stderr), p2.stderr);
+
+  // FIX 06: a same-family note that says it isn't an approval is moved and owed, not a red gate.
+  fs.mkdirSync(path.join(dir, 'studio/reviews'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/reviews/2026-10-21-T-166.md'), '# Review T-166\nmodel-family: claude-opus-5-5\nimplementer-family: claude-opus-5-5\nThis note is not a cross-family approval.\n');
+  const before = run(dir, 'node scripts/check-reviewer.mjs');
+  run(dir, 'node scripts/preflight.mjs --fix --quick');
+  const after = run(dir, 'node scripts/check-reviewer.mjs');
+  const owed = fs.existsSync(path.join(dir, 'studio/reviews/OWED.json')) ? fs.readFileSync(path.join(dir, 'studio/reviews/OWED.json'), 'utf8') : '';
+  report('FIX 06: preflight --fix moves a self-declared same-family note and records the review as owed', before.status === 1 && /preflight -- --fix/.test(before.stderr) && after.status === 0 && fs.existsSync(path.join(dir, 'studio/reviews/same-family/2026-10-21-T-166.md')) && /T-166/.test(owed), before.stderr + after.stdout + after.stderr + owed);
+
+  // The heartbeat renews claims.
+  const lk = run(dir, `node -e "import('./harness/lock.mjs').then(m=>{m.claim('path:game/x','sel-r1',60);const n=m.renewOwner('sel-r1',3600);console.log(n, m.listLocks().find(l=>l.owner==='sel-r1').expiresAt)})"`);
+  const [n, exp] = lk.stdout.trim().split(' ');
+  report('the heartbeat renews an agent\'s claims', n === '1' && Date.parse(exp) > now + 50 * 60000, lk.stdout + lk.stderr);
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.

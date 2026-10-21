@@ -14,7 +14,7 @@ The HUB can be closed at any time while agents continue working. Open it on a se
 ## How Agents Log Events
 
 ```bash
-./scripts/append-event.sh RUNNING_VITEST src/sim/clock.ts P0-12 nvidia-glm-flash
+node scripts/append-event.mjs RUNNING_VITEST src/sim/clock.ts P0-12 nvidia-glm-flash
 # or
 node harness/event.mjs --type task.start --agent builder --task T-003 --msg "Implementing InstancedMesh"
 ```

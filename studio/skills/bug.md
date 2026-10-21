@@ -19,7 +19,7 @@
    replays your regression on the commit before the fix; it must fail there, or it guards nothing
    (`node qa/fails-before.mjs qa/regressions/<bug-id>.json <fix>^` to see it yourself).
 7. **Lesson.** Four bullets in `studio/memory/failures.md` (what broke, why, the fix, how to spot it
-   next time), plus `- **Role**: <role>` if one role should learn it. `bash scripts/distill-bug.sh`
+   next time), plus `- **Role**: <role>` if one role should learn it. `node scripts/distill-bug.mjs`
    starts it.
 8. **Verify and hand off.** Run the full `npm run verify`. In the done note, say what the next agent
    should watch for.

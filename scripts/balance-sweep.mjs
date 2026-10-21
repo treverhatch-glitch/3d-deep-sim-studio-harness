@@ -86,7 +86,20 @@ const md = [
   '',
 ].join('\n');
 console.log(md);
-if (argv.includes('--write')) fs.writeFileSync(path.join(root, 'studio', 'balance', 'latest.md'), md);
+// --write replaces only the sweep's own block, so notes and tables people or agents wrote in latest.md
+// stay (Jed's run: a measured options table was overwritten by the next sweep).
+if (argv.includes('--write')) {
+  const file = path.join(root, 'studio', 'balance', 'latest.md');
+  const START = '<!-- balance-sweep:start (written by scripts/balance-sweep.mjs --write; text outside this block is kept) -->';
+  const END = '<!-- balance-sweep:end -->';
+  const block = `${START}\n${md}\n${END}`;
+  const old = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const a = old.indexOf('<!-- balance-sweep:start');
+  const b = old.indexOf(END);
+  const out = a >= 0 && b > a ? `${old.slice(0, a)}${block}${old.slice(b + END.length)}` : old.trim() ? `${block}\n\n${old}` : `${block}\n`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, out);
+}
 
 if (values.length > 1 && hashes.size <= seeds.length) {
   console.error(`[balance] FAIL changing ${knob} changed nothing: does createInitialState(seed, tuning) use its tuning argument?`);

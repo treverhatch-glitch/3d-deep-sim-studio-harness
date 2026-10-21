@@ -28,7 +28,7 @@ for (const file of files) {
     continue;
   }
   if (modelFamily(reviewer) === modelFamily(implementer)) {
-    console.error(`[reviewer] FAIL ${file} reviewer family matches implementer (${reviewer})`);
+    console.error(`[reviewer] FAIL ${file} reviewer family matches implementer (${reviewer})${/not (?:a |an )?(?:cross-family )?approval|same[- ]family/i.test(text) ? '. It says it is not an approval: npm run preflight -- --fix moves it to studio/reviews/same-family/ and records the review as owed' : ''}`);
     failed += 1;
     continue;
   }

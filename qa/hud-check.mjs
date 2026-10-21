@@ -75,7 +75,9 @@ await new Promise((r) => fakeModel.listen(0, '127.0.0.1', r));
 env.OLLAMA_BASE_URL = `http://127.0.0.1:${fakeModel.address().port}/v1`;
 env.STUDIO_PREPARE_CHAIN = 'ollama-local';
 // A saved playable build for the Arcade: the browser check passes, so the build is kept.
-sh('qa/browser-play.mjs', '--no-shots');
+// When the game's own browser check fails there is no build to play: the Arcade checks that need one are
+// skipped and say why, instead of turning the HUD red for the game's bug (Jed's run: one red became three).
+const noBuild = sh('qa/browser-play.mjs', '--no-shots').status !== 0;
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 
 const port = await new Promise((resolve) => {
@@ -104,6 +106,12 @@ if (!(await fetch(`${BASE}/api/state`).then((r) => r.ok, () => false))) {
 
 let failed = 0;
 let total = 0;
+let skipped = 0;
+const needsBuild = (label, ok, detail) => {
+  if (!noBuild) return check(label, ok, detail);
+  skipped += 1;
+  console.log(`[hud] SKIP ${label}: no playable build (the game's browser check failed; npm run play:browser says why)`);
+};
 const check = (label, ok, detail = '') => {
   total += 1;
   if (!ok) failed += 1;
@@ -111,6 +119,15 @@ const check = (label, ok, detail = '') => {
 };
 const read = (rel) => (fs.existsSync(path.join(dir, rel)) ? fs.readFileSync(path.join(dir, rel), 'utf8') : '');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Poll until a condition holds (or the deadline passes): for steps whose time varies by machine.
+const until = async (fn, ms) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await fn().catch(() => false)) return true;
+    await wait(500);
+  }
+  return false;
+};
 
 try {
   for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
@@ -243,7 +260,7 @@ try {
   await page.click('#assets .switch[data-to="arcade"]');
   await wait(3500);
   const frameText = await page.frameLocator('#r-frame').locator('.hud').innerText().catch(() => '');
-  check('the Arcade plays the last build that passed the browser check', /\/play\/[^/]+\/web\/example-sim\/index\.html/.test(await page.locator('#r-frame').getAttribute('src')) && /Credits\s*\d+/.test(frameText) && /won at tick/.test(await page.locator('#r-build').innerText()), frameText + (await page.locator('#r-build').innerText()));
+  needsBuild('the Arcade plays the last build that passed the browser check', /\/play\/[^/]+\/web\/example-sim\/index\.html/.test(await page.locator('#r-frame').getAttribute('src')) && /Credits\s*\d+/.test(frameText) && /won at tick/.test(await page.locator('#r-build').innerText()), frameText + (await page.locator('#r-build').innerText()));
   await page.locator('#r-dungeon').click({ position: { x: 20, y: 20 } });
   await page.keyboard.press('ArrowRight');
   await wait(400);
@@ -252,11 +269,11 @@ try {
   await page.selectOption('#r-notekind', 'bug');
   await page.click('#r-note button');
   await wait(1500);
-  check('a note taken while playing becomes a bug task, saved with the build it was about', /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md')) && /the end screen text overlaps/.test(read('studio/playtest/NOTES.md')), await page.locator('#r-notemsg').innerText());
+  needsBuild('a note taken while playing becomes a bug task, saved with the build it was about', /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md')) && /the end screen text overlaps/.test(read('studio/playtest/NOTES.md')), await page.locator('#r-notemsg').innerText());
   // "Is it fun?": a person's verdict on the build being played (what lets a phase close).
   await page.click('#arcade [data-fun="yes"]');
   await wait(800);
-  check('"Yes, it\'s fun" in the Arcade records a verdict on the build being played', /"fun": "yes"/.test(read('studio/playtest/verdicts.json')) && /"build": "/.test(read('studio/playtest/verdicts.json')) && /is fun/.test(await page.locator('#r-notemsg').innerText()), (await page.locator('#r-notemsg').innerText()) + read('studio/playtest/verdicts.json'));
+  needsBuild('"Yes, it\'s fun" in the Arcade records a verdict on the build being played', /"fun": "yes"/.test(read('studio/playtest/verdicts.json')) && /"build": "/.test(read('studio/playtest/verdicts.json')) && /is fun/.test(await page.locator('#r-notemsg').innerText()), (await page.locator('#r-notemsg').innerText()) + read('studio/playtest/verdicts.json'));
   await page.click('#arcade .switch[data-to="ops"]');
   await wait(800);
   await page.selectOption('#o-arole', 'builder');
@@ -268,8 +285,10 @@ try {
     await page.locator('#o-launched [data-stopagent]').first().click();
     await wait(3000);
   }
-  await wait(1000);
-  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()));
+  // Stopping kills the process tree, saves a patch and hands the task back: on Windows that takes a few
+  // seconds (Gemini's run raced it), so wait for the page to say so instead of a fixed pause.
+  await until(async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), 20000);
+  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
   // + Hire in an open room of the Studio view: an agent for that department, which Pause hands back.
   await page.click('#ops .switch[data-to="tycoon"]');
   await wait(800);
@@ -283,7 +302,7 @@ try {
     await page.locator('#o-launched [data-pauseagent]').first().click();
     await wait(3000);
   }
-  await wait(1000);
+  await until(async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), 20000);
   check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
   // Throw it all away and restart: two warnings back to back; Cancel on the second changes nothing.
   await page.click('#o-restart');
@@ -303,5 +322,5 @@ try {
   await wait(300);
   fs.rmSync(dir, { recursive: true, force: true });
 }
-console.log(failed ? `[hud] ${failed} of ${total} checks failed` : `[hud] ok: ${total} checks across the Ops, Studio and Game plan views`);
+console.log(failed ? `[hud] ${failed} of ${total} checks failed` : `[hud] ok: ${total} checks across the Ops, Studio and Game plan views${skipped ? ` (${skipped} skipped: no playable build)` : ''}`);
 process.exit(failed ? 1 : 0);

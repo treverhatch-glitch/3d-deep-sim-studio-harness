@@ -24,7 +24,7 @@ Do **NOT** scan the entire repository. Load state in this order:
 1. `studio/CURRENT_TASK.md` (Producers: run `npm run handoff` instead; it covers this list and more)
 2. `studio/NEXT.md` (or `node harness/task.mjs next`)
 3. `studio/memory/failures.md` (distilled notes only)
-4. `studio/llms.txt`
+4. `studio/llms.txt` (the command sheet: open it when you need a command; it isn't loaded for you)
 5. `studio/bible/BIBLE.md` and `NOT-DOING.md` (the game, its open phase, and what is never built)
 6. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
 
@@ -104,7 +104,7 @@ Require explicit human or Producer approval before:
 ## 6. Token-Saver & Assets
 
 - Use compressed lookups instead of full-file dumps when possible.
-- Telemetry savings numbers are estimates (`docs/TELEMETRY.md`).
+- Token numbers are what each tool reported when its session ended (`npm run tokens`). Savings are not measured unless rtk reports them (`docs/TELEMETRY.md`).
 - Use Blender headless generation or blender-orchestrator for assets.
 
 ---
@@ -116,7 +116,7 @@ Require explicit human or Producer approval before:
 - Seeded RNG only.
 - JSON-serializable state only.
 - Run `npm run verify` before calling work done. The purity gate also plays every cartridge with randomness, clock, timers and DOM trapped.
-- Snapshot state before risky changes (`scripts/snapshot-state.sh`).
+- Snapshot state before risky changes (`node scripts/snapshot-state.mjs`).
 
 ---
 

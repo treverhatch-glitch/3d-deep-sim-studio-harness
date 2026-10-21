@@ -23,6 +23,6 @@ End-of-day (or end-of-session) record of what happened, with optional before/aft
 
 ## Relation to Other Files
 
-- `studio/CURRENT_TASK.md` = live handoff (updated constantly & snapshotted by `scripts/pre-compact.sh`)
+- `studio/CURRENT_TASK.md` = live handoff (updated constantly & snapshotted by `node scripts/pre-compact.mjs`)
 - `studio/done/` = per-task completion summaries
 - `studio/daily/` = daily rollup with visual before/after evidence for YouTube devlogs

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/session-start.sh"
+            "command": "node scripts/session-start.mjs"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/pre-compact.sh"
+            "command": "node scripts/pre-compact.mjs"
           }
         ]
       }

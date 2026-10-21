@@ -328,7 +328,6 @@ async function executeTacticalMacro(macro, args = {}) {
       type: 'macro.pull_next',
       agent: 'producer',
       status: 'CODING',
-      tokensSaved: 3200,
       msg: `Pulled next task via War Room Deck`,
     });
     broadcastWs({
@@ -347,7 +346,6 @@ async function executeTacticalMacro(macro, args = {}) {
       status: 'PLAYTESTING',
       task: 'QA-STAGE1',
       target: 'qa/playtest.mjs',
-      tokensSaved: 6400,
       msg: 'Running Two-Stage ?playtest=1 trajectory + visual layout check',
     });
     broadcastSnapshot();
@@ -386,17 +384,15 @@ async function executeTacticalMacro(macro, args = {}) {
     const snap = buildStudioSnapshot();
     const report = [
       '=== RTK + QMD + SERENA TOKEN EFFICIENCY REPORT ===',
-      'Estimates only: summed from tokensSaved fields that agents write into events (docs/TELEMETRY.md).',
-      `RTK output compression (est.) : ${snap.telemetry.rtkCompressionPct}%`,
-      `Input tokens saved (est.)     : ${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens`,
-      `Budget preserved (est.)       : $${snap.telemetry.estimatedDollarsPreserved}`,
+      snap.telemetry.measured
+        ? `Measured by rtk: ${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens saved (only what rtk itself reported).`
+        : 'Not measured: no tool has reported savings. Install rtk (npm run setup:token-savers) to measure them.',
     ].join('\n');
     emitEvent({
       type: 'telemetry.rtk_gain',
       agent: 'reviewer',
       status: 'IDLE',
-      tokensSaved: 1850,
-      msg: `RTK Gain verified: ${snap.telemetry.rtkCompressionPct}% compression (${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens saved)`,
+      msg: snap.telemetry.measured ? `rtk reported ${snap.telemetry.estimatedTokensSaved.toLocaleString()} tokens saved` : 'Token savings: not measured (no tool reported any)',
     });
     broadcastWs({
       type: 'terminal.output',
@@ -413,7 +409,6 @@ async function executeTacticalMacro(macro, args = {}) {
       agent: 'producer',
       status: 'IDLE',
       target: 'studio/CURRENT_TASK.md',
-      tokensSaved: 12000,
       msg: 'Pre-compaction checkpoint written to studio/CURRENT_TASK.md',
     });
     const nowIso = new Date().toISOString();
@@ -453,7 +448,6 @@ async function executeTacticalMacro(macro, args = {}) {
       provider: selected.provider,
       model: selected.model,
       status: 'CODING',
-      tokensSaved: 2400,
       msg: `Switched Head Producer preset -> ${selected.label} (${selected.model})`,
     });
     const out = `Head Producer switched to ${selected.label} [${selected.provider} / ${selected.model}]`;
@@ -479,8 +473,8 @@ async function executeTacticalMacro(macro, args = {}) {
       status: 'FAILOVER_COOLDOWN',
       task: 'T-003',
       target: 'src/sim/clock.ts',
-      tokensSaved: 4800,
-      msg: `HTTP 429 on ${failedProvider} (30s cooldown) -> Instant failover to ${backupProvider}`,
+      msg: `[demo] Simulated HTTP 429 on ${failedProvider} (30s cooldown) -> failover to ${backupProvider}`,
+      meta: { demo: true },
     });
     const out = `[freecc:auto] HTTP 429 on ${failedProvider} -> 30s cooldown active. Failover routed to ${backupProvider}.`;
     broadcastWs({

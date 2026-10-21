@@ -4,6 +4,44 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.28.0] — 2026-10-22
+From the Grok Bot and Gemini reviews (their combined list, items 1–7), Jed's test #3 report on 2.27.2, and the notes his agents left during the run.
+### Windows
+- **Setup from PowerShell:** PowerShell can block `npm.ps1` ("running scripts is disabled"). The README says to use `npm.cmd run …`, `setup.cmd` runs the setup without npm, and `npm run help` prints `npm.cmd` on Windows.
+- **No Git Bash needed:** session start, the pre-compaction checkpoint, the daily summary, demo events, the token-saver setup, the virtual display, append-event, snapshot-state and distill-bug are Node scripts now (`scripts/*.mjs`). The `.sh` files only call them, and the Claude Code hooks in `.claude/settings.json` run `node`.
+- **Self-test and HUD check timing:** the self-test's supervisor runs and deadlines scale on Windows (`STUDIO_SELFTEST_SLOW`, 2.5 there by default); the HUD check waits for Stop and Pause to land instead of a fixed second.
+### Tokens: measured, or labelled
+- **`npm run tokens`** and a **Tokens used** panel in the War Room: input, output and cache reads by role, model, agent or tool, for the last 5 h, today or the whole log, from what each tool reported when its session ended. Sessions whose tool reported nothing are listed as not measured; work outside the launcher is named as not counted.
+- **Turns per session:** the launcher records Claude's `num_turns` (and Codex's turn count). Cost follows turns more than file size: Jed's sandbox A/B found a map-first workflow added turns and cost 27% more cache reads.
+- **The made-up numbers are gone:** the old War Room's 248,500 tokens, 84% and $4.68, the War Room buttons that wrote `tokensSaved` into real events, and the fake savings in the pre-compact hook, append-event and the token-saver setup. `npm run seed:events` adds demo events only to an empty log, marked `[demo]`, with no token numbers.
+### Lite scope
+- **`npm run mode -- scope lite|full`**, separate from the pace. Lite runs 6 gates in everyday verify (purity, isolation, golden, regressions, playtest, secrets; marked `"lite"` in `studio/gates.json`), shows ten commands in `npm run help`, and makes Claude Code load `AGENTS.lite.md` (about 400 tokens) instead of `AGENTS.md`.
+- A fresh clone (still on the template game) is Lite; a studio that already builds a game stays Full until someone chooses. `new-game` keeps the scope the studio had. Preflight keeps `CLAUDE.md` in step with the scope (`--fix`).
+- `CLAUDE.md` no longer auto-loads `studio/llms.txt` (about 6k tokens in every session); agents open it when they need a command.
+### Verify and setup hygiene
+- **Everyday verify skips the harness self-checks** (selftest, hub-smoke, hud: `"deep"` in gates.json). `--deep` runs them; `npm run release` and CI always do. The done-check accepts an everyday full verify.
+- **`package-lock.json` matches `package.json`.** It said 2.2.0, so every `npm install` rewrote it and it showed as changed in every agent's hand-back. Setup uses `npm ci`, preflight `--fix` sets a lagging lock's version, and the release refuses a mismatch.
+- **Setup installs Playwright's Chromium** (skip with `--no-browsers`).
+- **A retro never rewrites a day that already has one**, so a committed retro doesn't show up as changed.
+- **The parity gate waits for real porting:** while `engine/<game>/sim/sim.gd` is still the template, parity skips with a note (test #3: 13 parity fails in builders' verify runs, all "still the template").
+### From test #3
+- **FIX 06:** a same-family review note that says it isn't an approval no longer blocks READY. `npm run preflight -- --fix` moves it to `studio/reviews/same-family/` and records the cross-family review as owed.
+- **Hire runs in the background** unless `--foreground`, so a hired agent no longer dies with the shell that hired it.
+- **Dead sessions are cleaned up:** the watcher marks a session whose process is gone as ended (with an `agent.session.end`), hands its task back and releases the path claims it left.
+- **The heartbeat renews the agent's claims,** so a long task doesn't lose its claim under a working agent.
+- **Forced done saves the owner's uncommitted work** in its claimed folders to `.studio/wip/<task>-<agent>-forced.patch` and names it in the event.
+- **`task park … --until T-ID|phase:N|time`:** a park that ends by itself (tasks parked until Phase 2 stayed parked 5 h after it opened).
+- **"blocked by T-12" in a hand-back note** holds the task until T-12 is done, so it isn't picked up again for the same reason.
+- **The done-check counts from the first `task.start`** since the task was last finished or reopened, so work done before a hand-back counts; another agent's uncommitted work in its own claimed folder no longer counts as this task's change.
+- **A bug in the docs** ("Bug: docs gate …", a `.md` file) closes like a docs task, not with a sim replay.
+- **`task pause` says why** when the task isn't in progress (already queued, done, or not on the board).
+- **The kickoff** tells launched agents their environment is already set, and to run `npm run verify` in the foreground before `task done`.
+- **`balance-sweep --write`** replaces only its own block in `studio/balance/latest.md` and keeps what people wrote around it.
+- **War Room:** the Asset studio names the meshopt and Draco decoders for compressed GLBs; the pace buttons wrap on a phone; the HUD check skips the Arcade checks that need a build when the game's browser check failed, instead of failing three times for one game bug.
+- Self-test: 9 more checks (395). HUD check: 61.
+
+---
+
 ## [2.27.2] — 2026-10-21
 From Hatch's notes on the War Room and the engine track.
 ### Fixed

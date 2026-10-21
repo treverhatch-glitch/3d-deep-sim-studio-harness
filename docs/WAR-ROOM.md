@@ -48,7 +48,7 @@ Click the **Source Gear Menu (`⚙ Gear`)** in the top-right of the **Agent Eyes
 ### Source 1: `noVNC` / `Xvfb` Live Desktop Stream (`:6080`)
 Watch the actual headless Linux/WSL2/Docker browser or Blender 4.x viewport the agent is controlling in real time:
 ```bash
-bash scripts/start-agent-display.sh
+node scripts/start-agent-display.mjs
 export DISPLAY=:99
 # Any Playwright or Blender process launched on DISPLAY=:99 now streams live to :6080
 ```

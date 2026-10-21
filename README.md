@@ -32,6 +32,10 @@ npm run hub                   # War Room on http://127.0.0.1:3847/?token=<HUB_TO
 npm run release               # syntax, required gates, closed-loop proof, read-only gates, changelog
 ```
 
+On Windows, PowerShell may refuse `npm run …` with "running scripts is disabled on this system" (it
+blocks `npm.ps1`). Use `npm.cmd run setup` (and `npm.cmd` for every other command), run `.\setup.cmd`, or
+use cmd.exe. Every script runs under plain Node; Git Bash is not needed.
+
 Clone it, keep your copy private if you like, put keys only in `.env` (gitignored). The public repo
 contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would publish.
 

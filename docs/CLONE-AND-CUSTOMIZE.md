@@ -14,7 +14,7 @@ cd my-3d-sim-game
 npm run setup
 
 # Optional: seed realistic demo events so the War Room lights up immediately
-bash scripts/seed-demo-events.sh
+node scripts/seed-demo-events.mjs
 ```
 
 ---

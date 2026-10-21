@@ -67,8 +67,30 @@ if (!fs.existsSync(eventsFile) || fs.statSync(eventsFile).size === 0) {
 
 // Install dependencies when they are missing (or when --install asks for a fresh install)
 if (process.argv.includes('--install') || !fs.existsSync(path.join(rootDir, 'node_modules'))) {
-  console.log('[setup] Installing packages (npm install)...');
-  execSync('npm install', { cwd: rootDir, stdio: 'inherit' });
+  // npm ci installs exactly what package-lock.json says and never rewrites it (a changed lock showed up
+  // in every agent's hand-back in Jed's runs).
+  const ci = fs.existsSync(path.join(rootDir, 'package-lock.json'));
+  console.log(`[setup] Installing packages (npm ${ci ? 'ci' : 'install'})...`);
+  execSync(ci ? 'npm ci --no-audit --no-fund' : 'npm install', { cwd: rootDir, stdio: 'inherit' });
+}
+
+// The browser checks (play:browser, the HUD check, Stage 2 playtests) need Playwright's Chromium.
+// Install it once unless it's already there (--no-browsers skips this).
+if (!process.argv.includes('--no-browsers') && fs.existsSync(path.join(rootDir, 'node_modules', 'playwright'))) {
+  let present = false;
+  try {
+    const { chromium } = await import('playwright');
+    present = fs.existsSync(chromium.executablePath());
+  } catch {}
+  if (present) console.log('[setup] Playwright Chromium is installed.');
+  else {
+    console.log('[setup] Installing Playwright Chromium (npx playwright install chromium)...');
+    try {
+      execSync('npx playwright install chromium', { cwd: rootDir, stdio: 'inherit' });
+    } catch {
+      console.warn('[setup] Could not install Chromium; the browser checks will fail until you run: npx playwright install chromium');
+    }
+  }
 }
 
 const lineCount = fs
@@ -93,3 +115,4 @@ console.log('   npm run verify                     # Every gate');
 console.log('   npm run brief -- <ID> [--model]     # 300-word brief for a strong model (cheap model drafts, script checks)');
 console.log('   node qa/playtest.mjs               # Run Stage 1 + Stage 2 QA');
 console.log('====================================================================');
+if (process.platform === 'win32') console.log(' Windows PowerShell blocks npm.ps1? Use npm.cmd run <command> (e.g. npm.cmd run verify).');

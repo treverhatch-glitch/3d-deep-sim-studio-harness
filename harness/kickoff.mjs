@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
+import { readMode, scopeOf } from './mode.mjs';
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -62,7 +63,16 @@ export function launchLine(tool, { agent, model }) {
   return { name: t.name, line: `STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model} ${t.line(file, model)}`, note: t.note };
 }
 
-export function kickoff({ role, agent, model = 'unknown' }) {
+export function kickoff(opts) {
+  let text = kickoffText(opts);
+  // Started by the launcher: the environment is already set (Jed's run: agents exported it again, and some
+  // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
+  if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER=${a} and STUDIO_AGENT_MODEL=${m}${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
+  if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
+  return text;
+}
+
+function kickoffText({ role, agent, model = 'unknown' }) {
   const roleFile = `studio/roles/${role}.md`;
   const hasRole = fs.existsSync(path.join(REPO_ROOT, roleFile));
   const env = `export STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model}`;
@@ -151,7 +161,7 @@ Loop:
 2. \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`. It writes your one-page brief to \`.studio/briefs/<ID>.md\`: read that, it has the steps, what done means, notes from anyone before you, and what not to touch. If it says the history is long, run \`npm run brief -- <ID>\` and read the 300-word summary instead of the logs.
 3. Claim what you will edit: \`node harness/lock.mjs claim path:<folder> --owner ${agent}\`.
 4. Work in small steps; run the narrowest check first. Three failed tries: stop and hand back with a note.
-5. \`node harness/task.mjs done <ID> --agent ${agent}\`. If it refuses, do what it says is missing. Only \`--force\` with a reason; the Producer will check it.
+5. Run \`npm run verify\` in the foreground and wait for it (never in the background), then \`node harness/task.mjs done <ID> --agent ${agent}\`. If it refuses, do what it says is missing. Only \`--force\` with a reason; the Producer will check it.
 6. Release your claims (\`node harness/lock.mjs release <key> --owner ${agent}\`) and go back to 1.
 
 Running low on usage or being stopped: \`node harness/task.mjs pause <ID> --agent ${agent} --note "what is done, what is left, files touched"\`.

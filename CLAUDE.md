@@ -1,3 +1,2 @@
-@AGENTS.md
+@AGENTS.lite.md
 @studio/CURRENT_TASK.md
-@studio/llms.txt

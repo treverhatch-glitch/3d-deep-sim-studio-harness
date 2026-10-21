@@ -23,11 +23,11 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
 import { holdReason } from './task-hold.mjs';
-import { listLocks } from './lock.mjs';
+import { listLocks, release } from './lock.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
 import { listDivisions } from './divisions.mjs';
-import { sessions, fillAgents, startAgent } from './agent.mjs';
+import { sessions, fillAgents, startAgent, markGone } from './agent.mjs';
 import { effectiveMode } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
@@ -71,6 +71,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   }
   const holder = new Map(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l]));
   const findings = [];
+  if (!dryRun) for (const a of markGone()) findings.push({ kind: 'gone', agent: a, msg: `${a}'s process is gone; its session is marked ended`, producer: false });
   const agentSessions = sessions();
   for (const s of agentSessions.filter((x) => x.stalled)) findings.push({ kind: 'stalled', agent: s.agent, msg: `${s.agent} (${s.role}) is running but its heartbeat stopped ${s.beatAgeMin} min ago`, producer: true });
 
@@ -99,6 +100,18 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     if (now - lastHeard > stallMin * 60000) {
       findings.push({ kind: 'stalled', task: t.id, agent: lock.owner, msg: `${lock.owner} holds ${t.id} but has been silent ${lastHeard ? `for ${ago(lastHeard)}` : 'since it claimed it'}`, producer: true });
     }
+  }
+
+  // Path claims left behind by a launcher session that has ended (crashed, killed, out of usage) block
+  // every other agent from that folder until they expire. Release them now (Jed's run).
+  for (const l of locks) {
+    if (l.key.startsWith('task:')) continue;
+    const s = agentSessions.find((x) => x.agent === l.owner);
+    if (!s || s.running) continue;
+    // Only claims from that session: a person reusing the name later keeps theirs.
+    if (s.endedAt && Date.parse(l.claimedAt) > Date.parse(s.endedAt)) continue;
+    if (!dryRun) release(l.key, l.owner);
+    findings.push({ kind: 'released', agent: l.owner, msg: `Released ${l.key}: ${l.owner}'s session has ended`, producer: false });
   }
 
   for (const t of q.backlog) {

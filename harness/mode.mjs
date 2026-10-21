@@ -5,6 +5,7 @@
  *   npm run mode                                 show the mode and what it sets
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
  *   npm run mode -- boost on|off --by <name> [--hours 4]   the MAX SPEED lever (also in every War Room view)
+ *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
  *
  * The mode (studio/mode.json) sets how many agents may run at once, which work needs a review from
  * another model family, whether the watcher starts agents on its own, how often the Director and the
@@ -18,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
 
 export const MODE_FILE = path.join(REPO_ROOT, 'studio', 'mode.json');
 
@@ -138,6 +140,31 @@ export function setBoost(on, by, hours = null) {
   return { ok: true, mode: e };
 }
 
+// Scope (2.28): how much of the harness a studio carries day to day. Unset, a fresh clone (still on the
+// template cartridge) is Lite and a studio that already builds a game is Full, so an existing studio
+// changes nothing until someone chooses. new-game and onboard keep the scope the studio had. Lite runs the gates marked "lite" in
+// studio/gates.json (6 by default) in everyday verify, and agents auto-load AGENTS.lite.md
+// (about 400 tokens) instead of AGENTS.md. npm run release and CI still run everything.
+export const SCOPES = { full: 'Full: every gate, AGENTS.md', lite: 'Lite: 6 gates in everyday verify, AGENTS.lite.md' };
+export const scopeOf = (m = readMode()) => (m.scope === 'lite' || m.scope === 'full' ? m.scope : isTemplateCartridge(activeCartridge().name) ? 'lite' : 'full');
+export const CLAUDE_MD = { full: '@AGENTS.md\n@studio/CURRENT_TASK.md\n', lite: '@AGENTS.lite.md\n@studio/CURRENT_TASK.md\n' };
+
+export function setScope(id, by) {
+  if (!SCOPES[id]) return { ok: false, message: 'Scope is lite or full.' };
+  if (!by) return { ok: false, message: 'Say who chose it: --by <name>.' };
+  const m = readMode();
+  const prev = scopeOf(m);
+  m.scope = id;
+  m.history = [...(m.history || []), { scope: id, from: prev, by, at: new Date().toISOString() }].slice(-50);
+  save(m);
+  // What Claude Code loads into every session. Other tools read AGENTS.md or AGENTS.lite.md from the kickoff.
+  try {
+    fs.writeFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), CLAUDE_MD[id]);
+  } catch {}
+  emitEvent({ type: 'mode.scope', agent: by, to: 'producer', msg: `Scope: ${SCOPES[id]}${prev !== id ? ` (was ${prev})` : ''}` });
+  return { ok: true, mode: effectiveMode(m) };
+}
+
 export function describeMode(e = effectiveMode()) {
   return `${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h.`;
 }
@@ -155,8 +182,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   };
   if (argv[0] === 'set') done(setMode(argv[1], flag('by'), flag('why') || ''));
   if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours')));
+  if (argv[0] === 'scope') {
+    if (!argv[1] || argv[1].startsWith('--')) {
+      console.log(SCOPES[scopeOf()]);
+      process.exit(0);
+    }
+    const r = setScope(argv[1], flag('by'));
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    console.log(`${SCOPES[argv[1]]}. CLAUDE.md now loads ${argv[1] === 'lite' ? 'AGENTS.lite.md' : 'AGENTS.md'}; commit it with studio/mode.json.`);
+    process.exit(0);
+  }
   console.log(describeMode());
+  console.log(`Scope: ${SCOPES[scopeOf()]}`);
   console.log('\nModes:');
   for (const [id, m] of Object.entries(MODES)) console.log(`  ${id.padEnd(8)} ${m.label}: ${m.pitch}`);
-  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4]');
+  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4]   Scope: npm run mode -- scope lite|full --by <name>');
 }
