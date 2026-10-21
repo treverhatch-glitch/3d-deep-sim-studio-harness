@@ -30,6 +30,7 @@ import { listBuilds } from './builds.mjs';
 import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
 import { holdReason, readHolds } from './task-hold.mjs';
+import { latestVerdict } from './verdict.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -416,7 +417,8 @@ export function buildHudState() {
         const done = queue.done.filter((t) => tp[t.id] === n).length;
         const exitFile = path.join(REPO_ROOT, 'studio', 'bible', `PHASE-${n}-EXIT.md`);
         const exit = fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8').match(/^\s*[-*] \[[ xX]\] .+$/gm) || [] : [];
-        return { n, player: bibleNow?.phases?.[n]?.player || null, open: (bibleNow?.phase?.open || 0) >= n, planned: mine.length > 0, total: mine.length, done, exit: { total: exit.length, done: exit.filter((l) => /\[[xX]\]/.test(l)).length } };
+        const fun = latestVerdict(n);
+        return { n, player: bibleNow?.phases?.[n]?.player || null, open: (bibleNow?.phase?.open || 0) >= n, planned: mine.length > 0, total: mine.length, done, exit: { total: exit.length, done: exit.filter((l) => /\[[xX]\]/.test(l)).length }, fun: fun ? { said: fun.fun, by: fun.by, build: fun.build } : null };
       });
     })(),
     taskHolder: Object.fromEntries(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l.owner])),

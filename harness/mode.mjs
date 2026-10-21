@@ -3,7 +3,7 @@
  * harness/mode.mjs — how fast the studio works, chosen by the game dev, and the MAX SPEED lever.
  *
  *   npm run mode                                 show the mode and what it sets
- *   npm run mode -- set precise|budget|fast|extreme --by <name> [--why "…"]
+ *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
  *   npm run mode -- boost on|off --by <name> [--hours 4]   the MAX SPEED lever (also in every War Room view)
  *
  * The mode (studio/mode.json) sets how many agents may run at once, which work needs a review from
@@ -54,6 +54,21 @@ export const MODES = {
     directorEveryHours: 12,
     producerEveryHours: 4,
     models: 'mixed',
+  },
+  // From SendIt (3 h to a playable game outside the harness): one accountable lead, builders in
+  // separate folders, one gate that plays the game, frames looked at before a merge. Until the phase
+  // is proven fun, the Director reviews the phase, not every task.
+  prototype: {
+    label: 'Prototype sprint',
+    pitch: 'One lead, a few builders in their own folders, one gate that plays the game, before/after frames looked at before each merge. The fastest way to something you can play; the Director reviews at the end of the phase.',
+    maxAgents: 4,
+    perRole: { builder: 3, 'qa-playtester': 1, rnd: 1, art: 1 },
+    review: 'systems',
+    autoLaunch: true,
+    directorEveryHours: 24,
+    producerEveryHours: 2,
+    models: 'strong',
+    prototype: true,
   },
   extreme: {
     label: 'Extreme speed',

@@ -22,6 +22,11 @@ saved build holds that folder, the cartridge and `assets/approved/`.
 
 ## The Arcade (War Room view 5)
 
+**Is it fun?** Under the game are two buttons, "Yes, it's fun" and "Not yet". They record a person's
+verdict on the build being played (`studio/playtest/verdicts.json`; also `npm run verdict -- yes|not-yet
+--by <name>`). A yes is what lets the current phase close (docs/GAME-BIBLE.md, Phases); a "not yet" goes
+to the Producer with the note in the box.
+
 - **Play the last good build** in the page, while the agents keep working. Older builds are one click
   away for comparing. The game runs in a sandboxed frame, so game code can't reach the War Room.
 - **Notes while playing**, saved with the build you played in `studio/playtest/NOTES.md`: a note for the

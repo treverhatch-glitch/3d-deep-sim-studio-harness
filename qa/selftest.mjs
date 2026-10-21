@@ -475,7 +475,18 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('a filled review (phase, verdict, what it checked, next) finishes it', run(dir, `node harness/task.mjs done ${rid} --agent director-1`, env).status === 0);
   report('Phase 2 won\'t open on an "on course" review', run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).status !== 0);
   edit(dir, reviewFile, (s) => s.replace('Verdict: on course', 'Verdict: phase-ready'));
-  report('Phase 2 opens once the Director says Phase 1 is ready', run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).status === 0);
+  // Proven fun (2.25): a person played a build and said yes, and the exit checklist is ticked.
+  const notProven = run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env);
+  report('Phase 2 won\'t open until a person played a build and said it\'s fun', notProven.status !== 0 && /isn't proven yet: .*nobody has played a build/.test(notProven.stderr + notProven.stdout), notProven.stdout + notProven.stderr);
+  report('an agent can\'t give the fun verdict', /looks like an agent/.test(run(dir, 'node harness/verdict.mjs yes --by builder-1', env).stderr));
+  fs.mkdirSync(path.join(dir, 'studio/playtest'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio/playtest/verdicts.json'), JSON.stringify({ verdicts: [{ at: new Date(Date.now() + 1000).toISOString(), by: 'hatch', fun: 'not-yet', build: 'b-1', phase: 1, note: 'too fast' }] }));
+  report('a "not yet" verdict keeps the phase open', /the last verdict was "not yet" \(hatch: too fast\)/.test(run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).stderr));
+  fs.writeFileSync(path.join(dir, 'studio/bible/PHASE-1-EXIT.md'), '# Phase 1 exit\n\n- [x] plays start to win\n- [ ] the moss feels calm\n');
+  fs.writeFileSync(path.join(dir, 'studio/playtest/verdicts.json'), JSON.stringify({ verdicts: [{ at: new Date(Date.now() + 2000).toISOString(), by: 'hatch', fun: 'yes', build: 'b-2', phase: 1 }] }));
+  report('an unticked exit checklist item keeps it open too', /1 of 2 items in PHASE-1-EXIT\.md aren't ticked/.test(run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).stderr));
+  fs.writeFileSync(path.join(dir, 'studio/bible/PHASE-1-EXIT.md'), '# Phase 1 exit\n\n- [x] plays start to win\n- [x] the moss feels calm\n');
+  report('Phase 2 opens once the Director says Phase 1 is ready, the checklist is done and a person said it\'s fun', run(dir, 'node harness/bible.mjs phase open 2 --by hatch', env).status === 0);
 
   // STUDIO_DIRECTOR_CMD: a ping starts the Director once, then the cooldown holds; the daily ping fires once a day.
   fs.writeFileSync(path.join(dir, 'fake-director.mjs'), "import fs from 'node:fs';\nfs.appendFileSync('director-started.txt', 'x\\n');\n");
@@ -1141,6 +1152,48 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the restart can be undone from its tag', git(`show ${tag}:cartridges/tin-moon/index.mjs`).status === 0 && git(`show ${tag}:qa/golden/tin-moon-1.json`).status === 0);
 }
 
+// 2.25: every game has its own ID (made without anyone asking) on goldens, results, builds and events;
+// a recording from another game fails; a copy records its parent; version tags; the Prototype sprint pace.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const ng = run(dir, 'node scripts/new-game.mjs tin-moon', env);
+  const meta = fs.existsSync(path.join(dir, 'cartridges/tin-moon/cartridge.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'cartridges/tin-moon/cartridge.json'), 'utf8')) : {};
+  const g1 = JSON.parse(fs.readFileSync(path.join(dir, 'qa/golden/tin-moon-start-to-win.json'), 'utf8'));
+  report('a new game gets its own ID, and its goldens carry it', ng.status === 0 && /^gid_[a-z0-9]{26}$/.test(meta.id || '') && g1.gameId === meta.id && run(dir, 'node qa/check-golden.mjs', env).status === 0, ng.stdout + ng.stderr + JSON.stringify(meta));
+  run(dir, 'node harness/event.mjs --type agent.info --agent builder-1 --msg "hello"', env);
+  const lastEv = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).pop();
+  report('events carry the game ID', lastEv.gameId === meta.id, JSON.stringify(lastEv));
+  fs.writeFileSync(path.join(dir, 'qa/golden/tin-moon-seed-1.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(dir, 'qa/golden/tin-moon-seed-1.json'), 'utf8')), gameId: 'gid_aaaaaaaaaaaaaaaaaaaaaaaaaa' }, null, 2));
+  const other = run(dir, 'node qa/check-golden.mjs', env);
+  report('a golden recorded for another game fails, even when its hashes match', other.status !== 0 && /results from another game/.test(other.stderr), other.stdout + other.stderr);
+  run(dir, 'node qa/check-golden.mjs --update', env);
+  report('npm run golden -- --update stamps this game\'s ID on its goldens', JSON.parse(fs.readFileSync(path.join(dir, 'qa/golden/tin-moon-seed-1.json'), 'utf8')).gameId === meta.id);
+  // A game made before 2.25: preflight gives it an ID.
+  fs.rmSync(path.join(dir, 'cartridges/tin-moon/cartridge.json'));
+  const pf = run(dir, 'node scripts/preflight.mjs --quick', env);
+  const meta2 = JSON.parse(fs.readFileSync(path.join(dir, 'cartridges/tin-moon/cartridge.json'), 'utf8'));
+  report('a game made before 2.25 gets an ID at preflight, without anyone asking', /^gid_/.test(meta2.id) && meta2.id !== meta.id && /Game ID gid_/.test(pf.stdout), pf.stdout.split('\n').filter((l) => /Game ID/.test(l)).join('\n'));
+  // A game started from a setup that carries a game template is a new game, with its parent recorded.
+  const setup = path.join(tmpRoot, `setup225-${n}`);
+  fs.mkdirSync(path.join(setup, 'cartridges/tin-moon'), { recursive: true });
+  fs.copyFileSync(path.join(dir, 'cartridges/tin-moon/index.mjs'), path.join(setup, 'cartridges/tin-moon/index.mjs'));
+  fs.copyFileSync(path.join(dir, 'cartridges/tin-moon/cartridge.json'), path.join(setup, 'cartridges/tin-moon/cartridge.json'));
+  const into = path.join(tmpRoot, `into225-${n}`);
+  fs.mkdirSync(into, { recursive: true });
+  run(dir, `node scripts/studio-setup.mjs apply "${setup}" --into "${into}"`, env);
+  const child = JSON.parse(fs.readFileSync(path.join(into, 'cartridges/tin-moon/cartridge.json'), 'utf8'));
+  report('a game copied from a setup gets a new ID and records the original as its parent', /^gid_/.test(child.id) && child.id !== meta2.id && child.parent === meta2.id, JSON.stringify(child));
+  // Version tags.
+  const tr = JSON.parse(run(dir, 'node harness/task.mjs add "Port the scorer to Godot" --role builder --track engine:godot', env).stdout);
+  const added = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.type === 'task.added' && e.task === tr.id).pop();
+  run(dir, 'node harness/notes.mjs add --kind bad --track engine:godot "the Godot import is slow"', env);
+  report('tasks and notes carry a version tag (web or engine:<name>)', added?.meta?.track === 'engine:godot' && /· engine:godot\] the Godot import is slow/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')), JSON.stringify(added?.meta));
+  // The Prototype sprint pace.
+  run(dir, 'node harness/mode.mjs set prototype --by hatch', env);
+  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /18\. In the Prototype sprint pace/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout + fs.readFileSync(path.join(dir, 'harness/kickoff.mjs'), 'utf8')));
+}
+
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
 {
   const dir = copyRepo();
@@ -1331,7 +1384,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     variant('a clock that never moves fails it', 'state = step(state, acts.length ? acts : null);', 'void acts;', /BROWSER-FROZEN/);
     variant('a HUD that shows a different number from the sim fails it', "$('hud-credits').textContent = String(Math.floor(state.resources.credits));", "$('hud-credits').textContent = String(Math.floor(state.resources.credits) + 100);", /BROWSER-WIRING[^\n]*HUD credits/);
     variant('the camera inside geometry fails it', 'camera: { inside: false },', 'camera: { inside: state.tick > 40 },', /camera is inside geometry/);
-    variant('keys that never reach the game fail it: start-to-win is not won', "if (e.key === 'b' || e.key === 'B') buy();", 'void e;', /BROWSER-NO-OUTCOME[^\n]*ended lost/);
+    variant('keys that never reach the game fail it: start-to-win is not won, and the B control is dead', "if (e.key === 'b' || e.key === 'B') buy();", 'void e;', /CONTROL-DEAD: B buys a unit[\s\S]*BROWSER-NO-OUTCOME[^\n]*ended lost|BROWSER-NO-OUTCOME[^\n]*ended lost[\s\S]*CONTROL-DEAD: B buys a unit/);
     fs.writeFileSync(path.join(dir, MAIN), orig);
     // A bundled game: the check runs its build command and plays dist/, never a dev server.
     fs.mkdirSync(path.join(dir, 'dist/cartridges/example-sim'), { recursive: true });

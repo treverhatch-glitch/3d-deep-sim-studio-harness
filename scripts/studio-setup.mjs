@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mintGameId } from '../harness/game-id.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ALLOWED = [/^studio\/(roles|skills|presets|rules)\//, /^studio\/(divisions|budget|mode)\.json$/, /^cartridges\/[^/]+\//, /^web\/[^/]+\//, /^intake-answers\.json$/, /^settings\.env$/];
@@ -72,6 +73,17 @@ export function applySetup(src, into = ROOT) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(path.join(from, rel), dest);
     copied.push(rel);
+  }
+  // A game template copied from a setup becomes a new game: its own ID, the template's as its parent.
+  const carts = [...new Set(copied.filter((c) => /^cartridges\/[^/]+\/cartridge\.json$/.test(c)).map((c) => c.split('/')[1]))];
+  for (const c of carts) {
+    try {
+      const f = path.join(into, 'cartridges', c, 'cartridge.json');
+      const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (m.id) fs.writeFileSync(f, `${JSON.stringify({ ...m, parent: m.id, id: mintGameId(), created: new Date().toISOString() }, null, 2)}\n`);
+    } catch {
+      // not a game template
+    }
   }
   return { ok: true, copied, skipped, dropped, intake: fs.existsSync(path.join(into, 'studio', 'intake-answers.json')) && copied.includes('intake-answers.json') };
 }

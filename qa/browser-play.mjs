@@ -18,7 +18,9 @@
  * It saves start, middle and end screenshots and a report to qa/reports/.
  *
  * The cartridge declares its build in qa.mjs: export const browser = { page | url, query, scenario,
- * input, wiring, maxMs }. `page` is served from this repo on 127.0.0.1; `url` (or --url, PLAYTEST_URL)
+ * input, wiring, maxMs, controls }. `controls` lists every button, key and clickable spot with what it
+ * should do ({ name, key | click | mouse, when?, expect(before, after) }); each one is tried before the
+ * play, and one that does nothing fails (CONTROL-DEAD). `page` is served from this repo on 127.0.0.1; `url` (or --url, PLAYTEST_URL)
  * points at your own dev server. A cartridge without `browser` passes with a note. When Chromium is
  * missing it fails for a real game, and only notes it for the template cartridge.
  */
@@ -189,7 +191,34 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
     const t1 = await page.evaluate(() => window.__sim.getState().tick);
     if (!(t1 > t0)) fail('BROWSER-FROZEN', `the clock didn't move: tick ${t0} after a second of play`);
 
+    // Every control the cartridge lists does what it should (Solar Outpost: pads that couldn't be
+    // clicked, and empty space that bought a building). Each control: { name, key | click | mouse: [x, y],
+    // when?(state) (wait until it's fair to try), expect(before, after) }. Then a fresh page for the play.
+    if (Array.isArray(b?.controls) && b.controls.length) {
+      report.controls = [];
+      for (const c of b.controls) {
+        if (typeof c.when === 'function') {
+          const until = Date.now() + Number(c.waitForMs || 10000);
+          while (Date.now() < until && !c.when(await page.evaluate(() => window.__sim.getState()))) await sleep(100);
+        }
+        const before = await page.evaluate(() => window.__sim.getState());
+        let err = null;
+        if (c.key) await page.keyboard.press(c.key);
+        else if (c.click) await page.click(c.click, { timeout: 3000 }).catch((e) => (err = e.message.split('\n')[0]));
+        else if (c.mouse) await page.mouse.click(c.mouse[0], c.mouse[1]);
+        await sleep(Number(c.waitMs ?? 300));
+        const after = await page.evaluate(() => window.__sim.getState());
+        const ok = err ? false : typeof c.expect === 'function' ? Boolean(c.expect(before, after)) : null;
+        report.controls.push({ name: c.name, ok, ...(err ? { why: err } : {}) });
+        if (ok === false) fail('CONTROL-DEAD', `${c.name}: ${err ? `couldn't be pressed (${err})` : `didn't do what it should${c.what ? ` (${c.what})` : ''}`}`);
+      }
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction(() => window.__sim && typeof window.__sim.getState === 'function', null, { timeout: 8000 }).catch(() => {});
+      await sleep(300);
+    }
+
     // Play: the scenario's policy picks actions from the live state; real keys and clicks perform them.
+    const playStart = Date.now();
     const sc = cart.scenarios[b?.scenario || 'start-to-win'];
     const expect = sc?.expect || 'won';
     const until = Date.now() + Number(maxMs || b?.maxMs || 30000);
@@ -221,6 +250,18 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
       await sleep(25);
     }
     await shot(page, 'end');
+    report.playSeconds = Math.round((Date.now() - playStart) / 100) / 10;
+    // Pace: a perfect player's time against the Bible's play length (Gemini's run: a phase gone in
+    // 15 s of a 10-minute session). A note for the people, not a failure: speed is a design choice.
+    if (outcome) {
+      try {
+        const len = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'bible', 'bible.json'), 'utf8')).answers?.playLength;
+        const minutes = { demo: 15, short: 60, medium: 300, long: 1200 }[len];
+        if (minutes && report.playSeconds < minutes * 60 * 0.05) report.notes = [...(report.notes || []), `pace: a perfect player reaches "${outcome}" in ${report.playSeconds} s of real play; the Bible says ${len === 'demo' ? 'a 15-30 minute demo' : `a ${len} game`}. If that's too fast for a person to read and choose, slow the clock (ms per tick).`];
+      } catch {
+        // no Bible yet
+      }
+    }
     report.outcome = outcome;
     report.ticks = last?.state?.tick ?? null;
     if ([...mismatches].length) fail('BROWSER-WIRING', `the screen doesn't match the sim (${mismatches.size}): ${[...mismatches].slice(0, 3).join('; ')}`, { mismatches: [...mismatches].slice(0, 20) });

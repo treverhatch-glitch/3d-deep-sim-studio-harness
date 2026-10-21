@@ -32,6 +32,10 @@ export const browser = {
   maxMs: 40000,
   // Which real input performs a sim action.
   input: (action) => (action.type === 'spawn' ? { key: 'b' } : null),
+  // Every control and what it must do; the gate presses each one and fails one that does nothing.
+  controls: [
+    { name: 'B buys a unit', key: 'b', when: (s) => s.resources.credits >= nextUnitCost(s), expect: (before, after) => unitCount(after) > unitCount(before), what: 'a unit appears and credits are spent' },
+  ],
   // What the screen must agree with; each string is a mismatch.
   wiring: (state, view) => {
     const out = [];

@@ -26,8 +26,19 @@ export const browser = {
   maxMs: 40000,
   input: (action) => (action.type === 'build' ? { key: 'b' } : action.type === 'select' ? { click: '#slot-1' } : null),
   wiring: (state, view) => (view.hud.gold !== state.gold ? [`HUD gold ${view.hud.gold}, sim ${state.gold}`] : []),
+  // Every button, key and clickable spot, and what it must do. Each is tried before the play; one that
+  // does nothing fails (CONTROL-DEAD). `when` waits until it's fair to try (enough gold to build).
+  controls: [
+    { name: 'pad 10 builds there', mouse: [612, 344], when: (s) => s.gold >= 50, expect: (a, b) => b.pads[10] && !a.pads[10] },
+    { name: 'empty space buys nothing', mouse: [20, 20], expect: (a, b) => b.buildings.length === a.buildings.length },
+  ],
 };
 ```
+
+List every control. Solar Outpost's pads overlapped, and a click on empty space bought a building. Every
+gate was green, and a person found both in a minute; a `controls` list finds them on every run. The gate
+also notes the pace: when a perfect player wins in under 5% of the Bible's play length, the report says
+the game may be too fast to read (a note, not a failure).
 
 The page, with `?playtest=1`, sets `window.__sim = { getState }` and `window.__view = () => ({ hud: {…},
 drawn, camera: { inside } })`, read from the page itself (the DOM, the scene graph), never copied from

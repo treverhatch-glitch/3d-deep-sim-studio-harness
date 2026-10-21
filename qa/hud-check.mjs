@@ -253,6 +253,10 @@ try {
   await page.click('#r-note button');
   await wait(1500);
   check('a note taken while playing becomes a bug task, saved with the build it was about', /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md')) && /the end screen text overlaps/.test(read('studio/playtest/NOTES.md')), await page.locator('#r-notemsg').innerText());
+  // "Is it fun?": a person's verdict on the build being played (what lets a phase close).
+  await page.click('#arcade [data-fun="yes"]');
+  await wait(800);
+  check('"Yes, it\'s fun" in the Arcade records a verdict on the build being played', /"fun": "yes"/.test(read('studio/playtest/verdicts.json')) && /"build": "/.test(read('studio/playtest/verdicts.json')) && /is fun/.test(await page.locator('#r-notemsg').innerText()), (await page.locator('#r-notemsg').innerText()) + read('studio/playtest/verdicts.json'));
   await page.click('#arcade .switch[data-to="ops"]');
   await wait(800);
   await page.selectOption('#o-arole', 'builder');

@@ -4,7 +4,7 @@
  * workarounds in use, and upgrade ideas. They survive `npm run studio:reset`, so every new project
  * (and every new Producer) starts with what the last ones learned about running the studio.
  *
- *   npm run notes -- add --kind well|bad|workaround|upgrade|eval "text" [--agent name]
+ *   npm run notes -- add --kind well|bad|workaround|upgrade|eval "text" [--agent name] [--track web|engine:godot]
  *   (eval: the overseer's evaluation of a session or run: what worked, what didn't, a score, what to change)
  *   npm run notes -- list [--kind bad]
  *   npm run notes -- export          markdown to bring back upstream (harness only: no game code or data)
@@ -41,14 +41,14 @@ function writeNotes(notes) {
   fs.writeFileSync(NOTES_FILE, `${HEADER}\n${body}`);
 }
 
-export function addNote(kind, text, agent = actor()) {
+export function addNote(kind, text, agent = actor(), track = process.env.STUDIO_TRACK || null) {
   if (!KINDS[kind]) throw new Error(`--kind must be one of: ${Object.keys(KINDS).join(', ')}`);
   const t = String(text || '').replace(/\s+/g, ' ').trim();
   if (!t) throw new Error('A note needs text.');
   const notes = readNotes();
-  notes[kind].unshift(`[${new Date().toISOString().slice(0, 10)} · ${agent}] ${t}`);
+  notes[kind].unshift(`[${new Date().toISOString().slice(0, 10)} · ${agent}${track ? ` · ${track}` : ''}] ${t}`);
   writeNotes(notes);
-  emitEvent({ type: 'notes.add', agent, msg: `${KINDS[kind]}: ${t}`.slice(0, 160) });
+  emitEvent({ type: 'notes.add', agent, track, msg: `${KINDS[kind]}: ${t}`.slice(0, 160) });
   return notes;
 }
 
@@ -69,10 +69,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     return i >= 0 ? args[i + 1] : null;
   };
   if (cmd === 'add') {
-    const skip = new Set(['add', val('kind'), val('agent'), '--kind', '--agent']);
+    const skip = new Set(['add', val('kind'), val('agent'), val('track'), '--kind', '--agent', '--track']);
     const text = args.filter((a) => !skip.has(a)).join(' ');
     try {
-      addNote(val('kind'), text, val('agent') || undefined);
+      addNote(val('kind'), text, val('agent') || undefined, val('track') || undefined);
       console.log(`Added to studio/harness-notes/NOTES.md under "${KINDS[val('kind')]}"`);
     } catch (err) {
       console.error(err.message);

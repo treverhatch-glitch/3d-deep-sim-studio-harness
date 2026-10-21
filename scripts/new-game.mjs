@@ -37,6 +37,9 @@ fs.cpSync(src, dest, { recursive: true });
 const readme = path.join(dest, 'README.md');
 fs.writeFileSync(readme, fs.readFileSync(readme, 'utf8').replaceAll('__GAME_NAME__', name));
 
+// Its own game ID, made now (harness/game-id.mjs): goldens, results and builds carry it.
+const { ensureGameId } = await import('../harness/game-id.mjs');
+const ident = ensureGameId(name, { by: process.env.STUDIO_LOCK_OWNER || 'producer' });
 const cart = await loadCartridge(name);
 const slice = runScenario(cart, 'start-to-win');
 if (slice.outcome !== 'won' || slice.findings.length) {
@@ -50,6 +53,7 @@ const write = (file, spec) => fs.writeFileSync(file, JSON.stringify(spec, null, 
 write(goldenFiles[0], {
   name: `${name} vertical slice: new game to win`,
   cartridge: name,
+  ...(ident ? { gameId: ident.id } : {}),
   scenario: 'start-to-win',
   seed: slice.seed,
   expect: { outcome: slice.outcome, tick: slice.ticksRun },
@@ -57,11 +61,11 @@ write(goldenFiles[0], {
   sha256: slice.sha256,
   actionsSha256: slice.actionsSha256,
 });
-write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
+write(goldenFiles[1], { name: `${name} seed 1, 100 ticks, no actions`, cartridge: name, ...(ident ? { gameId: ident.id } : {}), seed: 1, tick: 100, actions: [], hash: plain.hash, sha256: plain.sha256 });
 
 // This is the studio's game now: gates and playtests default to it (studio/game.json is never frozen).
 if (!process.argv.includes('--keep-active')) fs.writeFileSync(path.join(root, 'studio', 'game.json'), `${JSON.stringify({ cartridge: name, since: new Date().toISOString() }, null, 2)}\n`);
-emitEvent({ type: 'game.new', agent: 'producer', target: `cartridges/${name}`, msg: `New cartridge ${name}: slice won at tick ${slice.ticksRun}` });
+emitEvent({ type: 'game.new', agent: 'producer', target: `cartridges/${name}`, msg: `New cartridge ${name}${ident ? ` (${ident.id})` : ''}: slice won at tick ${slice.ticksRun}` });
 console.log(`[new-game] cartridges/${name}/ created
 [new-game] qa/golden/${name}-start-to-win.json  won at tick ${slice.ticksRun}, sha256 ${slice.sha256.slice(0, 16)}…
 [new-game] qa/golden/${name}-seed-1.json        sha256 ${plain.sha256.slice(0, 16)}…

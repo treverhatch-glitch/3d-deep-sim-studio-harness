@@ -119,6 +119,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   }
   // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
   const ideas = dryRun ? null : collectIdeas();
+  // A game made before 2.25 gets its ID here, without anyone asking.
+  if (!dryRun) import('./game-id.mjs').then(({ ensureGameId }) => import('./cartridge.mjs').then(({ activeCartridge }) => ensureGameId(activeCartridge().name, { by: 'watch' }))).catch(() => {});
   // The dev hacker's cards reach the Producer in one batch; hunts are queued only while its lab is open.
   if (!dryRun) trickPass({ queue: parseNextQueue(), divisions: listDivisions(), gates: readGatesLast() }).catch(() => {});
   // The mode decides whether agents start on their own, and how often the Producer checks in.

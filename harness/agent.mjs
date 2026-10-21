@@ -247,7 +247,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
   const out = fs.openSync(logFile, 'a');
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role };
+  // A task on another version of the game (--track engine:godot) tags everything its agent records.
+  const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
+  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, ...(track ? { STUDIO_TRACK: track } : {}) };
   const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role).replaceAll('{task}', task || '');
   const child = custom
     ? spawn(fill(custom), { cwd: REPO_ROOT, shell: true, env, stdio: ['ignore', out, out] })

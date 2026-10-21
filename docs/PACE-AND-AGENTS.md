@@ -10,7 +10,17 @@ The game dev chooses how fast the studio works, at intake, in the War Room's Gam
 | Precise and slow (default) | 2 (1 builder) | every build task | no | 24 h / 8 h |
 | Budget: cheaper and slower | 1 | whole systems | no | 24 h / 12 h |
 | Fast and furious | 4 (3 builders) | whole systems | yes | 12 h / 4 h |
+| Prototype sprint | 4 (3 builders, one per lane) | whole systems | yes | at phase end / 2 h |
 | Extreme speed | 8 (5 builders) | whole systems | yes | 6 h / 2 h |
+
+**Prototype sprint** is SendIt's way of working inside the harness, for getting to something you can
+play:
+- **One lead:** the Producer is the one accountable lead.
+- **Folders first:** the game is split into folders from the start, and each builder holds its own lane.
+- **Merge rules:** a builder's work merges only when the gate that plays the game passes and the lead has
+  looked at its before/after frames (`npm run shot`).
+- **One Director review per phase,** not one per task.
+- **The phase closes** when a person plays a build in the Arcade and says it's fun.
 
 ## MAX SPEED
 

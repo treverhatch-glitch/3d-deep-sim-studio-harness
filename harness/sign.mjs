@@ -124,6 +124,14 @@ export function buildManifest({ by, note = '' }) {
   }
   return {
     kind: 'studio.result',
+    gameId: (() => {
+      try {
+        const g = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8')).cartridge;
+        return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'cartridges', g, 'cartridge.json'), 'utf8')).id || null;
+      } catch {
+        return null;
+      }
+    })(),
     harness: pkg.version,
     commit: head,
     uncommittedGameChanges: Boolean(dirty),

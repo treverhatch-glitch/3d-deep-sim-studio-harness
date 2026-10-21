@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { phaseExitGaps } from './verdict.mjs';
 
 export const BIBLE_DIR = path.join(REPO_ROOT, 'studio', 'bible');
 export const BIBLE_FILE = path.join(BIBLE_DIR, 'bible.json');
@@ -325,6 +326,9 @@ export function openPhase(b, n, { by, force = null } = {}) {
   const r = latestReview();
   const ready = r && r.verdict === 'phase-ready' && r.phase === open && (!since || r.at >= Date.parse(since));
   if (!ready && !force) return { ok: false, message: `Phase ${open} needs a Director review with "Verdict: phase-ready" and "Phase: ${open}" since it opened (npm run director -- ping --reason "Is Phase ${open} ready?"), or --force "reason".` };
+  // Proven fun (2.25): the exit checklist is ticked and a person played a build and said yes.
+  const gaps = open >= 1 ? phaseExitGaps(open, since) : [];
+  if (gaps.length && !force) return { ok: false, message: `Phase ${open} isn't proven yet: ${gaps.join('; ')}. Or --force "reason".` };
   b.phase.open = n;
   b.phase.history.push({ phase: n, at: now(), by, reason: force ? `forced: ${force}` : `Director review ${r.file}` });
   writeBible(b);

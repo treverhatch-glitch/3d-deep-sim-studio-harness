@@ -48,6 +48,26 @@ comes from **replaying**: the verifier re-runs the seed and actions with the sam
 the SHA-256 itself, which is what `qa/check-golden.mjs` and `qa/test-golden.py` do. Proving *who*
 made a result needs a signature: `npm run sign` (see `docs/SIGNED-RESULTS-AND-DATA.md`).
 
+## Game IDs: which game a hash belongs to
+
+Two different games can't produce the same SHA-256 by accident. What can get mixed up is which game a
+result belongs to: two studios that both call their game `next-floor`, a copied folder, or results
+uploaded to a marketplace. So every game gets an ID once, at `npm run new-game` (or at the next
+preflight or watcher pass for a game made before 2.25), in `cartridges/<game>/cartridge.json`:
+
+```json
+{ "id": "gid_7q2kz…", "cartridge": "next-floor", "name": "Next Floor", "created": "…", "harness": "2.25.0", "parent": "gid_…" }
+```
+
+The ID is stamped on goldens, regressions, signed results, saved builds and events.
+- **A recording from another game fails**, even when its hashes match.
+- **A copy gets its own ID.** A game started from another (a setup carrying a game template) gets a new
+  ID, with the original's as `parent`, so a game's family tree can be followed.
+
+The ID is public, and it is not mixed into seeds or state hashes. Anyone must be able to replay a game
+from its code and a seed and get the same hash, including a port to another engine. Proving who made a
+game is the job of signed results (`npm run sign`), not of a secret. `npm run game-id` shows it.
+
 ## Changing a hash
 
 Changing either function, the canonical form, or a cartridge's state changes every golden. Regenerate

@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
 import { hash64, isHash64, isSha256 } from '../harness/hash.mjs';
+import { checkRecordingId, gameIdFor } from '../harness/game-id.mjs';
 
 const GOLDEN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'golden');
 const update = process.argv.includes('--update');
@@ -51,8 +52,15 @@ for (const file of files) {
     continue;
   }
 
+  // A recording from another game (a copy, a second studio) never passes as this game's.
+  const owner = checkRecordingId(spec, name);
+  if (!owner.ok && !update) {
+    fail(`${file}: ${owner.message}`);
+    continue;
+  }
   if (update) {
     spec.cartridge = name;
+    if (gameIdFor(name)) spec.gameId = gameIdFor(name);
     spec.hash = result.hash;
     spec.sha256 = result.sha256;
     // A cartridge may use its own display hash; Python then checks only the SHA-256.
@@ -90,6 +98,7 @@ for (const file of files) {
     fail(`${file}: expected to finish at tick ${spec.expect.tick} got ${result.ticksRun}`);
     continue;
   }
+  if (owner.missing) console.log(`[golden] note: ${file} has no gameId yet; npm run golden -- --update adds it.`);
   const what = spec.scenario ? `${spec.scenario} ${result.outcome} @ tick ${result.ticksRun}` : `seed ${spec.seed} tick ${spec.tick}`;
   console.log(`[golden] PASS ${file} (${name}: ${what}, sha256 ${result.sha256.slice(0, 16)}…)`);
 }

@@ -67,6 +67,23 @@ export function getEventPaths() {
  * @param {object} partial
  * @returns {object} The normalized event record written to disk.
  */
+// This studio's game ID (cartridges/<game>/cartridge.json), read once; harness/game-id.mjs makes it.
+let gameIdCache;
+let gameIdAt = 0;
+function studioGameId() {
+  // Re-read once a minute: a long-running hub sees a game made after it started.
+  if (gameIdCache !== undefined && Date.now() - gameIdAt < 60000) return gameIdCache;
+  gameIdAt = Date.now();
+  gameIdCache = null;
+  try {
+    const g = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8')).cartridge;
+    if (g) gameIdCache = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'cartridges', g, 'cartridge.json'), 'utf8')).id || null;
+  } catch {
+    // no game yet, or one made before 2.25
+  }
+  return gameIdCache;
+}
+
 export function emitEvent(partial = {}) {
   const now = new Date().toISOString();
   const durationMs =
@@ -97,6 +114,8 @@ export function emitEvent(partial = {}) {
     latencyMs: durationMs,
     msg: partial.msg || '',
     meta: partial.meta || {},
+    ...(studioGameId() ? { gameId: studioGameId() } : {}),
+    ...(partial.track || process.env.STUDIO_TRACK ? { track: partial.track || process.env.STUDIO_TRACK } : {}),
   };
 
   const line = JSON.stringify(event) + '\n';

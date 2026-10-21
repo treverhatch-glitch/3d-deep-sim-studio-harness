@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from '../harness/event.mjs';
 import { findPython } from '../qa/run-python.mjs';
 import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
+import { ensureGameId } from '../harness/game-id.mjs';
 import { launchableRoles } from '../harness/agent.mjs';
 import { effectiveMode, describeMode } from '../harness/mode.mjs';
 
@@ -149,8 +150,12 @@ export function preflight() {
   const cap = Number(envVal('STUDIO_DAILY_TOKEN_CAP') || 0);
   if (keys.length) row(cap > 0 ? 'ok' : 'warn', `Daily token cap: ${cap ? cap.toLocaleString() : 'none'}`, cap ? '' : 'set STUDIO_DAILY_TOKEN_CAP before running with paid keys');
 
-  // The game the gates test.
+  // The game the gates test, and its ID (made here if it has none: harness/game-id.mjs).
   const game = activeCartridge();
+  if (!isTemplateCartridge(game.name)) {
+    const ident = ensureGameId(game.name, { by: 'preflight' });
+    if (ident) row('ok', `Game ID ${ident.id}`, ident.parent ? `started from ${ident.parent}` : '');
+  }
   row(isTemplateCartridge(game.name) ? 'warn' : 'ok', `Gates test the game "${game.name || 'none'}" (from ${game.from || 'nowhere'})`, isTemplateCartridge(game.name) ? 'still the template: once your game exists, npm run new-game <name> makes it the active game (studio/game.json)' : '');
 
   // Pace and who can start on their own.

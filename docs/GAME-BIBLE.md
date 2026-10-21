@@ -50,8 +50,17 @@ Every agent writing something the player reads or hears gets it in its brief.
 | 3 Endgame | Peak tests, then a win, prestige, or endless play | It ends, resets with bonuses, or becomes self-directed |
 
 Build tasks say which phase they are for (`--phase 1|2|3`) and only open phases take build work.
-A phase opens when the Director's review says the one before is ready (`Verdict: phase-ready`) and a
-person opens it: `npm run bible -- phase open 2 --by <name>`. Designing later phases (studies,
+A phase opens only when the one before is proven, and a person opens it with
+`npm run bible -- phase open 2 --by <name>`. Proven means three things:
+
+1. **The Director is ready.** Its review says `Verdict: phase-ready`.
+2. **The exit checklist is done.** Every item in `studio/bible/PHASE-<n>-EXIT.md` is ticked, if the file exists.
+3. **A person says it's fun.** Someone played a real build since the phase opened and said yes, with the
+   Arcade's "Is it fun?" or `npm run verdict -- yes --by <name>`. Agents can't answer this.
+
+Both test runs so far went green on every gate while the person playing found the game wrong, so the
+person's verdict is what closes a phase. `--force "reason"` still overrides, and the reason is logged.
+A "not yet" goes to the Producer's inbox with its note. Designing later phases (studies,
 storyboards, docs) is always fine.
 
 ## 3. Layers: ask about everything, keep what fits, cross out the rest

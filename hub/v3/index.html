@@ -142,6 +142,10 @@
   #arcade select { background: #120d1f; color: var(--txt); border: 2px solid #3a2b66; font: 17px VT323, monospace; padding: 4px; }
   #arcade button.go { background: var(--neon); color: #1d1533; border: 0; padding: 6px 14px; font: 11px "Press Start 2P", monospace; cursor: pointer; }
   #arcade .hint { color: var(--dim); font-size: 17px; }
+  #arcade .verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; font: 20px VT323, monospace; }
+  #arcade .verdict button { border: 2px solid var(--lime); background: transparent; color: var(--lime); padding: 6px 12px; font: 11px "Press Start 2P", monospace; cursor: pointer; }
+  #arcade .verdict button.fun-no { border-color: var(--neon); color: var(--neon); }
+  #arcade .verdict small { color: var(--dim); }
   #arcade .clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
   #arcade .clips video, #arcade .clips img { width: 100%; border: 2px solid #3a2b66; border-radius: 4px; background: #000; }
   #arcade .clips:empty::before { content: 'No clips yet. npm run clip records 20 seconds of the real build.'; color: var(--dim); grid-column: 1 / -1; }
@@ -761,6 +765,8 @@
         <button class="go">Send note</button>
       </form>
       <p class="hint" id="r-notemsg" role="status">Notes are saved with the build you played, in studio/playtest/NOTES.md.</p>
+      <div class="verdict" role="group" aria-labelledby="r-funq"><span id="r-funq">Is it fun?</span> <button type="button" class="fun-yes" data-fun="yes">Yes, it's fun</button> <button type="button" class="fun-no" data-fun="not-yet">Not yet</button> <small id="r-funstate"></small></div>
+      <p class="hint">A yes on this build is what lets the phase close (with the exit checklist and the Director). "Not yet" goes to the Producer with the note above.</p>
       <h3>Clips <small>npm run clip</small></h3>
       <div class="clips" id="r-clips"></div>
     </section>
@@ -1143,7 +1149,8 @@
   function renderOps(s) {
     const nowList = s.now && s.now.length ? s.now : s.queue.inProgress.slice(0, 1).map((t) => ({ id: t.id, title: t.title, agents: [] }));
     $('o-now').innerHTML = nowList.length ? `Now: ${nowList.slice(0, 4).map((t) => `<b>${esc(t.id)}</b> ${esc(short(t.title, nowList.length > 1 ? 50 : 90))}${t.agents.length ? ` <span style="opacity:.7">(${esc(t.agents.join(', '))})</span>` : ''}`).join(' · ')}${nowList.length > 4 ? ` · +${nowList.length - 4} more` : ''}` : 'Nothing in progress. Pull the next task from the queue.';
-    const opPh = (s.phases || []).map((p) => `Phase ${p.n}: ${p.planned ? `${p.done} of ${p.total}${p.exit.total ? `, exit ${p.exit.done}/${p.exit.total}` : ''}` : 'not planned yet'}`).join(' · ');
+    const funTxt = (p) => (p.open ? (p.fun ? (p.fun.said === 'yes' ? `, fun: yes (${p.fun.by})` : `, fun: not yet (${p.fun.by})`) : ', fun: not played yet') : '');
+    const opPh = (s.phases || []).map((p) => `Phase ${p.n}: ${p.planned ? `${p.done} of ${p.total}${p.exit.total ? `, exit ${p.exit.done}/${p.exit.total}` : ''}${funTxt(p)}` : 'not planned yet'}`).join(' · ');
     const sv = s.supervisor;
     $('o-sup').innerHTML = `${sv ? `<p>${sv.running ? '<b>Running</b>' : 'Stopped'} since ${esc(hhmm(sv.startedAt))}${sv.opts?.until ? `, until ${esc(hhmm(sv.opts.until))}` : ''}${sv.opts?.window ? `, window ${esc(sv.opts.window)}` : ''}: ${sv.sessions} sessions, ${sv.tasksDone} tasks done${sv.tokens ? `, ${Number(sv.tokens).toLocaleString()} tokens` : ''}.${sv.stopReason ? ` Stopped: ${esc(sv.stopReason)}.` : ''}${sv.last?.why?.length && sv.running ? ` <span class="note">Last pass: ${esc(sv.last.why.join('; '))}</span>` : ''}${sv.hubDown?.length ? ` <span class="note">Hub was down ${sv.hubDown.map((d) => `${esc(hhmm(d.from))}–${esc(hhmm(d.to))}`).join(', ')}.</span>` : ''}</p>` : '<p class="note">Not running. <code>npm run studio:start -- --until 23:00</code> keeps the hub up and starts a fresh agent per task until then; <code>--install</code> starts it after a restart.</p>'}${(s.budget || []).map((b) => `<p class="note">${esc(b.text)}</p>`).join('')}`;
     $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done${opPh ? ` · ${opPh}` : ''}`;
@@ -1752,7 +1759,7 @@
     const pct = openPh && openPh.total ? Math.round((openPh.done / openPh.total) * 100) : Math.round(s.progress.ratio * 100);
     $('t-buildbar').style.width = `${pct}%`;
     $('t-buildpct').textContent = `${pct}%`;
-    const phaseText = ph.length ? ph.map((p) => `Phase ${p.n}: ${p.planned ? `${p.done}/${p.total}${p.exit.total ? ` · exit ${p.exit.done}/${p.exit.total}` : ''}` : 'not planned yet'}`).join('  ·  ') : '';
+    const phaseText = ph.length ? ph.map((p) => `Phase ${p.n}: ${p.planned ? `${p.done}/${p.total}${p.exit.total ? ` · exit ${p.exit.done}/${p.exit.total}` : ''}${p.open && p.fun?.said === 'yes' ? ' · fun ✓' : ''}` : 'not planned yet'}`).join('  ·  ') : '';
     $('t-buildlabel').textContent = openPh && openPh.total ? `Phase ${openPh.n} in development` : 'Game in development';
     $('t-buildlabel').title = phaseText || 'Tasks done over all tasks';
     $('t-phases').textContent = ph.every((p) => p.planned) ? `${phaseText}  ·  whole game ${Math.round(s.progress.ratio * 100)}%` : phaseText;
@@ -2198,6 +2205,17 @@
     showRoom();
     cv.focus();
   });
+  // "Is it fun?": a person's verdict on the build being played; a yes lets the phase close.
+  document.querySelectorAll('#arcade [data-fun]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await post('/api/verdict', { fun: b.dataset.fun, build: arcBuild, note: $('r-notetext').value.trim(), by: actor() });
+      $('r-notemsg').textContent = r.next;
+      if (b.dataset.fun === 'not-yet') $('r-notetext').value = '';
+      poll();
+    } catch (err) {
+      $('r-notemsg').textContent = `Couldn't record it: ${err.message}`;
+    }
+  }));
   $('r-note').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const text = $('r-notetext').value.trim();

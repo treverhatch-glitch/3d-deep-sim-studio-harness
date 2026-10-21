@@ -95,7 +95,13 @@ export function snapshotBuild(cart, report = {}) {
   fs.mkdirSync(BUILDS_DIR, { recursive: true });
   fs.cpSync(tmp, dest, { recursive: true });
   fs.rmSync(tmp, { recursive: true, force: true });
-  const build = { id, at: new Date().toISOString(), sha, dirty, content, cartridge: cart.name, page, query: b.playQuery || '', outcome: report.outcome || null, ticks: report.ticks ?? null, files: files.length };
+  let gameId = null;
+  try {
+    gameId = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'cartridges', cart.name, 'cartridge.json'), 'utf8')).id || null;
+  } catch {
+    // a template cartridge, or a game made before 2.25
+  }
+  const build = { id, at: new Date().toISOString(), sha, dirty, content, cartridge: cart.name, gameId, track: process.env.STUDIO_TRACK || 'web', page, query: b.playQuery || '', outcome: report.outcome || null, ticks: report.ticks ?? null, files: files.length };
   fs.writeFileSync(path.join(dest, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
   for (const old of listBuilds().slice(KEEP)) fs.rmSync(path.join(BUILDS_DIR, old.id), { recursive: true, force: true });
   emitEvent({ type: 'build.saved', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: `Playable build ${id}${sha ? ` (${sha}${dirty ? ' + uncommitted work' : ''})` : ''}: ${build.outcome || 'played'}${build.ticks != null ? ` at tick ${build.ticks}` : ''}` });

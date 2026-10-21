@@ -4,6 +4,33 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.25.0] — 2026-10-21
+Make "good" a gate, not a guess. Both test runs went green on every check while the person playing found the game wrong; this batch puts the person's verdict where a phase closes, and gives every game an identity.
+### Added
+- **Proven fun closes a phase.** `bible -- phase open <n+1>` now also needs:
+  - every item in `PHASE-<n>-EXIT.md` ticked;
+  - a person's "yes, it's fun" on a build played since the phase opened (the Arcade's new "Is it fun?" buttons, or `npm run verdict -- yes|not-yet --by <name>`).
+  - Agents can't answer it, and `--force "reason"` still overrides. A "not yet" goes to the Producer's inbox with its note.
+  - Phase progress shows the verdict.
+- **Game IDs** (`harness/game-id.mjs`, `npm run game-id`, docs/HASH.md):
+  - every game gets a random public ID once (`cartridges/<game>/cartridge.json`), made by new-game, or by the next preflight or watcher pass for an older game;
+  - goldens, regressions, signed results, saved builds and events carry it;
+  - a recording from another game fails the gates even when its hashes match;
+  - a game started from a setup's game template gets a new ID with the original as `parent`;
+  - not mixed into seeds or hashes, so anyone can still replay a game and a port can match it.
+- **Every control is pressed:**
+  - the browser contract's `controls` list (`{ name, key | click | mouse, when?, expect }`) is tried before the play, and a control that does nothing fails (CONTROL-DEAD; Solar Outpost's dead pads);
+  - the example game lists its B key.
+- **A pace note:** when a perfect player wins in under 5% of the Bible's play length, the browser check's report says so.
+- **The Prototype sprint pace** (`npm run mode -- set prototype`), SendIt's way of working:
+  - one lead, and builders in their own lanes;
+  - merge only on the gate that plays the game, after the lead looks at before/after frames;
+  - the Director reviews at the end of the phase. The Producer's brief says how.
+- **Version tags:** `task add --track web|engine:<name>`, `notes add --track …`; an agent working a tagged task tags its events (STUDIO_TRACK); builds record theirs. Ready for the engine track.
+- hud-check: 61 checks (the fun verdict).
+
+---
+
 ## [2.24.1] — 2026-10-21
 ### Fixed
 - The self-test for a stopped agent's cooldown waits for the hand-back before trying to restart the task (Windows hands back more slowly, so the restart was refused for the lock instead of the cooldown). No harness behaviour changed.

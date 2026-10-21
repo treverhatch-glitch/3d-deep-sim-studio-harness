@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, loadCartridge, replay } from '../harness/cartridge.mjs';
 import { hash64, isSha256 } from '../harness/hash.mjs';
+import { checkRecordingId, gameIdFor } from '../harness/game-id.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'regressions');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : [];
@@ -24,8 +25,10 @@ for (const file of files) {
   const name = spec.cartridge || defaultCartridgeName();
   if (!carts.has(name)) carts.set(name, await loadCartridge(name));
   const result = replay(carts.get(name), { seed: spec.seed, tick: spec.tick, actions: spec.actions || [], tuning: spec.tuning });
+  const owner = checkRecordingId(spec, name);
   if (update) {
     spec.cartridge = name;
+    if (gameIdFor(name)) spec.gameId = gameIdFor(name);
     spec.hash = result.hash;
     spec.sha256 = result.sha256;
     if (result.hash !== hash64(result.state)) spec.hashKind = 'custom';
@@ -34,7 +37,10 @@ for (const file of files) {
     console.log(`[regressions] updated ${file} -> sha256 ${result.sha256.slice(0, 16)}…`);
     continue;
   }
-  if (result.findings.length) {
+  if (!owner.ok) {
+    console.error(`[regressions] FAIL ${file}: ${owner.message}`);
+    failed += 1;
+  } else if (result.findings.length) {
     console.error(`[regressions] FAIL ${file}: tick ${result.failingTick} ${result.findings[0].id} — ${result.findings[0].summary}`);
     failed += 1;
   } else if (!isSha256(spec.sha256)) {
