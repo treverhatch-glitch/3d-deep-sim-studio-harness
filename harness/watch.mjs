@@ -24,10 +24,20 @@ import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './even
 import { parseNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { collectIdeas } from './ideas.mjs';
+import { trickPass } from './tricks.mjs';
+import { listDivisions } from './divisions.mjs';
 import { sessions, fillAgents, startAgent } from './agent.mjs';
 import { effectiveMode } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
+
+const readGatesLast = () => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+};
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -109,6 +119,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   }
   // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
   const ideas = dryRun ? null : collectIdeas();
+  // The dev hacker's cards reach the Producer in one batch; hunts are queued only while its lab is open.
+  if (!dryRun) trickPass({ queue: parseNextQueue(), divisions: listDivisions(), gates: readGatesLast() }).catch(() => {});
   // The mode decides whether agents start on their own, and how often the Producer checks in.
   const decided = dryRun ? [] : expireAsks(now);
   // Designs left waiting past the pace's limit: the Producer approves them provisionally (logged).

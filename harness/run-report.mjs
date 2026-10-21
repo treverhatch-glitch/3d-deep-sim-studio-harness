@@ -136,6 +136,23 @@ export function renderRunReport(r) {
     }
   })();
   L.push('## The supervisor', '', ...(sup ? [`- ${sup.status === 'running' ? 'Running' : 'Stopped'} since ${sup.startedAt}${sup.stopReason ? `; stopped: ${sup.stopReason}` : ''}`, `- Sessions started: ${sup.sessions}; tasks done: ${sup.tasksDone}; tokens reported: ${(sup.tokens || 0).toLocaleString()}`, ...(sup.hubDown?.length ? sup.hubDown.map((d) => `- The War Room hub was down from ${d.from} to ${d.to}`) : ['- The War Room hub stayed up.'])] : ['- Not used (npm run studio:start keeps the studio running unattended).']), '');
+  // Staffing: who was hired, by whom, into which division, how long, what it used.
+  const ev = readRecentEvents(50000);
+  const starts = ev.filter((e) => e.type === 'agent.session.start');
+  const ends = ev.filter((e) => e.type === 'agent.session.end');
+  const staff = new Map();
+  for (const e of starts) {
+    const s = staff.get(e.agent) || { agent: e.agent, role: e.meta?.role, division: e.meta?.division || null, hiredBy: e.meta?.hiredBy || null, sessions: 0, ms: 0, tokens: 0, first: e.ts };
+    s.sessions += 1;
+    const end = ends.find((x) => x.agent === e.agent && x.ts >= e.ts);
+    if (end) {
+      s.ms += Date.parse(end.ts) - Date.parse(e.ts);
+      s.tokens += (Number(end.tokensIn) || 0) + (Number(end.tokensOut) || 0);
+    }
+    staff.set(e.agent, s);
+  }
+  const doneBy = (a) => ev.filter((e) => e.type === 'task.done' && e.agent === a).length;
+  L.push('## Staffing', '', ...(staff.size ? [...staff.values()].map((s) => `- ${s.agent} (${s.role}${s.division ? `, ${s.division}` : ''})${s.hiredBy ? `, hired by ${s.hiredBy}` : ''}: ${s.sessions} session${s.sessions === 1 ? '' : 's'}, ${Math.round(s.ms / 60000)} min, ${s.tokens.toLocaleString()} tokens, ${doneBy(s.agent)} task(s) done`) : ['- Nobody hired through the launcher yet.']), '');
   L.push('## Agents the launcher ran', '', ...(r.launched.length ? r.launched.map((s) => `- ${s.agent} (${s.role}, ${s.tool}/${s.model}): ${s.running ? 'running' : s.reason || 'ended'}${s.handed?.length ? `; handed back ${s.handed.map((h) => h.task).join(', ')}` : ''}`) : ['- None (agents were started by hand).']), '');
   L.push('## Decided without you', '', ...(r.decided.length ? r.decided.map((a) => `- ${a.id}: ${a.question} → "${a.answer}" by ${a.by} (${a.why})${a.status === 'reversed' ? ` — reversed by ${a.answeredBy}` : ''}`) : ['- Nothing; every question was answered or is still open.']), '');
   L.push('## Needed a person', '', ...(r.needsPerson.length ? r.needsPerson.map((x) => `- ${x}`) : ['- Nothing.']), '');

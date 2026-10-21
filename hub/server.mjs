@@ -41,7 +41,7 @@ import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR
 import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE, readStop, setStop, clearStop } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
-import { buildHudState, buildAgentDetail, setDivision } from '../harness/hud.mjs';
+import { buildHudState, buildAgentDetail, setDivision, listDivisions } from '../harness/hud.mjs';
 import { acceptCause } from '../harness/causes.mjs';
 import { serveBuildFile } from '../harness/builds.mjs';
 import { watchPass } from '../harness/watch.mjs';
@@ -50,7 +50,7 @@ import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
 import { learnIfDue } from '../harness/learn.mjs';
 import { runReportIfDue } from '../harness/run-report.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
-import { startAgent, stopAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
+import { startAgent, stopAgent, pauseAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
 import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
 import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
@@ -581,17 +581,36 @@ export function createHubServer() {
         stopAgent(s.pid);
         return sendJson(res, 200, { ok: true, stopping: s.agent });
       }
-      const role = String(body.role || '').replace(/[^a-z0-9-]/gi, '').slice(0, 30);
-      const agent = String(body.agent || `${role}-${Date.now().toString(36).slice(-4)}`).replace(/[^a-z0-9._-]/gi, '').slice(0, 40);
-      const r = startAgent({ role, agent, tool: body.tool ? String(body.tool).replace(/[^a-z]/g, '') : undefined, model: body.model ? String(body.model).replace(/[^a-zA-Z0-9._:/-]/g, '').slice(0, 80) : undefined, task: /^T-\d+$/.test(body.task || '') ? body.task : null }, { detach: true });
+      if (body.action === 'pause') {
+        const p = pauseAgent(String(body.agent || ''), String(body.note || '').slice(0, 500));
+        broadcastSnapshot();
+        return sendJson(res, p.ok ? 200 : 400, p.ok ? { ok: true, next: `${body.agent} paused${p.handed.length ? `; ${p.handed.join(', ')} back in the queue` : ''}.` } : { ok: false, error: p.message });
+      }
+      // A hire: from the Act form, or "+ Hire" in a Studio room (division given, role from the division).
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      const division = body.division ? String(body.division).replace(/[^a-z0-9-]/gi, '').slice(0, 30) : null;
+      const div = division ? listDivisions().find((d) => d.id === division) : null;
+      if (division && !div) return sendJson(res, 400, { ok: false, error: `No division ${division}` });
+      if (div && !div.active) setDivision(division, true, by);
+      const role = String(body.role || div?.roles?.[0] || '').replace(/[^a-z0-9-]/gi, '').slice(0, 30);
+      const agent = body.agent ? String(body.agent).replace(/[^a-z0-9._-]/gi, '').slice(0, 40) : undefined;
+      const r = startAgent({ role, agent, tool: body.tool ? String(body.tool).replace(/[^a-z]/g, '') : undefined, model: body.model ? String(body.model).replace(/[^a-zA-Z0-9._:/-]/g, '').slice(0, 80) : undefined, task: /^T-\d+$/.test(body.task || '') ? body.task : null, next: !body.task, division, by }, { detach: true });
       broadcastSnapshot();
-      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, agent: r.agent, tool: r.tool, model: r.model } : { ok: false, error: r.message });
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, agent: r.agent, tool: r.tool, model: r.model, next: `${r.agent} hired${division ? ` into ${div.name}` : ''} (${r.tool}, ${r.model}); it takes the next ${role} task.` } : { ok: false, error: r.message });
     }
     if (url.pathname === '/api/asks' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);
       noteHuman(by);
       const r = body.action === 'reverse' ? await reverseAsk(String(body.id || ''), String(body.answer || ''), by) : answerAsk(String(body.id || ''), String(body.answer || ''), by);
+      // A question that carries an action (the Producer asking to hire past its limit) runs it on "yes".
+      if (r.ok && r.ask?.action?.type === 'hire' && /^yes$/i.test(r.ask.answer || '')) {
+        const h = startAgent({ ...r.ask.action.opts, approved: true, by }, { detach: true });
+        r.task = null;
+        r.ask.hired = h.ok ? h.agent : null;
+        broadcastSnapshot();
+        return sendJson(res, 200, { ok: true, ask: r.ask, next: h.ok ? `${h.agent} hired and starting (${h.tool}, ${h.model}).` : `Couldn't hire: ${h.message}` });
+      }
       broadcastSnapshot();
       return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ask: r.ask, task: r.task || null, next: r.task ? `The Producer has ${r.task} to undo the old decision.` : `${r.ask.id} answered; ${r.ask.by} sees your answer in its next briefing.` } : { ok: false, error: r.message });
     }

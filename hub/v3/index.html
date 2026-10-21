@@ -329,6 +329,8 @@
   .room .floor { position: absolute; left: 0; right: 0; top: 102px; bottom: 0; background: var(--fa); }
   .room .sign { position: absolute; z-index: 3; top: 6px; left: 8px; padding: 4px 6px 3px; background: var(--panel); border: 3px solid var(--frame); font: 9px/1.2 "Press Start 2P", monospace; color: var(--frame); box-shadow: 3px 3px 0 rgba(0, 0, 0, .25); }
   .room.r-production .sign { background: #ffd54f; font-size: 10px; }
+  .room .hire { position: absolute; z-index: 4; top: 34px; right: 8px; pointer-events: auto; cursor: pointer; font: 8px/1 "Press Start 2P", monospace; padding: 4px 5px; color: #fff; background: #2e7d32; border: 2px solid #1b5e20; }
+  .room .hire:hover, .room .hire:focus-visible { background: #43a047; outline: 2px solid #fff; }
   .room .count { position: absolute; z-index: 3; top: 6px; right: 8px; padding: 0 4px; font-size: 18px; background: var(--panel); border: 2px solid var(--frame); }
   .room .count:empty { display: none; }
   .room .door { position: absolute; z-index: 2; left: 50%; bottom: 0; width: 46px; height: 8px; transform: translateX(-50%); background: #6d4c41; border-top: 2px solid #3e2723; }
@@ -658,6 +660,8 @@
       <section>
         <h2>Experiments and references</h2>
         <div id="p-exp"></div>
+        <h3 class="sub">The dev hacker's tricks <small>cards for the Producer: adopt or park</small></h3>
+        <div id="p-tricks"></div>
       </section>
     </div>
     <div class="two">
@@ -1352,13 +1356,15 @@
       html: () => prop('right:14px;top:38px', P.rocket) + prop('right:60px;top:46px', '<div class="neon" style="border-color:#bf360c;color:#ff8a65;background:#3e1a0e">SHIP IT</div>') + prop('right:12px;bottom:104px', P.boxes) },
     devlog: { cls: 'wl-brick fl-planks', v: '--wall:#263238;--wall2:#1b262c;--trim:#546e7a;--fa:#6d4c41;--fb:#5d4037',
       html: () => prop('right:14px;top:44px', '<div class="onair">ON AIR</div>') + prop('right:12px;bottom:100px', P.ringlight) + prop('right:56px;bottom:100px', P.camera) },
+    hacks: { cls: 'wl-grid fl-grid', v: '--wall:#1b1b2f;--wall2:#162447;--trim:#e43f5a;--fa:#1f4068;--fb:#162447',
+      html: () => prop('right:14px;top:44px', '<div class="neon" style="border-color:#e43f5a;color:#ff7a8a;background:#2a0f17">HACKS</div>') + prop('right:16px;bottom:106px', P.cubeScreen) },
     engine: { cls: 'wl-rivet fl-hazard', v: '--wall:#607d8b;--wall2:#455a64;--trim:#fdd835;--fa:#9e9e9e;--fb:#757575',
       html: () => prop('right:10px;top:46px', '<div class="belt"><span class="m">WEB</span><span class="track"><i></i></span><span class="m">PORT</span></div>') + prop('right:16px;bottom:110px', P.gear) },
   };
   const roomHtml = (d) => {
     const r = ROOMS[d.baseId || d.id] || ROOMS.engineering;
     return `<div class="room r-${esc(d.baseId || d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Locked: click to switch this division on (it also opens by itself when one of its agents starts work)'}" data-division="${esc(d.baseId || d.id)}">`
-      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span></div>`;
+      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span>${d.active ? `<button type="button" class="hire" data-hire="${esc(d.baseId || d.id)}" title="Hire a ${esc((d.roles || ['agent'])[0])} into ${esc(d.name)} (tool and model from .env)">+ Hire</button>` : ''}</div>`;
   };
 
   // ----- layout: every position is in office coordinates (the #t-office box) -----
@@ -1853,7 +1859,7 @@
     ].join('');
     document.querySelectorAll('[data-signals]').forEach((el) => { el.innerHTML = html; });
     const launched = (s.launched || []).filter((a) => a.running);
-    $('o-launched').innerHTML = launched.length ? launched.map((a) => `<div class="ag"><span class="lamp ${a.stalled ? 'stalled' : 'working'}" aria-hidden="true"></span>${esc(a.agent)} · ${esc(a.role)} · ${esc(a.tool)}/${esc(a.model)}${a.task ? ` · ${esc(a.task)}` : ''} · heartbeat ${a.beatAgeMin ?? '?'} min ago${a.lane ? ` · lane ${esc(a.lane)}` : ''} <button type="button" data-stopagent="${esc(a.agent)}">Stop</button>${a.now || a.wip ? `<div class="note" style="margin-left:22px">${a.now ? `Now: ${esc(a.now)}. ` : ''}${a.wip ? esc(a.wip) : ''}</div>` : ''}</div>`).join('') : '<p class="note">No agents started from here yet. Pick a role and press Start agent (the tool and model can come from .env).</p>';
+    $('o-launched').innerHTML = launched.length ? launched.map((a) => `<div class="ag"><span class="lamp ${a.stalled ? 'stalled' : 'working'}" aria-hidden="true"></span>${esc(a.agent)} · ${esc(a.role)} · ${esc(a.tool)}/${esc(a.model)}${a.task ? ` · ${esc(a.task)}` : ''} · heartbeat ${a.beatAgeMin ?? '?'} min ago${a.lane ? ` · lane ${esc(a.lane)}` : ''} <button type="button" data-pauseagent="${esc(a.agent)}" title="Hand its task back with a note, then stop">Pause</button> <button type="button" data-stopagent="${esc(a.agent)}">Stop</button>${a.now || a.wip ? `<div class="note" style="margin-left:22px">${a.now ? `Now: ${esc(a.now)}. ` : ''}${a.wip ? esc(a.wip) : ''}</div>` : ''}</div>`).join('') : '<p class="note">No agents started from here yet. Pick a role and press Start agent (the tool and model can come from .env).</p>';
     // Game plan: the pace choice and the studio's questions.
     if ($('p-modes')) {
       $('p-modes').innerHTML = Object.entries(s.modes || {}).map(([id, x]) => `<button type="button" class="mode" role="radio" aria-checked="${m.chosen && m.id === id ? 'true' : 'false'}" data-mode="${esc(id)}"><b>${esc(x.label)}</b>${esc(x.pitch)}</button>`).join('');
@@ -1862,6 +1868,12 @@
       $('p-askcount').textContent = asks.open.length ? `${asks.open.length} waiting` : '';
       $('p-asks').innerHTML = (asks.open.length ? asks.open.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}<div class="note">from ${esc(a.by)}${a.deadline ? `; if you don't answer by ${esc(hhmm(a.deadline))}, it goes with "${esc(a.default)}" because ${esc(a.why)}` : '; it waits for you'}</div><div class="opts">${(a.options.length ? a.options : ['yes', 'no']).map((o) => `<button type="button" data-ask="${esc(a.id)}" data-answer="${esc(o)}">${esc(o)}</button>`).join('')}</div></div>`).join('') : '<p class="note">No questions waiting.</p>')
         + (asks.decided.length ? `<h3 class="sub">Decided without you</h3>${asks.decided.map((a) => `<div class="ask"><b>${esc(a.id)}</b> ${esc(a.question)}: went with "${esc(a.answer)}" (${esc(a.why)})<div class="opts">${a.options.filter((o) => o !== a.answer).map((o) => `<button type="button" data-reverse="${esc(a.id)}" data-answer="${esc(o)}">Change to ${esc(o)}</button>`).join('')}</div></div>`).join('')}` : '');
+      const tr = s.tricks || [];
+      const trSig = JSON.stringify(tr.map((t) => [t.id, t.status]));
+      if ($('p-tricks').dataset.sig !== trSig) {
+        $('p-tricks').dataset.sig = trSig;
+        $('p-tricks').innerHTML = tr.length ? tr.map((t) => `<div class="ask"><b>${esc(t.id)}</b> ${esc(t.title)} <span class="note">(${esc(t.status)}${t.tasks.length ? `: ${esc(t.tasks.join(', '))}` : ''}${t.experiment ? `, prototype ${esc(t.experiment)}` : ''})</span><div class="note">${esc(short(t.problem, 140))}</div></div>`).join('') : '<p class="note">No trick cards. Open the Dev Hacker Lab (Studio view, or npm run division -- open hacks) and the dev hacker hunts for tricks that fit this game, without holding anything up.</p>';
+      }
       const art = s.art || { designs: [], reference: null };
       const waiting = art.designs.filter((d) => d.status === 'proposed');
       $('p-artcount').textContent = waiting.length ? `${waiting.length} waiting for you` : 'proposes the look; you approve it';
@@ -2142,9 +2154,9 @@
     }
   });
   document.addEventListener('click', async (ev) => {
-    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse],[data-art],[data-brief],[data-need],.room.locked');
+    const t = ev.target.closest('[data-speed],[data-stopagent],[data-pauseagent],[data-hire],[data-mode],[data-ask],[data-reverse],[data-art],[data-brief],[data-need],.room.locked');
     if (!t) return;
-    const say = (msg) => { notify(msg); if ($('p-modemsg') && document.body.dataset.skin === 'plan') $('p-modemsg').textContent = msg; };
+    const say = (msg) => { notify(msg); if ($('p-modemsg') && document.body.dataset.skin === 'plan') $('p-modemsg').textContent = msg; if (document.body.dataset.skin === 'tycoon') $('t-ticker').textContent = msg; };
     try {
       if (t.dataset.speed !== undefined) {
         const on = t.getAttribute('aria-pressed') !== 'true';
@@ -2159,6 +2171,12 @@
       } else if (t.dataset.ask) {
         const r = await post('/api/asks', { id: t.dataset.ask, answer: t.dataset.answer, by: actor() });
         say(r.next || `${t.dataset.ask} answered: ${t.dataset.answer}.`);
+      } else if (t.dataset.hire) {
+        const r = await post('/api/agents', { division: t.dataset.hire, by: actor() });
+        say(r.next);
+      } else if (t.dataset.pauseagent) {
+        const r = await post('/api/agents', { action: 'pause', agent: t.dataset.pauseagent, by: actor() });
+        say(r.next);
       } else if (t.dataset.need === 'accept-cause') {
         const r = await post('/api/causes', { cause: t.dataset.cause, by: actor() });
         say(r.next);

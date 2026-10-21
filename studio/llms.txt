@@ -103,12 +103,15 @@
 - `npm run proof -- add <task> <png> "<what it shows>" | check <task> --by <name> --verdict matches|wrong` — screenshot proof for `--part renderer|both` tasks
 - `npm run task -- add "…" --part sim|renderer|both` — which part of the game a task touches; renderer bugs close with a browser regression
 - `npm run causes [-- accept "<cause>" --by <person> --why "…"]` — forced tasks grouped by why they were forced; accept a cause once for the run
-- `npm run new-studio -- --name "<game>" [--dir <folder>] [--port 3848]` — a second game gets its own studio (clone, .env, port, fresh board); never start a game in a folder by hand
+- `npm run new-studio -- --name "<game>" [--dir <folder>] [--port 3848] [--setup <folder>|this]` — a second (third…) game gets its own studio (clone, .env, the next free War Room and play ports, fresh board); never start a game in a folder by hand. `--setup` plugs in roles, skills, presets, rules, divisions/budget/mode, a cartridge template, intake-answers.json and settings.env (never keys, never harness code); `--save-setup <folder>` saves this studio's (scripts/studio-setup.mjs)
 - `npm run play [-- --lan | list | --build <id>]` — serve the last build that passed `play:browser` (saved in .studio/builds/); the War Room's Arcade (view 5) plays it, takes playtest notes, shows clips and the read-only dungeon (docs/ARCADE.md)
 - `npm run clip [-- --seconds 20 --task T-012]` / `npm run shot [-- --query "floor=3"]` — an mp4 or a screenshot of the real build
 - `npm run studio:start [-- --until 23:00|8h] [--window 09:00-23:00] [--budget 50%|<tokens>] [--lanes auto] [--install|--uninstall]` / `studio:stop` / `studio:status` — the supervisor: keeps the hub up, a fresh agent per task, stops at a time or budget (docs/RUN-UNATTENDED.md)
 - `npm run budget [-- set <tool> --weekly <tokens> --reset <day> --target 100% | order claude,codex,agy]` — plan use per tool; tools out of quota are skipped until their reset
 - `npm run agent -- start … [--lane <folder>] [--one-task]`, `npm run agent -- now "<doing>"`; `npm run task -- add … --lane <folder>`
+- `npm run agent -- hire --role <r> --division <id> [--next] [--open] [--note "…"] [--loop until-empty|N] --by <name> | pause <name> --note "…" | logs <name>` — hire into a department (seated there); the Producer hires up to `producerMayHireUpTo` (studio/budget.json, default 4), past it a Needs-you ask; the Director never hires (docs/PACE-AND-AGENTS.md)
+- `npm run division [-- open|close <id> --reason "…" --by <name>]` — departments on/off with a logged reason (studio/decisions/divisions.md); harness/divisions.mjs
+- `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`); the War Room asks someone to check them
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)
 - `npm run hud:check [-- --shots <folder>]` — drives the War Room in Chromium (all three views, desktop and phone) on a throwaway copy of the studio; skips without a browser

@@ -5,6 +5,12 @@
  *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|custom --model <model>
  *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
  *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, shown with its heartbeat in the War Room
+ *   npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
+ *                        [--loop until-empty|N] [--by <producer or person>] [--open]   the same as start, as a hire:
+ *                        the Producer hires on its own up to studio/budget.json producerMayHireUpTo (default 4), past
+ *                        that the game dev is asked; --open switches the division on
+ *   npm run agent -- pause <agent> [--note "…"]   its task goes back to the queue, then it stops
+ *   npm run agent -- logs <agent> [--tail 60]
  *   npm run agent -- list          who is running, last heartbeat, task, tool, model
  *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
  *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
@@ -46,8 +52,13 @@ const IS = { win: process.platform === 'win32', mac: process.platform === 'darwi
 export function toolCommand(tool, { model, file, prompt, effort }) {
   const m = model && model !== 'unknown' ? model : null;
   switch (tool) {
-    case 'claude':
-      return { argv: ['claude', '-p', '--permission-mode', 'acceptEdits', '--allowedTools', 'Bash(node harness/*),Bash(node qa/*),Bash(node scripts/*),Bash(npm run *),Bash(npm test*),Bash(npx playwright *),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *),Bash(git log *)', '--output-format', 'json', ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
+    case 'claude': {
+      // Builders need Playwright, vite, ffmpeg and asset tools too (run #1: a narrow list failed silently).
+      // In a frozen test clone, STUDIO_CLAUDE_BYPASS=1 skips permission prompts entirely; the clone is the boundary.
+      const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
+      const allowed = 'Bash(node *),Bash(npm *),Bash(npx *),Bash(ffmpeg *),Bash(blender *),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *),Bash(git log *),Bash(git show *),Bash(ls *),Bash(mkdir *),Bash(cp *),Bash(mv *)';
+      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'json', ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
+    }
     case 'codex': {
       // In a frozen test clone, Codex's sandbox can't write .git or bind 127.0.0.1 on macOS; the clone itself is the boundary.
       const bypass = process.env.STUDIO_CODEX_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
@@ -173,7 +184,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
-export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false }) {
+export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null }) {
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   if (lane) {
     const c = claim(`path:${lane}`, agent, 6 * 3600);
@@ -183,7 +194,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
-    + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '');
+    + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '')
+    + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
   const file = path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
@@ -204,9 +216,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.stdin.end(cmd.stdin);
   }
   const startedAt = new Date().toISOString();
-  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask };
+  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
-  emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})`, meta: { role, tool: session.tool, pid: child.pid } });
+  emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   const beat = setInterval(() => {
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
@@ -231,7 +243,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const [ftool, fmodel] = next.split(':');
     const resume = result.handed[0]?.task || task;
     emitEvent({ type: 'agent.failover', agent, to: 'producer', msg: `${agent} failed over to ${ftool}${fmodel ? ` (${fmodel})` : ''}${resume ? ` on ${resume}` : ''}` });
-    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask });
+    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by });
   }
   return { ok: true, code, ...result };
 }
@@ -280,9 +292,38 @@ export function sayNow(agent, text) {
   return { ok: true };
 }
 
+const isAgentName = (by) => /^(prod|producer|director|builder|rnd|qa|reviewer|planner|art|liaison|agent|watch|supervisor|dev-hacker|codex|claude|gemini|agy|grok|cursor|aider|hermes)\b/i.test(String(by || '')) || by === process.env.STUDIO_LOCK_OWNER;
+function readBudgetLimits() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'budget.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/** Pause an agent: its task goes back to the queue with a note (and its claims), then the process ends. */
+export function pauseAgent(agent, note = '') {
+  const s = sessions().find((x) => x.agent === agent && x.running);
+  if (!s) return { ok: false, message: `${agent} isn't running.` };
+  const held = listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
+  for (const t of held) pauseTask(t, agent, note || `Paused from the War Room; ${agent}'s work so far is in the working tree.`, { force: true });
+  stopAgent(s.pid);
+  emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
+  return { ok: true, handed: held };
+}
+
+/** The last lines of an agent's output. */
+export function agentLog(agent, tail = 60) {
+  const f = path.join(AGENTS_DIR, `${agent}.log`);
+  if (!fs.existsSync(f)) return null;
+  return fs.readFileSync(f, 'utf8').split('\n').slice(-tail).join('\n');
+}
+
 /** Start one agent, after the stop switch, caps and spend checks. */
 export function startAgent(opts, { detach = false } = {}) {
-  const { role, agent } = opts;
+  const { role } = opts;
+  const agent = opts.agent || `${role}-${sessions().filter((s) => s.role === role).length + 1}`;
+  opts = { ...opts, agent };
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
   const already = sessions().find((s) => s.agent === agent && s.running);
@@ -293,14 +334,27 @@ export function startAgent(opts, { detach = false } = {}) {
   if (spend.over) return { ok: false, message: `Not started: the daily token cap is spent (${spend.used} of ${spend.cap}).` };
   const tool = opts.tool || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
   const model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
+  if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
+  // The Director watches for drift and files corrections; the Producer decides staffing.
+  if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };
+  // A frozen clone (a test run) keeps agents out of the harness itself.
+  if (opts.lane && fs.existsSync(path.join(REPO_ROOT, '.studio', 'harness-frozen')) && /^(\.\/)?(harness|hub|qa|scripts)(\/|$)/.test(String(opts.lane).replace(/\\/g, '/'))) return { ok: false, message: `Not started: ${opts.lane} is harness code, and this clone's harness is frozen.` };
+  // The Producer hires on its own up to a limit (studio/budget.json producerMayHireUpTo, default 4);
+  // past it, the hire becomes a question for the game dev (Needs you), started when they say yes.
+  if (opts.by && isAgentName(opts.by) && !opts.approved) {
+    const limit = Number(readBudgetLimits().producerMayHireUpTo ?? 4);
+    const byAgents = sessions().filter((s) => s.running && s.hiredBy && isAgentName(s.hiredBy)).length;
+    if (byAgents >= limit) return { ok: false, needsApproval: true, message: `${opts.by} already has ${byAgents} agents it hired running (its limit is ${limit}): asking the game dev.`, approval: { role, agent, tool, model, task: opts.task || null, lane: opts.lane || null, division: opts.division || null, by: opts.by } };
+  }
+  if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : [])];
+    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
     const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
   }
-  return { ok: true, run: runAgent({ ...opts, tool, model }) };
+  return { ok: true, agent, run: runAgent({ ...opts, tool, model }) };
 }
 
 /** The watcher's job: start agents for waiting tasks while the mode allows it. */
@@ -352,9 +406,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const cmd = argv[0];
-  if (cmd === 'start') {
-    const r = startAgent({ role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), lane: flag('lane'), oneTask: argv.includes('--one-task'), extra: Number(flag('extra')) || 0 }, { detach: argv.includes('--detach') });
+  if (cmd === 'start' || cmd === 'hire') {
+    // hire = start, from the Producer or the game dev, into a division, with a note; --loop keeps the
+    // same desk working through the division's tasks one session at a time.
+    const division = flag('division');
+    if (division && (argv.includes('--open') || (flag('by') && !isAgentName(flag('by'))))) {
+      const { setDivision, listDivisions } = await import('./divisions.mjs');
+      const d = listDivisions().find((x) => x.id === division);
+      if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
+    }
+    const base = { role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved') };
+    const r = startAgent(base, { detach: argv.includes('--detach') });
     if (!r.ok) {
+      if (r.needsApproval) {
+        const { ask } = await import('./ask.mjs');
+        const a = r.approval;
+        const q = ask({ question: `Hire ${a.agent} (${a.role}${a.division ? ` in ${a.division}` : ''}, ${a.tool}/${a.model})${a.task ? ` for ${a.task}` : ''}?`, options: ['yes', 'no'], why: r.message, by: a.by, action: { type: 'hire', opts: a } });
+        console.error(`${r.message} ${q.ok ? `Asked as ${q.ask.id}; it starts when the game dev says yes.` : ''}`);
+        process.exit(2);
+      }
       console.error(r.message);
       process.exit(1);
     }
@@ -362,13 +432,36 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(`${r.agent} started in the background (${r.tool}, ${r.model}). Output: .studio/agents/${r.agent}.log. npm run agent -- list`);
       process.exit(0);
     }
-    const res = await r.run;
+    let res = await r.run;
+    // --loop until-empty | N: the next session starts on the next task for this role, same name, same desk.
+    let left = flag('loop') === 'until-empty' ? Infinity : Number(flag('loop')) || 0;
+    while (res.ok && !res.bad && --left > 0) {
+      const next = nextFor({ role: base.role }, parseNextQueue()).task;
+      if (!next || readStop()) break;
+      const again = startAgent({ ...base, agent: r.agent || base.agent, task: next.id, next: false });
+      if (!again.ok) break;
+      res = await again.run;
+    }
     if (!res.ok) {
       console.error(res.message);
       process.exit(1);
     }
-    console.log(`${flag('agent')} ended: ${res.reason}${res.handed?.length ? `; handed back ${res.handed.map((h) => `${h.task}${h.patch ? ` (work in ${h.patch})` : ''}`).join(', ')}` : ''}`);
+    console.log(`${flag('agent') || r.agent || ''} ended: ${res.reason}${res.handed?.length ? `; handed back ${res.handed.map((h) => `${h.task}${h.patch ? ` (work in ${h.patch})` : ''}`).join(', ')}` : ''}`);
     process.exit(res.bad ? 1 : 0);
+  }
+  if (cmd === 'pause') {
+    const r = pauseAgent(argv[1], flag('note') || '');
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    console.log(`${argv[1]} paused${r.handed.length ? `; ${r.handed.join(', ')} back in the queue with a note` : ''}.`);
+    process.exit(0);
+  }
+  if (cmd === 'logs') {
+    const t = agentLog(argv[1], Number(flag('tail')) || 60);
+    console.log(t ?? `No log for ${argv[1]}.`);
+    process.exit(t ? 0 : 1);
   }
   if (cmd === 'now') {
     const r = sayNow(process.env.STUDIO_LOCK_OWNER || flag('agent'), argv.slice(1).filter((x, i, a) => !x.startsWith('--') && !(i > 0 && a[i - 1].startsWith('--'))).join(' '));

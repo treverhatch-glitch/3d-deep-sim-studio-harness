@@ -10,6 +10,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { DEFAULT_DIVISIONS, listDivisions, setDivision } from './divisions.mjs';
+
+export { DEFAULT_DIVISIONS, listDivisions, setDivision };
+const divisions = () => listDivisions();
 import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { activeMeeting } from './meeting.mjs';
@@ -20,6 +24,7 @@ import { effectiveMode, describeMode, MODES } from './mode.mjs';
 import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
 import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
+import { readTricks } from './tricks.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
 import { readStatus as supervisorStatus } from './supervisor.mjs';
@@ -33,23 +38,6 @@ const readJson = (rel, fallback = null) => {
   }
 };
 
-// Core divisions and Art are on; the rest ship switched off. studio/divisions.json overrides this list.
-export const DEFAULT_DIVISIONS = [
-  { id: 'production', name: 'Producer', core: true },
-  { id: 'engineering', name: 'Engineering', core: true },
-  { id: 'qa', name: 'QA Lab', core: true },
-  { id: 'design', name: 'Design & Balance', core: true },
-  { id: 'review', name: 'Review', core: true },
-  { id: 'sound', name: 'Sound Studio' },
-  { id: 'art', name: 'Art', active: true },
-  { id: '3d', name: '3D' },
-  { id: 'localization', name: 'Localization' },
-  { id: 'ui', name: 'UI & Accessibility' },
-  { id: 'narrative', name: 'Narrative' },
-  { id: 'release', name: 'Release & Store' },
-  { id: 'devlog', name: 'Devlog' },
-  { id: 'engine', name: 'Engine Transfer' },
-];
 
 const ROOM_FOR_ROLE = {
   producer: 'production',
@@ -83,6 +71,8 @@ const ROOM_FOR_ROLE = {
   'store-manager': 'release',
   devlogger: 'devlog',
   'engine-porter': 'engine',
+  'dev-hacker': 'hacks',
+  hacker: 'hacks',
 };
 // Custom roles named after their division ("sound-mixer", "art-lead") land in that room, and so do
 // names that say what the agent does ("audio-1", "concept-artist", "mesh-bot"), however it was started.
@@ -109,23 +99,6 @@ const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || (/(^|-)producer($|-)/
 // Events that mean "an agent reports to the Producer" in the Studio view.
 const TO_PRODUCER = new Set(['task.done', 'task.forced', 'task.not_done', 'task.lock_denied', 'closedloop.escalate']);
 
-/** Switch a division on or off from the War Room: writes studio/divisions.json with every division listed. */
-export function setDivision(id, on, by = 'war-room-human') {
-  const list = divisions().map(({ autoOn, ...d }) => ({ ...d }));
-  const d = list.find((x) => x.id === id);
-  if (!d) return { ok: false, message: `No division ${id}` };
-  if (d.core && !on) return { ok: false, message: `${d.name} is a core division and stays on.` };
-  d.active = Boolean(on);
-  fs.writeFileSync(path.join(REPO_ROOT, 'studio', 'divisions.json'), `${JSON.stringify({ divisions: list.map((x) => ({ id: x.id, name: x.name, ...(x.core ? { core: true } : { active: x.active }) })) }, null, 2)}\n`);
-  emitEvent({ type: 'division.set', agent: by, to: 'producer', msg: `${by} switched ${d.name} ${on ? 'on' : 'off'}` });
-  return { ok: true, division: d };
-}
-
-function divisions() {
-  const cfg = readJson('studio/divisions.json');
-  const list = Array.isArray(cfg?.divisions) ? cfg.divisions : DEFAULT_DIVISIONS;
-  return list.map((d) => ({ ...d, active: Boolean(d.core || d.active) }));
-}
 
 function latestPlaytest() {
   const dir = path.join(REPO_ROOT, 'qa', 'reports');
@@ -244,7 +217,8 @@ export function buildHudState() {
     return {
       ...a,
       role,
-      room: roomForRole(role, divs) || 'engineering',
+      // Seated by the division it was hired into, then by role.
+      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || roomForRole(role, divs) || 'engineering',
       // The launcher's heartbeat is the truth for agents it started.
       status: sess?.running ? (sess.stalled ? 'stalled' : 'working') : stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       launched: Boolean(sess?.running),
@@ -405,6 +379,7 @@ export function buildHudState() {
     scorecard: scorecardCached(queue),
     needs: needs.slice(0, 10),
     // The Arcade: saved playable builds, recent clips, and which phase each task belongs to (for the dungeon).
+    tricks: readTricks().slice(-12).reverse().map((t) => ({ id: t.id, title: t.title, status: t.status, problem: t.problem, by: t.by, tasks: t.tasks || [], experiment: t.experiment || null })),
     builds: listBuilds().slice(0, 6),
     supervisor: (() => {
       const s = supervisorStatus();

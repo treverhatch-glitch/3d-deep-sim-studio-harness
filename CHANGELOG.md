@@ -4,6 +4,49 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.23.0] — 2026-10-21
+From Hatch's request and art-1's hire-agents spec: hire agents into departments from the CLI or the War Room, and a new role, the dev hacker.
+### Added
+- **Hiring** (`npm run agent -- hire --role <r> --division <id> [--next] [--open] [--note "…"] [--loop until-empty|N] --by <name>`):
+  - an agent hired into a department sits in that room, whatever its name;
+  - names are generated when not given; `--note` reaches its prompt;
+  - `pause <name> --note "…"` hands its task back; `logs <name>` shows its output.
+- **War Room hiring:** "+ Hire" in every open room, and Pause on agents started from the War Room. A yes to a hire question starts the agent.
+- **Limits on hiring:**
+  - the Producer hires on its own up to `producerMayHireUpTo` (studio/budget.json, default 4); past that it becomes a Needs-you question;
+  - the Director never hires;
+  - a frozen clone refuses lanes inside harness/, hub/, qa/ or scripts/.
+- **Departments as commands:**
+  - `npm run division -- open|close <id> --reason "…" --by <name>`, logged in studio/decisions/divisions.md;
+  - every department lists its roles;
+  - a saved studio/divisions.json picks up departments added in later versions.
+- **Missing role cards:** sound-designer, composer, artist, art-director.
+- **The dev hacker** (Dev Hacker Lab, off by default; docs/DEV-HACKER.md):
+  - researches how developers solve problems this game has, and writes trick cards (`npm run trick`): the problem here, the trick, why it fits, when not to use it, and how to prove it helped;
+  - while the lab is open, the watcher queues a P3 hunt daily, or at once when a budget, module-size, browser-play or soak check is red;
+  - new cards reach the Producer in one "Tricks:" task, and the Producer adopts each one (queuing build work) or parks it;
+  - nothing waits on the dev hacker.
+- Run report: a **Staffing** section (who was hired, by whom, into which room, for how long, and their tokens).
+- `STUDIO_CLAUDE_BYPASS=1` (frozen clone only) runs claude agents without permission prompts, and claude agents may run node, npm, git, ffmpeg and blender.
+- **Several games on one computer:**
+  - `new-studio` picks the first War Room port that no sibling studio uses (3848, 3849, …), and gives each studio its own `npm run play` port.
+  - START-HERE.md now covers hiring and running unattended.
+- **Studio setups** (scripts/studio-setup.mjs):
+  - `npm run new-studio -- --name "<game>" --setup <folder>|this` starts a game from a setup. A setup can hold:
+    - roles, skills, presets and rules;
+    - divisions, budget and pace;
+    - a cartridge or web template;
+    - `intake-answers.json`, which fills the intake (a person still signs);
+    - `settings.env`.
+  - `--save-setup <folder>` saves this studio's setup.
+  - Keys, tokens and ports never travel in a setup, and harness code in one is skipped.
+- War Room check: "+ Hire" in an open room hires an agent that Pause hands back (hud-check, 59 checks).
+### Changed
+- The departments code moved to harness/divisions.mjs (hud.mjs re-exports it), which removes an import cycle between the launcher and the HUD.
+- The supervisor starts the most urgent work first and the dev hacker last.
+
+---
+
 ## [2.22.2] — 2026-10-21
 ### Added
 - The browser check plays bundled games: `browser.dist` (and `browser.build`, run first) in qa.mjs serves the build folder instead of a dev server. A failing build fails the check.

@@ -17,13 +17,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { applySetup, saveSetup } from './studio-setup.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+if (flag('save-setup')) {
+  const r = saveSetup(flag('save-setup'), ROOT);
+  console.log(r.ok ? `[new-studio] Saved this studio's setup (${r.saved} file(s), ${r.settings} setting(s), no keys) to ${r.dir}.\nStart a game with it: npm run new-studio -- --name "<game>" --setup ${r.dir}` : r.message);
+  process.exit(r.ok ? 0 : 1);
+}
 const name = flag('name');
 if (!name) {
-  console.error('Name the new game: npm run new-studio -- --name "<game name>" [--dir <folder>] [--port 3848]');
+  console.error('Name the new game: npm run new-studio -- --name "<game name>" [--dir <folder>] [--port 3848] [--setup <folder>|this]');
+  process.exit(1);
+}
+const setupFrom = flag('setup');
+if (setupFrom && setupFrom !== 'this' && !fs.existsSync(path.resolve(setupFrom))) {
+  console.error(`No setup folder at ${setupFrom}. Make one with: npm run new-studio -- --save-setup <folder>`);
   process.exit(1);
 }
 const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'new-game';
@@ -55,10 +66,23 @@ if (cloned.status !== 0) {
 }
 
 // 2. Settings: this studio's .env with its own War Room port and the game's own results folder note.
-const port = Number(flag('port') || Number(process.env.HUB_PORT || 3847) + 1);
 const envFile = path.join(ROOT, '.env');
+// The first War Room port no studio next to this one uses, so a third and fourth game don't clash.
+const portOf = (folder) => {
+  try {
+    return Number((fs.readFileSync(path.join(folder, '.env'), 'utf8').match(/^HUB_PORT=(\d+)/m) || [])[1]) || null;
+  } catch {
+    return null;
+  }
+};
+const used = new Set([portOf(ROOT) || Number(process.env.HUB_PORT || 3847), ...fs.readdirSync(path.dirname(ROOT)).map((d) => portOf(path.join(path.dirname(ROOT), d))).filter(Boolean)]);
+let port = Number(flag('port') || 0);
+if (!port) for (port = Math.max(...used, 3847) + 1; used.has(port); port += 1);
 let env = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : fs.existsSync(path.join(dir, '.env.example')) ? fs.readFileSync(path.join(dir, '.env.example'), 'utf8') : '';
 env = /^HUB_PORT=.*$/m.test(env) ? env.replace(/^HUB_PORT=.*$/m, `HUB_PORT=${port}`) : `${env.replace(/\s*$/, '\n')}HUB_PORT=${port}\n`;
+// Its own port for npm run play too, so both games can be played at once.
+const playPort = 4610 + (port - 3847);
+env = /^STUDIO_PLAY_PORT=.*$/m.test(env) ? env.replace(/^STUDIO_PLAY_PORT=.*$/m, `STUDIO_PLAY_PORT=${playPort}`) : `${env}STUDIO_PLAY_PORT=${playPort}\n`;
 env += `# ${name}: a separate studio. Point STUDIO_RESULTS_DIR and STUDIO_BACKUP_DIR at this game's own folders.\n`;
 fs.writeFileSync(path.join(dir, '.env'), env);
 step(`.env copied${fs.existsSync(envFile) ? ' from this studio' : ' from .env.example'}; War Room port ${port}`);
@@ -72,6 +96,25 @@ step('Setup, a fresh studio, and preflight');
 sh(process.execPath, ['scripts/setup.mjs'], dir, true);
 const reset = sh(process.execPath, ['scripts/studio-reset.mjs', '--name', name, '--yes'], dir, true);
 if (reset.status !== 0) console.log(`[new-studio] studio:reset said:\n${reset.stdout}${reset.stderr}`);
+// A setup (yours, your agent's, or this studio's with --setup this): roles, skills, departments, budget,
+// pace, a game template, intake answers. Never keys, never the harness.
+let intakeDone = false;
+if (setupFrom) {
+  let src = setupFrom;
+  if (setupFrom === 'this') {
+    src = path.join(dir, '.studio', 'setup-from-parent');
+    saveSetup(src, ROOT);
+  }
+  const r = applySetup(src, dir);
+  step(`Setup ${setupFrom === 'this' ? `from ${path.basename(ROOT)}` : path.basename(path.resolve(src))}: ${r.ok ? `${r.copied.length} part(s) copied` : r.message}`);
+  if (r.skipped?.length) console.log(`[new-studio] Skipped (not part of a setup): ${r.skipped.slice(0, 10).join(', ')}${r.skipped.length > 10 ? ', …' : ''}`);
+  if (r.dropped?.length) console.log(`[new-studio] Not copied from settings.env (keys and ports never travel): ${r.dropped.join(', ')}`);
+  if (r.intake) {
+    const ir = sh(process.execPath, ['harness/intake.mjs', '--answers', 'studio/intake-answers.json'], dir, true);
+    intakeDone = ir.status === 0;
+    step(intakeDone ? 'Intake filled from the setup\'s answers (a person still signs the Bible)' : `Intake answers didn't apply:\n${ir.stdout}${ir.stderr}`);
+  }
+}
 if (!argv.includes('--no-install')) sh(process.execPath, ['scripts/preflight.mjs', '--fix'], dir);
 
 // 4. Where to go next.
@@ -82,9 +125,12 @@ This folder is its own studio (its own Game Bible, board, agents and War Room), 
 
 1. \`npm run preflight\` until it says READY.
 2. \`npm run hub\` and open the link it prints (War Room on port ${port}).
-3. \`npm run intake\` with the game dev: the idea, the pace, the play length.
-4. The Producer: \`npm run kickoff -- --role producer --agent producer-1 --model <model>\`, and follow it.
-5. Start workers with \`npm run agent -- start --role <role> --agent <name>\` (or Start agent in the War Room).
+3. ${intakeDone ? 'The intake was filled from the setup: read studio/bible/BIBLE.md with the game dev, finish it with `npm run intake`, and sign it.' : '`npm run intake` with the game dev: the idea, the pace, the play length.'}
+4. The Producer: \`npm run kickoff -- --role producer --agent producer-1 --model <model>\`, and follow it. It opens departments and hires (\`npm run agent -- hire …\`).
+5. Or hire from the War Room: "+ Hire" in any open room.
+6. Unattended: \`npm run studio:start -- --until 23:00\`. Each studio runs its own supervisor; \`--install\` registers this folder separately.
+
+Both studios run at once: this one's War Room is on port ${port} and its Arcade build server (\`npm run play\`) on ${playPort}.
 `;
 fs.writeFileSync(path.join(dir, 'START-HERE.md'), start);
 console.log(`\n[new-studio] Ready: ${dir}\n\n${start}`);

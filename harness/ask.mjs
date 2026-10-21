@@ -52,7 +52,7 @@ export function parseDuration(s) {
   return n * ({ m: 60000, min: 60000, h: 3600000, d: 86400000 }[(m[2] || 'h').toLowerCase()]);
 }
 
-export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer' }) {
+export function ask({ question, options = [], def = null, timeout = null, why = '', by = process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer', action = null }) {
   const q = String(question || '').trim();
   if (!q) return { ok: false, message: 'Ask something: npm run ask -- "<question>" --options "a,b" --default a --timeout 4h' };
   const opts = (Array.isArray(options) ? options : String(options).split(',')).map((o) => o.trim()).filter(Boolean);
@@ -67,7 +67,7 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
     deadline = new Date(Date.now() + ms).toISOString();
   }
   const n = allAsks().length + 1;
-  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date().toISOString(), deadline, protected: protectedTopic, status: 'open' });
+  const a = write({ id: `A-${String(n).padStart(3, '0')}`, question: q.slice(0, 500), options: opts, default: def, why: String(why).slice(0, 500), by, at: new Date().toISOString(), deadline, protected: protectedTopic, status: 'open', ...(action ? { action } : {}) });
   emitEvent({ type: 'ask.open', agent: by, to: 'human', msg: `${a.id} for the game dev: ${a.question}${deadline ? ` (if no answer by ${deadline.slice(11, 16)} UTC: "${def}")` : ''}` });
   return { ok: true, ask: a, note: protectedTopic && timeout ? 'This is about signing, pillars, money or deleting, so it waits for a person: no deadline.' : null };
 }

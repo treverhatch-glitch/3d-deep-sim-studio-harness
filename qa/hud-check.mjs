@@ -265,6 +265,21 @@ try {
   }
   await wait(1000);
   check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()));
+  // + Hire in an open room of the Studio view: an agent for that department, which Pause hands back.
+  await page.click('#ops .switch[data-to="tycoon"]');
+  await wait(800);
+  await page.locator('#tycoon [data-hire="engineering"]').first().click();
+  await wait(4000);
+  await page.click('#tycoon .switch[data-to="ops"]');
+  await wait(1500);
+  const hired = await page.locator('#o-launched').innerText();
+  check('+ Hire in an open room hires an agent for that department, with a Pause button', /builder-/.test(hired) && (await page.locator('#o-launched [data-pauseagent]').count()) > 0, hired);
+  for (let k = 0; k < 4 && (await page.locator('#o-launched [data-pauseagent]').count()); k++) {
+    await page.locator('#o-launched [data-pauseagent]').first().click();
+    await wait(3000);
+  }
+  await wait(1000);
+  check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close();

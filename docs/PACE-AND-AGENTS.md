@@ -44,6 +44,59 @@ The launcher:
 
 In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself.
 
+## Hiring into departments
+
+The Producer runs the studio. It opens departments, writes tasks, and hires agents into them. The game dev
+can do the same from the War Room. The Director doesn't hire: it files corrections, and the Producer
+acts on them.
+
+```bash
+npm run division                                    # every department, on or off, and its roles
+npm run division -- open sound --reason "floor one needs footsteps" --by producer-1
+npm run division -- close sound --reason "done for phase 1" --by producer-1
+npm run agent -- hire --role sound-designer --division sound --next --by producer-1 \
+  [--open] [--note "keep it subtle"] [--loop until-empty|3] [--lane public/audio]
+npm run agent -- pause audio-1 --note "wrong floor"  # stops it and hands its task back with the note
+npm run agent -- logs audio-1                        # its output so far
+```
+
+- `hire` is `start` with a department. The agent is named for you (`sound-designer-2`) unless you give `--agent`.
+  `--next` takes the top waiting task for its role.
+  - `--division` seats the agent in that room whatever its name, and `--open` opens the room if it's locked.
+  - `--note` goes into its prompt as "Note from producer-1: …".
+  - `--loop` keeps it taking tasks until the queue is empty, or for N tasks.
+- Opening or closing a department needs a reason. Reasons are logged in `studio/decisions/divisions.md`.
+- In the War Room, every open room has a **+ Hire** button. It hires the room's first role on the next waiting
+  task, and the desk appears within seconds. Agents started from the War Room have a **Pause** button in Ops.
+- **The Producer's limit:** it hires on its own up to `producerMayHireUpTo` running agents (in `studio/budget.json`;
+  the default is 4). Past that, the hire becomes a "Needs you" question. Saying yes starts the agent.
+- **Refused:**
+  - a hire by the Director;
+  - in a frozen clone, a lane inside `harness/`, `hub/`, `qa/` or `scripts/`;
+  - any hire past the pace's caps, while the studio is stopped, or once the daily token cap is spent.
+- **Departments and their roles.** Always on:
+  - Producer
+  - Engineering: builder
+  - QA Lab: qa-playtester
+  - Design & Balance: rnd, designer-calibrator, planner
+  - Review: reviewer
+
+  On by default:
+  - Art: art, artist, art-director
+
+  Off until opened:
+  - Sound Studio: sound-designer, composer
+  - 3D: asset-3d
+  - Localization: localizer
+  - UI & Accessibility: ui-designer
+  - Narrative: writer
+  - Release & Store: release-manager
+  - Devlog: devlogger
+  - Engine Transfer: engine-porter
+  - Dev Hacker Lab: dev-hacker (docs/DEV-HACKER.md)
+- The run report's **Staffing** section lists who was hired, by whom, into which room, how long they worked, and their tokens.
+- In a frozen clone, `STUDIO_CLAUDE_BYPASS=1` lets claude agents run without permission prompts.
+
 ## War Room actions reach agents
 
 What the game dev does in the War Room starts the agent that should act on it, if a tool is set for

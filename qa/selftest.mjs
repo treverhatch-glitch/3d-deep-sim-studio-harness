@@ -924,6 +924,55 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens this week \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
 }
 
+// Hiring into departments, and the dev hacker: trick cards that reach the Producer without holding anything up.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1' };
+  report('the dev hacker and the missing department roles have role cards', ['dev-hacker', 'sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
+  const op = run(dir, 'node harness/division.mjs open hacks --reason "the game hitches between floors" --by hatch', env);
+  report('a division opens with a reason, logged', op.status === 0 && /Dev Hacker Lab is open/.test(op.stdout) && /opened Dev Hacker Lab: the game hitches/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
+  run(dir, 'node harness/watch.mjs', env);
+  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},500)']);
+  run(dir, 'node harness/watch.mjs', env);
+  const q1 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('with the lab open, the watcher queues one low-priority trick hunt for the dev hacker', (q1.match(/\[P3\] \(`dev-hacker`\) — Trick hunt:/g) || []).length === 1, q1.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
+  const hunt = (q1.match(/\*\*(T-\d+)\*\* \[P3\] \(`dev-hacker`\)/) || [])[1];
+  report('a trick card must say when not to use it', /--avoid-if/.test(run(dir, 'node harness/tricks.mjs propose "Elevator hides the load" --problem "F3 hitches" --trick "load during the ride" --fits "a building" --proof "frame time"', env).stderr));
+  run(dir, `node harness/task.mjs start ${hunt} --agent dev-hacker-1`, env);
+  run(dir, 'node harness/tricks.mjs propose "Elevator ride hides the next floor loading" --problem "F3 hitches 400 ms when its models load" --trick "Start loading floor N+1 when the doors close; open them when it is ready" --fits "Every level is a floor of one building; the ride is already in the fiction" --avoid-if "levels are not separated by a ride, or loads are already under a frame" --proof "longest frame on a floor change, browser check, before vs after" --by dev-hacker-1', env);
+  const hdone = run(dir, `node harness/task.mjs done ${hunt} --agent dev-hacker-1`, env);
+  report('a trick hunt is done when a card is written', hdone.status === 0, hdone.stdout + hdone.stderr);
+  run(dir, 'node harness/watch.mjs', env);
+  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('new trick cards reach the Producer in one batch', /\(`producer`\) — Tricks: 1 new from the dev hacker \(K-001\)/.test(q2), q2.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
+  const ad = run(dir, 'node harness/tricks.mjs adopt K-001 --by prod-1', env);
+  report('the Producer adopts a card: build work that names the trick and how to prove it', ad.status === 0 && /Build trick K-001: Elevator ride hides the next floor loading \(prove it: longest frame/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), ad.stdout + ad.stderr);
+  report('a hunt that finds nothing is a fine result', run(dir, 'node harness/tricks.mjs none "frame times are flat; nothing measured to fix"', env).status === 0 && /nothing worth doing now/.test(fs.readFileSync(path.join(dir, 'studio/tricks/HUNTS.md'), 'utf8')));
+  // Hiring: into a division, seated there whatever its name; paused hands the task back.
+  const tid = JSON.parse(run(dir, 'node harness/task.mjs add "Footstep sounds for floor one" --role sound-designer', env).stdout).id;
+  const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
+  const hire = run(dir, `node harness/agent.mjs hire --role sound-designer --agent zed-1 --division sound --task ${tid} --by hatch --note "keep it subtle" --detach`, henv);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 8000 && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
+  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
+  const zed = (hud.agents || []).find((a) => a.name === 'zed-1');
+  report('an agent hired into a division sits in that room, and the room opens', hire.status === 0 && zed?.room === 'sound' && (hud.divisions || []).find((d) => d.id === 'sound')?.active === true && /Note from hatch: keep it subtle/.test(fs.readFileSync(path.join(dir, '.studio/kickoff/zed-1.md'), 'utf8')), hire.stdout + hire.stderr + JSON.stringify(zed));
+  const pz = run(dir, 'node harness/agent.mjs pause zed-1 --note "wrong floor"', env);
+  report('pausing an agent hands its task back with the note', pz.status === 0 && new RegExp(`## BACKLOG[\\s\\S]*${tid}`).test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), pz.stdout + pz.stderr);
+  report('npm run agent -- logs shows an agent\'s output', run(dir, 'node harness/agent.mjs logs zed-1', env).status === 0);
+  fs.writeFileSync(path.join(dir, 'studio/budget.json'), JSON.stringify({ producerMayHireUpTo: 0 }));
+  const over = run(dir, 'node harness/agent.mjs hire --role builder --by prod-1 --detach', { ...env, STUDIO_BUILDER_CMD: 'node -e 0' });
+  const asks = fs.existsSync(path.join(dir, 'studio/asks')) ? fs.readdirSync(path.join(dir, 'studio/asks')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, 'studio/asks', f), 'utf8'))) : [];
+  report('past its hiring limit the Producer asks the game dev instead of hiring', over.status === 2 && asks.some((a) => a.action?.type === 'hire' && /Hire builder-/.test(a.question)), over.stdout + over.stderr);
+  const dh = run(dir, 'node harness/agent.mjs hire --role builder --by director-1 --detach', { ...env, STUDIO_BUILDER_CMD: 'node -e 0' });
+  fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.studio/harness-frozen'), 'test');
+  const fz = run(dir, 'node harness/agent.mjs hire --role builder --lane harness/ --by hatch --detach', { ...env, STUDIO_BUILDER_CMD: 'node -e 0' });
+  fs.rmSync(path.join(dir, '.studio/harness-frozen'));
+  report('the Director never hires, and a frozen clone never hires into the harness', dh.status !== 0 && /Director does not hire/.test(dh.stderr + dh.stdout) && fz.status !== 0 && /harness is frozen/.test(fz.stderr + fz.stdout), dh.stdout + dh.stderr + fz.stdout + fz.stderr);
+}
+
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
 {
   const dir = copyRepo();
@@ -1206,6 +1255,21 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const second = path.join(tmpRoot, `second-studio-${n}`);
   const ns = run(dir, `node scripts/new-studio.mjs --name "Moss Garden" --dir "${second}" --from local --no-install`, env);
   report('npm run new-studio makes a second studio next to this one, with its own War Room port and a fresh board', ns.status === 0 && /HUB_PORT=3848/.test(fs.readFileSync(path.join(second, '.env'), 'utf8')) && /Moss Garden/.test(fs.readFileSync(path.join(second, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(second, 'START-HERE.md')), ns.stdout + ns.stderr);
+  // A setup plugged in by the game dev or an agent: its roles, departments and settings, never keys or harness code.
+  const setup = path.join(tmpRoot, `setup-${n}`);
+  fs.mkdirSync(path.join(setup, 'studio/roles'), { recursive: true });
+  fs.mkdirSync(path.join(setup, 'harness'), { recursive: true });
+  fs.writeFileSync(path.join(setup, 'studio/roles/level-designer.md'), '# level-designer\n');
+  fs.writeFileSync(path.join(setup, 'studio/divisions.json'), JSON.stringify({ divisions: [{ id: 'hacks', active: true }] }));
+  fs.writeFileSync(path.join(setup, 'settings.env'), 'STUDIO_AGENT_TOOL=claude\nSTUDIO_FAKE_TOKEN=do-not-copy\nHUB_PORT=9999\n');
+  fs.writeFileSync(path.join(setup, 'harness/evil.mjs'), 'process.exit(1)\n');
+  const third = path.join(tmpRoot, `third-studio-${n}`);
+  const ns3 = run(dir, `node scripts/new-studio.mjs --name "Tin Moon" --dir "${third}" --from local --no-install --setup "${setup}"`, env);
+  const env3 = fs.existsSync(path.join(third, '.env')) ? fs.readFileSync(path.join(third, '.env'), 'utf8') : '';
+  report('a third game gets the next free port, and a plugged-in setup brings roles, departments and settings but never keys or harness code', ns3.status === 0 && /^HUB_PORT=3849$/m.test(env3) && !/9999/.test(env3) && /STUDIO_AGENT_TOOL=claude/.test(env3) && !/do-not-copy/.test(env3) && fs.existsSync(path.join(third, 'studio/roles/level-designer.md')) && !fs.existsSync(path.join(third, 'harness/evil.mjs')) && /hacks/.test(fs.readFileSync(path.join(third, 'studio/divisions.json'), 'utf8')), ns3.stdout + ns3.stderr + env3);
+  const saved = path.join(tmpRoot, `saved-setup-${n}`);
+  const sv = run(third, `node scripts/new-studio.mjs --save-setup "${saved}"`, env);
+  report('a studio saves its setup to reuse for the next game, without its keys', sv.status === 0 && fs.existsSync(path.join(saved, 'studio/roles/level-designer.md')) && !/do-not-copy/.test(fs.existsSync(path.join(saved, 'settings.env')) ? fs.readFileSync(path.join(saved, 'settings.env'), 'utf8') : ''), sv.stdout + sv.stderr);
 }
 
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.

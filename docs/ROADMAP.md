@@ -240,6 +240,8 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F12 | The Asset studio: rounds, thumbs up into assets/approved/, feedback by number, Producer provisional approval, labelled references, a reworked ledger | done (2.20.0) |
 | F13 | The Arcade: play the last good build, playtest notes, clips, the read-only dungeon | done (2.21.0) |
 | F14 | Run unattended: supervisor, budget pacing and quota fallback, lanes, WIP on the HUD, progress by phase, golden reasons | done (2.22.0) |
+| F14b | Hire agents into departments (CLI and War Room), department commands, the Producer's hiring limit; the dev hacker and trick cards | done (2.23.0) |
+| F14c | A Producer staffing plan applied by one "Staff the studio" click; "close?" hints for idle departments | planned |
 | F15 | A cheap vision model checks screenshot proof against the art reference | planned |
 | F16 | A browser regression proven to fail on the code before the fix | planned |
 | F17 | Room spec export and a dressing gate (keep-out zones, per-floor budgets) for set dressing | planned |

@@ -114,7 +114,9 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   const canStart = new Set(launchableRoles([...new Set(waiting.map((t) => t.role))]));
   const started = [];
-  for (const g of groups.values()) {
+  // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
+  const ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  for (const g of ordered) {
     if (room <= 0) break;
     if (!canStart.has(g.role)) {
       why.push(`${g.role}: no tool set to start it (STUDIO_AGENT_TOOL or STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL)`);
