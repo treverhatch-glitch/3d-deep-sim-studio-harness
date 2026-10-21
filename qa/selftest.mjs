@@ -1285,6 +1285,19 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const twice = run(dir, `node harness/agent.mjs start --role builder --agent dup-1 --task ${t3}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' });
   report('an agent is never started on a task someone else holds (test #2: two sessions on T-160)', twice.status !== 0 && /someone-1 holds/.test(twice.stderr), twice.stdout + twice.stderr);
   run(dir, `node harness/lock.mjs release task:${t3} --owner someone-1`, env);
+  // Stop all saves each running agent's uncommitted work as a patch before it hands the task back.
+  const t4 = id('node harness/task.mjs add "Stop me mid-work" --role builder');
+  run(dir, `node harness/agent.mjs start --role builder --agent mid-1 --task ${t4} --detach`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' });
+  const tm = Date.now();
+  while (Date.now() - tm < 8000 && !fs.existsSync(path.join(dir, 'docs/fake/mid-1.md'))) pause(300);
+  pause(500);
+  run(dir, 'node harness/task.mjs stop --by jed --reason "harness update"', env);
+  const wipF = path.join(dir, `.studio/wip/${t4}-mid-1.patch`);
+  const tw = Date.now();
+  while (Date.now() - tw < 8000 && !fs.existsSync(wipF)) pause(300);
+  report('Stop all saves a running agent\'s uncommitted work as a patch, then hands its task back', fs.existsSync(wipF) && /docs\/fake\/mid-1\.md/.test(fs.readFileSync(wipF, 'utf8')) && /saved to \.studio\/wip\//.test(fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8')), fs.existsSync(path.join(dir, `studio/handoffs/${t4}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8') : 'no handoff');
+  run(dir, 'node harness/task.mjs resume --by jed', env);
+  run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason test --accepted-by selftest`, env);
   // One launcher: the watcher's auto-start does nothing while a supervisor runs, and uses lanes when none does.
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder')) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
@@ -1332,7 +1345,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   // Hand-back notes are kept short.
   const t5 = id('node harness/task.mjs add "Long notes" --role builder');
   run(dir, `node harness/task.mjs start ${t5} --agent long-1`, env);
-  run(dir, `node harness/task.mjs pause ${t5} --agent long-1 --note "${Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')}"`, env);
+  // Through the module, not the command line: a newline in an argument doesn't survive cmd.exe on Windows.
+  node('ln.mjs', `import { pauseTask } from './harness/task.mjs';\npauseTask('${t5}', 'long-1', Array.from({ length: 40 }, (_, i) => \`line \${i}\`).join('\\n'));\n`);
   const longNote = fs.readFileSync(path.join(dir, `studio/handoffs/${t5}.md`), 'utf8');
   report('a hand-back note is cut to 20 lines, with a reminder of the short shape', /line 19/.test(longNote) && !/line 20\b/.test(longNote) && /Cut to 20 lines/.test(longNote), longNote.slice(-300));
   // A verdict an owner gave in chat can be relayed, with their words and where they said them.

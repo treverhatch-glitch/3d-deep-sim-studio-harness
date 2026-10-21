@@ -107,7 +107,9 @@ export async function supervise(opts, state, now = Date.now()) {
     const metaTool = last2[0].meta?.tool || 'the agent tool';
     const roleOf = String(last2[0].meta?.role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
     const tool = metaTool === 'custom' ? String(process.env[`STUDIO_${roleOf}_CMD`] || process.env.STUDIO_AGENT_CMD || 'the custom command').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') : metaTool;
-    const hint = code === 127 || code === 9009 ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
+    // A program that isn't on the PATH: exit 127 (9009, or 1 under cmd.exe on Windows), or one `which` can't find.
+    const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' }).status !== 0);
+    const hint = missing ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
     state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}` };
     emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
     return { started: [], why: [`halted: ${state.halted.why}`] };

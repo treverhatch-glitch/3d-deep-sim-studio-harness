@@ -443,8 +443,13 @@ const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner 
 export function pauseAgent(agent, note = '', by = 'war-room-human') {
   const s = sessions().find((x) => x.agent === agent && x.running);
   if (!s) return { ok: false, message: `${agent} isn't running.` };
-  const held = listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
-  for (const t of held) pauseTask(t, agent, note || `Paused from the War Room; ${agent}'s work so far is in the working tree.`, { force: true });
+  const mine = listLocks().filter((l) => l.owner === agent);
+  const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
+  // The patch is saved before the hand-back frees the claims, so the launcher's clean-up still has it.
+  for (const t of held) {
+    const patch = savePatch(agent, t, mine.map((l) => l.key));
+    pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is in the working tree.`}${patch ? ` Saved to ${patch}.` : ''}`, { force: true });
+  }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
   for (const t of tasksOf(agent, s)) cooldown(t, by);
   stopAgent(s.pid);
@@ -467,8 +472,12 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
 export function stopAllAgents(by = 'war-room-human', reason = '') {
   const stopped = [];
   for (const s of sessions().filter((x) => x.running)) {
-    const held = listLocks().filter((l) => l.owner === s.agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
-    for (const t of held) pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is in the working tree.`, { force: true });
+    const mine = listLocks().filter((l) => l.owner === s.agent);
+    const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
+    for (const t of held) {
+      const patch = savePatch(s.agent, t, mine.map((l) => l.key));
+      pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is in the working tree${patch ? ` and saved to ${patch}` : ''}.`, { force: true });
+    }
     stopAgent(s.pid);
     stopped.push(s.agent);
   }
@@ -706,6 +715,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     console.log(`Stopping ${r.agent}; the launcher hands its work back.${r.tasks.length ? ` ${r.tasks.join(', ')} won't restart before ${r.until ? r.until.slice(11, 16) : 'now'} (STUDIO_STOP_COOLDOWN_MIN).` : ''}`);
+    process.exit(0);
+  }
+  if (cmd === 'stop-all') {
+    // Used by npm run task -- stop: prints the agents it stopped, one per line.
+    for (const a of stopAllAgents(flag('by') || 'human', flag('reason') || '')) console.log(a);
     process.exit(0);
   }
   if (cmd === 'fill') {

@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.27.1] — 2026-10-21
+### Fixed
+- **`npm run task -- stop` now stops the running agents.** Since 2.24 it set the stop switch but never reached the agents: it imported the launcher, which imports it back, and the command exited 13. The War Room's Stop all was not affected. It now stops them in a child process. Found while writing test #3's update steps.
+- **Stop all and Pause save each agent's uncommitted work as a patch** (`.studio/wip/<task>-<agent>.patch`) before they hand its task back. Before, the hand-back freed the claims first, so the launcher's clean-up found nothing to save.
+- **A supervisor halt names the missing program on Windows too** (cmd.exe exits 1, not 127, for an unknown command).
+- Self-test: 1 more check; the hand-back cap test no longer passes a multi-line note through cmd.exe.
+
+---
+
 ## [2.27.0] — 2026-10-21
 The engine track: a Godot (or Unity, Unreal) version of a game that is proven in web, run as its own team and linked to the web game only by a parity test. From the SendIt experiment (Godot playable in about 3 hours, Unreal slow for 7) and Jed's test #2 ("Godot first needs a custom gate and a capture-based equivalent of browser-play").
 ### Added

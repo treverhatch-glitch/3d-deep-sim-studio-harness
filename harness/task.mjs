@@ -511,8 +511,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'stop') {
     const s = setStop(typeof flags.by === 'string' ? flags.by : 'human', typeof flags.reason === 'string' ? flags.reason : '');
-    const { stopAllAgents } = await import('./agent.mjs');
-    const stopped = stopAllAgents(s.by, s.reason);
+    // In a child process: agent.mjs imports this module, so importing it here, while this module is still
+    // running as the command, never settles (2.24-2.26: the command stopped nothing and exited 13).
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'agent.mjs'), 'stop-all', '--by', s.by, '--reason', s.reason || ''], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env });
+    const stopped = String(r.stdout || '').trim().split(/\s+/).filter(Boolean);
     console.log(`Studio stopped by ${s.by}. No task can start${stopped.length ? `; ${stopped.join(', ')} handed back their work and stopped` : ''}. Resume: npm run task -- resume --by <name>`);
     process.exit(0);
   }
