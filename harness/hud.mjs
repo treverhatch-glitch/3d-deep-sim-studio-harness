@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { activeMeeting } from './meeting.mjs';
@@ -20,6 +20,7 @@ import { effectiveMode, describeMode, MODES } from './mode.mjs';
 import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
 import { readDesigns } from './art.mjs';
+import { forcedGroups, readAccepted } from './cause-store.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -80,11 +81,42 @@ const ROOM_FOR_ROLE = {
   devlogger: 'devlog',
   'engine-porter': 'engine',
 };
-// Custom roles named after their division ("sound-mixer", "art-lead") land in that room.
-const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || (/(^|-)producer($|-)/.test(role || '') ? 'production' : null) || divs.find((d) => role && (role === d.id || role.startsWith(`${d.id}-`)))?.id || null;
+// Custom roles named after their division ("sound-mixer", "art-lead") land in that room, and so do
+// names that say what the agent does ("audio-1", "concept-artist", "mesh-bot"), however it was started.
+const KEYWORD_ROOMS = [
+  [/^(audio|sound|music|sfx|composer|foley)$/, 'sound'],
+  [/^(3d|model|models|mesh|blender|rig|asset3d)$/, '3d'],
+  [/^(art|artist|concept|texture|textures|sprite|sprites|illustrator|painter|assets?)$/, 'art'],
+  [/^(qa|test|tester|playtest|playtester)$/, 'qa'],
+  [/^(review|reviewer)$/, 'review'],
+  [/^(design|designer|balance|balancer|fun|rnd|planner)$/, 'design'],
+  [/^(ui|ux|accessibility)$/, 'ui'],
+  [/^(writer|narrative|story|dialogue)$/, 'narrative'],
+  [/^(loc|localizer|translator)$/, 'localization'],
+  [/^(release|store)$/, 'release'],
+  [/^(devlog)$/, 'devlog'],
+  [/^(port|porter|engine)$/, 'engine'],
+];
+const keywordRoom = (name) => {
+  const tokens = String(name || '').toLowerCase().split(/[-_.\s]+/);
+  return KEYWORD_ROOMS.find(([re]) => tokens.some((t) => re.test(t)))?.[1] || null;
+};
+const roomForRole = (role, divs) => ROOM_FOR_ROLE[role] || (/(^|-)producer($|-)/.test(role || '') ? 'production' : null) || divs.find((d) => role && (role === d.id || role.startsWith(`${d.id}-`)))?.id || keywordRoom(role) || null;
 
 // Events that mean "an agent reports to the Producer" in the Studio view.
 const TO_PRODUCER = new Set(['task.done', 'task.forced', 'task.not_done', 'task.lock_denied', 'closedloop.escalate']);
+
+/** Switch a division on or off from the War Room: writes studio/divisions.json with every division listed. */
+export function setDivision(id, on, by = 'war-room-human') {
+  const list = divisions().map(({ autoOn, ...d }) => ({ ...d }));
+  const d = list.find((x) => x.id === id);
+  if (!d) return { ok: false, message: `No division ${id}` };
+  if (d.core && !on) return { ok: false, message: `${d.name} is a core division and stays on.` };
+  d.active = Boolean(on);
+  fs.writeFileSync(path.join(REPO_ROOT, 'studio', 'divisions.json'), `${JSON.stringify({ divisions: list.map((x) => ({ id: x.id, name: x.name, ...(x.core ? { core: true } : { active: x.active }) })) }, null, 2)}\n`);
+  emitEvent({ type: 'division.set', agent: by, to: 'producer', msg: `${by} switched ${d.name} ${on ? 'on' : 'off'}` });
+  return { ok: true, division: d };
+}
 
 function divisions() {
   const cfg = readJson('studio/divisions.json');
@@ -219,6 +251,30 @@ export function buildHudState() {
       idleMin,
     };
   });
+  // Out of quota, not stalled: the last thing an agent said was a usage limit (and when it resets).
+  const QUOTA = /usage limit|rate.?limit|\b429\b|quota|insufficient[_ ]credit|credit balance/i;
+  for (const a of agentList) {
+    const last = events.filter((e) => e.agent === a.name || (e.type === 'task.paused' && e.task === a.task && e.agent === a.name)).pop();
+    if (last && QUOTA.test(last.msg || '') && Date.parse(last.ts) > now - 12 * 3600 * 1000) {
+      const until = (String(last.msg).match(/(?:resets?|try again)(?: at| after)?\s*(\d{1,2}:\d{2}(?:\s*[ap]m)?)/i) || [])[1] || null;
+      a.status = 'out-of-quota';
+      a.quotaUntil = until;
+    }
+  }
+  // Bugs each agent caused: bugs filed --caused-by a task it finished, and its tasks reopened.
+  const doneBy = new Map();
+  for (const e of events) if (e.type === 'task.done' && e.task) doneBy.set(e.task, e.agent);
+  const caused = new Map();
+  for (const e of events) {
+    const src = e.type === 'task.added' ? e.meta?.causedBy : e.type === 'task.reopened' ? e.task : null;
+    const who = src && doneBy.get(src);
+    if (who) caused.set(who, (caused.get(who) || 0) + 1);
+  }
+  for (const a of agentList) a.caused = caused.get(a.name) || 0;
+  // Divisions switch on by themselves when an agent of theirs is at work.
+  for (const d of divs) {
+    if (!d.active && agentList.some((a) => a.room === d.id)) Object.assign(d, { active: true, autoOn: true });
+  }
   // The Producer's office is never empty: the role exists even before it writes an event.
   if (!agentList.some((a) => a.room === 'production')) {
     agentList.push({ name: 'producer', role: 'producer', room: 'production', status: 'idle', events: 0, idleMin: null, placeholder: true });
@@ -259,9 +315,20 @@ export function buildHudState() {
     if (e.type === 'closedloop.pass') break;
     if (e.type === 'closedloop.escalate' || e.type === 'route.exhausted') needs.push({ ts: e.ts, agent: e.agent, msg: e.msg, task: e.task });
   }
+  // Forced work, one card per cause (harness/causes.mjs), not one per task.
+  for (const g of forcedGroups(queue)) needs.push({ agent: 'producer', msg: `${g.tasks.length} task${g.tasks.length === 1 ? '' : 's'} closed past the same check: ${g.cause} (${g.tasks.slice(0, 6).join(', ')}${g.tasks.length > 6 ? ', …' : ''})`, task: g.checks[0], action: { type: 'accept-cause', cause: g.cause, label: 'Accept for this run' } });
   for (const t of [...queue.inProgress, ...queue.backlog]) {
-    if (/^(Check forced done|Watch:)/i.test(t.title)) needs.push({ agent: t.title.startsWith('Watch:') ? 'watch' : 'producer', msg: t.title, task: t.id });
+    if (/^Watch:/i.test(t.title)) needs.push({ agent: 'watch', msg: t.title, task: t.id });
   }
+  // A studio that stopped: work waiting, nothing running, nobody heard from in an hour.
+  const lastActivity = events.filter((e) => e.agent && !['watch', 'war-room-human'].includes(e.agent)).pop();
+  const quietMin = lastActivity ? Math.round((now - Date.parse(lastActivity.ts)) / 60000) : null;
+  if (queue.backlog.length && !queue.inProgress.length && !agentSessionsList().some((s) => s.running) && (quietMin === null || quietMin >= 60)) {
+    needs.push({ agent: 'watch', msg: `The studio is idle${quietMin !== null ? ` (${quietMin >= 120 ? `${Math.round(quietMin / 60)} h` : `${quietMin} min`})` : ''} with ${queue.backlog.length} task${queue.backlog.length === 1 ? '' : 's'} waiting: start an agent in Ops, or choose a faster pace`, action: { type: 'start-producer', label: 'Start the Producer' } });
+  }
+  // Money, licences, publishing and deleting first; then what breaks play; then housekeeping.
+  const rank = (n) => (/money|spend|pay|licen[cs]e|credit line|publish|delet/i.test(n.msg) ? 0 : /playtest|browser|blank|escalat|exhausted|won't load|idle/i.test(n.msg) ? 1 : 2);
+  needs.sort((x, y) => rank(x) - rank(y));
 
   // Three separate signals, each with its reason, so "an agent needs you", "a check is red" and
   // "an agent died" never look the same.
@@ -269,7 +336,7 @@ export function buildHudState() {
   const launched = agentSessionsList();
   const signals = {
     needsYou: [
-      ...needs.map((n) => `${n.task ? `${n.task}: ` : ''}${n.msg}`),
+      ...needs.map((n) => (n.action?.type === 'accept-cause' ? n.msg : `${n.task ? `${n.task}: ` : ''}${n.msg}`)),
       ...(bibleNow && !bibleNow.signed ? ['The Game Bible is waiting for your signature (npm run bible -- check, then sign)'] : []),
       ...(bibleNow?.amended ? [`The Bible changed after signing (${bibleNow.amended.changes.map((c) => c.field).join(', ')}): re-sign it so build work can go on`] : []),
       ...readDesigns().filter((d) => d.status === 'proposed').map((d) => `${d.id}: approve or change the ${d.kind === 'style' ? 'style sheet' : d.kind} "${d.title}" (Game plan)`),
@@ -313,9 +380,19 @@ export function buildHudState() {
     watch: watchLast ? { at: watchLast.at, findings: (watchLast.findings || []).map((f) => f.msg), pinged: watchLast.pinged } : null,
     scorecard: scorecardCached(queue),
     needs: needs.slice(0, 10),
+    causes: readAccepted(),
     gates,
     playtest: latestPlaytest(),
     router: { providers, failovers, exhausted },
+    // Tokens: the router's real counts plus what launched agents reported at the end of a session.
+    tokens: (() => {
+      const routed = Object.values(providers).reduce((n, p) => n + p.tokensIn + p.tokensOut, 0);
+      const ends = events.filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) > dayAgo && (e.tokensIn || e.tokensOut));
+      const agentsN = ends.reduce((n, e) => n + Number(e.tokensIn || 0) + Number(e.tokensOut || 0), 0);
+      return { routed, agents: agentsN, total: routed + agentsN, tracked: routed + agentsN > 0, why: routed + agentsN > 0 ? null : 'not tracked: agents started outside the launcher and the router report no usage' };
+    })(),
+    // What is being worked on: every task with activity in the last 30 minutes.
+    now: queue.inProgress.map((t) => ({ id: t.id, title: t.title, agents: [...new Set(events.filter((e) => e.task === t.id && Date.parse(e.ts) > now - 30 * 60000).map((e) => e.agent))] })).filter((t, i) => t.agents.length || i === 0),
     divisions: divs,
     lessons: lessons(),
     rtk: rtkGain(),

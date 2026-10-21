@@ -41,7 +41,8 @@ import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR
 import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE, readStop, setStop, clearStop } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
-import { buildHudState, buildAgentDetail } from '../harness/hud.mjs';
+import { buildHudState, buildAgentDetail, setDivision } from '../harness/hud.mjs';
+import { acceptCause } from '../harness/causes.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
@@ -630,6 +631,22 @@ export function createHubServer() {
       res.writeHead(200, { 'content-type': ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
       return res.end(fs.readFileSync(file));
     }
+    if (url.pathname === '/api/causes' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const r = await acceptCause(String(body.cause || ''), { by, why: String(body.why || 'accepted in the War Room').slice(0, 300) });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ...r, next: `Accepted for this run: ${r.tasks.length} forced task(s) stay done${r.closed.length ? `, ${r.closed.join(', ')} closed` : ''}. Later tasks forced for the same reason won't ask again; a different reason will.` } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/divisions' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const r = setDivision(String(body.id || ''), body.on !== false, by);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `${r.division.name} is ${r.division.active ? 'on' : 'off'} (studio/divisions.json).` } : { ok: false, error: r.message });
+    }
     if (url.pathname === '/api/stop' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);
@@ -1054,7 +1071,9 @@ export function startHubCli() {
     console.log('====================================================================');
     console.log(' 3D DEEP-SIM WORKFLOW UI HUB — ZERO-TOKEN MISSION CONTROL WAR ROOM');
     console.log('====================================================================');
-    console.log(` War Room                      : http://localhost:${PORT}/${hubToken() ? '?token=<HUB_TOKEN from .env> (buttons need it)' : ' (read-only: no HUB_TOKEN)'}`);
+    // The token is printed in the link so a person can open it and use the buttons straight away (it
+    // leaves the address bar on load and stays in that tab). It is in .env on this machine anyway.
+    console.log(` War Room                      : http://localhost:${PORT}/${hubToken() ? `?token=${hubToken()}  (open this link: the buttons work in that tab)` : ' (read-only: set HUB_TOKEN in .env to use the buttons)'}`);
     console.log(` Studio view                   : http://localhost:${PORT}/?skin=tycoon`);
     console.log(` Retired War Room (one release): http://localhost:${PORT}/legacy`);
     console.log(` WebSocket Terminal & Stream   : ws://localhost:${PORT}/ws`);

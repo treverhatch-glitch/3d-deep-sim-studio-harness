@@ -45,8 +45,8 @@ export const TOOLS = {
   },
   agy: {
     name: 'Antigravity CLI (replaced Gemini CLI for personal accounts)',
-    line: (f) => `script -qc 'agy -p "$(cat ${f})"' /dev/null`,
-    note: 'Wrapped in script(1): agy 1.1 can print nothing when stdout is not a terminal. Reads AGENTS.md; GEMINI.md wins if both exist.',
+    line: (f) => `agy -p "$(cat ${f})" --print-timeout 900s < /dev/null`,
+    note: 'Needs --print-timeout and stdin closed, or it exits before the work is written (run #1). In a frozen test clone, add --dangerously-skip-permissions (the launcher does with STUDIO_AGY_BYPASS=1). Reads AGENTS.md; GEMINI.md wins if both exist.',
   },
   aider: {
     name: 'Aider (free local dry run with Ollama)',

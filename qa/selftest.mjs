@@ -1052,6 +1052,50 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('with a browser regression, a passing browser play after it, and checked screenshots, those checks pass', /\[x\] Browser regression/.test(after) && /\[x\] Browser play passed with the regression/.test(after) && /\[x\] Screenshots, each with a line/.test(after) && /\[x\] Checked by someone other than the builder/.test(after), after);
 }
 
+// Run #1's art agent notes: forced work grouped by cause and accepted once; agents credited for their own
+// notes; rooms that open for the agents in them; out-of-quota isn't "stalled"; a second game gets its own studio.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const add = (t) => JSON.parse(run(dir, `node harness/task.mjs add "${t}"`, env).stdout).id;
+  const force = (id) => {
+    run(dir, `node harness/task.mjs start ${id} --agent builder-1`, env);
+    return run(dir, `node harness/task.mjs done ${id} --agent builder-1 --force`, env);
+  };
+  const [a, b, c] = [add('Tidy the HUD label'), add('Tidy the menu label'), add('Tidy the end label')];
+  force(a);
+  force(b);
+  const q1 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const checks = q1.split('\n').filter((l) => /Check forced done/.test(l));
+  report('two tasks forced past the same cause share one check task', checks.length === 1 && checks[0].includes(`${a}, ${b}`), checks.join('\n'));
+  report('an agent can\'t accept a cause for the run', run(dir, 'node harness/causes.mjs accept "x" --by prod-1', env).status !== 0);
+  const cause = (run(dir, 'node harness/causes.mjs', env).stdout.match(/accept "([^"]+)"/) || [])[1];
+  const acc = run(dir, `node harness/causes.mjs accept "${cause}" --by hatch --why "known: no git here"`, env);
+  force(c);
+  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  report('accepting a cause closes its check task, and later tasks forced for it don\'t ask again', acc.status === 0 && !/- \[ \][^\n]*Check forced done/.test(q2) && /\[x\][^\n]*Check forced done/.test(q2), acc.stdout + acc.stderr + q2);
+  run(dir, 'node harness/notes.mjs add --kind bad "the agy line exits early"', { ...env, STUDIO_LOCK_OWNER: 'art-1' });
+  report('a note is credited to the agent that wrote it, not the Producer', /· art-1\] the agy line exits early/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')));
+  run(dir, 'node harness/event.mjs --type task.progress --agent audio-1 --msg "menu music"', env);
+  run(dir, 'node harness/event.mjs --type task.paused --agent builder-3 --msg "Handed back: usage limit, resets 06:12"', env);
+  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
+  const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
+  const audio = (hud.agents || []).find((x) => x.name === 'audio-1');
+  const sound = (hud.divisions || []).find((d) => d.id === 'sound');
+  report('an agent named for its work sits in its room, and the room opens for it', audio?.room === 'sound' && sound?.active === true && sound?.autoOn === true, JSON.stringify({ audio, sound }));
+  const b3 = (hud.agents || []).find((x) => x.name === 'builder-3');
+  report('an agent out of quota shows when it resets, and isn\'t listed as stalled', b3?.status === 'out-of-quota' && b3?.quotaUntil === '06:12' && !(hud.signals?.stalled || []).some((x) => /builder-3/.test(x)), JSON.stringify(b3));
+  report('tokens nobody measured say "not tracked" instead of 0', hud.tokens?.tracked === false && /not tracked/.test(hud.tokens?.why || ''), JSON.stringify(hud.tokens));
+  // A second game: its own studio in a sibling folder, never a folder made by hand.
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const second = path.join(tmpRoot, `second-studio-${n}`);
+  const ns = run(dir, `node scripts/new-studio.mjs --name "Moss Garden" --dir "${second}" --from local --no-install`, env);
+  report('npm run new-studio makes a second studio next to this one, with its own War Room port and a fresh board', ns.status === 0 && /HUB_PORT=3848/.test(fs.readFileSync(path.join(second, '.env'), 'utf8')) && /Moss Garden/.test(fs.readFileSync(path.join(second, 'studio/NEXT.md'), 'utf8')) && fs.existsSync(path.join(second, 'START-HERE.md')), ns.stdout + ns.stderr);
+}
+
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
 {
   const http = await import('node:http');

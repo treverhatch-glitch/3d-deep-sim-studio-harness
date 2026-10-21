@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, actor, emitEvent } from './event.mjs';
 
 export const NOTES_FILE = path.join(REPO_ROOT, 'studio', 'harness-notes', 'NOTES.md');
 export const KINDS = { well: 'Worked well', bad: "Didn't work", workaround: 'Workarounds in use', upgrade: 'Upgrade ideas', eval: 'Overseer evaluations' };
@@ -41,7 +41,7 @@ function writeNotes(notes) {
   fs.writeFileSync(NOTES_FILE, `${HEADER}\n${body}`);
 }
 
-export function addNote(kind, text, agent = process.env.STUDIO_PRODUCER_NAME || process.env.STUDIO_LOCK_OWNER || 'producer') {
+export function addNote(kind, text, agent = actor()) {
   if (!KINDS[kind]) throw new Error(`--kind must be one of: ${Object.keys(KINDS).join(', ')}`);
   const t = String(text || '').replace(/\s+/g, ' ').trim();
   if (!t) throw new Error('A note needs text.');

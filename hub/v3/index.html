@@ -244,7 +244,7 @@
   .room.r-production .sign { background: #ffd54f; font-size: 10px; }
   .room .count { position: absolute; z-index: 3; top: 6px; right: 8px; padding: 0 4px; font-size: 18px; background: var(--panel); border: 2px solid var(--frame); }
   .room .count:empty { display: none; }
-  .room .door { position: absolute; z-index: 2; left: 0; bottom: 0; width: 8px; height: 50px; background: #6d4c41; border-right: 2px solid #3e2723; }
+  .room .door { position: absolute; z-index: 2; left: 50%; bottom: 0; width: 46px; height: 8px; transform: translateX(-50%); background: #6d4c41; border-top: 2px solid #3e2723; }
   .room .prop { position: absolute; z-index: 1; line-height: 0; }
   .room svg.art { display: block; }
   .room.locked { filter: grayscale(.9) brightness(.6); }
@@ -334,6 +334,7 @@
   .desk .model:empty { display: none; }
   .desk .bugs { position: absolute; top: -14px; right: -8px; padding: 0 3px; font: 8px/12px "Press Start 2P", monospace; color: #fff; background: #c62828; border: 2px solid #4a0d0d; }
   .desk .bugs:empty { display: none; }
+  .desk.quota::after { content: attr(data-quota); position: absolute; top: -30px; left: -10px; padding: 1px 3px; white-space: nowrap; font: 7px/10px "Press Start 2P", monospace; color: #3b2414; background: #ffd54f; border: 2px solid #3b2414; }
   .person .zz { position: absolute; bottom: 42px; left: 22px; font: 10px "Press Start 2P", monospace; color: #fff; text-shadow: 2px 2px 0 #263238; display: none; }
   .person.asleep .zz { display: block; animation: zz 2s ease-in-out infinite; }
   @keyframes zz { 0% { opacity: 0; transform: translate(0, 4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -12px); } }
@@ -491,10 +492,10 @@
   <div class="top">
     <h1>Your Studio</h1>
     <span class="stat" title="Tasks done in studio/NEXT.md">Shipped <b id="t-done">0</b></span>
-    <span class="stat" title="Open bug tasks (titles starting Bug or Fix)">Bugs <b id="t-bugs">0</b></span>
-    <span class="stat" title="Gates green in the last verify">Fans <b id="t-fans">–</b></span>
+    <span class="stat" title="Open bug tasks (titles starting Bug or Fix)">Open bugs <b id="t-bugs">0</b></span>
+    <span class="stat" id="t-checks-stat" title="Required checks green in the last verify">Checks <b id="t-fans">–</b></span>
     <span class="stat" title="Lessons in studio/memory/failures.md">Research <b id="t-research">0</b></span>
-    <span class="stat" title="Real tokens reported by providers through the router today">Tokens used <b id="t-tokens">0</b></span>
+    <span class="stat" title="Tokens reported today">Tokens used <b id="t-tokens">–</b></span>
     <span class="stat" title="Local time">Day <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
@@ -604,7 +605,7 @@
 
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
-  const setSkin = (s) => { document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
+  const setSkin = (s) => { document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
   setSkin(['tycoon', 'ops', 'plan'].includes(fromUrl) ? fromUrl : store.get('hudSkin') || 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
 
@@ -878,8 +879,8 @@
 
   // ---------- Ops ----------
   function renderOps(s) {
-    const cur = s.queue.inProgress[0];
-    $('o-now').innerHTML = cur ? `Now: <b>${esc(cur.id)}</b> ${esc(short(cur.title, 90))}` : 'Nothing in progress. Pull the next task from the queue.';
+    const nowList = s.now && s.now.length ? s.now : s.queue.inProgress.slice(0, 1).map((t) => ({ id: t.id, title: t.title, agents: [] }));
+    $('o-now').innerHTML = nowList.length ? `Now: ${nowList.slice(0, 4).map((t) => `<b>${esc(t.id)}</b> ${esc(short(t.title, nowList.length > 1 ? 50 : 90))}${t.agents.length ? ` <span style="opacity:.7">(${esc(t.agents.join(', '))})</span>` : ''}`).join(' · ')}${nowList.length > 4 ? ` · +${nowList.length - 4} more` : ''}` : 'Nothing in progress. Pull the next task from the queue.';
     $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done`;
     $('o-progbar').style.width = `${Math.round(s.progress.ratio * 100)}%`;
     if (s.gates?.rows) {
@@ -893,10 +894,10 @@
     $('o-stopmsg').textContent = s.stopped ? `By ${s.stopped.by} at ${hhmm(s.stopped.at)}${s.stopped.reason ? `: ${s.stopped.reason}` : ''}. No task can start; agents hand back what they hold. Resume from Act.` : '';
     $('o-stopbtn').textContent = s.stopped ? 'Resume the studio' : 'Stop all agents';
     $('o-hold').classList.toggle('on', s.needs.length > 0);
-    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task ? ` (<code>${esc(n.task)}</code>)` : ''}</div>`).join('');
+    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task && n.action?.type !== 'accept-cause' ? ` (<code>${esc(n.task)}</code>)` : ''}${n.action ? ` <button type="button" data-need="${esc(n.action.type)}" data-cause="${esc(n.action.cause || '')}">${esc(n.action.label)}</button>` : ''}</div>`).join('');
 
     $('o-agents').innerHTML = s.agents.some((a) => !a.placeholder)
-      ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue" data-agent="${esc(a.name)}" role="button" tabindex="0" title="Show ${esc(a.name)}'s task and checklist"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
+      ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue" data-agent="${esc(a.name)}" role="button" tabindex="0" title="Show ${esc(a.name)}'s task and checklist"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.status === 'out-of-quota' ? `<b>out of quota${a.quotaUntil ? ` until ${esc(a.quotaUntil)}` : ''}</b> · ` : ''}${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
       : '<p class="note">No agent has written an event yet. Agents appear here when they run any harness command.</p>';
     $('o-locks').innerHTML = s.locks.length
       ? s.locks.map((l) => `<div class="lock"><b>${esc(l.owner)}</b> holds <code>${esc(l.key)}</code> until ${esc(hhmm(l.expiresAt))}</div>`).join('')
@@ -1182,8 +1183,8 @@
       html: () => prop('right:10px;top:46px', '<div class="belt"><span class="m">WEB</span><span class="track"><i></i></span><span class="m">PORT</span></div>') + prop('right:16px;bottom:110px', P.gear) },
   };
   const roomHtml = (d) => {
-    const r = ROOMS[d.id] || ROOMS.engineering;
-    return `<div class="room r-${esc(d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Locked: switch on in studio/divisions.json'}">`
+    const r = ROOMS[d.baseId || d.id] || ROOMS.engineering;
+    return `<div class="room r-${esc(d.baseId || d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Locked: click to switch this division on (it also opens by itself when one of its agents starts work)'}" data-division="${esc(d.baseId || d.id)}">`
       + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span></div>`;
   };
 
@@ -1197,17 +1198,40 @@
   let roomSig = '';
   const geo = (id) => {
     const el = document.getElementById(`room-${id}`);
-    return el ? { el, left: el.offsetLeft, top: el.offsetTop, w: el.offsetWidth, x: el.offsetLeft + 4, y: el.offsetTop + el.offsetHeight - 4 } : null;
+    return el ? { el, left: el.offsetLeft, top: el.offsetTop, w: el.offsetWidth, bottom: el.offsetTop + el.offsetHeight, x: el.offsetLeft + 4, y: el.offsetTop + el.offsetHeight - 4 } : null;
   };
+  // A room holds five desks. One more agent and an annex opens next to it ("Engineering 2"), so no
+  // room gets crowded; the annex closes again when the work is done.
+  const CAP = 5;
+  function roomList(s) {
+    const out = [];
+    for (const d of s.divisions) {
+      const n = d.active ? Math.max(1, Math.ceil(s.agents.filter((a) => a.room === d.id).length / CAP)) : 1;
+      for (let k = 0; k < n; k++) out.push(k === 0 ? { ...d, baseId: d.id, k } : { ...d, id: `${d.id}-annex-${k + 1}`, baseId: d.id, name: `${d.name} ${k + 1}`, k });
+    }
+    return out;
+  }
+  // Doors are in the middle of each room's bottom wall: staff step out into the hallway between rows.
+  const doorIn = (g) => ({ x: Math.round(g.left + g.w / 2), y: g.y - 10 });
+  const doorOut = (g) => ({ x: Math.round(g.left + g.w / 2), y: g.bottom + GAP / 2 });
+  // The corridor between columns nearest the middle of the floor: the main way up and down.
+  function spineX() {
+    const lefts = [...new Set([...office.querySelectorAll('.room')].map((el) => el.offsetLeft))].sort((a, b) => a - b);
+    const mid = office.clientWidth / 2;
+    const gaps = lefts.slice(1).map((x) => x - GAP / 2);
+    if (!gaps.length) return (lefts[0] || 24) - GAP / 2 - 2;
+    return gaps.reduce((best, x) => (Math.abs(x - mid) < Math.abs(best - mid) ? x : best));
+  }
   // Feet position of desk i in a room. The Producer's big desk takes slot 0 and pushes the rest right.
   const slotPt = (g, i, roomId) => {
     const big = roomId === 'production';
     return { x: g.x + 18 + (i % 3) * 74 + (big && i % 3 ? 44 : 0), y: g.y - 46 - Math.floor(i / 3) * 88 };
   };
-  const home = (p) => { const g = geo(p.room); return g ? slotPt(g, p.i, p.room) : { x: p.x, y: p.y }; };
+  const home = (p) => { const g = geo(p.room); return g ? slotPt(g, p.i, String(p.room).replace(/-annex-\d+$/, '')) : { x: p.x, y: p.y }; };
 
   function buildRooms(s) {
-    const sig = s.divisions.map((d) => `${d.id}:${d.active}`).join('|');
+    const rooms = roomList(s);
+    const sig = rooms.map((d) => `${d.id}:${d.active}`).join('|');
     if (sig === roomSig) return;
     roomSig = sig;
     people.forEach((p) => p.el.remove());
@@ -1215,7 +1239,7 @@
     desks.forEach((d) => d.remove());
     desks.clear();
     office.querySelectorAll('.room').forEach((r) => r.remove());
-    crowd.insertAdjacentHTML('beforebegin', s.divisions.map(roomHtml).join(''));
+    crowd.insertAdjacentHTML('beforebegin', rooms.map(roomHtml).join(''));
   }
 
   function place(p, x, y) {
@@ -1254,23 +1278,21 @@
     next();
   }
 
-  // Leave by the door, take the hallway to the other room's door, walk in.
+  // Leave by the door into the hallway below the room, walk along it, up or down the middle corridor
+  // if the other room is on another row, and in through its door. Nobody hugs the edge of the screen.
   function route(fromId, toId, to) {
     const a = geo(fromId);
     const b = geo(toId);
     if (!a || !b || a.el === b.el) return [to];
-    const lane = (g) => g.left - GAP / 2 - 16;
-    const doorY = (g) => g.y - 10;
-    const hallY = b.top - GAP / 2 + 6;
-    return [
-      { x: a.x + 2, y: doorY(a) },
-      { x: lane(a), y: doorY(a) },
-      { x: lane(a), y: hallY },
-      { x: lane(b), y: hallY },
-      { x: lane(b), y: doorY(b) },
-      { x: b.x + 2, y: doorY(b) },
-      to,
-    ];
+    const outA = doorOut(a);
+    const outB = doorOut(b);
+    const path = [doorIn(a), outA];
+    if (Math.abs(outA.y - outB.y) > 2) {
+      const x = spineX();
+      path.push({ x, y: outA.y }, { x, y: outB.y });
+    }
+    path.push(outB, doorIn(b), to);
+    return path;
   }
 
   function applyStatus(p) {
@@ -1381,23 +1403,25 @@
   function placeDesk(a, roomId, i) {
     const g = geo(roomId);
     if (!g) return;
-    const pt = slotPt(g, i, roomId);
+    const base = roomId.replace(/-annex-\d+$/, '');
+    const pt = slotPt(g, i, base);
     let el = desks.get(a.name);
     if (!el || el.dataset.room !== roomId) {
       if (el) el.remove();
       el = document.createElement('span');
       el.dataset.room = roomId;
       el.dataset.agent = a.name;
-      const big = roomId === 'production' && i === 0;
+      const big = base === 'production' && i === 0;
       el.className = `desk${big ? ' big' : ''}`;
-      el.innerHTML = `<span class="equip">${EQUIP[roomId] || EQUIP.engineering}</span><span class="tag"></span><span class="model"></span><span class="bugs" title="Confirmed bugs by this model"></span>`;
+      el.innerHTML = `<span class="equip">${EQUIP[base] || EQUIP.engineering}</span><span class="tag"></span><span class="model"></span><span class="bugs" title="Bugs traced to work this agent finished"></span>`;
       crowd.appendChild(el);
       desks.set(a.name, el);
     }
     el.querySelector('.tag').textContent = a.kind === 'script' ? 'watch (script)' : a.kind === 'human' ? `${a.name} (you)` : a.name;
-    const score = (state?.scorecard || []).find((m) => m.model === a.model);
-    const nBugs = score ? score.bugs + (score.traced || 0) : 0;
-    el.querySelector('.bugs').textContent = nBugs ? `${nBugs} BUG${nBugs > 1 ? 'S' : ''}` : '';
+    const nBugs = a.caused || 0;
+    el.querySelector('.bugs').textContent = nBugs ? `CAUSED ${nBugs}` : '';
+    el.classList.toggle('quota', a.status === 'out-of-quota');
+    el.dataset.quota = a.status === 'out-of-quota' ? `OUT OF QUOTA${a.quotaUntil ? ` TILL ${a.quotaUntil}` : ''}` : '';
     el.querySelector('.model').textContent = a.model ? String(a.model).replace(/^(models\/|accounts\/[^/]+\/models\/)/, '') : '';
     el.title = `${a.name}${a.model ? ` on ${a.model}` : ''}: ${a.lastMsg || 'no activity yet'}`;
     el.classList.toggle('on', a.status === 'working');
@@ -1444,9 +1468,16 @@
   function renderTycoon(s) {
     $('t-done').textContent = s.progress.done;
     $('t-bugs').textContent = [...s.queue.inProgress, ...s.queue.backlog].filter((t) => /^(bug|fix)\b/i.test(t.title)).length;
-    if (s.gates?.rows) { const req = s.gates.rows.filter((r) => r.required); $('t-fans').textContent = `${req.filter((r) => r.ok).length}/${req.length}`; }
+    if (s.gates?.rows) {
+      const req = s.gates.rows.filter((r) => r.required);
+      const red = req.filter((r) => !r.ok).map((r) => r.id);
+      $('t-fans').textContent = `${req.length - red.length}/${req.length}${red.length ? ` · ${red[0]} ✗` : ''}`;
+      $('t-checks-stat').title = red.length ? `Red: ${red.join(', ')} (npm run verify -- --only ${red[0]})` : 'Every required check was green in the last verify';
+    } else $('t-fans').textContent = 'not run yet';
     $('t-research').textContent = s.lessons;
-    $('t-tokens').textContent = Object.values(s.router.providers).reduce((a, v) => a + v.tokensIn + v.tokensOut, 0).toLocaleString();
+    const tk = s.tokens || { tracked: false };
+    $('t-tokens').textContent = tk.tracked ? tk.total.toLocaleString() : 'not tracked';
+    $('t-tokens').parentElement.title = tk.tracked ? `Today: ${tk.routed.toLocaleString()} through the router, ${tk.agents.toLocaleString()} reported by agents the launcher started` : tk.why;
     $('t-clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const pct = Math.round(s.progress.ratio * 100);
     $('t-buildbar').style.width = `${pct}%`;
@@ -1456,10 +1487,10 @@
     buildRooms(s);
     renderWidgets(s);
     const present = new Set();
-    for (const d of s.divisions) {
+    for (const d of roomList(s)) {
       const g = geo(d.id);
       if (!g) continue;
-      const staff = s.agents.filter((a) => a.room === d.id).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name)));
+      const staff = s.agents.filter((a) => a.room === d.baseId).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
       g.el.querySelector('.count').textContent = staff.length && !staff.every((a) => a.placeholder) ? `${staff.length} staff` : '';
       g.el.classList.toggle('busy', staff.some((a) => a.status === 'working'));
       staff.forEach((a, i) => {
@@ -1468,7 +1499,8 @@
         let p = people.get(a.name);
         if (!p) {
           // New hire: walks in from the hallway through the door.
-          p = { name: a.name, el: newPerson(a, d.id), room: d.id, at: d.id, i, x: g.left - GAP / 2 - 16, y: g.y - 10 };
+          const out = doorOut(g);
+          p = { name: a.name, el: newPerson(a, d.baseId), room: d.id, at: d.id, i, x: out.x, y: out.y };
           p.el.style.transition = 'none';
           place(p, p.x, p.y);
           void p.el.offsetWidth;
@@ -1476,20 +1508,20 @@
           p.status = a.status;
           p.kind = a.kind || 'agent';
           p.work = a.work || null;
-          walkPath(p, [{ x: g.x + 2, y: g.y - 10 }, slotPt(g, i, d.id)]);
+          walkPath(p, [doorIn(g), slotPt(g, i, d.baseId)]);
         } else if (p.room !== d.id) {
           // Moved to another division: walk over, and change into that division's outfit on arrival.
           const from = p.room;
           p.room = d.id;
           p.i = i;
           p.status = a.status;
-          if (!p.visiting && !p.meeting) walkPath(p, route(from, d.id, slotPt(g, i, d.id)), () => { p.at = d.id; const old = p.el; p.el = newPerson(a, d.id); p.el.style.transition = 'none'; place(p, p.x, p.y); old.remove(); applyStatus(p); });
+          if (!p.visiting && !p.meeting) walkPath(p, route(from, d.id, slotPt(g, i, d.baseId)), () => { p.at = d.id; const old = p.el; p.el = newPerson(a, d.baseId); p.el.style.transition = 'none'; place(p, p.x, p.y); old.remove(); applyStatus(p); });
         } else {
           p.status = a.status;
           p.kind = a.kind || 'agent';
           p.work = a.work || null;
           p.i = i;
-          const h = slotPt(g, i, d.id);
+          const h = slotPt(g, i, d.baseId);
           if (!p.walking && !p.visiting && !p.meeting && (Math.abs(p.x - h.x) > 1 || Math.abs(p.y - h.y) > 1)) walkPath(p, [h]);
           applyStatus(p);
         }
@@ -1503,7 +1535,7 @@
       people.delete(name);
       desks.get(name)?.remove();
       desks.delete(name);
-      if (g) walkPath(p, [{ x: g.x + 2, y: g.y - 10 }, { x: g.left - GAP / 2 - 16, y: g.y - 10 }], () => p.el.remove());
+      if (g) walkPath(p, [doorIn(g), doorOut(g)], () => p.el.remove());
       else p.el.remove();
     }
     syncMeeting(s.meeting);
@@ -1692,7 +1724,7 @@
     }
   });
   document.addEventListener('click', async (ev) => {
-    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse],[data-art],[data-brief]');
+    const t = ev.target.closest('[data-speed],[data-stopagent],[data-mode],[data-ask],[data-reverse],[data-art],[data-brief],[data-need],.room.locked');
     if (!t) return;
     const say = (msg) => { notify(msg); if ($('p-modemsg') && document.body.dataset.skin === 'plan') $('p-modemsg').textContent = msg; };
     try {
@@ -1709,6 +1741,15 @@
       } else if (t.dataset.ask) {
         const r = await post('/api/asks', { id: t.dataset.ask, answer: t.dataset.answer, by: actor() });
         say(r.next || `${t.dataset.ask} answered: ${t.dataset.answer}.`);
+      } else if (t.dataset.need === 'accept-cause') {
+        const r = await post('/api/causes', { cause: t.dataset.cause, by: actor() });
+        say(r.next);
+      } else if (t.dataset.need === 'start-producer') {
+        const r = await post('/api/agents', { role: 'producer', agent: 'producer-1', by: actor() });
+        say(`Started ${r.agent} (${r.tool}, ${r.model}).`);
+      } else if (t.classList.contains('room') && t.dataset.division) {
+        const r = await post('/api/divisions', { id: t.dataset.division, on: true, by: actor() });
+        say(r.next);
       } else if (t.dataset.art) {
         const note = ($('p-designs').querySelector(`input[data-note="${t.dataset.id}"]`) || {}).value || '';
         if (t.dataset.art === 'changes' && !note.trim()) { $('p-artmsg').textContent = 'Write what to change in the box first.'; return; }

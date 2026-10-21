@@ -40,6 +40,13 @@ export const STUDIO_STATE_DIR = path.join(REPO_ROOT, '.studio');
   }
   for (const [k, v] of Object.entries(found)) if (process.env[k] === undefined) process.env[k] = v;
 })();
+/**
+ * Who is acting, for attribution: an explicit name, then STUDIO_AGENT, then STUDIO_LOCK_OWNER (set by
+ * the launcher and kickoff), then the Producer's name. An agent's notes and tasks are its own, never
+ * credited to the Producer because STUDIO_PRODUCER_NAME happens to be set in .env.
+ */
+export const actor = (explicit = null) => explicit || process.env.STUDIO_AGENT || process.env.STUDIO_LOCK_OWNER || process.env.STUDIO_PRODUCER_NAME || 'producer';
+
 export const DEFAULT_EVENTS_FILE = path.join(STUDIO_STATE_DIR, 'events.jsonl');
 
 export function getEventPaths() {

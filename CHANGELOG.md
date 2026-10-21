@@ -4,6 +4,26 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.19.0] — 2026-10-21
+From the art agent's notes on run #1, and the owner's notes on the Studio view.
+### Added
+- **Forced work grouped by cause** (`npm run causes`): a task forced past the same failing check joins the open check task instead of adding another, the War Room shows one "Needs you" card per cause with **Accept for this run**, and an accepted cause stops asking. A different cause still raises a new card. Cards are ranked: money, licences, publishing and deleting first, then what breaks play, then housekeeping.
+- **"The studio is idle"** in Needs you when tasks wait, nothing runs and nobody has been heard from for an hour, with a button to start the Producer.
+- **`npm run new-studio -- --name "<game>"`**: a second game gets its own studio next to this one (cloned harness, copied .env with its own War Room port, setup, preflight, a fresh board, START-HERE.md). AGENTS.md now says: one game per studio, never a game started in a folder by hand.
+- **Annex rooms** in the Studio view: a room holds five desks; the sixth agent opens "Engineering 2" next to it.
+### Changed
+- **Walking in the Studio view**: doors are in the middle of each room's bottom wall, and staff walk along the hallways between rows and the corridor nearest the middle, instead of along the edge of the screen.
+- **Attribution**: notes and added tasks are credited to the acting agent (STUDIO_AGENT or STUDIO_LOCK_OWNER) before the Producer's name.
+- **Every agent gets a desk in the right room**: names that say the work ("audio-1", "concept-artist", "mesh-bot") find their division, and a division opens by itself (★) when one of its agents is at work. A locked room can be switched on with a click.
+- **Honest labels**: desk badges show bugs traced to that agent's own work ("CAUSED 2"), not its model's record; "Fans" is "Checks 16/17 · selftest ✗"; "Bugs" is "Open bugs"; tokens add what launched agents reported and say "not tracked" instead of 0.
+- **Out of quota** is shown on the agent's desk with its reset time ("OUT OF QUOTA TILL 06:12") and no longer counts as stalled.
+- Ops "Now" lists every task with activity in the last 30 minutes, and who is on it.
+- `npm run hub` prints the War Room link with the token in it, so the buttons work straight away on this machine.
+- agy is started with `--print-timeout 900s` and a closed stdin (it exited early before); `STUDIO_AGY_BYPASS=1` skips its prompts in a frozen test clone.
+- Hidden views are inert, so scripted and assistive-technology clicks reach only the visible view.
+
+---
+
 ## [2.18.0] — 2026-10-21
 ### Added
 - **The browser play gate** (`npm run play:browser`, required gate `browser-play`, docs/BROWSER-PLAY.md): opens the game's browser build in Chromium and plays start-to-win with real key presses and clicks chosen by the scenario's policy, reading `window.__sim` and `window.__view()` in the same instant every step. Fails on script errors, a blank canvas, a frozen clock, a screen that disagrees with the sim, the camera inside geometry, or no win. Saves start, middle and end screenshots. Metal on macOS, a pointer-lock stand-in headless. A real game without a browser to play it in fails; only the template skips. Also runs in CI.

@@ -6,6 +6,17 @@ Every coding agent **MUST** follow these operating rules.
 
 ---
 
+## 0. One game per studio: starting a game
+
+- This clone is one studio for one game. Its Game Bible, board, locks and War Room belong to that game.
+- Asked to start a **new** game? Don't make a folder by hand or build it outside the harness. In an
+  empty clone, run `npm run studio:reset -- --name "<game>" --yes`, then `npm run intake`.
+- Asked to start **another** game next to this one? Run `npm run new-studio -- --name "<game>"`. It
+  makes a second studio in a sibling folder (its own .env and War Room port). Then work there, from
+  its START-HERE.md.
+- Assets, art and code made outside the harness still come in through it: `npm run art -- propose`
+  or `npm run asset`. Nothing goes into the game unrecorded.
+
 ## 1. Thin-Context First: Read Order on Session Start
 
 Do **NOT** scan the entire repository. Load state in this order:

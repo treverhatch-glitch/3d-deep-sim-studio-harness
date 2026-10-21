@@ -51,11 +51,13 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
       const bypass = process.env.STUDIO_CODEX_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       return { argv: ['codex', 'exec', '--json', ...(bypass ? ['--dangerously-bypass-approvals-and-sandbox'] : ['--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']), ...(m ? ['-m', m] : []), '-'], stdin: prompt };
     }
-    case 'agy':
-      // agy prints nothing without a terminal: macOS script(1) is BSD (-q file cmd…), Linux is util-linux (-qc 'cmd').
-      if (IS.win) return { argv: ['agy', '-p', prompt] };
-      if (IS.mac) return { argv: ['script', '-q', '/dev/null', 'agy', '-p', prompt] };
-      return { argv: ['script', '-qc', `agy -p "$(cat '${file}')"`, '/dev/null'] };
+    case 'agy': {
+      // From run #1: agy exits with "I'll report back" before it finishes unless it has a print timeout
+      // and stdin is closed; no script(1) wrapper needed. In a frozen test clone it may skip its own
+      // permission prompts (STUDIO_AGY_BYPASS=1), since nobody is there to answer them.
+      const bypass = process.env.STUDIO_AGY_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
+      return { argv: ['agy', '-p', prompt, '--print-timeout', '900s', ...(bypass ? ['--dangerously-skip-permissions'] : [])] };
+    }
     case 'cursor':
       return { argv: ['agent', '-p', '--force', '--output-format', 'text', prompt] };
     case 'grok':

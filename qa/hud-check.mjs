@@ -170,6 +170,7 @@ try {
   await wait(2000);
   const office = await page.locator('#t-office').innerText();
   check('the Studio view seats the Producer and the person in the Producer\'s office', /prod-1/.test(office) && /hatch/.test(office));
+  check('unmeasured numbers say so instead of showing 0, and Checks names a red check', /not tracked/.test(await page.locator('#t-tokens').innerText()) && !/Fans/.test(await page.locator('#tycoon .top').innerText()), await page.locator('#tycoon .top').innerText());
   await page.click('#tycoon .switch[data-to="plan"]');
   await wait(2500);
   const plan = await page.locator('#plan').innerText();

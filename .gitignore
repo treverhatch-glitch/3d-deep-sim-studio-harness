@@ -49,3 +49,6 @@ studio/memory/LEARNED.md
 
 # The reference library's media (npm run ref); the index in studio/references/ is kept
 /references/
+
+# Written by npm run new-studio in a new studio's folder
+/START-HERE.md

@@ -6,11 +6,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
 import { checkDone, taskType } from './done-check.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
+import { causeOf, isAccepted } from './cause-store.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -273,6 +274,20 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     });
     // A person already accepted it with a reason: logged, no follow-up task (the run report lists it).
     if (acceptedBy && reason) return { ...target, forced: true, check, followUp: null, acceptedBy };
+    // A person accepted this cause for the run: logged, no new card (harness/causes.mjs).
+    const cause = causeOf(check.missing[0]);
+    if (isAccepted(cause)) return { ...target, forced: true, check, followUp: null, acceptedCause: cause };
+    // The same cause already has an open check task: this task joins it instead of adding another.
+    const open = [...q.inProgress, ...q.backlog].find((t) => /^Check forced done /.test(t.title) && causeOf(t.title.replace(/^[^:]*\): /, '')) === cause);
+    if (open) {
+      const q2 = parseNextQueue();
+      const same = [...q2.inProgress, ...q2.backlog].find((t) => t.id === open.id);
+      const m = same.title.match(/^Check forced done (.+?) \(([^)]+)\): (.+)$/);
+      const ids = m[1].split(/,\s*/);
+      if (!ids.includes(target.id)) same.title = `Check forced done ${[...ids, target.id].join(', ')} (${m[2]}): ${m[3]}`;
+      writeNextQueue(q2);
+      return { ...target, forced: true, check, followUp: open.id, joined: true };
+    }
     const followUp = addTask({ title: `Check forced done ${target.id} (${check.type}): ${check.missing[0]}`, role: 'producer', priority: 'P1' });
     return { ...target, forced: true, check, followUp: followUp.id };
   }
@@ -571,7 +586,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       title: `${prefix}${title}`,
       role: flags.role || 'builder',
       priority: flags.priority || 'P1',
-      agent: typeof flags.agent === 'string' ? flags.agent : PRODUCER_NAME(),
+      agent: typeof flags.agent === 'string' ? flags.agent : actor(),
       meta: {
         ...(size ? { size } : {}),
         ...(causedBy ? { causedBy } : {}),

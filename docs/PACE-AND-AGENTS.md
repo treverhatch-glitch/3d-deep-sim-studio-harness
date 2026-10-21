@@ -35,8 +35,8 @@ command for tools the launcher doesn't know (Hermes, a script); `{kickoff}`, `{a
 The launcher:
 - refuses to start past the pace's caps, while the studio is stopped, or when the daily token cap is spent;
 - passes the kickoff on stdin or as one argument, so the same command works on Windows, macOS and Linux
-  (macOS uses BSD `script` for agy; Codex can run without its sandbox in a frozen clone with
-  `STUDIO_CODEX_BYPASS=1`);
+  (agy gets `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its
+  sandbox with `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
 - sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops;
 - when an agent dies (exit code, usage limit, 429, auth), hands its task back with a note, saves its
   uncommitted work under its claims to `.studio/wip/<task>-<agent>.patch`, frees its claims, and with
