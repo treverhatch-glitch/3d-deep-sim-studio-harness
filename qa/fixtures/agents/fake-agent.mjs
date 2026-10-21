@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // A stand-in agent for the self-test: takes a task, edits a file, then finishes, dies, or waits.
-//   node qa/fixtures/agents/fake-agent.mjs <agent> <task> ok|quota|wait|chatty
+//   node qa/fixtures/agents/fake-agent.mjs <agent> <task> ok|quota|wait|chatty|agyquota|quit
 // chatty: a normal session whose output mentions rate limits and quota (run #1's false "out of quota").
+// agyquota: a session that ran agy itself, whose 429 is the last thing in the log (test #2).
+// quit: a session that ends without task done or a hand-back (test #2: its claims sat for an hour).
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const [agent, task, how] = process.argv.slice(2);
@@ -19,6 +21,12 @@ if (how === 'quota') {
   console.error("You've hit your usage limit. Try again at 6:12 AM.");
   process.exit(1);
 }
+if (how === 'agyquota') {
+  console.log('error: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 80h54m54s.');
+  console.log('AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 80h54m54s.","error_code":429}');
+  process.exit(1);
+}
+if (how === 'quit') process.exit(0);
 if (how === 'wait') {
   setTimeout(() => process.exit(0), 60000);
 } else {

@@ -33,7 +33,11 @@ for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WA
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), cartridge: active.name, rows }, null, 2));
+  const rec = JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), cartridge: active.name, rows }, null, 2);
+  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), rec);
+  // A full run is kept apart, so one agent's --only run never wipes the full verify another agent's
+  // done-check needs (test #2).
+  if (!only) fs.writeFileSync(path.join(root, '.studio', 'gates-last-full.json'), rec);
 } catch {
   // read-only checkout: the board just shows "not run"
 }

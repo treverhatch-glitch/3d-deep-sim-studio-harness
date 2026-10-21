@@ -4,6 +4,46 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.26.0] — 2026-10-21
+From Jed's test #2 (Next Floor on 2.24.1 and 2.25.0, its FIXES/01–05 and about twenty harness notes) and the token numbers from run #1 (580M cached reads against 3.7M written: the cost is re-reading context).
+### Fixed
+- **One launcher (FIX 02).** The watcher's auto-start did its own thing beside the supervisor, ignored lanes and named agents by count: four builders landed in one folder in 15 minutes.
+  - While the supervisor runs, the watcher starts nothing.
+  - Otherwise it uses the supervisor's own picker (lanes, holds, task claims, caps, quota) with `-auto-` names from the name list.
+  - An agent is never started on a task another one holds.
+- **Quota marks (FIX 04).**
+  - A limit error that names another tool (agy's `AGY_ERROR … 429` printed by a command a Claude session ran) marks that tool, never the session's.
+  - Resets are read from the provider's words: "Resets in 80h54m54s", "in 3 days", "in 45 minutes", ISO times. "80h54m" used to read as one hour.
+  - Every mark keeps the provider's own line, and `npm run budget` quotes it with the reset date and the last 5 hours apart from the week.
+  - `npm run budget -- probe [tool]` asks the tool with one tiny call and clears a wrong mark; the supervisor probes a mark older than 10 minutes by itself (STUDIO_QUOTA_PROBE=off). `budget -- clear <tool>` by hand.
+  - Preflight clears marks written before 2.26 or quoting another tool's error.
+- **The selftest reads only the template (FIX 03, FIX 05).**
+  - A studio counts as building a game when `studio/game.json` exists, `STUDIO_CARTRIDGE` names another cartridge, or `cartridges/` has a folder the release doesn't. Next Floor picked its game in `.env` and got 8 FAILs.
+  - Preflight writes `studio/game.json` when it's missing.
+  - The copy skips everything git ignores (`references/`, `hub/node_modules`, generated models), so it matches CI and is quicker.
+- **browser-play when the bot can lose (FIX 01).** A loss with the screen matching the sim at every check passes with a note; `browser.mustWin: true` makes it fail. Every input is saved with its tick (`qa/reports/<run>-inputs.json`, or the sim's own log from `window.__sim.getActions()`), replayable with `replay --trace`. `input` may return `{ move: [x, y] }` to look without clicking.
+- **A session that ends without `task done` hands its task back at once,** with what it last said, its work in progress and a patch. Claims used to sit until they expired (up to an hour). The watcher does the same for ended sessions instead of calling them "silent".
+- **A task handed back three times in two hours is parked** with its last note, and the Producer is told. T-110 went to 12 sessions in a row, each refused the same command. `STUDIO_LOOP_HANDBACKS` sets the count.
+- **Anyone may hand back a task whose agent has ended**; only a running holder's task is owner-only.
+- **The watcher:** a held task is reported as held, not "waiting for an agent"; an outage needs two failed calls and never pages again after the Producer closed it; a Watch task whose findings cleared closes itself.
+- **A partial verify (`--only`) never replaces the full one** a done-check reads (`.studio/gates-last-full.json`).
+- **The docs check skips free text** people and agents write (the Producer's log and inbox, the pitfall list).
+- **The supervisor's halt names the program** (`no-such-agent-tool wasn't found`), not "custom".
+- **Game tools go in `game/<game>/tools/`:** the kickoff and the art and asset-3d roles say so, and preflight names any new file in a harness folder. Agents had written six game tools into the harness's `tools/`, and the frozen-harness hook refused the game's commit.
+### Added
+- **Cheaper to read:**
+  - `npm run map`: `.studio/MAP.md`, every code file in one line (what it is, its exports, its lane, who holds it); agents read it before searching, and the launcher refreshes it when code changed.
+  - `npm run pitfall`: `studio/PITFALLS.md`, one-line rules every agent's prompt carries; a "didn't work" note that reads as a rule is added too. The newest 40 are kept.
+  - Prompts say never to read CHANGELOG.md, and hand-back notes are cut to 20 lines (done, not done, files, next step, proof).
+- **Real token counts:** from the tool's final report (Claude's `result`, Codex's `turn.completed`), with cache reads kept apart, on every session-end event.
+- **Readable sessions:** claude runs with `--output-format stream-json --verbose`, so the log keeps every message and tool call; `npm run agent -- logs <name>` shows it as a conversation (`--raw` for the lines).
+- **Owed reviews:** when no reviewer of another family answers (all out of quota), the review is owed (`studio/reviews/OWED.json`) and the watcher tries again when the reviewer resets; a reviewer that says it hit its limit is marked.
+- **Relayed verdicts:** `npm run verdict -- yes --by jed --quote "…" --source "…" --relayed-by art-1`. From inside an agent session a verdict must be a relay; it's marked as relayed and the person is told.
+- `npm run balance -- --cartridge <game> --knob <key> --values a,b,c` sweeps your game without a config file.
+- Self-test: 27 more checks (`2.26` block and two browser-play checks).
+
+---
+
 ## [2.25.0] — 2026-10-21
 Make "good" a gate, not a guess. Both test runs went green on every check while the person playing found the game wrong; this batch puts the person's verdict where a phase closes, and gives every game an identity.
 ### Added

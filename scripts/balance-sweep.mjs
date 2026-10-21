@@ -3,6 +3,7 @@
  * scripts/balance-sweep.mjs — sweep one TUNING knob of a cartridge across seeds and score it.
  *
  *   node scripts/balance-sweep.mjs [--config studio/balance/sweep.json] [--write]
+ *   npm run balance -- --cartridge <game> --knob <TUNING key> --values 0.8,1,1.2 [--seeds 1,2,3,4]
  *
  * Config: { cartridge, scenario, knob, values, seeds, target: { winRate: [lo, hi], medianTick: [lo, hi] } }
  * The knob must exist in the cartridge's exported TUNING table. Each value is played as the scenario's
@@ -23,6 +24,20 @@ if (!fs.existsSync(cfgPath)) {
   process.exit(1);
 }
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+// Sweep your own game without writing a config (test #2: the sweep only ever ran example-sim):
+// --cartridge next-floor --knob ghostSpeed --values 0.8,1,1.2 [--seeds 1,2,3,4] [--scenario start-to-win]
+const opt = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+const nums = (v) => String(v).split(',').map(Number).filter((x) => Number.isFinite(x));
+if (opt('cartridge')) cfg.cartridge = opt('cartridge');
+if (opt('knob')) cfg.knob = opt('knob');
+if (opt('values')) cfg.values = nums(opt('values'));
+if (opt('seeds')) cfg.seeds = nums(opt('seeds'));
+if (opt('scenario')) cfg.scenario = opt('scenario');
+{
+  const { activeCartridge } = await import('../harness/cartridge.mjs');
+  const active = activeCartridge().name;
+  if (active && active !== cfg.cartridge && !opt('cartridge')) console.log(`[balance] note: this sweep is for ${cfg.cartridge}; your game is ${active}. Sweep it with: npm run balance -- --cartridge ${active} --knob <a TUNING key> --values a,b,c`);
+}
 const cart = await loadCartridge(cfg.cartridge);
 const { knob, scenario = 'start-to-win', seeds = [1, 2, 3, 4], target = {} } = cfg;
 if (!cart.hasTuning || !(knob in cart.tuning)) {

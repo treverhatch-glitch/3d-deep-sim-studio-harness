@@ -115,6 +115,43 @@ export function reviewerTools(builder, env = process.env) {
     return bfam === 'unknown' || (fam !== bfam && TOOL_FAMILY[tool] !== bfam);
   });
 }
+/**
+ * Reviews that couldn't happen because every reviewer of another family was out (test #2: Codex and agy
+ * were both out all afternoon, and reviews just stopped). Kept in studio/reviews/OWED.json with when to
+ * try again; the watcher retries each one once that time has passed.
+ */
+export const OWED = path.join(REPO_ROOT, 'studio', 'reviews', 'OWED.json');
+export function readOwed() {
+  try {
+    return JSON.parse(fs.readFileSync(OWED, 'utf8')).owed || [];
+  } catch {
+    return [];
+  }
+}
+function writeOwed(list) {
+  fs.mkdirSync(path.dirname(OWED), { recursive: true });
+  fs.writeFileSync(OWED, `${JSON.stringify({ owed: list }, null, 2)}\n`);
+}
+export async function oweReview(taskId, why, builder) {
+  const { exhaustedUntil } = await import('./budget.mjs');
+  const resets = reviewerTools(builder).map(({ tool }) => exhaustedUntil(tool)).filter(Boolean).sort();
+  const nextTry = resets[0] || new Date(Date.now() + 3600000).toISOString();
+  const list = readOwed().filter((o) => o.task !== taskId);
+  list.push({ task: taskId, at: new Date().toISOString(), why: String(why).slice(0, 300), nextTry });
+  writeOwed(list);
+  emitEvent({ type: 'review.owed', agent: 'reviewer', to: 'producer', task: taskId, msg: `${taskId}: no reviewer of another family answered; the review is owed and will be tried again at ${nextTry.slice(11, 16)} UTC` });
+  return nextTry;
+}
+export function settleOwed(taskId) {
+  const list = readOwed();
+  if (list.some((o) => o.task === taskId)) writeOwed(list.filter((o) => o.task !== taskId));
+}
+/** Owed reviews whose retry time has passed (the watcher starts them). */
+export const dueOwed = (now = Date.now()) => readOwed().filter((o) => Date.parse(o.nextTry) <= now && !(o.tries >= 3));
+export function markTried(taskId) {
+  writeOwed(readOwed().map((o) => (o.task === taskId ? { ...o, tries: (o.tries || 0) + 1, nextTry: new Date(Date.now() + 3600000).toISOString() } : o)));
+}
+
 export async function cliReview(g, messages, { run = spawnSync } = {}) {
   const { exhaustedUntil } = await import('./budget.mjs');
   const text = messages.map((m) => `${m.role === 'system' ? 'Instructions' : 'Review this'}:\n${m.content}`).join('\n\n');
@@ -137,6 +174,12 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     const r = run(argv[0], argv.slice(1), { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex'].includes(tool) ? text : undefined, timeout: 15 * 60000, shell: process.platform === 'win32', maxBuffer: 32 * 1024 * 1024 });
     const out = String(r.stdout || '').trim();
     if (r.status === 0 && out) return { ok: true, model: model || TOOL_MODEL_NAME[tool], content: out, tool };
+    // A reviewer that says it hit its limit is marked out until it resets, so the owed review knows when to retry.
+    const said = `${r.stdout || ''}\n${r.stderr || ''}`.split('\n').reverse().find((l) => /usage limit|hit your limit|quota|\b429\b|rate limit/i.test(l));
+    if (said && run === spawnSync) {
+      const { markExhausted } = await import('./budget.mjs');
+      markExhausted(tool, said);
+    }
     tried.push(`${tool}: exit ${r.status}${r.stderr ? ` (${String(r.stderr).trim().split('\n').pop().slice(0, 120)})` : ''}`);
   }
   return { ok: false, error: tried.length ? tried.join('; ') : `no reviewer tool of another family than ${modelFamily(g.builder)} (set STUDIO_REVIEWER_TOOL)` };
@@ -171,7 +214,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else r = { ...r, error: `${r.error || 'router failed'}; agent CLIs: ${c.error}` };
   }
   if (!r.ok) {
-    console.error(`No reviewer answered: ${r.error || r.attempts?.map((a) => `${a.providerId}: ${a.reason || a.status}`).join('; ')}${chain ? '\nIs Ollama running (ollama serve) with the model in OLLAMA_MODEL pulled?' : ''}`);
+    const why = r.error || r.attempts?.map((a) => `${a.providerId}: ${a.reason || a.status}`).join('; ');
+    const next = chain ? null : await oweReview(id, why, g.builder);
+    console.error(`No reviewer answered: ${why}${chain ? '\nIs Ollama running (ollama serve) with the model in OLLAMA_MODEL pulled?' : `\nThe review is owed (studio/reviews/OWED.json): the watcher tries again at ${next.slice(11, 16)} UTC.`}`);
     process.exit(1);
   }
   if (modelFamily(r.model) === modelFamily(g.builder)) {
@@ -179,6 +224,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(1);
   }
   const w = writeReview(g, r);
+  settleOwed(id);
   console.log(`${id}: ${w.verdict} from ${r.model}. Written to ${w.file}`);
   process.exit(0);
 }

@@ -24,6 +24,7 @@ import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
 import { ensureGameId } from '../harness/game-id.mjs';
 import { launchableRoles } from '../harness/agent.mjs';
 import { effectiveMode, describeMode } from '../harness/mode.mjs';
+import { cleanQuotaMarks } from '../harness/budget.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -119,8 +120,22 @@ export function preflight() {
   // Frozen means unedited too, not only uncommitted: Gemini's run loosened two self-tests in qa/selftest.mjs
   // without committing, so the hook never saw it and the results no longer measured the shipped harness.
   if (fs.existsSync(FROZEN)) {
-    const edited = editedHarnessFiles();
+    const all = editedHarnessFiles();
+    // New files in harness folders are usually a game's own tools in the wrong place (test #2: art and
+    // asset agents wrote tools/art/*.mjs, and the frozen-harness hook then refused the game's commit).
+    let sums = {};
+    try {
+      sums = JSON.parse(fs.readFileSync(FROZEN_SUMS, 'utf8'));
+    } catch {
+      // older freeze
+    }
+    const added = all.filter((f) => !(f in sums) && fs.existsSync(path.join(REPO_ROOT, f)));
+    const edited = all.filter((f) => !added.includes(f));
     row(edited.length ? 'fail' : 'ok', 'Harness files unedited since the freeze', edited.length ? `${edited.slice(0, 6).join(', ')}${edited.length > 6 ? ` and ${edited.length - 6} more` : ''} changed. Put them back (git checkout -- <file>) and record the problem instead: npm run notes -- add --kind bad "…"` : '');
+    if (added.length) {
+      const g = activeCartridge().name || '<game>';
+      row('fail', 'No new files in harness folders', `${added.slice(0, 6).join(', ')}${added.length > 6 ? ` and ${added.length - 6} more` : ''}: a game's own tools go in game/${g}/tools/ (move them there and fix their paths); harness ideas go in npm run notes`);
+    }
   }
 
   // .env and the HUB token.
@@ -156,6 +171,19 @@ export function preflight() {
     const ident = ensureGameId(game.name, { by: 'preflight' });
     if (ident) row('ok', `Game ID ${ident.id}`, ident.parent ? `started from ${ident.parent}` : '');
   }
+  // A studio set up before new-game wrote studio/game.json picks its game from STUDIO_CARTRIDGE; write
+  // the file, so everything that asks "is this studio building a game?" agrees (test #2, FIX 03).
+  const gameJson = path.join(REPO_ROOT, 'studio', 'game.json');
+  if (!isTemplateCartridge(game.name) && game.name && !fs.existsSync(gameJson)) {
+    fs.mkdirSync(path.dirname(gameJson), { recursive: true });
+    fs.writeFileSync(gameJson, `${JSON.stringify({ cartridge: game.name, since: new Date().toISOString(), by: 'preflight' }, null, 2)}\n`);
+    row('ok', `Wrote studio/game.json for ${game.name}`, `it came from ${game.from || 'STUDIO_CARTRIDGE'}; commit it with the game`);
+  }
+  // Quota marks: one written by an older harness, or naming another tool's error, isn't trusted (test #2:
+  // claude was marked out by agy's 429 under 2.22, and the mark outlived the update).
+  const marks = cleanQuotaMarks();
+  for (const d of marks.dropped) row('ok', `Cleared a stale quota mark for ${d.tool}`, d.why);
+  for (const k of marks.kept) row('warn', `${k.tool} is marked out of quota until ${k.until.slice(0, 16).replace('T', ' ')} UTC`, `the provider said: "${k.line}". Wrong? npm run budget -- probe ${k.tool}`);
   row(isTemplateCartridge(game.name) ? 'warn' : 'ok', `Gates test the game "${game.name || 'none'}" (from ${game.from || 'nowhere'})`, isTemplateCartridge(game.name) ? 'still the template: once your game exists, npm run new-game <name> makes it the active game (studio/game.json)' : '');
 
   // Pace and who can start on their own.

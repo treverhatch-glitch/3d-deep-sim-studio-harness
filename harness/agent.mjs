@@ -10,7 +10,7 @@
  *                        the Producer hires on its own up to studio/budget.json producerMayHireUpTo (default 4), past
  *                        that the game dev is asked; --open switches the division on
  *   npm run agent -- pause <agent> [--note "…"]   its task goes back to the queue, then it stops
- *   npm run agent -- logs <agent> [--tail 60]
+ *   npm run agent -- logs <agent> [--tail 60] [--raw]   a Claude session reads as a conversation
  *   npm run agent -- list          who is running, last heartbeat, task, tool, model
  *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
  *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
@@ -40,8 +40,11 @@ import { kickoff } from './kickoff.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { listLocks, release, claim } from './lock.mjs';
 import { effectiveMode } from './mode.mjs';
-import { markExhausted } from './budget.mjs';
+import { markExhausted, toolNamed } from './budget.mjs';
+import { setHold } from './task-hold.mjs';
 import { cooldown } from './task-hold.mjs';
+import { mapStale, writeMap } from './map.mjs';
+import { pitfallsForPrompt } from './pitfalls.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -67,9 +70,9 @@ export function providerTrouble(log, code) {
       if (!err) return null;
       const text = JSON.stringify(o.result ?? o.error ?? o.message ?? o).slice(0, 400);
       const q = text.match(QUOTA_ERROR);
-      if (q) return { kind: 'quota', text: q[0], line: text };
+      if (q) return { kind: 'quota', text: q[0], line: text, named: toolNamed(text) };
       const au = text.match(AUTH_ERROR);
-      return au ? { kind: 'auth', text: au[0], line: text } : null;
+      return au ? { kind: 'auth', text: au[0], line: text, named: toolNamed(text) } : null;
     }
   }
   if (code === 0) return null;
@@ -79,9 +82,9 @@ export function providerTrouble(log, code) {
     // The line has to read as an error from the tool, not text the agent wrote or read.
     if (!/\berror\b|\bfailed\b|too many requests|\b429\b|\b401\b|usage limit reached|hit your (?:usage )?limit|invalid api key|not logged in/i.test(l)) continue;
     const q = l.match(QUOTA_ERROR);
-    if (q) return { kind: 'quota', text: q[0], line: l };
+    if (q) return { kind: 'quota', text: q[0], line: l, named: toolNamed(l) };
     const au = l.match(AUTH_ERROR);
-    if (au) return { kind: 'auth', text: au[0], line: l };
+    if (au) return { kind: 'auth', text: au[0], line: l, named: toolNamed(l) };
   }
   return null;
 }
@@ -94,9 +97,11 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
     case 'claude': {
       // Builders need Playwright, vite, ffmpeg and asset tools too (run #1: a narrow list failed silently).
       // In a frozen test clone, STUDIO_CLAUDE_BYPASS=1 skips permission prompts entirely; the clone is the boundary.
+      // stream-json (2.26): the log keeps every message and tool call, not only the final result, so a
+      // session can be read back (test #2: --output-format json left nothing but the last answer).
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       const allowed = 'Bash(node *),Bash(npm *),Bash(npx *),Bash(ffmpeg *),Bash(blender *),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *),Bash(git log *),Bash(git show *),Bash(ls *),Bash(mkdir *),Bash(cp *),Bash(mv *)';
-      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'json', ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
+      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'stream-json', '--verbose', ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
     }
     case 'codex': {
       // In a frozen test clone, Codex's sandbox can't write .git or bind 127.0.0.1 on macOS; the clone itself is the boundary.
@@ -185,43 +190,104 @@ function savePatch(agent, taskId, claims) {
   return path.relative(REPO_ROOT, file).split(path.sep).join('/');
 }
 
-function tokensFrom(log) {
-  const sum = (re) => [...log.matchAll(re)].reduce((n, m) => n + Number(m[1]), 0);
-  const tin = sum(/"input_tokens"\s*:\s*(\d+)/g) + sum(/"prompt_tokens"\s*:\s*(\d+)/g);
-  const tout = sum(/"output_tokens"\s*:\s*(\d+)/g) + sum(/"completion_tokens"\s*:\s*(\d+)/g);
-  const cost = [...log.matchAll(/"total_cost_usd"\s*:\s*([\d.]+)/g)].reduce((n, m) => n + Number(m[1]), 0);
-  return { tokensIn: tin, tokensOut: tout, costUsd: cost || null };
+/**
+ * What a session used, from the tool's own final report (run #1: summing every "input_tokens" in a
+ * Claude log ignored cache reads, which were 37.6M of the real work, and double-counted streamed
+ * messages). Claude Code: the last {"type":"result"} object's usage. Codex: each turn.completed.
+ * Cache reads are kept apart: cheap, but they are where the cost of re-reading context shows.
+ */
+export function tokensFrom(log) {
+  const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith('{'));
+  let claude = null;
+  let cost = null;
+  const codex = { seen: false, in: 0, cached: 0, out: 0 };
+  let plain = null;
+  for (const l of lines) {
+    let o;
+    try {
+      o = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    if (o.type === 'result' && o.usage) {
+      const u = o.usage;
+      claude = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 };
+      if (o.total_cost_usd != null) cost = Number(o.total_cost_usd);
+    } else if (o.type === 'turn.completed' && o.usage) {
+      const u = o.usage;
+      codex.seen = true;
+      codex.in += Math.max(0, (u.input_tokens || 0) - (u.cached_input_tokens || 0));
+      codex.cached += u.cached_input_tokens || 0;
+      codex.out += u.output_tokens || 0;
+    } else if (o.usage && (o.usage.input_tokens != null || o.usage.prompt_tokens != null)) {
+      // Another tool's (or a script's) single usage report: the last one counts.
+      plain = { in: (o.usage.input_tokens ?? o.usage.prompt_tokens) || 0, cacheRead: o.usage.cache_read_input_tokens || o.usage.cached_input_tokens || 0, out: (o.usage.output_tokens ?? o.usage.completion_tokens) || 0 };
+    }
+  }
+  const r = claude || (codex.seen ? { in: codex.in, cacheRead: codex.cached, out: codex.out } : plain);
+  return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null };
 }
 
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 export function cleanUp(agent, { code, log = '', role, tool, model }) {
-  const t = providerTrouble(log, code);
+  const found = providerTrouble(log, code);
+  // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
+  // never this session's (test #2: claude was marked out of quota for agy's limit).
+  const other = found?.named && found.named !== tool ? found.named : null;
+  const t = other ? null : found;
   const trouble = t?.text || null;
   const bad = code !== 0 || Boolean(trouble);
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
-  if (bad && tasks.length) {
-    for (const t of tasks) {
-      const patch = savePatch(agent, t, mine.map((l) => l.key));
-      const note = `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Picked up by the launcher.`;
-      pauseTask(t, agent, note, { force: true });
-      handed.push({ task: t, patch });
-    }
+  const s0 = readJson(sessionFile(agent)) || {};
+  for (const id of tasks) {
+    const patch = savePatch(agent, id, mine.map((l) => l.key));
+    // A session that ended without task done or a hand-back still holds its task (test #2: claims sat
+    // for up to an hour). Hand it back now, with what it last said and what it left.
+    const note = bad
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Picked up by the launcher.`
+      : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work is in the tree and saved to ${patch}.` : ' No uncommitted work.'} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
+    pauseTask(id, agent, note, { force: true });
+    handed.push({ task: id, patch });
+    parkIfLooping(id);
   }
-  if (bad) for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
+  for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
   // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
-  if (t?.kind === 'quota' && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
-    const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l)) || t.line;
-    markExhausted(tool, line);
+  const quota = (other ? found : t)?.kind === 'quota' ? (other ? found : t) : null;
+  if (quota && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
+    const who = other || tool;
+    const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
+    markExhausted(who, line);
   }
   const tok = tokensFrom(log);
-  const reason = trouble ? `provider: ${trouble}` : code === 0 ? 'finished' : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd } });
+  const reason = trouble ? `provider: ${trouble}` : code === 0 ? (tasks.length ? 'finished without task done' : 'finished') : `exit ${code}`;
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd, cacheRead: tok.cacheRead, otherToolLimit: other } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
   return { bad, trouble, handed, reason };
+}
+
+/**
+ * A task handed back three times in two hours without being done is stuck on something a fresh session
+ * won't fix (test #2: T-110 went to 12 sessions in a row, each refused the same command). Park it with
+ * the last note, and tell the Producer. STUDIO_LOOP_HANDBACKS sets the count (0 turns it off).
+ */
+export function parkIfLooping(id, now = Date.now()) {
+  const limit = Number(process.env.STUDIO_LOOP_HANDBACKS ?? 3);
+  if (!(limit > 0)) return null;
+  const evs = readRecentEvents(20000).filter((e) => e.task === id && Date.parse(e.ts) >= now - 2 * 3600000);
+  const lastDone = evs.filter((e) => e.type === 'task.done').pop();
+  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts));
+  const unparked = evs.filter((e) => e.type === 'task.hold' && /unparked/.test(e.msg || '')).pop();
+  const since = unparked ? pauses.filter((e) => e.ts > unparked.ts) : pauses;
+  if (since.length < limit) return null;
+  const last = String(since[since.length - 1].msg || '').replace(/^Handed back [^:]+:\s*/, '').slice(0, 200);
+  const why = `handed back ${since.length} times in 2 h without being done; the last note: "${last}". Fix the blocker, then npm run task -- unpark ${id} --by <name>`;
+  setHold(id, { parked: { by: 'launcher', why, at: new Date(now).toISOString() } }, { by: 'launcher', msg: `Parked ${id}: ${why}` });
+  emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: id, msg: `${id} keeps coming back (${since.length} hand-backs in 2 h), so it's parked. Last note: "${last}"` });
+  return why;
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
@@ -236,7 +302,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
     + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '')
+    // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
+    // and the rules this game has learned the hard way.
+    + `\nBefore you search or open files, read .studio/MAP.md (every code file in one line: what it is, its exports, its lane). Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
+    + pitfallsForPrompt()
     + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
+  // The map the prompt points at, refreshed when code changed since it was made.
+  try {
+    if (mapStale()) writeMap();
+  } catch {
+    // the map is a help, never a blocker
+  }
   const file = path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
@@ -431,11 +507,43 @@ export function otherAgents() {
   return { checked: true, list };
 }
 
-/** The last lines of an agent's output. */
-export function agentLog(agent, tail = 60) {
+/**
+ * The last lines of an agent's output. Claude's stream-json log is shown as a conversation (what it
+ * said, each tool it ran, the result); --raw gives the lines as written.
+ */
+export function agentLog(agent, tail = 60, { raw = false } = {}) {
   const f = path.join(AGENTS_DIR, `${agent}.log`);
   if (!fs.existsSync(f)) return null;
-  return fs.readFileSync(f, 'utf8').split('\n').slice(-tail).join('\n');
+  const lines = fs.readFileSync(f, 'utf8').split('\n');
+  if (raw) return lines.slice(-tail).join('\n');
+  const out = [];
+  for (const l of lines) {
+    const t = l.trim();
+    if (!t.startsWith('{')) {
+      if (t) out.push(t);
+      continue;
+    }
+    let o;
+    try {
+      o = JSON.parse(t);
+    } catch {
+      out.push(t);
+      continue;
+    }
+    if (o.type === 'assistant' && Array.isArray(o.message?.content)) {
+      for (const c of o.message.content) {
+        if (c.type === 'text' && c.text?.trim()) out.push(`${agent}: ${c.text.trim().replace(/\s+/g, ' ').slice(0, 400)}`);
+        else if (c.type === 'tool_use') out.push(`  → ${c.name} ${JSON.stringify(c.input?.command ?? c.input?.file_path ?? c.input?.pattern ?? c.input ?? '').slice(0, 160)}`);
+      }
+    } else if (o.type === 'user' && Array.isArray(o.message?.content)) {
+      for (const c of o.message.content) if (c.type === 'tool_result' && c.is_error) out.push(`  ✗ ${String(Array.isArray(c.content) ? c.content.map((x) => x.text || '').join(' ') : c.content).replace(/\s+/g, ' ').slice(0, 200)}`);
+    } else if (o.type === 'result') {
+      const u = o.usage || {};
+      out.push(`result (${o.subtype || 'done'}${o.is_error ? ', error' : ''}): ${String(o.result || '').replace(/\s+/g, ' ').slice(0, 300)} [in ${(u.input_tokens || 0) + (u.cache_creation_input_tokens || 0)}, cache read ${u.cache_read_input_tokens || 0}, out ${u.output_tokens || 0}${o.total_cost_usd != null ? `, $${Number(o.total_cost_usd).toFixed(2)}` : ''}]`);
+    } else if (o.type === 'system' && o.subtype === 'init') out.push(`(session ${o.session_id || ''} started: ${o.model || ''})`);
+    else if (!['user', 'assistant', 'system', 'stream_event', 'rate_limit_event'].includes(o.type)) out.push(t.slice(0, 400));
+  }
+  return out.slice(-tail).join('\n');
 }
 
 /** Start one agent, after the stop switch, caps and spend checks. */
@@ -447,6 +555,13 @@ export function startAgent(opts, { detach = false } = {}) {
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
   const already = sessions().find((s) => s.agent === agent && s.running);
   if (already) return { ok: false, message: `${agent} is already running (pid ${already.pid}).` };
+  // Never two sessions on one task (test #2: T-160 and T-171 each started twice within seconds).
+  if (opts.task) {
+    const busy = sessions().find((s) => s.running && s.task === opts.task);
+    const held = listLocks().find((l) => l.key === `task:${opts.task}` && l.owner !== agent);
+    if (busy) return { ok: false, message: `Not started: ${busy.agent} is already on ${opts.task}.` };
+    if (held) return { ok: false, message: `Not started: ${held.owner} holds ${opts.task}.` };
+  }
   const c = caps(role, Number(opts.extra) || 0);
   if (!c.ok) return { ok: false, message: `Not started: ${c.why}.` };
   const spend = spentToday();
@@ -476,26 +591,21 @@ export function startAgent(opts, { detach = false } = {}) {
   return { ok: true, agent, run: runAgent({ ...opts, tool, model }) };
 }
 
-/** The watcher's job: start agents for waiting tasks while the mode allows it. */
-export function fillAgents() {
+/**
+ * The watcher's job: start agents for waiting tasks while the mode allows it. One launcher (test #2,
+ * FIX 02): while the supervisor runs, it starts the agents and this does nothing; otherwise this uses
+ * the supervisor's own picker (lanes, holds, task claims, caps, quota) with -auto- names.
+ */
+export async function fillAgents() {
   const mode = effectiveMode();
   if (!mode.autoLaunch) return { started: [], why: `${mode.label} doesn't start agents on its own` };
   if (readStop()) return { started: [], why: 'the studio is stopped' };
-  const q = parseNextQueue();
-  const started = [];
-  const roles = [...new Set(q.backlog.map((t) => t.role).filter((r) => r && r !== 'human'))];
-  for (const role of roles) {
-    const launchable = process.env[`STUDIO_${roleKey(role)}_CMD`] || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL;
-    if (!launchable) continue;
-    const { task } = nextFor({ role }, q);
-    if (!task) continue;
-    const n = sessions().filter((s) => s.role === role).length + 1;
-    const r = startAgent({ role, agent: `${role}-auto-${n}`, task: task.id }, { detach: true });
-    if (r.ok) started.push(`${r.agent} on ${task.id}`);
-    else if (/caps|already running|allows/.test(r.message)) break;
-  }
-  if (started.length) emitEvent({ type: 'agent.auto_start', agent: 'watch', to: 'producer', msg: `Started ${started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})` });
-  return { started };
+  const { readStatus, supervise } = await import('./supervisor.mjs');
+  const sup = readStatus();
+  if (sup?.status === 'running' && alive(sup.pid)) return { started: [], why: `the supervisor (pid ${sup.pid}) starts agents` };
+  const r = await supervise({ watcher: true, prefix: 'auto-', deps: { sessions, startAgent, launchableRoles, nextAgentName } }, { startedAt: Date.now(), names: [] });
+  if (r.started.length) emitEvent({ type: 'agent.auto_start', agent: 'watch', to: 'producer', msg: `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})` });
+  return { started: r.started, why: r.why.join('; ') };
 }
 
 /**
@@ -509,8 +619,7 @@ export function wake(role, { task = null, why = '' } = {}) {
   const busy = sessions().find((s) => s.role === role && s.running);
   if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
   if (!launchableRoles([role]).length) return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
-  const n = sessions().filter((s) => s.role === role).length + 1;
-  const r = startAgent({ role, agent: `${role}-${n}`, task }, { detach: true });
+  const r = startAgent({ role, agent: nextAgentName(role), task }, { detach: true });
   if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
   emitEvent({ type: 'agent.wake', agent: 'war-room', to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
   return { started: true, agent: r.agent, next: `${label} is starting now as ${r.agent} (${r.tool}${r.model !== 'unknown' ? `, ${r.model}` : ''})${task ? ` on ${task}` : ''}. Watch it in Ops.` };
@@ -578,9 +687,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'logs') {
-    const t = agentLog(argv[1], Number(flag('tail')) || 60);
+    const t = agentLog(argv[1], Number(flag('tail')) || 60, { raw: argv.includes('--raw') });
     console.log(t ?? `No log for ${argv[1]}.`);
-    process.exit(t ? 0 : 1);
+    process.exit(t === null ? 1 : 0);
   }
   if (cmd === 'now') {
     const r = sayNow(process.env.STUDIO_LOCK_OWNER || flag('agent'), argv.slice(1).filter((x, i, a) => !x.startsWith('--') && !(i > 0 && a[i - 1].startsWith('--'))).join(' '));
@@ -600,7 +709,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'fill') {
-    const r = fillAgents();
+    const r = await fillAgents();
     console.log(r.started.length ? `Started: ${r.started.join(', ')}` : `Nothing started${r.why ? `: ${r.why}` : ''}.`);
     process.exit(0);
   }

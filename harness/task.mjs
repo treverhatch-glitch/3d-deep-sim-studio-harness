@@ -302,10 +302,28 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
  * the queue, the claim is released, and the note tells the next agent where things stand.
  * The watcher (harness/watch.mjs) does the same for claims that expired with no word.
  */
+/** Is this lock owner a launcher session that is still running? Unknown owners (hand-run agents) count as running. */
+function holderRunning(owner) {
+  let s;
+  try {
+    s = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'agents', `${owner}.json`), 'utf8'));
+  } catch {
+    return true; // not a launcher session: it may be running by hand
+  }
+  if (s.status !== 'running') return false;
+  try {
+    process.kill(s.supervisor || s.pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
 export function pauseTask(taskId, agent = null, note = '', { force = false } = {}) {
   const lock = lockStatus(`task:${taskId}`);
-  if (lock.locked && lock.lock.owner !== agent && !force) {
-    return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}. Only that owner can hand it back.` };
+  // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
+  // claimed for up to an hour, and the Producer had to wait for the claim to expire).
+  if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
+    return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}, which is still running. Only that owner can hand it back (or stop it: npm run agent -- stop ${lock.lock.owner}).` };
   }
   const q = parseNextQueue();
   const idx = q.inProgress.findIndex((t) => t.id === taskId);
@@ -320,6 +338,10 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   const freed = [];
   const mine = listLocks().filter((l) => l.owner === who);
   if (!mine.some((l) => l.key.startsWith('task:'))) for (const l of mine) if (release(l.key, who).ok !== false) freed.push(l.key);
+  // A hand-back note is for the next agent, who shouldn't have to read the last one's logs: 20 lines
+  // at most, in a fixed shape (done, not done, files, next step, proof). Longer notes are cut.
+  const capLines = String(note || '').split('\n');
+  if (capLines.length > 20 || String(note || '').length > 2400) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
   if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);

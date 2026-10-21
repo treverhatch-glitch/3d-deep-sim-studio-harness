@@ -702,7 +702,7 @@ export function createHubServer() {
       noteHuman(by);
       const { addVerdict } = await import('../harness/verdict.mjs');
       const build = String(body.build || '').replace(/[^\w.-]/g, '').slice(0, 40);
-      const r = await addVerdict({ by, fun: String(body.fun || ''), build: build && build !== 'latest' ? build : null, note: String(body.note || '').slice(0, 1000) });
+      const r = await addVerdict({ by, fun: String(body.fun || ''), build: build && build !== 'latest' ? build : null, note: String(body.note || '').slice(0, 1000), viaWarRoom: true });
       broadcastSnapshot();
       return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, verdict: r.verdict, next: r.verdict.fun === 'yes' ? `Recorded: build ${r.verdict.build} is fun${r.verdict.phase ? `. Phase ${r.verdict.phase} can close once its exit checklist is ticked and the Director says it's ready` : ''}.` : `Recorded: not fun yet. It's in the Producer's inbox${r.verdict.note ? ' with your note' : ''}.` } : { ok: false, error: r.message });
     }

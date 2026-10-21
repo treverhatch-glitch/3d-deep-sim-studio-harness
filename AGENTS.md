@@ -28,6 +28,8 @@ Do **NOT** scan the entire repository. Load state in this order:
 5. `studio/bible/BIBLE.md` and `NOT-DOING.md` (the game, its open phase, and what is never built)
 6. `studio/VISION_LOCK.md`, `studio/PLAN.md` and `studio/decisions/` (`studio/MASTER.md` maps every key document)
 
+Before you search or open code, read `.studio/MAP.md` (`npm run map`): every code file in one line. Follow `studio/PITFALLS.md`: rules this game learned the hard way. Never read `CHANGELOG.md`; `studio/llms.txt` lists every command.
+
 See also `docs/READ-FIRST.md`.
 
 ---

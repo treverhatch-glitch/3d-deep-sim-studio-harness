@@ -159,7 +159,7 @@ Found a bug outside your task: \`node harness/task.mjs add "<what broke>" --type
 Need the Producer: \`node harness/event.mjs --type agent.ask --agent ${agent} --to producer --msg "<question>"\`.
 
 If \`task start\` says the studio is stopped, finish your step, hand back what you hold and wait.
-Never: edit files someone else holds, change a golden hash without regenerating it in the same commit, put keys in files, push to a remote (a person pushes), or edit the harness (harness/, hub/, qa/ scripts, scripts/, studio/gates.json) during a test run: note the problem with \`npm run notes -- add --kind bad "…"\` instead.
+Never: edit files someone else holds, change a golden hash without regenerating it in the same commit, put keys in files, push to a remote (a person pushes), or edit the harness (harness/, hub/, qa/ scripts, scripts/, tools/, studio/gates.json) during a test run: note the problem with \`npm run notes -- add --kind bad "…"\` instead. A script of your own for this game (an art pass, a capture, a check) goes in \`game/<game>/tools/\`, never in the harness's \`tools/\`.
 `;
 }
 

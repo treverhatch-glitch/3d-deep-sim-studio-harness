@@ -208,7 +208,7 @@ function lastGameChange() {
 function gatesAfter(at) {
   let run = null;
   try {
-    run = JSON.parse(fs.readFileSync(abs('.studio/gates-last.json'), 'utf8'));
+    run = JSON.parse(fs.readFileSync(abs(fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json'), 'utf8'));
   } catch {
     return 'no full `npm run verify` has been recorded';
   }

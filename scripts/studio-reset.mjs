@@ -34,7 +34,7 @@ const rel = (p) => path.relative(root, p).replace(/\\/g, '/');
 
 // Folders whose files belong to the previous project (README.md files stay).
 const CLEAR = ['studio/meetings', 'studio/handoffs', 'studio/game', 'studio/research', 'studio/reviews', 'studio/memory/retros', 'studio/bible'];
-const SIGNOFFS = [['studio/balance', /^decision-.*\.md$/], ['studio/fun', /^review-.*\.md$/]];
+const SIGNOFFS = [['studio/balance', /^decision-.*\.md$/], ['studio/fun', /^review-.*\.md$/], ['studio', /^PITFALLS(-ARCHIVE)?\.md$/]];
 const REWRITE = ['studio/PLAN.md', 'studio/producer/LOG.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md'];
 
 const toRemove = [];
@@ -73,7 +73,7 @@ for (const f of [...toRemove, ...REWRITE.map((r) => path.join(root, r)), events]
 for (const f of toRemove) fs.rmSync(f, { force: true });
 if (fs.existsSync(events)) fs.rmSync(events);
 fs.rmSync(path.join(root, '.studio', 'locks'), { recursive: true, force: true });
-for (const f of ['meeting.json', 'watch-last.json', 'gates-last.json', 'last-seed-failure.json', 'closed-loop-state.json']) fs.rmSync(path.join(root, '.studio', f), { force: true });
+for (const f of ['meeting.json', 'watch-last.json', 'gates-last.json', 'gates-last-full.json', 'last-seed-failure.json', 'closed-loop-state.json']) fs.rmSync(path.join(root, '.studio', f), { force: true });
 
 const date = new Date();
 const p = (n) => String(n).padStart(2, '0');

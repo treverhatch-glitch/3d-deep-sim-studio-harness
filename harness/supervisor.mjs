@@ -77,13 +77,15 @@ export function inWindow(win, now = Date.now()) {
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
 export async function supervise(opts, state, now = Date.now()) {
   const { parseNextQueue, readStop } = await import('./task.mjs');
-  const { sessions, startAgent, launchableRoles, nextAgentName } = await import('./agent.mjs');
+  // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
+  const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
   const { holdReason, laneOf, lanesClash } = await import('./task-hold.mjs');
   const { effectiveMode } = await import('./mode.mjs');
-  const { budgetStatus, pickTool } = await import('./budget.mjs');
+  const { budgetStatus, pickTool, quotaMark, probeTool } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
   const why = [];
-  if (fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
+  if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
   if (opts.until && now >= opts.until) return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
   if (readStop()) return { started: [], why: ['"Stop all agents" is on in the War Room'] };
   if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
@@ -101,7 +103,10 @@ export async function supervise(opts, state, now = Date.now()) {
   const last2 = mine.slice(-2);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
-    const tool = last2[0].meta?.tool || 'the agent tool';
+    // Name the program, not "custom" (test #2): the first word of STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD.
+    const metaTool = last2[0].meta?.tool || 'the agent tool';
+    const roleOf = String(last2[0].meta?.role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+    const tool = metaTool === 'custom' ? String(process.env[`STUDIO_${roleOf}_CMD`] || process.env.STUDIO_AGENT_CMD || 'the custom command').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') : metaTool;
     const hint = code === 127 || code === 9009 ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
     state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}` };
     emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
@@ -171,12 +176,19 @@ export async function supervise(opts, state, now = Date.now()) {
     }
     const preferred = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
     const custom = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_CMD`];
+    // Before believing a mark older than 10 minutes, ask the tool once (one tiny call, at most every
+    // 10 minutes per tool). Test #2: a wrong mark idled the studio; the provider never said "limit".
+    const mark = !custom && !opts.watcher ? quotaMark(preferred) : null;
+    if (mark && Date.parse(mark.until) > now && now - Date.parse(mark.at) > 10 * 60000 && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_PROBE || '') && now - ((state.probed || {})[preferred] || 0) > 10 * 60000) {
+      state.probed = { ...(state.probed || {}), [preferred]: now };
+      why.push(`asked ${preferred} whether it is really out: ${probeTool(preferred).why}`);
+    }
     const tool = custom ? undefined : pickTool(preferred, now);
     if (!custom && !tool) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
     }
-    const agent = nextAgentName(g.role, 's');
+    const agent = nextAgentName(g.role, opts.prefix || 's');
     state.names = [...(state.names || []), agent].slice(-200);
     const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra }, { detach: true });
     if (r.ok) {

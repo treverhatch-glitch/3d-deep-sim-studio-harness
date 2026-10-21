@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor, emitEvent } from './event.mjs';
+import { RULE, addPitfall } from './pitfalls.mjs';
 
 export const NOTES_FILE = path.join(REPO_ROOT, 'studio', 'harness-notes', 'NOTES.md');
 export const KINDS = { well: 'Worked well', bad: "Didn't work", workaround: 'Workarounds in use', upgrade: 'Upgrade ideas', eval: 'Overseer evaluations' };
@@ -49,6 +50,9 @@ export function addNote(kind, text, agent = actor(), track = process.env.STUDIO_
   notes[kind].unshift(`[${new Date().toISOString().slice(0, 10)} · ${agent}${track ? ` · ${track}` : ''}] ${t}`);
   writeNotes(notes);
   emitEvent({ type: 'notes.add', agent, track, msg: `${KINDS[kind]}: ${t}`.slice(0, 160) });
+  // A "didn't work" that reads as a rule ("never…", "don't…") is something every agent should know:
+  // it goes on the game's pitfall list too (harness/pitfalls.mjs).
+  if (kind === 'bad' && RULE.test(t)) addPitfall(t, agent);
   return notes;
 }
 

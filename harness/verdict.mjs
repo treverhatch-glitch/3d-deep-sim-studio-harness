@@ -4,6 +4,8 @@
  * lets a phase close.
  *
  *   npm run verdict -- yes|not-yet --by <person> [--build <id>] [--note "…"]
+ *   npm run verdict -- yes --by jed --quote "<their words>" --source "<where they said it>" --relayed-by <agent>
+ *                                           a person's verdict given in chat, relayed by the lead or Liaison
  *   npm run verdict                         the verdicts so far
  *
  * Both runs so far went green on every gate while the game was wrong for the person playing it
@@ -14,7 +16,10 @@
  *   3. a person said "yes, it's fun" in the Arcade (or here) about a build played since the phase opened.
  * `npm run bible -- phase open <n> --force "reason"` still overrides, and the reason is logged.
  * The War Room's Arcade has the two buttons; a "not yet" goes to the Producer's inbox with its note.
- * Agents can't give a verdict: it has to come from someone who played.
+ * Agents can't give a verdict: it has to come from someone who played. Owners often answer in chat, not in
+ * the Arcade (test #2: "love the burgers… now might be time to move on to next floors" on Discord), so an
+ * agent may relay one: the person's own words, word for word (--quote), where they said it (--source),
+ * and who relayed it (--relayed-by). It is marked as relayed, and the person is told so they can undo it.
  * Verdicts live in studio/playtest/verdicts.json, each with the build it was about.
  */
 import fs from 'node:fs';
@@ -35,8 +40,15 @@ export function readVerdicts() {
   }
 }
 
-export async function addVerdict({ by, fun, build = null, note = '' }) {
+export async function addVerdict({ by, fun, build = null, note = '', quote = '', source = '', relayedBy = null, viaWarRoom = false }) {
   if (!isPerson(by)) return { ok: false, message: `${by || 'Nobody'} looks like an agent. A fun verdict comes from a person who played the build (--by <your name>).` };
+  // From inside an agent session, a verdict is always a relay: the person's words and where they said them.
+  const inAgent = !viaWarRoom && Boolean(process.env.STUDIO_ROLE || (process.env.STUDIO_LOCK_OWNER && !isPerson(process.env.STUDIO_LOCK_OWNER)));
+  const relay = relayedBy || (inAgent ? process.env.STUDIO_LOCK_OWNER || 'an agent' : null);
+  if (relay) {
+    const q = String(quote || '').replace(/\s+/g, ' ').trim();
+    if (q.length < 8 || !String(source || '').trim()) return { ok: false, message: `A relayed verdict needs ${by}'s own words and where they said them: --quote "<their words, word for word>" --source "<Discord #channel, time or link>" --relayed-by <you>.` };
+  }
   if (!['yes', 'not-yet'].includes(fun)) return { ok: false, message: 'Say yes or not-yet.' };
   const { latestBuild, listBuilds } = await import('./builds.mjs');
   const b = build ? listBuilds().find((x) => x.id === build) : latestBuild();
@@ -47,7 +59,7 @@ export async function addVerdict({ by, fun, build = null, note = '' }) {
   } catch {
     // no Bible yet
   }
-  const v = { at: new Date().toISOString(), by, fun, build: b.id, commit: b.sha || null, phase, note: String(note || '').replace(/\s+/g, ' ').trim().slice(0, 1000) };
+  const v = { at: new Date().toISOString(), by, fun, build: b.id, commit: b.sha || null, phase, note: String(note || '').replace(/\s+/g, ' ').trim().slice(0, 1000), ...(relay ? { relayed: { by: relay, quote: String(quote).replace(/\s+/g, ' ').trim().slice(0, 600), source: String(source).trim().slice(0, 300) } } : {}) };
   const all = [...readVerdicts(), v];
   fs.mkdirSync(path.dirname(VERDICTS), { recursive: true });
   fs.writeFileSync(VERDICTS, `${JSON.stringify({ verdicts: all }, null, 2)}\n`);
@@ -57,7 +69,7 @@ export async function addVerdict({ by, fun, build = null, note = '' }) {
     if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
     fs.appendFileSync(inbox, `- [${v.at.slice(0, 16).replace('T', ' ')}] **${by}** played build ${b.id}: not fun yet${v.note ? `: ${v.note}` : ''}\n`);
   }
-  emitEvent({ type: 'playtest.verdict', agent: by, to: 'producer', msg: `${by} played build ${b.id}${phase ? ` (Phase ${phase})` : ''}: ${fun === 'yes' ? 'yes, it\'s fun' : 'not fun yet'}${v.note ? `: ${v.note}` : ''}` });
+  emitEvent({ type: 'playtest.verdict', agent: by, to: relay ? 'human' : 'producer', msg: `${by} played build ${b.id}${phase ? ` (Phase ${phase})` : ''}: ${fun === 'yes' ? 'yes, it\'s fun' : 'not fun yet'}${v.note ? `: ${v.note}` : ''}${relay ? ` (relayed by ${relay} from ${v.relayed.source}: "${v.relayed.quote.slice(0, 120)}"; ${by}, if that's wrong, record not-yet in the Arcade)` : ''}` });
   return { ok: true, verdict: v };
 }
 
@@ -86,14 +98,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   if (['yes', 'not-yet'].includes(argv[0])) {
-    const r = await addVerdict({ by: flag('by'), fun: argv[0], build: flag('build'), note: flag('note') || '' });
+    const r = await addVerdict({ by: flag('by'), fun: argv[0], build: flag('build'), note: flag('note') || '', quote: flag('quote') || '', source: flag('source') || '', relayedBy: flag('relayed-by') });
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);
     }
-    console.log(`Recorded: ${r.verdict.by} on build ${r.verdict.build}${r.verdict.phase ? ` (Phase ${r.verdict.phase})` : ''}: ${r.verdict.fun}.`);
+    console.log(`Recorded: ${r.verdict.by} on build ${r.verdict.build}${r.verdict.phase ? ` (Phase ${r.verdict.phase})` : ''}: ${r.verdict.fun}${r.verdict.relayed ? ` (relayed by ${r.verdict.relayed.by})` : ''}.`);
     process.exit(0);
   }
   const all = readVerdicts();
-  console.log(all.length ? all.map((v) => `${v.at.slice(0, 16).replace('T', ' ')}  ${v.by}  build ${v.build}  Phase ${v.phase ?? '-'}  ${v.fun}${v.note ? `: ${v.note}` : ''}`).join('\n') : 'No verdicts yet. Play the last good build in the Arcade and answer "Is it fun?".');
+  console.log(all.length ? all.map((v) => `${v.at.slice(0, 16).replace('T', ' ')}  ${v.by}  build ${v.build}  Phase ${v.phase ?? '-'}  ${v.fun}${v.note ? `: ${v.note}` : ''}${v.relayed ? ` [relayed by ${v.relayed.by} from ${v.relayed.source}]` : ''}`).join('\n') : 'No verdicts yet. Play the last good build in the Arcade and answer "Is it fun?".');
 }

@@ -13,7 +13,12 @@
  *   3. reads window.__sim (the sim) and window.__view() (what the page shows) in the same instant and
  *      fails on any mismatch the cartridge's `browser.wiring(state, view)` reports, or when the
  *      camera is inside geometry (`view.camera.inside`);
- *   4. requires the expected outcome before `browser.maxMs`;
+ *   4. requires the expected outcome before `browser.maxMs`. Real input against a 60 Hz sim lands on
+ *      different ticks each run, so a bot that can die sometimes loses (Jed's test #2: 3 wins, 1 loss on
+ *      one build). A loss with the screen matching the sim at every check passes with a note, unless
+ *      the cartridge sets `browser.mustWin: true`. Every input is recorded with its tick
+ *      (qa/reports/<run>-inputs.json, or the sim's own log when window.__sim.getActions() exists),
+ *      so a loss can be replayed with harness/replay.mjs --trace;
  *   5. runs the browser regressions in qa/regressions/browser/*.mjs (renderer bugs, see docs/BUGS.md).
  * It saves start, middle and end screenshots and a report to qa/reports/.
  *
@@ -226,6 +231,9 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
     let last = null;
     let midShot = false;
     const mismatches = new Set();
+    // The inputs, with the tick the bot chose them on (the game applies each one a tick or two later).
+    const timeline = [];
+    const seed = await page.evaluate(() => window.__sim.getState()?.seed ?? null).catch(() => null);
     while (!report.findings.some((f) => f.id === 'BROWSER-FROZEN') && Date.now() < until) {
       const snap = await page.evaluate(() => ({ state: window.__sim.getState(), view: typeof window.__view === 'function' ? window.__view() : null }));
       last = snap;
@@ -245,7 +253,10 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
         if (input.key) await page.keyboard.press(input.key);
         else if (input.click) await page.click(input.click);
         else if (input.mouse) await page.mouse.click(input.mouse[0], input.mouse[1]);
+        // Look without firing (a game where a click means look + shoot): { move: [x, y] }.
+        else if (input.move) await page.mouse.move(input.move[0], input.move[1]);
         report.inputs += 1;
+        if (timeline.length < 20000) timeline.push({ tick: snap.state.tick, action: act });
       }
       await sleep(25);
     }
@@ -264,8 +275,20 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
     }
     report.outcome = outcome;
     report.ticks = last?.state?.tick ?? null;
+    // The inputs as a trace harness/replay.mjs reads: the sim's own log when it keeps one, else the bot's.
+    const simLog = await page.evaluate(() => (typeof window.__sim.getActions === 'function' ? window.__sim.getActions() : null)).catch(() => null);
+    const trace = { cartridge: cart.name, seed, tick: report.ticks, description: `browser-play ${runId}: ${outcome || 'no outcome'} at tick ${report.ticks}`, actions: Array.isArray(simLog) ? simLog : timeline, exact: Array.isArray(simLog) };
+    fs.mkdirSync(REPORTS, { recursive: true });
+    fs.writeFileSync(path.join(REPORTS, `${runId}-inputs.json`), `${JSON.stringify(trace)}\n`);
+    report.trace = `qa/reports/${runId}-inputs.json`;
     if ([...mismatches].length) fail('BROWSER-WIRING', `the screen doesn't match the sim (${mismatches.size}): ${[...mismatches].slice(0, 3).join('; ')}`, { mismatches: [...mismatches].slice(0, 20) });
-    if (!report.findings.some((f) => f.id === 'BROWSER-FROZEN') && outcome !== expect) fail('BROWSER-NO-OUTCOME', `playing with real input ended ${outcome || 'without an outcome'} at tick ${report.ticks}; expected ${expect}`);
+    const frozen = report.findings.some((f) => f.id === 'BROWSER-FROZEN');
+    // "The browser game works" is separate from "the bot won": a real outcome with the screen matching
+    // the sim at every check is a pass with a note, unless the cartridge says the bot must win.
+    // Only when nothing else failed: a dead control (keys that never arrive) loses too, and that is a bug.
+    if (!frozen && outcome && outcome !== expect && !mismatches.size && !b?.mustWin && !report.findings.length) {
+      report.notes = [...(report.notes || []), `the bot ${outcome} at tick ${report.ticks} (expected ${expect}); the screen matched the sim at all ${report.checks} checks, so the browser build works. Real-time input lands on different ticks each run. Replay it: node harness/replay.mjs --trace ${report.trace}${trace.exact ? '' : ' (approximate: the bot\'s ticks, not the sim\'s)'}. Set browser.mustWin: true to make a loss fail.`];
+    } else if (!frozen && outcome !== expect) fail('BROWSER-NO-OUTCOME', `playing with real input ended ${outcome || 'without an outcome'} at tick ${report.ticks}; expected ${expect}. Inputs: ${report.trace}`);
 
     // Browser regressions: one file per renderer bug, each a check on the running page.
     if (fs.existsSync(BROWSER_REGRESSIONS)) {

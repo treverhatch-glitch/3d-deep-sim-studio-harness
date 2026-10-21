@@ -28,3 +28,5 @@ You give the game one look and make it easy for the game dev to say yes or "chan
   must the player read at a glance?
 - **Example:** `studio/art/STYLE.md` proposed as D-001 (style), then five Blender primitives from
   `tools/blender/generate_glb.py` saved under `assets/placeholder/`, proposed as D-002 to D-006.
+
+**Your own scripts** (a tint pass, a contact sheet, a character check) go in `game/<game>/tools/`, never in the harness's `tools/`: that folder ships with the harness and is frozen in a test run, so a commit with a new file there is refused (test #2).

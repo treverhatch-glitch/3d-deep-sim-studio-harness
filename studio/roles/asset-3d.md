@@ -31,3 +31,5 @@ You make the game's 3D assets with tools that can be rerun, and every file you s
 - **Ask:** which phase and layer needs it? What does it look like next to existing assets? Is the
   source ours or licensed?
 - **Example:** a crate prop: generate, check bounds, export, record as own work, playtest.
+
+**Your own scripts** (a tint pass, a contact sheet, a character check) go in `game/<game>/tools/`, never in the harness's `tools/`: that folder ships with the harness and is frozen in a test run, so a commit with a new file there is refused (test #2).

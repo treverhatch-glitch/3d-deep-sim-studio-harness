@@ -17,11 +17,12 @@
  *     and providers that ran out (route.exhausted) in the last hour.
  */
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
-import { parseNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
+import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
+import { holdReason } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
@@ -84,8 +85,16 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${note}`, producer: false });
       continue;
     }
-    // A launcher heartbeat counts as being heard from, even if the agent is quiet in the log.
+    // A launcher session that has ended but still holds the task: hand it back now (test #2: the
+    // watcher called agents "silent 34 min" that agent list already showed as ended).
     const session = agentSessions.find((s) => s.agent === lock.owner);
+    if (session && !session.running) {
+      const note = `${lock.owner}'s session ended (${session.reason || 'no reason recorded'}) while it held ${t.id}.\n${trail(events, lock.owner)}`;
+      if (!dryRun) pauseTask(t.id, 'watch', note, { force: true });
+      findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${lock.owner} ended without handing it back`, producer: false });
+      continue;
+    }
+    // A launcher heartbeat counts as being heard from, even if the agent is quiet in the log.
     const lastHeard = Math.max(heard.get(lock.owner) || 0, session?.running && session.lastBeat ? Date.parse(session.lastBeat) : 0);
     if (now - lastHeard > stallMin * 60000) {
       findings.push({ kind: 'stalled', task: t.id, agent: lock.owner, msg: `${lock.owner} holds ${t.id} but has been silent ${lastHeard ? `for ${ago(lastHeard)}` : 'since it claimed it'}`, producer: true });
@@ -94,6 +103,12 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
 
   for (const t of q.backlog) {
     const last = lastOnTask.get(t.id);
+    // Held on purpose (after another task, blocked, parked, cooling down): not waiting for an agent.
+    const held = holdReason(t.id, q, now);
+    if (held) {
+      if (last && now - last.at >= waitMin * 60000 && readTaskHandoff(t.id)) findings.push({ kind: 'held', task: t.id, msg: `${t.id} is held: ${held}`, producer: false });
+      continue;
+    }
     if (last?.type === 'task.paused' && now - last.at > waitMin * 60000 && readTaskHandoff(t.id)) {
       const wip = fs.existsSync(path.join(STUDIO_STATE_DIR, 'wip')) ? fs.readdirSync(path.join(STUDIO_STATE_DIR, 'wip')).find((f) => f.startsWith(`${t.id}-`)) : null;
       findings.push({ kind: 'waiting', task: t.id, msg: `${t.id} was handed back ${ago(last.at)} ago and is waiting for a ${t.role || 'free'} agent (npm run agent -- start --role ${t.role || 'builder'} --agent <name>)${wip ? `; saved work in .studio/wip/${wip}` : ''}`, producer: true });
@@ -102,8 +117,11 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
 
   const capped = events.filter((e) => e.type === 'route.capped' && now - Date.parse(e.ts) < 3600000);
   if (capped.length) findings.push({ kind: 'exhausted', msg: `The daily spend cap stopped ${capped.length} model call(s) in the last hour (STUDIO_DAILY_TOKEN_CAP)`, producer: true });
-  const exhausted = events.filter((e) => e.type === 'route.exhausted' && now - Date.parse(e.ts) < 3600000);
-  if (exhausted.length) findings.push({ kind: 'exhausted', msg: `Every provider was busy or out ${exhausted.length} time(s) in the last hour (${[...new Set(exhausted.map((e) => e.agent))].join(', ')})`, producer: true });
+  // An outage the Producer already closed never pages again, and one failed call isn't an outage
+  // (test #2: two reviewer 503s on a done task opened four Watch tasks, about 12 Producer sessions).
+  const closedWatch = events.filter((e) => e.type === 'task.done' && /Watch:/.test(e.msg || '')).map((e) => Date.parse(e.ts)).pop() || 0;
+  const exhausted = events.filter((e) => e.type === 'route.exhausted' && now - Date.parse(e.ts) < 3600000 && Date.parse(e.ts) > closedWatch);
+  if (exhausted.length >= 2) findings.push({ kind: 'exhausted', msg: `Every provider was busy or out ${exhausted.length} time(s) in the last hour (${[...new Set(exhausted.map((e) => e.agent))].join(', ')})`, producer: true });
 
   // One ping for the Producer, only when something needs a decision and no Watch task is open yet.
   const forProducer = findings.filter((f) => f.producer);
@@ -117,6 +135,19 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   } else if (findings.length && !dryRun) {
     emitEvent({ type: 'watch.report', agent: 'watch', msg: findings.map((f) => f.msg).join('; ').slice(0, 300) });
   }
+  // A Watch task nobody has started, whose findings have all cleared: close it, so no Producer session
+  // is spent confirming "all quiet" (test #2, T-197).
+  if (open && !forProducer.length && !dryRun && q.backlog.some((t) => t.id === open.id)) {
+    const q2 = parseNextQueue();
+    const i = q2.backlog.findIndex((t) => t.id === open.id);
+    if (i >= 0) {
+      const [t] = q2.backlog.splice(i, 1);
+      t.status = 'done';
+      q2.done.unshift(t);
+      writeNextQueue(q2);
+      emitEvent({ type: 'task.done', agent: 'watch', task: t.id, msg: `${t.id} closed by the watcher: what it reported (Watch:) has cleared` });
+    }
+  }
   // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
   const ideas = dryRun ? null : collectIdeas();
   // A game made before 2.25 gets its ID here, without anyone asking.
@@ -127,7 +158,34 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const decided = dryRun ? [] : expireAsks(now);
   // Designs left waiting past the pace's limit: the Producer approves them provisionally (logged).
   if (!dryRun) expireDesigns(now).catch(() => {});
-  const launched = dryRun ? null : fillAgents();
+  // Owed reviews (no reviewer of another family answered): try each again once its reviewer resets.
+  if (!dryRun) {
+    import('./review.mjs')
+      .then(({ dueOwed, markTried }) => {
+        for (const o of dueOwed(now)) {
+          markTried(o.task);
+          const c = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'review.mjs'), o.task], { cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
+          c.unref();
+          emitEvent({ type: 'review.retry', agent: 'watch', task: o.task, msg: `Trying the owed review of ${o.task} again` });
+        }
+      })
+      .catch(() => {});
+  }
+  // The launcher answers asynchronously; its result lands in watch-last.json and the event log.
+  if (!dryRun) {
+    fillAgents()
+      .then((r) => {
+        if (r.started.length) console.log(`[watch] started ${r.started.join(', ')}`);
+        try {
+          const f = path.join(STUDIO_STATE_DIR, 'watch-last.json');
+          fs.writeFileSync(f, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), launched: r.started, launchWhy: r.why || null }, null, 2)}\n`);
+        } catch {
+          // the pass hasn't written yet
+        }
+      })
+      .catch(() => {});
+  }
+  const launched = null;
   const checkin = dryRun ? null : producerCheckinIfDue(now, events);
   const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas, launched: launched?.started || [], checkin, decided };
   if (!dryRun) {
