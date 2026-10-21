@@ -700,6 +700,26 @@ export function createHubServer() {
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, next });
     }
+    if (url.pathname === '/api/golden' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const sha = String(body.sha || '').replace(/[^0-9a-f]/g, '').slice(0, 40);
+      if (!sha) return sendJson(res, 400, { ok: false, error: 'which commit?' });
+      const file = path.join(REPO_ROOT, 'studio', 'decisions', 'golden-approvals.json');
+      let j = { approved: [] };
+      try {
+        j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        // first one
+      }
+      j.approved.push({ sha, by, at: new Date().toISOString() });
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `${JSON.stringify(j, null, 2)}\n`);
+      emitEvent({ type: 'golden.approved', agent: by, to: 'producer', msg: `${by} checked the golden change in ${sha}: looks right` });
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next: `Golden change ${sha} marked as checked by ${by}.` });
+    }
     if (url.pathname === '/api/causes' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);

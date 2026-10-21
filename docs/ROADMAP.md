@@ -236,6 +236,13 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F8 | A Stage-2 browser gate that plays start to win with real input and checks the scene matches the sim (B6) | done (2.18.0) |
 | F9 | Screenshot proof for renderer tasks, checked against the art reference | done (2.18.0) |
 | F10 | Bugs carry a layer (sim, renderer, both); renderer bugs close with a browser regression (B8) | done (2.18.0) |
+| F11 | Run #1 art agent's notes: forced work grouped by cause, attribution, rooms that open, honest labels, quota on desks; Studio view walks the middle, annex rooms; new-studio | done (2.19.0) |
+| F12 | The Asset studio: rounds, thumbs up into assets/approved/, feedback by number, Producer provisional approval, labelled references, a reworked ledger | done (2.20.0) |
+| F13 | The Arcade: play the last good build, playtest notes, clips, the read-only dungeon | done (2.21.0) |
+| F14 | Run unattended: supervisor, budget pacing and quota fallback, lanes, WIP on the HUD, progress by phase, golden reasons | done (2.22.0) |
+| F15 | A cheap vision model checks screenshot proof against the art reference | planned |
+| F16 | A browser regression proven to fail on the code before the fix | planned |
+| F17 | Room spec export and a dressing gate (keep-out zones, per-floor budgets) for set dressing | planned |
 
 ## 2.10.0 and later — Verifiable results, data, and the platform
 

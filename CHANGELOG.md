@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.22.0] — 2026-10-21
+From the notes on run #1's overnight stop: the studio keeps itself running and uses the plan.
+### Added
+- **The supervisor** (`npm run studio:start`, `studio:stop`, `studio:status`; docs/RUN-UNATTENDED.md): keeps the War Room hub up (and logs downtime), starts a fresh agent per task as sessions end, within the pace's caps; stops at `--until`, outside a daily `--window`, past a `--budget`, or while "Stop all" is on. `--install` brings it back after a restart (launchd, systemd --user, Task Scheduler).
+- **Budget pacing** (`npm run budget`, `studio/budget.json`): tokens each tool reported this week against a target for this point in the week; under target the supervisor allows two more agents, over target none. A tool that hits its limit is skipped until its reset time and its work goes to the next tool in the order.
+- **Lanes**: `task add --lane <folder>`, `agent start --lane <folder>` (the folder is claimed for the session), `studio:start --lanes auto` (one agent per lane). `studio/rules/lanes.md` and an optional `module-size` check: split renderer files over 300 lines so builders can work in parallel.
+- **One task per session**: supervisor sessions finish their task and stop, so no agent carries a long history. `{task}` in `STUDIO_<ROLE>_CMD`.
+- **Work in progress on the HUD**: each heartbeat carries a diff summary of the agent's lane and when verify last ran; agents post a one-line status with `npm run agent -- now "…"`.
+- **Progress by phase**: Ops and the Studio view show "Phase 1: 12/15 · exit 3/5 · Phase 2: not planned yet" from task phases and `studio/bible/PHASE-<n>-EXIT.md`; one overall % only when every phase is planned.
+- **Golden changes need a reason**: the commit-msg hook refuses a `qa/golden/` change without a `Golden-Reason:` trailer and adds `Golden-Diff:` (which recorded numbers moved); the War Room shows each as a card with "Looks right".
+- Run report: a section for the supervisor (sessions, tasks done, tokens, hub downtime).
+
+---
+
 ## [2.21.0] — 2026-10-21
 ### Added
 - **The Arcade** (War Room view 5, docs/ARCADE.md): play the last good build in the page while agents keep working, with older builds one click away; take notes while playing (to the Producer, as a bug for a builder, or as an idea), saved with the build in `studio/playtest/NOTES.md`; watch recent clips; and walk **the dungeon**, a read-only mini-game where floors are phases, rooms are tasks, the party is the agents at work, slimes are open bugs and P0 bugs are bosses.

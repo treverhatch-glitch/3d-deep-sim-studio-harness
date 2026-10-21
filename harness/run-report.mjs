@@ -128,6 +128,14 @@ export function renderRunReport(r) {
     L.push(`**${label}** (${(n[k] || []).length})`, '', ...((n[k] || []).slice(0, 15).map((x) => `- ${x}`)), ...((n[k] || []).length ? [] : ['- None yet.']), '');
   }
   L.push("## The overseer's evaluations", '', ...((n.eval || []).length ? n.eval.slice(0, 10).map((x) => `- ${x}`) : ['- None yet. The overseer adds one at least every few hours: `npm run notes -- add --kind eval "..."`.']), '');
+  const sup = (() => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, '.studio', 'supervisor.json'), 'utf8'));
+    } catch {
+      return null;
+    }
+  })();
+  L.push('## The supervisor', '', ...(sup ? [`- ${sup.status === 'running' ? 'Running' : 'Stopped'} since ${sup.startedAt}${sup.stopReason ? `; stopped: ${sup.stopReason}` : ''}`, `- Sessions started: ${sup.sessions}; tasks done: ${sup.tasksDone}; tokens reported: ${(sup.tokens || 0).toLocaleString()}`, ...(sup.hubDown?.length ? sup.hubDown.map((d) => `- The War Room hub was down from ${d.from} to ${d.to}`) : ['- The War Room hub stayed up.'])] : ['- Not used (npm run studio:start keeps the studio running unattended).']), '');
   L.push('## Agents the launcher ran', '', ...(r.launched.length ? r.launched.map((s) => `- ${s.agent} (${s.role}, ${s.tool}/${s.model}): ${s.running ? 'running' : s.reason || 'ended'}${s.handed?.length ? `; handed back ${s.handed.map((h) => h.task).join(', ')}` : ''}`) : ['- None (agents were started by hand).']), '');
   L.push('## Decided without you', '', ...(r.decided.length ? r.decided.map((a) => `- ${a.id}: ${a.question} → "${a.answer}" by ${a.by} (${a.why})${a.status === 'reversed' ? ` — reversed by ${a.answeredBy}` : ''}`) : ['- Nothing; every question was answered or is still open.']), '');
   L.push('## Needed a person', '', ...(r.needsPerson.length ? r.needsPerson.map((x) => `- ${x}`) : ['- Nothing.']), '');

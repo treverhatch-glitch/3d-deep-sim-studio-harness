@@ -562,7 +562,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--prototype | --infra]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--prototype | --infra]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -594,6 +594,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}),
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
         ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
+        ...(typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
         ...(typeof flags['not-layer'] === 'string' ? { notLayer: flags['not-layer'] } : {}),

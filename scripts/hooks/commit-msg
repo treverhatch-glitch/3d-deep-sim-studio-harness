@@ -8,6 +8,19 @@ ROOT="$(git rev-parse --show-toplevel)"
 add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --trailer "$1: $2" "$MSG_FILE"; }
 # Experiments: STUDIO_EXPERIMENT=X-001 tags the commit, so `npm run experiment -- drop` can find it.
 [ -n "${STUDIO_EXPERIMENT:-}" ] && add "Studio-Experiment" "$STUDIO_EXPERIMENT"
+# Goldens are the recorded answers: changing them needs a reason in the commit, and the commit says
+# which numbers moved, so a re-recorded wrong answer gets a second look (War Room: Needs you).
+GOLDEN_CHANGED="$(git diff --cached --name-only -- qa/golden)"
+if [ -n "$GOLDEN_CHANGED" ]; then
+  if ! grep -qi '^Golden-Reason:' "$MSG_FILE"; then
+    echo "[commit-msg] FAIL this commit changes qa/golden/. Say why the recorded answers changed, as a trailer:"
+    echo '  git commit -m "<message>" -m "Golden-Reason: <why, e.g. the F3 bounds fix moves the win tick>"'
+    echo "  What moved: $(cd "$ROOT" && node scripts/golden-diff.mjs --staged 2>/dev/null)"
+    exit 1
+  fi
+  DIFF="$(cd "$ROOT" && node scripts/golden-diff.mjs --staged 2>/dev/null || true)"
+  [ -n "$DIFF" ] && add "Golden-Diff" "$DIFF"
+fi
 [ -n "${STUDIO_LOCK_OWNER:-}" ] || exit 0
 TASKS="$(cd "$ROOT" && node -e "
 import('./harness/lock.mjs').then(({ listLocks }) => {

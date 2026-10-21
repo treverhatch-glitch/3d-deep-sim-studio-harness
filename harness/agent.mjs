@@ -3,7 +3,8 @@
  * harness/agent.mjs — start agents, watch them, and clean up when one dies.
  *
  *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|custom --model <model>
- *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--detach]
+ *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
+ *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, shown with its heartbeat in the War Room
  *   npm run agent -- list          who is running, last heartbeat, task, tool, model
  *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
  *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
@@ -31,8 +32,9 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { kickoff } from './kickoff.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
-import { listLocks, release } from './lock.mjs';
+import { listLocks, release, claim } from './lock.mjs';
 import { effectiveMode } from './mode.mjs';
+import { markExhausted } from './budget.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -98,11 +100,13 @@ export function sessions() {
   });
 }
 
-function caps(role) {
-  const mode = effectiveMode();
+// extra: the supervisor's budget allowance (up to two more agents while the plan is under its target).
+function caps(role, extra = 0) {
+  const mode = { ...effectiveMode() };
+  mode.maxAgents = Math.min(12, mode.maxAgents + extra);
   const live = sessions().filter((s) => s.running);
   const ofRole = live.filter((s) => s.role === role).length;
-  const perRole = mode.perRole[role] ?? Math.max(1, Math.floor(mode.maxAgents / 2));
+  const perRole = (mode.perRole[role] ?? Math.max(1, Math.floor(mode.maxAgents / 2))) + (extra ? 1 : 0);
   if (live.length >= mode.maxAgents) return { ok: false, why: `${live.length} agents already running; the ${mode.label}${mode.boost ? ' + MAX SPEED' : ''} mode allows ${mode.maxAgents}` };
   if (['producer', 'director'].includes(role) ? ofRole >= 1 : ofRole >= perRole) return { ok: false, why: `${ofRole} ${role} agent(s) already running; the mode allows ${['producer', 'director'].includes(role) ? 1 : perRole}` };
   return { ok: true, mode };
@@ -155,6 +159,11 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     }
   }
   if (bad) for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
+  // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
+  if (trouble && !/unauthori|401|invalid api key|authentication/i.test(trouble)) {
+    const line = log.split('\n').reverse().find((l) => /reset|try again/i.test(l)) || trouble;
+    markExhausted(tool, line);
+  }
   const tok = tokensFrom(log);
   const reason = trouble ? `provider: ${trouble}` : code === 0 ? 'finished' : `exit ${code}`;
   emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd } });
@@ -164,8 +173,17 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
 }
 
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
-export async function runAgent({ role, agent, tool, model, fallback = [], task = null }) {
-  const prompt = kickoff({ role, agent, model }) + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '');
+export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false }) {
+  // A lane is a folder this agent owns for the session, so two agents never edit the same files.
+  if (lane) {
+    const c = claim(`path:${lane}`, agent, 6 * 3600);
+    if (c && c.ok === false) return { ok: false, message: `Lane ${lane} is taken: ${c.message || 'claimed by another agent'}` };
+  }
+  const prompt = kickoff({ role, agent, model })
+    + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
+    + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
+    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
+    + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '');
   const file = path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
@@ -177,7 +195,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
   const out = fs.openSync(logFile, 'a');
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role };
-  const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role);
+  const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role).replaceAll('{task}', task || '');
   const child = custom
     ? spawn(fill(custom), { cwd: REPO_ROOT, shell: true, env, stdio: ['ignore', out, out] })
     : spawn(cmd.argv[0], cmd.argv.slice(1), { cwd: REPO_ROOT, env, shell: IS.win, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
@@ -186,14 +204,15 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.stdin.end(cmd.stdin);
   }
   const startedAt = new Date().toISOString();
-  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task };
+  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})`, meta: { role, tool: session.tool, pid: child.pid } });
   const beat = setInterval(() => {
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now }, null, 2));
-    emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive` });
+    const wip = wipSummary(agent);
+    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip }, null, 2));
+    emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
   const code = await new Promise((resolve) => {
     child.on('error', (err) => {
@@ -206,12 +225,13 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model });
+  if (lane) release(`path:${lane}`, agent);
   if (result.bad && fallback.length) {
     const [next, ...rest] = fallback;
     const [ftool, fmodel] = next.split(':');
     const resume = result.handed[0]?.task || task;
     emitEvent({ type: 'agent.failover', agent, to: 'producer', msg: `${agent} failed over to ${ftool}${fmodel ? ` (${fmodel})` : ''}${resume ? ` on ${resume}` : ''}` });
-    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume });
+    return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask });
   }
   return { ok: true, code, ...result };
 }
@@ -227,6 +247,39 @@ export function stopAgent(pid) {
   }
 }
 
+/**
+ * Work in progress, for the heartbeat: uncommitted changes under the agent's path claims (or, with
+ * no path claims, the files its task's commits touched), and when the last verify ran. Cheap: git only.
+ */
+export function wipSummary(agent) {
+  const paths = listLocks().filter((l) => l.owner === agent && l.key.startsWith('path:')).map((l) => l.key.slice(5));
+  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length ? paths : ['.'])], { cwd: REPO_ROOT, encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  const rows = r.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')).filter(([, , f]) => f && !/^(studio\/(NEXT|CURRENT_TASK)\.md|\.studio\/)/.test(f));
+  const add = rows.reduce((n, [a]) => n + (Number(a) || 0), 0);
+  const del = rows.reduce((n, [, d]) => n + (Number(d) || 0), 0);
+  const top = rows.sort((x, y) => Number(y[0]) + Number(y[1]) - Number(x[0]) - Number(x[1])).slice(0, 2).map(([a, d, f]) => `${f.split('/').pop()} +${a}/−${d}`);
+  let verify = '';
+  try {
+    const g = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last.json'), 'utf8'));
+    const min = Math.round((Date.now() - Date.parse(g.at)) / 60000);
+    if (min < 240) verify = `, last verify ${min} min ago${g.rows?.some((x) => x.required && !x.ok) ? ' (red)' : ''}`;
+  } catch {
+    // none yet
+  }
+  return rows.length ? `${rows.length} file${rows.length === 1 ? '' : 's'} changed +${add}/−${del}${paths.length ? '' : ' (whole tree)'} (${top.join(', ')})${verify}` : `no uncommitted changes${verify}`;
+}
+
+/** An agent says what it is doing now; the War Room shows it next to its heartbeat. */
+export function sayNow(agent, text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (!agent || !t) return { ok: false, message: 'npm run agent -- now "<what you are doing>" (with STUDIO_LOCK_OWNER set)' };
+  const s = readJson(sessionFile(agent));
+  if (s) fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, now: t, nowAt: new Date().toISOString() }, null, 2));
+  emitEvent({ type: 'agent.now', agent, msg: t });
+  return { ok: true };
+}
+
 /** Start one agent, after the stop switch, caps and spend checks. */
 export function startAgent(opts, { detach = false } = {}) {
   const { role, agent } = opts;
@@ -234,7 +287,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
   const already = sessions().find((s) => s.agent === agent && s.running);
   if (already) return { ok: false, message: `${agent} is already running (pid ${already.pid}).` };
-  const c = caps(role);
+  const c = caps(role, Number(opts.extra) || 0);
   if (!c.ok) return { ok: false, message: `Not started: ${c.why}.` };
   const spend = spentToday();
   if (spend.over) return { ok: false, message: `Not started: the daily token cap is spent (${spend.used} of ${spend.cap}).` };
@@ -242,7 +295,7 @@ export function startAgent(opts, { detach = false } = {}) {
   const model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : [])];
+    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : [])];
     const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
@@ -300,7 +353,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const cmd = argv[0];
   if (cmd === 'start') {
-    const r = startAgent({ role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task') }, { detach: argv.includes('--detach') });
+    const r = startAgent({ role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), lane: flag('lane'), oneTask: argv.includes('--one-task'), extra: Number(flag('extra')) || 0 }, { detach: argv.includes('--detach') });
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);
@@ -316,6 +369,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     console.log(`${flag('agent')} ended: ${res.reason}${res.handed?.length ? `; handed back ${res.handed.map((h) => `${h.task}${h.patch ? ` (work in ${h.patch})` : ''}`).join(', ')}` : ''}`);
     process.exit(res.bad ? 1 : 0);
+  }
+  if (cmd === 'now') {
+    const r = sayNow(process.env.STUDIO_LOCK_OWNER || flag('agent'), argv.slice(1).filter((x, i, a) => !x.startsWith('--') && !(i > 0 && a[i - 1].startsWith('--'))).join(' '));
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    process.exit(0);
   }
   if (cmd === 'stop') {
     const s = sessions().find((x) => x.agent === argv[1]);

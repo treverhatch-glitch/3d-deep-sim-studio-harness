@@ -22,6 +22,8 @@ import { openAsks, allAsks } from './ask.mjs';
 import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
+import { readStatus as supervisorStatus } from './supervisor.mjs';
+import { budgetStatus } from './budget.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -321,6 +323,14 @@ export function buildHudState() {
   for (const t of [...queue.inProgress, ...queue.backlog]) {
     if (/^Watch:/i.test(t.title)) needs.push({ agent: 'watch', msg: t.title, task: t.id });
   }
+  // Golden changes someone should look at: the reason, and which recorded numbers moved.
+  const okGolden = new Set((readJson('studio/decisions/golden-approvals.json', { approved: [] })?.approved || []).map((a) => a.sha));
+  const glog = spawnSync('git', ['log', '-n', '12', '--since=14 days ago', '--format=%h%x1f%an%x1f%(trailers:key=Golden-Reason,valueonly,separator=%x20)%x1f%(trailers:key=Golden-Diff,valueonly,separator=%x20)%x1f%(trailers:key=Studio-Agent,valueonly)', '--', 'qa/golden'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  for (const line of (glog.status === 0 ? glog.stdout : '').split('\n').filter(Boolean)) {
+    const [sha, author, reason, diff, agent] = line.split('\x1f').map((x) => x.trim());
+    if (okGolden.has(sha)) continue;
+    needs.push({ agent: agent || author, msg: `Recorded answers (goldens) changed in ${sha}: ${reason || 'no reason given'}${diff ? `. Moved: ${diff}` : ''}`, action: { type: 'golden-ok', sha, label: 'Looks right' } });
+  }
   // A studio that stopped: work waiting, nothing running, nobody heard from in an hour.
   const lastActivity = events.filter((e) => e.agent && !['watch', 'war-room-human'].includes(e.agent)).pop();
   const quietMin = lastActivity ? Math.round((now - Date.parse(lastActivity.ts)) / 60000) : null;
@@ -380,7 +390,7 @@ export function buildHudState() {
       };
     })(),
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
-    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null })),
+    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
     signals,
     queue,
     progress: { done: queue.done.length, total, ratio: total ? queue.done.length / total : 0 },
@@ -394,11 +404,37 @@ export function buildHudState() {
     needs: needs.slice(0, 10),
     // The Arcade: saved playable builds, recent clips, and which phase each task belongs to (for the dungeon).
     builds: listBuilds().slice(0, 6),
+    supervisor: (() => {
+      const s = supervisorStatus();
+      if (!s) return null;
+      let up = false;
+      try {
+        process.kill(s.pid, 0);
+        up = s.status === 'running';
+      } catch {
+        up = false;
+      }
+      return { ...s, running: up };
+    })(),
+    budget: budgetStatus(now, events),
     clips: (() => {
       const d = path.join(REPO_ROOT, 'qa', 'reports', 'clips');
       return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => /\.(mp4|webm|jpg)$/.test(f)).sort().reverse().slice(0, 8) : [];
     })(),
     taskPhase: Object.fromEntries(events.filter((e) => e.type === 'task.added' && e.task && e.meta?.phase).map((e) => [e.task, Number(e.meta.phase)])),
+    // Progress toward the game, by phase: a phase with no tasks is "not planned", not 0% or 100%.
+    phases: (() => {
+      const tp = {};
+      for (const e of events) if (e.type === 'task.added' && e.task && e.meta?.phase) tp[e.task] = Number(e.meta.phase);
+      const all = [...queue.inProgress, ...queue.backlog, ...queue.done];
+      return [1, 2, 3].map((n) => {
+        const mine = all.filter((t) => tp[t.id] === n);
+        const done = queue.done.filter((t) => tp[t.id] === n).length;
+        const exitFile = path.join(REPO_ROOT, 'studio', 'bible', `PHASE-${n}-EXIT.md`);
+        const exit = fs.existsSync(exitFile) ? fs.readFileSync(exitFile, 'utf8').match(/^\s*[-*] \[[ xX]\] .+$/gm) || [] : [];
+        return { n, player: bibleNow?.phases?.[n]?.player || null, open: (bibleNow?.phase?.open || 0) >= n, planned: mine.length > 0, total: mine.length, done, exit: { total: exit.length, done: exit.filter((l) => /\[[xX]\]/.test(l)).length } };
+      });
+    })(),
     taskHolder: Object.fromEntries(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l.owner])),
     causes: readAccepted(),
     gates,

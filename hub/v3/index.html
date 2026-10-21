@@ -154,7 +154,8 @@
   #arcade #r-level { font: 11px "Press Start 2P", monospace; color: var(--lime); }
   #arcade .roomcard { min-height: 3.6em; border-left: 4px solid var(--neon); padding: 4px 10px; background: #120d1f; }
   #arcade button:focus-visible, #arcade canvas:focus-visible, #arcade textarea:focus-visible, #arcade select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-  #o-launched .ag { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; }
+  #o-launched .ag { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 14px; padding: 2px 0; }
+  #o-launched .ag .note { flex-basis: 100%; margin: 0; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
   #ops .meet-strip { display: none; margin: 12px 20px 0; padding: 8px 14px; border-left: 4px solid var(--link); background: rgba(108, 198, 255, .08); }
@@ -568,6 +569,7 @@
       <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
       <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
+      <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
       <section><h2>Model calls today</h2><div id="o-router"></div></section>
       <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
       <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
@@ -595,9 +597,9 @@
   <div class="signals" data-signals role="status" aria-live="polite"></div>
   <div class="office" id="t-office"><div id="t-crowd" aria-hidden="true"></div></div>
   <div class="dock">
-    <div class="build"><span>Game in development</span><span class="bar"><i id="t-buildbar"></i></span><span id="t-buildpct">0%</span></div>
+    <div class="build"><span id="t-buildlabel">Game in development</span><span class="bar"><i id="t-buildbar"></i></span><span id="t-buildpct">0%</span></div>
     <div class="ticker" aria-live="off"><span id="t-ticker">Waiting for the first event…</span></div>
-    <div class="legend">Every number is read from the studio files. Locked rooms are divisions that are switched off.</div>
+    <div class="legend"><span id="t-phases"></span> Every number is read from the studio files. Locked rooms are divisions that are switched off.</div>
   </div>
 </div>
 
@@ -1049,7 +1051,10 @@
   function renderOps(s) {
     const nowList = s.now && s.now.length ? s.now : s.queue.inProgress.slice(0, 1).map((t) => ({ id: t.id, title: t.title, agents: [] }));
     $('o-now').innerHTML = nowList.length ? `Now: ${nowList.slice(0, 4).map((t) => `<b>${esc(t.id)}</b> ${esc(short(t.title, nowList.length > 1 ? 50 : 90))}${t.agents.length ? ` <span style="opacity:.7">(${esc(t.agents.join(', '))})</span>` : ''}`).join(' · ')}${nowList.length > 4 ? ` · +${nowList.length - 4} more` : ''}` : 'Nothing in progress. Pull the next task from the queue.';
-    $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done`;
+    const opPh = (s.phases || []).map((p) => `Phase ${p.n}: ${p.planned ? `${p.done} of ${p.total}${p.exit.total ? `, exit ${p.exit.done}/${p.exit.total}` : ''}` : 'not planned yet'}`).join(' · ');
+    const sv = s.supervisor;
+    $('o-sup').innerHTML = `${sv ? `<p>${sv.running ? '<b>Running</b>' : 'Stopped'} since ${esc(hhmm(sv.startedAt))}${sv.opts?.until ? `, until ${esc(hhmm(sv.opts.until))}` : ''}${sv.opts?.window ? `, window ${esc(sv.opts.window)}` : ''}: ${sv.sessions} sessions, ${sv.tasksDone} tasks done${sv.tokens ? `, ${Number(sv.tokens).toLocaleString()} tokens` : ''}.${sv.stopReason ? ` Stopped: ${esc(sv.stopReason)}.` : ''}${sv.last?.why?.length && sv.running ? ` <span class="note">Last pass: ${esc(sv.last.why.join('; '))}</span>` : ''}${sv.hubDown?.length ? ` <span class="note">Hub was down ${sv.hubDown.map((d) => `${esc(hhmm(d.from))}–${esc(hhmm(d.to))}`).join(', ')}.</span>` : ''}</p>` : '<p class="note">Not running. <code>npm run studio:start -- --until 23:00</code> keeps the hub up and starts a fresh agent per task until then; <code>--install</code> starts it after a restart.</p>'}${(s.budget || []).map((b) => `<p class="note">${esc(b.text)}</p>`).join('')}`;
+    $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done${opPh ? ` · ${opPh}` : ''}`;
     $('o-progbar').style.width = `${Math.round(s.progress.ratio * 100)}%`;
     if (s.gates?.rows) {
       const req = s.gates.rows.filter((r) => r.required);
@@ -1062,7 +1067,7 @@
     $('o-stopmsg').textContent = s.stopped ? `By ${s.stopped.by} at ${hhmm(s.stopped.at)}${s.stopped.reason ? `: ${s.stopped.reason}` : ''}. No task can start; agents hand back what they hold. Resume from Act.` : '';
     $('o-stopbtn').textContent = s.stopped ? 'Resume the studio' : 'Stop all agents';
     $('o-hold').classList.toggle('on', s.needs.length > 0);
-    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task && n.action?.type !== 'accept-cause' ? ` (<code>${esc(n.task)}</code>)` : ''}${n.action ? ` <button type="button" data-need="${esc(n.action.type)}" data-cause="${esc(n.action.cause || '')}">${esc(n.action.label)}</button>` : ''}</div>`).join('');
+    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task && n.action?.type !== 'accept-cause' ? ` (<code>${esc(n.task)}</code>)` : ''}${n.action ? ` <button type="button" data-need="${esc(n.action.type)}" data-cause="${esc(n.action.cause || '')}" data-sha="${esc(n.action.sha || '')}">${esc(n.action.label)}</button>` : ''}</div>`).join('');
 
     $('o-agents').innerHTML = s.agents.some((a) => !a.placeholder)
       ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue" data-agent="${esc(a.name)}" role="button" tabindex="0" title="Show ${esc(a.name)}'s task and checklist"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.status === 'out-of-quota' ? `<b>out of quota${a.quotaUntil ? ` until ${esc(a.quotaUntil)}` : ''}</b> · ` : ''}${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
@@ -1647,9 +1652,16 @@
     $('t-tokens').textContent = tk.tracked ? tk.total.toLocaleString() : 'not tracked';
     $('t-tokens').parentElement.title = tk.tracked ? `Today: ${tk.routed.toLocaleString()} through the router, ${tk.agents.toLocaleString()} reported by agents the launcher started` : tk.why;
     $('t-clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const pct = Math.round(s.progress.ratio * 100);
+    // Progress by phase: the bar fills for the open phase; a phase with no tasks says "not planned yet".
+    const ph = s.phases || [];
+    const openPh = ph.filter((p) => p.open).pop() || ph[0];
+    const pct = openPh && openPh.total ? Math.round((openPh.done / openPh.total) * 100) : Math.round(s.progress.ratio * 100);
     $('t-buildbar').style.width = `${pct}%`;
     $('t-buildpct').textContent = `${pct}%`;
+    const phaseText = ph.length ? ph.map((p) => `Phase ${p.n}: ${p.planned ? `${p.done}/${p.total}${p.exit.total ? ` · exit ${p.exit.done}/${p.exit.total}` : ''}` : 'not planned yet'}`).join('  ·  ') : '';
+    $('t-buildlabel').textContent = openPh && openPh.total ? `Phase ${openPh.n} in development` : 'Game in development';
+    $('t-buildlabel').title = phaseText || 'Tasks done over all tasks';
+    $('t-phases').textContent = ph.every((p) => p.planned) ? `${phaseText}  ·  whole game ${Math.round(s.progress.ratio * 100)}%` : phaseText;
     $('t-ticker').textContent = s.events.slice(0, 12).map((e) => `${hhmm(e.ts)} ${e.agent}: ${short(e.msg, 70)}`).join('   ★   ') || 'Quiet day at the studio.';
 
     buildRooms(s);
@@ -1841,7 +1853,7 @@
     ].join('');
     document.querySelectorAll('[data-signals]').forEach((el) => { el.innerHTML = html; });
     const launched = (s.launched || []).filter((a) => a.running);
-    $('o-launched').innerHTML = launched.length ? launched.map((a) => `<div class="ag"><span class="lamp ${a.stalled ? 'stalled' : 'working'}" aria-hidden="true"></span>${esc(a.agent)} · ${esc(a.role)} · ${esc(a.tool)}/${esc(a.model)}${a.task ? ` · ${esc(a.task)}` : ''} · heartbeat ${a.beatAgeMin ?? '?'} min ago <button type="button" data-stopagent="${esc(a.agent)}">Stop</button></div>`).join('') : '<p class="note">No agents started from here yet. Pick a role and press Start agent (the tool and model can come from .env).</p>';
+    $('o-launched').innerHTML = launched.length ? launched.map((a) => `<div class="ag"><span class="lamp ${a.stalled ? 'stalled' : 'working'}" aria-hidden="true"></span>${esc(a.agent)} · ${esc(a.role)} · ${esc(a.tool)}/${esc(a.model)}${a.task ? ` · ${esc(a.task)}` : ''} · heartbeat ${a.beatAgeMin ?? '?'} min ago${a.lane ? ` · lane ${esc(a.lane)}` : ''} <button type="button" data-stopagent="${esc(a.agent)}">Stop</button>${a.now || a.wip ? `<div class="note" style="margin-left:22px">${a.now ? `Now: ${esc(a.now)}. ` : ''}${a.wip ? esc(a.wip) : ''}</div>` : ''}</div>`).join('') : '<p class="note">No agents started from here yet. Pick a role and press Start agent (the tool and model can come from .env).</p>';
     // Game plan: the pace choice and the studio's questions.
     if ($('p-modes')) {
       $('p-modes').innerHTML = Object.entries(s.modes || {}).map(([id, x]) => `<button type="button" class="mode" role="radio" aria-checked="${m.chosen && m.id === id ? 'true' : 'false'}" data-mode="${esc(id)}"><b>${esc(x.label)}</b>${esc(x.pitch)}</button>`).join('');
@@ -2149,6 +2161,9 @@
         say(r.next || `${t.dataset.ask} answered: ${t.dataset.answer}.`);
       } else if (t.dataset.need === 'accept-cause') {
         const r = await post('/api/causes', { cause: t.dataset.cause, by: actor() });
+        say(r.next);
+      } else if (t.dataset.need === 'golden-ok') {
+        const r = await post('/api/golden', { sha: t.dataset.sha, by: actor() });
         say(r.next);
       } else if (t.dataset.need === 'start-producer') {
         const r = await post('/api/agents', { role: 'producer', agent: 'producer-1', by: actor() });

@@ -887,6 +887,43 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   for (const a of ['builder-1', 'builder-2']) run(dir, `node harness/agent.mjs stop ${a}`, env);
 }
 
+// The supervisor keeps the studio running: one task per session, the next session when one ends, a stop
+// time, lanes so builders never share a folder, and tools out of quota skipped until they reset.
+{
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
+  for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
+  const sup = run(dir, 'node harness/supervisor.mjs --no-hub --until 9s', env);
+  const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
+  report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
+  report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
+  // Lanes: two builders at once, each holding its own folder.
+  run(dir, 'node harness/mode.mjs set fast --by hatch', env);
+  run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
+  run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
+  const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
+  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const t0 = Date.now();
+  let lanes = [];
+  while (Date.now() - t0 < 8000 && lanes.length < 2) {
+    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)']);
+    lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8')).filter((x) => /path:docs\/lane-[ab]/.test(x));
+  }
+  report('with --lanes auto, each lane gets its own agent holding that folder', lanes.length === 2, lanes.join('\n'));
+  await new Promise((r) => child.on('exit', r));
+  for (const s of fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json'))) run(dir, `node harness/agent.mjs stop ${s.replace(/\.json$/, '')}`, env);
+  // Quota: a tool that ran out is skipped until its reset; its lanes go to the next tool.
+  fs.writeFileSync(path.join(dir, 'q.mjs'), "import { markExhausted, pickTool, exhaustedUntil } from './harness/budget.mjs';\nmarkExhausted('claude', \"You've hit your usage limit. Try again at 6:12 AM.\");\nconsole.log(JSON.stringify({ until: exhaustedUntil('claude'), next: pickTool('claude') }));\n");
+  const q = JSON.parse(run(dir, 'node q.mjs', env).stdout);
+  report('a tool out of quota is skipped until its reset time, for the next tool in the order', /T\d{2}:12/.test(new Date(q.until).toTimeString().slice(0, 5).replace(/^(\d{2}):(\d{2})$/, 'T$1:$2')) && q.next === 'codex', JSON.stringify(q));
+  run(dir, 'node harness/budget.mjs set codex --weekly 1000 --reset monday --target 100%', env);
+  report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens this week \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
+}
+
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
 {
   const dir = copyRepo();
@@ -1274,6 +1311,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m "trailer test"', { STUDIO_LOCK_OWNER: 'bob-1', STUDIO_AGENT_MODEL: 'model-y' });
   const body = run(dir, 'git log -1 --format=%B').stdout;
   report('commit-msg adds Studio-Agent, Studio-Model and Studio-Task trailers', /Studio-Agent: bob-1/.test(body) && /Studio-Model: model-y/.test(body) && /Studio-Task: T-004/.test(body), body);
+  edit(dir, 'qa/golden/example-sim-start-to-win.json', (s) => s.replace('"tick": 300', '"tick": 312'));
+  git('add qa/golden/example-sim-start-to-win.json');
+  const noWhy = run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m "re-record"', { STUDIO_LOCK_OWNER: 'bob-1' });
+  const why = run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m "re-record" -m "Golden-Reason: the bounds fix moves the win"', { STUDIO_LOCK_OWNER: 'bob-1' });
+  const gbody = run(dir, 'git log -1 --format=%B').stdout;
+  report('a golden change needs a Golden-Reason, and the commit records which numbers moved', noWhy.status !== 0 && /Golden-Reason/.test(noWhy.stdout + noWhy.stderr) && why.status === 0 && /Golden-Diff: example-sim-start-to-win: tick 300 → 312/.test(gbody), noWhy.stdout + noWhy.stderr + gbody);
   fs.writeFileSync(path.join(dir, 'notes.txt'), `key ${'gsk_'}${'b'.repeat(30)}\n`);
   git('add notes.txt');
   report('pre-commit blocks a staged secret', run(dir, 'git -c user.name=t -c user.email=t@example.com commit -q -m y', { STUDIO_LOCK_OWNER: 'bob-1' }).status !== 0);
