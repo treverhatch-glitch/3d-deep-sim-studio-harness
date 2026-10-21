@@ -1050,7 +1050,9 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const t0 = Date.now();
   while (Date.now() - t0 < 8000 && !/stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(300);
   const st = run(dir, 'node harness/agent.mjs stop stop-1 --by jed', env);
-  pause(1500);
+  // Wait for the launcher to hand the task back (slower on Windows), then try to restart it.
+  const t2 = Date.now();
+  while (Date.now() - t2 < 15000 && /stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(400);
   const again = run(dir, `node harness/task.mjs start ${c} --agent other-1`, env);
   report('after agent stop, its task can\'t restart straight away (run #1: it restarted within seconds)', st.status === 0 && /won't restart before/.test(st.stdout) && again.status !== 0 && /can restart after/.test(again.stderr), st.stdout + again.stdout + again.stderr);
   run(dir, `node harness/task.mjs done ${c} --agent prod-1 --force --reason test --accepted-by selftest`, env);

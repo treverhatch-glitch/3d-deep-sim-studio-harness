@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.24.1] — 2026-10-21
+### Fixed
+- The self-test for a stopped agent's cooldown waits for the hand-back before trying to restart the task (Windows hands back more slowly, so the restart was refused for the lock instead of the cooldown). No harness behaviour changed.
+
+---
+
 ## [2.24.0] — 2026-10-21
 From Jed's run #1 feedback on 2.22.2 (its P0, P1 and P2 lists) and Gemini's Solar Outpost run. These fix what stalled a real run or let a broken game look green.
 ### Fixed
