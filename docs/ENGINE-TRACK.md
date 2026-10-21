@@ -58,6 +58,14 @@ results, not hashes). A mechanic is proven in web first, then ported.
 
 ## In the War Room
 
-The Arcade shows the engine build next to the web build: its last frames, and a link to its web export
-(`engine.json` `webExport`, for Godot `engine/<game>/export/web/index.html`) when there is one. A Godot
-web export needs its export templates installed on that machine.
+The Arcade shows the engine build next to the web build: "Play it here" puts its web export
+(`engine.json` `webExport`, for Godot `engine/<game>/export/web/index.html`) in the same screen, and its
+last frame is a click away. Export Godot for the web without thread support so it plays inside the
+Arcade's frame; a Godot web export needs its export templates installed on that machine.
+
+## Following how it is made
+
+- `studio/engine/LOG.md`: every gate, parity and capture run (when, who, which commit, the result), and the track's start.
+- Tasks, notes, events and builds carry the `engine:<name>` tag, so a run can be filtered to the port.
+- The run report's Engine track section: gate and parity results, and the porters' sessions, tasks and cache reads.
+- `studio/engine/PARITY.md`: which mechanics are ported.

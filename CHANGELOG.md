@@ -4,6 +4,22 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.27.2] — 2026-10-21
+From Hatch's notes on the War Room and the engine track.
+### Fixed
+- **The Arcade plays bundled builds.** A vite game (the default base `/`) asks for `/assets/index-….js` at the root, not under `/play/<id>/`, so its saved build showed a black screen in the Arcade while it played in `npm run play:browser`. The hub now serves those requests from the build the Arcade opened last.
+### Added
+- **The engine build in the Arcade's own screen:** "Play it here" puts the engine's web export in the same frame as the web build ("Back to the web build" returns). Export Godot without thread support to play it framed.
+- **Following how the port is made:**
+  - `studio/engine/LOG.md` records every engine gate, parity and capture run: when, who, on which commit, the result;
+  - the run report has an **Engine track** section (gate and parity results, the porters' sessions, tasks and cache reads);
+  - the run report has a **Tokens by role** table: sessions, tasks done, cache reads per session and per task done.
+- **The Asset studio's next round:** approving the last design waiting gives the art department a "next round" task at once (and wakes it), so a new set comes in. Approved files still move to `assets/approved/`.
+- **A narrator role** (`studio/roles/narrator.md`, in the Narrative department, off by default): a storyteller with a personality who turns the dev's brief and the Bible into story pitches on the Idea Board, never canon until the dev says yes.
+- Self-test: 3 more checks (386).
+
+---
+
 ## [2.27.1] — 2026-10-21
 ### Fixed
 - **`npm run task -- stop` now stops the running agents.** Since 2.24 it set the stop switch but never reached the agents: it imported the launcher, which imports it back, and the command exited 13. The War Room's Stop all was not affected. It now stops them in a child process. Found while writing test #3's update steps.

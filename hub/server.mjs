@@ -497,6 +497,8 @@ async function executeTacticalMacro(macro, args = {}) {
 }
 
 export function createHubServer() {
+  // The build page the Arcade opened last (for a bundled game's root-relative files, below).
+  let lastPlayed = null;
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://hub.local');
 
@@ -699,7 +701,10 @@ export function createHubServer() {
           return res.end();
         }
       }
-      if (serveBuildFile(id, rest.join('/'), res)) return;
+      if (serveBuildFile(id, rest.join('/'), res)) {
+        if (/\.html?$/i.test(rest.join('/'))) lastPlayed = { id, at: Date.now() };
+        return;
+      }
       return sendJson(res, 404, { ok: false, error: 'no such build or file (npm run play -- list)' });
     }
     if (url.pathname === '/api/clip' && req.method === 'GET') {
@@ -1123,6 +1128,10 @@ export function createHubServer() {
       return res.end(fs.readFileSync(targetHtml, 'utf8').replace(/<body([^>]*)>/i, (m) => `${m}${notice}`));
     }
 
+    // A bundled game (vite's default base '/') asks for /assets/index-…js at the root, not under
+    // /play/<id>/: those requests come from the build last opened in the Arcade, so serve them from it.
+    // Without this a dist build plays in npm run play:browser and shows a black screen in the Arcade.
+    if (req.method === 'GET' && lastPlayed && Date.now() - lastPlayed.at < 12 * 3600000 && !url.pathname.startsWith('/api/') && serveBuildFile(lastPlayed.id, url.pathname.slice(1), res)) return;
     sendJson(res, 404, { error: 'Not found', path: url.pathname });
   });
 

@@ -97,6 +97,18 @@ export function engineCommand(track, which, { seeds = [], frames = 120 } = {}) {
   return cmd;
 }
 
+/**
+ * The engine track's own history (studio/engine/LOG.md): every gate, parity and capture run, with who
+ * ran it and on which commit, so how the port was made can be followed run by run.
+ */
+export function logEngine(line, agent = actor()) {
+  const f = path.join(REPO_ROOT, 'studio', 'engine', 'LOG.md');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  if (!fs.existsSync(f)) fs.writeFileSync(f, '# Engine track log (`studio/engine/LOG.md`)\n\n> Every gate, parity and capture run, newest last: when, who, on which commit, and the result.\n\n');
+  const sha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+  fs.appendFileSync(f, `- ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · ${agent}${sha ? ` · ${sha}` : ''} · ${line}\n`);
+}
+
 /** Is Phase 1 proven (opened Phase 2, or every exit item ticked and a person said it's fun)? */
 export async function phaseOneProven() {
   try {
@@ -163,6 +175,7 @@ export async function startEngine(engine, { by = actor() } = {}) {
     `Port the sim rules 1:1 from cartridges/${game} into ${folder}/sim/ and make npm run parity pass for seeds 1-5`,
     ...(track.webExport ? [`Web export of the ${e.label} build to ${track.webExport} for the Arcade's engine tab`] : []),
   ].map((title) => addTask({ title, role: 'engine-porter', priority: 'P2', agent: by, meta }).id).filter(Boolean);
+  logEngine(`track started: ${e.label} in ${folder}; ${tasks.join(', ')} queued`, by);
   emitEvent({ type: 'engine.started', agent: by, to: 'producer', track: track.track, msg: `Engine track: ${game} to ${e.label} in ${folder}; ${tasks.join(', ')} queued for Engine Transfer` });
   return { ok: true, track, tasks };
 }
@@ -194,6 +207,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(`No frames (exit ${r.status}): ${String(r.stderr || r.stdout).trim().split('\n').slice(-2).join(' ')}. Frames need a display: on a Linux server install xvfb (xvfb-run).`);
       process.exit(1);
     }
+    logEngine(`capture: ${shots.length} frames`);
     console.log(`${shots.length} frames in ${t.folder}/captures/ (last: ${shots[shots.length - 1]}). Keep one with a task: npm run proof -- add <task> ${t.folder}/captures/${shots[shots.length - 1]} "<what it shows>"`);
     process.exit(0);
   }

@@ -1428,6 +1428,39 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const g1 = run(dir, 'node scripts/check-engine.mjs', env);
   const g2 = run(dir, 'node scripts/check-engine.mjs', { ...env, BREAK: '1' });
   report('the engine gate passes a clean run and fails on a script error even when the engine exits 0', g1.status === 0 && /PASS Godot 4/.test(g1.stdout) && g2.status !== 0 && /1 script error/.test(g2.stderr), g1.stdout + g1.stderr + g2.stdout + g2.stderr);
+  // How the port is made is followed run by run: the engine log, and the run report's engine and token sections.
+  const elog = fs.existsSync(path.join(dir, 'studio/engine/LOG.md')) ? fs.readFileSync(path.join(dir, 'studio/engine/LOG.md'), 'utf8') : '';
+  fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
+  fs.appendFileSync(path.join(dir, '.studio/events.jsonl'), `${JSON.stringify({ ts: new Date().toISOString(), type: 'agent.session.start', agent: 'porter-s1', meta: { role: 'engine-porter' } })}\n${JSON.stringify({ ts: new Date().toISOString(), type: 'agent.session.end', agent: 'porter-s1', tokensIn: 10, tokensOut: 20, meta: { role: 'engine-porter', cacheRead: 1500000 } })}\n`);
+  const rto = path.join(tmpRoot, `results-engine-${n}`);
+  run(dir, `node harness/run-report.mjs --to "${rto}"`, env);
+  const rmade = fs.existsSync(rto) ? fs.readdirSync(rto) : [];
+  const rrep = rmade[0] ? fs.readFileSync(path.join(rto, rmade[0], 'REPORT.md'), 'utf8') : '';
+  report('the engine track keeps its own log (start, gate, parity) and the run report shows it, with cache reads per session by role', /track started: Godot 4/.test(elog) && /gate PASS/.test(elog) && /gate FAIL[^\n]*script error/.test(elog) && /parity FAIL on seeds/.test(elog) && /## Engine track[\s\S]*Gate: 1 passed, 1 failed/.test(rrep) && /\| engine-porter \| 1 \| 0 \| 1\.5M \|/.test(rrep), elog + rrep.slice(rrep.indexOf('## Tokens'), rrep.indexOf('## Tokens') + 900));
+  // Asset studio: approving the last design waiting moves it to assets/approved/ and asks for the next round.
+  fs.mkdirSync(path.join(dir, 'assets/staging/props'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'assets/staging/props/lamp.png'), 'png');
+  const prA = run(dir, 'node harness/art.mjs propose assets/staging/props/lamp.png --title "Lobby lamp" --by art-1', env);
+  const num = (prA.stdout.match(/#(\d+)/) || [])[1];
+  const apA = run(dir, `node harness/art.mjs approve ${num} --by hatch`, env);
+  const qA = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
+  report('approving the last design waiting moves it to assets/approved/ and gives the art department its next round', fs.existsSync(path.join(dir, 'assets/approved/props/lamp.png')) && qA.backlog.some((t) => t.role === 'art' && /^Art: next round/.test(t.title)) && /next round/.test(apA.stdout), prA.stdout + prA.stderr + apA.stdout + apA.stderr);
+  // The Arcade plays a bundled build whose files are asked for at the root (vite's default base '/').
+  const vb = path.join(dir, '.studio/builds/209901010000-vite');
+  fs.mkdirSync(path.join(vb, 'assets'), { recursive: true });
+  fs.writeFileSync(path.join(vb, 'build.json'), JSON.stringify({ id: '209901010000-vite', at: '2099-01-01T00:00:00Z', page: 'index.html', cartridge: 'tin-moon', outcome: 'won', ticks: 1 }));
+  fs.writeFileSync(path.join(vb, 'index.html'), '<script type="module" src="/assets/index-abc.js"></script>\n');
+  fs.writeFileSync(path.join(vb, 'assets/index-abc.js'), 'console.log("a bundled game");\n');
+  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`]);
+  const hport = 3900 + Math.floor(Math.random() * 90);
+  const hubP = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...CLEAN_ENV, HUB_PORT: String(hport), HUB_TOKEN: 'selftest-token' }, stdio: 'ignore' });
+  const get = (p) => spawnSync(process.execPath, ['-e', `fetch('http://127.0.0.1:${hport}${p}').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40))).catch((e) => console.log('ERR', e.message))`], { encoding: 'utf8' }).stdout.trim();
+  const th = Date.now();
+  while (Date.now() - th < 10000 && /^ERR/.test(get('/health'))) pause(300);
+  const page = get('/play/209901010000-vite/index.html');
+  const asset = get('/assets/index-abc.js');
+  hubP.kill();
+  report('the Arcade plays a bundled build whose files load from the root (/assets/…), not only from /play/<id>/', /^200/.test(page) && /^200 console\.log\("a bundled game"\)/.test(asset), `${page} | ${asset}`);
   // The real thing, when a Godot is installed: the template's port matches the web game, and its gate passes.
   const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot']).status === 0 ? 'godot' : null);
   if (godot) {

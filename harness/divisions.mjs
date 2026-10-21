@@ -27,7 +27,7 @@ export const DEFAULT_DIVISIONS = [
   { id: '3d', name: '3D', roles: ['asset-3d'] },
   { id: 'localization', name: 'Localization', roles: ['localizer'] },
   { id: 'ui', name: 'UI & Accessibility', roles: ['ui-designer'] },
-  { id: 'narrative', name: 'Narrative', roles: ['writer'] },
+  { id: 'narrative', name: 'Narrative', roles: ['writer', 'narrator'] },
   { id: 'release', name: 'Release & Store', roles: ['release-manager'] },
   { id: 'devlog', name: 'Devlog', roles: ['devlogger'] },
   { id: 'engine', name: 'Engine Transfer', roles: ['engine-porter'] },

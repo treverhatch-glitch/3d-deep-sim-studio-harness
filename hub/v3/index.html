@@ -2101,7 +2101,10 @@
       const sig = `${en.label}|${en.web}|${en.frames.join(',')}`;
       if ($('r-engine').dataset.sig !== sig) {
         $('r-engine').dataset.sig = sig;
-        $('r-engine').innerHTML = `The <b>${esc(en.label)}</b> version (${esc(en.folder)}): ${en.web ? '<a href="/engine-play/index.html" target="_blank" rel="noopener">play its web build</a>' : 'no web build yet'}${en.frames.length ? ` · <a href="/api/engine-frame?file=${encodeURIComponent(en.frames[0])}" target="_blank" rel="noopener">its last frame</a>` : ' · no frames yet (npm run engine -- capture)'}`;
+        $('r-engine').innerHTML = `The <b>${esc(en.label)}</b> version (${esc(en.folder)}): ${en.web ? '<button type="button" id="r-engine-play">Play it here</button><button type="button" id="r-web-play">Back to the web build</button> <a href="/engine-play/index.html" target="_blank" rel="noopener">new tab</a>' : 'no web build yet (export it to engine.json\'s webExport)'}${en.frames.length ? ` · <a href="/api/engine-frame?file=${encodeURIComponent(en.frames[0])}" target="_blank" rel="noopener">its last frame</a>` : ' · no frames yet (npm run engine -- capture)'}`;
+        // One screen, two versions: the engine's web export plays in the same frame as the web build.
+        if ($('r-engine-play')) $('r-engine-play').onclick = () => { $('r-frame').src = '/engine-play/index.html'; $('r-frame').closest('.screen').classList.remove('empty'); $('r-notemsg').textContent = `Playing the ${en.label} build. Notes and "Is it fun?" are about the web build.`; };
+        if ($('r-web-play')) $('r-web-play').onclick = () => { arcBuild = null; renderArcade(state); };
       }
     }
     const clipSig = (s.clips || []).join('|');

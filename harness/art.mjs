@@ -190,6 +190,18 @@ async function decide(ref, status, by, note = '', { provisional = false, why = '
   }
   if (status === 'approved' && !out.next) out.next = `#${numberOf(d)} approved. The art department builds on it.`;
   writeDesigns(list);
+  // The last one waiting was just approved: the art department gets its next round straight away, so a
+  // new set lands in the Asset studio instead of an empty wall (Hatch: "then a new graphic pops in").
+  if (status === 'approved' && !provisional && !list.some((x) => x.status === 'proposed')) {
+    const { parseNextQueue, addTask } = await import('./task.mjs');
+    const q = parseNextQueue();
+    if (![...q.inProgress, ...q.backlog].some((t) => t.role === 'art' && /^Art: next round/.test(t.title))) {
+      const approvedN = list.filter((x) => x.status === 'approved').length;
+      const t = addTask({ title: `Art: next round of designs (${approvedN} approved so far, latest #${numberOf(d)} ${d.title}): propose the next pieces the game needs`.slice(0, 180), role: 'art', priority: 'P2', agent: by, meta: { design: d.id } });
+      out.task = t.id || null;
+      if (out.task) out.next = `${out.next} Nothing is left waiting, so the art department has ${out.task} for the next round.`;
+    }
+  }
   if (status === 'changes') {
     const { addTask } = await import('./task.mjs');
     const t = addTask({ title: `Art: round ${(d.round || 1) + 1} of #${numberOf(d)} ${d.title}: ${note.replace(/\s+/g, ' ')}`.slice(0, 180), role: 'art', priority: 'P1', agent: by, meta: { design: d.id } });

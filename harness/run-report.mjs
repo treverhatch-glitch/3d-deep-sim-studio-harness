@@ -153,6 +153,31 @@ export function renderRunReport(r) {
   }
   const doneBy = (a) => ev.filter((e) => e.type === 'task.done' && e.agent === a).length;
   L.push('## Staffing', '', ...(staff.size ? [...staff.values()].map((s) => `- ${s.agent} (${s.role}${s.division ? `, ${s.division}` : ''})${s.hiredBy ? `, hired by ${s.hiredBy}` : ''}: ${s.sessions} session${s.sessions === 1 ? '' : 's'}, ${Math.round(s.ms / 60000)} min, ${s.tokens.toLocaleString()} tokens, ${doneBy(s.agent)} task(s) done`) : ['- Nobody hired through the launcher yet.']), '');
+  // Tokens by role (2.27.2): cache reads are where the cost of re-reading context shows (test #2: 580M
+  // read against 3.7M written in a day), so they are counted per session and per finished task.
+  const roleOf = new Map(starts.map((e) => [e.agent, e.meta?.role || 'unknown']));
+  const byRole = new Map();
+  for (const e of ends) {
+    const role = e.meta?.role || roleOf.get(e.agent) || 'unknown';
+    const x = byRole.get(role) || { role, sessions: 0, cacheRead: 0, tokens: 0, done: 0 };
+    x.sessions += 1;
+    x.cacheRead += Number(e.meta?.cacheRead) || 0;
+    x.tokens += (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0);
+    byRole.set(role, x);
+  }
+  for (const e of ev.filter((x) => x.type === 'task.done')) {
+    const x = byRole.get(roleOf.get(e.agent));
+    if (x) x.done += 1;
+  }
+  const M = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+  L.push('## Tokens by role', '', ...(byRole.size ? ['| Role | Sessions | Tasks done | Cache reads per session | Cache reads per task done | In + out |', '| --- | --- | --- | --- | --- | --- |', ...[...byRole.values()].sort((a, b) => b.cacheRead - a.cacheRead).map((x) => `| ${x.role} | ${x.sessions} | ${x.done} | ${M(Math.round(x.cacheRead / x.sessions))} | ${x.done ? M(Math.round(x.cacheRead / x.done)) : '-'} | ${M(x.tokens)} |`)] : ['- No session has ended yet.']), '');
+  // The engine track: what the port's agents did, and how its gate and parity went.
+  const engEv = ev.filter((e) => /^(qa\.engine|qa\.parity|engine\.)/.test(e.type));
+  if (engEv.length) {
+    const count = (t) => engEv.filter((e) => e.type === t).length;
+    const porters = [...byRole.values()].find((x) => x.role === 'engine-porter');
+    L.push('## Engine track', '', `- Gate: ${count('qa.engine.pass')} passed, ${count('qa.engine.fail')} failed. Parity: ${count('qa.parity.pass')} passed, ${count('qa.parity.fail')} failed.`, ...(porters ? [`- Engine porters: ${porters.sessions} sessions, ${porters.done} tasks done, ${M(porters.cacheRead)} cache reads.`] : []), ...engEv.slice(-6).map((e) => `- ${e.ts.slice(0, 16).replace('T', ' ')} ${e.agent}: ${e.msg}`), '- The full history is in studio/engine/LOG.md.', '');
+  }
   L.push('## Agents the launcher ran', '', ...(r.launched.length ? r.launched.map((s) => `- ${s.agent} (${s.role}, ${s.tool}/${s.model}): ${s.running ? 'running' : s.reason || 'ended'}${s.handed?.length ? `; handed back ${s.handed.map((h) => h.task).join(', ')}` : ''}`) : ['- None (agents were started by hand).']), '');
   L.push('## Decided without you', '', ...(r.decided.length ? r.decided.map((a) => `- ${a.id}: ${a.question} → "${a.answer}" by ${a.by} (${a.why})${a.status === 'reversed' ? ` — reversed by ${a.answeredBy}` : ''}`) : ['- Nothing; every question was answered or is still open.']), '');
   L.push('## Needed a person', '', ...(r.needsPerson.length ? r.needsPerson.map((x) => `- ${x}`) : ['- Nothing.']), '');

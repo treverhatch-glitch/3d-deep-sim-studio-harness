@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { activeCartridge, loadCartridge, runScenario } from '../harness/cartridge.mjs';
-import { readTrack, engineCommand } from '../harness/engine.mjs';
+import { readTrack, engineCommand, logEngine } from '../harness/engine.mjs';
 
 export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   const t = readTrack();
@@ -64,6 +64,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   for (const p of r.problems) console.error(`[parity] FAIL ${p}`);
   if (r.ok) console.log(`[parity] PASS ${seeds.length} seeds agree on ${r.compared.join(' and ')}`);
+  logEngine(`parity ${r.ok ? 'PASS' : 'FAIL'} on seeds ${seeds.join(',')}${r.ok ? '' : `: ${r.problems[0]}`}`, process.env.STUDIO_LOCK_OWNER || 'qa');
   emitEvent({ type: r.ok ? 'qa.parity.pass' : 'qa.parity.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: r.ok ? `Web and engine agree on ${seeds.length} seeds` : `Web and engine disagree: ${r.problems[0]}` });
   process.exit(r.ok ? 0 : 1);
 }

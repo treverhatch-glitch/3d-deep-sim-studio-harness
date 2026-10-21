@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
-import { readTrack, ENGINES, engineBin, engineCommand } from '../harness/engine.mjs';
+import { readTrack, ENGINES, engineBin, engineCommand, logEngine } from '../harness/engine.mjs';
 
 const t = readTrack();
 if (!t) {
@@ -40,5 +40,6 @@ fs.writeFileSync(path.join(REPO_ROOT, logFile), out);
 const scriptErrors = (out.match(/SCRIPT ERROR|Unhandled exception|LogScript: Error|Parse Error/gi) || []).length;
 const ok = r.status === 0 && scriptErrors === 0;
 emitEvent({ type: ok ? 'qa.engine.pass' : 'qa.engine.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', track: t.track, msg: `${t.label} gate ${ok ? 'passed' : 'failed'} in ${Math.round((Date.now() - start) / 1000)} s${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}` });
+logEngine(`gate ${ok ? 'PASS' : 'FAIL'}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}, log ${logFile}`, process.env.STUDIO_LOCK_OWNER || 'qa');
 console[ok ? 'log' : 'error'](`[engine] ${ok ? 'PASS' : 'FAIL'} ${t.label}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}. Log ${logFile}`);
 process.exit(ok ? 0 : 1);
