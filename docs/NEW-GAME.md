@@ -38,3 +38,16 @@ What a setup never carries:
 - **A game's progress.** The board, events and the Bible stay with their game.
 
 Applying a setup to a studio that already exists: `node scripts/studio-setup.mjs apply <folder>`.
+
+## Throw it all away and restart
+
+When a game isn't working out, Ops has **Throw it all away and restart**. It asks twice, and only the
+second confirmation does anything:
+
+1. The whole working tree, committed or not, is saved as a git tag `archive/<game>-<time>`.
+2. The game's code (cartridges/, game/ and web/ folders), recorded runs, assets, board, Bible and
+   saved builds are removed. The harness, your roles, skills, departments, budget and pace stay.
+3. The studio starts again at the intake: `npm run intake`.
+
+On the command line: `npm run studio:restart` shows what would go; `npm run studio:restart -- --by <name> --yes --yes` does it.
+Undo: `git checkout <tag> -- .` (the tag name is in the event log and the War Room message).

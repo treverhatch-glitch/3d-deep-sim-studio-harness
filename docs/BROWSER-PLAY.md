@@ -46,6 +46,15 @@ way a dev server would; the same build is saved for `npm run play` and the Arcad
 `browser` passes with a note. Without Chromium the template game is skipped; a real game fails,
 because skipping is how "green but broken" ships.
 
+## When it fails before playing
+
+- **A renderer with no contract fails.** A game with a `game/<name>/` or `web/<name>/` folder whose qa.mjs
+  declares no `browser` fails with BROWSER-CONTRACT-MISSING. A sim-only game, or the template, skips.
+- **A dead `PLAYTEST_URL` is skipped.** When `PLAYTEST_URL` in `.env` doesn't answer, the check plays the
+  cartridge's own page or build and prints a note. Clear it unless you mean to play a dev server.
+- **Finding a browser.** Order: `PLAYWRIGHT_CHROMIUM`, Playwright's own browser (`npx playwright install
+  chromium`), then the installed Chrome or Edge (Windows and macOS included).
+
 ## Renderer work and bugs
 
 Tasks carry the part of the game they touch: `npm run task -- add "…" --part sim|renderer|both`.

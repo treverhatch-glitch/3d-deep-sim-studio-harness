@@ -13,6 +13,7 @@ commit. An unchanged build isn't saved twice; the last 6 are kept.
 npm run play                 # serve the newest saved build: http://127.0.0.1:4610/
 npm run play -- --lan        # also on phones on the same Wi-Fi (prints the address)
 npm run play -- list         # saved builds; play an older one with --build <id>
+# The root (and the War Room's /play/<id>/) redirects to the page in its own folder, so its ./main.mjs loads.
 ```
 
 A bundled game (Vite and the like) declares `browser.dist` and `browser.build` in its qa.mjs; the

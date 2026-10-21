@@ -2,7 +2,7 @@
 /**
  * harness/review.mjs — a second opinion from a model made by another company, in one command.
  *
- *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run]
+ *   npm run review -- <TASK_ID> [--local] [--implementer <model>] [--dry-run] [--router-only]
  *
  * Gathers the task, its spec (for system tasks) and the diff of every commit tagged with it, sends
  * them to the reviewer chain through the router (--local: only your Ollama model, free and offline),
@@ -22,7 +22,7 @@ import { parseNextQueue } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { taggedCommits } from './scorecard.mjs';
 import { modelFamily } from './families.mjs';
-import { routeChatCompletion } from './route.mjs';
+import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
 
 const DIFF_CAP = 24000;
@@ -92,6 +92,56 @@ export function writeReview(g, { model, content }) {
   return { file: path.relative(REPO_ROOT, file).split(path.sep).join('/'), verdict };
 }
 
+/**
+ * No router keys (or the router failed): ask an agent CLI made by another company instead, read-only.
+ * Run #1 showed "503: All channels exhausted for role reviewer" on a studio that reviews through agent
+ * CLIs and never set router keys. Order: STUDIO_REVIEWER_TOOL (+ _MODEL), then STUDIO_REVIEW_TOOLS
+ * ("codex:gpt-6-sol,agy"), then codex, agy, claude; tools of the builder's family, missing from the
+ * PATH or out of quota are skipped.
+ */
+const TOOL_FAMILY = { claude: 'anthropic', codex: 'openai', agy: 'google', gemini: 'google', grok: 'xai' };
+const TOOL_MODEL_NAME = { claude: 'claude', codex: 'gpt', agy: 'gemini', gemini: 'gemini', grok: 'grok' };
+export function reviewerTools(builder, env = process.env) {
+  const listed = [env.STUDIO_REVIEWER_TOOL ? `${env.STUDIO_REVIEWER_TOOL}${env.STUDIO_REVIEWER_MODEL ? `:${env.STUDIO_REVIEWER_MODEL}` : ''}` : null, ...String(env.STUDIO_REVIEW_TOOLS || '').split(','), 'codex', 'agy', 'claude'].filter(Boolean).map((x) => x.trim());
+  const seen = new Set();
+  const bfam = modelFamily(builder);
+  return listed.map((x) => {
+    const [tool, ...m] = x.split(':');
+    return { tool, model: m.join(':') || null };
+  }).filter(({ tool, model }) => {
+    if (seen.has(tool) || !TOOL_FAMILY[tool]) return false;
+    seen.add(tool);
+    const fam = model ? modelFamily(model) : TOOL_FAMILY[tool];
+    return bfam === 'unknown' || (fam !== bfam && TOOL_FAMILY[tool] !== bfam);
+  });
+}
+export async function cliReview(g, messages, { run = spawnSync } = {}) {
+  const { exhaustedUntil } = await import('./budget.mjs');
+  const text = messages.map((m) => `${m.role === 'system' ? 'Instructions' : 'Review this'}:\n${m.content}`).join('\n\n');
+  const tried = [];
+  for (const { tool, model } of reviewerTools(g.builder)) {
+    const which = run(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' });
+    if (which.status !== 0) {
+      tried.push(`${tool}: not installed`);
+      continue;
+    }
+    if (exhaustedUntil(tool)) {
+      tried.push(`${tool}: out of quota`);
+      continue;
+    }
+    // Read-only: the reviewer looks and writes a verdict, it never edits the game.
+    const argv = tool === 'claude' ? ['claude', '-p', '--output-format', 'text', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit', ...(model ? ['--model', model] : [])]
+      : tool === 'codex' ? ['codex', 'exec', '--sandbox', 'read-only', ...(model ? ['-m', model] : []), '-']
+      : tool === 'agy' || tool === 'gemini' ? [tool, '-p', text, '--print-timeout', '900s']
+      : ['grok', '-p', text, ...(model ? ['-m', model] : [])];
+    const r = run(argv[0], argv.slice(1), { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex'].includes(tool) ? text : undefined, timeout: 15 * 60000, shell: process.platform === 'win32', maxBuffer: 32 * 1024 * 1024 });
+    const out = String(r.stdout || '').trim();
+    if (r.status === 0 && out) return { ok: true, model: model || TOOL_MODEL_NAME[tool], content: out, tool };
+    tried.push(`${tool}: exit ${r.status}${r.stderr ? ` (${String(r.stderr).trim().split('\n').pop().slice(0, 120)})` : ''}`);
+  }
+  return { ok: false, error: tried.length ? tried.join('; ') : `no reviewer tool of another family than ${modelFamily(g.builder)} (set STUDIO_REVIEWER_TOOL)` };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const id = argv.find((a) => /^T-\d+$/.test(a));
@@ -110,7 +160,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`Would send ${id} (${g.commits.length} commits, ${g.diff.length} characters of diff, ${g.specs.length} spec) to ${chain ? 'your local Ollama model' : 'the reviewer chain'}; builder ${g.builder} (${modelFamily(g.builder)}).`);
     process.exit(0);
   }
-  const r = await routeChatCompletion({ role: 'reviewer', customChain: chain, messages: prompt(g), task: id, maxTokens: 1200 });
+  // With no router keys at all, go straight to an agent CLI (no 503 card); if the router fails, try one too.
+  const routerReady = chain || getRouterMatrix('reviewer').some((p) => (p.channels || []).length);
+  let r = routerReady ? await routeChatCompletion({ role: 'reviewer', customChain: chain, messages: prompt(g), task: id, maxTokens: 1200 }) : { ok: false, error: 'no router keys for the reviewer' };
+  if (!r.ok && !chain && !argv.includes('--router-only')) {
+    const c = await cliReview(g, prompt(g));
+    if (c.ok) {
+      emitEvent({ type: 'review.cli', agent: `reviewer:${c.tool}`, task: id, msg: `${id} reviewed through ${c.tool} (${r.error ? `router: ${String(r.error).slice(0, 80)}` : 'no router'})` });
+      r = c;
+    } else r = { ...r, error: `${r.error || 'router failed'}; agent CLIs: ${c.error}` };
+  }
   if (!r.ok) {
     console.error(`No reviewer answered: ${r.error || r.attempts?.map((a) => `${a.providerId}: ${a.reason || a.status}`).join('; ')}${chain ? '\nIs Ollama running (ollama serve) with the model in OLLAMA_MODEL pulled?' : ''}`);
     process.exit(1);

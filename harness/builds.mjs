@@ -102,12 +102,21 @@ export function snapshotBuild(cart, report = {}) {
   return { ok: true, build };
 }
 
+/**
+ * Where the build's page lives, for a redirect from its root. The page must load from its own folder,
+ * or its relative scripts (./main.mjs) resolve to the root and 404: a black screen at tick 0 (Gemini's run).
+ */
+export function buildPagePath(id) {
+  const b = id === 'latest' ? latestBuild() : listBuilds().find((x) => x.id === id);
+  return b ? `${b.page}${b.query ? `?${b.query}` : ''}` : null;
+}
+
 /** Serve one saved build's files (also used by the HUB under /play/<id>/). Returns false when not found. */
 export function serveBuildFile(id, rel, res) {
   const b = id === 'latest' ? latestBuild() : listBuilds().find((x) => x.id === id);
-  if (!b) return false;
+  if (!b || !rel) return false;
   const root = path.join(BUILDS_DIR, b.id);
-  const file = path.resolve(root, decodeURIComponent(rel || b.page).replace(/^\/+/, ''));
+  const file = path.resolve(root, decodeURIComponent(rel).replace(/^\/+/, ''));
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return false;
   // The War Room plays builds in a sandboxed frame (no access to the War Room's token), whose module
   // scripts load cross-origin, so the files allow any origin. They are the game's own public files.
@@ -142,8 +151,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const host = argv.includes('--lan') ? '0.0.0.0' : '127.0.0.1';
   const srv = http.createServer((req, res) => {
     const rel = new URL(req.url, 'http://x').pathname.replace(/^\/+/, '');
-    if (!serveBuildFile(b.id, rel || b.page, res)) {
-      res.writeHead(rel ? 404 : 302, rel ? {} : { location: `/${b.page}${b.query ? `?${b.query}` : ''}` });
+    if (!rel) {
+      res.writeHead(302, { location: `/${buildPagePath(b.id)}` });
+      return res.end();
+    }
+    if (!serveBuildFile(b.id, rel, res)) {
+      res.writeHead(404);
       res.end();
     }
   });

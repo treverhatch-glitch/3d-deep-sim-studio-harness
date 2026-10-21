@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { launchChromium } from './chromium.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { cartridgeFromArgv, loadCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
@@ -79,20 +80,37 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
   const b = cart.browser;
   const report = { cartridge: cart.name, at: new Date().toISOString(), findings: [], screenshots: [], inputs: 0, checks: 0 };
   const fail = (id, summary, extra = {}) => report.findings.push({ id, severity: 'P1', summary, ...extra });
-  if (!b && !urlArg) return { ...report, skipped: `cartridges/${cart.name}/qa.mjs declares no browser build (export const browser = { page, input, wiring })`, passed: true };
+  if (!b && !urlArg) {
+    // A game with a renderer folder and no browser contract hasn't been played: that fails (run #1 printed
+    // SKIP and PASS for Next Floor). A sim-only game, or the template, may skip.
+    const renderer = ['game', 'web'].map((d) => `${d}/${cart.name}`).find((d) => fs.existsSync(path.join(REPO_ROOT, d)));
+    if (renderer && !isTemplateCartridge(cart.name)) {
+      fail('BROWSER-CONTRACT-MISSING', `${renderer}/ is a renderer, but cartridges/${cart.name}/qa.mjs declares no browser build, so nobody played it in a browser. Add export const browser = { page or dist, input, wiring } (copy cartridges/example-sim/qa.mjs).`);
+      return { ...report, passed: false };
+    }
+    return { ...report, skipped: `cartridges/${cart.name}/qa.mjs declares no browser build (export const browser = { page, input, wiring })`, passed: true };
+  }
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
   } catch {
     return { ...report, skipped: 'Playwright is not installed (npm install, then npx playwright install chromium)', passed: isTemplateCartridge(cart.name) };
   }
-  const exe = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
   const args = process.platform === 'darwin' ? ['--use-angle=metal'] : [];
-  const browser = await chromium.launch({ ...(exe ? { executablePath: exe } : {}), args }).catch((err) => ({ error: err }));
-  if (browser.error) return { ...report, skipped: `Chromium did not start (${browser.error.message.split('\n')[0]}); npx playwright install chromium`, passed: isTemplateCartridge(cart.name) };
+  const browser = await launchChromium(chromium, { args });
+  if (browser.error) return { ...report, skipped: `Chromium did not start (${browser.error.message.split('\n')[0]}; tried ${browser.tried.join(', ')}); npx playwright install chromium`, passed: isTemplateCartridge(cart.name) };
 
   let srv = null;
   let url = urlArg || process.env.PLAYTEST_URL || b?.url || null;
+  // A PLAYTEST_URL left in .env from the example, with nothing answering (Gemini's run): play the
+  // cartridge's own page or build instead, and say so.
+  if (!urlArg && url && url === process.env.PLAYTEST_URL && (b?.page || b?.dist)) {
+    const up = await fetch(url, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
+    if (!up) {
+      report.notes = [...(report.notes || []), `PLAYTEST_URL (${url}) isn't answering; played the cartridge's own ${b.dist ? 'build' : 'page'} instead. Clear PLAYTEST_URL in .env unless a dev server should be used.`];
+      url = null;
+    }
+  }
   if (!url && b?.dist) {
     // A bundled game (Vite and the like): build it, then play the build, never the dev server.
     if (b.build) {
@@ -230,7 +248,7 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
   }
   report.passed = report.findings.length === 0;
   // A pass means this build is playable: save it for npm run play and the Arcade (unchanged builds aren't saved twice).
-  if (report.passed && save && !urlArg && !process.env.PLAYTEST_URL) {
+  if (report.passed && save && !urlArg && !(process.env.PLAYTEST_URL && url === process.env.PLAYTEST_URL)) {
     const { snapshotBuild } = await import('../harness/builds.mjs');
     const s = snapshotBuild(cart, report);
     if (s.ok) report.build = s.build.id;
@@ -250,7 +268,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(r.passed ? 0 : 1);
   }
   emitEvent({ type: r.passed ? 'qa.browser.pass' : 'qa.browser.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: `${r.cartridge} in the browser: ${r.passed ? `${r.outcome} at tick ${r.ticks} with ${r.inputs} real inputs, ${r.checks} screen checks` : r.findings.map((f) => f.id).join(', ')}` });
+  for (const n of r.notes || []) console.log(`[browser-play] note: ${n}`);
   for (const f of r.findings) console.error(`[browser-play] FAIL ${f.id}: ${f.summary}`);
+  if (r.ticks === undefined && !r.passed) process.exit(1);
   console.log(`[browser-play] ${r.passed ? 'PASS' : 'FAIL'} ${r.cartridge}: ${r.outcome || 'no outcome'} at tick ${r.ticks}, ${r.inputs} real inputs, ${r.checks} screen checks. Report ${r.file}; screenshots ${r.screenshots.join(', ')}`);
   process.exit(r.passed ? 0 : 1);
 }

@@ -12,6 +12,7 @@ import { checkDone, taskType } from './done-check.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
+import { holdReason, setHold, readHolds } from './task-hold.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -150,7 +151,7 @@ export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()
   if (held) return { task: held, held: true };
   const open = q.backlog
     .map((t, i) => [t, i])
-    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role))
+    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q))
     .sort((a, b) => (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
   return { task: open[0]?.[0] || null, held: false };
 }
@@ -177,11 +178,13 @@ export function showTask(taskId, q = parseNextQueue()) {
   };
 }
 
-export function startTask(taskId, agent = null, { model = null } = {}) {
-  if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
+export function startTask(taskId, agent = null, { model = null, force = false } = {}) {
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   const stop = readStop();
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
+  // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
+  const held = holdReason(taskId, parseNextQueue());
+  if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: `${taskId} can't start yet: ${held}. Pick another task (npm run task -- next), or a person releases it.` };
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
     if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };
@@ -416,6 +419,7 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
   };
   q.backlog.push(newTask);
   writeNextQueue(q);
+  if (meta.after?.length) setHold(newTask.id, { after: meta.after });
   emitEvent({
     type: 'task.added',
     agent,
@@ -485,7 +489,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'stop') {
     const s = setStop(typeof flags.by === 'string' ? flags.by : 'human', typeof flags.reason === 'string' ? flags.reason : '');
-    console.log(`Studio stopped by ${s.by}. No task can start; agents hand back what they hold. Resume: npm run task -- resume --by <name>`);
+    const { stopAllAgents } = await import('./agent.mjs');
+    const stopped = stopAllAgents(s.by, s.reason);
+    console.log(`Studio stopped by ${s.by}. No task can start${stopped.length ? `; ${stopped.join(', ')} handed back their work and stopped` : ''}. Resume: npm run task -- resume --by <name>`);
     process.exit(0);
   }
   if (cmd === 'resume') {
@@ -499,7 +505,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
     }
-    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, { model: typeof flags.model === 'string' ? flags.model : null });
+    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force) });
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);
@@ -559,10 +565,63 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  // Holds: dependencies, parking, blocks and lanes (harness/task-hold.mjs).
+  if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
+    const by = typeof flags.by === 'string' ? flags.by : actor();
+    const all = [...q.inProgress, ...q.backlog, ...q.done];
+    if (cmd === 'holds') {
+      const h = readHolds();
+      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
+      console.log(rows.length ? rows.join('\n') : 'No holds: every waiting task can start.');
+      process.exit(0);
+    }
+    if (!arg1 || !all.some((t) => t.id === arg1)) {
+      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> ${cmd === 'block' ? '--until <T-ID|ISO time> ' : cmd === 'lane' ? '<folder|none> ' : ''}--by <name>${cmd === 'park' ? ' --why "…"' : ''}`);
+      process.exit(1);
+    }
+    if (cmd === 'park') {
+      if (typeof flags.why !== 'string') {
+        console.error('Say why it is parked: --why "…" (the Producer and Director read it).');
+        process.exit(1);
+      }
+      setHold(arg1, { parked: { by, why: flags.why, at: new Date().toISOString() } }, { by, msg: `${by} parked ${arg1}: ${flags.why}` });
+      console.log(`${arg1} is parked: it won't start until someone runs npm run task -- unpark ${arg1} --by <name>.`);
+    } else if (cmd === 'unpark') {
+      setHold(arg1, { parked: null }, { by, msg: `${by} unparked ${arg1}` });
+      console.log(`${arg1} can start again.`);
+    } else if (cmd === 'block') {
+      const u = typeof flags.until === 'string' ? flags.until : '';
+      if (/^[A-Z]+-\d+$/.test(u)) setHold(arg1, { after: [...new Set([...(readHolds()[arg1]?.after || []), u])], why: typeof flags.why === 'string' ? flags.why : undefined }, { by, msg: `${by}: ${arg1} waits for ${u}` });
+      else if (Number.isFinite(Date.parse(u))) setHold(arg1, { until: new Date(Date.parse(u)).toISOString(), why: typeof flags.why === 'string' ? flags.why : undefined }, { by, msg: `${by} blocked ${arg1} until ${u}` });
+      else {
+        console.error('--until takes a task id (T-011) or a time (2026-10-22T09:00).');
+        process.exit(1);
+      }
+      console.log(`${arg1} is blocked until ${u}.`);
+    } else {
+      const folder = flags._[2];
+      if (!folder) {
+        console.error(`Usage: npm run task -- lane ${arg1} <folder|none> --by <name>`);
+        process.exit(1);
+      }
+      const lane = folder === 'none' ? null : folder.replace(/\\/g, '/').replace(/\/+$/, '');
+      if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
+        console.error(`${lane} is harness code, and this clone's harness is frozen.`);
+        process.exit(1);
+      }
+      const all2 = readHolds();
+      all2[arg1] = { ...(all2[arg1] || {}), lane };
+      fs.writeFileSync(path.join(REPO_ROOT, 'studio', 'task-holds.json'), `${JSON.stringify({ tasks: all2 }, null, 2)}\n`);
+      emitEvent({ type: 'task.lane', agent: by, task: arg1, msg: `${by}: ${arg1} works in ${lane || 'the whole game'}` });
+      console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.`);
+    }
+    process.exit(0);
+  }
+
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--prototype | --infra]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--prototype | --infra]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -595,6 +654,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
         ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
         ...(typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
+        ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
         ...(typeof flags['not-layer'] === 'string' ? { notLayer: flags['not-layer'] } : {}),
@@ -609,5 +669,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>"]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds]');
 }

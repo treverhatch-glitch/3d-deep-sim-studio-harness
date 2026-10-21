@@ -156,8 +156,17 @@
   #arcade button:focus-visible, #arcade canvas:focus-visible, #arcade textarea:focus-visible, #arcade select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
   #o-launched .ag { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-launched .ag .note { flex-basis: 100%; margin: 0; }
+  #o-queue .hold { color: var(--standby); font-size: 0.85em; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
+  #ops .restartbox { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .62); }
+  #ops .restartbox[hidden] { display: none; }
+  #ops .restartcard { width: min(520px, 100%); background: var(--panel); border: 2px solid var(--hold); border-radius: 8px; padding: 20px 22px; }
+  #ops .restartcard h3 { margin: 0 0 8px; font: 700 22px/1.15 "Barlow Condensed", sans-serif; color: var(--hold); }
+  #ops .restartcard p { margin: 0 0 10px; }
+  #ops .restartcard ul { margin: 0 0 14px; padding-left: 20px; color: var(--quiet); }
+  #ops .restartbtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+  #ops .restartbtns #o-restartyes { background: var(--hold); color: var(--bg); font-weight: 700; }
   #ops .meet-strip { display: none; margin: 12px 20px 0; padding: 8px 14px; border-left: 4px solid var(--link); background: rgba(108, 198, 255, .08); }
   #ops .meet-strip.on { display: block; }
   #ops .hold-strip h2 { margin: 0 0 4px; font: 600 18px/1.2 "Barlow Condensed", sans-serif; color: var(--hold); }
@@ -560,12 +569,20 @@
           <select id="o-size" aria-label="Size, 1 easy to 5 big"><option value="">size</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
           <button>Add task</button></form>
-        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button id="o-restart" type="button" class="stop restart" title="Saved as a git tag first; asks twice">Throw it all away and restart</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
         <form id="o-agentform" class="act-row"><select id="o-arole" aria-label="Role for the new agent"><option>builder</option><option>qa-playtester</option><option>rnd</option><option>art</option><option>director</option><option>producer</option><option>reviewer</option><option>planner</option><option>liaison</option></select>
           <select id="o-atool" aria-label="Agent tool"><option value="">tool from .env</option><option>claude</option><option>codex</option><option>agy</option><option>cursor</option><option>grok</option><option>aider</option><option>custom</option></select>
           <input id="o-amodel" placeholder="model (blank: from .env)" aria-label="Model for the new agent" size="18"> <button>Start agent</button></form>
         <div id="o-launched"></div>
         <form id="o-inbox" class="act-row"><input id="o-msg" placeholder="Message the Producer" aria-label="Message for the Producer's inbox" required> <button>Send</button></form>
+        <div id="o-restartbox" class="restartbox" role="alertdialog" aria-modal="true" aria-labelledby="o-restarth" aria-describedby="o-restartp" hidden>
+          <div class="restartcard">
+            <h3 id="o-restarth"></h3>
+            <p id="o-restartp"></p>
+            <ul id="o-restartlist"></ul>
+            <div class="restartbtns"><button type="button" id="o-restartno">Cancel</button> <button type="button" id="o-restartyes" class="stop"></button></div>
+          </div>
+        </div>
         <p class="note" id="o-actmsg" role="status">Paste the HUB token from .env to use the buttons. Without it the page is read-only.</p>
       </section>
       <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
@@ -830,6 +847,65 @@
       return stopping ? 'Stopped. No task can start until you resume.' : 'Resumed. Agents can start tasks again.';
     });
   });
+  // Throw it all away and restart: two warnings back to back; the server needs both presses.
+  {
+    const box = $('o-restartbox');
+    let ticket = null;
+    let step = 0;
+    const close = (msg) => {
+      box.hidden = true;
+      step = 0;
+      ticket = null;
+      $('o-restart').focus();
+      if (msg) notify(msg);
+    };
+    const show = (title, text, items, yes) => {
+      $('o-restarth').textContent = title;
+      $('o-restartp').textContent = text;
+      $('o-restartlist').innerHTML = items.map((x) => `<li>${esc(x)}</li>`).join('');
+      $('o-restartyes').textContent = yes;
+      box.hidden = false;
+      $('o-restartno').focus();
+    };
+    $('o-restart').addEventListener('click', async () => {
+      try {
+        const r = await post('/api/restart', { step: 1, by: actor() });
+        ticket = r.ticket;
+        step = 1;
+        const p = r.plan;
+        show(`Throw away ${p.title}?`, 'This removes the game from the studio and starts again at the intake:', [
+          `${p.folders.length ? p.folders.join(', ') : 'no game code folders yet'}`,
+          `${p.recorded.length} recorded run${p.recorded.length === 1 ? '' : 's'} (goldens and regressions), ${p.assets.length} art and asset item${p.assets.length === 1 ? '' : 's'}`,
+          'the board, the Game Bible, reviews, logs and saved builds',
+          'Kept: the harness, your roles, departments, budget and pace. A full copy is saved as a git tag first.',
+        ], 'Yes, throw it away');
+      } catch (err) {
+        notify(`Restart: ${err.message}`);
+      }
+    });
+    $('o-restartno').addEventListener('click', () => close('Restart cancelled. Nothing changed.'));
+    box.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') close('Restart cancelled. Nothing changed.');
+    });
+    $('o-restartyes').addEventListener('click', async () => {
+      if (step === 1) {
+        step = 2;
+        show('Last warning: are you sure?', 'Agents stop now, and the game\'s code, Bible and board leave the studio. Only the git tag can bring them back.', [], 'Throw it all away and restart');
+        return;
+      }
+      if (step !== 2) return;
+      $('o-restartyes').disabled = true;
+      try {
+        const r = await post('/api/restart', { step: 2, ticket, by: actor() });
+        close(r.next);
+        poll();
+      } catch (err) {
+        close(`Restart failed: ${err.message}`);
+      } finally {
+        $('o-restartyes').disabled = false;
+      }
+    });
+  }
   $('o-queue').addEventListener('click', (ev) => {
     const b = ev.target.closest('button[data-act]');
     if (!b) return;
@@ -927,9 +1003,21 @@
     if (document.activeElement !== box) box.checked = c.share;
     $('p-shareq').textContent = c.question;
     $('p-sharemsg').textContent = `${c.detail} Now: ${c.text}.`;
-    // Showing the question is recorded once, so an export can say the dev saw it and left it ticked.
-    if (!c.shown && hubToken()) post('/api/data-consent', { shown: true, by: actor() }).catch(() => {});
+    // Showing the question is recorded once, so an export can say the dev saw it and left it ticked:
+    // only after a person did something on the Game plan (a real click or key), never on a page load
+    // and never in an automated browser (run #1: a headless visit counted as the dev seeing it).
+    consentPending = !c.shown && hubToken() && !navigator.webdriver;
   }
+  let consentPending = false;
+  const consentSeen = (ev) => {
+    // The Game plan (where the box is) has to be on screen.
+    const box = document.getElementById('p-share');
+    if (!consentPending || !ev.isTrusted || !box || !box.offsetParent) return;
+    consentPending = false;
+    post('/api/data-consent', { shown: true, by: actor() }).catch(() => {});
+  };
+  document.addEventListener('pointerdown', consentSeen, true);
+  document.addEventListener('keydown', consentSeen, true);
   async function pollPlan() {
     try {
       const res = await fetch('/api/bible', { cache: 'no-store' });
@@ -1095,7 +1183,7 @@
     // Most urgent first; the file order breaks ties. The rest are counted, not hidden silently.
     const rank = { P0: 0, P1: 1, P2: 2, P3: 3 };
     const byPri = (list) => list.map((t, i) => [t, i]).sort((a, b) => (rank[a[0].priority] ?? 9) - (rank[b[0].priority] ?? 9) || a[1] - b[1]).map(([t]) => t);
-    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${acts[label](t)}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
+    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${t.hold ? ` <span class="hold" title="It can't start yet">${esc(t.hold)}</span>` : ''}${acts[label](t)}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
     // Every open task is listed; the list scrolls inside its box. Done shows the latest ten.
     $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, Infinity) + lane('Next up', s.queue.backlog, Infinity) + lane('Done', [...s.queue.done].reverse(), 10);
     $('o-act').classList.toggle('ro', ro);
@@ -2182,6 +2270,9 @@
         say(r.next);
       } else if (t.dataset.need === 'golden-ok') {
         const r = await post('/api/golden', { sha: t.dataset.sha, by: actor() });
+        say(r.next);
+      } else if (t.dataset.need === 'supervisor-resume') {
+        const r = await post('/api/supervisor', { action: 'resume', by: actor() });
         say(r.next);
       } else if (t.dataset.need === 'start-producer') {
         const r = await post('/api/agents', { role: 'producer', agent: 'producer-1', by: actor() });

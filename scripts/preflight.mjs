@@ -33,6 +33,43 @@ const git = (...a) => spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' });
 const FROZEN = path.join(STUDIO_STATE_DIR, 'harness-frozen');
 const ENV = path.join(REPO_ROOT, '.env');
 
+// The files a frozen clone must leave alone (the same list the pre-commit hook guards).
+const FROZEN_SUMS = path.join(STUDIO_STATE_DIR, 'harness-frozen.json');
+const FROZEN_RE = /^(harness|hub|scripts|tools|\.github)\/|^qa\/[^/]+\.(mjs|py)$|^studio\/gates\.json$|^AGENTS\.md$|^package\.json$/;
+function harnessFiles() {
+  const out = [];
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(REPO_ROOT, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (!['node_modules', '.git', '__pycache__'].includes(e.name)) walk(r);
+      } else if (FROZEN_RE.test(r)) out.push(r);
+    }
+  };
+  for (const top of ['harness', 'hub', 'scripts', 'tools', '.github', 'qa']) if (fs.existsSync(path.join(REPO_ROOT, top))) walk(top);
+  for (const f of ['studio/gates.json', 'AGENTS.md', 'package.json']) if (fs.existsSync(path.join(REPO_ROOT, f))) out.push(f);
+  return out.sort();
+}
+export function harnessSums() {
+  return Object.fromEntries(harnessFiles().map((f) => [f, crypto.createHash('sha256').update(fs.readFileSync(path.join(REPO_ROOT, f))).digest('hex')]));
+}
+/** Harness files changed since the freeze: against the fingerprints taken then, or (older freezes) git. */
+export function editedHarnessFiles() {
+  let sums = null;
+  try {
+    sums = JSON.parse(fs.readFileSync(FROZEN_SUMS, 'utf8'));
+  } catch {
+    // frozen before 2.24: ask git instead
+  }
+  if (sums) {
+    const now = harnessSums();
+    return [...new Set([...Object.keys(sums), ...Object.keys(now)])].filter((f) => sums[f] !== now[f]).sort();
+  }
+  const st = git('status', '--porcelain', '--untracked-files=all');
+  if (st.status !== 0) return [];
+  return st.stdout.split('\n').map((l) => l.slice(3).trim().replace(/^"|"$/g, '')).filter((f) => f && FROZEN_RE.test(f.split(' -> ').pop())).sort();
+}
+
 function writable(dir) {
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -75,8 +112,15 @@ export function preflight() {
   if (FIX && !fs.existsSync(FROZEN)) {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(FROZEN, `Frozen by npm run preflight -- --fix at ${new Date().toISOString()}. Delete this file to unfreeze.\n`);
+    fs.writeFileSync(FROZEN_SUMS, `${JSON.stringify(harnessSums(), null, 2)}\n`);
   }
   row(fs.existsSync(FROZEN) ? 'ok' : 'warn', 'Harness frozen for the run', fs.existsSync(FROZEN) ? '' : 'run with --fix so commits to harness files are refused');
+  // Frozen means unedited too, not only uncommitted: Gemini's run loosened two self-tests in qa/selftest.mjs
+  // without committing, so the hook never saw it and the results no longer measured the shipped harness.
+  if (fs.existsSync(FROZEN)) {
+    const edited = editedHarnessFiles();
+    row(edited.length ? 'fail' : 'ok', 'Harness files unedited since the freeze', edited.length ? `${edited.slice(0, 6).join(', ')}${edited.length > 6 ? ` and ${edited.length - 6} more` : ''} changed. Put them back (git checkout -- <file>) and record the problem instead: npm run notes -- add --kind bad "…"` : '');
+  }
 
   // .env and the HUB token.
   if (!fs.existsSync(ENV) && FIX) {

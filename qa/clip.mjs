@@ -56,8 +56,9 @@ if (argv[0] === 'shot' || process.env.npm_lifecycle_event === 'shot') {
     url = `http://127.0.0.1:${srv.address().port}/${b.page}`;
   }
   const q = [b.query, flag('query')].filter(Boolean).join('&');
-  const exe = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
-  const browser = await chromium.launch({ ...(exe ? { executablePath: exe } : {}), args: process.platform === 'darwin' ? ['--use-angle=metal'] : [] });
+  const { launchChromium } = await import('./chromium.mjs');
+  const browser = await launchChromium(chromium, { args: process.platform === 'darwin' ? ['--use-angle=metal'] : [] });
+  if (browser.error) throw new Error(`Chromium did not start (${browser.error.message.split('\n')[0]}; tried ${browser.tried.join(', ')}). Run: npx playwright install chromium`);
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   await page.goto(`${url}${url.includes('?') ? '&' : '?'}${q}`, { waitUntil: 'load' });
   await page.waitForTimeout(Number(flag('wait') || 1500));

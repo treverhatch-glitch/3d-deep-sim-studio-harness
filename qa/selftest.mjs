@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
-const gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates;
+let gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates;
 const SKIP = new Set(['.git', 'node_modules', '.env', 'dist']);
 let failed = 0;
 let n = 0;
@@ -23,18 +23,52 @@ let n = 0;
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
 const FIXTURE = path.join(root, 'qa', 'fixtures', 'studio');
-const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art'];
+const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/REFERENCES.md', 'studio/bible/STORYBOARD.md', 'studio/bible/ideas', 'studio/bible/systems', 'studio/signed', 'studio/data-consent.json', 'studio/mode.json', 'studio/game.json', 'studio/asks', 'studio/art', 'studio/divisions.json', 'studio/task-holds.json', 'studio/budget.json', 'studio/tricks', 'studio/playtest', 'studio/proof', 'studio/assets', 'studio/decisions/divisions.md', 'studio/intake-answers.json'];
+// A game's own folders. In a studio building a game, the copy takes these from the harness release this
+// clone last merged (git merge-base HEAD origin/main), never from the live game: run #1's selftest
+// failed on a real studio because its divisions, references, assets, goldens and logs leaked in.
+const GAME_OWNED = ['studio', 'assets', 'game', 'cartridges', 'web', 'qa/golden', 'qa/regressions'];
+const isGameOwned = (rel) => GAME_OWNED.some((g) => rel === g || rel.startsWith(`${g}/`));
+let TEMPLATE = null; // { dir, rev } once extracted; { dir: null } means this checkout is the template
+function templateTree() {
+  if (TEMPLATE) return TEMPLATE;
+  const git = (args, input) => spawnSync('git', args, { cwd: root, ...(input === undefined ? { encoding: 'utf8' } : {}), input, maxBuffer: 256 * 1024 * 1024 });
+  const building = fs.existsSync(path.join(root, 'studio', 'game.json'));
+  const rev = building ? String(git(['merge-base', 'HEAD', 'origin/main']).stdout || '').trim() : '';
+  if (!building || !/^[0-9a-f]{40}$/.test(rev)) {
+    if (building) console.log('[selftest] note: no origin/main to read the template from; using this checkout with its game state removed.');
+    return (TEMPLATE = { dir: null });
+  }
+  const files = String(git(['ls-tree', '-r', '--name-only', rev, '--', ...GAME_OWNED]).stdout || '').split('\n').filter(Boolean);
+  const out = git(['cat-file', '--batch'], files.map((f) => `${rev}:${f}`).join('\n') + '\n').stdout;
+  const dir = path.join(tmpRoot, 'template');
+  let at = 0;
+  for (const f of files) {
+    const nl = out.indexOf(10, at);
+    const size = Number(out.slice(at, nl).toString('utf8').split(' ')[2]);
+    const body = out.subarray(nl + 1, nl + 1 + size);
+    at = nl + 1 + size + 1;
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), body);
+  }
+  console.log(`[selftest] template folders from the harness release ${rev.slice(0, 7)} (${files.length} files); this studio's game is left out.`);
+  return (TEMPLATE = { dir, rev });
+}
+
 function copyRepo() {
   const dest = path.join(tmpRoot, `copy-${++n}`);
+  const tpl = templateTree();
   fs.cpSync(root, dest, {
     recursive: true,
     filter: (src) => {
       const rel = path.relative(root, src).replace(/\\/g, '/');
       if (!rel) return true;
       const top = rel.split('/')[0];
+      if (tpl.dir && isGameOwned(rel)) return false;
       return !SKIP.has(top) && !rel.startsWith('qa/reports/') && !rel.startsWith('.studio/') && !rel.includes('__pycache__');
     },
   });
+  if (tpl.dir) fs.cpSync(tpl.dir, dest, { recursive: true });
   for (const rel of LIVE_STATE) fs.rmSync(path.join(dest, rel), { recursive: true, force: true });
   for (const dir of ['studio/reviews', 'studio/bible/reviews', 'studio/experiments']) {
     const d = path.join(dest, dir);
@@ -43,6 +77,8 @@ function copyRepo() {
   fs.cpSync(FIXTURE, path.join(dest, 'studio'), { recursive: true });
   return dest;
 }
+// The gates the template ships (a game's own gates.json may name its cartridge or add gates).
+if (templateTree().dir) gates = JSON.parse(fs.readFileSync(path.join(templateTree().dir, 'studio', 'gates.json'), 'utf8')).gates;
 const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readFileSync(path.join(dir, rel), 'utf8')));
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k)));
@@ -897,7 +933,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('commit -q -m init --no-verify');
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
-  const sup = run(dir, 'node harness/supervisor.mjs --no-hub --until 9s', env);
+  const sup = run(dir, 'node harness/supervisor.mjs --no-hub --until 9s --foreground', env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
@@ -906,7 +942,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
   run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
-  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
   const t0 = Date.now();
   let lanes = [];
   while (Date.now() - t0 < 8000 && lanes.length < 2) {
@@ -971,6 +1007,136 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const fz = run(dir, 'node harness/agent.mjs hire --role builder --lane harness/ --by hatch --detach', { ...env, STUDIO_BUILDER_CMD: 'node -e 0' });
   fs.rmSync(path.join(dir, '.studio/harness-frozen'));
   report('the Director never hires, and a frozen clone never hires into the harness', dh.status !== 0 && /Director does not hire/.test(dh.stderr + dh.stdout) && fz.status !== 0 && /harness is frozen/.test(fz.stderr + fz.stdout), dh.stdout + dh.stderr + fz.stdout + fz.stderr);
+}
+
+// 2.24, from run #1 (Next Floor) and Gemini's Solar Outpost run: only real limit errors count as out of
+// quota, dependencies and parked tasks, a stop's cooldown, builders never share files, names never
+// repeat, a supervisor that stops after two identical failures, a browser contract a renderer can't
+// skip, a frozen harness that stays unedited, and "throw it all away and restart" with an undo.
+{
+  const dir = copyRepo();
+  const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
+  git('init -q');
+  git('add -A');
+  git('commit -q -m init --no-verify');
+  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`]);
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
+  const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
+  const quotaFile = path.join(dir, '.studio/tool-quota.json');
+  // Quota: a normal session that mentions rate limits and quota doesn't mark the tool out.
+  const tq = id('node harness/task.mjs add "Tidy the HUD labels" --role builder');
+  run(dir, `node harness/agent.mjs start --role builder --agent chat-1 --task ${tq}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} chatty' });
+  report('a normal session that mentions rate limits and quota leaves the tool usable (run #1 idled for an hour)', !fs.existsSync(quotaFile) || !JSON.parse(fs.readFileSync(quotaFile, 'utf8')).claude, fs.existsSync(quotaFile) ? fs.readFileSync(quotaFile, 'utf8') : '');
+  fs.writeFileSync(path.join(dir, 'pt.mjs'), "import { providerTrouble as p } from './harness/agent.mjs';\nconst c = [[p('{\"type\":\"result\",\"is_error\":true,\"result\":\"Claude AI usage limit reached|1792600000\"}', 0)?.kind, 'quota'], [p('Error: 429 Too Many Requests', 1)?.kind, 'quota'], [p('read docs about quota exceeded handling\\nexit', 1)?.kind, undefined], [p('{\"type\":\"result\",\"is_error\":false,\"result\":\"fixed the rate limit bug\"}', 0)?.kind, undefined], [p('Invalid API key · Please run /login', 1)?.kind, 'auth']];\nconsole.log(c.every(([a, b]) => a === b), JSON.stringify(c));\n");
+  report('only a real limit or auth error counts, read from the end of a failed session or an error result', /^true/.test(run(dir, 'node pt.mjs', env).stdout), run(dir, 'node pt.mjs', env).stdout);
+  const tq2 = id('node harness/task.mjs add "Tidy the menu" --role builder');
+  run(dir, `node harness/agent.mjs start --role builder --agent q-1 --task ${tq2}`, { ...env, STUDIO_QUOTA_SKIP: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quota' });
+  report('STUDIO_QUOTA_SKIP=off never skips a tool for quota (usage is watched outside the harness)', !fs.existsSync(quotaFile) || !JSON.parse(fs.readFileSync(quotaFile, 'utf8')).claude);
+  // Dependencies and parking.
+  const a = id('node harness/task.mjs add "Merge round 15" --role builder');
+  const b = id(`node harness/task.mjs add "Playtest the merged build" --role builder --after ${a}`);
+  run(dir, `node harness/task.mjs pause ${tq2} --force --note x`, env);
+  const sb = run(dir, `node harness/task.mjs start ${b} --agent qa-x`, env);
+  report('a task added --after another waits until that one is done', sb.status !== 0 && new RegExp(`waits for ${a}`).test(sb.stderr), sb.stdout + sb.stderr);
+  run(dir, `node harness/task.mjs park ${a} --by director-1 --why "after the Bible change"`, env);
+  const nx = run(dir, 'node harness/task.mjs next --role builder', env).stdout;
+  report('a parked task is never picked, and what waits on it waits too', !new RegExp(`"${a}"|"${b}"`).test(nx), nx);
+  run(dir, `node harness/task.mjs unpark ${a} --by prod-1`, env);
+  run(dir, `node harness/task.mjs done ${a} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  report('once the task it waits for is done, the waiting task can start', run(dir, `node harness/task.mjs start ${b} --agent qa-x`, env).status === 0);
+  // A stopped agent's task doesn't restart for a while.
+  const c = id('node harness/task.mjs add "Floor two lighting" --role builder');
+  run(dir, `node harness/agent.mjs start --role builder --agent stop-1 --task ${c} --detach`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' });
+  const t0 = Date.now();
+  while (Date.now() - t0 < 8000 && !/stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(300);
+  const st = run(dir, 'node harness/agent.mjs stop stop-1 --by jed', env);
+  pause(1500);
+  const again = run(dir, `node harness/task.mjs start ${c} --agent other-1`, env);
+  report('after agent stop, its task can\'t restart straight away (run #1: it restarted within seconds)', st.status === 0 && /won't restart before/.test(st.stdout) && again.status !== 0 && /can restart after/.test(again.stderr), st.stdout + again.stdout + again.stderr);
+  run(dir, `node harness/task.mjs done ${c} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${b} --agent qa-x --force --reason test --accepted-by selftest`, env);
+  // Builders never share files: without lanes one builder holds the whole game; with lanes, one per lane.
+  run(dir, 'node harness/mode.mjs set fast --by hatch', env);
+  for (const t of ['Fix the elevator doors', 'Fix the gun direction']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
+  const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
+  run(dir, 'node harness/supervisor.mjs --no-hub --until 5s --foreground', wenv);
+  const live = () => JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"', env).stdout || '[]');
+  const one = live();
+  report('two builders without lanes never run at once, even in a fast pace (run #1: they edited the same files)', one.length === 1, JSON.stringify(one));
+  for (const s of one) run(dir, `node harness/agent.mjs stop ${s}`, env);
+  // Wait for the launcher to hand the stopped agent's task back.
+  const t1 = Date.now();
+  let q0 = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
+  while (Date.now() - t1 < 10000 && (live().length || q0.backlog.filter((t) => /^Fix the/.test(t.title)).length < 2)) {
+    pause(400);
+    q0 = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
+  }
+  const [l1, l2] = q0.backlog.filter((t) => /^Fix the/.test(t.title)).map((t) => t.id);
+  run(dir, `node harness/task.mjs done ${tq2} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs lane ${l1} docs/lane-c --by prod-1`, env);
+  run(dir, `node harness/task.mjs lane ${l2} docs/lane-d --by prod-1`, env);
+  // Other waiting builder tasks have no lane, so one of them would take the whole game: park them.
+  for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder' && ![l1, l2].includes(x.id))) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
+  fs.writeFileSync(path.join(dir, 'studio/task-holds.json'), JSON.stringify({ tasks: Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks).map(([k, v]) => [k, { ...v, cooldownUntil: undefined }])) }));
+  run(dir, 'node harness/supervisor.mjs --no-hub --until 5s --foreground', wenv);
+  const two = live();
+  report('task lane gives each builder its own folder, and then they run side by side', two.length === 2, `l1=${l1} l2=${l2} q0=${JSON.stringify(q0.backlog.map((t) => t.id))} inprog=${JSON.stringify(q0.inProgress.map((t) => t.id))} ` + JSON.stringify(two) + JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8')).last) + run(dir, 'node harness/task.mjs holds', env).stdout + JSON.stringify(JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.map((t) => t.id + t.role)));
+  const names = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
+  report('agent names never repeat across supervisor restarts', names.length === new Set(names).size && names.filter((n) => /^builder-s\d+$/.test(n)).length >= 3, names.join(', '));
+  for (const s of two) run(dir, `node harness/agent.mjs stop ${s}`, env);
+  pause(1500);
+  // Two sessions ending the same bad way: stop starting, and ask once.
+  for (const t of ['Polish one', 'Polish two', 'Polish three', 'Polish four']) run(dir, `node harness/task.mjs add "${t}" --role rnd`, env);
+  run(dir, 'node harness/supervisor.mjs --no-hub --until 8s --foreground', { ...env, STUDIO_RND_CMD: 'node -e "process.exit(127)"' });
+  const sup = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
+  const rndRuns = fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => /^rnd-s\d+\.json$/.test(f)).length;
+  fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
+  report('after two sessions in a row end with exit 127, the supervisor stops starting and says why (run #1 looped)', sup.halted?.code === 127 && /wasn't found/.test(sup.halted.why) && rndRuns === 2, JSON.stringify(sup.halted) + ` runs=${rndRuns}`);
+  // Install: the login job gets this terminal's PATH and HOME, and the node on the PATH.
+  fs.writeFileSync(path.join(dir, 'plist.mjs'), "import { launchdPlist } from './harness/supervisor.mjs';\nconsole.log(launchdPlist({ label: 'com.studio.x', node: '/usr/local/bin/node', args: ['s.mjs', '--foreground'], env: { PATH: '/Users/j/.local/bin:/usr/bin', HOME: '/Users/j' } }));\n");
+  const pl = run(dir, 'node plist.mjs', env).stdout;
+  report('the macOS login job carries PATH and HOME, so claude in ~/.local/bin is found', /<key>PATH<\/key><string>\/Users\/j\/\.local\/bin:\/usr\/bin<\/string>/.test(pl) && /<key>HOME<\/key><string>\/Users\/j<\/string>/.test(pl) && /<string>\/usr\/local\/bin\/node<\/string>/.test(pl), pl.slice(0, 600));
+  // Chromium on Windows: Chrome and Edge are tried after Playwright's own.
+  fs.writeFileSync(path.join(dir, 'chr.mjs'), "import { chromiumCandidates } from './qa/chromium.mjs';\nconsole.log(chromiumCandidates({}, 'win32').map((c) => c.label).join(' | '));\n");
+  report('on Windows the browser checks also try Chrome and Edge', /Playwright's Chromium.*Chrome \(channel\).*Edge \(channel\)/.test(run(dir, 'node chr.mjs', env).stdout), run(dir, 'node chr.mjs', env).stdout);
+  // Reviews without router keys go to an agent CLI from another family.
+  fs.writeFileSync(path.join(dir, 'rv.mjs'), "import { reviewerTools } from './harness/review.mjs';\nconsole.log(reviewerTools('claude-opus-5-5', {}).map((t) => t.tool).join(','), reviewerTools('gpt-6', { STUDIO_REVIEWER_TOOL: 'codex' }).map((t) => t.tool).join(','));\n");
+  report('with no router keys, a review goes to another family\'s agent CLI, never the builder\'s', run(dir, 'node rv.mjs', env).stdout.trim() === 'codex,agy agy,claude', run(dir, 'node rv.mjs', env).stdout);
+  // A renderer folder without a browser contract fails the browser check instead of skipping.
+  fs.mkdirSync(path.join(dir, 'cartridges/tin-moon'), { recursive: true });
+  fs.copyFileSync(path.join(dir, 'cartridges/example-sim/index.mjs'), path.join(dir, 'cartridges/tin-moon/index.mjs'));
+  fs.writeFileSync(path.join(dir, 'cartridges/tin-moon/qa.mjs'), 'export const scenarios = {};\n');
+  fs.mkdirSync(path.join(dir, 'game/tin-moon'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'game/tin-moon/index.html'), '<canvas></canvas>\n');
+  const bp = run(dir, 'node qa/browser-play.mjs --cartridge tin-moon --no-shots', env);
+  report('a game with a renderer but no browser contract fails the browser check (run #1 printed PASS)', bp.status !== 0 && /BROWSER-CONTRACT-MISSING/.test(bp.stdout + bp.stderr), bp.stdout + bp.stderr);
+  // Docs: "npm run asset." at the end of a sentence; reviews: a Director drift review in the wrong folder.
+  fs.appendFileSync(path.join(dir, 'studio/producer/LOG.md'), '\nRecorded the pack with npm run asset.\n');
+  report('the docs check reads "npm run asset." as the asset script', run(dir, 'node scripts/check-docs.mjs', env).status === 0, run(dir, 'node scripts/check-docs.mjs', env).stdout);
+  fs.writeFileSync(path.join(dir, 'studio/reviews/director-drift-2026-10-21.md'), '# Director drift review\n\nVerdict: drifting.\n');
+  const rg = run(dir, 'node scripts/check-reviewer.mjs', env);
+  report('a Director drift review in studio/reviews/ is pointed to studio/bible/reviews/, not failed', rg.status === 0 && /Move it to studio\/bible\/reviews/.test(rg.stdout), rg.stdout + rg.stderr);
+  // A frozen clone whose harness files were edited fails preflight (Gemini loosened two self-tests).
+  fs.writeFileSync(path.join(dir, 'frz.mjs'), "import fs from 'node:fs';\nimport { harnessSums } from './scripts/preflight.mjs';\nfs.writeFileSync('.studio/harness-frozen', 'test');\nfs.writeFileSync('.studio/harness-frozen.json', JSON.stringify(harnessSums()));\n");
+  run(dir, 'node frz.mjs', env);
+  fs.appendFileSync(path.join(dir, 'qa/selftest.mjs'), '\n// loosened\n');
+  const pf = run(dir, 'node scripts/preflight.mjs --quick', env);
+  report('preflight fails when a frozen harness file was edited, and names it', /harness files unedited since the freeze/i.test(pf.stdout) && /qa\/selftest\.mjs/.test(pf.stdout), pf.stdout.split('\n').filter((l) => /unedited|selftest/i.test(l)).join('\n'));
+  fs.rmSync(path.join(dir, '.studio/harness-frozen'));
+  fs.rmSync(path.join(dir, '.studio/harness-frozen.json'));
+  // Throw it all away and restart: two yeses, everything saved as a tag first, the template kept.
+  fs.writeFileSync(path.join(dir, 'studio/game.json'), JSON.stringify({ cartridge: 'tin-moon', name: 'Tin Moon' }));
+  fs.mkdirSync(path.join(dir, 'assets/own'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'assets/own/boat.txt'), 'boat\n');
+  fs.writeFileSync(path.join(dir, 'qa/golden/tin-moon-1.json'), JSON.stringify({ cartridge: 'tin-moon', seed: 1 }));
+  git('add -A');
+  git('commit -q -m game --no-verify');
+  const once = run(dir, 'node harness/restart.mjs --by hatch --yes', env);
+  report('one yes only shows what a restart would remove', once.status === 0 && /cartridges\/tin-moon/.test(once.stdout) && fs.existsSync(path.join(dir, 'cartridges/tin-moon/index.mjs')), once.stdout);
+  const rs = run(dir, 'node harness/restart.mjs --by hatch --yes --yes --name "Tin Moon 2"', env);
+  const tag = (git('tag -l "archive/*"').stdout || '').trim();
+  report('throw it all away and restart: saved as a git tag, then the game is gone and the template stays', rs.status === 0 && /^archive\/tin-moon-/.test(tag) && !fs.existsSync(path.join(dir, 'cartridges/tin-moon')) && !fs.existsSync(path.join(dir, 'game/tin-moon')) && !fs.existsSync(path.join(dir, 'qa/golden/tin-moon-1.json')) && !fs.existsSync(path.join(dir, 'assets/own/boat.txt')) && !fs.existsSync(path.join(dir, 'studio/game.json')) && fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && fs.existsSync(path.join(dir, 'studio/roles/builder.md')) && /Tin Moon 2/.test(fs.readFileSync(path.join(dir, 'studio/PLAN.md'), 'utf8')), rs.stdout + rs.stderr + tag);
+  report('the restart can be undone from its tag', git(`show ${tag}:cartridges/tin-moon/index.mjs`).status === 0 && git(`show ${tag}:qa/golden/tin-moon-1.json`).status === 0);
 }
 
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
@@ -1147,8 +1313,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     const builds = run(dir, 'node harness/builds.mjs list', env).stdout;
     run(dir, 'node qa/browser-play.mjs --no-shots', env);
     report('a passing browser check saves the build for npm run play and the Arcade, once per change', (run(dir, 'node harness/builds.mjs list', env).stdout.match(/won at tick/g) || []).length === 1 && /won at tick/.test(builds) && fs.existsSync(path.join(dir, '.studio/builds', builds.split(/\s+/)[0], 'web/example-sim/index.html')), builds);
-    fs.writeFileSync(path.join(dir, 'clipjs.mjs'), "import { serveBuildFile } from './harness/builds.mjs';\nconst res = { writeHead() {}, end() {} };\nconsole.log(serveBuildFile('latest', '../../../package.json', res), serveBuildFile('latest', 'web/example-sim/main.mjs', res));\n");
-    report('a saved build serves only its own files', /^false true/.test(run(dir, 'node clipjs.mjs', env).stdout.trim()), run(dir, 'node clipjs.mjs', env).stdout);
+    fs.writeFileSync(path.join(dir, 'clipjs.mjs'), "import { serveBuildFile, buildPagePath } from './harness/builds.mjs';\nconst res = { writeHead() {}, end() {} };\nconsole.log(serveBuildFile('latest', '../../../package.json', res), serveBuildFile('latest', 'web/example-sim/main.mjs', res), serveBuildFile('latest', '', res), buildPagePath('latest'));\n");
+    report('a saved build serves only its own files, and its root redirects to the page\'s own folder (Gemini: a black screen)', /^false true false web\/example-sim\/index\.html/.test(run(dir, 'node clipjs.mjs', env).stdout.trim()), run(dir, 'node clipjs.mjs', env).stdout);
     const clip = run(dir, 'node qa/clip.mjs --seconds 6 --task T-001', env);
     report('npm run clip records the real build and keeps the clip with the task', clip.status === 0 && /Saved qa\/reports\/clips\/clip_\w+\.(mp4|jpg)/.test(clip.stdout) && fs.readdirSync(path.join(dir, 'studio/proof/T-001')).length === 1, clip.stdout + clip.stderr);
     const MAIN = 'web/example-sim/main.mjs';

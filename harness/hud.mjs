@@ -29,6 +29,7 @@ import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
 import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
+import { holdReason, readHolds } from './task-hold.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -156,6 +157,9 @@ export function buildHudState() {
   const now = Date.now();
   const events = readRecentEvents(400);
   const queue = parseNextQueue();
+  // Why a waiting task can't start yet (waits for, parked, cooldown), shown next to it in Ops.
+  const holds = readHolds();
+  if (Object.keys(holds).length) queue.backlog = queue.backlog.map((t) => ({ ...t, hold: holdReason(t.id, queue, now, holds) || undefined }));
   const locks = listLocks();
   const dayAgo = now - 24 * 3600 * 1000;
 
@@ -313,8 +317,11 @@ export function buildHudState() {
   if (queue.backlog.length && !queue.inProgress.length && !agentSessionsList().some((s) => s.running) && quietMin !== null && quietMin >= 60) {
     needs.push({ agent: 'watch', msg: `The studio is idle${quietMin !== null ? ` (${quietMin >= 120 ? `${Math.round(quietMin / 60)} h` : `${quietMin} min`})` : ''} with ${queue.backlog.length} task${queue.backlog.length === 1 ? '' : 's'} waiting: start an agent in Ops, or choose a faster pace`, action: { type: 'start-producer', label: 'Start the Producer' } });
   }
+  // The supervisor stopped starting agents after two identical failures (exit 127: tool not on PATH).
+  const sup = supervisorStatus();
+  if (sup?.halted && sup.status === 'running') needs.push({ ts: sup.halted.at, agent: 'supervisor', msg: `The supervisor stopped starting agents: ${sup.halted.why}`, action: { type: 'supervisor-resume', label: 'Fixed it: try again' } });
   // Money, licences, publishing and deleting first; then what breaks play; then housekeeping.
-  const rank = (n) => (/money|spend|pay|licen[cs]e|credit line|publish|delet/i.test(n.msg) ? 0 : /playtest|browser|blank|escalat|exhausted|won't load|idle/i.test(n.msg) ? 1 : 2);
+  const rank = (n) => (/money|spend|pay|licen[cs]e|credit line|publish|delet/i.test(n.msg) ? 0 : /playtest|browser|blank|escalat|exhausted|won't load|idle|stopped starting/i.test(n.msg) ? 1 : 2);
   needs.sort((x, y) => rank(x) - rank(y));
 
   // Three separate signals, each with its reason, so "an agent needs you", "a check is red" and

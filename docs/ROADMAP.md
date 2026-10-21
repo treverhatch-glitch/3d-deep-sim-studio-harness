@@ -241,6 +241,9 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F13 | The Arcade: play the last good build, playtest notes, clips, the read-only dungeon | done (2.21.0) |
 | F14 | Run unattended: supervisor, budget pacing and quota fallback, lanes, WIP on the HUD, progress by phase, golden reasons | done (2.22.0) |
 | F14b | Hire agents into departments (CLI and War Room), department commands, the Producer's hiring limit; the dev hacker and trick cards | done (2.23.0) |
+| F14d | Run #1 and Solar Outpost fixes: real quota errors only, login PATH, dependencies, parking, stop cooldown, lanes always, selftest from the template release, browser contract required, restart with undo | done (2.24.0) |
+| F14e | Proven fun: a person's Arcade verdict plus before/after frames close a phase; prototype mode; every declared control clicked; a pace check; a version tag (web or engine) on everything | planned (2.25) |
+| F14f | Engine track after Phase 1 and the dev's approval: engine/<name>/, its own gate and goldens, a parity test, an engine tab in the Arcade | planned (2.27) |
 | F14c | A Producer staffing plan applied by one "Staff the studio" click; "close?" hints for idle departments | planned |
 | F15 | A cheap vision model checks screenshot proof against the art reference | planned |
 | F16 | A browser regression proven to fail on the code before the fix | planned |

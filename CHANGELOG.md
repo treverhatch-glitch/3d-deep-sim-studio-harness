@@ -4,6 +4,52 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.24.0] — 2026-10-21
+From Jed's run #1 feedback on 2.22.2 (its P0, P1 and P2 lists) and Gemini's Solar Outpost run. These fix what stalled a real run or let a broken game look green.
+### Fixed
+- **False "out of quota":**
+  - only a real usage-limit, 429 or credit error counts, read from a failed session's last lines or an error result object, never the whole transcript (run #1: a normal `end_turn` and selftest output idled the studio for an hour);
+  - `STUDIO_QUOTA_SKIP=off` turns quota-skipping off when usage is watched outside the harness.
+- **macOS `studio:start --install` looped on exit 127:**
+  - the login job (launchd, systemd) now carries this terminal's PATH and HOME and the `node` on the PATH;
+  - install warns when the agent tool isn't on the PATH;
+  - after two sessions in a row end with the same exit code, the supervisor stops starting agents and raises one "Needs you" card with the reason and a "Fixed it: try again" button.
+- **`studio:start` survives the shell that started it:** it runs on its own by default (`--foreground` keeps it attached). Run #1's agents all died with the host shell.
+- **Dependencies and parking:**
+  - `task add --after T-011`, `task block <ID> --until <T-ID|time>`, `task park|unpark <ID>`, `task holds`;
+  - parked tasks and tasks waiting on unfinished ones never start;
+  - Ops shows why each one waits.
+- **Stop cooldown:** `agent stop` and `agent pause` keep the task from restarting for 15 minutes (`STUDIO_STOP_COOLDOWN_MIN`). Run #1's stopped task came back within seconds under a new name.
+- **Builders never share files:**
+  - lanes always count, not only with `--lanes auto`;
+  - `task lane <ID> <folder|none>` sets one after the fact;
+  - `--part sim|renderer` implies the cartridge or renderer folder;
+  - a builder with no lane holds the whole game, so no other builder runs beside it;
+  - the supervisor counts agents it started in the same pass.
+- **"Stop all" reaches running agents:** it hands their tasks back with a note and stops them. `agent list` also shows claude, codex and agy processes in the repo that the launcher didn't start.
+- **Agent names never repeat** across supervisor restarts (`.studio/agent-names.json`).
+- **The selftest never reads the live game:** in a studio building a game, its scratch copies take studio/, cartridges/, web/, game/, assets/, goldens and regressions from the harness release the clone last merged (`git merge-base HEAD origin/main`). Jed's selftest was red on a real studio, and Gemini edited it to pass.
+- **The browser check:**
+  - fails when a game has a renderer folder but no browser contract (run #1 printed SKIP and PASS);
+  - when a `PLAYTEST_URL` is set but nothing answers it, plays the cartridge's own build and says so;
+  - `.env.example` no longer sets `PLAYTEST_URL`.
+- **Chromium on Windows and macOS:** every browser check (`play:browser`, `hud:check`, `clip`, the renderer budget) tries PLAYWRIGHT_CHROMIUM, Playwright's own browser, then the installed Chrome or Edge (qa/chromium.mjs).
+- **The Arcade's black screen:** `npm run play` and `/play/<id>/` redirect to the page in its own folder, so `./main.mjs` loads (Gemini).
+- **Reviews without router keys:** they go to an agent CLI made by another company (`STUDIO_REVIEWER_TOOL`, `STUDIO_REVIEW_TOOLS`, then codex, agy, claude), read-only, instead of a "503: All channels exhausted" card.
+- **Data-sharing consent** is recorded as seen only after a person clicks or types on the Game plan, never on a page load or in an automated browser.
+- **Docs check:** "npm run asset." at the end of a sentence reads as the `asset` script.
+- **Reviewer gate:** a Director drift review in studio/reviews/ is pointed to studio/bible/reviews/ instead of failing.
+### Added
+- **Throw it all away and restart** (War Room Ops, two warnings back to back; `npm run studio:restart -- --by <name> --yes --yes`):
+  - the whole working tree is saved as a git tag `archive/<game>-<time>` first (undo: `git checkout <tag> -- .`);
+  - then the game's code, recorded runs, assets, board, Bible and builds go;
+  - the harness, roles, departments, budget and pace stay;
+  - the server needs both presses (a ticket from the first, spent by the second within two minutes).
+- **A frozen harness stays unedited:** `preflight -- --fix` fingerprints the harness files, and preflight fails when one has changed since (or, for older freezes, when git shows it modified). Gemini's run loosened two self-tests without committing them.
+- hud-check: 60 checks, including the two restart warnings and the consent rule.
+
+---
+
 ## [2.23.0] — 2026-10-21
 From Hatch's request and art-1's hire-agents spec: hire agents into departments from the CLI or the War Room, and a new role, the dev hacker.
 ### Added

@@ -43,14 +43,14 @@ import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState, buildAgentDetail, setDivision, listDivisions } from '../harness/hud.mjs';
 import { acceptCause } from '../harness/causes.mjs';
-import { serveBuildFile } from '../harness/builds.mjs';
+import { serveBuildFile, buildPagePath } from '../harness/builds.mjs';
 import { watchPass } from '../harness/watch.mjs';
 import { retroIfDue } from '../harness/retro.mjs';
 import { dailyPingIfDue, driftReport } from '../harness/director.mjs';
 import { learnIfDue } from '../harness/learn.mjs';
 import { runReportIfDue } from '../harness/run-report.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
-import { startAgent, stopAgent, pauseAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
+import { startAgent, stopAgentNamed, stopAllAgents, pauseAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
 import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
 import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
@@ -576,13 +576,12 @@ export function createHubServer() {
       const body = await readBody(req);
       noteHuman(String(body.by || 'war-room-human').slice(0, 60));
       if (body.action === 'stop') {
-        const s = agentSessions().find((x) => x.agent === body.agent && x.running);
-        if (!s) return sendJson(res, 400, { ok: false, error: `${body.agent} isn't running` });
-        stopAgent(s.pid);
-        return sendJson(res, 200, { ok: true, stopping: s.agent });
+        const st = stopAgentNamed(String(body.agent || ''), String(body.by || 'war-room-human').slice(0, 60));
+        if (!st.ok) return sendJson(res, 400, { ok: false, error: st.message });
+        return sendJson(res, 200, { ok: true, stopping: st.agent, next: `Stopping ${st.agent}.${st.tasks.length ? ` ${st.tasks.join(', ')} can restart after ${st.until ? st.until.slice(11, 16) : 'now'}.` : ''}` });
       }
       if (body.action === 'pause') {
-        const p = pauseAgent(String(body.agent || ''), String(body.note || '').slice(0, 500));
+        const p = pauseAgent(String(body.agent || ''), String(body.note || '').slice(0, 500), String(body.by || 'war-room-human').slice(0, 60));
         broadcastSnapshot();
         return sendJson(res, p.ok ? 200 : 400, p.ok ? { ok: true, next: `${body.agent} paused${p.handed.length ? `; ${p.handed.join(', ')} back in the queue` : ''}.` } : { ok: false, error: p.message });
       }
@@ -679,6 +678,14 @@ export function createHubServer() {
     // The Arcade: the last good build (and older ones) served for play while agents keep working.
     if (url.pathname.startsWith('/play/') && req.method === 'GET') {
       const [, , id, ...rest] = url.pathname.split('/');
+      // /play/<id>/ (or /play/<id>) goes to the page in its own folder, so its relative files load.
+      if (!rest.join('/')) {
+        const page = buildPagePath(id);
+        if (page) {
+          res.writeHead(302, { location: `/play/${id}/${page}` });
+          return res.end();
+        }
+      }
       if (serveBuildFile(id, rest.join('/'), res)) return;
       return sendJson(res, 404, { ok: false, error: 'no such build or file (npm run play -- list)' });
     }
@@ -739,6 +746,35 @@ export function createHubServer() {
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, next: `Golden change ${sha} marked as checked by ${by}.` });
     }
+    // Throw it all away and restart: step 1 hands out a ticket, step 2 (the second warning) spends it.
+    if (url.pathname === '/api/restart' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { restartTicket, restartStudio } = await import('../harness/restart.mjs');
+      if (Number(body.step) === 1) {
+        const t = restartTicket(by);
+        return sendJson(res, 200, { ok: true, ticket: t.id, plan: t.plan });
+      }
+      if (Number(body.step) === 2) {
+        const r = await restartStudio({ by, ticket: String(body.ticket || '') });
+        broadcastSnapshot();
+        return sendJson(res, r.ok ? 200 : 400, r.ok ? r : { ok: false, error: r.message });
+      }
+      return sendJson(res, 400, { ok: false, error: 'step must be 1 or 2' });
+    }
+    // "Fixed it: try again" on a halted supervisor: it starts agents again on its next pass.
+    if (url.pathname === '/api/supervisor' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      if (body.action !== 'resume') return sendJson(res, 400, { ok: false, error: 'action must be resume' });
+      fs.mkdirSync(path.join(REPO_ROOT, '.studio'), { recursive: true });
+      fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'supervisor-resume'), by);
+      emitEvent({ type: 'supervisor.resume_asked', agent: by, to: 'supervisor', msg: `${by} asked the supervisor to try again` });
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next: 'The supervisor tries again on its next pass (within a minute).' });
+    }
     if (url.pathname === '/api/causes' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);
@@ -760,7 +796,10 @@ export function createHubServer() {
       const by = String(body.by || 'war-room-human').slice(0, 60);
       noteHuman(by);
       if (body.stop === false) clearStop(by);
-      else setStop(by, body.reason);
+      else {
+        setStop(by, body.reason);
+        stopAllAgents(by, String(body.reason || ''));
+      }
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, stopped: readStop() });
     }

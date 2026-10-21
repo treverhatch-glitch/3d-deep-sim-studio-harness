@@ -31,11 +31,12 @@ try {
   console.log('[hud] SKIP Playwright is not installed (npm install)');
   process.exit(0);
 }
-const exe = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
-const browser = await chromium.launch(exe ? { executablePath: exe } : {}).catch((err) => {
-  console.log(`[hud] SKIP Chromium did not start (${err.message.split('\n')[0]}). Run: npx playwright install chromium`);
+const { launchChromium } = await import('./chromium.mjs');
+const browser = await launchChromium(chromium);
+if (browser.error) {
+  console.log(`[hud] SKIP Chromium did not start (${browser.error.message.split('\n')[0]}; tried ${browser.tried.join(', ')}). Run: npx playwright install chromium`);
   process.exit(0);
-});
+}
 
 // A throwaway studio: tracked files only, sharing node_modules.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-check-'));
@@ -188,7 +189,7 @@ try {
     await wait(1200);
     check('answering a follow-up saves it to the Bible', /Moss spreads slower/.test(read('studio/bible/bible.json')));
   } else check('follow-up questions are shown', false);
-  check('the sharing box starts ticked and is recorded as shown', (await page.isChecked('#p-share')) && /"shown": true/.test(read('studio/data-consent.json')));
+  check('the sharing box starts ticked, and an automated visit is not recorded as the dev seeing it', (await page.isChecked('#p-share')) && !/"shown": true/.test(read('studio/data-consent.json') || ''), read('studio/data-consent.json') || '(no file)');
   await page.click('#p-share');
   await wait(1200);
   check('unticking the box records a decline', /"how": "declined"/.test(read('studio/data-consent.json')));
@@ -280,6 +281,16 @@ try {
   }
   await wait(1000);
   check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
+  // Throw it all away and restart: two warnings back to back; Cancel on the second changes nothing.
+  await page.click('#o-restart');
+  await wait(800);
+  const warn1 = await page.locator('#o-restartbox').innerText();
+  await page.click('#o-restartyes');
+  await wait(300);
+  const warn2 = await page.locator('#o-restartbox').innerText();
+  await page.click('#o-restartno');
+  await wait(300);
+  check('the restart button warns twice, and Cancel on the second warning changes nothing', /Throw away/.test(warn1) && /git tag/.test(warn1) && /Last warning/.test(warn2) && (await page.locator('#o-restartbox').isHidden()) && /Nothing changed/.test(await page.locator('#o-actmsg').innerText()) && fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).stdout || ''), warn1 + ' / ' + warn2);
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close();

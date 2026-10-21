@@ -3,7 +3,7 @@
  * harness/supervisor.mjs — keep the studio running without anyone at the keyboard.
  *
  *   npm run studio:start [-- --until 23:00 | --until 8h] [--window 09:00-23:00] [--budget 50% | --budget 3000000]
- *                        [--lanes auto] [--no-hub]
+ *                        [--lanes auto] [--no-hub] [--foreground]   (runs on its own unless --foreground)
  *   npm run studio:start -- --install [same options]    start it at login (launchd, systemd --user, Task Scheduler)
  *   npm run studio:start -- --uninstall
  *   npm run studio:stop                                  stop the supervisor (agents finish their task)
@@ -77,7 +77,8 @@ export function inWindow(win, now = Date.now()) {
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
 export async function supervise(opts, state, now = Date.now()) {
   const { parseNextQueue, readStop } = await import('./task.mjs');
-  const { sessions, startAgent, launchableRoles } = await import('./agent.mjs');
+  const { sessions, startAgent, launchableRoles, nextAgentName } = await import('./agent.mjs');
+  const { holdReason, laneOf, lanesClash } = await import('./task-hold.mjs');
   const { effectiveMode } = await import('./mode.mjs');
   const { budgetStatus, pickTool } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
@@ -86,6 +87,26 @@ export async function supervise(opts, state, now = Date.now()) {
   if (opts.until && now >= opts.until) return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
   if (readStop()) return { started: [], why: ['"Stop all agents" is on in the War Room'] };
   if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
+  // Two sessions in a row ending the same bad way (exit 127: the tool isn't on PATH) means starting
+  // more won't help: stop starting, and ask a person once (Needs you). "Try again" clears it.
+  const RESUME = path.join(STUDIO_STATE_DIR, 'supervisor-resume');
+  if (fs.existsSync(RESUME)) {
+    fs.rmSync(RESUME, { force: true });
+    if (state.halted) emitEvent({ type: 'supervisor.resumed', agent: 'supervisor', to: 'producer', msg: 'Supervisor starting agents again' });
+    state.halted = null;
+    state.haltCheckFrom = now;
+  }
+  if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
+  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent));
+  const last2 = mine.slice(-2);
+  if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
+    const code = last2[0].meta.code;
+    const tool = last2[0].meta?.tool || 'the agent tool';
+    const hint = code === 127 || code === 9009 ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
+    state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}` };
+    emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
+    return { started: [], why: [`halted: ${state.halted.why}`] };
+  }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
   const spentHere = readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0), 0);
@@ -103,11 +124,19 @@ export async function supervise(opts, state, now = Date.now()) {
   if (room <= 0) return { started: [], why: [`${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
-  const waiting = q.backlog.filter((t) => t.role && t.role !== 'human' && !lockStatus(`task:${t.id}`).locked);
-  const laneOf = new Map(readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.meta?.lane).map((e) => [e.task, e.meta.lane]));
+  const held = [];
+  const waiting = q.backlog.filter((t) => {
+    if (!t.role || t.role === 'human' || lockStatus(`task:${t.id}`).locked) return false;
+    const h = holdReason(t.id, q, now);
+    if (h) held.push(`${t.id} ${h}`);
+    return !h;
+  });
+  if (held.length) why.push(`held: ${held.slice(0, 4).join('; ')}${held.length > 4 ? ` (+${held.length - 4})` : ''}`);
+  const evs = readRecentEvents(20000);
   const groups = new Map();
   for (const t of waiting) {
-    const lane = opts.lanes === 'auto' ? laneOf.get(t.id) || null : null;
+    // Lanes always count now: a task's own lane, `task lane`, or its --part (harness/task-hold.mjs).
+    const lane = laneOf(t.id, evs) || null;
     const key = `${t.role}|${lane || ''}`;
     if (!groups.has(key)) groups.set(key, { role: t.role, lane, tasks: [] });
     groups.get(key).tasks.push(t);
@@ -122,9 +151,20 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${g.role}: no tool set to start it (STUDIO_AGENT_TOOL or STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL)`);
       continue;
     }
-    const busy = live.filter((s) => s.role === g.role && (g.lane ? s.lane === g.lane : !s.lane));
+    // Builders (and any role whose work has a lane) never share files: a builder with no lane holds
+    // the whole game, so nothing else in that role runs beside it, and two lanes must not overlap.
+    const sameRole = live.filter((s) => s.role === g.role);
+    const codeRole = g.role === 'builder' || Boolean(g.lane) || sameRole.some((s) => s.lane);
+    if (codeRole) {
+      const clash = sameRole.find((s) => lanesClash(s.lane || null, g.lane || null));
+      if (clash) {
+        if (sameRole.length) why.push(`${g.role}${g.lane ? ` in ${g.lane}` : ''}: ${clash.agent} is working ${clash.lane ? `in ${clash.lane}` : 'on the whole game (no lane)'}`);
+        continue;
+      }
+    }
     const perRole = (mode.perRole || {})[g.role] ?? 1;
-    if (g.lane ? busy.length >= 1 : busy.length >= perRole + (extra ? 1 : 0)) continue;
+    // One agent per lane (the clash check above); without a lane, the pace's per-role cap.
+    if (!g.lane && sameRole.length >= perRole + (extra ? 1 : 0)) continue;
     if (g.lane && lockStatus(`path:${g.lane}`).locked) {
       why.push(`lane ${g.lane} is held by ${lockStatus(`path:${g.lane}`).lock.owner}`);
       continue;
@@ -136,11 +176,13 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
     }
-    state.n = (state.n || 0) + 1;
-    const agent = `${g.role}-s${state.n}`;
+    const agent = nextAgentName(g.role, 's');
+    state.names = [...(state.names || []), agent].slice(-200);
     const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra }, { detach: true });
     if (r.ok) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
+      // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
+      live.push({ agent, role: g.role, lane: g.lane || null, running: true });
       room -= 1;
     } else why.push(`${g.role}: ${r.message}`);
   }
@@ -220,9 +262,31 @@ async function main(argv) {
 }
 
 /** Start at login: launchd on macOS, systemd --user on Linux, Task Scheduler on Windows. */
+/**
+ * The node to run at login: the one on this terminal's PATH (run #1: process.execPath was a node bundled
+ * inside another app), unless STUDIO_NODE says otherwise.
+ */
+export function loginNode() {
+  if (process.env.STUDIO_NODE) return process.env.STUDIO_NODE;
+  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { encoding: 'utf8' });
+  const found = (r.stdout || '').split(/\r?\n/).map((x) => x.trim()).find(Boolean);
+  return found || process.execPath;
+}
+const xmlEsc = (a) => String(a).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** A launchd plist with this terminal's PATH and HOME, so agents' tools (claude in ~/.local/bin) are found. */
+export function launchdPlist({ label, node, args, env = process.env }) {
+  const vars = { PATH: env.PATH || '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin', HOME: env.HOME || os.homedir() };
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${xmlEsc(label)}</string>\n<key>ProgramArguments</key><array>${[node, ...args].map((a) => `<string>${xmlEsc(a)}</string>`).join('')}</array>\n<key>EnvironmentVariables</key><dict>${Object.entries(vars).map(([k, v]) => `<key>${k}</key><string>${xmlEsc(v)}</string>`).join('')}</dict>\n<key>WorkingDirectory</key><string>${xmlEsc(REPO_ROOT)}</string>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ThrottleInterval</key><integer>60</integer>\n<key>StandardOutPath</key><string>${xmlEsc(path.join(STUDIO_STATE_DIR, 'supervisor.log'))}</string>\n<key>StandardErrorPath</key><string>${xmlEsc(path.join(STUDIO_STATE_DIR, 'supervisor.log'))}</string>\n</dict></plist>\n`;
+}
+
 function install(argv, remove = false) {
   const slug = path.basename(REPO_ROOT).replace(/[^a-z0-9-]/gi, '-').toLowerCase();
-  const args = [path.join(REPO_ROOT, 'harness', 'supervisor.mjs'), ...argv.filter((a) => !['--install', '--uninstall'].includes(a))];
+  const args = [path.join(REPO_ROOT, 'harness', 'supervisor.mjs'), ...argv.filter((a) => !['--install', '--uninstall', '--foreground'].includes(a)), '--foreground'];
+  const node = loginNode();
+  // The agent tool must be findable from the PATH the login job gets; say so now rather than loop on exit 127.
+  const tool = process.env.STUDIO_AGENT_TOOL || 'claude';
+  const has = spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' });
+  const warn = has.status === 0 ? '' : `\nWarning: \`${tool}\` isn't on this terminal's PATH, so the supervisor won't find it either. Run this from a terminal where \`${tool} --version\` works.`;
   if (process.platform === 'darwin') {
     const label = `com.studio.${slug}`;
     const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
@@ -231,11 +295,12 @@ function install(argv, remove = false) {
       fs.rmSync(plist, { force: true });
       return `Removed ${plist}`;
     }
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${label}</string>\n<key>ProgramArguments</key><array>${[process.execPath, ...args].map((a) => `<string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>`).join('')}</array>\n<key>WorkingDirectory</key><string>${REPO_ROOT}</string>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>StandardOutPath</key><string>${path.join(STUDIO_STATE_DIR, 'supervisor.log')}</string>\n<key>StandardErrorPath</key><string>${path.join(STUDIO_STATE_DIR, 'supervisor.log')}</string>\n</dict></plist>\n`;
+    const xml = launchdPlist({ label, node, args });
     fs.mkdirSync(path.dirname(plist), { recursive: true });
+    spawnSync('launchctl', ['unload', '-w', plist]);
     fs.writeFileSync(plist, xml);
     spawnSync('launchctl', ['load', '-w', plist]);
-    return `Installed ${plist}: the supervisor starts at login and after a restart. Remove: npm run studio:start -- --uninstall`;
+    return `Installed ${plist} (node ${node}, this terminal's PATH and HOME): the supervisor starts at login and after a restart. Remove: npm run studio:start -- --uninstall${warn}`;
   }
   if (process.platform === 'win32') {
     const name = `Studio ${slug}`;
@@ -243,9 +308,9 @@ function install(argv, remove = false) {
       spawnSync('schtasks', ['/Delete', '/F', '/TN', name]);
       return `Removed the scheduled task "${name}"`;
     }
-    const cmd = [process.execPath, ...args].map((a) => `"${a}"`).join(' ');
+    const cmd = [node, ...args].map((a) => `"${a}"`).join(' ');
     const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { encoding: 'utf8' });
-    return r.status === 0 ? `Installed the scheduled task "${name}": the supervisor starts when you log in. Remove: npm run studio:start -- --uninstall` : `Task Scheduler said: ${r.stderr || r.stdout}`;
+    return r.status === 0 ? `Installed the scheduled task "${name}": the supervisor starts when you log in. Remove: npm run studio:start -- --uninstall${warn}` : `Task Scheduler said: ${r.stderr || r.stdout}`;
   }
   const unit = path.join(os.homedir(), '.config', 'systemd', 'user', `studio-${slug}.service`);
   if (remove) {
@@ -254,10 +319,10 @@ function install(argv, remove = false) {
     return `Removed ${unit}`;
   }
   fs.mkdirSync(path.dirname(unit), { recursive: true });
-  fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nExecStart=${[process.execPath, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n`);
+  fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nEnvironment="PATH=${process.env.PATH || ''}" "HOME=${process.env.HOME || os.homedir()}"\nExecStart=${[node, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\nRestartSec=60\n\n[Install]\nWantedBy=default.target\n`);
   spawnSync('systemctl', ['--user', 'daemon-reload']);
   spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`]);
-  return `Installed ${unit} (systemd --user): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall`;
+  return `Installed ${unit} (systemd --user, this terminal's PATH): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall${warn}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -285,5 +350,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(install(argv, argv.includes('--uninstall')));
     process.exit(0);
   }
-  await main(argv);
+  // By default it runs on its own, so it outlives the terminal or agent shell that started it
+  // (run #1: every agent died when the host shell restarted). --foreground keeps it attached.
+  if (!argv.includes('--foreground')) {
+    const prev = readStatus();
+    if (prev?.pid && alive(prev.pid) && prev.status === 'running') {
+      console.error(`A supervisor is already running (pid ${prev.pid}). npm run studio:stop first.`);
+      process.exit(1);
+    }
+    fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+    const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'supervisor.log'), 'a');
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv, '--foreground'], { cwd: REPO_ROOT, detached: true, stdio: ['ignore', log, log], env: process.env, windowsHide: true });
+    child.unref();
+    console.log(`[supervisor] running on its own (pid ${child.pid}); output in .studio/supervisor.log. npm run studio:status to check, npm run studio:stop to stop.`);
+    process.exit(0);
+  }
+  await main(argv.filter((a) => a !== '--foreground'));
 }

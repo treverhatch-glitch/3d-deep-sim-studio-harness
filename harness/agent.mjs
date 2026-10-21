@@ -41,11 +41,50 @@ import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { listLocks, release, claim } from './lock.mjs';
 import { effectiveMode } from './mode.mjs';
 import { markExhausted } from './budget.mjs';
+import { cooldown } from './task-hold.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
 const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
-const PROVIDER_TROUBLE = /usage limit|rate.?limit|\b429\b|quota|insufficient[_ ]credit|credit balance|unauthori[sz]ed|\b401\b|invalid api key|authentication|not supported when using|try again at/i;
+// Only a real limit or auth error counts (run #1: a normal end_turn and selftest output that mentioned
+// "quota" marked tools out and idled the studio for an hour). Read the end of a failed session, or a
+// final result object that says it is an error; never the agent's whole transcript.
+const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)/i;
+const AUTH_ERROR = /\b401\b|unauthori[sz]ed|invalid (?:api|x-api) key|authentication (?:failed|error|required)|not logged in|please (?:run )?\/?login/i;
+export function providerTrouble(log, code) {
+  const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // A final result object (claude stream-json, codex --json) decides when there is one.
+  for (const l of lines.slice(-40).reverse()) {
+    if (!l.startsWith('{')) continue;
+    let o;
+    try {
+      o = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    if (o.type === 'result' || o.type === 'turn.failed' || o.type === 'error') {
+      const err = o.is_error === true || o.type !== 'result' || /error/i.test(String(o.subtype || ''));
+      if (!err) return null;
+      const text = JSON.stringify(o.result ?? o.error ?? o.message ?? o).slice(0, 400);
+      const q = text.match(QUOTA_ERROR);
+      if (q) return { kind: 'quota', text: q[0], line: text };
+      const au = text.match(AUTH_ERROR);
+      return au ? { kind: 'auth', text: au[0], line: text } : null;
+    }
+  }
+  if (code === 0) return null;
+  // A failed session without a result object: only its last lines, and never a line reporting an allowed status.
+  for (const l of lines.slice(-30).reverse()) {
+    if (/"status"\s*:\s*"allowed"|rate_limit_event/.test(l)) continue;
+    // The line has to read as an error from the tool, not text the agent wrote or read.
+    if (!/\berror\b|\bfailed\b|too many requests|\b429\b|\b401\b|usage limit reached|hit your (?:usage )?limit|invalid api key|not logged in/i.test(l)) continue;
+    const q = l.match(QUOTA_ERROR);
+    if (q) return { kind: 'quota', text: q[0], line: l };
+    const au = l.match(AUTH_ERROR);
+    if (au) return { kind: 'auth', text: au[0], line: l };
+  }
+  return null;
+}
 const IS = { win: process.platform === 'win32', mac: process.platform === 'darwin' };
 
 /** How each tool is started: an argv and whether the prompt goes on stdin. */
@@ -156,7 +195,8 @@ function tokensFrom(log) {
 
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 export function cleanUp(agent, { code, log = '', role, tool, model }) {
-  const trouble = (log.match(PROVIDER_TROUBLE) || [])[0] || null;
+  const t = providerTrouble(log, code);
+  const trouble = t?.text || null;
   const bad = code !== 0 || Boolean(trouble);
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
@@ -171,8 +211,9 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   }
   if (bad) for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
-  if (trouble && !/unauthori|401|invalid api key|authentication/i.test(trouble)) {
-    const line = log.split('\n').reverse().find((l) => /reset|try again/i.test(l)) || trouble;
+  // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
+  if (t?.kind === 'quota' && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
+    const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l)) || t.line;
     markExhausted(tool, line);
   }
   const tok = tokensFrom(log);
@@ -301,15 +342,91 @@ function readBudgetLimits() {
   }
 }
 
+/**
+ * A name no session has used before, kept across restarts in .studio/agent-names.json, so two
+ * different sessions never share a name (run #1: builder-s3 named a dead session and a live one).
+ */
+export function nextAgentName(role, prefix = '') {
+  const f = path.join(STUDIO_STATE_DIR, 'agent-names.json');
+  const counters = readJson(f) || {};
+  const key = `${role}-${prefix}`;
+  const re = new RegExp(`^${role.replace(/[^a-z0-9-]/gi, '')}-${prefix}(\\d+)$`);
+  const seen = sessions().map((x) => Number((String(x.agent).match(re) || [])[1]) || 0);
+  const n = Math.max(Number(counters[key]) || 0, ...seen, 0) + 1;
+  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  fs.writeFileSync(f, `${JSON.stringify({ ...counters, [key]: n }, null, 2)}\n`);
+  return `${role}-${prefix}${n}`;
+}
+
+/** The tasks an agent holds (its task locks), plus the task its session was started on. */
+const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5)), ...(s?.task ? [s.task] : [])])];
+
 /** Pause an agent: its task goes back to the queue with a note (and its claims), then the process ends. */
-export function pauseAgent(agent, note = '') {
+export function pauseAgent(agent, note = '', by = 'war-room-human') {
   const s = sessions().find((x) => x.agent === agent && x.running);
   if (!s) return { ok: false, message: `${agent} isn't running.` };
   const held = listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
   for (const t of held) pauseTask(t, agent, note || `Paused from the War Room; ${agent}'s work so far is in the working tree.`, { force: true });
+  // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
+  for (const t of tasksOf(agent, s)) cooldown(t, by);
   stopAgent(s.pid);
   emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, handed: held };
+}
+
+/** Stop one agent by name: its task can't restart for the cooldown; the launcher hands the work back. */
+export function stopAgentNamed(agent, by = 'war-room-human') {
+  const s = sessions().find((x) => x.agent === agent && x.running);
+  if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
+  const tasks = tasksOf(agent, s);
+  const until = tasks.map((t) => cooldown(t, by)).filter(Boolean)[0] || null;
+  stopAgent(s.pid);
+  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}` });
+  return { ok: true, agent, tasks, until };
+}
+
+/** "Stop all": every running launcher session hands its task back with a note and ends. */
+export function stopAllAgents(by = 'war-room-human', reason = '') {
+  const stopped = [];
+  for (const s of sessions().filter((x) => x.running)) {
+    const held = listLocks().filter((l) => l.owner === s.agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
+    for (const t of held) pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is in the working tree.`, { force: true });
+    stopAgent(s.pid);
+    stopped.push(s.agent);
+  }
+  if (stopped.length) emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `Stop all: ${stopped.join(', ')} handed back their work` });
+  return stopped;
+}
+
+/**
+ * Agents the launcher didn't start (a claude -p, codex exec or agy run by hand or a script) working in
+ * this repo, so `agent list` shows them too. Best effort: Linux reads /proc, macOS asks lsof; Windows isn't checked.
+ */
+export function otherAgents() {
+  if (IS.win) return { checked: false, list: [] };
+  const known = new Set(sessions().filter((x) => x.running).flatMap((x) => [x.pid, x.supervisor]).filter(Boolean));
+  const ps = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+  if (ps.status !== 0) return { checked: false, list: [] };
+  const list = [];
+  for (const line of ps.stdout.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (!m || known.has(Number(m[1])) || Number(m[1]) === process.pid) continue;
+    // The program itself must be claude, codex or agy (run directly or by node), not a path that mentions one.
+    const words = m[2].split(/\s+/);
+    const base = (w) => String(w || '').split('/').pop().replace(/\.(exe|js|mjs|cjs)$/i, '');
+    const prog = /^(node|bun|deno)$/.test(base(words[0])) ? base(words[1]) : base(words[0]);
+    const rest = words.slice(1);
+    if (!((prog === 'claude' && rest.some((w) => w === '-p' || w === '--print')) || (prog === 'codex' && rest.includes('exec')) || (prog === 'agy' && rest.includes('-p')))) continue;
+    let cwd = '';
+    try {
+      cwd = fs.readlinkSync(`/proc/${m[1]}/cwd`);
+    } catch {
+      const l = spawnSync('lsof', ['-a', '-p', m[1], '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+      cwd = (l.stdout || '').split('\n').find((x) => x.startsWith('n'))?.slice(1) || '';
+    }
+    if (cwd && (cwd === REPO_ROOT || cwd.startsWith(`${REPO_ROOT}${path.sep}`))) list.push({ pid: Number(m[1]), command: m[2].slice(0, 120) });
+  }
+  return { checked: true, list };
 }
 
 /** The last lines of an agent's output. */
@@ -322,7 +439,7 @@ export function agentLog(agent, tail = 60) {
 /** Start one agent, after the stop switch, caps and spend checks. */
 export function startAgent(opts, { detach = false } = {}) {
   const { role } = opts;
-  const agent = opts.agent || `${role}-${sessions().filter((s) => s.role === role).length + 1}`;
+  const agent = opts.agent || (role ? nextAgentName(role) : null);
   opts = { ...opts, agent };
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
@@ -450,7 +567,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(res.bad ? 1 : 0);
   }
   if (cmd === 'pause') {
-    const r = pauseAgent(argv[1], flag('note') || '');
+    const r = pauseAgent(argv[1], flag('note') || '', flag('by') || 'human');
     if (!r.ok) {
       console.error(r.message);
       process.exit(1);
@@ -472,13 +589,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'stop') {
-    const s = sessions().find((x) => x.agent === argv[1]);
-    if (!s?.running) {
-      console.error(`${argv[1] || '(no name)'} isn't running.`);
+    const r = stopAgentNamed(argv[1], flag('by') || 'human');
+    if (!r.ok) {
+      console.error(r.message);
       process.exit(1);
     }
-    stopAgent(s.pid);
-    console.log(`Stopping ${s.agent}; the launcher hands its work back.`);
+    console.log(`Stopping ${r.agent}; the launcher hands its work back.${r.tasks.length ? ` ${r.tasks.join(', ')} won't restart before ${r.until ? r.until.slice(11, 16) : 'now'} (STUDIO_STOP_COOLDOWN_MIN).` : ''}`);
     process.exit(0);
   }
   if (cmd === 'fill') {
@@ -489,6 +605,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const list = sessions();
   if (!list.length) console.log('No agents started by the launcher yet. npm run agent -- start --role builder --agent builder-1 --tool claude --model claude-sonnet-5-5');
   for (const s of list) console.log(`${s.running ? (s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago` : `  ${s.reason || ''}`}`);
+  const others = otherAgents();
+  for (const o of others.list) console.log(`outside  pid ${String(o.pid).padEnd(12)} not started by the launcher: ${o.command}`);
+  if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');
   const mode = effectiveMode();
   console.log(`\nMode: ${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, up to ${mode.maxAgents} agents. Roles that can start on their own: ${launchableRoles().join(', ') || 'none (set STUDIO_AGENT_TOOL or STUDIO_<ROLE>_TOOL in .env)'}.`);
 }

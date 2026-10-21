@@ -111,6 +111,10 @@
 - `npm run agent -- start … [--lane <folder>] [--one-task]`, `npm run agent -- now "<doing>"`; `npm run task -- add … --lane <folder>`
 - `npm run agent -- hire --role <r> --division <id> [--next] [--open] [--note "…"] [--loop until-empty|N] --by <name> | pause <name> --note "…" | logs <name>` — hire into a department (seated there); the Producer hires up to `producerMayHireUpTo` (studio/budget.json, default 4), past it a Needs-you ask; the Director never hires (docs/PACE-AND-AGENTS.md)
 - `npm run division [-- open|close <id> --reason "…" --by <name>]` — departments on/off with a logged reason (studio/decisions/divisions.md); harness/divisions.mjs
+- `npm run task -- add … --after T-011 | block <ID> --until <T-ID|time> | park|unpark <ID> --by <n> [--why "…"] | lane <ID> <folder|none> | holds` — dependencies, parking and lanes (harness/task-hold.mjs, studio/task-holds.json); a builder with no lane holds the whole game; `agent stop|pause` add a 15 min cooldown (STUDIO_STOP_COOLDOWN_MIN)
+- `npm run studio:restart [-- --by <name> --yes --yes [--name "<new>"]]` — throw the game away and restart at the intake; saved first as git tag archive/<game>-<time> (War Room: two warnings)
+- Quota: only a real 429/usage-limit error counts; STUDIO_QUOTA_SKIP=off turns quota-skipping off. studio:start detaches unless --foreground; two identical failed sessions halt it with a Needs-you card
+- Reviews with no router keys go to another family's agent CLI (STUDIO_REVIEWER_TOOL, STUDIO_REVIEW_TOOLS); qa/chromium.mjs finds a browser (Chrome/Edge too); preflight fails when a frozen harness file was edited
 - `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`); the War Room asks someone to check them
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)

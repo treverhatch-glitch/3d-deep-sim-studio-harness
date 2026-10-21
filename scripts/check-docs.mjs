@@ -30,7 +30,9 @@ const problems = [];
 for (const rel of files.filter((f) => !SKIP_FILES.has(f))) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
   text.split(/\r?\n/).forEach((line, i) => {
-    for (const m of line.matchAll(/\bnpm run ([a-z][\w:.-]*)/g)) {
+    for (const m0 of line.matchAll(/\bnpm run ([a-z][\w:.-]*)/g)) {
+      // "npm run asset." at the end of a sentence names the asset script (run #1: a Producer log line broke preflight).
+      const m = [m0[0], m0[1].replace(/[.:-]+$/, '')];
       if (!scripts.has(m[1]) && !hubScripts.has(m[1])) problems.push(`${rel}:${i + 1} npm run ${m[1]} (no such script in package.json)`);
     }
     for (const m of line.matchAll(/\b(?:node|bash)\s+((?:\.\/)?(?:harness|scripts|qa|hub|tools|cartridges)\/[\w./-]+\.(?:mjs|js|sh|py))/g)) {

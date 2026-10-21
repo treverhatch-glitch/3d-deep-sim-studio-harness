@@ -18,7 +18,12 @@ for (const file of files) {
   const reviewer = (text.match(/model-family\s*:\s*(\S+)/i) || [])[1];
   const implementer = (text.match(/implementer-family\s*:\s*(\S+)/i) || [])[1];
   if (!reviewer || !implementer) {
-    console.error(`[reviewer] FAIL ${file} needs model-family and implementer-family`);
+    // A Director's design or drift review isn't a code review; it belongs in studio/bible/reviews/ (run #1).
+    if (/director|drift/i.test(file) || /^#\s*(director|drift)/im.test(text)) {
+      console.log(`[reviewer] note: ${file} looks like a Director design review, not a code review. Move it to studio/bible/reviews/ (npm run director -- review writes there).`);
+      continue;
+    }
+    console.error(`[reviewer] FAIL ${file} needs model-family and implementer-family (a code review: npm run review -- <TASK_ID>)`);
     failed += 1;
     continue;
   }

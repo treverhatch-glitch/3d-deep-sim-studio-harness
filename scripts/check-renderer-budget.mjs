@@ -36,7 +36,8 @@ async function measure(url, budget) {
   } catch {
     return { skipped: 'Playwright is not installed' };
   }
-  const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM } : {}).catch((err) => ({ error: err }));
+  const { launchChromium } = await import('../qa/chromium.mjs');
+  const browser = await launchChromium(chromium);
   if (browser.error) return { skipped: `Chromium did not start (${browser.error.message.split('\n')[0]})` };
   try {
     const page = await browser.newPage();
