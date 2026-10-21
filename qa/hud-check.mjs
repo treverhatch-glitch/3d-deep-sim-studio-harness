@@ -61,7 +61,7 @@ fs.mkdirSync(path.join(dir, 'assets/placeholder'), { recursive: true });
 fs.writeFileSync(path.join(dir, 'studio/art/concept.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGElEQVR4nGP4z8DwHwxRAQMDAwMDLjcDALOLD/G4jBqDAAAAAElFTkSuQmCC', 'base64'));
 fs.writeFileSync(path.join(dir, 'assets/placeholder/crate.glb'), 'glTF placeholder');
 sh('harness/art.mjs', 'propose', 'studio/art/concept.png', '--kind', 'style', '--title', 'Mossy pastel, soft light', '--by', 'art-1');
-sh('harness/art.mjs', 'propose', 'assets/placeholder/crate.glb', '--title', 'Garden crate', '--by', 'art-1');
+sh('harness/art.mjs', 'propose', 'assets/placeholder/crate.glb', '--title', 'Garden crate', '--thumb', 'studio/art/concept.png', '--by', 'art-1');
 // A fake local model for the Liaison chat: it answers with a brief straight away.
 const fakeModel = http.createServer((req, res) => {
   req.resume();
@@ -111,7 +111,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try {
   for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
-    for (const skin of ['ops', 'tycoon', 'plan']) {
+    for (const skin of ['ops', 'tycoon', 'plan', 'assets']) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h } });
       const page = await ctx.newPage();
       const errs = [];
@@ -196,7 +196,7 @@ try {
   await page.click('#plan [data-speed]');
   await wait(2500);
   const boost = JSON.parse(read('studio/mode.json') || '{}').boost;
-  check('the MAX SPEED lever turns boost on, and every view shows it', boost?.on === true && (await page.locator('[data-speed][aria-pressed="true"]').count()) === 3);
+  check('the MAX SPEED lever turns boost on, and every view shows it', boost?.on === true && (await page.locator('[data-speed][aria-pressed="true"]').count()) === (await page.locator('.skin [data-speed]').count()));
   await page.click('#plan [data-mode="fast"]');
   await wait(2000);
   check('choosing a pace in the Game plan records it', JSON.parse(read('studio/mode.json') || '{}').mode === 'fast' && /Fast and furious/.test(await page.locator('#p-modemsg').innerText()));
@@ -204,18 +204,7 @@ try {
   await page.click('#p-asks [data-answer="Food court"]');
   await wait(1500);
   check('answering it with one click records the answer', /"answer": "Food court"/.test(read('studio/asks/A-001.json')));
-  check('the signals strip shows the pace on every view', (await page.locator('[data-signals] .sig.pace').count()) === 3);
-  // The art department's designs: shown with the image, approved or sent back with the dev's words.
-  const designs = await page.locator('#p-designs').innerText();
-  const imgOk = await page.locator('#p-designs img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
-  check('the art panel shows the designs waiting, with the concept image', /D-001/.test(designs) && /D-002/.test(designs) && imgOk && /D-001: approve or change/.test(await page.locator('#plan [data-signals]').innerText()), designs);
-  await page.fill('#p-designs input[data-note="D-002"]', 'make it rounder, like a planter');
-  await page.click('#p-designs [data-art="changes"][data-id="D-002"]');
-  await wait(1500);
-  check('asking for changes gives the art department a task with your words', /Art: change D-002 Garden crate: make it rounder/.test(read('studio/NEXT.md')) && /art department has T-/.test(await page.locator('#p-artmsg').innerText()), await page.locator('#p-artmsg').innerText());
-  await page.click('#p-designs [data-art="approve"][data-id="D-001"]');
-  await wait(1500);
-  check('approving the style sheet makes it the art reference in the Bible', /"artReference"/.test(read('studio/bible/bible.json')) && /art reference/.test(await page.locator('#p-artmsg').innerText()), await page.locator('#p-artmsg').innerText());
+  check('the signals strip shows the pace on every view', (await page.locator('[data-signals] .sig.pace').count()) === (await page.locator('.skin [data-signals]').count()));
   // The Liaison chat: the model reads a brief back; nothing moves until "Yes, send it".
   await page.fill('#p-chatin', 'I want fireflies in the garden at night');
   await page.click('#p-chat button');
@@ -224,7 +213,30 @@ try {
   await page.click('#p-chatlog [data-brief="confirm"]');
   await wait(1500);
   check('saying yes sends it to R&D and says what happens next', /Idea: shape I-\d+ Fireflies at dusk/.test(read('studio/NEXT.md')) && /sent on as I-/.test(await page.locator('#p-chatlog').innerText()), await page.locator('#p-chatlog').innerText());
-  await page.click('#plan .switch[data-to="ops"]');
+  check('the Game plan points to the Asset studio with what is waiting', /2 waiting for you/.test(await page.locator('#p-designs').innerText()), await page.locator('#p-designs').innerText());
+  // The Asset studio (view 4): designs by number and round, thumbs up, words for the next round, references.
+  await page.click('#plan .switch[data-to="assets"]');
+  await wait(2500);
+  const waiting = await page.locator('#a-waiting').innerText();
+  const imgOk = await page.locator('#a-waiting img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
+  check('the Asset studio shows each design by number and round, with its picture', /#1\s*Mossy pastel/.test(waiting) && /#2\s*Garden crate/.test(waiting) && /round 1/.test(waiting) && imgOk && /2 designs waiting in the Asset studio/.test(await page.locator('#assets [data-signals]').innerText()), waiting);
+  await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('input[data-note]').fill('make it rounder, like a planter');
+  await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('[data-art="changes"]').click();
+  await wait(1500);
+  check('"Change this" gives the art department its next round with your words', /Art: round 2 of #2 Garden crate: make it rounder/.test(read('studio/NEXT.md')) && /round 2 of #2/.test(await page.locator('#a-msg').innerText()) && /Garden crate/.test(await page.locator('#a-works').innerText()), await page.locator('#a-msg').innerText());
+  await page.fill('#a-saytext', 'crate #2 needs a lid too');
+  await page.click('#a-say button');
+  await wait(1500);
+  check('typed feedback naming #2 joins its open round instead of a new task', (read('studio/NEXT.md').match(/of #2 Garden crate/g) || []).length === 1 && /added to its open round/.test(await page.locator('#a-msg').innerText()), await page.locator('#a-msg').innerText());
+  await page.locator('#a-waiting .acard', { hasText: 'Mossy pastel' }).locator('[data-art="approve"]').click();
+  await wait(1500);
+  check('a thumbs up on the style sheet makes it the art reference', /"artReference"/.test(read('studio/bible/bible.json')) && /art reference/.test(await page.locator('#a-msg').innerText()) && /Mossy pastel/.test(await page.locator('#a-approved').innerText()), await page.locator('#a-msg').innerText());
+  await page.setInputFiles('#a-reffile', path.join(dir, 'studio/art/concept.png'));
+  await page.fill('#a-reflabel', 'the moss colour I want');
+  await page.click('#a-ref button');
+  await wait(2000);
+  check('a labelled reference from the dev is listed for the art department', /the moss colour I want/.test(await page.locator('#a-refs').innerText()) && /the moss colour I want/.test(read('studio/art/references.json')), await page.locator('#a-refmsg').innerText());
+  await page.click('#assets .switch[data-to="ops"]');
   await wait(800);
   await page.selectOption('#o-arole', 'builder');
   await page.click('#o-agentform button');

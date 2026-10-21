@@ -15,7 +15,7 @@
   button { font: inherit; cursor: pointer; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .skin { display: none; }
-  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon, body[data-skin="plan"] #plan { display: block; }
+  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon, body[data-skin="plan"] #plan, body[data-skin="assets"] #assets, body[data-skin="arcade"] #arcade { display: block; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
   /* ---------- Ops: a stage manager's cue board ---------- */
@@ -68,6 +68,52 @@
   #plan .chatmsg.them { align-self: flex-start; border: 1px solid var(--line, #ccc); }
   #plan #p-chat { display: flex; gap: 6px; }
   #plan #p-chat textarea { flex: 1; min-height: 44px; }
+  body[data-skin="assets"] {
+    --table: #23272b; --card: #f4f2ec; --ink: #1b1d1f; --quiet: #6a6f73; --line: #3a4046; --wait: #e8a33d; --ok: #3f9d63; --works: #8a7dd8; --focus: #e8a33d;
+    background: var(--table); color: #e9e6df; font: 15px/1.45 Barlow, system-ui, sans-serif;
+  }
+  #assets header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  #assets h1 { margin: 0; font: 700 26px/1 "Barlow Condensed", sans-serif; letter-spacing: .01em; }
+  #assets .state { color: #b7b2a8; }
+  #assets .spacer { flex: 1; }
+  #assets .switch { background: transparent; color: #e9e6df; border: 1px solid #5a6168; border-radius: 6px; padding: 5px 10px; font: inherit; }
+  #assets main { padding: 6px 20px 40px; max-width: 1400px; }
+  #assets .lede { max-width: 76ch; color: #cfcac0; }
+  #assets section { margin: 22px 0; }
+  #assets h2 { font: 600 20px/1.2 "Barlow Condensed", sans-serif; margin: 0 0 10px; }
+  #assets h2 small { font: 400 14px Barlow, sans-serif; color: #a9a49a; margin-left: 8px; }
+  #assets .note { color: #b7b2a8; }
+  #assets form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #assets #a-saytext, #assets #a-reflabel { flex: 1 1 260px; min-width: 0; padding: 8px 10px; border-radius: 6px; border: 1px solid #5a6168; background: #191c1f; color: #f1eee7; font: inherit; }
+  #assets button { font: inherit; cursor: pointer; }
+  #assets button.go { background: var(--wait); color: #1b1d1f; border: 0; border-radius: 6px; padding: 7px 14px; font-weight: 600; }
+  #assets .kinds { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  #assets .kinds small { color: #a9a49a; }
+  #assets .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  #assets .sheet:empty::before { content: attr(data-empty); color: #8f8a80; grid-column: 1 / -1; }
+  .acard { background: var(--card); color: var(--ink); border-radius: 4px; padding: 8px 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; box-shadow: 0 1px 0 rgba(0,0,0,.4); border-top: 5px solid var(--quiet); }
+  .acard.proposed { border-top-color: var(--wait); }
+  .acard.approved { border-top-color: var(--ok); }
+  .acard.approved.provisional { border-top-style: dashed; border-top-color: var(--wait); }
+  .acard.changes { border-top-color: var(--works); }
+  .acard .view { aspect-ratio: 4 / 3; background: #d9d5cb; display: grid; place-items: center; overflow: hidden; border-radius: 2px; }
+  .acard .view img { width: 100%; height: 100%; object-fit: contain; image-rendering: auto; }
+  .acard .view model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+  .acard .view .ph { font: 600 13px Barlow, sans-serif; color: var(--quiet); text-align: center; padding: 8px; }
+  .acard .cap { font: 600 17px/1.2 "Barlow Condensed", sans-serif; }
+  .acard .num { font: 700 20px/1 "Barlow Condensed", sans-serif; margin-right: 4px; }
+  .acard .rd { font: 500 13px Barlow, sans-serif; color: var(--quiet); }
+  .acard .meta { font-size: 12.5px; color: var(--quiet); overflow-wrap: anywhere; }
+  .acard .said { font-size: 13px; border-left: 3px solid var(--works); padding-left: 6px; }
+  .acard .badge { font-size: 12.5px; background: #fff3dc; border: 1px dashed var(--wait); padding: 3px 6px; }
+  .acard .rounds { display: flex; gap: 4px; flex-wrap: wrap; }
+  .acard .rounds a { display: block; width: 36px; height: 28px; background: #d9d5cb center / cover no-repeat; border: 1px solid #b9b4a8; font-size: 10px; color: var(--quiet); text-decoration: none; text-align: center; line-height: 28px; }
+  .acard input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #bdb8ad; border-radius: 4px; font: inherit; font-size: 14px; background: #fff; color: var(--ink); }
+  .acard .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .acard .acts button { border-radius: 4px; padding: 5px 8px; flex: 1 1 auto; white-space: nowrap; border: 1px solid #8f8a80; background: #fff; color: var(--ink); }
+  .acard .acts button.up { background: var(--ok); border-color: var(--ok); color: #fff; font-weight: 600; }
+  #assets button:focus-visible, #assets input:focus-visible, .acard button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  @media (max-width: 600px) { #assets header, #assets main { padding-left: 16px; padding-right: 16px; } #assets .sheet { grid-template-columns: 1fr 1fr; } }
   #o-launched .ag { display: flex; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
@@ -443,6 +489,8 @@
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
     <button class="switch" data-to="plan">Game plan</button>
+    <button class="switch" data-to="assets">Asset studio</button>
+    <button class="switch" data-to="arcade">Arcade</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -500,6 +548,8 @@
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
     <button class="switch" data-to="plan">Game plan</button>
+    <button class="switch" data-to="assets">Assets</button>
+    <button class="switch" data-to="arcade">Arcade</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </div>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -521,6 +571,8 @@
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
     <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="switch" data-to="assets">Asset studio</button>
+    <button class="switch" data-to="arcade">Arcade</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -585,6 +637,43 @@
   </main>
 </div>
 
+<!-- Asset studio: every asset the art department makes, its rounds, the dev's thumbs up or words, references -->
+<div id="assets" class="skin">
+  <header>
+    <h1>Asset studio</h1>
+    <span class="state" id="a-state">Loading…</span>
+    <span class="spacer"></span>
+    <button class="switch" data-to="ops">Ops view</button>
+    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="switch" data-to="plan">Game plan</button>
+    <button class="switch" data-to="arcade">Arcade</button>
+    <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
+  </header>
+  <div class="signals" data-signals role="status" aria-live="polite"></div>
+  <main>
+    <p class="lede" id="a-lede">The art department makes assets in rounds and keeps going without waiting for you. Give a thumbs up to what you like, or say what to change. Approved files move to <code>assets/approved/</code>, the only folder the game loads from.</p>
+    <section class="tell">
+      <h2>Tell the art department</h2>
+      <form id="a-say"><input id="a-saytext" maxlength="1000" aria-label="Feedback for the art department" placeholder="e.g. yellow gun #4 is still clunky, #7 is perfect" required> <button class="go">Send</button></form>
+      <p class="note" id="a-msg" role="status">Name assets by their number (#4) and your words go to that asset's next round.</p>
+    </section>
+    <section><h2>Waiting for you <small id="a-waitcount"></small></h2><div class="sheet" id="a-waiting"></div></section>
+    <section><h2>In the works <small>you asked for changes; the next round comes back here</small></h2><div class="sheet" id="a-works"></div></section>
+    <section><h2>Approved <small>in assets/approved/ and the asset ledger</small></h2><div class="sheet" id="a-approved"></div></section>
+    <section>
+      <h2>References <small>what the art department works from</small></h2>
+      <form id="a-ref" class="refform">
+        <input type="file" id="a-reffile" aria-label="A photo, a 3D model or a clip" accept="image/*,.glb,.gltf,.fbx,.obj,video/mp4,video/webm,audio/*" required>
+        <input id="a-reflabel" maxlength="160" aria-label="What it is" placeholder="What it is: the hotel lobby mood, my yellow gun model…" required>
+        <span class="kinds" role="radiogroup" aria-label="How to use it"><label><input type="radio" name="a-refkind" value="look" checked> Look like this <small>(never shipped)</small></label><label><input type="radio" name="a-refkind" value="use"> Use this in the game <small>(I own it)</small></label></span>
+        <button class="go">Add reference</button>
+      </form>
+      <p class="note" id="a-refmsg" role="status"></p>
+      <div class="sheet refs" id="a-refs"></div>
+    </section>
+  </main>
+</div>
+
 <aside id="drawer" class="drawer" aria-hidden="true" aria-labelledby="dr-name"><button class="close" type="button" aria-label="Close">×</button><div id="dr-body"></div></aside>
 <script>
 (() => {
@@ -605,8 +694,9 @@
 
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
-  const setSkin = (s) => { document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
-  setSkin(['tycoon', 'ops', 'plan'].includes(fromUrl) ? fromUrl : store.get('hudSkin') || 'ops');
+  const setSkin = (s) => { if (!document.getElementById(s)) return; document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
+  const SKINS = ['tycoon', 'ops', 'plan', 'assets', 'arcade'].filter((k) => document.getElementById(k));
+  setSkin(SKINS.includes(fromUrl) ? fromUrl : SKINS.includes(store.get('hudSkin')) ? store.get('hudSkin') : 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
 
 
@@ -1648,7 +1738,10 @@
   }, 5000);
   function render() {
     renderChrome(state);
-    if (document.body.dataset.skin === 'tycoon') renderTycoon(state);
+    const skin = document.body.dataset.skin;
+    if (skin === 'tycoon') renderTycoon(state);
+    else if (skin === 'assets') renderAssets(state);
+    else if (skin === 'arcade' && typeof renderArcade === 'function') renderArcade(state);
     else renderOps(state);
   }
 
@@ -1683,17 +1776,106 @@
       const waiting = art.designs.filter((d) => d.status === 'proposed');
       $('p-artcount').textContent = waiting.length ? `${waiting.length} waiting for you` : 'proposes the look; you approve it';
       $('p-artref').textContent = art.reference ? `Art reference: ${art.reference.file}, approved by ${art.reference.approvedBy}. Art and renderer work is checked against it.` : 'No art reference yet. The art department starts in pre-production with a style sheet and five placeholder assets for you to approve.';
-      const keep = {};
-      $('p-designs').querySelectorAll('input[data-note]').forEach((i) => { if (i.value) keep[i.dataset.note] = i.value; });
-      const order = [...waiting, ...art.designs.filter((d) => d.status !== 'proposed').reverse()].slice(0, 12);
-      const artSig = JSON.stringify(order.map((d) => [d.id, d.status]));
-      if ($('p-designs').dataset.sig !== artSig) {
-        $('p-designs').dataset.sig = artSig;
-        $('p-designs').innerHTML = order.length ? order.map((d) => `<div class="design ${esc(d.status)}">${d.image ? `<img src="/api/art/file?id=${encodeURIComponent(d.id)}" alt="${esc(d.title)}" loading="lazy">` : ''}<div><b>${esc(d.id)}</b> ${esc(d.title)}</div><div class="file">${esc(d.kind === 'style' ? 'style sheet' : d.kind)} · ${esc(d.file)}${d.licence ? ` · ${esc(d.licence)}` : ''} · by ${esc(d.by)}</div>${d.status === 'proposed' ? `<input data-note="${esc(d.id)}" placeholder="What to change (for Ask for changes)" aria-label="What to change in ${esc(d.id)}"><div class="opts"><button type="button" class="go" data-art="approve" data-id="${esc(d.id)}">Approve</button><button type="button" data-art="changes" data-id="${esc(d.id)}">Ask for changes</button></div>` : `<div class="note">${d.status === 'approved' ? 'Approved' : d.status === 'changes' ? `Changes asked: ${esc(d.note)}` : esc(d.status)}</div>`}</div>`).join('') : '<p class="note">No designs yet.</p>';
-        $('p-designs').querySelectorAll('input[data-note]').forEach((i) => { if (keep[i.dataset.note]) i.value = keep[i.dataset.note]; });
+      // The Game plan shows a summary; the work happens in the Asset studio (view 4).
+      const sumSig = JSON.stringify(art.designs.map((d) => [d.id, d.status]));
+      if ($('p-designs').dataset.sig !== sumSig) {
+        $('p-designs').dataset.sig = sumSig;
+        const approved = art.designs.filter((d) => d.status === 'approved').length;
+        $('p-designs').innerHTML = `<p>${waiting.length ? `<b>${waiting.length} waiting for you</b>: ${waiting.slice(0, 5).map((d) => `#${d.n} ${esc(d.title)}`).join(', ')}${waiting.length > 5 ? ', …' : ''}. ` : ''}${approved} approved, ${art.designs.length - approved - waiting.length} in the works.</p><button type="button" class="go switch" data-to="assets">Open the Asset studio</button>`;
+        $('p-designs').querySelector('.switch').addEventListener('click', () => setSkin('assets'));
       }
     }
   }
+  // ---------- Asset studio ----------
+  let viewerLoaded = false;
+  const agoIso = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  function assetView(d) {
+    if (d.thumb || d.image) return `<img src="/api/art/file?id=${encodeURIComponent(d.id)}${d.thumb ? '&thumb=1' : ''}" alt="${esc(d.title)}, round ${d.round}" loading="lazy">`;
+    if (d.model) {
+      if (!viewerLoaded) {
+        viewerLoaded = true;
+        const sc = document.createElement('script');
+        sc.type = 'module';
+        sc.src = 'https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js';
+        document.head.appendChild(sc);
+      }
+      return `<model-viewer src="/api/art/file?id=${encodeURIComponent(d.id)}" alt="${esc(d.title)}, a 3D model" camera-controls auto-rotate shadow-intensity="0.6"><span class="ph" slot="poster">3D model: loading the viewer…</span></model-viewer>`;
+    }
+    return `<span class="ph">${esc(d.kind === 'style' ? 'Style sheet' : d.kind)}<br>${esc(d.file.split('/').pop())}</span>`;
+  }
+  function assetCard(d) {
+    const said = d.feedback && d.feedback.length ? `<div class="said">“${esc(short(d.feedback[d.feedback.length - 1].text, 120))}” <span class="rd">${esc(d.feedback[d.feedback.length - 1].by)}</span></div>` : '';
+    const rounds = d.rounds && d.rounds.length ? `<div class="rounds" aria-label="Earlier rounds">${d.rounds.map((r) => `<a href="/api/art/file?id=${encodeURIComponent(r.id)}${r.thumb ? '&thumb=1' : ''}" target="_blank" rel="noopener" title="Round ${r.round}" ${r.image || r.thumb ? `style="background-image:url('/api/art/file?id=${encodeURIComponent(r.id)}${r.thumb ? '&thumb=1' : ''}')"` : ''}>${r.image || r.thumb ? '' : `r${r.round}`}</a>`).join('')}</div>` : '';
+    const change = `<input data-note="${esc(d.id)}" placeholder="What to change in #${d.n}" aria-label="What to change in #${d.n} ${esc(d.title)}">`;
+    const acts = d.status === 'proposed'
+      ? `${change}<div class="acts"><button type="button" class="up" data-art="approve" data-id="${esc(d.id)}">👍 Approve</button><button type="button" data-art="changes" data-id="${esc(d.id)}">Change this</button></div>`
+      : d.status === 'approved' && d.provisional
+        ? `<div class="badge">The Producer approved it while you were away.</div>${change}<div class="acts"><button type="button" data-art="changes" data-id="${esc(d.id)}">Change this</button></div>`
+        : '';
+    return `<article class="acard ${esc(d.status)}${d.provisional ? ' provisional' : ''}"><div class="view">${assetView(d)}</div><div class="cap"><span class="num">#${d.n}</span>${esc(d.title)} <span class="rd">round ${d.round}</span></div><div class="meta">${esc(d.kind === 'style' ? 'style sheet' : d.kind)} · by ${esc(d.by)} · ${esc(d.licence || '')}${d.generated ? ` · ${esc(d.generated.tool)}` : ''} · ${esc(agoIso(d.at))}</div>${said}${rounds}${acts}</article>`;
+  }
+  function renderAssets(s) {
+    const art = s.art || { designs: [], references: [] };
+    const by = (st) => art.designs.filter((d) => d.status === st);
+    const waiting = by('proposed');
+    $('a-state').textContent = `${waiting.length} waiting · ${by('changes').length} in the works · ${by('approved').length} approved · a design left waiting ${art.waitHours} h is approved provisionally by the Producer`;
+    $('a-waitcount').textContent = waiting.length ? `${waiting.length}` : '';
+    const fill = (id, list, empty) => {
+      const el = $(id);
+      const sig = JSON.stringify(list.map((d) => [d.id, d.status, d.provisional, (d.feedback || []).length]));
+      if (el.dataset.sig === sig) return;
+      const keep = {};
+      el.querySelectorAll('input[data-note]').forEach((i) => { if (i.value) keep[i.dataset.note] = i.value; });
+      el.dataset.sig = sig;
+      el.dataset.empty = empty;
+      el.innerHTML = list.map(assetCard).join('');
+      el.querySelectorAll('input[data-note]').forEach((i) => { if (keep[i.dataset.note]) i.value = keep[i.dataset.note]; });
+    };
+    fill('a-waiting', waiting, 'Nothing waiting. New rounds land here as the art department makes them.');
+    fill('a-works', by('changes'), 'Nothing being redone.');
+    fill('a-approved', by('approved').slice().reverse(), 'Nothing approved yet.');
+    const refs = art.references || [];
+    const rsig = JSON.stringify(refs.map((r) => r.id));
+    if ($('a-refs').dataset.sig !== rsig) {
+      $('a-refs').dataset.sig = rsig;
+      $('a-refs').dataset.empty = 'No references yet. Add photos, screenshots or your own models so the art department knows what you mean.';
+      $('a-refs').innerHTML = refs.slice().reverse().map((r) => `<article class="acard ${r.kind === 'use' ? 'approved' : ''}"><div class="view">${r.image ? `<img src="/api/art/ref?id=${encodeURIComponent(r.id)}" alt="${esc(r.label)}" loading="lazy">` : `<span class="ph">${esc((r.file || r.ref || '').split('/').pop())}</span>`}</div><div class="cap">${esc(r.label)}</div><div class="meta">${r.kind === 'use' ? `your asset, in ${esc(r.file)}` : 'look like this · never shipped'} · ${esc(r.by)}</div></article>`).join('');
+    }
+  }
+  $('a-say').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const text = $('a-saytext').value.trim();
+    if (!text) return;
+    try {
+      const r = await post('/api/art', { action: 'say', text, by: actor() });
+      $('a-saytext').value = '';
+      $('a-msg').textContent = r.next;
+      $('a-works').dataset.sig = '';
+      poll();
+    } catch (err) {
+      $('a-msg').textContent = `Couldn't send it: ${err.message}. Set the HUB token in the Ops view.`;
+    }
+  });
+  $('a-ref').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = $('a-reffile').files[0];
+    const label = $('a-reflabel').value.trim();
+    if (!f || !label) return;
+    if (f.size > 28e6) { $('a-refmsg').textContent = 'That file is over 28 MB; attach a smaller copy.'; return; }
+    $('a-refmsg').textContent = 'Adding…';
+    try {
+      const data = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); });
+      const kind = (document.querySelector('input[name="a-refkind"]:checked') || {}).value || 'look';
+      const r = await post('/api/art/reference', { name: f.name, data, label, kind, by: actor() });
+      $('a-reffile').value = '';
+      $('a-reflabel').value = '';
+      $('a-refmsg').textContent = r.next;
+      poll();
+    } catch (err) {
+      $('a-refmsg').textContent = `Couldn't add it: ${err.message}`;
+    }
+  });
+
   // The Liaison chat: the conversation stays in this tab; a brief is sent only on "Yes, send it".
   let chatMsgs = [];
   let pendingBrief = null;
@@ -1751,10 +1933,12 @@
         const r = await post('/api/divisions', { id: t.dataset.division, on: true, by: actor() });
         say(r.next);
       } else if (t.dataset.art) {
-        const note = ($('p-designs').querySelector(`input[data-note="${t.dataset.id}"]`) || {}).value || '';
-        if (t.dataset.art === 'changes' && !note.trim()) { $('p-artmsg').textContent = 'Write what to change in the box first.'; return; }
+        const box = t.closest('.acard');
+        const note = (box?.querySelector('input[data-note]') || {}).value || '';
+        if (t.dataset.art === 'changes' && !note.trim()) { $('a-msg').textContent = 'Write what to change in the box on the card first.'; box?.querySelector('input[data-note]')?.focus(); return; }
         const r = await post('/api/art', { action: t.dataset.art, id: t.dataset.id, note, by: actor() });
-        $('p-artmsg').textContent = r.next;
+        $('a-msg').textContent = r.next;
+        $('a-waiting').dataset.sig = '';
       } else if (t.dataset.brief) {
         const r = await post('/api/liaison', { action: t.dataset.brief, id: t.dataset.id, by: actor() });
         t.parentElement.remove();

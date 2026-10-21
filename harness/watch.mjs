@@ -27,6 +27,7 @@ import { collectIdeas } from './ideas.mjs';
 import { sessions, fillAgents, startAgent } from './agent.mjs';
 import { effectiveMode } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
+import { expireDesigns } from './art.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -110,6 +111,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const ideas = dryRun ? null : collectIdeas();
   // The mode decides whether agents start on their own, and how often the Producer checks in.
   const decided = dryRun ? [] : expireAsks(now);
+  // Designs left waiting past the pace's limit: the Producer approves them provisionally (logged).
+  if (!dryRun) expireDesigns(now).catch(() => {});
   const launched = dryRun ? null : fillAgents();
   const checkin = dryRun ? null : producerCheckinIfDue(now, events);
   const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas, launched: launched?.started || [], checkin, decided };

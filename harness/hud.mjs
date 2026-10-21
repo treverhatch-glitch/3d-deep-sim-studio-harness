@@ -19,7 +19,7 @@ import { readTaskHandoff } from './task.mjs';
 import { effectiveMode, describeMode, MODES } from './mode.mjs';
 import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
-import { readDesigns } from './art.mjs';
+import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 
 const readJson = (rel, fallback = null) => {
@@ -339,7 +339,10 @@ export function buildHudState() {
       ...needs.map((n) => (n.action?.type === 'accept-cause' ? n.msg : `${n.task ? `${n.task}: ` : ''}${n.msg}`)),
       ...(bibleNow && !bibleNow.signed ? ['The Game Bible is waiting for your signature (npm run bible -- check, then sign)'] : []),
       ...(bibleNow?.amended ? [`The Bible changed after signing (${bibleNow.amended.changes.map((c) => c.field).join(', ')}): re-sign it so build work can go on`] : []),
-      ...readDesigns().filter((d) => d.status === 'proposed').map((d) => `${d.id}: approve or change the ${d.kind === 'style' ? 'style sheet' : d.kind} "${d.title}" (Game plan)`),
+      ...(() => {
+        const w = readDesigns().filter((d) => d.status === 'proposed');
+        return w.length ? [`${w.length} design${w.length === 1 ? '' : 's'} waiting in the Asset studio (${w.slice(0, 4).map((d) => `#${numberOf(d)} ${d.title}`).join(', ')}${w.length > 4 ? ', …' : ''})`] : [];
+      })(),
       ...openAsks().map((a) => `${a.id}: ${a.question}${a.deadline ? ` (if you don't answer in time, it goes with "${a.default}")` : ''}`),
     ].slice(0, 12),
     red: ((readJson('.studio/gates-last.json', null) || {}).rows || []).filter((r) => r.required && !r.ok).map((r) => r.id),
@@ -366,7 +369,15 @@ export function buildHudState() {
     stopped: readJson('.studio/STOP.json', null),
     mode: { ...effectiveMode(), text: describeMode() },
     modes: Object.fromEntries(Object.entries(MODES).map(([id, m]) => [id, { label: m.label, pitch: m.pitch }])),
-    art: { designs: readDesigns().filter((d) => d.status !== 'replaced').slice(-24).map((d) => ({ id: d.id, kind: d.kind, title: d.title, file: d.file, image: d.image, status: d.status, by: d.by, note: d.note || '', licence: d.licence })), reference: bibleNow?.artReference || null },
+    art: (() => {
+      const all = readDesigns();
+      return {
+        designs: latestRounds(all).slice(-60).map((d) => ({ id: d.id, n: numberOf(d), round: d.round || 1, kind: d.kind, title: d.title, file: d.file, image: d.image, model: d.model || /\.(glb|gltf)$/i.test(d.file), thumb: d.thumb || null, status: d.status, provisional: Boolean(d.provisional), by: d.by, at: d.at, licence: d.licence, generated: d.generated || null, feedback: (d.feedback || []).slice(-3), note: (d.feedback || []).slice(-1)[0]?.text || '', rounds: all.filter((x) => (x.asset || x.id) === (d.asset || d.id) && x.id !== d.id).map((x) => ({ id: x.id, round: x.round || 1, image: x.image, thumb: x.thumb || null })) })),
+        references: readArtRefs(),
+        reference: bibleNow?.artReference || null,
+        waitHours: { precise: 24, budget: 24, fast: 8, extreme: 4 }[effectiveMode().id] / (effectiveMode().boost ? 2 : 1),
+      };
+    })(),
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
     launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null })),
     signals,

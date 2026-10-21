@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.20.0] — 2026-10-21
+### Added
+- **The Asset studio** (War Room view 4, `npm run art`, docs/ART-DEPARTMENT.md): every asset the art department makes, by number (#4) and round, with its picture (3D files spin in a viewer). Thumbs up, or "Change this" with your words, per card; or type "yellow gun #4 is still clunky, #7 is perfect" and each named asset gets the words for its next round. Sections: Waiting for you, In the works, Approved, References.
+- **Rounds without waiting**: the art department proposes new rounds of an asset (`--round-of 4`) whenever it likes; feedback on an asset already being redone joins its open round instead of a new task.
+- **Staging and approved folders**: proposed game files live in `assets/staging/<pack>/`; a thumbs up moves them to `assets/approved/`, records them in the ledger and queues "Import: wire asset #4 … into the game" for a builder. The assets gate fails when game code loads a staging file.
+- **The Producer steps in** when the dev is slow: a design waiting past the pace's limit (precise 24 h, fast 8 h, extreme 4 h, half with MAX SPEED) is approved provisionally, logged under "Decided without you", marked on its card, and can still be sent back. The style sheet always waits for the dev.
+- **References from the dev**, labelled: "Look like this" (reference library, never shipped) or "Use this in the game" (recorded as the dev's own asset). Upload them in the Asset studio or `npm run art -- ref`; the art department reads `studio/art/references.json`.
+- **The asset ledger, reworked** (from run #1's notes): files already in `assets/`, `public/` or `web/` are recorded in place, others copied into `assets/<pack>/` (no flat folder, no duplicate copies); separate `author`, `source`, `licence`, `creditRequired`, `rightsHolder`, `declaredBy` and `madeBy` fields; a `generated` class for AI art (tool, model, prompt, terms); `npm run asset -- update` and `import-manifest`.
+### Changed
+- The Game plan's art panel is now a summary with a button to the Asset studio. "Needs you" shows one line for all waiting designs.
+
+---
+
 ## [2.19.0] — 2026-10-21
 From the art agent's notes on run #1, and the owner's notes on the Studio view.
 ### Added

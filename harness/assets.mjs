@@ -5,6 +5,9 @@
  *
  *   npm run asset -- add <file> --use game --owner "<who owns it>" --licence "<own work | licence name>" [--source "<where from>"] --by <person>
  *   npm run asset -- add <file or url> --use reference --game "…" --feature "…" [--by <name>]
+ *   npm run asset -- add <file> --use game --generated "<tool>:<model>" --prompt <file> --terms "<plan or terms>" --by <person>
+ *   npm run asset -- update <file> --by <person>                     re-record after a re-export (new checksum)
+ *   npm run asset -- import-manifest <pack>/MANIFEST.json --by <person> [--pack <name>]   a whole pack at once
  *   npm run asset -- list
  *
  * --use game: the person states they own it or hold a licence to use it in this game. The file is
@@ -40,46 +43,124 @@ function writeManifest(m) {
   fs.writeFileSync(MANIFEST, `${JSON.stringify(m, null, 2)}\n`);
 }
 
-export async function addAsset({ source, use, owner = '', licence = '', origin = '', by = '', game = '', feature = '' }) {
+// Files already where the game loads them are recorded where they are; anything else is copied into
+// assets/<pack>/ (namespaced, so two packs can both have a button_panel.glb).
+const IN_PLACE = /^(assets|public|web)\/|^cartridges\/[^/]+\/assets\//;
+const relOf = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+
+/**
+ * One ledger entry. Fields kept apart, because a CC0 author doesn't own the copy the game uses:
+ * author (who made it), source (where from), licence, creditRequired + credit (the line to show),
+ * declaredBy (the person who vouched), rightsHolder (who holds the right to ship it: the studio or
+ * the dev), madeBy (the agent that made or fetched it), generated ({ tool, model, prompt, terms }
+ * for AI-made art: the first thing a buyer or a store asks).
+ */
+function entryFor(rel, { id, owner, licence, origin, by, author = '', credit = '', madeBy = '', generated = null, design = null, pack = null }) {
+  const holder = owner || by;
+  return {
+    id,
+    file: rel,
+    pack: pack || rel.split('/').slice(1, -1).join('/').replace(/^(approved|staging)\//, '') || null,
+    sha256: sha256(path.join(REPO_ROOT, rel)),
+    use: 'game',
+    owner: holder,
+    rightsHolder: holder,
+    author: author || null,
+    licence: generated ? `generated (${generated.tool}${generated.model ? `, ${generated.model}` : ''})` : licence,
+    creditRequired: Boolean(credit) || /\bCC[- ]?BY\b/i.test(licence || ''),
+    credit: credit || null,
+    source: origin,
+    madeBy: madeBy || null,
+    generated,
+    design,
+    declaredBy: by,
+    declaredAt: new Date().toISOString(),
+    statement: generated
+      ? `${by} stated that ${holder} may use this ${generated.tool}-generated file in this game${generated.terms ? ` under ${generated.terms}` : ''}.`
+      : `${by} stated that ${holder} owns this file or holds a licence (${licence}) to use it in this game.`,
+  };
+}
+
+export async function addAsset({ source, use, owner = '', licence = '', origin = '', by = '', game = '', feature = '', author = '', credit = '', madeBy = '', generated = null, pack = 'own' }) {
   if (use === 'reference') {
     const r = await addRef({ source, game: game || 'our own', feature: feature || path.basename(String(source || '')), by: by || 'game-dev' });
     return r.ok ? { ok: true, reference: r.ref.id, note: r.note } : r;
   }
   if (use !== 'game') return { ok: false, message: '--use game (it goes in the game) or --use reference (to design from, never shipped).' };
-  if (!by || AGENTISH.test(by)) return { ok: false, message: 'A person declares a game asset: --by <your name>.' };
-  if (!owner || !licence) return { ok: false, message: 'Say who owns it and on what terms: --owner "<who>" --licence "<own work | licence name>". You are stating you own it or may use it in this game.' };
+  if (!by || AGENTISH.test(by)) return { ok: false, message: 'A person declares a game asset: --by <your name>. (An agent proposes it with npm run art -- propose; the dev approves it.)' };
+  if (!generated && (!owner || !licence)) return { ok: false, message: 'Say who holds the right to ship it and on what terms: --owner "<who>" --licence "<own work | CC0 | CC-BY 4.0 | …>" (or --generated "<tool>:<model>" --prompt <file> --terms "<plan or terms>" for AI-made art).' };
   const file = path.resolve(String(source || ''));
   if (!source || !fs.existsSync(file) || !fs.statSync(file).isFile()) return { ok: false, message: `No file at ${source}. (Download it first; game assets are kept as files.)` };
+  let rel = relOf(file);
+  if (rel.startsWith('..') || !IN_PLACE.test(rel) || /^assets\/staging\//.test(rel)) {
+    const safePack = String(pack || 'own').replace(/[^a-z0-9/_-]/gi, '-').replace(/^\/+|\/+$/g, '') || 'own';
+    rel = `assets/${safePack}/${path.basename(file)}`;
+    const dest = path.join(REPO_ROOT, rel);
+    if (fs.existsSync(dest) && path.resolve(dest) !== file && sha256(dest) !== sha256(file)) return { ok: false, message: `${rel} already exists with different content; use --pack <name> or rename the file.` };
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    if (path.resolve(dest) !== file) fs.copyFileSync(file, dest);
+  }
   const m = readManifest();
-  const n = m.assets.reduce((x, a) => Math.max(x, Number(a.id.slice(2))), 0) + 1;
-  const id = `A-${String(n).padStart(3, '0')}`;
-  const rel = `assets/${path.basename(file)}`;
-  if (fs.existsSync(path.join(REPO_ROOT, rel)) && path.resolve(REPO_ROOT, rel) !== file) return { ok: false, message: `${rel} already exists; rename the file first.` };
-  fs.mkdirSync(ASSETS_DIR, { recursive: true });
-  if (path.resolve(REPO_ROOT, rel) !== file) fs.copyFileSync(file, path.join(REPO_ROOT, rel));
-  const entry = { id, file: rel, sha256: sha256(path.join(REPO_ROOT, rel)), use: 'game', owner, licence, source: origin, declaredBy: by, declaredAt: new Date().toISOString(), statement: `${by} stated that ${owner} owns this file or holds a licence (${licence}) to use it in this game.` };
-  m.assets.push(entry);
+  const existing = m.assets.find((a) => a.file === rel);
+  const id = existing?.id || `A-${String(m.assets.reduce((x, a) => Math.max(x, Number(a.id.slice(2))), 0) + 1).padStart(3, '0')}`;
+  const entry = entryFor(rel, { id, owner, licence, origin, by, author, credit, madeBy, generated });
+  m.assets = existing ? m.assets.map((a) => (a.file === rel ? entry : a)) : [...m.assets, entry];
   writeManifest(m);
-  emitEvent({ type: 'asset.added', agent: by, to: 'producer', msg: `${id} ${rel} declared for the game by ${by} (owner ${owner}, ${licence})` });
+  emitEvent({ type: 'asset.added', agent: by, to: 'producer', msg: `${id} ${rel} declared for the game by ${by} (${entry.rightsHolder}, ${entry.licence})${madeBy ? `, made by ${madeBy}` : ''}` });
   return { ok: true, asset: entry };
 }
 
-/** The game dev approved a studio-made design under assets/ (npm run art -- approve): record it like a declaration. */
-export function recordApproved({ file, by, licence, source = '', design, maker }) {
+/** Re-record a file after it was re-exported: new checksum, same record, by a person. */
+export function updateAsset(file, by) {
+  if (!by || AGENTISH.test(by)) return { ok: false, message: 'A person re-records an asset: --by <your name>.' };
+  const rel = relOf(path.resolve(REPO_ROOT, String(file || '')));
+  const m = readManifest();
+  const a = m.assets.find((x) => x.file === rel);
+  if (!a) return { ok: false, message: `${rel} has no record yet: npm run asset -- add ${rel} …` };
+  if (!fs.existsSync(path.join(REPO_ROOT, rel))) return { ok: false, message: `${rel} is gone.` };
+  const was = a.sha256;
+  Object.assign(a, { sha256: sha256(path.join(REPO_ROOT, rel)), updatedBy: by, updatedAt: new Date().toISOString() });
+  writeManifest(m);
+  emitEvent({ type: 'asset.updated', agent: by, msg: `${a.id} ${rel} re-recorded by ${by}${was === a.sha256 ? ' (unchanged)' : ''}` });
+  return { ok: true, asset: a };
+}
+
+/**
+ * Record a whole pack from its MANIFEST.json: { files: [{ file, author, source, licence, credit, generated }] },
+ * paths relative to the manifest. Files stay where they are when they are already in assets/ or public/.
+ */
+export async function importManifest(manifestFile, { by, owner = '', pack = '' }) {
+  const mf = path.resolve(String(manifestFile || ''));
+  let j;
+  try {
+    j = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  } catch (err) {
+    return { ok: false, message: `Can't read ${manifestFile}: ${err.message}` };
+  }
+  const files = Array.isArray(j) ? j : j.files || j.assets || [];
+  const done = [];
+  const failed = [];
+  for (const f of files) {
+    const src = path.resolve(path.dirname(mf), f.file || f.path || '');
+    const r = await addAsset({ source: src, use: 'game', owner: owner || f.rightsHolder || f.owner || by, licence: f.licence || f.license || '', origin: f.source || f.source_url || f.url || '', by, author: f.author || '', credit: f.credit || '', madeBy: f.madeBy || f.made_by || j.madeBy || '', generated: f.generated || null, pack: pack || j.pack || path.basename(path.dirname(mf)) });
+    if (r.ok) done.push(r.asset.id);
+    else failed.push(`${f.file || f.path}: ${r.message}`);
+  }
+  return { ok: failed.length === 0, done, failed, message: failed.join('\n') };
+}
+
+/** A design approved in the Asset studio (npm run art -- approve): recorded like a declaration, with who made it. */
+export function recordApproved({ file, by, licence, source = '', design, maker, author = '', generated = null, provisional = false }) {
   const abs = path.join(REPO_ROOT, file);
   if (!fs.existsSync(abs)) return { ok: false, message: `${file} is gone; propose it again.` };
   const m = readManifest();
   const existing = m.assets.find((a) => a.file === file);
-  if (existing) {
-    Object.assign(existing, { sha256: sha256(abs), declaredBy: by, declaredAt: new Date().toISOString(), design });
-    writeManifest(m);
-    return { ok: true, asset: existing };
-  }
-  const n = m.assets.reduce((x, a) => Math.max(x, Number(a.id.slice(2))), 0) + 1;
-  const entry = { id: `A-${String(n).padStart(3, '0')}`, file, sha256: sha256(abs), use: 'game', owner: 'this studio', licence: licence || 'own work (made in this studio)', source: source || `made by ${maker}`, declaredBy: by, declaredAt: new Date().toISOString(), design, statement: `${by} approved design ${design} for the game; ${maker} made or sourced it (${licence || 'own work'}${source ? `, from ${source}` : ''}).` };
-  m.assets.push(entry);
+  const id = existing?.id || `A-${String(m.assets.reduce((x, a) => Math.max(x, Number(a.id.slice(2))), 0) + 1).padStart(3, '0')}`;
+  const entry = { ...entryFor(file, { id, owner: 'this studio', licence: licence || 'own work (made in this studio)', origin: source || `made by ${maker}`, by, author, madeBy: maker, generated, design }), ...(provisional ? { provisional: true } : {}) };
+  entry.statement = `${by} approved design ${design} for the game${provisional ? ' provisionally, while the game dev was away' : ''}; ${maker} made or sourced it (${entry.licence}${source ? `, from ${source}` : ''}).`;
+  m.assets = existing ? m.assets.map((a) => (a.file === file ? entry : a)) : [...m.assets, entry];
   writeManifest(m);
-  emitEvent({ type: 'asset.added', agent: by, to: 'producer', msg: `${entry.id} ${file} approved for the game by ${by} (design ${design}, ${entry.licence})` });
+  emitEvent({ type: 'asset.added', agent: by, to: 'producer', msg: `${entry.id} ${file} approved for the game by ${by}${provisional ? ' (provisional)' : ''} (design ${design}, ${entry.licence})` });
   return { ok: true, asset: entry };
 }
 
@@ -96,15 +177,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else pos.push(argv[i]);
   }
   const [cmd = 'list', a1] = pos;
+  const gen = flag('generated') ? { tool: flag('generated').split(':')[0], model: flag('generated').split(':').slice(1).join(':') || null, prompt: flag('prompt') || null, terms: flag('terms') || null, at: new Date().toISOString().slice(0, 10) } : null;
+  const fail = (m) => {
+    console.error(m);
+    process.exit(1);
+  };
   if (cmd === 'add') {
-    const r = await addAsset({ source: a1, use: flag('use'), owner: flag('owner') || '', licence: flag('licence') || flag('license') || '', origin: flag('source') || '', by: flag('by') || '', game: flag('game') || '', feature: flag('feature') || '' });
-    if (!r.ok) {
-      console.error(r.message);
-      process.exit(1);
-    }
+    const r = await addAsset({ source: a1, use: flag('use'), owner: flag('owner') || '', licence: flag('licence') || flag('license') || '', origin: flag('source') || '', by: flag('by') || '', game: flag('game') || '', feature: flag('feature') || '', author: flag('author') || '', credit: flag('credit') || '', madeBy: flag('made-by') || '', generated: gen, pack: flag('pack') || 'own' });
+    if (!r.ok) fail(r.message);
     console.log(r.asset ? `${r.asset.id} ${r.asset.file} recorded for the game. ${r.asset.statement}` : `Kept as reference ${r.reference} (never shipped). ${r.note}`);
+  } else if (cmd === 'update') {
+    const r = updateAsset(a1, flag('by'));
+    if (!r.ok) fail(r.message);
+    console.log(`${r.asset.id} ${r.asset.file} re-recorded.`);
+  } else if (cmd === 'import-manifest') {
+    const r = await importManifest(a1, { by: flag('by') || '', owner: flag('owner') || '', pack: flag('pack') || '' });
+    console.log(`Recorded ${r.done.length} file(s)${r.done.length ? `: ${r.done.join(', ')}` : ''}.`);
+    if (!r.ok) fail(r.message);
   } else {
     const m = readManifest();
-    console.log(m.assets.length ? m.assets.map((a) => `${a.id} ${a.file} (${a.licence}; owner ${a.owner}; declared by ${a.declaredBy} ${a.declaredAt.slice(0, 10)})`).join('\n') : 'No game assets recorded yet.');
+    console.log(m.assets.length ? m.assets.map((a) => `${a.id} ${a.file} (${a.licence}${a.creditRequired ? `, credit: ${a.credit || 'required'}` : ''}; rights: ${a.rightsHolder || a.owner}${a.author ? `; author ${a.author}` : ''}${a.madeBy ? `; made by ${a.madeBy}` : ''}; declared by ${a.declaredBy} ${a.declaredAt.slice(0, 10)})`).join('\n') : 'No game assets recorded yet.');
   }
 }

@@ -50,7 +50,7 @@ import { learnIfDue } from '../harness/learn.mjs';
 import { runReportIfDue } from '../harness/run-report.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
 import { startAgent, stopAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
-import { readDesigns, approve as approveDesign, changes as changeDesign, IMAGE as ART_IMAGE } from '../harness/art.mjs';
+import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
 import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
@@ -268,12 +268,13 @@ for (const watchTarget of [eventsFile, NEXT_FILE, currentTaskFile, visionLockFil
   }
 }
 
-function readBody(req) {
+function readBody(req, limit = 8e6) {
   return new Promise((resolve) => {
     let data = '';
+    req.on('close', () => resolve({}));
     req.on('data', (chunk) => {
       data += chunk;
-      if (data.length > 8e6) req.destroy();
+      if (data.length > limit) req.destroy();
     });
     req.on('end', () => {
       try {
@@ -617,18 +618,42 @@ export function createHubServer() {
       const by = String(body.by || 'war-room-human').slice(0, 60);
       noteHuman(by);
       const id = String(body.id || '');
-      const r = body.action === 'changes' ? await changeDesign(id, String(body.note || '').slice(0, 1000), by) : await approveDesign(id, by, String(body.note || '').slice(0, 1000));
+      const text = String(body.note || body.text || '').slice(0, 1000);
+      const r = body.action === 'say' ? await artFeedback(text, by) : body.action === 'changes' ? await changeDesign(id, text, by) : await approveDesign(id, by, text);
       let next = r.next;
-      if (r.ok && r.task) next = `${next} ${wake('art', { task: r.task, why: `changes to ${id}` }).next}`;
+      const tasks = [r.task, ...(r.done || []).map((x) => x.task)].filter(Boolean);
+      if (r.ok && tasks.length) next = `${next} ${wake('art', { task: tasks[0], why: `feedback from ${by}` }).next}`;
       broadcastSnapshot();
-      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, design: r.design, task: r.task || null, next } : { ok: false, error: r.message });
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, design: r.design || null, task: tasks[0] || null, next } : { ok: false, error: r.message });
     }
-    if (url.pathname === '/api/art/file' && req.method === 'GET') {
-      const d = readDesigns().find((x) => x.id === url.searchParams.get('id'));
-      const file = d ? path.resolve(REPO_ROOT, d.file) : null;
-      if (!d || !ART_IMAGE.test(d.file) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file)) return sendJson(res, 404, { ok: false, error: 'no image for that design' });
+    if (url.pathname === '/api/art/reference' && req.method === 'POST') {
+      const body = await readBody(req, 40e6);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const name = path.basename(String(body.name || 'reference')).replace(/[^\w.-]+/g, '-').slice(0, 80);
+      if (!body.data || !/\.(png|jpe?g|webp|gif|glb|gltf|fbx|obj|mp4|webm|mp3|ogg|wav)$/i.test(name)) return sendJson(res, 400, { ok: false, error: 'Attach an image, a 3D model (glb, gltf, fbx, obj), a clip or a sound.' });
+      fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+      const dir = fs.mkdtempSync(path.join(STUDIO_STATE_DIR, 'upload-'));
+      const tmp = path.join(dir, name);
+      fs.writeFileSync(tmp, Buffer.from(String(body.data).replace(/^data:[^,]*,/, ''), 'base64'));
+      const r = await addArtReference({ file: tmp, label: String(body.label || ''), kind: body.kind === 'use' ? 'use' : 'look', by });
+      fs.rmSync(dir, { recursive: true, force: true });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, reference: r.reference, next: r.next } : { ok: false, error: r.message });
+    }
+    if ((url.pathname === '/api/art/file' || url.pathname === '/api/art/ref') && req.method === 'GET') {
+      // Images and 3D models of designs (any round) and of the dev's references; files inside the project only.
+      const id = url.searchParams.get('id');
+      let relPath = null;
+      if (url.pathname === '/api/art/file') {
+        const d = readDesigns().find((x) => x.id === id);
+        relPath = d ? (url.searchParams.get('thumb') === '1' && d.thumb ? d.thumb : d.file) : null;
+      } else relPath = readArtRefs().find((x) => x.id === id)?.file || null;
+      const file = relPath ? path.resolve(REPO_ROOT, relPath) : null;
+      if (!file || !(ART_IMAGE.test(file) || ART_MODEL.test(file)) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file)) return sendJson(res, 404, { ok: false, error: 'no image or model for that' });
       const ext = path.extname(file).slice(1).toLowerCase();
-      res.writeHead(200, { 'content-type': ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+      const type = { svg: 'image/svg+xml', jpg: 'image/jpeg', glb: 'model/gltf-binary', gltf: 'model/gltf+json' }[ext] || `image/${ext}`;
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
       return res.end(fs.readFileSync(file));
     }
     if (url.pathname === '/api/causes' && req.method === 'POST') {

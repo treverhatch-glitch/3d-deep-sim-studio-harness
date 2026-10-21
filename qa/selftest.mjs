@@ -578,11 +578,11 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   report('an agent can\'t declare a game asset', run(dir, 'node harness/assets.mjs add boat.glb --use game --owner Hatch --licence "own work" --by builder-1', env).status !== 0);
   const a = run(dir, 'node harness/assets.mjs add boat.glb --use game --owner Hatch --licence "own work" --by hatch', env);
   const man = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8'));
-  report('a person declares a game asset: it is copied to assets/ with who said so and a checksum', a.status === 0 && man.assets[0].declaredBy === 'hatch' && /hatch stated that Hatch owns this file/.test(man.assets[0].statement) && fs.existsSync(path.join(dir, 'assets/boat.glb')), a.stdout + a.stderr);
+  report('a person declares a game asset: it is copied to assets/own/ with who said so and a checksum', a.status === 0 && man.assets[0].declaredBy === 'hatch' && /hatch stated that Hatch owns this file/.test(man.assets[0].statement) && fs.existsSync(path.join(dir, 'assets/own/boat.glb')), a.stdout + a.stderr);
   report('the assets gate passes with every shipped file recorded', run(dir, 'node scripts/check-assets.mjs').status === 0);
-  fs.appendFileSync(path.join(dir, 'assets/boat.glb'), 'changed');
+  fs.appendFileSync(path.join(dir, 'assets/own/boat.glb'), 'changed');
   report('the assets gate fails when a recorded file changed', /changed since hatch recorded it/.test(run(dir, 'node scripts/check-assets.mjs').stdout));
-  fs.writeFileSync(path.join(dir, 'assets/boat.glb'), 'model');
+  fs.writeFileSync(path.join(dir, 'assets/own/boat.glb'), 'model');
   edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// const look = 'references/R-001-a-short-hike/clip.mp4';\n`);
   report('the assets gate fails when game code points at the reference library', /points at the reference library/.test(run(dir, 'node scripts/check-assets.mjs').stdout));
 
@@ -950,13 +950,13 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('approving the style sheet makes it the art reference in the Bible', ap.status === 0 && bible.artReference?.file === 'studio/art/STYLE.md' && /Art reference: studio\/art\/STYLE\.md \(approved by hatch/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')), ap.stdout + ap.stderr);
   run(dir, 'node harness/art.mjs approve D-002 --by hatch', env);
   const man = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8'));
-  report('approving a placeholder asset records it in the asset ledger with who approved it and its source', man.assets.some((a) => a.file === 'assets/placeholder/crate.glb' && a.declaredBy === 'hatch' && a.design === 'D-002' && /generate_glb/.test(a.source)), JSON.stringify(man));
+  report('approving a placeholder asset records it in the asset ledger with who approved it and its source', man.assets.some((a) => a.file === 'assets/approved/placeholder/crate.glb' && a.declaredBy === 'hatch' && a.design === 'D-002' && /generate_glb/.test(a.source)), JSON.stringify(man));
   const noWords = run(dir, 'node harness/art.mjs changes D-003 --by hatch', env);
   const ch = run(dir, 'node harness/art.mjs changes D-003 "taller, with a lid" --by hatch', env);
-  report('asking for changes needs your words, then gives the art department a task', noWords.status !== 0 && ch.status === 0 && /\(`art`\) — Art: change D-003 Prop 2: taller, with a lid/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), noWords.stderr + ch.stdout + ch.stderr + fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').split('\n').filter((l) => /Art:/.test(l)).join('\n'));
+  report('asking for changes needs your words, then gives the art department a task', noWords.status !== 0 && ch.status === 0 && /\(`art`\) — Art: round 2 of #3 Prop 2: taller, with a lid/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), noWords.stderr + ch.stdout + ch.stderr + fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').split('\n').filter((l) => /Art:/.test(l)).join('\n'));
   fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
   const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
-  report('the art division is on by default, and designs waiting show under Needs you', hud.divisions?.find((d) => d.id === 'art')?.active === true && (hud.signals?.needsYou || []).some((x) => /D-004: approve or change/.test(x)), JSON.stringify(hud.signals));
+  report('the art division is on by default, and designs waiting show under Needs you', hud.divisions?.find((d) => d.id === 'art')?.active === true && (hud.signals?.needsYou || []).some((x) => /designs waiting in the Asset studio \(#4 Prop 3/.test(x)), JSON.stringify(hud.signals));
   // War Room actions start the right agent when a tool is set, and say what happens next either way.
   fs.writeFileSync(path.join(dir, 'wake.mjs'), "import { wake } from './harness/agent.mjs';\nconsole.log(JSON.stringify(wake(process.argv[2], { task: process.argv[3] || null })));\n");
   const none = JSON.parse(run(dir, 'node wake.mjs rnd T-001', env).stdout);
@@ -988,6 +988,63 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   }
   report('the Liaison chat asks, then reads a brief back; a correction changes the same brief', turns.length === 3 && !turns[0].brief && /What should the player see first/.test(turns[0].reply) && turns[1].brief === turns[2].brief && /only in summer/.test(turns[2].reply) && /fireflies please/.test(fs.readFileSync(path.join(dir, 'studio/liaison/chat.md'), 'utf8')), chat.stdout + chat.stderr);
   report('nothing reaches the queue until the dev confirms the brief', !/Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')));
+}
+
+// The Asset studio: rounds without waiting, thumbs up moves a file to assets/approved/ and queues its
+// import, feedback by #number, the Producer approves provisionally when the dev is away, and references.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  fs.mkdirSync(path.join(dir, 'art-out'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'art-out/gun.glb'), 'gun v1');
+  const p1 = run(dir, 'node harness/art.mjs propose art-out/gun.glb --title "Yellow gun" --pack weapons --generated "agy:nano-banana" --prompt art-out/prompt.txt --terms "Google AI Pro" --by art-1', env);
+  report('a proposed game file goes to assets/staging/<pack>/, numbered #1', p1.status === 0 && fs.existsSync(path.join(dir, 'assets/staging/weapons/gun.glb')) && /#1 Yellow gun/.test(p1.stdout), p1.stdout + p1.stderr);
+  report('the assets gate ignores work in progress in staging', run(dir, 'node scripts/check-assets.mjs', env).status === 0);
+  fs.writeFileSync(path.join(dir, 'art-out/gun2.glb'), 'gun v2');
+  const p2 = run(dir, 'node harness/art.mjs propose art-out/gun2.glb --round-of 1 --pack weapons --by art-1', env);
+  const list = run(dir, 'node harness/art.mjs', env).stdout;
+  report('a new round keeps the asset\'s number and needs nobody\'s answer', p2.status === 0 && /#1 Yellow gun · round 2 · proposed/.test(list) && !/round 1/.test(list), list);
+  const say = run(dir, 'node harness/art.mjs say "the yellow gun #1 is still clunky" --by hatch', env);
+  report('feedback naming #1 gives the art department round 3 with the dev\'s words', say.status === 0 && /Art: round 3 of #1 Yellow gun: the yellow gun #1 is still clunky/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), say.stdout + say.stderr);
+  fs.writeFileSync(path.join(dir, 'art-out/gun3.glb'), 'gun v3');
+  run(dir, 'node harness/art.mjs propose art-out/gun3.glb --round-of 1 --pack weapons --by art-1', env);
+  const up = run(dir, 'node harness/art.mjs approve 1 --by hatch', env);
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8'));
+  const gun = man.assets.find((a) => a.file === 'assets/approved/weapons/gun3.glb');
+  report('a thumbs up moves the file to assets/approved/, records who made it and how, and queues its import', up.status === 0 && gun && gun.madeBy === 'art-1' && gun.declaredBy === 'hatch' && /generated \(agy, nano-banana\)/.test(gun.licence) && gun.generated?.terms === 'Google AI Pro' && /Import: wire asset #1 Yellow gun/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && run(dir, 'node scripts/check-assets.mjs', env).status === 0, up.stdout + up.stderr + run(dir, 'node scripts/check-assets.mjs', env).stdout + fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').split('\n').filter((l) => /Import/.test(l)).join(' '));
+  fs.mkdirSync(path.join(dir, 'web/x'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'web/x/main.mjs'), "const url = 'assets/staging/weapons/gun2.glb';\n");
+  report('the assets gate fails when game code loads a file still in staging', /points at assets\/staging/.test(run(dir, 'node scripts/check-assets.mjs', env).stdout));
+  fs.rmSync(path.join(dir, 'web/x'), { recursive: true });
+  // The dev is away: past the pace's limit the Producer approves provisionally, logged and reversible.
+  fs.writeFileSync(path.join(dir, 'art-out/lamp.png'), 'png');
+  run(dir, 'node harness/art.mjs propose art-out/lamp.png --title "Hotel lamp" --pack props --by art-1', env);
+  const designs = path.join(dir, 'studio/art/designs.json');
+  const dj = JSON.parse(fs.readFileSync(designs, 'utf8'));
+  dj.designs.find((d) => d.title === 'Hotel lamp').at = new Date(Date.now() - 25 * 3600000).toISOString();
+  fs.writeFileSync(designs, JSON.stringify(dj));
+  run(dir, 'node harness/art.mjs expire', env);
+  const lamp = JSON.parse(fs.readFileSync(designs, 'utf8')).designs.find((d) => d.title === 'Hotel lamp');
+  report('a design waiting past the pace\'s limit is approved provisionally by the Producer, logged for the dev', lamp.status === 'approved' && lamp.provisional === true && /Asset #\d+[\s\S]*Hotel lamp[\s\S]*provisionally by prod-1/.test(fs.readFileSync(path.join(dir, 'studio/decisions/decided-without-you.md'), 'utf8')), JSON.stringify(lamp));
+  const back = run(dir, `node harness/art.mjs changes ${Number(lamp.asset.slice(2))} "too bright for the hotel" --by hatch`, env);
+  report('the dev can still send a provisional approval back for another round', back.status === 0 && /round 2 of #\d+ Hotel lamp: too bright/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), back.stdout + back.stderr);
+  // References from the dev, labelled: one to look at (never shipped), one of their own to use.
+  fs.writeFileSync(path.join(dir, 'art-out/lobby.jpg'), 'jpg');
+  fs.writeFileSync(path.join(dir, 'art-out/mygun.glb'), 'my gun');
+  const look = run(dir, 'node harness/art.mjs ref art-out/lobby.jpg --label "the hotel lobby mood" --kind look --by hatch', env);
+  const use = run(dir, 'node harness/art.mjs ref art-out/mygun.glb --label "my yellow gun model" --kind use --by hatch', env);
+  const refs = JSON.parse(fs.readFileSync(path.join(dir, 'studio/art/references.json'), 'utf8')).references;
+  report('references are labelled: "look" goes to the reference library, "use" is recorded as the dev\'s own asset', look.status === 0 && use.status === 0 && refs[0].kind === 'look' && refs[0].ref && refs[1].file === 'assets/own/mygun.glb' && JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8')).assets.some((a) => a.file === 'assets/own/mygun.glb' && a.declaredBy === 'hatch'), look.stdout + look.stderr + use.stdout + use.stderr);
+  // The ledger: a whole pack from its MANIFEST.json, in place and namespaced, and re-recorded after a re-export.
+  fs.mkdirSync(path.join(dir, 'assets/env/f1'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'assets/env/f1/desk.glb'), 'desk');
+  fs.writeFileSync(path.join(dir, 'assets/env/f1/MANIFEST.json'), JSON.stringify({ madeBy: 'art-1', files: [{ file: 'desk.glb', author: 'Poly Haven', source: 'https://polyhaven.com/a/desk', licence: 'CC0' }, { file: 'MANIFEST.json', licence: 'own work' }] }));
+  const imp = run(dir, 'node harness/assets.mjs import-manifest assets/env/f1/MANIFEST.json --by hatch --owner "Jed"', env);
+  const desk = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8')).assets.find((a) => a.file === 'assets/env/f1/desk.glb');
+  report('a pack is recorded from its manifest in place, with author, source and rights kept apart', imp.status === 0 && desk && desk.author === 'Poly Haven' && desk.rightsHolder === 'Jed' && desk.madeBy === 'art-1' && desk.creditRequired === false, imp.stdout + imp.stderr + JSON.stringify(desk));
+  fs.writeFileSync(path.join(dir, 'assets/env/f1/desk.glb'), 'desk v2');
+  const upd = run(dir, 'node harness/assets.mjs update assets/env/f1/desk.glb --by hatch', env);
+  report('npm run asset -- update re-records a re-exported file', upd.status === 0 && run(dir, 'node scripts/check-assets.mjs', env).status === 0, upd.stdout + upd.stderr);
 }
 
 // The browser play gate: the example game is won with real key presses while the screen matches the sim;

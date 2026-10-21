@@ -1,32 +1,54 @@
-# The art department
+# The art department and the Asset studio
 
-The art division is on from day one. When intake writes the Game Bible, pre-production queues
-**"Art: style sheet and five placeholder assets"** for the `art` role (role card `studio/roles/art.md`,
-steps in `studio/skills/art.md`). Art work is allowed before the Bible is signed.
+The Art division is on from day one. Pre-production queues **"Art: style sheet and five placeholder
+assets"** for the `art` role (`studio/roles/art.md`, `studio/skills/art.md`); art work may start before
+the Bible is signed.
 
-## What the art department does
+## How assets move
 
-1. Reads the Bible (pitch, art answer, pillars, voice, never) and the reference studies.
-2. Writes a one-page style sheet, `studio/art/STYLE.md` (palette, shapes, lighting, camera, UI tone,
-   what it takes from references and what it avoids), with a concept image if it helps.
-3. Makes placeholder assets with tools that can be rerun (`tools/blender/generate_glb.py`) or free
-   CC0 sources, saved under `assets/placeholder/`.
-4. Proposes each one: `npm run art -- propose <file> --kind style|asset|concept --title "…" --task <ID> --by <agent>`.
+```
+art agent makes a file ──propose──▶ assets/staging/<pack>/   #4 "Yellow gun", round 1
+        ▲                                   │
+        │ more rounds, any time             ├─ 👍 the dev (or the Producer after the wait) ──▶ assets/approved/<pack>/
+        │ (--round-of 4)                    │      recorded in the asset ledger, import task for a builder
+        └──── "Change this" / "#4 is still clunky" ◀─┘
+```
 
-The task is done when the designs are proposed. Approving them is the game dev's call.
+- Every asset keeps its **number** (#4) through all its rounds. Rounds don't wait for anyone.
+- **Thumbs up** moves the file to `assets/approved/`, records it in `studio/assets/manifest.json` (who
+  made it, who approved it, licence, author, source, and for AI art the tool, model, prompt and terms),
+  and queues "Import: wire asset #4 … into the game" for a builder (`--part renderer`).
+- Game code loads `assets/approved/` only. The assets gate fails on a `assets/staging/` path in code.
+- **Feedback** in the dev's words: per card ("Change this"), or typed in "Tell the art department",
+  naming assets by number: "yellow gun #4 is still clunky, #7 is perfect". Each named asset gets the
+  words for its next round; without a number it's a note to the art department.
+- **When the dev is away**: a design waiting longer than the pace allows (precise 24 h, fast 8 h,
+  extreme 4 h, half with MAX SPEED) is approved provisionally by the Producer, logged under "Decided
+  without you", and marked on its card. The dev can still send it back. The style sheet always waits
+  for the dev: it becomes the art reference in the Game Bible.
+- **References** from the dev, labelled: "Look like this" (photos, screenshots, clips: kept in the
+  reference library, never shipped) or "Use this in the game" (the dev's own model or art: recorded as
+  theirs in `assets/own/`). Both are listed in `studio/art/references.json` for the art department.
 
-## What the game dev does
+## The Asset studio (War Room view 4)
 
-The War Room's **Game plan** view shows the designs (images shown), and they appear under
-**Needs you** on every view. Per design:
+Waiting for you · In the works · Approved · References, each card with its picture (3D files spin in
+a viewer), number, round, maker, licence, the dev's last words and earlier rounds. Or from a terminal:
 
-- **Approve.** A style sheet becomes the game's art reference, written into the Game Bible. An asset
-  under `assets/` is recorded in the asset ledger with who approved it and the licence and source the
-  art department gave, so the assets gate passes.
-- **Ask for changes**, in your words. The art department gets a task with them, and its agent starts
-  if a tool is set (`STUDIO_ART_TOOL` or `STUDIO_AGENT_TOOL`).
+```bash
+npm run art                                   # every asset, its round and status
+npm run art -- approve 4 --by <name>          # (no # on the command line: it starts a comment)
+npm run art -- changes 4 "slimmer barrel" --by <name>
+npm run art -- say "yellow gun #4 is still clunky" --by <name>
+npm run art -- ref photo.jpg --label "hotel lobby mood" --kind look --by <name>
+```
 
-Or from a terminal: `npm run art -- approve D-001 --by <name>`, `npm run art -- changes D-002 "rounder" --by <name>`.
-Agents can't approve designs, and files in `references/` can never be proposed for the game.
+## The asset ledger
+
+`npm run asset -- add` records files where they are when they're already in `assets/`, `public/` or
+`web/`, and copies anything else into `assets/<pack>/` (namespaced). Fields are kept apart: `author`,
+`source`, `licence`, `creditRequired`/`credit`, `rightsHolder`, `declaredBy`, `madeBy`, `generated`.
+`npm run asset -- import-manifest <pack>/MANIFEST.json --by <name>` records a whole pack;
+`npm run asset -- update <file> --by <name>` re-records a re-export.
 
 Asset tools stay outside the repo (`docs/EXTERNAL-TOOLS.md`, `docs/BLENDER-ORCHESTRATOR.md`).
