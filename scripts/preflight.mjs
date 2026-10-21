@@ -25,6 +25,7 @@ import { ensureGameId } from '../harness/game-id.mjs';
 import { launchableRoles } from '../harness/agent.mjs';
 import { effectiveMode, describeMode } from '../harness/mode.mjs';
 import { cleanQuotaMarks } from '../harness/budget.mjs';
+import { readTrack, engineBin } from '../harness/engine.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -185,6 +186,14 @@ export function preflight() {
   for (const d of marks.dropped) row('ok', `Cleared a stale quota mark for ${d.tool}`, d.why);
   for (const k of marks.kept) row('warn', `${k.tool} is marked out of quota until ${k.until.slice(0, 16).replace('T', ' ')} UTC`, `the provider said: "${k.line}". Wrong? npm run budget -- probe ${k.tool}`);
   row(isTemplateCartridge(game.name) ? 'warn' : 'ok', `Gates test the game "${game.name || 'none'}" (from ${game.from || 'nowhere'})`, isTemplateCartridge(game.name) ? 'still the template: once your game exists, npm run new-game <name> makes it the active game (studio/game.json)' : '');
+
+  // The engine track, if there is one: its program must be findable (STUDIO_GODOT …, or on the PATH).
+  const track = readTrack(game.name);
+  if (track) {
+    const bin = engineBin(track.engine);
+    const has = fs.existsSync(bin) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { encoding: 'utf8' }).status === 0;
+    row(has ? 'ok' : 'warn', `Engine track: ${track.label} in ${track.folder}`, has ? '' : `${bin} isn't found: set ${{ godot: 'STUDIO_GODOT', unity: 'STUDIO_UNITY', unreal: 'STUDIO_UNREAL' }[track.engine] || 'its path'} in .env (npm run engine:gate needs it)`);
+  }
 
   // Pace and who can start on their own.
   const mode = effectiveMode();

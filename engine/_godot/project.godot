@@ -1,0 +1,13 @@
+; Engine configuration file (Godot 4). Text, so agents can read and diff it.
+config_version=5
+
+[application]
+
+config/name="Engine track template (example-sim)"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.5", "GL Compatibility")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

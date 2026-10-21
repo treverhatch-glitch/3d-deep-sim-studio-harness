@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.27.0] — 2026-10-21
+The engine track: a Godot (or Unity, Unreal) version of a game that is proven in web, run as its own team and linked to the web game only by a parity test. From the SendIt experiment (Godot playable in about 3 hours, Unreal slow for 7) and Jed's test #2 ("Godot first needs a custom gate and a capture-based equivalent of browser-play").
+### Added
+- **`npm run engine`** (harness/engine.mjs, docs/ENGINE-TRACK.md):
+  - shows the engines with their expected usage and trade-offs (Godot recommended);
+  - `propose <engine>` refuses until Phase 1 is proven, then asks the game dev (a Needs-you question with the cost);
+  - a person's yes (War Room, or `npm run ask -- answer <id> yes`) starts it: `engine/<game>/` (for Godot from the template), `engine.json` with the game ID and the commands, the Engine Transfer department, `engine-porter` tasks tagged `engine:<name>` in that lane, and `studio/engine/PARITY.md`;
+  - `capture` writes frames of the real engine build (Godot's movie writer; `xvfb-run` on a Linux server).
+- **`engine/_godot/`**: a worked Godot 4 port of the template game. Its sim is mulberry32 bit for bit (u32, i32, imul), its policy is the web scenario's, and its scene is built in code. It has a gate (`tools/gate.gd`: tests, then a 300-frame smoke run) and parity (`tools/parity.gd`, one JSON line per seed). Checked with Godot 4.5.1: the same outcome, tick and credits as the web game on seeds 1–5 and 1337, the gate passes, and the frames render.
+- **`npm run engine:gate`**: the engine's own headless run; a non-zero exit or any script error fails it, even when the engine exits 0. The log goes to `qa/reports/engine_*.log`.
+- **`npm run parity`**: the same seeds in the web cartridge and the engine; outcome and tick (and any field or state path in `parity.compare`) must agree, and a mismatch names the seed and the field.
+- `engine` and `parity` are optional gates; preflight checks the engine program (`STUDIO_GODOT`, `STUDIO_UNITY`, `STUDIO_UNREAL`, or on the PATH).
+- The Arcade links the engine's web build and its last frame.
+- An ask that carries an action (a hire, an engine track) runs it from `npm run ask -- answer` too, not only the War Room.
+- The `engine-porter` role card.
+- CI: an `engine-godot` job downloads Godot and proves the template (`scripts/check-engine-template.mjs`). Self-test: 10 more checks, 2 of them only with a Godot.
+
+---
+
 ## [2.26.0] — 2026-10-21
 From Jed's test #2 (Next Floor on 2.24.1 and 2.25.0, its FIXES/01–05 and about twenty harness notes) and the token numbers from run #1 (580M cached reads against 3.7M written: the cost is re-reading context).
 ### Fixed

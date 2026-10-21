@@ -30,6 +30,23 @@ jobs:
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,hud
 
+  # The engine track's Godot template, with a real Godot: its port matches the web game seed by seed,
+  # and its headless gate passes.
+  engine-godot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Download Godot 4.5.1 (headless use)
+        run: |
+          curl -sSL -o godot.zip https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip
+          unzip -q godot.zip -d "$RUNNER_TEMP/godot"
+          echo "STUDIO_GODOT=$RUNNER_TEMP/godot/Godot_v4.5.1-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Godot template parity and gate
+        run: node scripts/check-engine-template.mjs
+
   # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).
   windows:
     runs-on: windows-latest

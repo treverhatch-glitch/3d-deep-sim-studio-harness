@@ -81,6 +81,25 @@ function resolve(id, status, answer, by, extra = {}) {
   return { ok: true, a: write({ ...a, ...extra, status, answer: String(answer).slice(0, 1000), answeredBy: by, answeredAt: new Date().toISOString() }) };
 }
 
+/**
+ * A question that carries an action runs it on a person's "yes": a hire past the Producer's limit, or an
+ * engine track. The War Room and `npm run ask -- answer` both call this. Never on a timeout.
+ */
+export async function runAskAction(a, by) {
+  if (!a?.action || !/^yes$/i.test(a.answer || '') || a.status !== 'answered') return null;
+  if (a.action.type === 'hire') {
+    const { startAgent } = await import('./agent.mjs');
+    const h = startAgent({ ...a.action.opts, approved: true, by }, { detach: true });
+    return { ok: h.ok, next: h.ok ? `${h.agent} hired and starting (${h.tool}, ${h.model}).` : `Couldn't hire: ${h.message}`, hired: h.ok ? h.agent : null };
+  }
+  if (a.action.type === 'engine') {
+    const { startEngine } = await import('./engine.mjs');
+    const r = await startEngine(a.action.engine, { by });
+    return { ok: r.ok, next: r.ok ? (r.already ? 'The engine track already exists.' : `Engine track started in ${r.track.folder} (${r.track.label}); ${r.tasks.join(', ')} queued for Engine Transfer.`) : `Couldn't start the engine track: ${r.message}` };
+  }
+  return null;
+}
+
 export function answer(id, ans, by) {
   const r = resolve(id, 'answered', ans, by);
   if (!r.ok) return r;
@@ -127,7 +146,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(line(r));
     process.exit(0);
   };
-  if (pos[0] === 'answer') out(answer(pos[1], pos[2], flag('by')), (r) => `${r.ask.id} answered: ${r.ask.answer}`);
+  if (pos[0] === 'answer') {
+    const r = answer(pos[1], pos[2], flag('by'));
+    const act = r.ok ? await runAskAction(r.ask, flag('by')) : null;
+    out(r, (x) => `${x.ask.id} answered: ${x.ask.answer}${act ? `. ${act.next}` : ''}`);
+  }
   if (pos[0] === 'reverse') out(await reverse(pos[1], pos[2], flag('by')), (r) => `${r.ask.id} reversed; the Producer has ${r.task} to undo it.`);
   if (pos[0] === 'expire') {
     const d = expireAsks();

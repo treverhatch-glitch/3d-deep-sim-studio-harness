@@ -23,6 +23,8 @@
     { "id": "renderer-budget", "command": "node scripts/check-renderer-budget.mjs", "required": false },
     { "id": "module-size", "command": "node scripts/check-module-size.mjs", "required": false },
     { "id": "hud", "command": "node qa/hud-check.mjs", "required": false },
+    { "id": "engine", "command": "node scripts/check-engine.mjs", "required": false },
+    { "id": "parity", "command": "node qa/parity.mjs", "required": false },
     { "id": "reviewer", "command": "node scripts/check-reviewer.mjs", "required": true }
   ]
 }

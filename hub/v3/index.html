@@ -758,6 +758,7 @@
     <section class="cab">
       <h2>Play the last good build</h2>
       <p class="buildline" id="r-build">Loading…</p>
+      <p class="buildline" id="r-engine" hidden></p>
       <div class="screen"><iframe id="r-frame" title="The game: the last build that passed the browser check" sandbox="allow-scripts allow-pointer-lock" allow="fullscreen; gamepad; autoplay"></iframe><p id="r-none" class="none">No build has passed the browser check yet. Each time <code>npm run play:browser</code> passes, that build is saved and plays here, while the agents keep working.</p></div>
       <form id="r-note">
         <textarea id="r-notetext" maxlength="2000" aria-label="What you noticed while playing" placeholder="What did you notice? (the HUD flickers on floor 2, the jump feels floaty…)" required></textarea>
@@ -2093,6 +2094,16 @@
       $('r-copy').onclick = async () => { try { await navigator.clipboard.writeText(new URL(src, location.href).href); $('r-notemsg').textContent = 'Link copied. On a phone, use npm run play -- --lan instead (this link works on this computer).'; } catch { $('r-notemsg').textContent = new URL(src, location.href).href; } };
       if ($('r-older')) $('r-older').onchange = (e) => { $('r-frame').dataset.want = e.target.value; arcBuild = null; renderArcade(state); };
     } else if (!b) $('r-build').textContent = 'Nothing to play yet.';
+    // The engine track's build, beside the web one (docs/ENGINE-TRACK.md).
+    const en = s.engine;
+    $('r-engine').hidden = !en;
+    if (en) {
+      const sig = `${en.label}|${en.web}|${en.frames.join(',')}`;
+      if ($('r-engine').dataset.sig !== sig) {
+        $('r-engine').dataset.sig = sig;
+        $('r-engine').innerHTML = `The <b>${esc(en.label)}</b> version (${esc(en.folder)}): ${en.web ? '<a href="/engine-play/index.html" target="_blank" rel="noopener">play its web build</a>' : 'no web build yet'}${en.frames.length ? ` · <a href="/api/engine-frame?file=${encodeURIComponent(en.frames[0])}" target="_blank" rel="noopener">its last frame</a>` : ' · no frames yet (npm run engine -- capture)'}`;
+      }
+    }
     const clipSig = (s.clips || []).join('|');
     if ($('r-clips').dataset.sig !== clipSig) {
       $('r-clips').dataset.sig = clipSig;

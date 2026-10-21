@@ -27,6 +27,16 @@ import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
 import { readTricks } from './tricks.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
+import { readTrack } from './engine.mjs';
+
+/** The engine track for the Arcade: which engine, its web export if built, its last frames. */
+function engineInfo() {
+  const t = readTrack();
+  if (!t) return null;
+  const caps = path.join(REPO_ROOT, t.folder, 'captures');
+  const frames = fs.existsSync(caps) ? fs.readdirSync(caps).filter((f) => /\.png$/.test(f)).sort().slice(-1) : [];
+  return { label: t.label, folder: t.folder, track: t.track, web: Boolean(t.webExport && fs.existsSync(path.join(REPO_ROOT, t.webExport, 'index.html'))), frames, started: t.started };
+}
 import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
 import { holdReason, readHolds } from './task-hold.mjs';
@@ -389,6 +399,7 @@ export function buildHudState() {
     // The Arcade: saved playable builds, recent clips, and which phase each task belongs to (for the dungeon).
     tricks: readTricks().slice(-12).reverse().map((t) => ({ id: t.id, title: t.title, status: t.status, problem: t.problem, by: t.by, tasks: t.tasks || [], experiment: t.experiment || null })),
     builds: listBuilds().slice(0, 6),
+    engine: engineInfo(),
     supervisor: (() => {
       const s = supervisorStatus();
       if (!s) return null;

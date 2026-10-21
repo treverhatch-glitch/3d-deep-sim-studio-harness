@@ -27,7 +27,7 @@ const LIVE_STATE = ['studio/bible/bible.json', 'studio/bible/BIBLE.md', 'studio/
 // A game's own folders. In a studio building a game, the copy takes these from the harness release this
 // clone last merged (git merge-base HEAD origin/main), never from the live game: run #1's selftest
 // failed on a real studio because its divisions, references, assets, goldens and logs leaked in.
-const GAME_OWNED = ['studio', 'assets', 'game', 'cartridges', 'web', 'qa/golden', 'qa/regressions'];
+const GAME_OWNED = ['studio', 'assets', 'game', 'cartridges', 'web', 'engine', 'qa/golden', 'qa/regressions'];
 const isGameOwned = (rel) => GAME_OWNED.some((g) => rel === g || rel.startsWith(`${g}/`));
 let TEMPLATE = null; // { dir, rev } once extracted; { dir: null } means this checkout is the template
 /**
@@ -1369,6 +1369,63 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   // Balance a game's own knob without a config file.
   const bal = run(dir, 'node scripts/balance-sweep.mjs --knob spawnCost --values 300,400', env);
   report('npm run balance takes a knob and values on the command line', bal.status === 0 && /\| 300 /.test(bal.stdout), bal.stdout.slice(-400) + bal.stderr);
+}
+
+// 2.27: the engine track. Only after Phase 1 is proven, only on a person's yes; then its own folder,
+// department, lane and gate, and a parity test against the web game. With a real Godot (STUDIO_GODOT),
+// the shipped template's parity and gate run for real.
+{
+  const dir = copyRepo();
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
+  const node = (name, code, e = env) => {
+    fs.writeFileSync(path.join(dir, name), code);
+    return run(dir, `node ${name}`, e);
+  };
+  const opts = run(dir, 'node harness/engine.mjs', env).stdout;
+  report('npm run engine shows the engines with their cost and trade-offs, Godot first', /No engine track/.test(opts) && /godot \(recommended\): Godot 4/.test(opts) && /unreal: Unreal 5, usage about 3 to 5 times Godot/.test(opts), opts);
+  report('with no engine track, the engine gate and parity pass with a note', /no engine track/.test(run(dir, 'node scripts/check-engine.mjs', env).stdout) && /SKIP no engine track/.test(run(dir, 'node qa/parity.mjs', env).stdout));
+  run(dir, 'node scripts/new-game.mjs tin-moon', env);
+  const early = run(dir, 'node harness/engine.mjs propose godot --by prod-1', env);
+  report('an engine track can\'t be proposed before Phase 1 is proven', early.status !== 0 && /Phase 1 isn't proven/.test(early.stderr), early.stdout + early.stderr);
+  fs.mkdirSync(path.join(dir, 'studio/bible'), { recursive: true });
+  const bj = path.join(dir, 'studio/bible/bible.json');
+  fs.writeFileSync(bj, JSON.stringify({ ...(fs.existsSync(bj) ? JSON.parse(fs.readFileSync(bj, 'utf8')) : {}), phase: { open: 2 } }));
+  const prop = run(dir, 'node harness/engine.mjs propose godot --by prod-1 --why "Phase 1 is fun"', env);
+  const askId = (prop.stdout.match(/A-\d+/) || [])[0];
+  report('once Phase 1 is proven, the Producer\'s proposal is a question for the game dev, not a start', prop.status === 0 && askId && !fs.existsSync(path.join(dir, 'engine/tin-moon')), prop.stdout + prop.stderr);
+  const yes = run(dir, `node harness/ask.mjs answer ${askId} yes --by hatch`, env);
+  const track = fs.existsSync(path.join(dir, 'engine/tin-moon/engine.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'engine/tin-moon/engine.json'), 'utf8')) : {};
+  const ql = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
+  const porter = ql.backlog.filter((t) => t.role === 'engine-porter');
+  const ev = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const added = ev.filter((e) => e.type === 'task.added' && porter.some((t) => t.id === e.task));
+  report('a yes starts the track: its folder from the Godot template, its record with the game ID, porter tasks in its lane, the department open', yes.status === 0 && track.engine === 'godot' && track.gameId && /\{bin\} --headless/.test(track.gate) && fs.existsSync(path.join(dir, 'engine/tin-moon/sim/sim.gd')) && fs.existsSync(path.join(dir, 'engine/tin-moon/tools/parity.gd')) && porter.length >= 2 && added.every((e) => e.meta?.lane === 'engine/tin-moon' && e.meta?.track === 'engine:godot') && /^true$/m.test(node('dv.mjs', "import { listDivisions } from './harness/divisions.mjs';\nconsole.log(Boolean(listDivisions().find((d) => d.id === 'engine')?.active));\n").stdout) && fs.existsSync(path.join(dir, 'studio/engine/PARITY.md')), yes.stdout + yes.stderr + JSON.stringify(track) + JSON.stringify(porter));
+  // Parity: the engine's results against the web game's, seed by seed (a stand-in engine here).
+  fs.writeFileSync(path.join(dir, 'fake-parity.mjs'), "import { loadCartridge, runScenario } from './harness/cartridge.mjs';\nconst cart = await loadCartridge('tin-moon');\nconst off = process.env.OFF_BY ? Number(process.env.OFF_BY) : 0;\nfor (const s of process.argv[2].split(',').map(Number)) { const r = runScenario(cart, 'start-to-win', { seed: s }); console.log(JSON.stringify({ seed: s, outcome: r.outcome, tick: r.ticksRun + (s === 3 ? off : 0) })); }\n");
+  fs.writeFileSync(path.join(dir, 'engine/tin-moon/engine.json'), JSON.stringify({ ...track, parity: { command: 'node fake-parity.mjs {seeds}', compare: ['outcome', 'tick'] } }, null, 2));
+  const p1 = run(dir, 'node qa/parity.mjs', env);
+  const p2 = run(dir, 'node qa/parity.mjs', { ...env, OFF_BY: '2' });
+  report('parity passes when the engine matches the web game, and fails naming the seed and the field when it doesn\'t', p1.status === 0 && /PASS 5 seeds agree on outcome and tick/.test(p1.stdout) && p2.status !== 0 && /seed 3: tick is \d+ on the web, \d+ in Godot 4/.test(p2.stderr), p1.stdout + p1.stderr + p2.stdout + p2.stderr);
+  // The gate: the engine's own headless run; a script error fails it even with exit 0.
+  const noEngine = run(dir, 'node scripts/check-engine.mjs', { ...env, PATH: path.dirname(process.execPath) });
+  report('without the engine installed, the engine gate fails and says what to set (STUDIO_GODOT)', noEngine.status !== 0 && /godot isn't installed[^\n]*STUDIO_GODOT/.test(noEngine.stderr), noEngine.stdout + noEngine.stderr);
+  fs.writeFileSync(path.join(dir, 'fake-gate.mjs'), "console.log('[gate] PASS test_sim.gd');\nif (process.env.BREAK) console.log('SCRIPT ERROR: Invalid call. Nonexistent function \\'foo\\' in base \\'Nil\\'.');\n");
+  fs.writeFileSync(path.join(dir, 'engine/tin-moon/engine.json'), JSON.stringify({ ...track, gate: 'node fake-gate.mjs' }, null, 2));
+  const g1 = run(dir, 'node scripts/check-engine.mjs', env);
+  const g2 = run(dir, 'node scripts/check-engine.mjs', { ...env, BREAK: '1' });
+  report('the engine gate passes a clean run and fails on a script error even when the engine exits 0', g1.status === 0 && /PASS Godot 4/.test(g1.stdout) && g2.status !== 0 && /1 script error/.test(g2.stderr), g1.stdout + g1.stderr + g2.stdout + g2.stderr);
+  // The real thing, when a Godot is installed: the template's port matches the web game, and its gate passes.
+  const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot']).status === 0 ? 'godot' : null);
+  if (godot) {
+    const tpl = path.join(dir, 'engine/_godot');
+    spawnSync(godot, ['--headless', '--path', tpl, '--import'], { encoding: 'utf8', timeout: 180000 });
+    const out = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/parity.gd', '--', '1,2,3,1337'], { encoding: 'utf8', timeout: 180000 });
+    const lines = String(out.stdout).split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+    const web = JSON.parse(node('webp.mjs', "import { loadCartridge, runScenario } from './harness/cartridge.mjs';\nconst cart = await loadCartridge('example-sim');\nconsole.log(JSON.stringify([1, 2, 3, 1337].map((s) => { const r = runScenario(cart, 'start-to-win', { seed: s }); return { seed: s, outcome: r.outcome, tick: r.ticksRun, 'resources.credits': r.state.resources.credits }; })));\n").stdout || '[]');
+    report('with Godot installed: the shipped Godot port matches the web game on outcome, tick and credits (seeds 1, 2, 3, 1337)', lines.length === 4 && JSON.stringify(lines.map((l) => [l.seed, l.outcome, l.tick, l['resources.credits']])) === JSON.stringify(web.map((w) => [w.seed, w.outcome, w.tick, w['resources.credits']])), JSON.stringify(lines) + JSON.stringify(web) + out.stderr);
+    const gate = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 180000 });
+    report('with Godot installed: the template\'s gate runs its tests and a smoke run, and passes', gate.status === 0 && /\[gate\] PASS: 0 test failure/.test(gate.stdout) && !/SCRIPT ERROR/.test(gate.stdout + gate.stderr), gate.stdout + gate.stderr);
+  } else console.log('[selftest] note: no Godot (set STUDIO_GODOT) so the real template parity and gate were not run');
 }
 
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.

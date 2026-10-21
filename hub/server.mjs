@@ -52,7 +52,7 @@ import { runReportIfDue } from '../harness/run-report.mjs';
 import { setMode, setBoost, describeMode } from '../harness/mode.mjs';
 import { startAgent, stopAgentNamed, stopAllAgents, pauseAgent, sessions as agentSessions, wake } from '../harness/agent.mjs';
 import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
-import { answer as answerAsk, reverse as reverseAsk } from '../harness/ask.mjs';
+import { answer as answerAsk, reverse as reverseAsk, runAskAction } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
 import { readBriefs, chatTurn, confirmBrief, dropBrief } from '../harness/liaison.mjs';
@@ -603,12 +603,12 @@ export function createHubServer() {
       noteHuman(by);
       const r = body.action === 'reverse' ? await reverseAsk(String(body.id || ''), String(body.answer || ''), by) : answerAsk(String(body.id || ''), String(body.answer || ''), by);
       // A question that carries an action (the Producer asking to hire past its limit) runs it on "yes".
-      if (r.ok && r.ask?.action?.type === 'hire' && /^yes$/i.test(r.ask.answer || '')) {
-        const h = startAgent({ ...r.ask.action.opts, approved: true, by }, { detach: true });
+      const act = r.ok && body.action !== 'reverse' ? await runAskAction(r.ask, by) : null;
+      if (act) {
         r.task = null;
-        r.ask.hired = h.ok ? h.agent : null;
+        if (act.hired) r.ask.hired = act.hired;
         broadcastSnapshot();
-        return sendJson(res, 200, { ok: true, ask: r.ask, next: h.ok ? `${h.agent} hired and starting (${h.tool}, ${h.model}).` : `Couldn't hire: ${h.message}` });
+        return sendJson(res, 200, { ok: true, ask: r.ask, next: act.next });
       }
       broadcastSnapshot();
       return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, ask: r.ask, task: r.task || null, next: r.task ? `The Producer has ${r.task} to undo the old decision.` : `${r.ask.id} answered; ${r.ask.by} sees your answer in its next briefing.` } : { ok: false, error: r.message });
@@ -673,6 +673,19 @@ export function createHubServer() {
       const ext = path.extname(file).slice(1).toLowerCase();
       const type = { svg: 'image/svg+xml', jpg: 'image/jpeg', glb: 'model/gltf-binary', gltf: 'model/gltf+json' }[ext] || `image/${ext}`;
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" });
+      return res.end(fs.readFileSync(file));
+    }
+    // The engine track's build: its web export (engine.json webExport) and its captured frames.
+    if ((url.pathname.startsWith('/engine-play/') || url.pathname === '/api/engine-frame') && req.method === 'GET') {
+      const { readTrack } = await import('../harness/engine.mjs');
+      const t = readTrack();
+      const base = url.pathname === '/api/engine-frame' ? (t ? path.join(REPO_ROOT, t.folder, 'captures') : null) : t?.webExport ? path.join(REPO_ROOT, t.webExport) : null;
+      const rel = url.pathname === '/api/engine-frame' ? path.basename(String(url.searchParams.get('file') || '')) : decodeURIComponent(url.pathname.slice('/engine-play/'.length)) || 'index.html';
+      const file = base ? path.resolve(base, rel) : null;
+      if (!file || !file.startsWith(base + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return sendJson(res, 404, { ok: false, error: 'no engine build or frame (npm run engine)' });
+      const type = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.pck': 'application/octet-stream', '.png': 'image/png', '.json': 'application/json' }[path.extname(file)] || 'application/octet-stream';
+      // A Godot web build with threads needs cross-origin isolation.
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'require-corp' });
       return res.end(fs.readFileSync(file));
     }
     // The Arcade: the last good build (and older ones) served for play while agents keep working.

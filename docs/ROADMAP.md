@@ -244,7 +244,7 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F14d | Run #1 and Solar Outpost fixes: real quota errors only, login PATH, dependencies, parking, stop cooldown, lanes always, selftest from the template release, browser contract required, restart with undo | done (2.24.0) |
 | F14e | Proven fun: a person's Arcade verdict on a real build closes a phase; game IDs; prototype pace; every declared control pressed; a pace note; version tags | done (2.25.0); version tags in, a version filter in the War Room with the engine track |
 | F14f | Test #2 fixes: one launcher, quota marks from the right tool with real resets and a probe, selftest reads only the template, a bot's loss isn't a red gate, auto hand-back and parking of looping tasks, owed reviews, relayed verdicts; cheaper to read: repo map, pitfall list, real token counts, readable sessions | done (2.26.0) |
-| F14g | Engine track after Phase 1 and the dev's approval: engine/<name>/, its own gate and goldens, a parity test, an engine tab in the Arcade | planned (2.27) |
+| F14g | Engine track after Phase 1 and the dev's approval: engine/<name>/ from a worked Godot template, its own gate, a parity test against the web sim, frames, the Arcade links its build | done (2.27.0); a Godot-first game (no web version) next |
 | F14c | A Producer staffing plan applied by one "Staff the studio" click; "close?" hints for idle departments | planned |
 | F15 | A cheap vision model checks screenshot proof against the art reference | planned |
 | F16 | A browser regression proven to fail on the code before the fix | planned |

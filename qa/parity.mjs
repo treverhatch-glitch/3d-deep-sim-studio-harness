@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+/**
+ * qa/parity.mjs — the web game and its engine port play the same seeds and must agree.
+ *
+ *   npm run parity [-- --seeds 1,2,3,4,5]
+ *
+ * The only link between the two versions: each keeps its own recordings (hashes differ by engine), but
+ * for the same seed the start-to-win scenario must reach the same outcome on the same tick (and any
+ * other field the track lists in parity.compare). The engine's parity command (engine/<game>/engine.json)
+ * gets the seeds and prints one JSON line per seed: {"seed":1,"outcome":"won","tick":300}.
+ * No engine track: nothing to compare, and it passes with a note.
+ */
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
+import { activeCartridge, loadCartridge, runScenario } from '../harness/cartridge.mjs';
+import { readTrack, engineCommand } from '../harness/engine.mjs';
+
+export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
+  const t = readTrack();
+  if (!t) return { ok: true, skipped: 'no engine track (npm run engine)' };
+  const cart = await loadCartridge(activeCartridge().name);
+  const web = Object.fromEntries(seeds.map((seed) => {
+    const r = runScenario(cart, 'start-to-win', { seed });
+    return [seed, { seed, outcome: r.outcome, tick: r.ticksRun, state: r.state }];
+  }));
+  const cmd = engineCommand(t, 'parity', { seeds });
+  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 10 * 60000, maxBuffer: 32 * 1024 * 1024 });
+  if (r.status !== 0) return { ok: false, problems: [`the engine's parity command failed (exit ${r.status}): ${(r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ')}`], web };
+  const eng = {};
+  for (const line of String(r.stdout).split('\n')) {
+    try {
+      const o = JSON.parse(line.trim());
+      if (o && o.seed != null) eng[Number(o.seed)] = o;
+    } catch {
+      // engine log lines
+    }
+  }
+  const problems = [];
+  for (const seed of seeds) {
+    const e = eng[seed];
+    if (!e) {
+      problems.push(`seed ${seed}: the engine printed no result`);
+      continue;
+    }
+    for (const k of t.parity.compare || ['outcome', 'tick']) {
+      // A field of the result (outcome, tick), or a dotted path into the final state (resources.credits).
+      const w = k in web[seed] && k !== 'state' ? web[seed][k] : k.split('.').reduce((o, p) => (o == null ? o : o[p]), web[seed].state);
+      if (String(e[k]) !== String(w)) problems.push(`seed ${seed}: ${k} is ${w} on the web, ${e[k]} in ${t.label}`);
+    }
+  }
+  for (const v of Object.values(web)) delete v.state;
+  return { ok: problems.length === 0, problems, web, engine: eng, compared: t.parity.compare };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const flag = (k) => (process.argv.includes(`--${k}`) ? process.argv[process.argv.indexOf(`--${k}`) + 1] : null);
+  const seeds = (flag('seeds') || '1,2,3,4,5').split(',').map(Number).filter((n) => Number.isFinite(n));
+  const r = await parity({ seeds });
+  if (r.skipped) {
+    console.log(`[parity] SKIP ${r.skipped}`);
+    process.exit(0);
+  }
+  for (const p of r.problems) console.error(`[parity] FAIL ${p}`);
+  if (r.ok) console.log(`[parity] PASS ${seeds.length} seeds agree on ${r.compared.join(' and ')}`);
+  emitEvent({ type: r.ok ? 'qa.parity.pass' : 'qa.parity.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: r.ok ? `Web and engine agree on ${seeds.length} seeds` : `Web and engine disagree: ${r.problems[0]}` });
+  process.exit(r.ok ? 0 : 1);
+}

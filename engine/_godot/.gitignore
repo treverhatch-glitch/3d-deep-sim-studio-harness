@@ -1,0 +1,4 @@
+# Godot's import cache, frames from npm run engine -- capture, and exports: rebuilt, never committed.
+.godot/
+captures/
+export/
