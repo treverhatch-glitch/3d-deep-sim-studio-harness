@@ -34,11 +34,13 @@ export const BROWSER_REGRESSIONS = path.join(REPO_ROOT, 'qa', 'regressions', 'br
 const TYPES = { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css', '.png': 'image/png', '.glb': 'model/gltf-binary', '.svg': 'image/svg+xml', '.wasm': 'application/wasm' };
 
 /** Serve the repo's web/ and cartridges/ folders (and assets/) on 127.0.0.1 for the browser build. */
-function serveRepo() {
+// dist: a bundled game's build folder, served at the root; otherwise the repo's web/, cartridges/, assets/, public/.
+function serveRepo(dist = null) {
+  const base = dist ? path.resolve(REPO_ROOT, dist) : REPO_ROOT;
   const srv = http.createServer((req, res) => {
-    const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '');
-    const file = path.resolve(REPO_ROOT, rel);
-    if (!/^(web|cartridges|assets|public)\//.test(rel) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || (dist ? 'index.html' : '');
+    const file = path.resolve(base, rel);
+    if ((!dist && !/^(web|cartridges|assets|public)\//.test(rel)) || !file.startsWith(base + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       res.writeHead(404);
       return res.end();
     }
@@ -91,7 +93,21 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
 
   let srv = null;
   let url = urlArg || process.env.PLAYTEST_URL || b?.url || null;
-  if (!url && b?.page) {
+  if (!url && b?.dist) {
+    // A bundled game (Vite and the like): build it, then play the build, never the dev server.
+    if (b.build) {
+      const { spawnSync } = await import('node:child_process');
+      const built = spawnSync(b.build, { cwd: REPO_ROOT, shell: true, encoding: 'utf8' });
+      if (built.status !== 0) {
+        await browser.close();
+        fail('BROWSER-BUILD-FAILED', `\`${b.build}\` failed: ${(built.stderr || built.stdout).trim().split('\n').slice(-2).join(' ')}`);
+        return { ...report, passed: false };
+      }
+    }
+    report.built = Boolean(b.build);
+    srv = await serveRepo(b.dist);
+    url = `http://127.0.0.1:${srv.address().port}/${b.distPage || 'index.html'}${b.query ? `?${b.query}` : ''}`;
+  } else if (!url && b?.page) {
     srv = await serveRepo();
     url = `http://127.0.0.1:${srv.address().port}/${b.page}${b.query ? `?${b.query}` : ''}`;
   }

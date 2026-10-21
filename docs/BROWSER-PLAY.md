@@ -33,6 +33,15 @@ The page, with `?playtest=1`, sets `window.__sim = { getState }` and `window.__v
 drawn, camera: { inside } })`, read from the page itself (the DOM, the scene graph), never copied from
 the sim, or a wiring bug can't show. `web/example-sim/` is a small working example.
 
+A bundled game (Vite, Webpack…) declares where its build goes instead of `page`:
+
+```js
+export const browser = { dist: 'game/my-game/dist', build: 'npm --prefix game/my-game run build', query: 'playtest=1', /* input, wiring, … */ };
+```
+
+The gate runs the build, serves `dist/` and plays that, so it never sees agents' half-saved files the
+way a dev server would; the same build is saved for `npm run play` and the Arcade.
+
 `PLAYTEST_URL` or `--url` points the gate at your own dev server instead. A cartridge with no
 `browser` passes with a note. Without Chromium the template game is skipped; a real game fails,
 because skipping is how "green but broken" ships.

@@ -70,7 +70,7 @@ export function snapshotBuild(cart, report = {}) {
   const files = [];
   let page;
   if (b.dist) {
-    if (b.build) spawnSync(b.build, { cwd: REPO_ROOT, shell: true, stdio: 'ignore' });
+    if (b.build && !report.built) spawnSync(b.build, { cwd: REPO_ROOT, shell: true, stdio: 'ignore' });
     copyTree(path.join(REPO_ROOT, b.dist), tmp, files);
     page = b.distPage || 'index.html';
   } else if (b.page) {

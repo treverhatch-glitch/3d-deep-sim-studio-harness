@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.22.2] — 2026-10-21
+### Added
+- The browser check plays bundled games: `browser.dist` (and `browser.build`, run first) in qa.mjs serves the build folder instead of a dev server. A failing build fails the check.
+
+---
+
 ## [2.22.1] — 2026-10-21
 ### Fixed
 - "Needs you" no longer shows golden-change cards for a fresh clone's history: only commits by the studio's agents, or with a Golden-Reason, are checked.

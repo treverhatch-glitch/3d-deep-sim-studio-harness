@@ -1116,6 +1116,17 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     variant('the camera inside geometry fails it', 'camera: { inside: false },', 'camera: { inside: state.tick > 40 },', /camera is inside geometry/);
     variant('keys that never reach the game fail it: start-to-win is not won', "if (e.key === 'b' || e.key === 'B') buy();", 'void e;', /BROWSER-NO-OUTCOME[^\n]*ended lost/);
     fs.writeFileSync(path.join(dir, MAIN), orig);
+    // A bundled game: the check runs its build command and plays dist/, never a dev server.
+    fs.mkdirSync(path.join(dir, 'dist/cartridges/example-sim'), { recursive: true });
+    fs.copyFileSync(path.join(dir, 'web/example-sim/index.html'), path.join(dir, 'dist/index.html'));
+    fs.writeFileSync(path.join(dir, 'dist/main.mjs'), orig.replace('../../cartridges/example-sim/index.mjs', './cartridges/example-sim/index.mjs'));
+    fs.copyFileSync(path.join(dir, 'cartridges/example-sim/index.mjs'), path.join(dir, 'dist/cartridges/example-sim/index.mjs'));
+    const QA = 'cartridges/example-sim/qa.mjs';
+    const qaOrig = fs.readFileSync(path.join(dir, QA), 'utf8');
+    fs.writeFileSync(path.join(dir, QA), qaOrig.replace("page: 'web/example-sim/index.html',", "dist: 'dist', build: 'node -e \"require(\\'fs\\').writeFileSync(\\'built.txt\\', \\'yes\\')\"',"));
+    const distRun = run(dir, 'node qa/browser-play.mjs --no-shots', env);
+    report('a bundled game is built and its dist/ played, not a dev server', distRun.status === 0 && /PASS/.test(distRun.stdout) && fs.existsSync(path.join(dir, 'built.txt')), distRun.stdout + distRun.stderr);
+    fs.writeFileSync(path.join(dir, QA), qaOrig);
     fs.mkdirSync(path.join(dir, 'qa/regressions/browser'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'qa/regressions/browser/T-900.mjs'), "export async function check({ page }) {\n  const t = await page.locator('#end').innerText();\n  return { ok: t === 'You won.', why: `end text was \"${t}\"` };\n}\n");
     const withReg = run(dir, 'node qa/browser-play.mjs --no-shots', env);
