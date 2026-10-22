@@ -2324,6 +2324,110 @@ function run() {
   report('the War Room status line says building now, waiting on you and tokens today; tasks carry their origin; a build lists what changed', /^Building now: .* · Waiting on you: .* · Tokens today: /.test(hs.line || '') && hs.origin?.includes('agent-proposed') && hs.changes?.[0]?.task === 'T-900' && /Boats dock/.test(hs.changes[0].title) && hs.wd === true, JSON.stringify(hs).slice(0, 1200));
 }
 
+// 2.30b: real-input fun probes (J1), sim features shown in the build (J4), the asset scout (G7). Each in a copy.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p230b-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  // A fake page: a player that moves with held keys, in camera space (good) or world space (bad).
+  const fakePage = `const fake = (o = {}) => {
+  const s = { x: 0, y: 0, z: 0, vy: 0, fwd: [0.8, -0.6], held: new Set(), t: Date.now(), hits: { last: null, count: 0 }, target: 'E1' };
+  const tick = () => {
+    const now = Date.now(); const dt = (now - s.t) / 1000; s.t = now;
+    const sp = (s.held.has('Shift') && !o.noSprint ? 2 : 1) * 3 * dt;
+    const f = o.worldWasd ? [0, 1] : s.fwd; const r = [f[1], -f[0]];
+    if (s.held.has('w')) { s.x += f[0] * sp; s.z += f[1] * sp; }
+    if (s.held.has('d')) { s.x += r[0] * sp; s.z += r[1] * sp; }
+    s.y = Math.max(0, s.y + s.vy * dt); s.vy = s.y > 0 || s.vy > 0 ? s.vy - 9 * dt : 0;
+  };
+  const v = () => { tick(); const out = { player: { x: s.x, y: s.y, z: s.z }, camera: { forward: s.fwd, inside: Boolean(o.inside) }, crosshair: { target: s.target }, hits: { ...s.hits } };
+    if (o.noView) return null; if (o.noCrosshair) delete out.crosshair; return out; };
+  return {
+    evaluate: async () => v(),
+    keyboard: { down: async (k) => { tick(); s.held.add(k); }, up: async (k) => { tick(); s.held.delete(k); }, press: async (k) => { tick(); if (k === 'Space' && !o.noJump) s.vy = 4; if (k === 'c') s.crouch = true; } },
+    mouse: { move: async () => {}, click: async () => { s.hits.count++; s.hits.last = o.miss ? 'E2' : s.target; } },
+    locator: () => ({ first: () => ({ boundingBox: async () => ({ x: 0, y: 0, width: 800, height: 600 }) }) }),
+    click: async () => {},
+  };
+};`;
+  const pr = probe(`import { runProbes, checkSimFeatures } from ${u('qa/fun-probes.mjs')};
+${fakePage}
+const all = ['move', 'sprint', 'jump', 'aim', 'camera'];
+const good = await runProbes(fake(), { probes: all });
+const bad = await runProbes(fake({ worldWasd: true, noSprint: true, noJump: true, miss: true, inside: true }), { probes: all });
+const unwired = await runProbes(fake({ noCrosshair: true }), { probes: ['aim'] });
+const none = await runProbes(fake({ noView: true }), { probes: ['move'] });
+const sim = await checkSimFeatures(fake(), ['jump', 'crouch', 'crane'], { features: { crouch: { key: 'c', expect: () => true, waitMs: 10 } } }, good);
+const simOff = await checkSimFeatures(fake(), ['crouch'], { features: { crouch: { key: 'c', expect: (a, b) => a.player.y !== b.player.y, waitMs: 10 } } }, []);
+console.log(JSON.stringify({ good, bad, unwired, none, sim, simOff }));`);
+  const ok = (arr, name) => arr?.find((p) => p.name === name)?.ok;
+  report('J1: the fun probes pass a game with camera-relative WASD, sprint, jump, crosshair hits and a clear camera', ['move', 'sprint', 'jump', 'aim', 'camera'].every((p) => ok(pr.good, p)), JSON.stringify(pr.good || pr));
+  report('J1: each probe fails its own fault: world-space WASD, no sprint, no jump, a shot that misses the crosshair target, the camera inside a wall', ['move', 'sprint', 'jump', 'aim', 'camera'].every((p) => ok(pr.bad, p) === false) && /camera-relative/.test(pr.bad?.find((p) => p.name === 'move')?.why || '') && /not E1/.test(pr.bad?.find((p) => p.name === 'aim')?.why || ''), JSON.stringify(pr.bad || pr));
+  report('J1: a probe the build has no view for fails as unwired, not as passed', pr.unwired?.[0]?.unwired === true && pr.unwired[0].ok === false && pr.none?.[0]?.unwired === true, JSON.stringify({ u: pr.unwired, n: pr.none }));
+  report('J4: a sim feature passes through its probe or its bound key, and fails when unbound or when the key shows nothing', ok(pr.sim, 'jump') && ok(pr.sim, 'crouch') && ok(pr.sim, 'crane') === false && /binds no input/.test(pr.sim?.find((f) => f.name === 'crane')?.why || '') && pr.simOff?.[0]?.ok === false && /changed nothing/.test(pr.simOff[0].why || ''), JSON.stringify({ sim: pr.sim, off: pr.simOff }));
+  const bp = fs.readFileSync(path.join(dir, 'qa', 'browser-play.mjs'), 'utf8');
+  report('J1/J4: browser play runs the probes and the sim features and fails on FUN-PROBE, PROBE-UNWIRED and SIM-ONLY', /runProbes\(page/.test(bp) && /checkSimFeatures\(page/.test(bp) && /'FUN-PROBE'/.test(bp) && /'PROBE-UNWIRED'/.test(bp) && /'SIM-ONLY'/.test(bp), 'browser-play.mjs is missing the probe wiring');
+  // done-check: a gameplay task closes only on passing probes after the last change plus a clip.
+  const reps = path.join(dir, 'qa', 'reports');
+  fs.mkdirSync(path.join(reps, 'clips'), { recursive: true });
+  const dc = (title, part = 'renderer') => probe(`import { gameplayChecks } from ${u('harness/done-check.mjs')};
+const checks = []; gameplayChecks({ id: 'T-900', title: ${JSON.stringify(title)} }, '${part}', Date.now() - 60000, (label, ok, why) => checks.push({ label, ok: Boolean(ok), why }));
+console.log(JSON.stringify(checks));`);
+  const writeRep = (i, probes, simFeatures = [], declared = { probes: ['move'], simFeatures: simFeatures.map((f) => f.name) }) => fs.writeFileSync(path.join(reps, `browser_${i}.json`), JSON.stringify({ at: new Date().toISOString(), passed: probes.every((p) => p.ok), probes, simFeatures, declared }));
+  const c0 = dc('Fix WASD movement');
+  writeRep(1, [{ name: 'move', ok: false, why: 'not camera-relative' }]);
+  const c1 = dc('Fix WASD movement');
+  writeRep(2, [{ name: 'move', ok: true }]);
+  const c2 = dc('Fix WASD movement');
+  fs.writeFileSync(path.join(reps, 'clips', 'T-900.webm'), 'x');
+  const c3 = dc('Fix WASD movement');
+  const cText = dc('Rewrite the credits text');
+  writeRep(3, [{ name: 'move', ok: true }], [{ name: 'crane', ok: false, why: 'binds no input' }]);
+  const cSim = dc('Add the crane arm to the sim', 'sim');
+  const lbl = (c, l) => c?.find?.((x) => x.label.startsWith(l));
+  report('J1: a gameplay task stays open while a probe fails, and without a clip; it closes with passing probes plus a clip', lbl(c0, 'Real-input')?.ok === false && /a probe fails/.test(lbl(c1, 'Real-input')?.why || '') && lbl(c2, 'Real-input')?.ok === true && lbl(c2, 'A clip')?.ok === false && lbl(c3, 'Real-input')?.ok && lbl(c3, 'A clip')?.ok && Array.isArray(cText) && !cText.length, JSON.stringify({ c0, c1, c2, c3, cText }));
+  report('J4: a sim task on a game with a browser build stays open while a sim feature is sim-only', lbl(cSim, 'The build shows')?.ok === false && /crane/.test(lbl(cSim, 'The build shows')?.why || ''), JSON.stringify(cSim));
+  for (const f of fs.readdirSync(reps)) if (/^browser_\d\.json$/.test(f)) fs.rmSync(path.join(reps, f));
+  fs.rmSync(path.join(reps, 'clips', 'T-900.webm'));
+  // G7: the scout searches CC0 APIs offline, pulls only CC0/CC-BY, writes the ledger and CREDITS.md, and the gate checks them.
+  fs.writeFileSync(path.join(tmpRoot, 'crate.glb'), 'glb-bytes');
+  fs.writeFileSync(path.join(tmpRoot, 'barrel.glb'), 'glb-bytes-2');
+  const sc = probe(`import { scout, pull, allowedLicence } from ${u('harness/asset-scout.mjs')};
+const fakeFetch = async (url) => ({ ok: true, json: async () => url.includes('polyhaven') ? { wooden_crate_01: { name: 'Wooden Crate 01', tags: ['crate', 'wood'], authors: { 'Jane Doe': 'All' } }, rock_02: { name: 'Rock', tags: ['rock'] } } : { foundAssets: [{ assetId: 'Wood051', displayName: 'Wood 051' }] } });
+const found = await scout('crate', { fetch: fakeFetch });
+const sa = await pull({ from: ${JSON.stringify(path.join(tmpRoot, 'crate.glb'))}, licence: 'CC-BY-SA 4.0', author: 'X', source: 'https://opengameart.org/x' });
+const noAuthor = await pull({ from: ${JSON.stringify(path.join(tmpRoot, 'crate.glb'))}, licence: 'CC-BY 4.0', source: 'https://sketchfab.com/x' });
+const cc0 = await pull({ from: ${JSON.stringify(path.join(tmpRoot, 'crate.glb'))}, licence: 'CC0', author: 'Jane Doe', source: 'https://polyhaven.com/a/wooden_crate_01', title: 'Wooden Crate 01', by: 'builder-1' });
+const ccby = await pull({ from: ${JSON.stringify(path.join(tmpRoot, 'barrel.glb'))}, licence: 'CC-BY 4.0', author: 'Sam Roe', source: 'https://sketchfab.com/3d-models/barrel', title: 'Barrel', by: 'builder-1' });
+console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY 3.0', 'CC-BY-NC 4.0', 'CC-BY-ND', 'free for personal use'].map(allowedLicence) }));`);
+  report('G7: the scout finds CC0 hits from the API sources and links the per-item sources with an allowlist filter', sc.found?.results?.some((r) => r.id === 'wooden_crate_01' && r.licence === 'CC0' && r.author === 'Jane Doe') && sc.found.results.some((r) => r.source === 'ambientcg') && !sc.found.results.some((r) => r.id === 'rock_02') && sc.found.check?.length === 3, JSON.stringify(sc.found || sc));
+  report('G7: only CC0 and CC-BY pass the allowlist; SA, NC, ND and personal-use go to references; CC-BY needs an author', JSON.stringify(sc.lic) === JSON.stringify(['CC0', 'CC-BY', null, null, null]) && sc.sa?.ok === false && /--use reference/.test(sc.sa.message) && sc.noAuthor?.ok === false && /author/.test(sc.noAuthor.message), JSON.stringify({ sa: sc.sa, na: sc.noAuthor, lic: sc.lic }));
+  const credits = fs.existsSync(path.join(dir, 'CREDITS.md')) ? fs.readFileSync(path.join(dir, 'CREDITS.md'), 'utf8') : '';
+  const led = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'assets', 'manifest.json'), 'utf8')).assets;
+  report('G7: a pulled asset lands in assets/scouted/, is marked scouted in the ledger, and CREDITS.md credits it', sc.cc0?.ok && sc.ccby?.ok && fs.existsSync(path.join(dir, 'assets', 'scouted', 'polyhaven', 'crate.glb')) && led.every((a) => a.scouted) && led.length === 2 && /"Barrel" by Sam Roe, CC-BY 4.0/.test(credits) && /Wooden Crate 01/.test(credits) && /Jane Doe/.test(credits), JSON.stringify({ cc0: sc.cc0, credits, led }));
+  const gate = () => run(dir, 'node scripts/check-assets.mjs');
+  const g1 = gate();
+  fs.writeFileSync(path.join(dir, 'CREDITS.md'), credits.replace('Sam Roe', 'someone'));
+  const g2 = gate();
+  fs.writeFileSync(path.join(dir, 'CREDITS.md'), credits);
+  const mf = path.join(dir, 'studio', 'assets', 'manifest.json');
+  const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  m.assets[1].licence = 'CC-BY-NC 4.0';
+  fs.writeFileSync(mf, JSON.stringify(m));
+  const g3 = gate();
+  report('G7: the assets gate passes a credited ledger and fails a stale CREDITS.md or a disallowed licence', g1.status === 0 && g2.status !== 0 && /CREDITS\.md is missing or out of date/.test(g2.stdout) && g3.status !== 0 && /not CC0 or CC-BY/.test(g3.stdout), JSON.stringify({ g1: g1.stdout, g2: g2.stdout, g3: g3.stdout }));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -55,7 +55,7 @@ const relOf = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join('/');
  * the dev), madeBy (the agent that made or fetched it), generated ({ tool, model, prompt, terms }
  * for AI-made art: the first thing a buyer or a store asks).
  */
-function entryFor(rel, { id, owner, licence, origin, by, author = '', credit = '', madeBy = '', generated = null, design = null, pack = null }) {
+export function entryFor(rel, { id, owner, licence, origin, by, author = '', credit = '', madeBy = '', generated = null, design = null, pack = null }) {
   const holder = owner || by;
   return {
     id,

@@ -4,6 +4,17 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-b] — 2026-10-22
+2.30b, the hard batch: gameplay is checked with real keys and clicks, a sim feature counts only once the build shows it, and free art comes in with its licence and credit on record.
+### Added
+- **Real-input fun check (J1).** A cartridge lists `browser.probes` in its qa.mjs (`move`, `sprint`, `jump`, `aim`, `camera`); `npm run play:browser` drives them with real keys and clicks (qa/fun-probes.mjs) and reads `window.__view()`: WASD moves along the camera's forward and right, sprint covers at least 1.2x the ground, jump lifts the player, a shot hits the enemy under the crosshair, the camera is never inside geometry. A failing probe is a FUN-PROBE finding; a probe the build has no view for is PROBE-UNWIRED, never a pass. A gameplay task (movement, sprint, jump, aim, shooting, camera, controls) closes only on a browser play after its last change with every probe passing, plus a clip since it started. The Arcade shows the fun check.
+- **Not done until the build shows it (J4).** A cartridge lists `simFeatures`; each must be a probe or a `browser.features[name] = { key | click, expect(before, after) }` that changes the screen. One that isn't bound, or shows nothing, is SIM-ONLY, and a sim task on that game stays open while any feature is.
+- **Asset scout (G7).** `npm run scout -- find "<what>"` searches Poly Haven and ambientCG (CC0) and links Kenney, OpenGameArt and Sketchfab with licence filters; `npm run scout -- pull <url|file> --licence --author --source --title` takes only CC0 or CC-BY (anything else is refused and pointed at `asset add --use reference`), puts the file in assets/scouted/<source>/, marks it `scouted` in the asset ledger and rewrites CREDITS.md. The assets gate fails on a disallowed licence, a CC-BY file with no author, or (once anything is scouted) a stale CREDITS.md. The Asset studio lists scouted art with its licence, author, source and credit state. References stay in the reference library and are never shipped.
+### Self-test
+11 more checks: each probe passes a good game and fails its own fault, unwired probes, sim features bound and unbound, browser-play wiring, the gameplay and sim-feature done checks, scout search offline, the licence allowlist, pull into the ledger and CREDITS.md, and the gate on stale credits or a bad licence.
+
+---
+
 ## [2.30.0-a] — 2026-10-22
 2.30a, the moderate batch: the dev's words drive the queue, the dev can overrule a gate, and the War Room says plainly what waits on whom. Details in docs/STEERING.md.
 ### Added

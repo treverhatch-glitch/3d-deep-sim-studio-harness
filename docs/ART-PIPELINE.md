@@ -17,3 +17,6 @@ Lightweight guide. Full art production lives in the game repo, not the harness.
 ## Rules
 - Do not pull unapproved external assets into the game.
 - Simulation code must not import rendering or asset libraries (see sim isolation rules).
+
+## Asset scout (2.30b)
+`npm run scout -- find "crate"` lists CC0 hits from Poly Haven and ambientCG and filtered links for Kenney, OpenGameArt and Sketchfab. `npm run scout -- pull <url|file> --licence CC0|CC-BY-4.0 --author "<who>" --source <page> --title "<name>"` records it in assets/scouted/ and CREDITS.md. Only CC0 and CC-BY ship; SA, NC, ND or unknown licences go to the reference library (`npm run asset -- add <file> --use reference`). `npm run scout -- credits` rewrites CREDITS.md; the assets gate fails when it is stale.

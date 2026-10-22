@@ -745,6 +745,7 @@
     <section><h2>Waiting for you <small id="a-waitcount"></small></h2><div class="sheet" id="a-waiting"></div></section>
     <section><h2>In the works <small>you asked for changes; the next round comes back here</small></h2><div class="sheet" id="a-works"></div></section>
     <section><h2>Approved <small>in assets/approved/ and the asset ledger</small></h2><div class="sheet" id="a-approved"></div></section>
+    <section><h2>Scouted <small>free art the scout pulled: CC0 or CC-BY only, credited in CREDITS.md</small></h2><div id="a-scouted" class="note"></div></section>
     <section>
       <h2>References <small>what the art department works from</small></h2>
       <form id="a-ref" class="refform">
@@ -777,6 +778,7 @@
       <h2>Play the last good build</h2>
       <p class="buildline" id="r-build">Loading…</p>
       <div id="r-changes" class="note" aria-live="polite"></div>
+      <div id="r-fun" class="note" aria-live="polite"></div>
       <p class="buildline" id="r-engine" hidden></p>
       <div class="screen"><iframe id="r-frame" title="The game: the last build that passed the browser check" sandbox="allow-scripts allow-pointer-lock" allow="fullscreen; gamepad; autoplay"></iframe><p id="r-none" class="none">No build has passed the browser check yet. Each time <code>npm run play:browser</code> passes, that build is saved and plays here, while the agents keep working.</p></div>
       <form id="r-note">
@@ -2148,6 +2150,8 @@
     fill('a-waiting', waiting, 'Nothing waiting. New rounds land here as the art department makes them.');
     fill('a-works', by('changes'), 'Nothing being redone.');
     fill('a-approved', by('approved').slice().reverse(), 'Nothing approved yet.');
+    const sc = art.scouted || [];
+    $('a-scouted').innerHTML = sc.length ? `<ul class="changes">${sc.map((x) => `<li><b>${esc(x.id)}</b> ${esc(x.title || x.file)}: ${esc(x.licence)}${x.author ? `, by ${esc(x.author)}` : ''}${x.source ? ` (<a href="${esc(x.source)}" target="_blank" rel="noopener">source</a>)` : ''}</li>`).join('')}</ul><p>${art.credits ? 'Credited in CREDITS.md.' : '<b>CREDITS.md is missing</b>: npm run scout -- credits'}</p>` : 'Nothing scouted yet. Find CC0 or CC-BY art with <code>npm run scout -- find "crate"</code>.';
     const refs = art.references || [];
     const rsig = JSON.stringify(refs.map((r) => r.id));
     if ($('a-refs').dataset.sig !== rsig) {
@@ -2232,6 +2236,10 @@
       }
       if (document.body.dataset.skin === 'arcade') store.set('arcadeSeen', builds[0].at);
     }
+    // 2.30b (J1, J4): the fun check from real keys and clicks on the build, and sim features the build doesn't show.
+    const fc = s.funCheck;
+    const rows = fc ? [...fc.probes.map((p) => ({ ...p, kind: 'probe' })), ...fc.simFeatures.filter((f) => f.via !== 'probe').map((f) => ({ ...f, kind: 'feature' }))] : [];
+    $('r-fun').innerHTML = rows.length ? `<b>Fun check</b> (real keys and clicks, ${esc(agoIso(fc.at))}): <ul class="changes">${rows.map((p) => `<li data-ok="${p.ok}">${p.ok ? '✓' : '✗'} <b>${esc(p.name)}</b>${p.kind === 'feature' ? ' (sim feature)' : ''}${p.ok ? '' : `: ${esc(p.why || '')}`}</li>`).join('')}</ul>` : '';
     // The engine track's build, beside the web one (docs/ENGINE-TRACK.md).
     const en = s.engine;
     $('r-engine').hidden = !en;

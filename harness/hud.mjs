@@ -408,9 +408,19 @@ export function buildHudState() {
       return {
         designs: latestRounds(all).slice(-60).map((d) => ({ id: d.id, n: numberOf(d), round: d.round || 1, kind: d.kind, title: d.title, file: d.file, image: d.image, model: d.model || /\.(glb|gltf)$/i.test(d.file), thumb: d.thumb || null, status: d.status, provisional: Boolean(d.provisional), by: d.by, at: d.at, licence: d.licence, generated: d.generated || null, feedback: (d.feedback || []).slice(-3), note: (d.feedback || []).slice(-1)[0]?.text || '', rounds: all.filter((x) => (x.asset || x.id) === (d.asset || d.id) && x.id !== d.id).map((x) => ({ id: x.id, round: x.round || 1, image: x.image, thumb: x.thumb || null })) })),
         references: readArtRefs(),
+        // 2.30b (G7): art the scout pulled (CC0 / CC-BY) and whether CREDITS.md credits it.
+        scouted: (readJson('studio/assets/manifest.json', { assets: [] }).assets || []).filter((x) => x.scouted).map((x) => ({ id: x.id, file: x.file, title: x.title || null, licence: x.licence, author: x.author, source: x.source })),
+        credits: fs.existsSync(path.join(REPO_ROOT, 'CREDITS.md')),
         reference: bibleNow?.artReference || null,
         waitHours: { precise: 24, budget: 24, fast: 8, extreme: 4 }[effectiveMode().id] / (effectiveMode().boost ? 2 : 1),
       };
+    })(),
+    // 2.30b (J1, J4): the newest browser play's real-input fun probes and sim features.
+    funCheck: (() => {
+      const dir = path.join(REPO_ROOT, 'qa', 'reports');
+      const f = fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => /^browser_\d+\.json$/.test(n)).sort().pop() : null;
+      const r = f ? readJson(`qa/reports/${f}`, null) : null;
+      return r && (r.probes?.length || r.simFeatures?.length) ? { at: r.at, probes: r.probes || [], simFeatures: r.simFeatures || [] } : null;
     })(),
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
     launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
