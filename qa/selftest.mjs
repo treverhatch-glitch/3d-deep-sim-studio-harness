@@ -904,8 +904,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const signed = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/bible.json'), 'utf8')).signed;
   report('sign records where a remote approval came from', signed?.via === 'discord message 42', JSON.stringify(signed));
   // B12: the refusal names the word; --not-layer lets a different meaning through, logged.
-  const mood = run(dir, 'node harness/task.mjs add "Renderer: give each room its own mood" --phase 1 --serves pillar:Calm', env);
-  report('a scope refusal names the word that matched and the layer', mood.status !== 0 && /the word "mood"/.test(mood.stderr) && /--not-layer npc-needs/.test(mood.stderr), mood.stderr);
+  const mood = run(dir, 'node harness/task.mjs add "Renderer: add a mood meter to each room" --phase 1 --serves pillar:Calm', env);
+  report('a scope refusal names the phrase that matched and the layer', mood.status !== 0 && /the word "add a mood meter"/.test(mood.stderr) && /--not-layer npc-needs/.test(mood.stderr), mood.stderr);
   const ok = run(dir, 'node harness/task.mjs add "Renderer: give each room its own mood" --phase 1 --serves pillar:Calm --not-layer npc-needs', env);
   report('--not-layer queues it and tells the Director', ok.status === 0 && /task\.scope_override/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), ok.stdout + ok.stderr);
   // B7: changing the design after signing holds new build work until a person re-signs.
@@ -1809,7 +1809,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system', ollama).stdout).id;
+  const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system --origin dev', ollama).stdout).id;
   run(dir, `node harness/task.mjs start ${id} --agent builder-1 --model claude-opus-5-5`, ollama);
   fs.mkdirSync(path.join(dir, 'studio/bible/systems'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals.\n`);
@@ -2208,6 +2208,120 @@ console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with depen
 const s = buildHudState();
 console.log(JSON.stringify({ meter: s.meter, sc: s.sessionCap?.limits, rows: s.sessionCap?.sessions?.length, mw: typeof s.modelWarning?.show, cs: Object.keys(s.cheatsheet || {}) }));`, { STUDIO_AGENT_MODEL: 'claude-opus-5-5' });
   report('the War Room state has the budget meter (per model, cache reads), the sessions against the refresh point, the model warning and the attached tricks', hud.meter?.cap === 50000000 && hud.meter?.byModel?.length >= 1 && hud.sc?.turns === 40 && hud.rows >= 1 && hud.mw === 'boolean' && hud.cs?.includes(tid), JSON.stringify(hud).slice(0, 1500));
+}
+
+// 2.30a: intent cards and task origin, the dev's yes, phase override, owned waits, phrase scope checks,
+// drop/reorder, quota accuracy, the watchdog, the Arcade's what-changed, ccusage. Each in a copy.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p230a-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  // J2: origin tags; an agent's mechanic waits for the dev's yes; other agent work doesn't.
+  const add = (args, env = {}) => run(dir, `node harness/task.mjs add ${args}`, env);
+  const a1 = add('"Add sprint and jump" --origin dev --asked "add sprint/jump" --infra');
+  const a2 = add('"Add a double jump mechanic" --infra', { STUDIO_LOCK_OWNER: 'builder-2' });
+  const a3 = add('"Tidy the HUD labels" --infra', { STUDIO_LOCK_OWNER: 'builder-2' });
+  const j = (r) => { try { return JSON.parse(r.stdout); } catch { return {}; } };
+  const [t1, t2, t3] = [j(a1), j(a2), j(a3)];
+  const hold = probe(`import { holdReason, holdOwner } from ${u('harness/task-hold.mjs')};
+import { parseNextQueue } from ${u('harness/task.mjs')};
+const q = parseNextQueue();
+console.log(JSON.stringify({ h1: holdReason('${t1.id}', q), h2: holdOwner('${t2.id}', q), h3: holdReason('${t3.id}', q) }));`);
+  const ev = () => fs.readFileSync(path.join(dir, '.studio', 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const origins = Object.fromEntries(ev().filter((e) => e.type === 'task.added').map((e) => [e.task, e.meta?.origin]));
+  report('every task is tagged dev-asked or agent-proposed; an agent-proposed mechanic waits on the dev, other agent work starts', origins[t1.id] === 'dev-asked' && origins[t2.id] === 'agent-proposed' && origins[t3.id] === 'agent-proposed' && !hold.h1 && hold.h2?.owner === 'the dev' && /yes/.test(hold.h2?.why || '') && !hold.h3, JSON.stringify({ origins, hold, a2: a2.stderr }));
+  const noAgent = run(dir, `node harness/task.mjs yes ${t2.id} --by builder-2`);
+  const relayNo = run(dir, `node harness/task.mjs yes ${t2.id} --by trever`, { STUDIO_LOCK_OWNER: 'producer-1' });
+  const yes = run(dir, `node harness/task.mjs yes ${t2.id} --by trever`);
+  const after = probe(`import { holdReason } from ${u('harness/task-hold.mjs')};
+import { parseNextQueue } from ${u('harness/task.mjs')};
+console.log(JSON.stringify({ h: holdReason('${t2.id}', parseNextQueue()) }));`);
+  report('only the dev says yes (an agent name is refused, a relay needs their words and where); then the task can start', noAgent.status !== 0 && relayNo.status !== 0 && /own words/.test(relayNo.stderr) && yes.status === 0 && !after.h && ev().some((e) => e.type === 'task.dev_yes' && e.task === t2.id), JSON.stringify({ noAgent: noAgent.stderr, relayNo: relayNo.stderr, yes: yes.stdout + yes.stderr, after }));
+  const echo = run(dir, `node harness/intent.mjs echo --asked "add sprint/jump" --wont "stamina, camera" --tasks ${t1.id} --by producer-1`);
+  const conf = run(dir, 'node harness/intent.mjs confirm E-001 --by trever');
+  const list = run(dir, 'node harness/intent.mjs list');
+  report('the intent card says "You asked for: X. I will NOT change: Y." and one confirm by the dev closes it', /You asked for: add sprint\/jump\. I will NOT change: stamina, camera\./.test(echo.stdout) && conf.status === 0 && /E-001 confirmed by trever/.test(list.stdout) && ev().some((e) => e.type === 'intent.echo') && ev().some((e) => e.type === 'intent.confirmed'), echo.stdout + echo.stderr + conf.stderr + list.stdout);
+  // J11: drop and reorder; phrase scope checks.
+  const re = run(dir, `node harness/task.mjs reorder ${t3.id} --to top --by producer-1`);
+  const order = probe(`import { parseNextQueue } from ${u('harness/task.mjs')};
+console.log(JSON.stringify(parseNextQueue().backlog.map((t) => t.id)));`);
+  const dropNo = run(dir, `node harness/task.mjs drop ${t1.id} --by producer-1`);
+  const drop = run(dir, `node harness/task.mjs drop ${t1.id} --why "the dev said not now" --by producer-1`);
+  const order2 = probe(`import { parseNextQueue } from ${u('harness/task.mjs')};
+console.log(JSON.stringify(parseNextQueue().backlog.map((t) => t.id)));`);
+  report('task reorder moves a waiting task; task drop needs a why, takes it off the queue and logs it', re.status === 0 && order[0] === t3.id && dropNo.status !== 0 && drop.status === 0 && !order2.includes(t1.id) && ev().some((e) => e.type === 'task.dropped' && /not now/.test(e.msg)), JSON.stringify({ order, order2, re: re.stderr, drop: drop.stderr }));
+  const scope = probe(`import { crossedLayersIn } from ${u('harness/bible.mjs')};
+const b = { layers: { unlocks: { answer: 'no' }, 'npc-needs': { answer: 'no' }, 'tech-tree': { answer: 'no' } } };
+const ids = (t) => crossedLayersIn(t, b).map((l) => l.id);
+console.log(JSON.stringify({ lic: ids('Fix the licence text in the credits'), mood: ids('Warm mood lighting on the dock'), sys: ids('Add a licence system for boats'), meter: ids('Crew mood meter'), tree: ids('Show the tech tree') }));`);
+  report('scope checks match phrases: "licence text" and "mood lighting" pass; "add a licence system", "mood meter", "tech tree" are caught', !scope.lic?.length && !scope.mood?.length && scope.sys?.includes('unlocks') && scope.meter?.includes('npc-needs') && scope.tree?.includes('tech-tree'), JSON.stringify(scope));
+  // J3: the dev's "do it now" opens the gate past an unfinished exit list and logs the risk.
+  fs.mkdirSync(path.join(dir, 'studio', 'bible'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio', 'bible', 'bible.json'), JSON.stringify({ version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: { by: 'trever', at: new Date().toISOString() }, phase: { open: 1, history: [{ phase: 1, at: new Date().toISOString(), by: 'trever', reason: 'Bible signed' }] } }));
+  fs.writeFileSync(path.join(dir, 'studio', 'bible', 'PHASE-1-EXIT.md'), '- [ ] floors 1-3 playable\n');
+  const gated = run(dir, 'node harness/bible.mjs phase open 2 --by trever');
+  const agentNow = run(dir, 'node harness/bible.mjs phase open 2 --now "port to Godot now" --by builder-1');
+  const now2 = run(dir, 'node harness/bible.mjs phase open 2 --now "start Phase 2 now" --by trever');
+  const bj = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'bible', 'bible.json'), 'utf8'));
+  const ov = ev().find((e) => e.type === 'bible.phase_override');
+  report('the dev\'s "do it now" opens the phase gate at once (an agent can\'t), and the risk it skipped is in the event log', gated.status !== 0 && agentNow.status !== 0 && now2.status === 0 && bj.phase.open === 2 && ov?.meta?.risk?.length >= 1 && /Risk taken/.test(ov.msg) && /start Phase 2 now/.test(bj.phase.history.at(-1).reason), JSON.stringify({ gated: gated.stderr, agentNow: agentNow.stderr, now2: now2.stdout + now2.stderr, ov }));
+  // J12: the false limit path. A killed session whose last lines are its own transcript quoting a limit.
+  const pt = probe(`import { providerTrouble } from ${u('harness/agent.mjs')};
+import { limitLine } from ${u('harness/budget.mjs')};
+const said = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Error: usage limit reached (429) in the selftest fixture' }] } });
+const real = 'Error: Claude AI usage limit reached|1792700000';
+console.log(JSON.stringify({ transcript: providerTrouble([said, said].join('\\n'), 143), real: providerTrouble(real, 1)?.kind, review: limitLine('', 'The review: the quota code reads the rate limit wrong.', 0), reviewFail: limitLine('', 'This change touches the quota check.', 1), probe: limitLine('Error: 429 Too Many Requests', '', 1) }));`);
+  report('quota stops are real: a transcript quoting "usage limit reached" or a review mentioning quota marks nothing; the provider\'s own 429 does', pt.transcript === null && pt.real === 'quota' && pt.review === null && pt.reviewFail === null && /429/.test(pt.probe || ''), JSON.stringify(pt));
+  const mark = probe(`import * as b from ${u('harness/budget.mjs')};
+import { emitEvent } from ${u('harness/event.mjs')};
+emitEvent({ type: 'agent.session.end', agent: 'b-1', model: 'claude-opus-5-5', tokensIn: 1000, tokensOut: 1000, meta: { tool: 'claude', cacheRead: 10000 } });
+const m = b.markExhausted('claude', 'Error: usage limit reached, resets 5pm');
+console.log(JSON.stringify({ m, text: b.budgetStatus().find((s) => s.tool === 'claude')?.text }));`);
+  report('a quota stop shows the numbers it used: tokens counted in the last 5 h and the model', mark.m?.used?.last5h === 3000 && /stopped at 3,000 counted tokens in the last 5 h, claude-opus-5-5/.test(mark.text || ''), JSON.stringify(mark).slice(0, 800));
+  // G1: the watchdog is off by default; on, it parks a looping task.
+  const wd = probe(`import * as w from ${u('harness/watchdog.mjs')};
+import { emitEvent } from ${u('harness/event.mjs')};
+import { readHolds } from ${u('harness/task-hold.mjs')};
+const off = await w.watchdogPass();
+for (let i = 0; i < 3; i++) emitEvent({ type: 'task.paused', agent: 'b', task: '${t3.id}', msg: 'handed back' });
+const still = readHolds()['${t3.id}']?.parked || null;
+w.setWatchdog(true, 'trever');
+const on = await w.watchdogPass();
+console.log(JSON.stringify({ off, still, on, parked: readHolds()['${t3.id}']?.parked?.by }));`);
+  report('the watchdog is off by default and does nothing; turned on, it parks a task handed back 3 times in 2 h', wd.off?.on === false && !wd.still && wd.on?.on === true && wd.parked === 'watchdog' && wd.on.actions.some((a) => a.kind === 'park'), JSON.stringify(wd).slice(0, 800));
+  // Plugins: godot-mcp and ccusage are listed and off; Serena's dashboard never opens over the War Room.
+  const pl = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'plugins.json'), 'utf8')).plugins;
+  const by = (id) => pl.find((p) => p.id === id);
+  report('godot-mcp and ccusage are opt-in plugins (off, pinned); Serena starts with its dashboard closed', by('godot-mcp')?.enabled === false && /@0\.1\.1$/.test(by('godot-mcp').mcp.args.at(-1)) && by('ccusage')?.enabled === false && by('ccusage').ledger.args.includes('--json') && by('serena').mcp.args.join(' ').includes('--open-web-dashboard false'), '');
+  const ccOff = run(dir, 'node harness/budget.mjs ccusage');
+  run(dir, 'node harness/plugins.mjs enable ccusage');
+  const fake = JSON.stringify({ daily: [{ date: '2026-10-22', inputTokens: 100, outputTokens: 50, cacheReadTokens: 9000, cacheCreationTokens: 10, totalTokens: 9160, modelsUsed: ['claude-opus-5-5'] }] });
+  fs.writeFileSync(path.join(dir, 'cc-fake.json'), fake);
+  const ccOn = run(dir, 'node harness/budget.mjs ccusage', { STUDIO_CCUSAGE_CMD: 'node -e "process.stdout.write(require(\'fs\').readFileSync(\'cc-fake.json\', \'utf8\'))"' });
+  report('ccusage feeds the token ledger only when its plugin is on: daily tokens, cache reads and the model', ccOff.status !== 0 && ccOn.status === 0 && /9,160 tokens .*cache reads 9,000.*claude-opus-5-5/.test(ccOn.stdout) && fs.existsSync(path.join(dir, '.studio', 'ccusage.json')), ccOff.stderr + ccOn.stdout + ccOn.stderr);
+  // J10 and J8 in the War Room state: the status line, owners, and what changed per build.
+  fs.mkdirSync(path.join(dir, '.studio', 'builds', 'b1'), { recursive: true });
+  run(dir, `node harness/task.mjs add "Study the dock" --type study --infra`);
+  const hs = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
+import { emitEvent } from ${u('harness/event.mjs')};
+import fs from 'node:fs';
+emitEvent({ type: 'task.done', agent: 'b', task: 'T-900', msg: 'Completed T-900: Boats dock at the pier' });
+fs.writeFileSync('.studio/builds/b1/build.json', JSON.stringify({ id: 'b1', at: new Date(Date.now() + 1000).toISOString(), page: 'index.html' }));
+run();
+function run() {
+  const s = buildHudState();
+  console.log(JSON.stringify({ line: s.status.line, you: s.status.waitingOnYou, origin: s.queue.backlog.map((t) => t.origin), changes: s.builds[0]?.changes, wd: s.watchdog.on }));
+}`);
+  report('the War Room status line says building now, waiting on you and tokens today; tasks carry their origin; a build lists what changed', /^Building now: .* · Waiting on you: .* · Tokens today: /.test(hs.line || '') && hs.origin?.includes('agent-proposed') && hs.changes?.[0]?.task === 'T-900' && /Boats dock/.test(hs.changes[0].title) && hs.wd === true, JSON.stringify(hs).slice(0, 1200));
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
