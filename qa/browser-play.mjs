@@ -36,6 +36,7 @@ import { launchChromium } from './chromium.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { cartridgeFromArgv, loadCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
+import { runProbes, checkSimFeatures } from './fun-probes.mjs';
 
 const REPORTS = path.join(REPO_ROOT, 'qa', 'reports');
 export const BROWSER_REGRESSIONS = path.join(REPO_ROOT, 'qa', 'regressions', 'browser');
@@ -222,6 +223,16 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
       await sleep(300);
     }
 
+    // 2.30b (J1, J4): the real-input fun probes and the sim features, on a fresh page, then a fresh page for the play.
+    report.declared = { probes: b?.probes || [], simFeatures: cart.simFeatures || [] };
+    const wantProbes = (b?.probes || []).filter((p) => p !== 'camera');
+    if (wantProbes.length || cart.simFeatures?.length) {
+      report.probes = await runProbes(page, { ...b, probes: wantProbes });
+      report.simFeatures = await checkSimFeatures(page, cart.simFeatures || [], b || {}, report.probes);
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction(() => window.__sim && typeof window.__sim.getState === 'function', null, { timeout: 8000 }).catch(() => {});
+      await sleep(300);
+    }
     // Play: the scenario's policy picks actions from the live state; real keys and clicks perform them.
     const playStart = Date.now();
     const sc = cart.scenarios[b?.scenario || 'start-to-win'];
@@ -281,6 +292,12 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
     fs.mkdirSync(REPORTS, { recursive: true });
     fs.writeFileSync(path.join(REPORTS, `${runId}-inputs.json`), `${JSON.stringify(trace)}\n`);
     report.trace = `qa/reports/${runId}-inputs.json`;
+    if ((b?.probes || []).includes('camera')) {
+      const inside = [...mismatches].some((m) => /camera is inside/.test(m));
+      report.probes = [...(report.probes || []), ...(await runProbes(page, { ...b, probes: ['camera'] }, { cameraInside: inside }))];
+    }
+    for (const p of report.probes || []) if (!p.ok) fail(p.unwired ? 'PROBE-UNWIRED' : 'FUN-PROBE', `${p.name}: ${p.why}`);
+    for (const f of report.simFeatures || []) if (!f.ok) fail('SIM-ONLY', `${f.name}: ${f.why}`);
     if ([...mismatches].length) fail('BROWSER-WIRING', `the screen doesn't match the sim (${mismatches.size}): ${[...mismatches].slice(0, 3).join('; ')}`, { mismatches: [...mismatches].slice(0, 20) });
     const frozen = report.findings.some((f) => f.id === 'BROWSER-FROZEN');
     // "The browser game works" is separate from "the bot won": a real outcome with the screen matching

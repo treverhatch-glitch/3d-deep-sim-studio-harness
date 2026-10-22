@@ -57,6 +57,10 @@ way a dev server would; the same build is saved for `npm run play` and the Arcad
 `browser` passes with a note. Without Chromium the template game is skipped; a real game fails,
 because skipping is how "green but broken" ships.
 
+## Fun probes and sim features (2.30b)
+`export const browser = { probes: ['move', 'sprint', 'jump', 'aim', 'camera'], keys: { forward: 'w', right: 'd', sprint: 'Shift', jump: 'Space' }, aim: (view) => ({ move: [x, y] }), features: { crane: { key: 'c', expect: (before, after) => after.crane.up !== before.crane.up } } }` and `export const simFeatures = ['jump', 'crane']`.
+The probes read `window.__view()`: `player { x, y, z }`, `camera { forward: [x, z], inside }`, `crosshair { target }`, `hits { last, count }`. Findings: FUN-PROBE (a probe failed), PROBE-UNWIRED (the view lacks the fields), SIM-ONLY (a sim feature with no input bound, or no visible change). A gameplay task closes only with every probe passing after its last change and a clip (`npm run clip`).
+
 ## When it fails before playing
 
 - **A renderer with no contract fails.** A game with a `game/<name>/` or `web/<name>/` folder whose qa.mjs

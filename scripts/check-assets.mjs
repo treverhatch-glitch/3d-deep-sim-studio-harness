@@ -48,6 +48,22 @@ for (const f of shipped) {
   else if (entry.sha256 !== crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')) problems.push(`${r} changed since ${entry.declaredBy} recorded it; record the new version: npm run asset -- update ${r} --by <person>`);
 }
 
+// 2.30b (G7): scouted art ships only under CC0 or CC-BY, with the author for CC-BY, and CREDITS.md matches the ledger.
+const credited = manifest.assets.filter((a) => a.scouted);
+if (credited.length) {
+  const { allowedLicence, creditsText } = await import('../harness/asset-scout.mjs');
+  for (const a of manifest.assets.filter((x) => x.scouted)) {
+    const kind = allowedLicence(a.licence);
+    if (!kind) problems.push(`${a.file} was scouted under "${a.licence}", not CC0 or CC-BY: it can't ship (keep it as a reference)`);
+    else if (kind === 'CC-BY' && !a.author) problems.push(`${a.file} is CC-BY with no author to credit`);
+  }
+  let credits = '';
+  try {
+    credits = fs.readFileSync(path.join(root, 'CREDITS.md'), 'utf8');
+  } catch {}
+  if (credits !== creditsText(manifest)) problems.push('CREDITS.md is missing or out of date with the asset ledger: npm run scout -- credits');
+}
+
 const refDir = process.env.STUDIO_REFERENCE_DIR ? rel(path.resolve(root, process.env.STUDIO_REFERENCE_DIR)) : 'references';
 const code = ['cartridges', 'src', 'public', 'web'].flatMap((d) => walk(path.join(root, d))).filter((f) => /\.(mjs|js|ts|tsx|jsx|json|html|css)$/.test(f));
 for (const f of code) {
