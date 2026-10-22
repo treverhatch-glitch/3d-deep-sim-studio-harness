@@ -8,6 +8,7 @@
  *   npm run bible -- layer <id> yes|explore|no [--phase 1|2|3] [--why "…"] --by <person>
  *   npm run bible -- sign --by <person>    a person signs it: pre-production ends, Phase 1 opens
  *   npm run bible -- phase open <2|3> --by <person> [--force "reason"]
+ *   npm run bible -- phase open <2|3> --now "<the dev's words>" --by <dev>   the dev's call: opens at once, risk logged (2.30)
  *   npm run bible -- json                  the whole Bible plus the question and layer catalogs
  *   npm run bible -- voice [--tone "…"] [--do "…"] [--dont "…"] [--never "a, b"] [--example "…"]
  *                                          the game's voice: read by every agent writing what players see
@@ -336,6 +337,34 @@ export function openPhase(b, n, { by, force = null } = {}) {
   return { ok: true };
 }
 
+/**
+ * The dev's "do it now" (2.30, J3): an explicit dev verdict ("start Phase 2 now", "port to Godot now")
+ * opens the gate at once, even past an unfinished exit list, and writes the risk to the event log. Only a
+ * person; from inside an agent it is a relay with the dev's words and where they said them.
+ */
+export async function openPhaseNow(b, n, { by, words = '', source = '', viaWarRoom = false } = {}) {
+  const { devSays } = await import('./intent.mjs');
+  const who = devSays(by, { quote: words, source, viaWarRoom });
+  if (!who.ok) return who;
+  if (!String(words).trim()) return { ok: false, message: 'Give the dev\'s words, e.g. --now "start Phase 2 now".' };
+  n = Number(n);
+  const open = b?.phase?.open || 0;
+  if (!b?.signed) return { ok: false, message: 'Sign the Bible first; that opens Phase 1.' };
+  if (!(n > open && n <= 3)) return { ok: false, message: `Phase ${open} is open; say a later phase (up to 3).` };
+  const since = (b.phase.history || []).at(-1)?.at;
+  const r = latestReview();
+  const reviewed = r && r.verdict === 'phase-ready' && r.phase === open && (!since || r.at >= Date.parse(since));
+  const gaps = open >= 1 ? phaseExitGaps(open, since) : [];
+  const risk = [...(reviewed ? [] : [`no Director review says Phase ${open} is ready`]), ...gaps.map((g) => `Phase ${open} exit: ${g}`), ...(n > open + 1 ? [`skips Phase ${open + 1}`] : [])];
+  b.phase.open = n;
+  b.phase.history.push({ phase: n, at: now(), by, reason: `dev override: "${String(words).slice(0, 200)}"`, risk, ...(who.relayedBy ? { relayedBy: who.relayedBy, source } : {}) });
+  writeBible(b);
+  emitEvent({ type: 'bible.phase_override', agent: by, to: 'producer', status: risk.length ? 'warning' : 'ok', msg: `${by}: "${String(words).slice(0, 120)}". Phase ${n} is open now${risk.length ? `. Risk taken: ${risk.join('; ')}` : ''}.`, meta: { phase: n, from: open, words, risk, relayedBy: who.relayedBy || null } });
+  return { ok: true, risk };
+}
+
+const FEATURE_VERB = 'add|adds|adding|new|implement|implements|introduce|build|builds|create|enable|unlock';
+const FEATURE_NOUN = 'system|systems|mechanic|mechanics|tree|meter|bar|screen|panel|menu|ui|shop|feature|loop|track|board|rewards?|progression';
 /** Crossed-out layers a task title touches, each with the word that matched (`word`). */
 export function crossedLayersIn(title, b = readBible()) {
   if (!b) return [];
@@ -343,7 +372,20 @@ export function crossedLayersIn(title, b = readBible()) {
   const out = [];
   for (const l of LAYERS) {
     if (b.layers?.[l.id]?.answer !== 'no') continue;
-    const word = l.keywords.find((k) => new RegExp(`[^a-z0-9]${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^a-z0-9]`).test(t));
+    // 2.30 (J11): phrases, not single words. A keyword phrase ("tech tree") matches as it is; a lone word
+    // ("licence", "mood") only inside a feature phrase ("add a licence system", "crew mood meter"), so
+    // "fix the licence text in the credits" or "warm mood lighting" no longer trip the gate.
+    let word = null;
+    for (const k of l.keywords) {
+      const e = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (/\s/.test(k)) {
+        if (new RegExp(`[^a-z0-9]${e}[^a-z0-9]`).test(t)) word = k;
+      } else {
+        const m = t.match(new RegExp(`(?:\\b(?:${FEATURE_VERB})\\s+(?:[a-z0-9'-]+\\s+){0,2}${e}\\b(?:\\s+[a-z0-9'-]+){0,1})|(?:\\b${e}\\s+(?:[a-z0-9'-]+\\s+){0,1}(?:${FEATURE_NOUN})\\b)`));
+        if (m) word = m[0].trim();
+      }
+      if (word) break;
+    }
     if (word) out.push({ ...l, word });
   }
   return out;
@@ -533,6 +575,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`Pillars changed by ${by}${b.signed ? ', and the Bible is signed with them' : ''}. The Director checks open work against them on its next review.`);
     process.exit(0);
   }
+  if (cmd === 'phase' && rest[0] === 'open' && flag('now')) {
+    const res = await openPhaseNow(b, rest[1], { by: flag('by'), words: flag('now'), source: flag('source') || '' });
+    if (!res.ok) {
+      console.error(res.message);
+      process.exit(1);
+    }
+    console.log(`Phase ${rest[1]} is open now (the dev's call).${res.risk.length ? ` Risk logged: ${res.risk.join('; ')}.` : ''}`);
+    process.exit(0);
+  }
   if (cmd === 'phase' && rest[0] === 'open') {
     const res = openPhase(b, rest[1], { by: flag('by') || process.env.STUDIO_LOCK_OWNER || 'producer', force: flag('force') });
     if (!res.ok) {
@@ -542,6 +593,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`Phase ${rest[1]} is open.`);
     process.exit(0);
   }
-  console.log('Usage: npm run bible -- [show | check | render | json | layer <id> yes|explore|no [--phase n] [--why "…"] --by <name> | sign --by <person> | phase open <2|3> --by <name> [--force "reason"]]');
+  console.log('Usage: npm run bible -- [show | check | render | json | layer <id> yes|explore|no [--phase n] [--why "…"] --by <name> | sign --by <person> | phase open <2|3> --by <name> [--force "reason"] | phase open <2|3> --now "<the dev\'s words>" --by <dev>]');
   process.exit(1);
 }

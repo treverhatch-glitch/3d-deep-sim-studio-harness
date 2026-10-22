@@ -175,7 +175,10 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     const out = String(r.stdout || '').trim();
     if (r.status === 0 && out) return { ok: true, model: model || TOOL_MODEL_NAME[tool], content: out, tool };
     // A reviewer that says it hit its limit is marked out until it resets, so the owed review knows when to retry.
-    const said = `${r.stdout || ''}\n${r.stderr || ''}`.split('\n').reverse().find((l) => /usage limit|hit your limit|quota|\b429\b|rate limit/i.test(l));
+    // 2.30 (J12): the provider's limit line on a failed run, never the review text (a review of budget code
+    // that said "quota" marked the reviewer out for an hour).
+    const { limitLine } = await import('./budget.mjs');
+    const said = limitLine(r.stderr, r.status === 0 ? '' : r.stdout, r.status ?? 1);
     if (said && run === spawnSync) {
       const { markExhausted } = await import('./budget.mjs');
       markExhausted(tool, said);
