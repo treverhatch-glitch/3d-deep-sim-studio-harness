@@ -51,6 +51,12 @@ import { allAttached } from './cheatsheet.mjs';
 import { dailyCap, cacheReadWeight, weightedTokens, readCcusage } from './budget.mjs';
 import { pendingEchoes } from './intent.mjs';
 import { readWatchdog } from './watchdog.mjs';
+import { readAway, listReview, learnedSummary } from './away.mjs';
+import { listPending } from './pending-review.mjs';
+import { listProposed } from './proposed.mjs';
+import { listWaves, wavesOn } from './waves.mjs';
+import { readAlerts } from './alerts.mjs';
+import { readPhone } from './phone.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -522,6 +528,16 @@ export function buildHudState() {
     // 2.30: intent cards (J2), the watchdog switch (G1), Claude Code's own count (ccusage, opt-in).
     intent: pendingEchoes(),
     watchdog: readWatchdog(),
+    // 2.30d: away mode and its review, forced work pending review, proposals, fun waves, phone alerts and access.
+    away: (() => {
+      const a = readAway();
+      return { on: Boolean(a.on), by: a.by || null, since: a.since || null, note: a.note || '', review: listReview({ pending: true }), learned: learnedSummary({ max: 5 }) };
+    })(),
+    pendingReview: listPending(),
+    proposed: listProposed(),
+    waves: { on: wavesOn(), list: listWaves().slice(0, 5) },
+    alerts: (() => { const a = readAlerts(); return { on: Boolean(a.on), channel: a.channel || null }; })(),
+    phone: { on: Boolean(readPhone().on) },
     ccusage: (() => {
       const c = readCcusage();
       const d = c?.days?.at(-1);
@@ -533,6 +549,8 @@ export function buildHudState() {
   const waitingOnYou = [
     ...st.intent.map((e) => ({ what: `${e.id}: confirm "${e.asked}"`, owner: 'you', why: 'an intent card' })),
     ...st.queue.backlog.filter((t) => t.needsYes).map((t) => ({ what: `${t.id}: ${t.title}`, owner: 'you', why: 'an agent-proposed mechanic needs your yes' })),
+    ...(st.away.review.length && !st.away.on ? [{ what: `${st.away.review.length} decision${st.away.review.length === 1 ? '' : 's'} made while you were away`, owner: 'you', why: 'confirm, redo or comment' }] : []),
+    ...st.pendingReview.map((p) => ({ what: `${p.task}: done (pending), forced by ${p.by}`, owner: 'you or a reviewer from another model family', why: p.reason })),
     ...(st.modelWarning?.show ? [{ what: 'top-tier models on every role', owner: 'you', why: 'accept or change the models' }] : []),
     ...st.asks.open.filter((a) => !a.to || /human|dev|you/i.test(a.to)).map((a) => ({ what: `${a.id}: ${a.question}`, owner: 'you', why: 'a question' })),
     // 2.30c (#8): a task the circuit breaker parked waits for someone to fix the reason and Unblock.

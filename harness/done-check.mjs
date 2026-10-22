@@ -23,6 +23,7 @@ import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
 import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
+import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -301,6 +302,11 @@ const words = (rel) => (fs.readFileSync(abs(rel), 'utf8').match(/[A-Za-z0-9]{2,}
 
 // 2.30b (J1, J4): a gameplay task closes only on a real-input browser play whose fun probes all pass after the last
 // change, plus a clip of the build; a sim task on a game with a browser build closes only when every sim feature shows.
+/** After a task closes: gameplay work in wave mode joins the open wave (2.30d). */
+export function joinWaveIfGameplay(task, by) {
+  if (!wavesOn() || !['change', 'bug'].includes(taskType(task)) || !GAMEPLAY.test(`${task.title} ${task.detail || ''}`)) return null;
+  try { return joinWave(task.id, { by })?.id || null; } catch { return null; }
+}
 export const GAMEPLAY = /\b(movement|move|moving|wasd|sprint\w*|jump\w*|aim\w*|shoot\w*|shot|crosshair|camera|controls?|combat|gun|weapon)\b/i;
 export function gameplayChecks(task, part, since, check) {
   const all = filesUnder('qa/reports', (n) => /^browser_\d+\.json$/.test(n)).map((f) => readJson(f)).filter(Boolean);
@@ -310,7 +316,12 @@ export function gameplayChecks(task, part, since, check) {
   if (!gameplay && !simShown) return;
   const lastChange = taskChanges(task.id, since).lastAt;
   const after = all.filter((r) => (Date.parse(r.at) || 0) >= Math.max(since, lastChange));
-  if (gameplay) {
+  // 2.30d (plan #6): in wave mode the probes run on the batch (harness/waves.mjs), not per task: the task
+  // closes, joins the open wave, and the lane moves on.
+  if (gameplay && wavesOn()) {
+    const w = (() => { try { return waveFor(task.id)?.id || nextWaveId(); } catch { return null; } })();
+    check(`Fun check runs on the batch: this joins wave ${w || 'W-?'} when done (npm run wave -- status)`, true, null);
+  } else if (gameplay) {
     const good = after.filter((r) => r.probes?.length && r.probes.every((p) => p.ok));
     const bad = after.flatMap((r) => (r.probes || []).filter((p) => !p.ok)).map((p) => `${p.name}: ${p.why}`);
     check('Real-input fun probes pass in the browser build after the last change', good.length, !declared?.probes?.length ? 'this is a gameplay task but the cartridge declares no probes: add browser.probes (move, sprint, jump, aim, camera) to its qa.mjs, then npm run play:browser' : bad.length ? `a probe fails: ${[...new Set(bad)].slice(0, 3).join('; ')}` : 'no browser play (npm run play:browser) with every probe passing after your last change');

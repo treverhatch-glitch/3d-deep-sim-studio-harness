@@ -15,7 +15,7 @@
   button { font: inherit; cursor: pointer; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .skin { display: none; }
-  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon, body[data-skin="plan"] #plan, body[data-skin="assets"] #assets, body[data-skin="arcade"] #arcade { display: block; }
+  body[data-skin="ops"] #ops, body[data-skin="tycoon"] #tycoon, body[data-skin="plan"] #plan, body[data-skin="assets"] #assets, body[data-skin="arcade"] #arcade, body[data-skin="away"] #away { display: block; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
   /* ---------- Ops: a stage manager's cue board ---------- */
@@ -544,6 +544,56 @@
   #tycoon .legend { font-size: 18px; margin-top: 4px; opacity: .85; }
   @media (max-width: 599px) { .r-production .p-wide { display: none; } .r-production .kanban-slot { left: auto !important; right: 66px; } }
   @media (max-width: 600px) { #tycoon .office { grid-template-columns: 1fr; padding-left: 24px; padding-right: 16px; } body[data-skin="tycoon"] { font-size: 19px; } }
+
+  /* 2.30d: the watchdog's own room (a kennel) and the dog: asleep when off, patrols its room when on. */
+  .room.r-kennel .floor { background: repeating-linear-gradient(90deg, #a1887f 0 22px, #8d6e63 22px 24px); }
+  .room.r-kennel .bowl { position: absolute; width: 22px; height: 8px; background: #e53935; border-radius: 0 0 10px 10px; box-shadow: inset 0 2px 0 #ffcc80; }
+  .room.r-kennel .bed { position: absolute; width: 70px; height: 20px; background: #5c6bc0; border-radius: 40px 40px 8px 8px; box-shadow: inset 0 -5px 0 #3949ab; }
+  .room.r-kennel .doghouse { position: absolute; right: 0; bottom: 0; width: 48px; height: 40px; background: #8d5a32; box-shadow: inset 0 -4px 0 #5d3a1f; }
+  .room.r-kennel .doghouse::before { content: ''; position: absolute; left: -6px; top: -18px; border: 30px solid transparent; border-bottom: 18px solid #c62828; border-top: 0; }
+  .room.r-kennel .doghouse::after { content: ''; position: absolute; left: 14px; bottom: 0; width: 20px; height: 22px; background: #2b1d14; border-radius: 10px 10px 0 0; }
+  .wdog { position: absolute; width: 44px; height: 30px; z-index: 5; transition: left 1.6s linear, top 1.6s linear; pointer-events: auto; }
+  .wdog .bd { position: absolute; left: 6px; top: 10px; width: 28px; height: 13px; background: #d7a35b; border-radius: 7px; box-shadow: inset 0 -3px 0 #b07d3a; }
+  .wdog .hd { position: absolute; left: 28px; top: 2px; width: 15px; height: 13px; background: #d7a35b; border-radius: 5px 6px 4px 4px; }
+  .wdog .hd::before { content: ''; position: absolute; left: 1px; top: -3px; width: 6px; height: 9px; background: #6d4c2f; border-radius: 3px 3px 1px 1px; }
+  .wdog .hd::after { content: ''; position: absolute; right: 2px; top: 4px; width: 3px; height: 3px; background: #1b1b1b; border-radius: 50%; box-shadow: 4px 3px 0 0 #1b1b1b; }
+  .wdog .tl { position: absolute; left: 0; top: 8px; width: 9px; height: 4px; background: #b07d3a; border-radius: 3px; transform-origin: right center; }
+  .wdog .lg { position: absolute; top: 21px; width: 4px; height: 8px; background: #b07d3a; border-radius: 0 0 2px 2px; }
+  .wdog .lg.a { left: 9px; } .wdog .lg.b { left: 15px; } .wdog .lg.c { left: 24px; } .wdog .lg.d { left: 30px; }
+  .wdog .zz { position: absolute; left: 34px; top: -14px; font: 12px/1 "Press Start 2P", monospace; color: #3949ab; opacity: 0; }
+  .wdog .collar { position: absolute; left: 27px; top: 10px; width: 4px; height: 8px; background: #e53935; }
+  .wdog.asleep .hd { top: 9px; left: 26px; transform: rotate(8deg); }
+  .wdog.asleep .hd::after { height: 1px; top: 6px; box-shadow: none; width: 4px; border-radius: 0; }
+  .wdog.asleep .lg { height: 3px; top: 21px; }
+  .wdog.asleep .bd { animation: dogbreath 2.4s ease-in-out infinite; }
+  .wdog.asleep .zz { animation: dogzz 2.4s ease-in-out infinite; }
+  .wdog.awake .tl { animation: dogwag .3s ease-in-out infinite alternate; }
+  .wdog.awake.walking .lg.a, .wdog.awake.walking .lg.c { animation: dogstep .35s ease-in-out infinite alternate; }
+  .wdog.awake.walking .lg.b, .wdog.awake.walking .lg.d { animation: dogstep .35s ease-in-out infinite alternate-reverse; }
+  .wdog.facing-left { transform: scaleX(-1); }
+  .wdog .tag { position: absolute; left: -10px; top: 32px; width: 66px; text-align: center; font: 9px/1.1 "Press Start 2P", monospace; color: #2b1d14; }
+  .wdog.facing-left .tag { transform: scaleX(-1); }
+  @keyframes dogbreath { 50% { transform: scaleY(1.12); } }
+  @keyframes dogzz { 0% { opacity: 0; transform: translate(0, 4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -10px); } }
+  @keyframes dogwag { from { transform: rotate(-25deg); } to { transform: rotate(25deg); } }
+  @keyframes dogstep { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+  /* 2.30d: "While you were away" review */
+  body[data-skin="away"] { background: #14171c; color: #e8eaed; }
+  #away header { display: flex; gap: 10px; align-items: center; padding: 14px 18px; border-bottom: 1px solid #2b3038; flex-wrap: wrap; }
+  #away h1 { font-size: 20px; margin: 0; }
+  #away .aw-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; padding: 16px 18px; }
+  #away .aw { background: #1d2129; border: 1px solid #2f3540; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  #away .aw .meta { font-size: 12px; color: #9aa0a6; }
+  #away .aw .media { display: flex; gap: 6px; flex-wrap: wrap; }
+  #away .aw .media img, #away .aw .media video { max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid #333; }
+  #away .aw .details { font-size: 13px; color: #c7cbd1; white-space: pre-wrap; max-height: 90px; overflow: auto; }
+  #away .aw .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #away .aw .btns button { border: 0; border-radius: 6px; padding: 7px 12px; font-weight: 600; }
+  #away .aw .ok { background: #2e7d32; color: #fff; } #away .aw .no { background: #c62828; color: #fff; } #away .aw .cm { background: #1565c0; color: #fff; }
+  #away .aw textarea { width: 100%; min-height: 44px; background: #11141a; color: #e8eaed; border: 1px solid #3a404c; border-radius: 6px; padding: 6px; font: inherit; font-size: 13px; }
+  #away .aw.done { opacity: .55; }
+  #away .learned { padding: 0 18px 18px; font-size: 13px; color: #9aa0a6; }
+  #away .awaybar { padding: 10px 18px; background: #1d2a1f; color: #a5d6a7; }
 </style>
 </head>
 <body data-skin="ops">
@@ -760,6 +810,21 @@
   </main>
 </div>
 
+<!-- 2.30d: While you were away. The Director and Producer decided; the dev confirms, sends back or comments. -->
+<div id="away" class="skin">
+  <header>
+    <h1>While you were away</h1>
+    <span class="state" id="aw-state">Loading…</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="switch" data-to="ops">Ops view</button>
+    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
+    <button class="switch" data-to="arcade">Arcade</button>
+  </header>
+  <div class="awaybar" id="aw-bar" hidden></div>
+  <div class="aw-list" id="aw-list"></div>
+  <div class="learned" id="aw-learned"></div>
+</div>
+
 <!-- Arcade: play the last good build, take notes while playing, and walk the studio's dungeon (read-only) -->
 <div id="arcade" class="skin">
   <header>
@@ -824,7 +889,7 @@
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
   const setSkin = (s) => { if (!document.getElementById(s)) return; document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
-  const SKINS = ['tycoon', 'ops', 'plan', 'assets', 'arcade'].filter((k) => document.getElementById(k));
+  const SKINS = ['tycoon', 'ops', 'plan', 'assets', 'arcade', 'away'].filter((k) => document.getElementById(k));
   setSkin(SKINS.includes(fromUrl) ? fromUrl : SKINS.includes(store.get('hudSkin')) ? store.get('hudSkin') : 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
 
@@ -841,7 +906,9 @@
     url0.searchParams.delete('token');
     history.replaceState(null, '', url0.pathname + url0.search);
   }
-  const hubToken = () => memToken || sess.get(tokenKey) || '';
+  // 2.30d (H3): a phone logged in at /phone writes with its session cookie and this per-session CSRF value.
+  const phoneCsrf = () => sess.get('phone_csrf') || '';
+  const hubToken = () => memToken || sess.get(tokenKey) || (phoneCsrf() ? 'phone-session' : '');
   const actor = () => store.get('hubName') || 'war-room-human';
   $('o-name').value = store.get('hubName') || '';
   $('o-save').addEventListener('click', () => {
@@ -852,7 +919,10 @@
   });
   const notify = (msg) => { $('o-actmsg').textContent = msg; };
   async function post(path, body) {
-    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Token': hubToken() }, body: JSON.stringify(body) });
+    const headers = { 'Content-Type': 'application/json' };
+    if (memToken || sess.get(tokenKey)) headers['X-Hub-Token'] = memToken || sess.get(tokenKey);
+    if (phoneCsrf()) headers['X-Phone-CSRF'] = phoneCsrf();
+    const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) throw new Error('The HUB token was refused. Check HUB_TOKEN in .env.');
     if (!res.ok || data.ok === false) throw new Error(data.result?.message || data.error || data.message || `HUB answered ${res.status}`);
@@ -1274,13 +1344,30 @@
     const cards = (s.intent || []).map((e) => `<div class="card" data-intent="${esc(e.id)}"><b class="k">${esc(e.id)}</b> You asked for: <b>${esc(e.asked)}</b>.${e.wont ? ` I will NOT change: <b>${esc(e.wont)}</b>.` : ''}${e.tasks?.length ? ` <span class="note">(${esc(e.tasks.join(', '))})</span>` : ''} <button class="act" data-intentok="${esc(e.id)}" ${dis}>That's right</button></div>`).join('');
     const yes = s.queue.backlog.filter((t) => t.needsYes).map((t) => `<div class="card"><b class="k">${esc(t.id)}</b> An agent proposed: ${esc(short(t.title, 90))} <button class="act" data-taskyes="${esc(t.id)}" ${dis}>Yes, build it</button></div>`).join('');
     const w = s.watchdog || { on: false };
-    const html = (cards || yes ? cards + yes : '<p class="note">Nothing waits on you.</p>') +
+    const html = (cards || yes || (s.pendingReview || []).length || s.away?.review?.length ? cards + yes : '<p class="note">Nothing waits on you.</p>') +
       (nextPh ? `<div class="act-row" data-phasenow><input id="o-phasewords" placeholder="Your words, e.g. start Phase ${nextPh} now" aria-label="Your words for opening the next phase now"> <button class="act" id="o-phasenow" data-phase="${nextPh}" ${dis}>Open Phase ${nextPh} now</button></div><p class="note">Opens the gate at once, even with the exit list unfinished; what's skipped is logged as the risk.</p>` : '') +
+      (s.pendingReview || []).map((p) => `<div class="card" data-pending="${esc(p.task)}"><b class="k">${esc(p.task)}</b> done (pending): ${esc(short(p.title, 70))}. Forced by ${esc(p.by)}${p.model ? ` on ${esc(p.model)}` : ''} because: <b>${esc(p.reason)}</b> <span class="note">(skipped: ${esc(short(p.missing || '', 80))})</span> <button class="act" data-pendingok="${esc(p.task)}" ${dis}>Accept</button> <button class="act" data-pendingno="${esc(p.task)}" ${dis}>Reopen</button></div>`).join('') +
+      (() => { const a = s.away || { on: false, review: [] }; return `<div class="act-row"><button class="act" id="o-away" aria-pressed="${a.on}" ${dis}>${a.on ? "I'm back" : "I'm away"}</button> <span class="note">${a.on ? `Away since ${esc(agoIso(a.since))}: the Director and Producer decide; you review it all when you're back.` : 'Going away? The Director and Producer keep deciding, and you confirm or send back each call on return.'}</span>${a.review?.length ? ` <button class="act switch" data-to="away">Review ${a.review.length} while-you-were-away item${a.review.length === 1 ? '' : 's'}</button>` : ''}</div>`; })() +
+      (() => { const wv = (s.waves?.list || []).find((x) => x.status === 'open'); return s.waves?.on && wv?.tasks?.length ? `<div class="act-row"><button class="act" id="o-wave" ${dis}>Fun wave ${esc(wv.id)} is ready (${wv.tasks.length})</button> <span class="note">Gameplay work waits in the open wave; the fun check runs on the whole batch once you or the Producer mark it ready. Other lanes keep building.</span></div>` : ''; })() +
       `<div class="act-row"><button class="act" id="o-watchdog" aria-pressed="${w.on}" ${dis}>Watchdog: ${w.on ? 'on' : 'off'}</button> <span class="note">${w.on ? `Turned on ${esc(agoIso(w.at))} by ${esc(w.by || '?')}: unanswered checks hand off, looping tasks park, an idle studio stops.` : 'Off (default). Turn it on when nobody is watching the run.'}</span></div>`;
     // Only when something changed, so typing in the box isn't wiped by the next poll.
     if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
   }
   document.addEventListener('click', (ev) => {
+    const pk = ev.target.closest('[data-pendingok],[data-pendingno]');
+    if (pk) { const t = pk.dataset.pendingok || pk.dataset.pendingno; act(`Reviewing ${t}`, async () => (await post('/api/pending-review', { task: t, verdict: pk.dataset.pendingok ? 'close' : 'reopen', by: actor() })).next); return; }
+    const swd = ev.target.closest('#o-yourcall .switch[data-to]');
+    if (swd) { setSkin(swd.dataset.to); return; }
+    if (ev.target.closest('#o-away')) { const on = !(state?.away?.on); act(on ? 'Going away' : 'Coming back', async () => { const r = await post('/api/away', { on, by: actor() }); if (!on) setSkin('away'); return r.next; }); return; }
+    if (ev.target.closest('#o-wave')) { act('Marking the fun wave ready', async () => (await post('/api/wave', { by: actor() })).next); return; }
+    const av = ev.target.closest('[data-awv]');
+    if (av) {
+      const card = av.closest('[data-awid]');
+      const comment = card.querySelector('textarea')?.value.trim() || '';
+      if (av.dataset.awv === 'comment' && !comment) { notify('Write the comment first.'); return; }
+      act('Saving your verdict', async () => (await post('/api/away/verdict', { id: card.dataset.awid, verdict: av.dataset.awv, comment, by: actor() })).next);
+      return;
+    }
     const i = ev.target.closest('[data-intentok]');
     if (i) act(`Confirming ${i.dataset.intentok}`, async () => (await post('/api/intent-confirm', { id: i.dataset.intentok, by: actor() })).next);
     const y = ev.target.closest('[data-taskyes]');
@@ -1563,13 +1650,16 @@
       html: () => prop('right:14px;top:44px', '<div class="onair">ON AIR</div>') + prop('right:12px;bottom:100px', P.ringlight) + prop('right:56px;bottom:100px', P.camera) },
     hacks: { cls: 'wl-grid fl-grid', v: '--wall:#1b1b2f;--wall2:#162447;--trim:#e43f5a;--fa:#1f4068;--fb:#162447',
       html: () => prop('right:14px;top:44px', '<div class="neon" style="border-color:#e43f5a;color:#ff7a8a;background:#2a0f17">HACKS</div>') + prop('right:16px;bottom:106px', P.cubeScreen) },
+    // 2.30d: the watchdog's kennel. Its own room, never on top of anyone else's.
+    kennel: { cls: 'wl-plain r-kennel', v: '--wall:#d7ccc8;--wall2:#bcaaa4;--trim:#6d4c41;--fa:#a1887f;--fb:#8d6e63',
+      html: () => prop('right:14px;bottom:70px', '<span class="doghouse"></span>') + prop('left:16px;bottom:16px', '<span class="bed"></span>') + prop('right:76px;bottom:18px', '<span class="bowl"></span>') },
     engine: { cls: 'wl-rivet fl-hazard', v: '--wall:#607d8b;--wall2:#455a64;--trim:#fdd835;--fa:#9e9e9e;--fb:#757575',
       html: () => prop('right:10px;top:46px', '<div class="belt"><span class="m">WEB</span><span class="track"><i></i></span><span class="m">PORT</span></div>') + prop('right:16px;bottom:110px', P.gear) },
   };
   const roomHtml = (d) => {
     const r = ROOMS[d.baseId || d.id] || ROOMS.engineering;
     return `<div class="room r-${esc(d.baseId || d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Locked: click to switch this division on (it also opens by itself when one of its agents starts work)'}" data-division="${esc(d.baseId || d.id)}">`
-      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span>${d.active ? `<button type="button" class="hire" data-hire="${esc(d.baseId || d.id)}" title="Hire a ${esc((d.roles || ['agent'])[0])} into ${esc(d.name)} (tool and model from .env)">+ Hire</button>` : ''}</div>`;
+      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span>${d.active && d.id !== 'kennel' ? `<button type="button" class="hire" data-hire="${esc(d.baseId || d.id)}" title="Hire a ${esc((d.roles || ['agent'])[0])} into ${esc(d.name)} (tool and model from .env)">+ Hire</button>` : ''}</div>`;
   };
 
   // ----- layout: every position is in office coordinates (the #t-office box) -----
@@ -1593,6 +1683,7 @@
       const n = d.active ? Math.max(1, Math.ceil(s.agents.filter((a) => a.room === d.id).length / CAP)) : 1;
       for (let k = 0; k < n; k++) out.push(k === 0 ? { ...d, baseId: d.id, k } : { ...d, id: `${d.id}-annex-${k + 1}`, baseId: d.id, name: `${d.name} ${k + 1}`, k });
     }
+    out.push({ id: 'kennel', baseId: 'kennel', name: 'Watchdog', active: true, roles: [], k: 0 });
     return out;
   }
   // Doors are in the middle of each room's bottom wall: staff step out into the hallway between rows.
@@ -1877,6 +1968,7 @@
 
     buildRooms(s);
     renderWidgets(s);
+    renderDog(s);
     const present = new Set();
     for (const d of roomList(s)) {
       const g = geo(d.id);
@@ -1941,6 +2033,49 @@
     }
     while (pendingTalks.length) visits.push(pendingTalks.shift());
     pumpVisits();
+  }
+
+  // 2.30d: the watchdog is a dog in its kennel. Off: curled up asleep on its bed. On: it wakes and patrols the room.
+  let dog = null;
+  function renderDog(s) {
+    const g = geo('kennel');
+    if (!g) return;
+    const on = Boolean(s.watchdog?.on);
+    if (!dog || !dog.el.isConnected) {
+      const el = document.createElement('div');
+      el.className = 'wdog';
+      el.dataset.agent = 'watchdog';
+      el.innerHTML = '<span class="tl"></span><span class="bd"></span><span class="lg a"></span><span class="lg b"></span><span class="lg c"></span><span class="lg d"></span><span class="collar"></span><span class="hd"></span><span class="zz">z</span><span class="tag">watchdog</span>';
+      g.el.appendChild(el);
+      dog = { el, on: null, timer: null };
+    }
+    const bed = { x: 26, y: g.el.offsetHeight - 48 };
+    dog.el.title = on ? `Watchdog on (${s.watchdog.by || '?'}, ${agoIso(s.watchdog.at)}): patrolling. Unanswered checks hand off, looping tasks park, an idle studio stops.` : 'Watchdog off: asleep. Turn it on in Ops, "Your call", for runs nobody watches.';
+    if (dog.on === on) return;
+    dog.on = on;
+    clearInterval(dog.timer);
+    dog.el.classList.toggle('asleep', !on);
+    dog.el.classList.toggle('awake', on);
+    dog.el.dataset.state = on ? 'awake' : 'asleep';
+    const put = (x, y) => { dog.el.style.left = `${x}px`; dog.el.style.top = `${y}px`; };
+    if (!on) {
+      dog.el.classList.remove('walking', 'facing-left');
+      put(bed.x, bed.y);
+      return;
+    }
+    // Patrol: walk to a random spot on the kennel floor every few seconds, facing where it goes.
+    const step = () => {
+      const w = g.el.offsetWidth;
+      const h = g.el.offsetHeight;
+      const x = 16 + Math.random() * Math.max(40, w - 120);
+      const y = h * 0.55 + Math.random() * Math.max(10, h * 0.3 - 30);
+      const cur = parseFloat(dog.el.style.left) || bed.x;
+      dog.el.classList.toggle('facing-left', x < cur);
+      dog.el.classList.add('walking');
+      put(x, y);
+      setTimeout(() => dog.el.classList.remove('walking'), 1600);
+    };
+    if (!reduceMotion) { step(); dog.timer = setInterval(step, 2600); } else put(bed.x + 60, bed.y);
   }
 
   // Meetings: everyone invited walks to a table in the meeting room; when it ends they go back to their desks.
@@ -2038,12 +2173,30 @@
       setTimeout(() => { if (!p.visiting && !p.walking && !p.meeting) walkPath(p, [home(p)]); }, 2600);
     }
   }, 5000);
+  // 2.30d: each decision made while the dev was away, with its pictures, clip or details, and three answers.
+  const mediaUrl = (p) => `/api/away/media?path=${encodeURIComponent(p)}`;
+  function renderAway(s) {
+    const a = s.away || { on: false, review: [], learned: {} };
+    const dis = hubToken() ? '' : 'disabled title="Needs the HUB token"';
+    $('aw-state').textContent = a.on ? `You're away (since ${hhmm(a.since)}). The Director and Producer are deciding.` : `${a.review.length} to review`;
+    const bar = $('aw-bar');
+    bar.hidden = !a.on;
+    if (a.on) bar.innerHTML = `Away mode is on. <button class="act" id="o-away" ${dis}>I'm back</button>`;
+    const cards = a.review.map((it) => `<div class="aw" data-awid="${esc(it.id)}"><div class="meta"><b>${esc(it.id)}</b> · ${esc(it.type)} · by ${esc(it.by)} · ${esc(hhmm(it.ts))}${it.task ? ` · ${esc(it.task)}` : ''}</div><div><b>${esc(short(it.title, 140))}</b></div>${(it.media || []).length ? `<div class="media">${it.media.map((m) => m.kind === 'clip' ? `<video src="${esc(mediaUrl(m.path))}" controls muted preload="metadata"></video>` : `<img src="${esc(mediaUrl(m.path))}" alt="${esc(it.title)}" loading="lazy">`).join('')}</div>` : ''}${it.details && it.details !== it.title ? `<div class="details">${esc(it.details)}</div>` : ''}<textarea placeholder="Comment for the workers (optional for redo)" aria-label="Comment on ${esc(it.id)}"></textarea><div class="btns"><button class="ok" data-awv="great" ${dis}>✅ Great</button><button class="no" data-awv="redo" ${dis}>❌ Redo</button><button class="cm" data-awv="comment" ${dis}>💬 Send comment</button></div></div>`).join('');
+    const html = cards || `<p class="note" style="padding:0 4px">${a.on ? 'Decisions show here when you come back.' : 'Nothing to review. When you go away (Ops view, "I\'m away"), every call the Director and Producer make waits here for you.'}</p>`;
+    const list = $('aw-list');
+    if (list.dataset.sig !== html) { list.dataset.sig = html; list.innerHTML = html; }
+    const l = a.learned || {};
+    $('aw-learned').innerHTML = (l.great || l.redo || l.comment) ? `What the Director and Producer learned from you so far: ✅ ${l.great || 0} · ❌ ${l.redo || 0} · 💬 ${l.comment || 0}${Object.keys(l.byDecider || {}).length ? ` (${Object.entries(l.byDecider).map(([k, v]) => `${esc(k)}: ${v.great}/${v.redo}/${v.comment}`).join(', ')})` : ''}` : '';
+  }
+
   function render() {
     renderChrome(state);
     const skin = document.body.dataset.skin;
     if (skin === 'tycoon') renderTycoon(state);
     else if (skin === 'assets') renderAssets(state);
     else if (skin === 'arcade' && typeof renderArcade === 'function') renderArcade(state);
+    else if (skin === 'away') renderAway(state);
     else renderOps(state);
   }
 

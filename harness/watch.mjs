@@ -202,6 +202,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const launched = null;
   // 2.30 (G1): the opt-in watchdog (off unless the dev turned it on).
   if (!dryRun) import('./watchdog.mjs').then(({ watchdogPass }) => watchdogPass(now)).catch(() => {});
+  if (!dryRun) import('./alerts.mjs').then(({ alertPass }) => alertPass()).catch(() => {});
   const checkin = dryRun ? null : producerCheckinIfDue(now, events);
   const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas, launched: launched?.started || [], checkin, decided };
   if (!dryRun) {

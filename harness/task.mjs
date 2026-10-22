@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
-import { checkDone, taskType } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay } from './done-check.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
@@ -19,6 +19,9 @@ import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
 import { startSummary, carryForward } from './carry.mjs';
+import { openPending, readPending } from './pending-review.mjs';
+import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
+import { attachTricks } from './cheatsheet.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -319,8 +322,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
+  joinWaveIfGameplay(target, agent || target.role);
 
   if (!check.ok) {
+    // 2.30d (#9): a forced done is "done (pending)": the lane moves on, an approval card waits for a
+    // person or a reviewer from another model family to close or reopen it (npm run task -- review).
+    const forcer = agent || target.role;
+    const forcedModel = readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.model).pop()?.model || process.env.STUDIO_AGENT_MODEL || null;
+    if (!(acceptedBy && reason)) openPending({ task: target.id, title: target.title, by: forcer, model: forcedModel, reason: reason || 'no reason given', missing: check.missing[0], type: check.type, patch: forcedPatch });
     // Forced past a failing check: tell the Producer, and give it a task to run the check.
     emitEvent({
       type: 'task.forced',
@@ -485,6 +494,13 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
 }
 
 export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
+  // 2.30d (#6): only the Director, Producer and planner (and people) add to the live queue; anyone
+  // else's add waits in studio/proposed.json with a one-line reason until the Producer promotes it.
+  if (!meta.promoted && !isDecider(agent, process.env)) {
+    const pr = propose({ title, role, priority, agent, meta, why: meta.why });
+    if (pr) return pr;
+  }
+  if (meta.why) meta = { ...meta, why: undefined };
   const gate = gateTask({ title, role, meta });
   if (!gate.ok) {
     emitEvent({ type: 'task.refused', agent, status: 'blocked', msg: `Not queued: ${title}. ${gate.message}` });
@@ -520,11 +536,31 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     msg: `Queued ${newTask.id} [${newTask.priority}] (${newTask.role}): ${newTask.title}`,
     meta,
   });
+  // 2.30d (#5): a builder task bigger than size 3 gets a linked planner task to split it, and waits for it.
+  let split = null;
+  if (role === 'builder' && Number(meta.size) > SIZE_CAP && !meta.splitOf) {
+    split = addTask({ title: `Split ${newTask.id} into builder tasks of size ${SIZE_CAP} or less: ${title}`.slice(0, 200), role: 'planner', priority: newTask.priority, agent, meta: { splitOf: newTask.id, infra: true, origin: meta.origin === 'dev-asked' ? 'dev' : undefined, asked: meta.asked, promoted: true } });
+    if (split?.id) {
+      setHold(newTask.id, { after: [...new Set([...(readHolds()[newTask.id]?.after || []), split.id])] }, { by: agent, msg: `${newTask.id} (size ${meta.size}) waits for its split ${split.id}` });
+      emitEvent({ type: 'task.split_needed', agent, task: newTask.id, to: 'planner', msg: `${newTask.id} is size ${meta.size} (builder cap ${SIZE_CAP}): ${split.id} splits it`, meta: { split: split.id, size: meta.size } });
+    }
+  }
+  // 2.30d: up to 3 cheat sheet tricks are matched and pre-approved when the task is added (logged).
+  let tricks = null;
+  if (process.env.STUDIO_AUTO_TRICKS !== '0') {
+    try {
+      const r = attachTricks(newTask.id, { title, tags: [role, meta.type, meta.part, meta.track].filter(Boolean), by: agent });
+      tricks = r.tricks?.length ? r.tricks.map((t) => t.id || t.text.slice(0, 40)) : null;
+    } catch {
+      // the cheat sheet is a help, never a blocker
+    }
+  }
   if (meta.idea) {
     const idea = readIdea(meta.idea);
     writeIdea({ ...idea, stage: 'scheduled', tasks: [...new Set([...(idea.tasks || []), newTask.id])], history: [...(idea.history || []), { stage: 'scheduled', at: new Date().toISOString(), by: agent, note: newTask.id }] });
   }
-  return gate.warnings.length ? { ...newTask, warnings: gate.warnings } : newTask;
+  const extra = { ...(split?.id ? { split: split.id } : {}), ...(tricks ? { tricks } : {}) };
+  return gate.warnings.length ? { ...newTask, ...extra, warnings: gate.warnings } : { ...newTask, ...extra };
 }
 
 /** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
@@ -802,6 +838,41 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  // 2.30d (#9): close or reopen a forced "done (pending)" task: a person, or a reviewer from another model family.
+  if (cmd === 'review' || cmd === 'pending') {
+    const { closePending, listPending } = await import('./pending-review.mjs');
+    if (cmd === 'pending' || !arg1) {
+      const list = listPending();
+      console.log(list.length ? list.map((p) => `${p.task} done (pending) — forced by ${p.by}${p.model ? ` on ${p.model}` : ''}: ${p.reason} [missing: ${p.missing}]`).join('\n') : 'No forced tasks waiting for review.');
+      process.exit(0);
+    }
+    const r = closePending(arg1, { by: typeof flags.by === 'string' ? flags.by : null, model: typeof flags.model === 'string' ? flags.model : null, verdict: flags.reopen ? 'reopen' : flags.close ? 'close' : null, note: typeof flags.note === 'string' ? flags.note : '' });
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    if (r.verdict === 'reopen') reopenTask(arg1, `Forced done reviewed and reopened by ${r.by}: ${r.note || r.reason}`, r.by);
+    console.log(r.message);
+    process.exit(0);
+  }
+  // 2.30d (#6): the proposed list, and the Producer promoting it in batches.
+  if (cmd === 'proposed' || cmd === 'promote') {
+    const { listProposed, promote } = await import('./proposed.mjs');
+    if (cmd === 'proposed') {
+      const list = listProposed();
+      console.log(list.length ? list.map((p) => `${p.id} [${p.priority}] (${p.role}) ${p.title} — ${p.agent}: ${p.why}`).join('\n') : 'Nothing proposed.');
+      process.exit(0);
+    }
+    const ids = flags.all ? 'all' : flags._.slice(1).join(',').split(/[,\s]+/).filter(Boolean);
+    const r = promote(ids, { by: typeof flags.by === 'string' ? flags.by : actor(), drop: flags.drop ? String(flags.drop).split(',') : [], addTask });
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    console.log(r.message);
+    process.exit(0);
+  }
+
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
@@ -847,13 +918,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.asked === 'string' ? { asked: flags.asked } : {}),
         ...(flags.mechanic ? { mechanic: true } : {}),
         ...(type ? { type } : {}),
+        ...(typeof flags.why === 'string' ? { why: flags.why } : {}),
+        ...(typeof flags['split-of'] === 'string' ? { splitOf: flags['split-of'] } : {}),
       },
     });
+    if (created.proposed) {
+      console.log(`Proposed ${created.id} (not on the live queue yet): ${created.message}`);
+      process.exit(0);
+    }
     if (created.error) {
       console.error(`Not queued. ${created.message}`);
       process.exit(1);
     }
     for (const w of created.warnings || []) console.error(`note: ${w}`);
+    if (created.split) console.error(`note: size ${size} is over the builder cap of ${SIZE_CAP}; ${created.split} (planner) splits it first.`);
+    if (created.tricks) console.error(`note: pre-approved cheat sheet tricks: ${created.tricks.join(', ')}`);
     console.log(JSON.stringify(created, null, 2));
     process.exit(0);
   }

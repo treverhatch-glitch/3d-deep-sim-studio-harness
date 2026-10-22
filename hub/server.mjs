@@ -62,6 +62,7 @@ import { readBible, writeBible, checkBible, catalog, readIdeas, signBible, sugge
 import { runIntake } from '../harness/intake.mjs';
 import { readConsent, setConsent, markShown, describeConsent, QUESTION as DATA_QUESTION, DETAIL as DATA_DETAIL } from '../harness/data-consent.mjs';
 import { addIdea, routeIdea } from '../harness/ideas.mjs';
+import { checkSession as phoneSession, parseCookieSid, login as phoneLogin, sessionCookie, LOGIN_PAGE_HTML, readPhone } from '../harness/phone.mjs';
 
 loadDotEnv();
 
@@ -127,8 +128,11 @@ function hostAllowed(req) {
 
 function isReadAuthorized(req, url) {
   if (isLoopback(HOST)) return true;
-  return tokenMatches(headerToken(req)) || tokenMatches(url.searchParams.get('token')) || tokenMatches(cookieToken(req));
+  return tokenMatches(headerToken(req)) || tokenMatches(url.searchParams.get('token')) || tokenMatches(cookieToken(req)) || phoneSession(parseCookieSid(req.headers.cookie)).ok;
 }
+// 2.30d (H3): a phone logged in with a pairing code (npm run phone -- on) reads with its session cookie and
+// writes with that cookie plus the per-session X-Phone-CSRF header. Off unless the dev turned it on.
+const phoneWrite = (req) => phoneSession(parseCookieSid(req.headers.cookie), { write: true, csrf: String(req.headers['x-phone-csrf'] || '') }).ok;
 
 const sseClients = new Set();
 const wsClients = new Set();
@@ -299,7 +303,7 @@ function sendJson(res, status, obj) {
 
 // Writes need the token in a header. A cookie or query string is never enough for a write (no CSRF).
 function isWriteAuthorized(req) {
-  return tokenMatches(headerToken(req));
+  return tokenMatches(headerToken(req)) || phoneWrite(req);
 }
 
 function runCommandCapture(cmd, cwd = REPO_ROOT, timeoutMs = 25000) {
@@ -501,6 +505,19 @@ export function createHubServer() {
     if (!hostAllowed(req)) {
       return sendJson(res, 403, { ok: false, error: 'host not allowed (set HUB_ALLOWED_HOSTS to add one)' });
     }
+    // Phone login (2.30d, H3): the page and the code check come before the token check, only while phone access is on.
+    if (url.pathname === '/phone' && req.method === 'GET') {
+      if (!readPhone().on) return sendJson(res, 404, { ok: false, error: 'phone access is off (npm run phone -- on --by <you>)' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(LOGIN_PAGE_HTML);
+    }
+    if (url.pathname === '/phone/login' && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = phoneLogin(String(body.code || ''), { ip: req.socket.remoteAddress || 'unknown', ua: String(req.headers['user-agent'] || '') });
+      if (!r.ok) return sendJson(res, r.retryAfterSec ? 429 : 401, { ok: false, error: r.error, retryAfterSec: r.retryAfterSec || undefined });
+      res.setHeader('Set-Cookie', sessionCookie(r.sid, new Date(r.expiresAt)));
+      return sendJson(res, 200, { ok: true, csrf: r.csrf, expiresAt: r.expiresAt });
+    }
     if (!isReadAuthorized(req, url)) {
       return sendJson(res, 401, { ok: false, error: 'token required when the HUB listens beyond localhost' });
     }
@@ -520,7 +537,7 @@ export function createHubServer() {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Hub-Token, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Hub-Token, X-Phone-CSRF, Authorization',
       });
       return res.end();
     }
@@ -902,6 +919,58 @@ export function createHubServer() {
       const r = setWatchdog(body.on === true, by);
       broadcastSnapshot();
       return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `Watchdog ${r.watchdog.on ? 'on' : 'off'}.` } : { ok: false, error: r.message });
+    }
+    // 2.30d: away mode and the "while you were away" review, forced-work review, proposals, fun waves.
+    if (url.pathname === '/api/away' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { goAway, comeBack } = await import('../harness/away.mjs');
+      const r = body.on === true ? goAway(by, { note: String(body.note || '').slice(0, 200) }) : comeBack(by);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: body.on === true ? 'Away mode on: the Director and Producer decide; you review on return.' : `Welcome back: ${r.items.length} item(s) to review.` } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/away/media' && req.method === 'GET') {
+      // Screenshots and clips shown on the review cards: only images and videos under qa/reports, studio or assets.
+      const rel = String(url.searchParams.get('path') || '').replace(/\\/g, '/').replace(/^\/+/, '');
+      const file = path.resolve(REPO_ROOT, rel);
+      const types = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.webm': 'video/webm', '.mp4': 'video/mp4' };
+      const type = types[path.extname(file).toLowerCase()];
+      if (!type || !/^(qa\/reports|studio|assets)\//.test(rel) || !file.startsWith(REPO_ROOT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return sendJson(res, 404, { ok: false, error: 'not found' });
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+      return fs.createReadStream(file).pipe(res);
+    }
+    if (url.pathname === '/api/away/verdict' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { verdict } = await import('../harness/away.mjs');
+      try {
+        await verdict(String(body.id || ''), { by, verdict: String(body.verdict || ''), comment: String(body.comment || '').slice(0, 1000) });
+      } catch (err) {
+        return sendJson(res, 400, { ok: false, error: err.message });
+      }
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next: body.verdict === 'great' ? 'Marked great.' : body.verdict === 'redo' ? 'Sent back to redo.' : 'Comment sent to the workers.' });
+    }
+    if (url.pathname === '/api/pending-review' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { closePending } = await import('../harness/pending-review.mjs');
+      const r = closePending(String(body.task || ''), { by, verdict: body.verdict === 'reopen' ? 'reopen' : 'close', note: String(body.note || '').slice(0, 300) });
+      if (r.ok && r.verdict === 'reopen') reopenTask(String(body.task), `Forced done reopened by ${by}: ${r.note || r.reason}`, by);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: r.message } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/wave' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { markReady } = await import('../harness/waves.mjs');
+      const r = markReady({ by });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `${r.wave.id} is batch-ready.` } : { ok: false, error: r.message });
     }
     if (url.pathname === '/api/data-consent' && req.method === 'POST') {
       const body = await readBody(req);

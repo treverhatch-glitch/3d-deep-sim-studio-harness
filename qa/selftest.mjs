@@ -155,7 +155,7 @@ const SABOTAGE = {
   playtest: (d) => edit(d, SIM, plantInvariant(37)),
   soak: (d) => edit(d, SIM, plantInvariant(150)),
   'tick-budget': () => ({ TICK_BUDGET_MS_PER_TICK: '0.0000001' }),
-  'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req));', 'return true;')),
+  'hub-smoke': (d) => edit(d, 'hub/server.mjs', (s) => s.replace('return tokenMatches(headerToken(req)) || phoneWrite(req);', 'return true;')),
   reviewer: (d) => fs.writeFileSync(path.join(d, 'studio/reviews/2026-10-20-T-001.md'), 'Review of T-001. Verdict: approve.\n'),
   assets: (d) => {
     fs.mkdirSync(path.join(d, 'assets'), { recursive: true });
@@ -2235,10 +2235,15 @@ console.log(JSON.stringify({ meter: s.meter, sc: s.sessionCap?.limits, rows: s.s
   // J2: origin tags; an agent's mechanic waits for the dev's yes; other agent work doesn't.
   const add = (args, env = {}) => run(dir, `node harness/task.mjs add ${args}`, env);
   const a1 = add('"Add sprint and jump" --origin dev --asked "add sprint/jump" --infra');
-  const a2 = add('"Add a double jump mechanic" --infra', { STUDIO_LOCK_OWNER: 'builder-2' });
-  const a3 = add('"Tidy the HUD labels" --infra', { STUDIO_LOCK_OWNER: 'builder-2' });
+  // 2.30d (#6): a builder's add waits on the proposed list until the Producer promotes it; the origin rules still apply after.
+  add('"Add a double jump mechanic" --infra --why "players asked for air control"', { STUDIO_LOCK_OWNER: 'builder-2' });
+  add('"Tidy the HUD labels" --infra --why "labels overlap at 1280px"', { STUDIO_LOCK_OWNER: 'builder-2' });
+  run(dir, 'node harness/task.mjs promote --all --by producer-1');
   const j = (r) => { try { return JSON.parse(r.stdout); } catch { return {}; } };
-  const [t1, t2, t3] = [j(a1), j(a2), j(a3)];
+  const bl = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
+  const idOf = (title) => (bl.split('\n').find((l) => l.includes(title))?.match(/\*\*(T-\d+)\*\*/) || [])[1];
+  const [t1, t2, t3] = [j(a1), { id: idOf('double jump') }, { id: idOf('Tidy the HUD') }];
+  const a2 = { stderr: '' };
   const hold = probe(`import { holdReason, holdOwner } from ${u('harness/task-hold.mjs')};
 import { parseNextQueue } from ${u('harness/task.mjs')};
 const q = parseNextQueue();
@@ -2388,7 +2393,7 @@ console.log(JSON.stringify({ good, bad, unwired, none, sim, simOff }));`);
   fs.mkdirSync(path.join(reps, 'clips'), { recursive: true });
   const dc = (title, part = 'renderer') => probe(`import { gameplayChecks } from ${u('harness/done-check.mjs')};
 const checks = []; gameplayChecks({ id: 'T-900', title: ${JSON.stringify(title)} }, '${part}', Date.now() - 60000, (label, ok, why) => checks.push({ label, ok: Boolean(ok), why }));
-console.log(JSON.stringify(checks));`);
+console.log(JSON.stringify(checks));`, { STUDIO_FUN_WAVES: '0' }); // per-task mode (2.30b); waves (2.30d) are tested below
   const writeRep = (i, probes, simFeatures = [], declared = { probes: ['move'], simFeatures: simFeatures.map((f) => f.name) }) => fs.writeFileSync(path.join(reps, `browser_${i}.json`), JSON.stringify({ at: new Date().toISOString(), passed: probes.every((p) => p.ok), probes, simFeatures, declared }));
   const c0 = dc('Fix WASD movement');
   writeRep(1, [{ name: 'move', ok: false, why: 'not camera-relative' }]);
@@ -2564,6 +2569,161 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
   const rl2 = run(dir, 'node scripts/release-ship.mjs 9.9.9-z --dry-run');
   report('release: npm run release -- <version> ships; a bad version or a checkout not on main in step with origin is refused before anything changes', rl.status === 1 && /Usage/.test(rl.stderr) && rl2.status === 1 && /FAIL/.test(rl2.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version !== '9.9.9-z', `${rl.stdout}${rl.stderr}\n${rl2.stdout}${rl2.stderr}`);
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// 2.30d: forced work pending review, the size cap and split, the proposed list, model escalation, tricks on add,
+// fun checks in waves, away mode and its review, phone alerts, phone login, the watchdog's kennel. Each in a copy.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p230d-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  const ev = () => fs.readFileSync(path.join(dir, '.studio', 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  // 2.30c: finished tasks live in studio/DONE.md.
+  const queue = () => ['NEXT.md', 'DONE.md'].map((f) => (fs.existsSync(path.join(dir, 'studio', f)) ? fs.readFileSync(path.join(dir, 'studio', f), 'utf8') : '')).join('\n');
+  const idOf = (title) => (queue().split('\n').find((l) => l.includes(title))?.match(/\*\*(T-\d+)\*\*/) || [])[1];
+  // #9: --force records the reason, the task is done (pending), the lane moves on; another family or a person closes it.
+  run(dir, 'node harness/task.mjs add "Write the dock notes" --type docs --infra');
+  const tf = idOf('Write the dock notes');
+  run(dir, `node harness/task.mjs start ${tf} --agent builder-7 --model claude-sonnet-4-5`);
+  const forced = run(dir, `node harness/task.mjs done ${tf} --agent builder-7 --force --reason "docs check flaky on CI"`);
+  const pend = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'pending-review.json'), 'utf8')).items;
+  const self = run(dir, `node harness/task.mjs review ${tf} --close --by builder-7`);
+  const same = run(dir, `node harness/task.mjs review ${tf} --close --by reviewer-1 --model claude-opus-4`);
+  const agentNoModel = run(dir, `node harness/task.mjs review ${tf} --close --by reviewer-1`);
+  const other = run(dir, `node harness/task.mjs review ${tf} --close --by reviewer-1 --model gemini-2.5-pro`);
+  report('2.30d #9: --force records the reason and opens a pending card; the task is done and the lane moves on', forced.status === 0 && new RegExp(`\\[x\\] \\*\\*${tf}\\*\\*`).test(queue()) && pend[0]?.task === tf && pend[0].reason === 'docs check flaky on CI' && pend[0].family === 'anthropic' && ev().some((e) => e.type === 'task.pending_review' && e.task === tf), forced.stdout + forced.stderr + JSON.stringify(pend));
+  report('2.30d #9: the forcing agent and a same-family reviewer cannot close it; another family (or a person) can', self.status !== 0 && same.status !== 0 && /another model family/.test(same.stderr) && agentNoModel.status !== 0 && other.status === 0 && ev().some((e) => e.type === 'task.pending_closed' && e.task === tf), [self.stderr, same.stderr, agentNoModel.stderr, other.stdout + other.stderr].join('\n'));
+  run(dir, 'node harness/task.mjs add "Write the pier notes" --type docs --infra');
+  const tf2 = idOf('Write the pier notes');
+  run(dir, `node harness/task.mjs done ${tf2} --agent builder-7 --force --reason "no time"`);
+  const reo = run(dir, `node harness/task.mjs review ${tf2} --reopen --by trever --note "needs the pier length"`);
+  report('2.30d #9: a person reopens forced work: it goes back on the queue with the note', reo.status === 0 && new RegExp(`\\[ \\] \\*\\*${tf2}\\*\\*`).test(queue()) && /needs the pier length/.test(fs.readFileSync(path.join(dir, 'studio', 'handoffs', `${tf2}.md`), 'utf8')), reo.stdout + reo.stderr);
+  // #5: a builder task over size 3 gets a linked planner split and waits for it.
+  const big = run(dir, 'node harness/task.mjs add "Build the whole harbour economy" --size 5 --infra');
+  const bigJ = (() => { try { return JSON.parse(big.stdout); } catch { return {}; } })();
+  const holds = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'task-holds.json'), 'utf8')).tasks;
+  report('2.30d #5: task add --size 5 for a builder auto-creates a linked planner split task, and the big task waits for it', big.status === 0 && bigJ.split && new RegExp(`\\(\`planner\`\\) — Split ${bigJ.id} into builder tasks of size 3`).test(queue()) && holds[bigJ.id]?.after?.includes(bigJ.split) && ev().some((e) => e.type === 'task.split_needed'), big.stdout + big.stderr);
+  const small = run(dir, 'node harness/task.mjs add "Paint the bollards" --size 3 --infra');
+  report('2.30d #5: size 3 or less queues normally', small.status === 0 && !/split/i.test(small.stderr), small.stderr);
+  // #6: only the Director, Producer and planner add to the live queue; others propose with a reason.
+  const bNo = run(dir, 'node harness/task.mjs add "Add rope physics" --infra', { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-3' });
+  const bYes = run(dir, 'node harness/task.mjs add "Add rope physics" --infra --size 5 --why "mooring looks stiff"', { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-3' });
+  const inQueue = /Add rope physics/.test(queue());
+  const bProm = run(dir, 'node harness/task.mjs promote --all --by builder-3', { STUDIO_ROLE: 'builder' });
+  const pProm = run(dir, 'node harness/task.mjs promote --all --by producer-1', { STUDIO_ROLE: 'producer' });
+  const dYes = run(dir, 'node harness/task.mjs add "Plan the night market" --type study --infra', { STUDIO_ROLE: 'director', STUDIO_LOCK_OWNER: 'director-1' });
+  report('2.30d #6: a builder\'s add needs a one-line why and waits on the proposed list; the Producer promotes it in a batch (a big one still gets its live planner split); the Director adds directly', bNo.status !== 0 && /--why/.test(bNo.stderr) && bYes.status === 0 && /Proposed P-1/.test(bYes.stdout) && !inQueue && bProm.status !== 0 && pProm.status === 0 && /Add rope physics/.test(queue()) && /\(`planner`\) — Split T-\d+ into builder tasks of size 3 or less: Add rope physics/.test(queue()) && /Plan the night market/.test(queue()) && ev().some((e) => e.type === 'proposed.promoted'), [bNo.stderr, bYes.stdout, bProm.stderr, pProm.stdout + pProm.stderr, dYes.stderr].join('\n'));
+  // #3: after a failed hand-back, one model tier up (suggested, or applied when the tier's model is set).
+  const esc = probe(`import { escalationFor } from ${u('harness/model-tiers.mjs')};
+const t = (type, model) => ({ type, task: 'T-500', model, ts: new Date().toISOString() });
+const one = [t('task.start', 'claude-haiku-4'), t('task.paused')];
+const two = [...one, t('task.start', 'claude-sonnet-4-5'), t('task.paused')];
+console.log(JSON.stringify({ none: escalationFor('T-500', { events: [t('task.start', 'claude-haiku-4')], env: {} }), one: escalationFor('T-500', { events: one, env: {} }), set: escalationFor('T-500', { events: one, env: { STUDIO_TIER_MID_MODEL: 'claude-sonnet-4-5' } }), two: escalationFor('T-500', { events: two, env: {} }), done: escalationFor('T-500', { events: [...one, t('task.done')], env: {} }) }));`);
+  report('2.30d #3: a failed hand-back moves the next session one model tier up (suggested; applied when STUDIO_TIER_<TIER>_MODEL is set)', esc.none === null && esc.one?.from === 'cheap' && esc.one.tier === 'mid' && !esc.one.applied && esc.set?.applied && esc.set.model === 'claude-sonnet-4-5' && esc.two?.from === 'mid' && esc.two.tier === 'top' && esc.done === null, JSON.stringify(esc));
+  const ag = fs.readFileSync(path.join(dir, 'harness', 'agent.mjs'), 'utf8');
+  report('2.30d #3: the launcher applies the escalation when no model was named for the task', /escalationFor\(opts\.task\)/.test(ag) && /model\.escalated/.test(ag), '');
+  // Cheat sheet tricks are matched and pre-approved when the task is added (up to 3, logged).
+  fs.writeFileSync(path.join(dir, 'studio', 'CHEATSHEET.md'), '# Cheat sheet\n- C-001 [dock,boats] Reuse the berth grid → no new layout code\n- C-002 [boats] Keep boat paths in the sim → render reads them\n- C-003 [boats,waves] Waves are a shader → no sim cost\n- C-004 [boats] Extra boat line\n- C-009 [director,boats] Plan boats in size-3 slices\n');
+  const tr = run(dir, 'node harness/task.mjs add "Give the boats wider hulls at the dock" --infra');
+  const trJ = (() => { try { return JSON.parse(tr.stdout); } catch { return {}; } })();
+  const att = fs.existsSync(path.join(dir, '.studio', 'cheatsheet', `${trJ.id}.json`)) ? JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'cheatsheet', `${trJ.id}.json`), 'utf8')) : {};
+  report('2.30d: task add auto-attaches up to 3 matching cheat sheet tricks as pre-approved (never a director line), and logs it', att.tricks?.length === 3 && att.tricks[0].id === 'C-001' && !att.tricks.some((t) => t.id === 'C-009') && att.preapproved?.ids?.length === 3 && ev().some((e) => e.type === 'cheatsheet.preapproved' && e.task === trJ.id), tr.stderr + JSON.stringify(att));
+  // Fun check in waves: a gameplay task closes into the open wave; probes run on the batch once it is ready.
+  const wv = probe(`import { gameplayChecks } from ${u('harness/done-check.mjs')};
+import * as W from ${u('harness/waves.mjs')};
+import fs from 'node:fs';
+const checks = []; gameplayChecks({ id: 'T-901', title: 'Fix WASD movement' }, 'renderer', Date.now() - 60000, (label, ok, why) => checks.push({ label, ok: Boolean(ok), why }));
+W.joinWave('T-901', { by: 'builder-1' }); W.joinWave('T-902', { by: 'builder-2' });
+const ready = W.markReady({ by: 'producer-1' });
+const next = W.joinWave('T-903', { by: 'builder-1' });
+const noPlay = await W.checkWave({ by: 'producer-1' });
+fs.mkdirSync('qa/reports', { recursive: true });
+fs.writeFileSync('qa/reports/browser_9100.json', JSON.stringify({ at: new Date(Date.now() + 1000).toISOString(), probes: [{ name: 'move', ok: false, why: 'not camera-relative' }, { name: 'jump', ok: true }] }));
+const failed = await W.checkWave({ by: 'producer-1' });
+W.markReady({ by: 'producer-1' });
+fs.writeFileSync('qa/reports/browser_9200.json', JSON.stringify({ at: new Date(Date.now() + 2000).toISOString(), probes: [{ name: 'move', ok: true }] }));
+const passed = await W.checkWave({ by: 'producer-1' });
+fs.rmSync('qa/reports/browser_9100.json'); fs.rmSync('qa/reports/browser_9200.json');
+console.log(JSON.stringify({ checks, ready: ready.wave?.id, next: next.id, noPlay: noPlay.result, failed: { r: failed.result, fix: failed.wave?.fixTask, failing: failed.wave?.failing }, passed: passed.result }));`, { STUDIO_ROLE: 'producer' });
+  report('2.30d #6 waves: in wave mode a gameplay task\'s done check names its wave instead of running the probes per task', wv.checks?.length === 1 && wv.checks[0].ok && /joins wave W-1/.test(wv.checks[0].label), JSON.stringify(wv.checks || wv));
+  report('2.30d waves: a batch-ready wave is checked once; a new wave opens for work that keeps closing; a failing play gives one linked fix task; a passing play passes the wave', wv.ready === 'W-1' && wv.next === 'W-2' && wv.noPlay === 'no-play' && wv.failed?.r === 'failed' && /^T-\d+$/.test(wv.failed.fix || '') && /not camera-relative/.test(wv.failed.failing?.[0] || '') && wv.passed === 'passed' && new RegExp(`Fix wave W-1`).test(queue()), JSON.stringify(wv));
+  // Away mode: the Director and Producer decide while the dev is away; the dev confirms, sends back or comments.
+  run(dir, 'node harness/task.mjs add "Tune the ferry timetable" --type docs --infra');
+  const ta = idOf('Tune the ferry timetable');
+  fs.mkdirSync(path.join(dir, 'qa', 'reports', 'shots'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'qa', 'reports', 'shots', 'pier.png'), 'png');
+  const aw = probe(`import * as A from ${u('harness/away.mjs')};
+import { emitEvent } from ${u('harness/event.mjs')};
+import { completeTask } from ${u('harness/task.mjs')};
+import fs from 'node:fs';
+A.goAway('trever', { note: 'sleeping' });
+await new Promise((r) => setTimeout(r, 15));
+emitEvent({ type: 'task.added', agent: 'producer-1', task: 'T-777', msg: 'Queued T-777: Night lights on the pier', meta: { shot: 'qa/reports/shots/pier.png' } });
+emitEvent({ type: 'task.added', agent: 'builder-1', task: 'T-778', msg: 'not a decision' });
+completeTask('${ta}', '', 'producer-1', { force: true, reason: 'fixture', acceptedBy: 'selftest' });
+emitEvent({ type: 'decision.made', agent: 'director-1', msg: 'Ferries before trains', meta: { clip: 'qa/reports/clips/ferry.webm' } });
+const back = A.comeBack('trever');
+const items = A.listReview();
+const pick = (re) => items.find((i) => re.test(i.title));
+const great = await A.verdict(pick(/Night lights/).id, { by: 'trever', verdict: 'great' });
+const redo = await A.verdict(pick(/${ta}/).id, { by: 'trever', verdict: 'redo', comment: 'wrong ferry times' });
+let noComment = null; try { await A.verdict(pick(/Ferries/).id, { by: 'trever', verdict: 'comment' }); } catch (e) { noComment = e.message; }
+await A.verdict(pick(/Ferries/).id, { by: 'trever', verdict: 'comment', comment: 'keep one train line' });
+console.log(JSON.stringify({ n: back.items.length, types: items.map((i) => i.type), media: pick(/Night lights/).media, clip: pick(/Ferries/).media, left: A.listReview().length, learned: A.learnedSummary(), noComment, md: fs.readFileSync('studio/memory/decisions-learned.md', 'utf8') }));`);
+  report('2.30d away: on return every Director/Producer decision made while away is listed with its pictures or clip (worker chatter is not)', aw.n >= 3 && !aw.types?.includes(undefined) && aw.media?.[0]?.kind === 'image' && aw.clip?.[0]?.kind === 'clip' && !JSON.stringify(aw).includes('not a decision'), JSON.stringify(aw).slice(0, 1500));
+  report('2.30d away: ✅ marks it great, ❌ reopens the work, a comment needs words and goes to the workers; the verdicts are kept for the Director and Producer to learn from', aw.left === aw.n - 3 && aw.learned?.great === 1 && aw.learned.redo === 1 && aw.learned.comment === 1 && aw.learned.byDecider?.['producer-1']?.great === 1 && /comment/.test(aw.noComment || '') && /\[redo\]/.test(aw.md || '') && new RegExp(`\\[ \\] \\*\\*${ta}\\*\\*`).test(queue()) && ev().filter((e) => e.type === 'away.verdict').length === 3, JSON.stringify(aw).slice(0, 1500));
+  // Phone alerts: opt-in, no key in a file or the log, the first pass never floods, a real event is sent once.
+  const al = probe(`import * as A from ${u('harness/alerts.mjs')};
+import { emitEvent, readRecentEvents } from ${u('harness/event.mjs')};
+import fs from 'node:fs';
+const calls = []; const fetchImpl = async (url, opts) => { calls.push({ url, h: opts.headers }); return { ok: true }; };
+const off = await A.alertPass({ fetchImpl });
+const noChat = A.setAlerts({ on: true, channel: 'telegram' }, 'trever');
+A.setAlerts({ on: true, channel: 'ntfy', topic: 'studio-x7q2', server: 'https://ntfy.example' }, 'trever');
+const first = await A.alertPass({ fetchImpl, cfg: A.readAlerts() });
+emitEvent({ type: 'studio.stopped', agent: 'watchdog', msg: 'no task finished in 2 h' });
+emitEvent({ type: 'task.done', agent: 'b', msg: 'not alerted' });
+const second = await A.alertPass({ fetchImpl, cfg: A.readAlerts() });
+const third = await A.alertPass({ fetchImpl, cfg: A.readAlerts() });
+const dry = await A.sendAlert({ type: 'studio.stopped', msg: 'x' }, { cfg: { on: true, channel: 'telegram', chatId: '42' }, env: { STUDIO_TELEGRAM_BOT_TOKEN: '123:SECRET-TOKEN' }, dryRun: true });
+console.log(JSON.stringify({ off, noChat: noChat.ok, first, second, third, calls, dry: dry.request?.url, file: fs.readFileSync('.studio/alerts.json', 'utf8'), log: readRecentEvents(200).some((e) => JSON.stringify(e).includes('SECRET-TOKEN')) }));`, { STUDIO_TELEGRAM_BOT_TOKEN: '' });
+  report('2.30d alerts: off by default; turning on never floods; a stop is sent once by ntfy; a Telegram key never reaches a file, the log or a dry run', al.off?.sent === 0 && al.noChat === false && al.first?.sent === 0 && al.second?.sent === 1 && al.third?.sent === 0 && al.calls?.length === 1 && al.calls[0].url === 'https://ntfy.example/studio-x7q2' && /\*\*\*/.test(al.dry || '') && !/SECRET/.test(al.dry || '') && !/token/i.test(al.file || '') && al.log === false, JSON.stringify(al).slice(0, 1200));
+  // Phone access: off by default; a one-time code, rate-limited; the session cookie reads, writes need its CSRF value.
+  const ph = probe(`import * as P from ${u('harness/phone.mjs')};
+import fs from 'node:fs';
+const offLogin = P.login('ABCDEFGH', { ip: '10.0.0.9' });
+const on = P.phoneOn('trever');
+const bad = []; for (let i = 0; i < 6; i++) bad.push(P.login('WRONG123', { ip: '10.0.0.5' }));
+const locked = P.login(on.code, { ip: '10.0.0.5' });
+const ok = P.login(on.code.toLowerCase(), { ip: '10.0.0.6', ua: 'phone' });
+const reuse = P.login(on.code, { ip: '10.0.0.7' });
+const read = P.checkSession(ok.sid);
+const writeNo = P.checkSession(ok.sid, { write: true });
+const writeBad = P.checkSession(ok.sid, { write: true, csrf: 'nope' });
+const writeOk = P.checkSession(ok.sid, { write: true, csrf: ok.csrf });
+const files = ['phone', 'sessions'].map((f) => fs.readFileSync('.studio/phone/' + f + '.json', 'utf8')).join('');
+P.phoneOff('trever');
+const afterOff = P.checkSession(ok.sid);
+console.log(JSON.stringify({ offLogin: offLogin.ok, code: /^[2-9A-HJKMNP-Z]{8}$/.test(on.code), bad5: bad[4].retryAfterSec === undefined && bad[5].retryAfterSec > 0, locked: locked.ok, ok: ok.ok, reuse: reuse.ok, read: read.ok, writeNo: writeNo.ok, writeBad: writeBad.ok, writeOk: writeOk.ok, leaked: files.includes(ok.sid) || files.includes(ok.csrf) || files.includes(on.code), afterOff: afterOff.ok, cookie: P.sessionCookie('x', new Date(Date.now() + 1000)) }));`);
+  report('2.30d phone: off by default; a one-time code logs one phone in; 5 wrong codes lock that address; writes need the session\'s CSRF value; no code, session or CSRF value is stored in clear; off ends every session', ph.offLogin === false && ph.code && ph.bad5 && ph.locked === false && ph.ok && ph.reuse === false && ph.read && ph.writeNo === false && ph.writeBad === false && ph.writeOk && ph.leaked === false && ph.afterOff === false && /HttpOnly; SameSite=Strict/.test(ph.cookie || ''), JSON.stringify(ph));
+  const srv = fs.readFileSync(path.join(dir, 'hub', 'server.mjs'), 'utf8');
+  report('2.30d phone: the hub serves /phone only while phone access is on, and a phone write needs the cookie plus X-Phone-CSRF', /url\.pathname === '\/phone' && req\.method === 'GET'[\s\S]{0,80}readPhone\(\)\.on/.test(srv) && /x-phone-csrf/.test(srv) && /return tokenMatches\(headerToken\(req\)\) \|\| phoneWrite\(req\);/.test(srv), '');
+  // The watchdog is a dog in its own room of the studio floor: asleep when off, patrolling when on.
+  const html = fs.readFileSync(path.join(dir, 'hub', 'v3', 'index.html'), 'utf8');
+  report('2.30d: the watchdog has its own kennel room on the studio floor and a dog that sleeps when off and patrols when on', /id: 'kennel'/.test(html) && /function renderDog/.test(html) && /classList\.toggle\('asleep', !on\)/.test(html) && /setInterval\(step/.test(html) && /id="away" class="skin"/.test(html), '');
+  const hs = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
+const s = buildHudState();
+console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pending: Array.isArray(s.pendingReview), waves: s.waves?.on, alerts: s.alerts?.on, phone: s.phone?.on }));`);
+  report('2.30d: the War Room state carries away mode and its review, pending forced work, proposals, waves, alerts and phone', hs.away && hs.pending && hs.waves === true && hs.alerts === true && hs.phone === false, JSON.stringify(hs));
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.

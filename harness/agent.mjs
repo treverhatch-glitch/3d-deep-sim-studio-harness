@@ -38,6 +38,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { escalationFor } from './model-tiers.mjs';
 import { kickoff } from './kickoff.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
@@ -723,7 +724,15 @@ export function startAgent(opts, { detach = false } = {}) {
   const spend = spentToday();
   if (spend.over) return { ok: false, message: `Not started: the daily token cap is spent (${spend.used} of ${spend.cap}).` };
   const tool = opts.tool || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
-  const model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
+  let model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
+  // 2.30d (plan #3): a task that came back without being done starts one model tier up.
+  if (opts.task && !opts.model) {
+    const esc = escalationFor(opts.task);
+    if (esc && esc.tier !== esc.from) {
+      if (esc.applied) model = esc.model;
+      emitEvent({ type: esc.applied ? 'model.escalated' : 'model.escalation_suggested', agent: opts.by || 'producer', task: opts.task, msg: `${opts.task} was handed back ${esc.failed} time${esc.failed === 1 ? '' : 's'} without being done: ${esc.applied ? `starting on ${esc.model}` : `suggest a ${esc.tier}-tier model (set STUDIO_TIER_${esc.tier.toUpperCase()}_MODEL)`} instead of ${esc.fromModel || 'the last model'} (${esc.from})`, meta: esc });
+    }
+  }
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
   // The Director watches for drift and files corrections; the Producer decides staffing.
   if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };

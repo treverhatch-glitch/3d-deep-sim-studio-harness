@@ -4,6 +4,27 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-d] — 2026-10-23
+2.30d, the steering batch: forced work waits for a second opinion without stopping the lane, big tasks split themselves, only the leads add to the live queue, fun checks run in batches, and the dev can step away and review every call on return. Details in docs/AWAY-AND-ALERTS.md.
+### Added
+- **Forced work is "done (pending)" (plan #9).** `task done --force --reason "…"` records the reason and opens an approval card (studio/pending-review.json, event task.pending_review); the task is done and its lane moves on. A person, or a reviewer from another model family, closes or reopens it (`task pending`, `task review <ID> --close|--reopen --by <name> [--model m]`, or Accept / Reopen in Your call). The forcing agent and same-family reviewers are refused.
+- **Size cap and auto-split (plan #5).** Builder tasks are size 3 at most; `task add --size 4|5` queues a linked planner task ("Split T-x into builder tasks of size 3 or less") and holds the big task until it is done.
+- **Director-only queue (plan #6).** Only the Director, Producer and planner (and people) add to studio/NEXT.md. Other roles' adds go to studio/proposed.json with a one-line `--why`; the Producer promotes them in batches (`task proposed`, `task promote P-1,P-2 | --all [--drop P-3] --by <name>`). The dev's own asks, the watcher and the liaison queue directly.
+- **Model escalation (plan #3).** After a failed hand-back the next session on that task starts one tier up (cheap → mid → top) on `STUDIO_TIER_<TIER>_MODEL`; with none set it is suggested in the event log (model.escalation_suggested), never enforced.
+- **Tricks on add.** `task add` matches up to 3 cheat sheet tricks (never a director line) and attaches them pre-approved, logged as cheatsheet.preapproved. `STUDIO_AUTO_TRICKS=0` turns it off.
+- **Fun check in waves.** A gameplay task closes into the open wave (studio/waves.json) instead of waiting for its own browser play. `npm run wave -- ready` marks the batch ready; `npm run wave -- check` reads the next browser play: pass → the wave passes; fail → one linked "Fix wave" task. Other lanes keep building; new gameplay work joins the next wave. `STUDIO_FUN_WAVES=0` restores the per-task check.
+- **The watchdog in the studio.** A dog in its own kennel room on the Studio Tycoon floor: asleep on its bed while the watchdog is off, awake and patrolling the room while it is on.
+- **Away mode and "While you were away".** `npm run away -- on|back` or I'm away / I'm back in Your call. On return every Director and Producer decision made while away is a card with its screenshots, clip or details; ✅ Great, ❌ Redo (reopens the work) or 💬 Comment (to the workers' hand-off notes). Verdicts are kept in studio/away/reviews.json and studio/memory/decisions-learned.md; the leads read `npm run away -- learned`.
+- **Phone alerts, opt-in.** `npm run alerts -- on --channel ntfy|telegram`: studio stopped, watchdog actions, pending reviews, the away summary and parked tasks reach the dev's phone, at most 5 per watch pass, never the backlog. Keys only in .env.
+- **Phone access with a secure login (H3), opt-in.** `npm run phone -- on` prints a one-time code (only its scrypt hash is stored); /phone logs one phone in with a 12-hour HttpOnly cookie, writes need its per-session CSRF value, 5 wrong codes lock that address for 15 minutes.
+### Changed
+- The 2.30b per-task fun check is the fallback mode (STUDIO_FUN_WAVES=0); sim features (J4) are still per task.
+- An agent's own add (builder, QA, art, reviewer, R&D and other non-lead roles) now needs `--why` and waits for promotion.
+### Self-test
+18 more checks: the pending card and who may close it, reopening forced work, the split task and its hold, the proposed list and promotion, escalation one tier per failed hand-back, tricks on add, waves (done check, batch, fix task, pass), away items with media and the three verdicts, alerts (opt-in, no flood, no key leak), phone login (one-time code, lockout, CSRF, nothing stored in clear), the hub's phone routes, the kennel and the War Room state.
+
+---
+
 ## [2.30.0-c] — 2026-10-23
 2.30c, the quick wins: agents read less at the start, a task that keeps failing the same way stops costing sessions, the Producer starts only when something happened, and a release ships with one command. Details in docs/RELEASE.md.
 ### Added

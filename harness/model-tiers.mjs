@@ -73,3 +73,26 @@ export function acceptModelWarning(by = 'war-room-human', env = process.env) {
   emitEvent({ type: 'models.warning.accepted', agent: rec.by, to: 'producer', msg: `${rec.by} accepted top-tier models on every role (${w.signature || 'none set'}): ${WARNING_TEXT}` });
   return { ok: true, accepted: rec };
 }
+
+/**
+ * 2.30d (plan #3): after a failed hand-back, the next session on that task starts one tier up
+ * (cheap → mid → top). The model for a tier comes from STUDIO_TIER_<TIER>_MODEL (e.g.
+ * STUDIO_TIER_TOP_MODEL=claude-opus-4); with none set, it is only suggested (logged), never enforced.
+ * A hand-back counts as failed when the task went back to the queue without being done since its last start.
+ */
+export const TIER_UP = { cheap: 'mid', mid: 'top', top: 'top', unknown: 'mid' };
+export function escalationFor(taskId, { events = readRecentEvents(20000), env = process.env } = {}) {
+  if (!taskId) return null;
+  const mine = events.filter((e) => e.task === taskId);
+  const lastDone = mine.filter((e) => e.type === 'task.done').pop();
+  const after = lastDone ? mine.slice(mine.indexOf(lastDone) + 1) : mine;
+  const failed = after.filter((e) => e.type === 'task.paused').length;
+  if (!failed) return null;
+  const lastModel = after.filter((e) => (e.type === 'task.start' || e.type === 'agent.session.start') && e.model && e.model !== 'unknown').pop()?.model || null;
+  const from = tierOf(lastModel);
+  // One tier per failed hand-back, capped at top.
+  let tier = from === 'unknown' ? 'mid' : from;
+  for (let i = 0; i < failed; i++) tier = TIER_UP[tier];
+  const model = env[`STUDIO_TIER_${tier.toUpperCase()}_MODEL`] || null;
+  return { task: taskId, failed, from, fromModel: lastModel, tier, model, applied: Boolean(model && tier !== from) };
+}

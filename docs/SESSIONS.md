@@ -88,7 +88,9 @@ scout and keeps it under 150 lines.
   check is owed.
 - **Queue:** the cheat sheet tricks attached to each open task, marked pre-approved, with who approved them and the trick ids.
 
-## Not in 2.29.2
+## Since 2.29.2
 
-The opt-in overnight watchdog, model escalation after a failed hand-back, the task-size cap with
-auto-split and the auto-match of tricks inside `task add` are planned for 2.30d.
+The opt-in overnight watchdog shipped in 2.30a. 2.30d adds the rest: a failed hand-back starts the next
+session one model tier up (`STUDIO_TIER_<TIER>_MODEL`, else suggested), builder tasks are size 3 at most
+(`--size 4|5` queues a linked planner split first), and `task add` attaches up to 3 matching tricks as
+pre-approved (logged; `STUDIO_AUTO_TRICKS=0` turns it off). See docs/AWAY-AND-ALERTS.md and the CHANGELOG.
