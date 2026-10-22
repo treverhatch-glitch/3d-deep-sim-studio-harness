@@ -4,6 +4,27 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-a] — 2026-10-22
+2.30a, the moderate batch: the dev's words drive the queue, the dev can overrule a gate, and the War Room says plainly what waits on whom. Details in docs/STEERING.md.
+### Added
+- **Intent card and task origin (J2).** Tasks are tagged dev-asked or agent-proposed (`task add --origin dev --asked "…"`; an agent's add is agent-proposed). `npm run intent -- echo --asked … --wont … --tasks …` puts "You asked for: X. I will NOT change: Y." in the War Room's new **Your call** box; one click confirms. An agent-proposed mechanic (a phrase, not a lone word) waits for the dev's yes (`task yes <ID> --by <dev>` or the button); other work never waits.
+- **"Do it now" (J3).** `npm run bible -- phase open <n> --now "<the dev's words>" --by <dev>` (or **Open Phase N now**) opens the gate at once and logs what it skipped as the risk (`bible.phase_override`). Agents can only relay it, with the dev's words and where.
+- **Plain status line (J10).** Building now · Waiting on you (what) · Tokens today (models named), at the top of Ops. Every waiting task names its owner and why.
+- **Steering commands (J11).** `task drop <ID> --why "…"` and `task reorder <ID> --to top|bottom|<n>|--before <ID>`.
+- **Watchdog (G1), opt-in.** `npm run watchdog -- on|off|status`, or the switch in Your call. Off by default. When on: unanswered refresh checks hand off after 15 min, a task handed back 3 times in 2 h parks, no task done in 2 h stops the studio.
+- **Arcade: what changed (J8).** Each build lists the tasks finished since the build before; the Arcade shows what changed since you last played. With no saved web build, the engine's web export plays instead of "Nothing to play yet".
+- **Plugins, opt-in:** godot-mcp (pinned 0.1.1) and ccusage (pinned 20.0.40). `npm run budget -- ccusage` copies Claude Code's own daily totals into the ledger; the Budget meter shows them.
+### Fixed
+- **False "limit hit" stops (J12).** A session killed while its last lines were its own transcript (a test's output quoting "usage limit reached" or "429") was marked out of quota. Stream events are now skipped; the quota probe and the cross-family reviewer read only the failed command's error output (a review that mentioned "quota" marked the reviewer out for an hour); the War Room's "out of quota" badge uses the same provider-message test instead of any mention of "quota". A stop now records the counted tokens of the last 5 h and the model, and `npm run budget` shows them.
+- **Scope checks match phrases (J11):** "licence", "mood" and other lone words no longer refuse unrelated tasks; "add a licence system" still does.
+- **HUD noise (J13):** Serena starts with its dashboard closed; no desk or bot in a locked room.
+### Deferred to 2.30b
+J1 real-input fun check, J4 "not done until the build shows it", G7 asset scout. Also not in 2.30a: model escalation, size cap with auto-split, director-only queueing, tiered checks (plan #3, #5, #6, #7).
+### Self-test
+13 more checks: origin tags and the mechanic hold, the dev-only yes (and relays), the intent card, drop and reorder, phrase scope checks, the phase override and its risk, the false quota path and the provider's real one, the stop's numbers, the watchdog off and on, the plugin entries, ccusage into the ledger, and the status line, owners and what-changed in the War Room state.
+
+---
+
 ## [2.29.2] — 2026-10-22
 Stop the waste, finished: the two 2.29 items that didn't ship (the turn budget for one-task sessions and the shorter start), plus the quick wins from the overnight test run on 2.28 (Oct 22, 104 sessions, one top-tier model on every role: 261.6M cache reads, 7.9M fresh input, 1.5M output, all counted by Claude Code; 16 sessions finished nothing; context grew to 315k tokens, up to 126 turns). None of it slows a build: caps hand off, checks are cards. docs/SESSIONS.md.
 ### Added

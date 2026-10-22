@@ -33,7 +33,7 @@
       "repo": "https://github.com/oraios/serena",
       "license": "MIT",
       "division": "core",
-      "what": "Symbol-level code lookup and edits over LSP for large codebases.",
+      "what": "Symbol-level code lookup and edits over LSP for large codebases. Its dashboard stays closed (--open-web-dashboard false) so it never opens over the War Room; it still runs on localhost:24282.",
       "install": "uv (https://docs.astral.sh/uv/)",
       "mcp": {
         "command": "uvx",
@@ -45,7 +45,9 @@
           "--context",
           "ide",
           "--project",
-          "."
+          ".",
+          "--open-web-dashboard",
+          "false"
         ]
       },
       "enabled": false
@@ -168,6 +170,40 @@
       "division": "sound",
       "what": "Local voice lines, dubbing, text-to-speech and transcription, no per-character fees. For dialogue, tutorial lines and localized audio when the game keeps a voice or narrative layer. Model weights and voices have their own terms.",
       "install": "Installer or prebuilt app from the repo's README (review any install script before running it). Runs on CPU, faster with an NVIDIA or Apple Silicon GPU.",
+      "enabled": false
+    },
+    {
+      "id": "godot-mcp",
+      "name": "Godot MCP",
+      "repo": "https://github.com/Coding-Solo/godot-mcp",
+      "license": "MIT",
+      "division": "engineering",
+      "what": "Launch the Godot editor, run the project and read its debug output from an agent. For the engine track (Godot). Set GODOT_PATH if Godot isn't found.",
+      "mcp": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@coding-solo/godot-mcp@0.1.1"
+        ]
+      },
+      "enabled": false
+    },
+    {
+      "id": "ccusage",
+      "name": "ccusage",
+      "repo": "https://github.com/ryoppippi/ccusage",
+      "license": "MIT",
+      "division": "core",
+      "what": "Reads Claude Code's own usage logs on this computer. When on, npm run budget -- ccusage copies its daily totals (tokens per model, cache reads included) into the token ledger beside the harness's own count.",
+      "ledger": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "ccusage@20.0.40",
+          "daily",
+          "--json"
+        ]
+      },
       "enabled": false
     }
   ]

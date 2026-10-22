@@ -16,6 +16,7 @@ import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
+import { isMechanic, originOf, devSays } from './intent.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -479,9 +480,15 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     title,
     status: 'backlog',
   };
+  // 2.30 (J2): every task says whose idea it is; an agent's own mechanic waits for the dev's yes.
+  meta = { ...meta, origin: originOf({ origin: meta.origin, agent, asked: meta.asked }) };
   q.backlog.push(newTask);
   writeNextQueue(q);
   if (meta.after?.length) setHold(newTask.id, { after: meta.after });
+  if (meta.origin === 'agent-proposed' && isMechanic(title, meta)) {
+    setHold(newTask.id, { needsYes: { by: agent, at: new Date().toISOString() } });
+    newTask.needsYes = true;
+  }
   emitEvent({
     type: 'task.added',
     agent,
@@ -494,6 +501,40 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     writeIdea({ ...idea, stage: 'scheduled', tasks: [...new Set([...(idea.tasks || []), newTask.id])], history: [...(idea.history || []), { stage: 'scheduled', at: new Date().toISOString(), by: agent, note: newTask.id }] });
   }
   return gate.warnings.length ? { ...newTask, warnings: gate.warnings } : newTask;
+}
+
+/** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
+export function dropTask(id, { by = actor(), why } = {}) {
+  if (typeof why !== 'string' || !why.trim()) return { ok: false, message: 'Say why it is dropped: --why "…" (kept in the event log and the task\'s notes).' };
+  const q = parseNextQueue();
+  if (q.inProgress.some((t) => t.id === id)) return { ok: false, message: `${id} is in progress. Pause it first (npm run task -- pause ${id} --note "…"), then drop it.` };
+  const i = q.backlog.findIndex((t) => t.id === id);
+  if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue.` };
+  const [t] = q.backlog.splice(i, 1);
+  writeNextQueue(q);
+  setHold(id, { needsYes: null, parked: null, after: null });
+  fs.mkdirSync(HANDOFF_DIR, { recursive: true });
+  fs.appendFileSync(handoffFile(id), `\n## ${new Date().toISOString()} · ${by} (dropped)\n${why}\nTitle was: ${t.title}\n`);
+  emitEvent({ type: 'task.dropped', agent: by, task: id, msg: `${by} dropped ${id} (${t.title}): ${why}`, meta: { task: t } });
+  return { ok: true, message: `${id} is off the queue. Its title and why are in the event log; re-add it with task add if needed.` };
+}
+
+/** Move a waiting task: --to top|bottom|<position from 1>, or --before <T-ID> (2.30, J11). */
+export function reorderTask(id, { to, before, by = actor() } = {}) {
+  const q = parseNextQueue();
+  const i = q.backlog.findIndex((t) => t.id === id);
+  if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue (only waiting tasks move).` };
+  const [t] = q.backlog.splice(i, 1);
+  let at;
+  if (typeof before === 'string') at = q.backlog.findIndex((x) => x.id === before);
+  else if (to === 'top') at = 0;
+  else if (to === 'bottom') at = q.backlog.length;
+  else if (Number(to) >= 1) at = Math.min(q.backlog.length, Number(to) - 1);
+  if (at === undefined || at < 0) return { ok: false, message: 'Usage: npm run task -- reorder <TASK_ID> --to top|bottom|<position> | --before <TASK_ID> --by <name>' };
+  q.backlog.splice(at, 0, t);
+  writeNextQueue(q);
+  emitEvent({ type: 'task.reordered', agent: by, task: id, msg: `${by} moved ${id} to position ${at + 1} of ${q.backlog.length}` });
+  return { ok: true, message: `${id} is now number ${at + 1} of ${q.backlog.length} waiting.` };
 }
 
 function parseFlags(argv) {
@@ -696,10 +737,39 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  // 2.30 (J2): the dev's yes lets an agent-proposed mechanic start.
+  if (cmd === 'yes') {
+    const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
+    if (!t) {
+      console.error('Usage: npm run task -- yes <TASK_ID> --by <dev> [--quote "…" --source "…" when relayed]');
+      process.exit(1);
+    }
+    const who = devSays(typeof flags.by === 'string' ? flags.by : null, { quote: flags.quote || '', source: flags.source || '' });
+    if (!who.ok) {
+      console.error(who.message);
+      process.exit(1);
+    }
+    setHold(arg1, { needsYes: null }, { by: flags.by, msg: `${flags.by} said yes to ${arg1}${who.relayedBy ? ` (relayed by ${who.relayedBy}: "${flags.quote}", ${flags.source})` : ''}` });
+    emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}`, meta: who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {} });
+    console.log(`${arg1} can start.`);
+    process.exit(0);
+  }
+  // 2.30 (J11): steer the queue without hand-editing NEXT.md.
+  if (cmd === 'drop' || cmd === 'reorder') {
+    const by = typeof flags.by === 'string' ? flags.by : actor();
+    const r = cmd === 'drop' ? dropTask(arg1, { by, why: flags.why }) : reorderTask(arg1, { to: flags.to, before: flags.before, by });
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    console.log(r.message);
+    process.exit(0);
+  }
+
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--track web|engine:<name>] [--prototype | --infra]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -737,6 +807,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),
         ...(typeof flags['not-layer'] === 'string' ? { notLayer: flags['not-layer'] } : {}),
+        ...(typeof flags.origin === 'string' ? { origin: flags.origin } : {}),
+        ...(typeof flags.asked === 'string' ? { asked: flags.asked } : {}),
+        ...(flags.mechanic ? { mechanic: true } : {}),
+        ...(type ? { type } : {}),
       },
     });
     if (created.error) {
@@ -748,5 +822,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }

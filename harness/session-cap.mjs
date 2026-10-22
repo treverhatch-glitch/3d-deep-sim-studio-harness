@@ -150,6 +150,7 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, lim
   if (st.state === 'due' && prev !== 'due') emitEvent({ type: 'agent.refresh.due', agent, task, msg: `${agent} passed the refresh point (${p.turns} turns, ${p.context.toLocaleString()} tokens of context, ${model}): hand off at the next breakpoint` });
   if (st.checkDue && f.cardFor !== st.checksOwed) {
     f.cardFor = st.checksOwed;
+    f.cardAt = new Date().toISOString();
     emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task, msg: `Check ${agent}${st.state === 'exception' ? ' (mid-debug exception)' : ''}: ${p.turns} turns, ${p.context.toLocaleString()} tokens of context (${model}). Continue or hand off: npm run session -- check ${agent} continue|handoff --by <you>`, meta: { refreshCheck: true, director: true } });
   }
   writeFlag(agent, f);
