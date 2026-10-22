@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.29.1] — 2026-10-22
+2.29.0's CI was red: three self-test checks (map find, the function-size check, the size ratchet) failed on Linux and Windows.
+### Fixed
+- **No parser is an error, not an empty answer.** `harness/codeindex.mjs` reads JavaScript with the `typescript` dev dependency; where it wasn't installed it returned nothing, so `npm run map -- find` found nothing and the size check passed. Now `map find` and `scripts/check-function-size.mjs` fail and say to run `npm install`, and the done-check's size ratchet names the file it couldn't check.
+- **CI installs the packages** (`npm ci`) before the release gate and the Windows verify; neither did, so the parser was never there.
+- The self-test's 2.29 checks link the harness's `node_modules` into their copy (the copies don't carry it), and a new check proves map find fails loudly without it (404).
+
+---
+
 ## [2.29.0] — 2026-10-22
 Stop the waste: test #3's top open items (Jed's list) and the Grok Bot + Gemini list, item 10.
 ### Added

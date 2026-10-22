@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+      - run: npm ci --no-audit --no-fund # typescript: map find and the size check parse with it
       # Syntax, every required gate (incl. the self-test that proves each gate can fail),
       # the closed-loop failure proof, read-only gates, and the changelog entry.
       - name: npm run release
@@ -58,6 +59,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+      - run: npm ci --no-audit --no-fund
       - name: npm run verify (required gates)
         run: node scripts/run-gates.mjs --required-only --deep
 

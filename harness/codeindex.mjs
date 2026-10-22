@@ -12,6 +12,9 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 // Loaded synchronously (the done-check is synchronous); the harness lists typescript as a dev dependency.
+// Without it a JavaScript file can't be read, and that is an error, not an empty answer (2.29.1: map find and
+// the size check found nothing and still passed).
+export const NO_PARSER = "can't read JavaScript: the typescript package isn't installed here (run npm install, or npm run setup)";
 let ts = null;
 function compiler() {
   if (ts === null) {
@@ -51,7 +54,7 @@ export function indexFile(file, text = fs.readFileSync(file, 'utf8')) {
   if (/\.gd$/i.test(file)) return { functions: indexGd(text), names: [] };
   if (!JS.test(file)) return { functions: [], names: [] };
   const t = compiler();
-  if (!t) return { functions: [], names: [], parser: 'missing' };
+  if (!t) throw Object.assign(new Error(NO_PARSER), { code: 'STUDIO_NO_PARSER' });
   const sf = t.createSourceFile(file, text, t.ScriptTarget.Latest, true, /x$/i.test(file) ? t.ScriptKind.TSX : /ts$/i.test(file) ? t.ScriptKind.TS : t.ScriptKind.JS);
   const line = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
   const functions = [];

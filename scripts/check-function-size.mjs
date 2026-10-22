@@ -42,7 +42,14 @@ export function scan(root, limits = LIMITS()) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const found = scan(root);
+  let found;
+  try {
+    found = scan(root);
+  } catch (err) {
+    if (err.code !== 'STUDIO_NO_PARSER') throw err;
+    console.log(`[function-size] FAIL — ${err.message}`);
+    process.exit(1);
+  }
   if (process.argv.includes('--json')) console.log(JSON.stringify(found, null, 2));
   else if (!found.length) console.log(`[function-size] PASS — no game function over ${LIMITS().fn} lines, no file over ${LIMITS().lines} lines or ${LIMITS().kb} KB`);
   else {

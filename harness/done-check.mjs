@@ -251,8 +251,15 @@ export function sizeGrowth(taskId, files) {
     let before = null;
     const r = spawnSync('git', ['show', `${base}:${f}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     if (r.status === 0) before = r.stdout;
-    const now = overLimits(f, fs.readFileSync(abs(f), 'utf8'), limits);
-    const was = before === null ? [] : overLimits(f, before, limits);
+    let now, was;
+    try {
+      now = overLimits(f, fs.readFileSync(abs(f), 'utf8'), limits);
+      was = before === null ? [] : overLimits(f, before, limits);
+    } catch (err) {
+      if (err.code !== 'STUDIO_NO_PARSER') throw err;
+      out.push(`${f}: the size check ${err.message}`);
+      continue;
+    }
     for (const x of now) {
       const old = was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
       if (!old || x.size > old.size) out.push(`${f}${x.kind === 'function' ? ` ${x.name}()` : ''} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}`);

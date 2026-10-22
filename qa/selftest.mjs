@@ -2081,6 +2081,10 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 // 2.29: npm run map -- find answers in one call; the size ratchet refuses growth past the limit.
 {
   const dir = copyRepo();
+  // The parser is the harness's typescript dev dependency; the copies don't carry node_modules.
+  const noParser = run(dir, 'node harness/map.mjs find spawnCost');
+  report('without typescript, map find says it can\'t read the code instead of finding nothing', noParser.status === 1 && /typescript package isn't installed/.test(noParser.stderr), noParser.stdout + noParser.stderr);
+  if (fs.existsSync(path.join(root, 'node_modules', 'typescript'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const f = run(dir, 'node harness/map.mjs find spawnCost');
   report('map find gives the file and line of a TUNING key in one call', /cartridges\/example-sim\/index\.mjs:\d+\s+TUNING\.spawnCost\b/.test(f.stdout), f.stdout + f.stderr);
   const g = (cmd) => run(dir, `git -c user.email=t@t -c user.name=t ${cmd}`);

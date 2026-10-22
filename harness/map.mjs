@@ -134,7 +134,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: npm run map -- find <name> [--harness]');
       process.exit(2);
     }
-    const hits = await findName(q, { harness: process.argv.includes('--harness') });
+    let hits;
+    try {
+      hits = await findName(q, { harness: process.argv.includes('--harness') });
+    } catch (err) {
+      if (err.code !== 'STUDIO_NO_PARSER') throw err;
+      console.error(`map find: ${err.message}`);
+      process.exit(1);
+    }
     if (!hits.length) console.log(`Nothing named like "${q}" in the game's code${process.argv.includes('--harness') ? ' or the harness' : ' (--harness looks in the harness too)'}.`);
     for (const h of hits) console.log(`${h.file}:${h.start}${h.end !== h.start ? `-${h.end}` : ''}  ${h.kind === 'function' ? `${h.name}(${h.params})  ${h.lines} lines` : h.kind === 'key' ? `${h.name}  (a key)` : `${h.kind} ${h.name}${h.keys ? `  {${h.keys} keys}` : ''}`}`);
     process.exit(0);
