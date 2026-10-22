@@ -77,6 +77,13 @@ export function inWindow(win, now = Date.now()) {
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
 export async function supervise(opts, state, now = Date.now()) {
   const { parseNextQueue, readStop } = await import('./task.mjs');
+  if (!opts.watcher) {
+    const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
+    if (floorsConfig?.autoOpen) {
+      const { tick: tickFloors } = await import('./floors.mjs');
+      await tickFloors({ by: 'supervisor', silent: true });
+    }
+  }
   // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
   const { holdReason, laneOf, lanesClash } = await import('./task-hold.mjs');
@@ -142,9 +149,19 @@ export async function supervise(opts, state, now = Date.now()) {
   if (held.length) why.push(`held: ${held.slice(0, 4).join('; ')}${held.length > 4 ? ` (+${held.length - 4})` : ''}`);
   const evs = readRecentEvents(20000);
   const groups = new Map();
+  const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
+  const gameCartridge = readJson(path.join(REPO_ROOT, 'studio', 'game.json'))?.cartridge ?? readJson(path.join(REPO_ROOT, 'studio', 'gates.json'))?.cartridge;
+  const { taskType } = await import('./done-check.mjs');
+
   for (const t of waiting) {
     // Lanes always count now: a task's own lane, `task lane`, or its --part (harness/task-hold.mjs).
-    const lane = laneOf(t.id, evs) || null;
+    let lane = laneOf(t.id, evs) || null;
+    if (!lane && floorsConfig && gameCartridge && ['change', 'system'].includes(taskType(t))) {
+      const meta = evs.find((e) => e.task === t.id && e.type === 'task.added')?.meta;
+      if (meta?.phase) {
+        lane = `cartridges/${gameCartridge}/floors/phase-${meta.phase}`;
+      }
+    }
     const key = `${t.role}|${lane || ''}`;
     if (!groups.has(key)) groups.set(key, { role: t.role, lane, tasks: [] });
     groups.get(key).tasks.push(t);

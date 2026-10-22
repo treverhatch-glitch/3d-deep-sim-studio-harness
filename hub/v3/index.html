@@ -1360,6 +1360,23 @@
   function renderYourCall(s, ro) {
     const box = $('o-yourcall');
     if (!box) return;
+    let fbox = $('o-floors');
+    if (!fbox) {
+      fbox = document.createElement('div');
+      fbox.id = 'o-floors';
+      fbox.className = 'card';
+      box.parentNode.insertBefore(fbox, box.nextSibling);
+    }
+    if (!s.floors?.configured) {
+      fbox.style.display = 'none';
+    } else {
+      fbox.style.display = '';
+      const f = s.floors;
+      const html = `<h3>Floors</h3><p class="note">Max parallel: ${f.maxParallel} | Auto-open: ${f.autoOpen ? 'on' : 'off'}</p>` +
+        `<div><b>Main Phase ${f.main.n}</b>: ${esc(f.main.stage)}</div>` +
+        f.open.map(fl => `<div><b>Floor ${fl.n}</b>: ${esc(fl.stage)} <span class="note">(by ${esc(fl.by)})</span></div>`).join('');
+      if (fbox.dataset.sig !== html) { fbox.dataset.sig = html; fbox.innerHTML = html; }
+    }
     const dis = ro ? 'disabled title="Needs the HUB token"' : '';
     const ph = s.phases || [];
     const open = ph.filter((p) => p.open).map((p) => p.n).pop() || 0;

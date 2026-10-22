@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 
 export const VERDICTS = path.join(REPO_ROOT, 'studio', 'playtest', 'verdicts.json');
@@ -82,6 +83,17 @@ export function latestVerdict(phase, sinceIso = null) {
 /** What a phase still needs before it can close: [] when ready. */
 export function phaseExitGaps(phase, sinceIso = null) {
   const gaps = [];
+  const floorsConfig = (() => { try { return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio/floors.json'), 'utf-8')); } catch { return null; } })();
+  const scenarioDir = path.join(REPO_ROOT, 'qa', 'scenarios', `phase-${phase}`);
+  if (!fs.existsSync(scenarioDir) && floorsConfig?.requireScenarios) {
+    gaps.push(`required scenario folder qa/scenarios/phase-${phase}/ is missing`);
+  } else if (fs.existsSync(scenarioDir)) {
+    const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-phase-scenarios.mjs'), '--phase', phase], { encoding: 'utf8', timeout: Number(process.env.STUDIO_SCENARIO_TIMEOUT_MS || 60000) + 5000 });
+    if (r.status !== 0) {
+      gaps.push(`phase-scenarios gate failed for Phase ${phase}: ${((r.stderr || '').match(/^(FAIL|ERROR).*$/gm) || [(r.stderr || r.stdout || '').trim().split('\n').pop()]).join('; ')}`);
+    }
+  }
+
   const exitFile = path.join(REPO_ROOT, 'studio', 'bible', `PHASE-${phase}-EXIT.md`);
   if (fs.existsSync(exitFile)) {
     const items = fs.readFileSync(exitFile, 'utf8').match(/^\s*[-*] \[[ xX]\] .+$/gm) || [];

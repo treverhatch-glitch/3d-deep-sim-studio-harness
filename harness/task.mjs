@@ -477,7 +477,11 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
   if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
   const phase = Number(meta.phase);
   if (![1, 2, 3].includes(phase)) return { ok: false, message: 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' };
-  if (phase > (b.phase?.open || 1)) return { ok: false, message: `Phase ${phase} isn't open yet (Phase ${b.phase?.open || 1} is). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
+  const openFloors = (b.phase?.floors || []).map(f => f.n);
+  if (phase > (b.phase?.open || 1) && !openFloors.includes(phase)) {
+    const openList = [b.phase?.open || 1, ...openFloors].filter(Boolean).sort();
+    return { ok: false, message: `Phase ${phase} isn't open yet (open: ${[...new Set(openList)].join(', ')}). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
+  }
   const serves = String(meta.serves || '');
   const pillarOk = /^pillar:/i.test(serves) && (b.pillars || []).some((p) => p.name.toLowerCase().startsWith(serves.slice(7).trim().toLowerCase()) && serves.slice(7).trim());
   const layerId = /^layer:/i.test(serves) ? serves.slice(6).trim() : null;

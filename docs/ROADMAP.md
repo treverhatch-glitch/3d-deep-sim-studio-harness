@@ -27,9 +27,7 @@ a part of the game the player plays: Phase 1 early game, Phase 2 mid game, Phase
 
 ## 2.8.0 — Pre-production, game phases, layers and the Director
 
-**Status: done (2.8.0)**, as described below, with these left for later: phase scenarios
-(`phase-1-early`, …) as a required check before a phase opens (today the gate is the Director's
-`phase-ready` verdict plus a person opening it), storyboard pictures, and an intake form in the War
+**Status: done (2.8.0)**, as described below, with these left for later: storyboard pictures, and an intake form in the War
 Room (the `POST /api/intake` endpoint is ready for it). Guide: `docs/GAME-BIBLE.md`.
 
 Today a new game gets a vision lock, a plan and planning guides, but nothing makes the studio
@@ -217,7 +215,7 @@ From a read-only review of 2.11.0 by Gemini on Windows (2026-10-20), each findin
 
 | # | Problem | Fix | Status |
 | --- | --- | --- | --- |
-| C1 | No content pipeline for a big game. | Content as data under `cartridges/<game>/content/` (JSON with a schema per kept layer, tagged by phase), checked by a gate, written by generators, with a sweep for the economy and unlock curve across the phases. Crossed-out layers need no content. | planned |
+| C1 | No content pipeline for a big game. | Content as data under `cartridges/<game>/content/` (JSON with a schema per kept layer, tagged by phase), checked by a gate, written by generators, with a sweep for the economy and unlock curve across the phases. Crossed-out layers need no content. | schema gate done (2.30f, docs/FLOORS.md); generators and the sweep planned |
 | C2 | Art, audio and narrative are folders and notes, not tools. | One tool each that an agent drives and a gate checks (when the layer is kept): art through Blender presets plus a budget check; audio through a sound preset generator plus loudness and length checks; narrative as structured dialogue files with a lint (missing speakers, dead branches). | planned |
 
 ## 2.15.x to 2.18.0 — After the first real run

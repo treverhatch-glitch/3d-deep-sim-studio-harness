@@ -557,6 +557,18 @@ export function buildHudState() {
     waves: { on: wavesOn(), list: listWaves().slice(0, 5) },
     alerts: (() => { const a = readAlerts(); return { on: Boolean(a.on), channel: a.channel || null }; })(),
     phone: { on: Boolean(readPhone().on) },
+    floors: (() => {
+      const fc = (() => { try { return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'floors.json'), 'utf8')); } catch { return null; } })();
+      const b = (() => { try { return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'bible', 'bible.json'), 'utf8')); } catch { return null; } })();
+      if (!fc || !b) return { configured: false };
+      return {
+        configured: true,
+        maxParallel: fc.maxParallel || 1,
+        autoOpen: fc.autoOpen || false,
+        main: { n: b.phase?.open || 1, stage: b.phase?.stage || 'build' },
+        open: b.phase?.floors || []
+      };
+    })(),
     ccusage: (() => {
       const c = readCcusage();
       const d = c?.days?.at(-1);

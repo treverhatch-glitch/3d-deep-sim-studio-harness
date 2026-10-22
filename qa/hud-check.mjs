@@ -107,6 +107,10 @@ for (let i = 0; i < 2 && trip; i++) {
 }
 sh('harness/overnight.mjs', '--since', '8h');
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
+fs.writeFileSync(path.join(dir, 'studio/floors.json'), JSON.stringify({ maxParallel: 2 }));
+const bFloors = JSON.parse(fs.readFileSync(path.join(dir, "studio/bible/bible.json"), "utf8"));
+bFloors.phase.floors = [{ n: 2, stage: 'build', by: 'hatch', openedAt: new Date().toISOString() }];
+fs.writeFileSync(path.join(dir, 'studio/bible/bible.json'), JSON.stringify(bFloors));
 
 const port = await new Promise((resolve) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => {
@@ -171,9 +175,12 @@ try {
       const wide = await page.evaluate((s) => [...document.querySelectorAll(`#${s} *`)].filter((e) => !e.closest('.ticker') && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > innerWidth + 1).slice(0, 3).map((e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ''}`), skin);
       check(`${size} ${skin}: loads without errors`, errs.length === 0, errs.slice(0, 3).join(' | '));
       check(`${size} ${skin}: nothing runs off the side`, wide.length === 0, wide.join(', '));
+      if (skin === 'ops') check(`${size} ops: the Floors card shows the main phase and Floor 2 (2.30f)`, await until(async () => /Main Phase 1/.test(await page.locator('#o-floors').textContent()) && /Floor 2/.test(await page.locator('#o-floors').textContent()), 4000));
       if (shotsAt) {
         fs.mkdirSync(shotsAt, { recursive: true });
         await page.screenshot({ path: path.join(shotsAt, `${size}-${skin}.png`), fullPage: true });
+        const floorsCard = page.locator('#o-floors');
+        if (skin === 'ops' && await floorsCard.count()) await floorsCard.first().screenshot({ path: path.join(shotsAt, `floors-${size}-${skin}.png`) }).catch(() => {});
       }
       await ctx.close();
     }

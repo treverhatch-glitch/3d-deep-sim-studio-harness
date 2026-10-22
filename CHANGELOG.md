@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-f] — 2026-10-23
+2.30f: parallel floors. A later phase can start its own pipeline while the one before it is in art or polish, behind an objective scenario gate, and game content becomes data with a schema per layer. Details in docs/FLOORS.md.
+### Added
+- **Parallel floors.** `studio/floors.json` (`maxParallel`, `autoOpen`, `requireScenarios`) turns them on; without it nothing changes. The main phase gets a stage (`bible.phase.stage`: build, art, polish, done) and each extra floor is listed in `bible.phase.floors`. `npm run floors -- status | open <n> --by <person> | stage <n> <stage> --by <name> | tick`. A floor opens only as the next phase number (up to 3), never twice, and manually only by a person (the same rule as signing the Bible). With `autoOpen` the supervisor opens the next floor once the newest one is in art or polish, fewer than `maxParallel` phases (the main phase counted) are in build, and the scenarios pass. `task add --phase N` accepts an open floor. Build tasks on a floor default to the lane `cartridges/<game>/floors/phase-<n>`, so the existing lane and lock checks keep floors apart.
+- **Phase scenarios (ROADMAP 2.8.0 leftover).** Scripts in `qa/scenarios/phase-<n>/*.mjs` (`export default async () => ({ ok, why })`) must pass before the next phase or floor opens (`npm run check:scenarios -- --phase <n>`). Each scenario has a time limit (60 s, `STUDIO_SCENARIO_TIMEOUT_MS`); a refusal names the failing scenario and its reason.
+- **Content as data (C1).** `npm run check:content` checks `cartridges/<game>/content/<layer>.json` against `studio/bible/schemas/<layer>.schema.json`: every item needs an id and an integer phase, content for a crossed-out layer fails. Optional gate for now.
+- **HUD:** a Floors card in Ops shows the main phase, its stage and each open floor.
+### Self-test
+New checks: floor open refuses a skipped number, a duplicate, phase 4 and an agent; tick waits while the main phase is in build and opens after art; the parallel limit counts the main phase; failing and hanging scenarios block; floor lanes clash only when they overlap; the content gate passes clean data and fails schema, phase-tag and crossed-out-layer errors. The HUD check sees the Floors card.
+
+---
+
 ## [2.30.0-e] — 2026-10-23
 2.30e: art the game can use (found and adapted), one token ledger across every provider, faster checks while working, and a rehearsal with no model.
 ### Added

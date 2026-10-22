@@ -158,7 +158,7 @@ const now = () => new Date().toISOString();
 const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/');
 
 export function emptyBible() {
-  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [] }, updatedAt: now() };
+  return { version: 1, answers: {}, pillars: [], phases: { 1: {}, 2: {}, 3: {} }, layers: {}, signed: null, phase: { open: 0, history: [], floors: [] }, updatedAt: now() };
 }
 
 export function hasBible() {
@@ -290,7 +290,7 @@ export function signBible(b, by, { via = null } = {}) {
   if (b.signed) b.signHistory = [...(b.signHistory || []), { ...b.signed, amended: b.amended || null }];
   b.signed = { by, at: now(), ...(via ? { via: String(via).slice(0, 200) } : {}) };
   if (resign) delete b.amended;
-  else b.phase = { open: 1, history: [...(b.phase?.history || []), { phase: 1, at: now(), by, reason: 'Bible signed' }] };
+  else b.phase = { open: 1, stage: 'build', history: [...(b.phase?.history || []), { phase: 1, at: now(), by, reason: 'Bible signed' }] };
   writeBible(b);
   emitEvent({ type: 'bible.signed', agent: by, to: 'producer', msg: resign ? `${by} re-signed the Game Bible${via ? ` (approved via ${via})` : ''}; build work can go on with the amended design.` : `${by} signed the Game Bible${via ? ` (approved via ${via})` : ''}. Pre-production is over; Phase 1 (early game) is open for build tasks.` });
   return { ok: true, bible: b, resign };
@@ -331,6 +331,7 @@ export function openPhase(b, n, { by, force = null } = {}) {
   const gaps = open >= 1 ? phaseExitGaps(open, since) : [];
   if (gaps.length && !force) return { ok: false, message: `Phase ${open} isn't proven yet: ${gaps.join('; ')}. Or --force "reason".` };
   b.phase.open = n;
+  b.phase.stage = 'build';
   b.phase.history.push({ phase: n, at: now(), by, reason: force ? `forced: ${force}` : `Director review ${r.file}` });
   writeBible(b);
   emitEvent({ type: force ? 'bible.phase_forced' : 'bible.phase', agent: by || 'producer', to: 'producer', msg: `Phase ${n} (${n === 2 ? 'mid game' : 'endgame'}) is open for build tasks${force ? ` (forced: ${force})` : ''}.` });
