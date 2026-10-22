@@ -132,11 +132,26 @@ const harnessVersion = () => {
  * A tool that hit its limit, and when it resets (1 h if the provider didn't say). The provider's own
  * line is kept word for word, so whoever reads "out of quota" sees what the provider actually said.
  */
+// Only a real limit message from a provider (shared with the launcher, the probe and the reviewer).
+export const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)/i;
+/** The provider's limit line in a failed command's stderr (or stdout when it printed nothing else), or null. */
+export function limitLine(stderr = '', stdout = '', code = 1) {
+  if (code === 0) return null;
+  const lines = `${stderr || ''}`.trim() ? String(stderr).split('\n') : String(stdout || '').split('\n').slice(-5);
+  return lines.reverse().find((l) => QUOTA_ERROR.test(l) && !/"type"\s*:\s*"(?:user|assistant|system|stream_event)"/.test(l)) || null;
+}
 export function markExhausted(tool, text = '', now = Date.now()) {
   const q = readJson(QUOTA_FILE, {});
   const at = parseReset(text, now);
   const until = at || now + 3600000;
-  q[tool] = { until: new Date(until).toISOString(), why: String(text).slice(0, 160), line: String(text).replace(/\s+/g, ' ').trim().slice(0, 240), resetKnown: Boolean(at), at: new Date(now).toISOString(), version: harnessVersion() };
+  // 2.30 (J12): a stop shows the numbers it used: tokens counted in the last 5 h and this week, by model.
+  let used = null;
+  try {
+    const ev = readRecentEvents(20000);
+    const c = cacheSince(tool, now - 5 * 3600000, ev);
+    used = { last5h: usedSince(tool, now - 5 * 3600000, ev), models: c.models };
+  } catch {}
+  q[tool] = { until: new Date(until).toISOString(), why: String(text).slice(0, 160), line: String(text).replace(/\s+/g, ' ').trim().slice(0, 240), resetKnown: Boolean(at), at: new Date(now).toISOString(), version: harnessVersion(), ...(used ? { used } : {}) };
   fs.mkdirSync(path.dirname(QUOTA_FILE), { recursive: true });
   fs.writeFileSync(QUOTA_FILE, `${JSON.stringify(q, null, 2)}\n`);
   return q[tool];
@@ -190,10 +205,12 @@ export function probeTool(tool, { timeoutMs = 90000 } = {}) {
   if (!custom && !argv) return { ok: null, why: `no probe for ${tool}` };
   const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
   const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-  const limited = /usage limit|rate limit|\b429\b|quota|too many requests|credit balance/i.test(out) && r.status !== 0;
+  // 2.30 (J12): the provider's own limit message only; a word like "quota" anywhere in the answer isn't one.
+  const said = limitLine(r.stderr, r.stdout, r.status);
+  const limited = Boolean(said);
   const ok = r.status === 0 && !/"is_error"\s*:\s*true/.test(out);
   if (ok) clearQuota(tool);
-  else if (limited) markExhausted(tool, out.split('\n').reverse().find((l) => /reset|limit|429|quota/i.test(l)) || out.slice(-200));
+  else if (limited) markExhausted(tool, said);
   return { ok, limited, code: r.status, why: ok ? `${tool} answered; its quota mark is cleared` : limited ? `${tool} is really out: ${out.trim().split('\n').pop().slice(0, 160)}` : `${tool} didn't answer (exit ${r.status ?? 'timeout'})` };
 }
 export const exhaustedUntil = (tool, now = Date.now()) => {
@@ -229,8 +246,33 @@ export function budgetStatus(now = Date.now(), events = readRecentEvents(50000))
     const cache = cacheSince(tool, start, events);
     const w = cacheReadWeight();
     const when = out ? (Date.parse(out) - now > 20 * 3600000 ? `${out.slice(5, 10)} ${out.slice(11, 16)} UTC` : `${out.slice(11, 16)} UTC`) : '';
-    return { tool, used, recent, weekly, pct, targetPct, verdict, cacheRead: cache.cacheRead, cacheWeight: w, models: cache.models, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}${cache.models.length ? ` (${cache.models.join(', ')})` : ''}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week, cache reads counted at ${w}x (${cache.cacheRead.toLocaleString()} read)${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.resetKnown === false ? ' (the provider gave no reset time; 1 h assumed)' : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
+    return { tool, used, recent, weekly, pct, targetPct, verdict, cacheRead: cache.cacheRead, cacheWeight: w, models: cache.models, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}${cache.models.length ? ` (${cache.models.join(', ')})` : ''}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week, cache reads counted at ${w}x (${cache.cacheRead.toLocaleString()} read)${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.used ? ` (it stopped at ${mark.used.last5h.toLocaleString()} counted tokens in the last 5 h${mark.used.models?.length ? `, ${mark.used.models.join(', ')}` : ''})` : ''}${mark?.resetKnown === false ? ' (the provider gave no reset time; 1 h assumed)' : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
   });
+}
+
+// ---- ccusage (2.30, opt-in plugin): Claude Code's own usage log, copied beside the harness's count ----
+export const CCUSAGE_FILE = path.join(STUDIO_STATE_DIR, 'ccusage.json');
+export const readCcusage = () => readJson(CCUSAGE_FILE, null);
+/** Run ccusage (only when its plugin is on) and keep its daily totals: tokens per day and model, cache reads apart. */
+export function importCcusage({ run = spawnSync, now = Date.now() } = {}) {
+  let plugin = null;
+  try {
+    plugin = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'plugins.json'), 'utf8')).plugins.find((p) => p.id === 'ccusage');
+  } catch {}
+  if (!plugin?.enabled) return { ok: false, message: 'The ccusage plugin is off. Turn it on first: node harness/plugins.mjs enable ccusage' };
+  const custom = process.env.STUDIO_CCUSAGE_CMD;
+  const r = custom ? run(custom, { shell: true, encoding: 'utf8', timeout: 120000, cwd: REPO_ROOT }) : run(plugin.ledger.command, plugin.ledger.args, { encoding: 'utf8', timeout: 120000, cwd: REPO_ROOT, shell: process.platform === 'win32' });
+  let data;
+  try {
+    data = JSON.parse(String(r.stdout || '').slice(String(r.stdout || '').indexOf('{')));
+  } catch {
+    return { ok: false, message: `ccusage gave no JSON (exit ${r.status ?? 'timeout'}).` };
+  }
+  const days = (data.daily || []).map((d) => ({ date: d.date, input: d.inputTokens || 0, output: d.outputTokens || 0, cacheRead: d.cacheReadTokens || 0, cacheWrite: d.cacheCreationTokens || 0, total: d.totalTokens || 0, models: d.modelsUsed || (d.modelBreakdowns || []).map((m) => m.modelName).filter(Boolean) }));
+  const out = { at: new Date(now).toISOString(), source: 'ccusage', days: days.slice(-14) };
+  fs.mkdirSync(path.dirname(CCUSAGE_FILE), { recursive: true });
+  fs.writeFileSync(CCUSAGE_FILE, `${JSON.stringify(out, null, 2)}\n`);
+  return { ok: true, ledger: out };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -255,6 +297,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const tools = argv[1] ? [argv[1]] : Object.keys(readJson(QUOTA_FILE, {}));
     if (!tools.length) console.log('No tool is marked out of quota.');
     for (const t of tools) console.log(probeTool(t).why);
+    process.exit(0);
+  }
+  if (argv[0] === 'ccusage') {
+    const r = importCcusage();
+    if (!r.ok) {
+      console.error(r.message);
+      process.exit(1);
+    }
+    const d = r.ledger.days.at(-1);
+    console.log(d ? `ccusage, ${d.date}: ${d.total.toLocaleString()} tokens (in ${d.input.toLocaleString()}, out ${d.output.toLocaleString()}, cache reads ${d.cacheRead.toLocaleString()}, cache writes ${d.cacheWrite.toLocaleString()}; ${d.models.join(', ') || 'model not named'}). Kept in .studio/ccusage.json beside the harness's own count.` : 'ccusage has no days yet.');
     process.exit(0);
   }
   if (argv[0] === 'clear') {

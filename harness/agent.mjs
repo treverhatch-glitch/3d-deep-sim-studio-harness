@@ -44,7 +44,7 @@ import { listLocks, release, claim, renewOwner } from './lock.mjs';
 import { savePatch } from './wip.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
-import { markExhausted, toolNamed, weightedTokens, dailyCap } from './budget.mjs';
+import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { cooldown } from './task-hold.mjs';
@@ -57,7 +57,6 @@ const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
 // Only a real limit or auth error counts (run #1: a normal end_turn and selftest output that mentioned
 // "quota" marked tools out and idled the studio for an hour). Read the end of a failed session, or a
 // final result object that says it is an error; never the agent's whole transcript.
-const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)/i;
 const AUTH_ERROR = /\b401\b|unauthori[sz]ed|invalid (?:api|x-api) key|authentication (?:failed|error|required)|not logged in|please (?:run )?\/?login/i;
 export function providerTrouble(log, code) {
   const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -84,6 +83,10 @@ export function providerTrouble(log, code) {
   // A failed session without a result object: only its last lines, and never a line reporting an allowed status.
   for (const l of lines.slice(-30).reverse()) {
     if (/"status"\s*:\s*"allowed"|rate_limit_event/.test(l)) continue;
+    // 2.30 (J12): a stream event (what the agent said, or a tool result it read) is the agent's transcript,
+    // never the provider talking: a killed session's last lines were a selftest's output quoting "429"
+    // and "usage limit reached", and the tool was marked out while the plan had room.
+    if (l.startsWith('{') && /"type"\s*:\s*"(?:user|assistant|system|stream_event|tool_use|tool_result|item\.\w+|message)"/.test(l)) continue;
     // The line has to read as an error from the tool, not text the agent wrote or read.
     if (!/\berror\b|\bfailed\b|too many requests|\b429\b|\b401\b|usage limit reached|hit your (?:usage )?limit|invalid api key|not logged in/i.test(l)) continue;
     const q = l.match(QUOTA_ERROR);
