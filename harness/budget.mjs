@@ -50,9 +50,42 @@ export function weekStart(cfg = {}, now = Date.now()) {
   return d.getTime();
 }
 
-/** Tokens the launcher's agents reported for a tool since a time. */
+/**
+ * Cache reads count (2.29.2). Test #4's overnight run: 97% of all tokens were cache reads, and a meter
+ * that saw only input + output read 4.66M against 100M+ real, so --budget could never trip. They are
+ * cheaper than fresh input, so they count at a weight: STUDIO_CACHE_READ_WEIGHT, or cacheReadWeight in
+ * studio/budget.json, default 0.1. Cache writes are already in tokensIn.
+ */
+export function cacheReadWeight() {
+  const v = process.env.STUDIO_CACHE_READ_WEIGHT ?? readBudget().cacheReadWeight;
+  return v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? 0.1 : Math.max(0, Number(v));
+}
+/** One event's tokens for the meters: input (with cache writes) + output + weighted cache reads. */
+export function weightedTokens(e, w = cacheReadWeight()) {
+  return (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead ?? e.cacheRead) || 0) * w;
+}
+/**
+ * The daily token cap (weighted tokens since midnight UTC). 2.29.2: it had no default (0 = no cap), so
+ * nothing stopped a runaway night. Default 50,000,000, about 1.4x a 10-hour, 104-session overnight
+ * test run measured this way; STUDIO_DAILY_TOKEN_CAP sets it, and off or 0 turns it off.
+ */
+export const DEFAULT_DAILY_TOKEN_CAP = 50000000;
+export function dailyCap(env = process.env) {
+  const v = env.STUDIO_DAILY_TOKEN_CAP;
+  if (v === undefined || v === '') return DEFAULT_DAILY_TOKEN_CAP;
+  if (/^(off|no|false|none)$/i.test(String(v))) return 0;
+  return Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : DEFAULT_DAILY_TOKEN_CAP;
+}
+
+/** Tokens the launcher's agents reported for a tool since a time (cache reads weighted). */
 export function usedSince(tool, since, events = readRecentEvents(50000)) {
-  return events.filter((e) => e.type === 'agent.session.end' && (e.meta?.tool || 'unknown') === tool && Date.parse(e.ts) >= since).reduce((n, e) => n + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0), 0);
+  const w = cacheReadWeight();
+  return Math.round(events.filter((e) => e.type === 'agent.session.end' && (e.meta?.tool || 'unknown') === tool && Date.parse(e.ts) >= since).reduce((n, e) => n + weightedTokens(e, w), 0));
+}
+/** Raw cache reads and the models behind them, for a tool since a time (counts are only comparable within a model). */
+export function cacheSince(tool, since, events = readRecentEvents(50000)) {
+  const ends = events.filter((e) => e.type === 'agent.session.end' && (e.meta?.tool || 'unknown') === tool && Date.parse(e.ts) >= since);
+  return { cacheRead: ends.reduce((n, e) => n + (Number(e.meta?.cacheRead) || 0), 0), models: [...new Set(ends.map((e) => e.model).filter((m) => m && m !== 'unknown'))] };
 }
 
 /**
@@ -193,8 +226,10 @@ export function budgetStatus(now = Date.now(), events = readRecentEvents(50000))
     const mark = out ? quotaMark(tool) : null;
     // The short window (Claude's is 5 hours) apart from the week: a stop is usually the short one.
     const recent = usedSince(tool, now - 5 * 3600000, events);
+    const cache = cacheSince(tool, start, events);
+    const w = cacheReadWeight();
     const when = out ? (Date.parse(out) - now > 20 * 3600000 ? `${out.slice(5, 10)} ${out.slice(11, 16)} UTC` : `${out.slice(11, 16)} UTC`) : '';
-    return { tool, used, recent, weekly, pct, targetPct, verdict, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.resetKnown === false ? ' (the provider gave no reset time; 1 h assumed)' : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
+    return { tool, used, recent, weekly, pct, targetPct, verdict, cacheRead: cache.cacheRead, cacheWeight: w, models: cache.models, exhaustedUntil: out, quotaLine: mark?.line || mark?.why || null, resets: new Date(start + 7 * 86400000).toISOString(), text: `${tool}${cache.models.length ? ` (${cache.models.join(', ')})` : ''}: ${recent.toLocaleString()} tokens in the last 5 h, ${used.toLocaleString()} this week, cache reads counted at ${w}x (${cache.cacheRead.toLocaleString()} read)${weekly ? ` (${Math.round(pct * 100)}% of ${weekly.toLocaleString()}; target ${Math.round(targetPct * 100)}% by now: ${verdict === 'under' ? 'under, start more lanes' : verdict === 'over' ? 'over, slow down' : 'on track'})` : ' (set --weekly to pace)'}${out ? `; out of quota until ${when}${mark?.resetKnown === false ? ' (the provider gave no reset time; 1 h assumed)' : ''}. The provider said: "${(mark?.line || mark?.why || '').slice(0, 160)}". Wrong? npm run budget -- probe ${tool}` : ''}` };
   });
 }
 
@@ -227,6 +262,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   const st = budgetStatus();
+  const cap = dailyCap();
+  console.log(cap ? `Daily cap: ${cap.toLocaleString()} tokens (input + output + cache reads at ${cacheReadWeight()}x); STUDIO_DAILY_TOKEN_CAP changes it, off turns it off.` : 'Daily cap: off (STUDIO_DAILY_TOKEN_CAP=off).');
   console.log(st.length ? st.map((s) => s.text).join('\n') : 'No tool has reported usage yet. Agents started with npm run agent or npm run studio:start report it.');
   console.log(`Order when a tool runs out: ${(readBudget().order || []).join(' → ')}`);
 }

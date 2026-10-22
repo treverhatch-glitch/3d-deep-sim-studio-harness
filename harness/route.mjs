@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDERS, COOLDOWN_DEFAULTS, getChainForRole } from './models.config.mjs';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR, REPO_ROOT } from './event.mjs';
+import { dailyCap } from './budget.mjs';
 
 const COOLDOWN_FILE = path.join(STUDIO_STATE_DIR, 'cooldowns.json');
 const RUNS_DIR = path.join(STUDIO_STATE_DIR, 'runs');
@@ -292,7 +293,7 @@ export async function routeChatCompletion({
 } = {}) {
   loadDotEnv();
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const cap = Number(process.env.STUDIO_DAILY_TOKEN_CAP || 0);
+  const cap = dailyCap();
   if (cap > 0) {
     const used = spendToday();
     if (used >= cap) {

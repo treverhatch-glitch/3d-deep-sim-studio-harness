@@ -99,6 +99,8 @@ Require explicit human or Producer approval before:
 - Large refactors
 - Changing core simulation rules
 
+Tricks attached to your brief as pre-approved (`studio/CHEATSHEET.md`, by the Director or Producer when the task was handed out) are approved for that task; use them without asking. Anything else still needs approval.
+
 ---
 
 ## 6. Token-Saver & Assets

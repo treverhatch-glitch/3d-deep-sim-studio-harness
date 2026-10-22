@@ -38,6 +38,8 @@ import {
   WAR_ROOM_CONFIG_FILE,
 } from '../harness/status.mjs';
 import { emitEvent, getEventPaths, readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR } from '../harness/event.mjs';
+import { acceptModelWarning } from '../harness/model-tiers.mjs';
+import { recordCheck, endForRefresh } from '../harness/session-cap.mjs';
 import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE, readStop, setStop, clearStop } from '../harness/task.mjs';
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
@@ -824,6 +826,27 @@ export function createHubServer() {
       }
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, stopped: readStop() });
+    }
+    // 2.29.2: the game dev accepts top-tier models on every role (a warning, never a block).
+    if (url.pathname === '/api/model-warning' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const r = acceptModelWarning(by);
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, accepted: r.accepted, next: 'Accepted. The warning comes back if the models change.' });
+    }
+    // 2.29.2: a refresh check from the War Room: let the agent continue, or have it hand off now.
+    if (url.pathname === '/api/session-check' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const agent = String(body.agent || '');
+      const r = recordCheck(agent, String(body.decision || ''), { by, note: String(body.note || '').slice(0, 300) });
+      if (!r.ok) return sendJson(res, 400, { ok: false, error: r.message });
+      const h = body.decision === 'handoff' ? await endForRefresh(agent, by) : null;
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next: body.decision === 'handoff' ? (h?.ok ? `${agent} hands off now; a fresh session continues its task.` : `Recorded; ${h?.message || ''}`) : `${agent} continues; next check in 20 turns / 40k tokens.` });
     }
     if (url.pathname === '/api/data-consent' && req.method === 'POST') {
       const body = await readBody(req);

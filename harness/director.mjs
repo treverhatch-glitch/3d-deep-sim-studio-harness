@@ -24,6 +24,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
+import { dailyCap } from './budget.mjs';
 import { parseNextQueue, addTask } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { readBible, checkBible, latestReview, crossedLayersIn, readIdeas, LAYERS, REVIEWS_DIR } from './bible.mjs';
@@ -105,7 +106,7 @@ function maybeStartDirector() {
   const coolMin = Number(process.env.STUDIO_DIRECTOR_COOLDOWN_MIN || 60);
   const lastStart = readRecentEvents(5000).filter((e) => e.type === 'director.started').pop();
   if (lastStart && Date.now() - Date.parse(lastStart.ts) < coolMin * 60000) return { started: false, why: `a Director was started ${Math.round((Date.now() - Date.parse(lastStart.ts)) / 60000)} min ago (cooldown ${coolMin} min)` };
-  const cap = Number(process.env.STUDIO_DAILY_TOKEN_CAP || 0);
+  const cap = dailyCap();
   if (cap > 0 && spendToday() >= cap) return { started: false, why: 'the daily spend cap is reached' };
   const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'director-run.log'), 'a');
   const child = spawn(cmd, { cwd: REPO_ROOT, shell: true, detached: true, stdio: ['ignore', log, log], env: { ...process.env } });

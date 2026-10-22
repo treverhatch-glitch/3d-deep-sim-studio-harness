@@ -47,6 +47,9 @@
   .signals:empty { display: none; }
   .sig { border: 1px solid; border-radius: 6px; padding: 3px 10px; font-size: 14px; line-height: 1.4; max-width: 100%; overflow-wrap: anywhere; }
   .sig b { font-weight: 700; margin-right: 4px; }
+  .sig.warn { border-color: #ff9f1a; background: rgba(255,159,26,.08); } .sig.warn button { margin-left: 8px; }
+  .rf { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 12px; border: 1px solid var(--quiet); } .rf.due { border-color: #f5b83d; } .rf.exception { border-color: #c084fc; } .rf.checkdue { border-color: #ff5a5f; } .rf.approved { border-color: #43a047; color: #43a047; }
+  .tricks { display: block; margin: 2px 0 0 28px; font-size: 12px; color: var(--quiet); } .tricks li { list-style: '→ '; overflow-wrap: anywhere; }
   .sig.you { border-color: #f5b83d; } .sig.red { border-color: #ff5a5f; } .sig.stall { border-color: #c084fc; } .sig.pace { border-style: dashed; opacity: .85; }
   #tycoon .signals { background: #4a2e1a; color: #ffe9b5; font: 16px VT323, monospace; }
   #plan .modes { display: grid; gap: 8px; }
@@ -595,6 +598,8 @@
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
       <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
       <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
+      <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
+      <section><h2>Sessions and context <small>refresh by default</small></h2><div id="o-sessions"></div></section>
       <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
       <section><h2>Model calls today</h2><div id="o-router"></div></section>
       <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
@@ -1194,9 +1199,11 @@
     // Most urgent first; the file order breaks ties. The rest are counted, not hidden silently.
     const rank = { P0: 0, P1: 1, P2: 2, P3: 3 };
     const byPri = (list) => list.map((t, i) => [t, i]).sort((a, b) => (rank[a[0].priority] ?? 9) - (rank[b[0].priority] ?? 9) || a[1] - b[1]).map(([t]) => t);
-    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${t.hold ? ` <span class="hold" title="It can't start yet">${esc(t.hold)}</span>` : ''}${acts[label](t)}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
+    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${t.hold ? ` <span class="hold" title="It can't start yet">${esc(t.hold)}</span>` : ''}${acts[label](t)}${label !== 'Done' && s.cheatsheet?.[t.id]?.tricks?.length ? `<ul class="tricks" data-tricks="${esc(t.id)}" title="From studio/CHEATSHEET.md (npm run cheatsheet -- attach ${esc(t.id)})"><span class="rf approved" data-preapproved="${esc(t.id)}">pre-approved by ${esc(s.cheatsheet[t.id].preapproved?.approvedBy || s.cheatsheet[t.id].by || '?')}</span>${s.cheatsheet[t.id].tricks.map((k) => `<li>${k.id ? `<b>${esc(k.id)}</b> ` : ''}${esc(k.text)}</li>`).join('')}</ul>` : ''}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
     // Every open task is listed; the list scrolls inside its box. Done shows the latest ten.
     $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, Infinity) + lane('Next up', s.queue.backlog, Infinity) + lane('Done', [...s.queue.done].reverse(), 10);
+    renderMeter(s.meter);
+    renderSessions(s.sessionCap, ro);
     $('o-act').classList.toggle('ro', ro);
     $('o-actstate').textContent = ro ? 'read-only' : `as ${actor()}`;
 
@@ -1224,6 +1231,31 @@
   let tokWin = 'last5h';
   let tokLast = null;
   const big = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
+  // 2.29.2: today's tokens with cache reads counted, against the daily cap; the model is named on every count.
+  function renderMeter(m) {
+    const box = $('o-meter');
+    if (!box || !m) return;
+    const rows = m.byModel || [];
+    box.innerHTML = `<p>${m.cap ? `<b>${big(m.used)}</b> of ${big(m.cap)} tokens today (${m.pct}%)` : `<b>${big(m.used)}</b> tokens today; daily cap off`}. Input + output + cache reads at ${m.cacheWeight}x.</p>` +
+      (m.cap ? `<div class="bar" role="meter" aria-label="Daily cap used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, m.pct)}" style="height:8px;background:var(--line,#333);border-radius:4px"><i style="display:block;height:100%;width:${Math.min(100, m.pct)}%;background:${m.pct >= 90 ? '#ff5a5f' : m.pct >= 70 ? '#f5b83d' : '#43a047'};border-radius:4px"></i></div>` : '') +
+      (rows.length ? `<table class="score" id="o-meter-models"><tr><th>Model</th><th>Sessions</th><th>In</th><th>Out</th><th>Cache reads</th><th>Counted</th></tr>${rows.map((r) => `<tr><td>${esc(r.model)}</td><td>${r.sessions}</td><td>${big(r.tokensIn)}</td><td>${big(r.tokensOut)}</td><td>${big(r.cacheRead)}</td><td>${big(r.counted)}</td></tr>`).join('')}</table><p class="note">Counts are each tool's own; compare tokens within a model, since every model family counts text differently.</p>` : '<p class="note">No launched session has ended today.</p>');
+  }
+  // 2.29.2: each launched session against the refresh point; flagged mid-debug sessions and owed checks.
+  function renderSessions(sc, ro) {
+    const box = $('o-sessions');
+    if (!box || !sc) return;
+    const l = sc.limits;
+    const rows = sc.sessions || [];
+    const badge = (r) => r.state === 'exception' ? '<span class="rf exception">mid-debug, flagged</span>' : r.state === 'due' ? '<span class="rf due">refresh due</span>' : '<span class="rf">ok</span>';
+    box.innerHTML = `<p class="note">Refresh at ${l.turns} turns or ${big(l.context)} tokens of context; ceiling ${l.ceilingTurns} turns; past it, a check every ${l.checkTurns} turns / ${big(l.checkTokens)} tokens.</p>` +
+      (rows.length ? `<table class="score" id="o-sessions-table"><tr><th>Agent</th><th>Turns</th><th>Context</th><th>State</th><th></th></tr>${rows.map((r) => `<tr data-session="${esc(r.agent)}"><td>${esc(r.agent)}${r.running ? '' : ' <span class="note">(ended)</span>'}${r.task ? ` · ${esc(r.task)}` : ''}</td><td>${r.turns} / ${l.turns}</td><td>${big(r.context)} / ${big(l.context)} <span class="note">${esc(r.model)}</span></td><td>${badge(r)}${r.checkDue ? ' <span class="rf checkdue">check due</span>' : ''}${r.exception ? `<div class="note">${esc(r.exception.why)}</div>` : ''}${r.checks.length ? `<div class="note">Checked ${r.checks.length}x, last by ${esc(r.checks[r.checks.length - 1].by)}: ${esc(r.checks[r.checks.length - 1].decision)}</div>` : ''}</td><td>${r.running && r.state !== 'ok' ? `<button type="button" data-sessioncheck="continue" data-agent="${esc(r.agent)}" ${ro ? 'disabled' : ''}>Continue</button> <button type="button" data-sessioncheck="handoff" data-agent="${esc(r.agent)}" ${ro ? 'disabled' : ''}>Hand off</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="note">No launched session has reported yet.</p>');
+  }
+  document.addEventListener('click', (ev) => {
+    const a = ev.target.closest('[data-acceptmodels]');
+    if (a) act('Accepting the model warning', async () => (await post('/api/model-warning', { by: 'war-room-human' })).next);
+    const c = ev.target.closest('[data-sessioncheck]');
+    if (c) act(`Check ${c.dataset.agent}`, async () => (await post('/api/session-check', { agent: c.dataset.agent, decision: c.dataset.sessioncheck, by: 'war-room-human' })).next);
+  });
   function renderTokens(tk) {
     tokLast = tk || tokLast;
     const box = $('o-tokens');
@@ -1977,6 +2009,8 @@
       sig.needsYou.length ? chip('you', `Needs you (${sig.needsYou.length})`, sig.needsYou, '') : '',
       sig.red.length ? chip('red', 'A check is red:', sig.red.map((g) => `${g} (npm run verify -- --only ${g})`), '') : '',
       sig.stalled.length ? chip('stall', `Agent stalled (${sig.stalled.length})`, sig.stalled, '') : '',
+      s.modelWarning?.show ? `<span class="sig warn" id="model-warning" role="alert"><b>Top-tier models on every role</b>${esc(s.modelWarning.text)} <span class="note">(${esc(s.modelWarning.roles.map((r) => `${r.role}: ${r.model}`).join(', '))}; suggested: builders and Producer mid, Director and planner top, check-ins cheap, reviewer another family)</span><button type="button" data-acceptmodels ${hubToken() ? '' : 'disabled title="Needs the HUB token"'}>I accept</button></span>` : '',
+      (s.sessionCap?.sessions || []).some((r) => r.running && r.checkDue) ? chip('you', 'Check an agent:', s.sessionCap.sessions.filter((r) => r.running && r.checkDue).map((r) => `${r.agent} is past the refresh point${r.exception ? ' (mid-debug)' : ''}: ${r.turns} turns, ${big(r.context)} tokens (${r.model})`), '') : '',
     ].join('');
     document.querySelectorAll('[data-signals]').forEach((el) => { el.innerHTML = html; });
     const launched = (s.launched || []).filter((a) => a.running);
