@@ -2455,7 +2455,7 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
   const [summary, carry = ''] = (st.stderr.split('Your brief:')[1] || '').split('\nPicking up where someone else stopped.');
   const carryBody = carry.split('\n').slice(1).join('\n');
   report('#4: task start prints the brief path and a 10-line summary, and a carry-forward note of at most 3k characters instead of the whole history', long.length > 20000 && /\.studio\/briefs\/T-003\.md/.test(st.stderr) && summary.trim().split('\n').length <= 11 && carryBody.length <= 3000 && /NEWEST: the golden moved/.test(carryBody) && !('handoff' in js) && js.handoffFile === 'studio/handoffs/T-003.md' && !st.stderr.includes('note 3 note 3'), `${st.stderr.slice(0, 1500)}\n${carryBody.length}`);
-  const longNote = 'x'.repeat(9000);
+  const longNote = 'x'.repeat(4000); // under cmd.exe's 8191-character command line on Windows
   run(dir, `node harness/task.mjs pause T-003 --agent b-1 --note "${longNote}"`);
   const h = fs.readFileSync(path.join(dir, 'studio', 'handoffs', 'T-003.md'), 'utf8');
   const last = h.split(/\n## /).pop();
