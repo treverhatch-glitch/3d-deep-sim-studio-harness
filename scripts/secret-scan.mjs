@@ -28,7 +28,7 @@ function listFiles() {
   const out = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
-      if (e.name === '.git' || e.name === 'node_modules') continue;
+      if (e.name === '.git' || e.name === 'node_modules' || e.name === '.lanes') continue;
       const rel = dir ? `${dir}/${e.name}` : e.name;
       if (e.isDirectory()) walk(rel);
       else if (e.isFile()) out.push(rel);

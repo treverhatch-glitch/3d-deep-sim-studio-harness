@@ -4,6 +4,29 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.29.0] — 2026-10-22
+Stop the waste: test #3's top open items (Jed's list) and the Grok Bot + Gemini list, item 10.
+### Added
+- **One working copy per lane.** An agent the launcher starts with a code lane works in its own git worktree, `.lanes/<agent>/`, on its own branch, so another builder's half-done edits can't reach its tests or commits (test #3: 2 browser-play fails and several forced-done tasks came from the shared checkout).
+  - `studio/` and `.studio/` stay shared (linked, and left out of the copy's own checkout), so there is one board, one set of claims and one event log. `.env` is copied; `node_modules` folders are linked (junctions on Windows).
+  - `task done` in a copy refuses uncommitted work, rebases on the studio's branch, runs the everyday checks again if that branch moved, then fast-forwards the studio's branch. A conflict or a red check is the agent's to fix; nothing is merged half-checked.
+  - A session that ends without finishing keeps its commits on its branch; the next agent on that task gets them merged into its copy, and uncommitted files are saved in `.studio/wip/`. Stop all, Pause and a dead session's clean-up do the same.
+  - Each agent's verify is kept in `.studio/gates/<agent>.json`, and its done-check reads its own.
+  - Needs git 2.42 or newer; on older git or with `STUDIO_WORKTREES=off` agents share one checkout as before. Preflight says which, and `--fix` removes copies left by ended sessions (keeping unmerged commits on their branches).
+- **The launcher finishes what an agent forgot to.** 18 of 64 sessions in test #3 ended without `task done`, most while a full verify ran in the background, which dies with the session. When a session ends cleanly holding a task, the launcher runs its done-check (and the everyday verify if only that is missing) and closes the task when it passes; otherwise it is handed back as before. Not for tasks whose done is a decision (type none). `STUDIO_AUTO_FINISH=off` turns it off.
+- **Long commands stay in the foreground:** Claude Code agents get a 10-minute shell timeout (`BASH_DEFAULT_TIMEOUT_MS`), and the kickoff says how long the last full verify took.
+- **`npm run map -- find <name>`:** where a function, constant or TUNING key is, with its arguments and line range, in one call (a real parse with the TypeScript compiler; GDScript by line scan). The kickoff now points to it instead of "read the map first": Jed's sandbox A/B found that reading a map, then line ranges, added turns and cost 27% more.
+- **The size ratchet:** `scripts/check-function-size.mjs` (optional gate) lists game functions over 80 lines and files over 400 lines or 30 KB. A task can't finish if it made one bigger or made a new one; edits inside one that don't grow it pass. On Next Floor it finds `step()` at 227 lines.
+### Decided
+- **Closed-loop auto-fix (the PDF's item 11):** the middle way. A failing gate already becomes a P0 "Fix" task with the trace (escalated after 3); now that task is worked in its own copy and reaches the studio's branch only after its checks pass. Nothing is committed without an agent and the gates.
+### Fixed
+- **The done-check counts commits from the commit a task started from** (recorded on `task.start`), not by the clock: git keeps whole seconds, so a quick agent's commit in the start's second was missed. A task started before 2.29 still goes by time.
+- When the launcher can't close a task, it says why (`agent.finish_refused`).
+- The hub smoke test waits up to 10 s per request (one timed out at 3 s on a busy machine).
+- Self-test: 8 more checks (403).
+
+---
+
 ## [2.28.0] — 2026-10-22
 From the Grok Bot and Gemini reviews (their combined list, items 1–7), Jed's test #3 report on 2.27.2, and the notes his agents left during the run.
 ### Windows

@@ -16,7 +16,7 @@ const max = Number(process.argv.includes('--max') ? process.argv[process.argv.in
 const walk = (d, out = []) => {
   if (!fs.existsSync(d)) return out;
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    if (['node_modules', 'dist', 'build', '.git'].includes(e.name)) continue;
+    if (['node_modules', 'dist', 'build', '.git', '.lanes', '.studio'].includes(e.name)) continue;
     const f = path.join(d, e.name);
     if (e.isDirectory()) walk(f, out);
     else if (/\.(m?js|tsx?|jsx)$/.test(e.name) && !/\.min\./.test(e.name)) out.push(f);

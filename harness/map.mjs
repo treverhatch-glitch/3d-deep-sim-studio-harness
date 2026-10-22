@@ -4,6 +4,8 @@
  *
  *   npm run map              write .studio/MAP.md and .studio/MAP.json (a script: no model, no tokens)
  *   npm run map -- --check   exit 1 when the map is older than the code it describes
+ *   npm run map -- find <name> [--harness]   where a function, constant or key is, its arguments and line
+ *                            range, in one call (2.29). The game's code by default; --harness adds the harness.
  *
  * For each code file: what it is (the first line of its header comment), its size, what it exports,
  * and which lane and agent hold it right now. Agents are told to read the map before searching.
@@ -19,7 +21,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 export const MAP_MD = path.join(STUDIO_STATE_DIR, 'MAP.md');
 export const MAP_JSON = path.join(STUDIO_STATE_DIR, 'MAP.json');
 const CODE = /\.(mjs|js|cjs|ts|tsx|jsx|py|gd|cs|gdshader|html|css)$/i;
-const SKIP_DIR = new Set(['node_modules', '.git', '.studio', 'dist', 'build', '__pycache__', 'reports', 'golden', 'regressions', 'fixtures', '.godot', 'export', 'assets']);
+const SKIP_DIR = new Set(['node_modules', '.git', '.studio', '.lanes', 'dist', 'build', '__pycache__', 'reports', 'golden', 'regressions', 'fixtures', '.godot', 'export', 'assets']);
 // Where code lives: the harness, and the game (cartridges/, game/, web/, engine/).
 const ROOTS = ['harness', 'hub', 'qa', 'scripts', 'tools', 'cartridges', 'game', 'web', 'engine', 'src'];
 
@@ -103,7 +105,40 @@ export function mapStale() {
   return files.some((f) => fs.statSync(path.join(REPO_ROOT, f)).mtimeMs > at + 1000);
 }
 
+/**
+ * Where a name is: functions (with arguments and line range), top-level constants, and keys of top-level
+ * object literals (TUNING.ghostLungeRange). Case-insensitive; an exact name sorts first.
+ */
+export async function findName(query, { harness = false } = {}) {
+  const { indexFile, codeFiles } = await import('./codeindex.mjs');
+  const q = String(query || '').toLowerCase();
+  const roots = harness ? ROOTS : ROOTS.filter((r) => !['harness', 'hub', 'qa', 'scripts', 'tools'].includes(r));
+  const hits = [];
+  for (const f of codeFiles(REPO_ROOT, roots)) {
+    const text = fs.readFileSync(path.join(REPO_ROOT, f), 'utf8');
+    if (!text.toLowerCase().includes(q)) continue;
+    const ix = indexFile(f, text);
+    for (const fn of ix.functions) if (fn.name.toLowerCase().includes(q)) hits.push({ file: f, ...fn, exact: fn.name.toLowerCase() === q });
+    for (const n of ix.names) {
+      if (n.name.toLowerCase().includes(q)) hits.push({ file: f, ...n, keys: n.keys ? n.keys.length : undefined, exact: n.name.toLowerCase() === q });
+      for (const k of n.keys || []) if (k.name.toLowerCase().includes(q)) hits.push({ file: f, kind: 'key', name: `${n.name}.${k.name}`, start: k.line, end: k.line, exact: k.name.toLowerCase() === q });
+    }
+  }
+  return hits.sort((a, b) => Number(b.exact) - Number(a.exact) || a.file.localeCompare(b.file) || a.start - b.start).slice(0, 40);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  if (process.argv[2] === 'find') {
+    const q = process.argv[3];
+    if (!q) {
+      console.error('Usage: npm run map -- find <name> [--harness]');
+      process.exit(2);
+    }
+    const hits = await findName(q, { harness: process.argv.includes('--harness') });
+    if (!hits.length) console.log(`Nothing named like "${q}" in the game's code${process.argv.includes('--harness') ? ' or the harness' : ' (--harness looks in the harness too)'}.`);
+    for (const h of hits) console.log(`${h.file}:${h.start}${h.end !== h.start ? `-${h.end}` : ''}  ${h.kind === 'function' ? `${h.name}(${h.params})  ${h.lines} lines` : h.kind === 'key' ? `${h.name}  (a key)` : `${h.kind} ${h.name}${h.keys ? `  {${h.keys} keys}` : ''}`}`);
+    process.exit(0);
+  }
   if (process.argv.includes('--check')) {
     const stale = mapStale();
     console.log(stale ? 'The map is older than the code: npm run map' : 'The map is up to date.');

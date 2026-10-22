@@ -69,6 +69,12 @@ export function kickoff(opts) {
   // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
   if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER=${a} and STUDIO_AGENT_MODEL=${m}${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
   if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
+  // How long the verify takes here, so nobody sends it to the background and ends the session under it.
+  try {
+    const last = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last-full.json'), 'utf8'));
+    const min = Math.ceil((last.rows || []).reduce((n, r) => n + (Number(r.ms) || 0), 0) / 60000);
+    if (min) text = text.replace('(never in the background)', `(never in the background: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min)`);
+  } catch {}
   return text;
 }
 

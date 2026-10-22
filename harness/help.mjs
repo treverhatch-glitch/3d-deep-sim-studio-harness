@@ -22,6 +22,7 @@ const GROUPS = [
     ['task -- start <ID> --agent <you>', 'claim it'],
     ['task -- done <ID> --agent <you>', 'finish it (after verify)'],
     ['task -- pause <ID> --agent <you> --note "…"', 'hand it back with a note'],
+    ['map -- find <name>', 'where a function or constant is, in one call'],
     ['agent -- list', 'agents running now'],
     ['handoff', 'the Producer\'s briefing'],
   ]],
@@ -43,7 +44,7 @@ const GROUPS = [
 
 const all = process.argv.includes('--all');
 // Lite scope shows the ten commands a Lite studio needs; --all shows every script.
-const LITE = ['setup', 'hub', 'task -- next', 'task -- start <ID> --agent <you>', 'task -- done <ID> --agent <you>', 'task -- pause <ID> --agent <you> --note "…"', 'verify', 'golden -- --update', 'tokens', 'mode'];
+const LITE = ['setup', 'hub', 'map -- find <name>', 'task -- next', 'task -- start <ID> --agent <you>', 'task -- done <ID> --agent <you>', 'task -- pause <ID> --agent <you> --note "…"', 'verify', 'golden -- --update', 'tokens', 'mode'];
 const lite = scopeOf(readMode()) === 'lite';
 const npm = process.platform === 'win32' ? 'npm.cmd run' : 'npm run';
 console.log(`Scope: ${scopeOf(readMode())}. Every command: npm run help -- --all. The full command sheet: studio/llms.txt.\n`);

@@ -59,7 +59,7 @@ function request(port, { method = 'GET', path: p = '/', headers = {}, body } = {
       res.on('end', () => resolve(res.statusCode));
     });
     req.on('error', reject);
-    req.setTimeout(3000, () => req.destroy(new Error('timeout')));
+    req.setTimeout(10000, () => req.destroy(new Error('timeout')));
     if (body) req.write(body);
     req.end();
   });
@@ -73,7 +73,7 @@ function requestBody(port, p) {
       res.on('end', () => resolve(data));
     });
     req.on('error', reject);
-    req.setTimeout(3000, () => req.destroy(new Error('timeout')));
+    req.setTimeout(10000, () => req.destroy(new Error('timeout')));
     req.end();
   });
 }

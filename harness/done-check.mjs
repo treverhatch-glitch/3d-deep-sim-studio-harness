@@ -22,6 +22,7 @@ import { failsBefore } from '../qa/fails-before.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
+import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -165,7 +166,9 @@ function walkSince(rel, since, out, depth = 0) {
 export function taskChanges(taskId, since) {
   const files = new Set();
   let lastAt = 0;
-  const log = git('log', `--since=${Math.floor(since / 1000)}`, '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', '--name-only');
+  const base = taskBase(taskId);
+  const afterBase = base ? new Set((git('rev-list', `${base}..HEAD`) || '').split('\n').filter(Boolean)) : null;
+  const log = git('log', `--since=${Math.floor(since / 1000) - 1}`, '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', '--name-only');
   const commits = [];
   if (log !== null) {
     for (const block of log.split('\x1e').slice(1)) {
@@ -173,7 +176,10 @@ export function taskChanges(taskId, since) {
       const [hash, ct, tasks] = head.split('\t');
       const tagged = (tasks || '').split(',').map((x) => x.trim()).filter(Boolean);
       if (tagged.length && !tagged.includes(taskId)) continue; // someone else's task
-      if (!tagged.length && Number(ct) * 1000 < since) continue; // same second as the start, but before it
+      // Untagged commits count when made after the task started: after the commit it started from when
+      // that's recorded (2.29; git keeps whole seconds, so a quick agent's commit can share the start's
+      // second), else by time.
+      if (!tagged.length && (afterBase ? !afterBase.has(hash) : Number(ct) * 1000 < since)) continue;
       const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
       if (!touched.length) continue;
       commits.push({ hash, at: Number(ct) * 1000, tagged: tagged.includes(taskId) });
@@ -220,6 +226,41 @@ export function taskChanges(taskId, since) {
   }
   return { files: [...files], commits, lastAt };
 }
+/** The commit a task started from (recorded on its first task.start since it was last finished or reopened). */
+export function taskBase(taskId) {
+  let base = null;
+  for (const e of readRecentEvents(20000)) {
+    if (e.task !== taskId) continue;
+    if (e.type === 'task.done' || e.type === 'task.forced' || e.type === 'task.reopened') base = null;
+    else if (e.type === 'task.start' && !base && e.meta?.head) base = e.meta.head;
+  }
+  return base;
+}
+
+/**
+ * The size ratchet (2.29): game functions and files over the limit (scripts/check-function-size.mjs) that
+ * this task made bigger, or created. Ones that were already that big and didn't grow are left to a split
+ * task. Null when the start commit isn't known (a task started before 2.29).
+ */
+export function sizeGrowth(taskId, files) {
+  const base = taskBase(taskId);
+  if (!base) return null;
+  const limits = LIMITS();
+  const out = [];
+  for (const f of files.filter((x) => isGameCode(x) && /\.(m?js|cjs|jsx|tsx?|gd)$/i.test(x) && fs.existsSync(abs(x)))) {
+    let before = null;
+    const r = spawnSync('git', ['show', `${base}:${f}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (r.status === 0) before = r.stdout;
+    const now = overLimits(f, fs.readFileSync(abs(f), 'utf8'), limits);
+    const was = before === null ? [] : overLimits(f, before, limits);
+    for (const x of now) {
+      const old = was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
+      if (!old || x.size > old.size) out.push(`${f}${x.kind === 'function' ? ` ${x.name}()` : ''} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}`);
+    }
+  }
+  return out;
+}
+
 /** The last time game code changed (cartridges/, src/): reports older than this describe an old build. */
 function lastGameChange() {
   const out = [];
@@ -229,7 +270,11 @@ function lastGameChange() {
 function gatesAfter(at) {
   let run = null;
   try {
-    run = JSON.parse(fs.readFileSync(abs(fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json'), 'utf8'));
+    // The agent's own full run first (2.29: in its own copy, the studio-wide record is someone else's code).
+    const owner = process.env.STUDIO_LOCK_OWNER;
+    const own = owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : null;
+    const file = own && fs.existsSync(abs(own)) ? own : fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json';
+    run = JSON.parse(fs.readFileSync(abs(file), 'utf8'));
   } catch {
     return 'no full `npm run verify` has been recorded';
   }
@@ -264,6 +309,10 @@ export function checkDone(task, since = startedAt(task.id)) {
     check(docsOnly ? 'Docs changed for this task' : 'Changes exist for this task', relevant.length, docsOnly ? 'no changed .md file since this task started' : `no changes found for ${task.id}: no commit tagged Studio-Task: ${task.id} and no edits since it started`);
     const why = gatesAfter(Math.max(since, ch.lastAt));
     check('Full verify green after the last change', !why, why);
+    if (!docsOnly) {
+      const grew = sizeGrowth(task.id, ch.files);
+      if (grew !== null) check('No function or file grown past the size limit', !grew.length, `${grew.slice(0, 3).join('; ')}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
+    }
   };
 
   if (type === 'change') workAndVerify();
@@ -297,7 +346,7 @@ export function checkDone(task, since = startedAt(task.id)) {
       const good = plays.filter((r) => r.passed && (Date.parse(r.at) || 0) >= lastChange && bregs.every((f) => (r.regressions || []).some((x) => x.file === f && x.ok)));
       check('Browser play passed with the regression, after the last change', good.length, 'no passing browser play (npm run play:browser) that ran the new regression after your last change');
     }
-    check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`bash scripts/distill-bug.sh\`)`);
+    check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`node scripts/distill-bug.mjs\`)`);
     workAndVerify();
   }
   const fresh = lastGameChange();

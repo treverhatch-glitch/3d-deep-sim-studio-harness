@@ -55,10 +55,19 @@ for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WA
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
   const rec = JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only), scope, deep, skipped, cartridge: active.name, rows }, null, 2);
-  fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), rec);
+  // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
+  // done-check reads its own record. The studio-wide record is the main checkout's.
+  const owner = process.env.STUDIO_LOCK_OWNER;
+  const inCopy = Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== root;
+  if (!inCopy) fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), rec);
   // A full run is kept apart, so one agent's --only run never wipes the full verify another agent's
   // done-check needs (test #2).
-  if (!only) fs.writeFileSync(path.join(root, '.studio', 'gates-last-full.json'), rec);
+  if (!only && !inCopy) fs.writeFileSync(path.join(root, '.studio', 'gates-last-full.json'), rec);
+  if (owner && /^[\w.-]+$/.test(owner)) {
+    fs.mkdirSync(path.join(root, '.studio', 'gates'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.studio', 'gates', `${owner}.json`), rec);
+    if (!only) fs.writeFileSync(path.join(root, '.studio', 'gates', `${owner}-full.json`), rec);
+  }
 } catch {
   // read-only checkout: the board just shows "not run"
 }

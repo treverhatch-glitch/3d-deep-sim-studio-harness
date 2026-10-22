@@ -22,6 +22,7 @@
     { "id": "fun", "command": "node scripts/fun-check.mjs", "required": false },
     { "id": "renderer-budget", "command": "node scripts/check-renderer-budget.mjs", "required": false },
     { "id": "module-size", "command": "node scripts/check-module-size.mjs", "required": false },
+    { "id": "function-size", "command": "node scripts/check-function-size.mjs", "required": false },
     { "id": "hud", "command": "node qa/hud-check.mjs", "required": false, "deep": true },
     { "id": "engine", "command": "node scripts/check-engine.mjs", "required": false },
     { "id": "parity", "command": "node qa/parity.mjs", "required": false },

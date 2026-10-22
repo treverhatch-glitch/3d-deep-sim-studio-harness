@@ -6,7 +6,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 ## Start
 
 1. Read `studio/CURRENT_TASK.md`, then your brief in `.studio/briefs/<ID>.md`.
-2. Before you search code, read `.studio/MAP.md` (`npm run map`): every code file in one line.
+2. To find code, `npm run map -- find <name>` gives the file, line range and arguments in one call.
 3. Follow `studio/PITFALLS.md`. Never read `CHANGELOG.md`. `npm run help` lists the commands.
 
 ## Claim, work, finish

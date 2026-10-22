@@ -39,8 +39,10 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { kickoff } from './kickoff.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
+import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner } from './lock.mjs';
 import { savePatch } from './wip.mjs';
+import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
 import { markExhausted, toolNamed } from './budget.mjs';
 import { setHold } from './task-hold.mjs';
@@ -169,6 +171,12 @@ export function markGone() {
     const at = new Date().toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
     emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone' } });
+    // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
+    if (s.copy) {
+      const mine = listLocks().filter((l) => l.owner === s.agent);
+      for (const t of tasksOf(s.agent, s)) saveWorkOf(s.agent, t, mine, s);
+      removeLaneCopy(s.agent, { keepBranch: unmerged(s.copy.branch) > 0 });
+    }
     gone.push(s.agent);
   }
   return gone;
@@ -248,13 +256,26 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
   const s0 = readJson(sessionFile(agent)) || {};
+  // An agent in its own copy (2.29): its uncommitted work is in that copy, its commits on its branch.
+  const copyDir = s0.copy?.dir ? path.join(REPO_ROOT, s0.copy.dir) : null;
+  const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
+  const finished = [];
   for (const id of tasks) {
-    const patch = savePatch(agent, id, mine.map((l) => l.key));
+    // Ended cleanly but never called task done (test #3: 18 of 64 sessions, most while "running the full
+    // verify" in the background, which ends with the session). The launcher runs the check itself and
+    // finishes the task when it passes; otherwise it is handed back as before.
+    if (!bad && autoFinish(agent, id, copyDir, mine)) {
+      finished.push(id);
+      continue;
+    }
+    const patch = savePatch(agent, id, copyDir ? [] : mine.map((l) => l.key), copyDir && fs.existsSync(copyDir) ? { cwd: copyDir } : {});
+    if (ahead) rememberTaskBranch(id, s0.copy.branch);
+    const onBranch = ahead ? ` ${ahead} commit(s) not yet in the studio's branch are on ${s0.copy.branch}; the next agent's copy gets them merged in.` : '';
     // A session that ended without task done or a hand-back still holds its task (test #2: claims sat
     // for up to an hour). Hand it back now, with what it last said and what it left.
     const note = bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Picked up by the launcher.`
-      : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work is in the tree and saved to ${patch}.` : ' No uncommitted work.'} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, note, { force: true });
     handed.push({ task: id, patch });
     parkIfLooping(id);
@@ -269,11 +290,45 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     markExhausted(who, line);
   }
   const tok = tokensFrom(log);
-  const reason = trouble ? `provider: ${trouble}` : code === 0 ? (tasks.length ? 'finished without task done' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other } });
+  const reason = trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
   return { bad, trouble, handed, reason };
+}
+
+/**
+ * Finish a task an agent left without calling task done, if its done-check passes: run task done as that
+ * agent (in its copy, so the work is delivered); if only the verify is missing or stale, run the everyday
+ * verify first. In the shared checkout, only when the agent left nothing uncommitted under its claims.
+ * STUDIO_AUTO_FINISH=off turns it off.
+ */
+export function autoFinish(agent, id, copyDir, mine) {
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_AUTO_FINISH || '')) return false;
+  // Only work a check can vouch for: a task whose done means "a person or the agent decided" stays with them.
+  const t = parseNextQueue().inProgress.find((x) => x.id === id);
+  if (!t || taskType(t) === 'none') return false;
+  const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
+  if (cwd === REPO_ROOT) {
+    const paths = mine.filter((l) => l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean);
+    if (!paths.length) return false;
+    const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { cwd, encoding: 'utf8' }).stdout || '';
+    if (dirty.trim()) return false;
+  }
+  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
+  const done = () => spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', 'closed by the launcher after its check passed'], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  let r = done();
+  if (r.status !== 0 && /verify/i.test(`${r.stdout}${r.stderr}`) && !/Commit your work first|conflict/i.test(`${r.stdout}${r.stderr}`)) {
+    const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+    if (g.status === 0) r = done();
+  }
+  if (r.status !== 0) {
+    const why = `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').filter((l) => /\[ \]|missing|refus|Commit|fail|not /i.test(l)).slice(0, 2).join(' ').slice(0, 300);
+    emitEvent({ type: 'agent.finish_refused', agent: 'launcher', task: id, msg: `${agent} ended without task done, and its check doesn't pass yet: ${why || `exit ${r.status}`}` });
+    return false;
+  }
+  emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
+  return true;
 }
 
 /**
@@ -304,14 +359,24 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const c = claim(`path:${lane}`, agent, 6 * 3600);
     if (c && c.ok === false) return { ok: false, message: `Lane ${lane} is taken: ${c.message || 'claimed by another agent'}` };
   }
+  // A code lane gets its own working copy (2.29), so half-done work never leaks into another agent's
+  // tests or commits. Not possible here (old git, STUDIO_WORKTREES=off): the shared checkout, as before.
+  let copy = null;
+  if (laneWantsCopy(lane) && !process.env.STUDIO_MAIN_ROOT) {
+    const c = createLaneCopy(agent, { task });
+    if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
+    else copy = c;
+  }
   const prompt = kickoff({ role, agent, model, launched: true })
     + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
+    + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
     + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '')
     // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
     // and the rules this game has learned the hard way.
-    + `\nBefore you search or open files, read .studio/MAP.md (every code file in one line: what it is, its exports, its lane). Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
+    // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
+    + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
     + pitfallsForPrompt()
     + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
   // The map the prompt points at, refreshed when code changed since it was made.
@@ -333,16 +398,22 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, ...(track ? { STUDIO_TRACK: track } : {}) };
+  // Claude Code stops a shell command after 2 minutes by default, so agents sent a long verify to the
+  // background and their session ended with it (test #3). Give commands 10 minutes unless set.
+  env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';
+  env.BASH_MAX_TIMEOUT_MS ||= '1200000';
   const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role).replaceAll('{task}', task || '');
+  if (copy) env.STUDIO_MAIN_ROOT = REPO_ROOT;
+  const cwd = copy ? copy.dir : REPO_ROOT;
   const child = custom
-    ? spawn(fill(custom), { cwd: REPO_ROOT, shell: true, env, stdio: ['ignore', out, out] })
-    : spawn(cmd.argv[0], cmd.argv.slice(1), { cwd: REPO_ROOT, env, shell: IS.win, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
+    ? spawn(fill(custom), { cwd, shell: true, env, stdio: ['ignore', out, out] })
+    : spawn(cmd.argv[0], cmd.argv.slice(1), { cwd, env, shell: IS.win, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
   if (cmd?.stdin && child.stdin) {
     child.stdin.on('error', () => {});
     child.stdin.end(cmd.stdin);
   }
   const startedAt = new Date().toISOString();
-  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by };
+  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   const beat = setInterval(() => {
@@ -364,6 +435,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model });
+  if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   if (lane) release(`path:${lane}`, agent);
   if (result.bad && fallback.length) {
     const [next, ...rest] = fallback;
@@ -392,7 +464,9 @@ export function stopAgent(pid) {
  */
 export function wipSummary(agent) {
   const paths = listLocks().filter((l) => l.owner === agent && l.key.startsWith('path:')).map((l) => l.key.slice(5));
-  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length ? paths : ['.'])], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const copy = readJson(sessionFile(agent))?.copy;
+  const cwd = copy?.dir && fs.existsSync(path.join(REPO_ROOT, copy.dir)) ? path.join(REPO_ROOT, copy.dir) : REPO_ROOT;
+  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { cwd, encoding: 'utf8' });
   if (r.status !== 0) return null;
   const rows = r.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')).filter(([, , f]) => f && !/^(studio\/(NEXT|CURRENT_TASK)\.md|\.studio\/)/.test(f));
   const add = rows.reduce((n, [a]) => n + (Number(a) || 0), 0);
@@ -444,6 +518,20 @@ export function nextAgentName(role, prefix = '') {
   return `${role}-${prefix}${n}`;
 }
 
+/**
+ * Save an agent's work on a task before its task is handed back: in its own copy (2.29) the uncommitted
+ * files there, and its unmerged commits stay on its branch for the next agent; otherwise the files under
+ * its claims in the shared checkout.
+ */
+function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) {
+  const copyDir = s?.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : null;
+  if (copyDir && fs.existsSync(copyDir)) {
+    if (unmerged(s.copy.branch) > 0) rememberTaskBranch(task, s.copy.branch);
+    return savePatch(agent, task, [], { cwd: copyDir });
+  }
+  return savePatch(agent, task, mine.map((l) => l.key));
+}
+
 /** The tasks an agent holds (its task locks), plus the task its session was started on. */
 const tasksOf = (agent, s) => [...new Set([...listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5)), ...(s?.task ? [s.task] : [])])];
 
@@ -455,8 +543,8 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
   const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   // The patch is saved before the hand-back frees the claims, so the launcher's clean-up still has it.
   for (const t of held) {
-    const patch = savePatch(agent, t, mine.map((l) => l.key));
-    pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is in the working tree.`}${patch ? ` Saved to ${patch}.` : ''}`, { force: true });
+    const patch = saveWorkOf(agent, t, mine);
+    pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}.`}${patch ? ` Saved to ${patch}.` : ''}`, { force: true });
   }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
   for (const t of tasksOf(agent, s)) cooldown(t, by);
@@ -483,8 +571,8 @@ export function stopAllAgents(by = 'war-room-human', reason = '') {
     const mine = listLocks().filter((l) => l.owner === s.agent);
     const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
     for (const t of held) {
-      const patch = savePatch(s.agent, t, mine.map((l) => l.key));
-      pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is in the working tree${patch ? ` and saved to ${patch}` : ''}.`, { force: true });
+      const patch = saveWorkOf(s.agent, t, mine, s);
+      pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}${patch ? ` and saved to ${patch}` : ''}.`, { force: true });
     }
     stopAgent(s.pid);
     stopped.push(s.agent);
@@ -739,7 +827,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   const list = sessions();
   if (!list.length) console.log('No agents started by the launcher yet. npm run agent -- start --role builder --agent builder-1 --tool claude --model claude-sonnet-5-5');
-  for (const s of list) console.log(`${s.running ? (s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago` : `  ${s.reason || ''}`}`);
+  for (const s of list) console.log(`${s.running ? (s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago` : `  ${s.reason || ''}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
   const others = otherAgents();
   for (const o of others.list) console.log(`outside  pid ${String(o.pid).padEnd(12)} not started by the launcher: ${o.command}`);
   if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');

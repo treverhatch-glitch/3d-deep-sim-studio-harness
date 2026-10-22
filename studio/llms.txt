@@ -94,6 +94,9 @@
 - `npm run bible -- sign --by <person> [--via "<where they approved>"]` · `npm run bible -- pillars set "<name: rules out>" … --by <person> --decision <file>` — design changes after signing hold new build tasks until a person re-signs
 - `npm run mode [-- set precise|budget|fast|prototype|extreme --by <name> | boost on|off --by <name> [--hours 4] | scope lite|full --by <name>]` — the pace, the MAX SPEED lever and the scope (Lite: 6 gates in everyday verify, AGENTS.lite.md; a fresh clone is Lite, a studio with a game is Full until someone chooses)
 - `npm run tokens [-- --since 5h|24h|today|all] [--by role|model|agent|tool] [--json]` — measured token use from each session's own report; sessions whose tool reported nothing are listed as not measured
+- `npm run map -- find <name> [--harness]` — where a function, constant or TUNING key is, with its arguments and line range, in one call (a real parse); prefer it to reading the map and then the file
+- `node scripts/check-function-size.mjs` — game functions over 80 lines and files over 400 lines or 30 KB (STUDIO_FN_MAX_LINES, STUDIO_FILE_MAX_LINES, STUDIO_FILE_MAX_KB); a task can't finish if it made one bigger
+- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout
 - `npm run help [-- --all]` — the everyday commands on one screen (Lite: ten)
 - `npm run verify [-- --deep | --full]` — everyday verify skips the harness self-checks (selftest, hub-smoke, hud); --deep runs them (release and CI do); --full runs every gate in Lite scope
 - `npm run agent -- start --role <r> --agent <name> --tool claude|codex|agy|cursor|grok|aider|custom --model <m> [--fallback tool:model,…] [--detach] | list | stop <name> | fill` — the launcher: heartbeats, caps, cleans up a dead agent's task, claims and work

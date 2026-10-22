@@ -27,6 +27,9 @@ import { effectiveMode, describeMode, readMode, scopeOf, CLAUDE_MD, SCOPES } fro
 import { cleanQuotaMarks } from '../harness/budget.mjs';
 import { readTrack, engineBin } from '../harness/engine.mjs';
 import { modelFamily } from '../harness/families.mjs';
+import { worktreeSupport, laneCopies, removeLaneCopy } from '../harness/worktree.mjs';
+import { sessions } from '../harness/agent.mjs';
+import { savePatch } from '../harness/wip.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -231,6 +234,20 @@ export function preflight() {
     const matches = now.trim() === want.trim() || (scope === 'full' && /@AGENTS\.md/.test(now)) || (scope === 'lite' && /@AGENTS\.lite\.md/.test(now) && !/@AGENTS\.md/.test(now));
     if (!matches && FIX) fs.writeFileSync(cm, want);
     row(matches || FIX ? 'ok' : 'warn', `Scope: ${SCOPES[scope]}${!matches && FIX ? ' (CLAUDE.md updated to match; commit it)' : ''}`, matches || FIX ? '' : `CLAUDE.md doesn't load ${scope === 'lite' ? 'AGENTS.lite.md' : 'AGENTS.md'}: npm run preflight -- --fix`);
+  } catch {}
+  // One working copy per lane (2.29): available here, and no copies left behind by ended sessions.
+  try {
+    const wt = worktreeSupport();
+    row(wt.ok ? 'ok' : 'warn', wt.ok ? 'Agents with a code lane get their own working copy (.lanes/)' : `Agents share one working copy: ${wt.why}`, wt.ok ? '' : 'their unfinished work can leak into each other\'s tests; STUDIO_WORKTREES=off silences this');
+    const live = new Set(sessions().filter((x) => x.running).map((x) => x.agent));
+    const stale = laneCopies().filter((c) => !live.has(c.agent));
+    if (stale.length && FIX) {
+      for (const c of stale) {
+        if (c.dirty) savePatch(c.agent, 'lane-copy', [], { cwd: c.dir });
+        removeLaneCopy(c.agent, { keepBranch: c.unmerged > 0 });
+      }
+    }
+    if (stale.length) row(FIX ? 'ok' : 'warn', FIX ? `Removed ${stale.length} lane copy(ies) left by ended sessions (unmerged commits kept on their branches, uncommitted work saved in .studio/wip/)` : `${stale.length} lane copy(ies) left by ended sessions: ${stale.map((c) => c.agent).join(', ')}`, FIX ? '' : 'npm run preflight -- --fix removes them and keeps unmerged commits on their branches');
   } catch {}
   // FIX 06 (test #3): before 2.26 the review fallback could end at the implementer's own family. Such a
   // note, honestly marked as not an approval, then fails the reviewer gate after an update. --fix moves it

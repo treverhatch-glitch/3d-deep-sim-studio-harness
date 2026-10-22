@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['node_modules', '.git', '.studio', 'dist', 'harness-notes', 'retros', 'daily', 'reviews', 'research', 'meetings', 'handoffs']);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.studio', '.lanes', 'dist', 'harness-notes', 'retros', 'daily', 'reviews', 'research', 'meetings', 'handoffs']);
 // Free text people and agents write (test #2: a Producer note ending "npm run verify:" turned the docs gate red).
 const SKIP_FILES = new Set(['CHANGELOG.md', 'docs/ROADMAP.md', 'studio/producer/LOG.md', 'studio/producer/INBOX.md', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md']);
 const scripts = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {}));

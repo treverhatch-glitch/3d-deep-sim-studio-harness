@@ -2038,6 +2038,71 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the heartbeat renews an agent\'s claims', n === '1' && Date.parse(exp) > now + 50 * 60000, lk.stdout + lk.stderr);
 }
 
+// 2.29: one working copy per lane. An agent with a code lane works in .lanes/<agent> on its own branch;
+// task done adds its commits to the studio's branch; a hand-back keeps its commits for the next agent.
+{
+  const dir = copyRepo();
+  const g = (cmd) => run(dir, `git -c user.email=t@t -c user.name=t ${cmd}`);
+  g('init -q -b main');
+  g('add -A');
+  g('commit -qm base');
+  const support = run(dir, `node -e "import('./harness/worktree.mjs').then(m=>console.log(JSON.stringify(m.worktreeSupport())))"`);
+  if (!/"ok":true/.test(support.stdout)) {
+    report('lane copies: skipped, this machine can\'t make them', true, support.stdout);
+  } else {
+    const agentJs = (quit, noDone = false) => `import { spawnSync } from 'node:child_process';\nimport fs from 'node:fs';\nconst [task, agent] = process.argv.slice(2);\nconst sh = (cmd) => { const r = spawnSync(cmd, { shell: true, encoding: 'utf8' }); console.log('$ ' + cmd + '\\n' + r.stdout + r.stderr + '[exit ' + r.status + ']'); return r; };\nconsole.log('cwd ' + process.cwd());\nsh('node harness/task.mjs start ' + task + ' --agent ' + agent);\nfs.appendFileSync('cartridges/example-sim/index.mjs', '\\n// ' + agent + '\\n');\nsh('git status --porcelain');\nsh('git -c user.email=a@b -c user.name=' + agent + ' commit -qam "' + task + ': ' + agent + '"');\n${quit ? "fs.appendFileSync('cartridges/example-sim/index.mjs', '\\n// uncommitted\\n');" : noDone ? "sh('node scripts/run-gates.mjs');" : "sh('node scripts/run-gates.mjs');\nsh('node harness/task.mjs done ' + task + ' --agent ' + agent);"}\n`;
+    fs.writeFileSync(path.join(tmpRoot, 'lane-agent.mjs'), agentJs(false));
+    fs.writeFileSync(path.join(tmpRoot, 'lane-quit.mjs'), agentJs(true));
+    fs.writeFileSync(path.join(tmpRoot, 'lane-nodone.mjs'), agentJs(false, true));
+    const add = (title) => (run(dir, `node harness/task.mjs add "${title}" --role builder --priority P1 --lane cartridges/example-sim`).stdout.match(/"id": "(T-\d+)"/) || [])[1];
+    const t1 = add('Lane copy one');
+    const t2 = add('Lane copy two');
+    const t3 = add('Lane copy three');
+    g('commit -qam board');
+    const start = (task, agent, script) => run(dir, `node harness/agent.mjs start --role builder --agent ${agent} --task ${task} --lane cartridges/example-sim`, { STUDIO_BUILDER_CMD: `node "${path.join(tmpRoot, script)}" {task} {agent}` });
+    start(t1, 'lane-a1', 'lane-agent.mjs');
+    const logA = fs.readFileSync(path.join(dir, '.studio/agents/lane-a1.log'), 'utf8');
+    const mainLog = g('log --oneline').stdout;
+    const statusInCopy = (logA.split('$ git status --porcelain\n')[1] || '').split('[exit')[0].trim();
+    report('an agent with a code lane works in its own copy, and its git status shows only its own change', /[\\/]\.lanes[\\/]lane-a1/.test(logA) && statusInCopy === 'M cartridges/example-sim/index.mjs', logA.slice(0, 1500));
+    report('task done in a copy adds its commit to the studio\'s branch, and the copy and its branch are removed', new RegExp(`${t1}: lane-a1`).test(mainLog) && /- \[x\] \*\*/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && !fs.existsSync(path.join(dir, '.lanes/lane-a1')) && !/lane\/lane-a1/.test(g('branch').stdout), mainLog + g('branch').stdout + logA.slice(-1500));
+    start(t2, 'lane-b1', 'lane-quit.mjs');
+    const hand = fs.existsSync(path.join(dir, `studio/handoffs/${t2}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${t2}.md`), 'utf8') : '';
+    report('a session that quits in its copy keeps its commits on its branch and saves what it hadn\'t committed', /not yet in the studio's branch are on lane\/lane-b1/.test(hand) && fs.existsSync(path.join(dir, `.studio/wip/${t2}-lane-b1.patch`)) && /lane\/lane-b1/.test(g('branch').stdout) && !fs.existsSync(path.join(dir, '.lanes/lane-b1')), hand + g('branch').stdout);
+    start(t2, 'lane-c1', 'lane-agent.mjs');
+    const mainLog2 = g('log --oneline').stdout;
+    start(t3, 'lane-d1', 'lane-nodone.mjs');
+    const endD = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter((l) => /agent\.session\.end/.test(l) && /lane-d1/.test(l)).pop() || '';
+    report('an agent that committed and verified but never called task done: the launcher closes the task once its check passes', new RegExp(`${t3}: lane-d1`).test(g('log --oneline').stdout) && /the launcher closed its task/.test(endD) && fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').includes(`- [x] **${t3}**`), endD + g('log --oneline').stdout);
+    report('the next agent\'s copy gets the earlier commits merged in, and done adds both; no lane branches are left', new RegExp(`${t2}: lane-b1`).test(mainLog2) && new RegExp(`${t2}: lane-c1`).test(mainLog2) && !/lane\//.test(g('branch').stdout) && !g('status --porcelain').stdout.split('\n').some((l) => /\.lanes/.test(l)), mainLog2 + g('branch').stdout + fs.readFileSync(path.join(dir, '.studio/agents/lane-c1.log'), 'utf8').slice(-1500));
+  }
+}
+
+// 2.29: npm run map -- find answers in one call; the size ratchet refuses growth past the limit.
+{
+  const dir = copyRepo();
+  const f = run(dir, 'node harness/map.mjs find spawnCost');
+  report('map find gives the file and line of a TUNING key in one call', /cartridges\/example-sim\/index\.mjs:\d+\s+TUNING\.spawnCost\b/.test(f.stdout), f.stdout + f.stderr);
+  const g = (cmd) => run(dir, `git -c user.email=t@t -c user.name=t ${cmd}`);
+  const body = (n, ret = 0) => `export function big() {\n${Array.from({ length: n }, (_, i) => `  const v${i} = ${i};`).join('\n')}\n  return ${ret};\n}\n`;
+  fs.mkdirSync(path.join(dir, 'game/sz/src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'game/sz/src/a.js'), body(90));
+  const gate = run(dir, 'node scripts/check-function-size.mjs');
+  report('the function-size check names a game function over 80 lines', gate.status === 1 && /game\/sz\/src\/a\.js:1 big\(\): 9\d lines/.test(gate.stdout), gate.stdout + gate.stderr);
+  g('init -q -b main');
+  g('add -A');
+  g('commit -qm base');
+  const add = (title) => (run(dir, `node harness/task.mjs add "${title}" --role builder --priority P1`).stdout.match(/"id": "(T-\d+)"/) || [])[1];
+  const t = add('Size ratchet');
+  run(dir, `node harness/task.mjs start ${t} --agent sz-1`, { STUDIO_LOCK_OWNER: 'sz-1' });
+  const growth = () => run(dir, `node -e "import('./harness/done-check.mjs').then(m=>console.log(JSON.stringify(m.sizeGrowth('${t}', ['game/sz/src/a.js']))))"`).stdout.trim();
+  fs.writeFileSync(path.join(dir, 'game/sz/src/a.js'), body(90, 1));
+  const edited = growth();
+  fs.writeFileSync(path.join(dir, 'game/sz/src/a.js'), body(95, 1));
+  const grown = growth();
+  report('the size ratchet lets an edit inside an over-limit function through, and refuses one that makes it bigger', edited === '[]' && /big\(\) is 9\d lines \(was 9\d\)/.test(grown), `${edited}\n${grown}`);
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

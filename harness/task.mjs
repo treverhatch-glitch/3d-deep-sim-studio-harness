@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
@@ -14,6 +15,7 @@ import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
@@ -206,9 +208,17 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
     q.inProgress.unshift(target);
   }
   writeNextQueue(q);
+  // In a lane copy (2.29): start from the studio's latest work, plus any earlier agent's unmerged work on this task.
+  let carried = null;
+  if (inLaneCopy()) {
+    catchUp();
+    carried = carryTaskBranch(target.id);
+  }
   syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
   const handoff = readTaskHandoff(target.id);
-  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}` });
+  // The commit the work starts from, for the size ratchet (harness/done-check.mjs sizeGrowth).
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
+  emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: head ? { head } : {} });
   // One page for the agent: what done means, the steps, notes, lanes, lessons, commands.
   let brief = null;
   try {
@@ -216,7 +226,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   } catch {
     // the brief is a help, never a blocker
   }
-  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}) };
+  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}) };
 }
 
 /**
@@ -253,6 +263,16 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
       ].filter(Boolean).join('\n'),
     };
+  }
+
+  // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
+  // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
+  if (inLaneCopy()) {
+    const d = deliver(taskId);
+    if (d && !d.ok) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
+      return { error: 'not-delivered', message: d.message };
+    }
   }
 
   // Forced past a failing check: the owner's uncommitted work in its claimed folders is saved as a patch
@@ -561,6 +581,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Notes (studio/handoffs/${started.id}.md):\n${started.handoff}`);
+    if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
     console.log(JSON.stringify(started, null, 2));
     process.exit(0);
   }
