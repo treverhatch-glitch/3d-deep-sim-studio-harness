@@ -39,13 +39,15 @@ function engineInfo() {
 }
 import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
-import { holdReason, readHolds } from './task-hold.mjs';
+import { holdReason, holdOwner, readHolds } from './task-hold.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { tokenTotals } from './tokens.mjs';
 import { refreshBoard, sessionLimits } from './session-cap.mjs';
 import { modelWarning } from './model-tiers.mjs';
 import { allAttached } from './cheatsheet.mjs';
-import { dailyCap, cacheReadWeight, weightedTokens } from './budget.mjs';
+import { dailyCap, cacheReadWeight, weightedTokens, readCcusage } from './budget.mjs';
+import { pendingEchoes } from './intent.mjs';
+import { readWatchdog } from './watchdog.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -189,8 +191,16 @@ export function buildHudState() {
   const queue = parseNextQueue();
   // Why a waiting task can't start yet (waits for, parked, cooldown), shown next to it in Ops.
   const holds = readHolds();
-  if (Object.keys(holds).length) queue.backlog = queue.backlog.map((t) => ({ ...t, hold: holdReason(t.id, queue, now, holds) || undefined }));
   const locks = listLocks();
+  // 2.30 (J10): every "waiting on" names its owner; (J2) every task says whose idea it is.
+  const holders = new Map(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l.owner]));
+  if (Object.keys(holds).length) queue.backlog = queue.backlog.map((t) => {
+    const w = holdOwner(t.id, queue, now, holds, holders);
+    return { ...t, hold: w?.why || undefined, waitOwner: w?.owner || undefined, needsYes: Boolean(holds[t.id]?.needsYes) || undefined };
+  });
+  const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task);
+  const originOf = Object.fromEntries(added.filter((e) => e.meta?.origin).map((e) => [e.task, e.meta.origin]));
+  for (const k of ['inProgress', 'backlog']) queue[k] = queue[k].map((t) => (originOf[t.id] ? { ...t, origin: originOf[t.id] } : t));
   const dayAgo = now - 24 * 3600 * 1000;
 
   // Router: real calls and real token counts from route.* events in the last 24 h.
@@ -388,7 +398,7 @@ export function buildHudState() {
 
   const gates = readJson('.studio/gates-last.json');
   const total = queue.inProgress.length + queue.backlog.length + queue.done.length;
-  return {
+  const out = {
     generatedAt: new Date(now).toISOString(),
     stopped: readJson('.studio/STOP.json', null),
     mode: { ...effectiveMode(), text: describeMode() },
@@ -492,7 +502,42 @@ export function buildHudState() {
     sessionCap: { limits: sessionLimits(), sessions: refreshBoard().sort((a, b) => Number(b.running) - Number(a.running)).slice(0, 12) },
     modelWarning: modelWarning(process.env, events, now),
     cheatsheet: allAttached(),
+    // 2.30: intent cards (J2), the watchdog switch (G1), Claude Code's own count (ccusage, opt-in).
+    intent: pendingEchoes(),
+    watchdog: readWatchdog(),
+    ccusage: (() => {
+      const c = readCcusage();
+      const d = c?.days?.at(-1);
+      return d ? { at: c.at, ...d } : null;
+    })(),
   };
+  // 2.30 (J10): the plain status line. Building now, waiting on you, tokens today with the model named.
+  const st = out;
+  const waitingOnYou = [
+    ...st.intent.map((e) => ({ what: `${e.id}: confirm "${e.asked}"`, owner: 'you', why: 'an intent card' })),
+    ...st.queue.backlog.filter((t) => t.needsYes).map((t) => ({ what: `${t.id}: ${t.title}`, owner: 'you', why: 'an agent-proposed mechanic needs your yes' })),
+    ...(st.modelWarning?.show ? [{ what: 'top-tier models on every role', owner: 'you', why: 'accept or change the models' }] : []),
+    ...st.asks.open.filter((a) => !a.to || /human|dev|you/i.test(a.to)).map((a) => ({ what: `${a.id}: ${a.question}`, owner: 'you', why: 'a question' })),
+  ];
+  const waitingOnOthers = st.queue.backlog.filter((t) => t.waitOwner && t.waitOwner !== 'the dev').map((t) => ({ what: t.id, owner: t.waitOwner, why: t.hold }));
+  const building = st.launched.filter((l) => l.running).map((l) => ({ agent: l.agent, task: l.task, model: l.model }));
+  const top = [...st.meter.byModel].sort((a, b) => b.counted - a.counted).map((m) => m.model);
+  st.status = {
+    building,
+    waitingOnYou,
+    waitingOnOthers,
+    tokensToday: st.meter.used,
+    models: top,
+    line: `Building now: ${building.length ? building.map((b) => `${b.agent} on ${b.task || 'no task'}`).join(', ') : 'nothing'} · Waiting on you: ${waitingOnYou.length || 'nothing'} · Tokens today: ${st.meter.used.toLocaleString()}${top.length ? ` (${top.join(', ')})` : ''}`,
+  };
+  // 2.30 (J8): what changed in each build, from the tasks finished between it and the build before.
+  const doneEv = readRecentEvents(20000).filter((e) => e.type === 'task.done' && e.task);
+  st.builds = st.builds.map((b, i) => {
+    const prev = st.builds[i + 1]?.at || '';
+    const items = doneEv.filter((e) => e.ts > prev && e.ts <= b.at).slice(-5).reverse().map((e) => ({ task: e.task, title: String(e.msg || '').replace(/^.*?:\s*/, '').slice(0, 120) }));
+    return { ...b, changes: items };
+  });
+  return st;
 }
 
 /**
