@@ -848,6 +848,49 @@ export function createHubServer() {
       broadcastSnapshot();
       return sendJson(res, 200, { ok: true, next: body.decision === 'handoff' ? (h?.ok ? `${agent} hands off now; a fresh session continues its task.` : `Recorded; ${h?.message || ''}`) : `${agent} continues; next check in 20 turns / 40k tokens.` });
     }
+    // 2.30: the dev's one-click answers. Intent card (J2), yes to an agent's mechanic (J2), do it now (J3), watchdog (G1).
+    if (url.pathname === '/api/intent-confirm' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { confirmEcho } = await import('../harness/intent.mjs');
+      const r = confirmEcho(String(body.id || '').replace(/[^\w-]/g, ''), by, { viaWarRoom: true });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `Confirmed: ${r.echo.asked}` } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/task-yes' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const id = String(body.task || '');
+      if (!/^[A-Z]+-\d+$/.test(id)) return sendJson(res, 400, { ok: false, error: 'Which task?' });
+      const { devSays } = await import('../harness/intent.mjs');
+      const { setHold } = await import('../harness/task-hold.mjs');
+      const who = devSays(by, { viaWarRoom: true });
+      if (!who.ok) return sendJson(res, 400, { ok: false, error: who.message });
+      setHold(id, { needsYes: null }, { by, msg: `${by} said yes to ${id} (War Room)` });
+      emitEvent({ type: 'task.dev_yes', agent: by, task: id, msg: `${by} said yes to ${id} in the War Room` });
+      broadcastSnapshot();
+      return sendJson(res, 200, { ok: true, next: `${id} can start.` });
+    }
+    if (url.pathname === '/api/phase-now' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { readBible, openPhaseNow } = await import('../harness/bible.mjs');
+      const r = await openPhaseNow(readBible(), Number(body.phase), { by, words: String(body.words || '').slice(0, 300), viaWarRoom: true });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, risk: r.risk, next: `Phase ${body.phase} is open now.${r.risk.length ? ` Risk logged: ${r.risk.join('; ')}.` : ''}` } : { ok: false, error: r.message });
+    }
+    if (url.pathname === '/api/watchdog' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const { setWatchdog } = await import('../harness/watchdog.mjs');
+      const r = setWatchdog(body.on === true, by);
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `Watchdog ${r.watchdog.on ? 'on' : 'off'}.` } : { ok: false, error: r.message });
+    }
     if (url.pathname === '/api/data-consent' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);

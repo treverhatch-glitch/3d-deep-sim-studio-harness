@@ -165,6 +165,14 @@
   #o-launched .ag { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 14px; padding: 2px 0; }
   #o-launched .ag .note { flex-basis: 100%; margin: 0; }
   #o-queue .hold { color: var(--standby); font-size: 0.85em; }
+  #ops .statusline { margin: 8px 20px 0; padding: 8px 12px; border-left: 4px solid var(--link); background: rgba(108, 198, 255, .07); font-size: 15px; }
+  #ops .statusline .you { color: var(--standby); font-weight: 700; }
+  .origin { font-size: .75em; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--quiet, #888); color: var(--quiet, #aaa); }
+  .origin.dev-asked { border-color: var(--go); color: var(--go); }
+  .origin.agent-proposed { border-color: var(--standby); color: var(--standby); }
+  #o-yourcall .card { border: 1px solid var(--standby); border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+  #o-yourcall .card b.k { color: var(--standby); }
+  .changes { margin: 6px 0 0 18px; padding: 0; font-size: 14px; }
   #o-queue { max-height: 70vh; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
   #ops button.stop { border-color: var(--hold); color: var(--hold); }
   #ops .restartbox { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .62); }
@@ -555,6 +563,7 @@
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
+  <div class="statusline" id="o-status" role="status" aria-live="polite"></div>
   <div class="meet-strip" id="o-meet"></div>
   <div class="hold-strip" id="o-stop" role="status"><h2>Studio stopped</h2><div id="o-stopmsg"></div></div>
   <div class="hold-strip" id="o-hold"><h2>Needs a person</h2><div id="o-holdlist"></div></div>
@@ -598,6 +607,7 @@
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
       <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
       <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
+      <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
       <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
       <section><h2>Sessions and context <small>refresh by default</small></h2><div id="o-sessions"></div></section>
       <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
@@ -766,6 +776,7 @@
     <section class="cab">
       <h2>Play the last good build</h2>
       <p class="buildline" id="r-build">Loading…</p>
+      <div id="r-changes" class="note" aria-live="polite"></div>
       <p class="buildline" id="r-engine" hidden></p>
       <div class="screen"><iframe id="r-frame" title="The game: the last build that passed the browser check" sandbox="allow-scripts allow-pointer-lock" allow="fullscreen; gamepad; autoplay"></iframe><p id="r-none" class="none">No build has passed the browser check yet. Each time <code>npm run play:browser</code> passes, that build is saved and plays here, while the agents keep working.</p></div>
       <form id="r-note">
@@ -1199,11 +1210,13 @@
     // Most urgent first; the file order breaks ties. The rest are counted, not hidden silently.
     const rank = { P0: 0, P1: 1, P2: 2, P3: 3 };
     const byPri = (list) => list.map((t, i) => [t, i]).sort((a, b) => (rank[a[0].priority] ?? 9) - (rank[b[0].priority] ?? 9) || a[1] - b[1]).map(([t]) => t);
-    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${t.hold ? ` <span class="hold" title="It can't start yet">${esc(t.hold)}</span>` : ''}${acts[label](t)}${label !== 'Done' && s.cheatsheet?.[t.id]?.tricks?.length ? `<ul class="tricks" data-tricks="${esc(t.id)}" title="From studio/CHEATSHEET.md (npm run cheatsheet -- attach ${esc(t.id)})"><span class="rf approved" data-preapproved="${esc(t.id)}">pre-approved by ${esc(s.cheatsheet[t.id].preapproved?.approvedBy || s.cheatsheet[t.id].by || '?')}</span>${s.cheatsheet[t.id].tricks.map((k) => `<li>${k.id ? `<b>${esc(k.id)}</b> ` : ''}${esc(k.text)}</li>`).join('')}</ul>` : ''}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
+    const lane = (label, raw, n) => { const list = label === 'Done' ? raw : byPri(raw); return `<h3>${label} (${list.length})</h3>${list.slice(0, n).map((t) => `<div class="task"><span class="pri ${t.priority}">${t.priority}</span> <b>${esc(t.id)}</b> ${esc(short(t.title, 80))} <span style="color:var(--quiet)">· ${esc(t.role)}</span>${t.origin ? ` <span class="origin ${esc(t.origin)}" data-origin="${esc(t.id)}">${t.origin === 'dev-asked' ? 'you asked' : 'agent idea'}</span>` : ''}${t.hold ? ` <span class="hold" title="It can't start yet" data-wait="${esc(t.id)}">waiting on ${esc(t.waitOwner || 'someone')}: ${esc(t.hold)}</span>` : ''}${t.needsYes ? ` <button class="act" data-taskyes="${esc(t.id)}" ${ro ? 'disabled title="Needs the HUB token"' : ''}>Yes, build it</button>` : ''}${acts[label](t)}${label !== 'Done' && s.cheatsheet?.[t.id]?.tricks?.length ? `<ul class="tricks" data-tricks="${esc(t.id)}" title="From studio/CHEATSHEET.md (npm run cheatsheet -- attach ${esc(t.id)})"><span class="rf approved" data-preapproved="${esc(t.id)}">pre-approved by ${esc(s.cheatsheet[t.id].preapproved?.approvedBy || s.cheatsheet[t.id].by || '?')}</span>${s.cheatsheet[t.id].tricks.map((k) => `<li>${k.id ? `<b>${esc(k.id)}</b> ` : ''}${esc(k.text)}</li>`).join('')}</ul>` : ''}</div>`).join('') || '<p class="note">Empty</p>'}${list.length > n ? `<p class="note">${list.length - n} more in <code>studio/NEXT.md</code> (<code>npm run task -- list</code>)</p>` : ''}`; };
     // Every open task is listed; the list scrolls inside its box. Done shows the latest ten.
     $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, Infinity) + lane('Next up', s.queue.backlog, Infinity) + lane('Done', [...s.queue.done].reverse(), 10);
     renderMeter(s.meter);
     renderSessions(s.sessionCap, ro);
+    renderStatus(s.status);
+    renderYourCall(s, ro);
     $('o-act').classList.toggle('ro', ro);
     $('o-actstate').textContent = ro ? 'read-only' : `as ${actor()}`;
 
@@ -1239,7 +1252,44 @@
     box.innerHTML = `<p>${m.cap ? `<b>${big(m.used)}</b> of ${big(m.cap)} tokens today (${m.pct}%)` : `<b>${big(m.used)}</b> tokens today; daily cap off`}. Input + output + cache reads at ${m.cacheWeight}x.</p>` +
       (m.cap ? `<div class="bar" role="meter" aria-label="Daily cap used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, m.pct)}" style="height:8px;background:var(--line,#333);border-radius:4px"><i style="display:block;height:100%;width:${Math.min(100, m.pct)}%;background:${m.pct >= 90 ? '#ff5a5f' : m.pct >= 70 ? '#f5b83d' : '#43a047'};border-radius:4px"></i></div>` : '') +
       (rows.length ? `<table class="score" id="o-meter-models"><tr><th>Model</th><th>Sessions</th><th>In</th><th>Out</th><th>Cache reads</th><th>Counted</th></tr>${rows.map((r) => `<tr><td>${esc(r.model)}</td><td>${r.sessions}</td><td>${big(r.tokensIn)}</td><td>${big(r.tokensOut)}</td><td>${big(r.cacheRead)}</td><td>${big(r.counted)}</td></tr>`).join('')}</table><p class="note">Counts are each tool's own; compare tokens within a model, since every model family counts text differently.</p>` : '<p class="note">No launched session has ended today.</p>');
+    const cc = state?.ccusage;
+    if (cc) box.insertAdjacentHTML('beforeend', `<p class="note" id="o-ccusage">Claude Code's own log (ccusage, ${esc(cc.date)}): ${big(cc.total)} tokens, cache reads ${big(cc.cacheRead)}${cc.models?.length ? `, ${esc(cc.models.join(', '))}` : ''}.</p>`);
   }
+  // 2.30 (J10): one plain line: building now, waiting on you, tokens today with the model named.
+  function renderStatus(st) {
+    const box = $('o-status');
+    if (!box || !st) return;
+    box.innerHTML = `<b>Building now:</b> ${st.building.length ? st.building.map((b) => `${esc(b.agent)} on ${esc(b.task || 'no task')}${b.model ? ` (${esc(b.model)})` : ''}`).join(', ') : 'nothing'} · <b>Waiting on you:</b> <span class="${st.waitingOnYou.length ? 'you' : ''}">${st.waitingOnYou.length ? `${st.waitingOnYou.length} (${esc(st.waitingOnYou.map((w) => w.what).slice(0, 3).join('; '))}${st.waitingOnYou.length > 3 ? '; …' : ''})` : 'nothing'}</span> · <b>Tokens today:</b> ${big(st.tokensToday)}${st.models.length ? ` (${esc(st.models.join(', '))})` : ''}${st.waitingOnOthers.length ? ` · <span class="note">also waiting: ${esc(st.waitingOnOthers.slice(0, 3).map((w) => `${w.what} on ${w.owner}`).join(', '))}</span>` : ''}`;
+  }
+  // 2.30: what only the dev answers. Intent cards (J2), agent mechanics (J2), do it now (J3), the watchdog (G1).
+  function renderYourCall(s, ro) {
+    const box = $('o-yourcall');
+    if (!box) return;
+    const dis = ro ? 'disabled title="Needs the HUB token"' : '';
+    const ph = s.phases || [];
+    const open = ph.filter((p) => p.open).map((p) => p.n).pop() || 0;
+    const nextPh = open >= 1 && open < 3 ? open + 1 : null;
+    const cards = (s.intent || []).map((e) => `<div class="card" data-intent="${esc(e.id)}"><b class="k">${esc(e.id)}</b> You asked for: <b>${esc(e.asked)}</b>.${e.wont ? ` I will NOT change: <b>${esc(e.wont)}</b>.` : ''}${e.tasks?.length ? ` <span class="note">(${esc(e.tasks.join(', '))})</span>` : ''} <button class="act" data-intentok="${esc(e.id)}" ${dis}>That's right</button></div>`).join('');
+    const yes = s.queue.backlog.filter((t) => t.needsYes).map((t) => `<div class="card"><b class="k">${esc(t.id)}</b> An agent proposed: ${esc(short(t.title, 90))} <button class="act" data-taskyes="${esc(t.id)}" ${dis}>Yes, build it</button></div>`).join('');
+    const w = s.watchdog || { on: false };
+    const html = (cards || yes ? cards + yes : '<p class="note">Nothing waits on you.</p>') +
+      (nextPh ? `<div class="act-row" data-phasenow><input id="o-phasewords" placeholder="Your words, e.g. start Phase ${nextPh} now" aria-label="Your words for opening the next phase now"> <button class="act" id="o-phasenow" data-phase="${nextPh}" ${dis}>Open Phase ${nextPh} now</button></div><p class="note">Opens the gate at once, even with the exit list unfinished; what's skipped is logged as the risk.</p>` : '') +
+      `<div class="act-row"><button class="act" id="o-watchdog" aria-pressed="${w.on}" ${dis}>Watchdog: ${w.on ? 'on' : 'off'}</button> <span class="note">${w.on ? `Turned on ${esc(agoIso(w.at))} by ${esc(w.by || '?')}: unanswered checks hand off, looping tasks park, an idle studio stops.` : 'Off (default). Turn it on when nobody is watching the run.'}</span></div>`;
+    // Only when something changed, so typing in the box isn't wiped by the next poll.
+    if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
+  }
+  document.addEventListener('click', (ev) => {
+    const i = ev.target.closest('[data-intentok]');
+    if (i) act(`Confirming ${i.dataset.intentok}`, async () => (await post('/api/intent-confirm', { id: i.dataset.intentok, by: actor() })).next);
+    const y = ev.target.closest('[data-taskyes]');
+    if (y) act(`Yes to ${y.dataset.taskyes}`, async () => (await post('/api/task-yes', { task: y.dataset.taskyes, by: actor() })).next);
+    if (ev.target.closest('#o-phasenow')) {
+      const words = $('o-phasewords').value.trim();
+      if (!words) { notify('Type your words first (they go in the log with the risk).'); return; }
+      act('Opening the phase', async () => (await post('/api/phase-now', { phase: Number(ev.target.closest('#o-phasenow').dataset.phase), words, by: actor() })).next);
+    }
+    if (ev.target.closest('#o-watchdog')) act('Watchdog', async () => (await post('/api/watchdog', { on: !(state?.watchdog?.on), by: actor() })).next);
+  });
   // 2.29.2: each launched session against the refresh point; flagged mid-debug sessions and owed checks.
   function renderSessions(sc, ro) {
     const box = $('o-sessions');
@@ -1829,7 +1879,8 @@
     for (const d of roomList(s)) {
       const g = geo(d.id);
       if (!g) continue;
-      const staff = s.agents.filter((a) => a.room === d.baseId).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
+      // 2.30 (J13): nobody sits at a desk in a locked room; only an agent actually working there shows.
+      const staff = s.agents.filter((a) => a.room === d.baseId && (d.active !== false || (a.status === 'working' && !a.placeholder))).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
       g.el.querySelector('.count').textContent = staff.length && !staff.every((a) => a.placeholder) ? `${staff.length} staff` : '';
       g.el.classList.toggle('busy', staff.some((a) => a.status === 'working'));
       staff.forEach((a, i) => {
@@ -2141,6 +2192,7 @@
 
   // ---------- Arcade ----------
   let arcBuild = null;
+  const arcSeenAtLoad = store.get('arcadeSeen');
   let arcFloor = null;
   const hero = { col: 0, row: 0, x: 0, y: 0 };
   let dun = { rooms: [], cols: 6, floor: 0 };
@@ -2158,7 +2210,28 @@
       $('r-open').onclick = () => window.open(src, '_blank', 'noopener');
       $('r-copy').onclick = async () => { try { await navigator.clipboard.writeText(new URL(src, location.href).href); $('r-notemsg').textContent = 'Link copied. On a phone, use npm run play -- --lan instead (this link works on this computer).'; } catch { $('r-notemsg').textContent = new URL(src, location.href).href; } };
       if ($('r-older')) $('r-older').onchange = (e) => { $('r-frame').dataset.want = e.target.value; arcBuild = null; renderArcade(state); };
-    } else if (!b) $('r-build').textContent = 'Nothing to play yet.';
+    } else if (!b && s.engine?.web) {
+      // 2.30 (J8): no saved web build, but the engine's web export exists: play that, never "nothing to play".
+      if (arcBuild !== 'engine') {
+        arcBuild = 'engine';
+        $('r-frame').src = '/engine-play/index.html';
+        $('r-frame').closest('.screen').classList.remove('empty');
+        $('r-build').innerHTML = `Playing the <b>${esc(s.engine.label)}</b> web export (no saved web build yet; one is saved each time the browser check passes).`;
+      }
+    } else if (!b) $('r-build').textContent = 'Nothing to play yet: no build has passed the browser check (npm run play:browser saves one).';
+    // 2.30 (J8): what changed since you last played, from the tasks finished between builds.
+    if (b) {
+      const seen = arcSeenAtLoad;
+      // First visit: this build's changes. After that: every build since the one you last had open.
+      const newer = seen ? builds.filter((x) => x.at > seen) : [];
+      const items = (newer.length ? newer : [b]).flatMap((x) => x.changes || []).slice(0, 5);
+      const sig = `${b.id}|${items.map((x) => x.task).join(',')}`;
+      if ($('r-changes').dataset.sig !== sig) {
+        $('r-changes').dataset.sig = sig;
+        $('r-changes').innerHTML = items.length ? `<b>What changed${seen && newer.length ? ' since you last played' : ' in this build'}:</b><ul class="changes">${items.map((x) => `<li><b>${esc(x.task)}</b> ${esc(x.title)}</li>`).join('')}</ul>` : 'No finished tasks between this build and the one before.';
+      }
+      if (document.body.dataset.skin === 'arcade') store.set('arcadeSeen', builds[0].at);
+    }
     // The engine track's build, beside the web one (docs/ENGINE-TRACK.md).
     const en = s.engine;
     $('r-engine').hidden = !en;
