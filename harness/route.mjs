@@ -293,6 +293,43 @@ export async function routeChatCompletion({
 } = {}) {
   loadDotEnv();
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+  // 2.30e (R6): Rehearsal mode returns a scripted reply with zero tokens.
+  if (process.env.STUDIO_REHEARSAL === '1') {
+    const { getScriptedReply } = await import('./rehearsal.mjs');
+    const reply = getScriptedReply({ role });
+    const result = {
+      ok: true,
+      status: 200,
+      runId,
+      role,
+      selectedChannel: 'rehearsal',
+      provider: 'rehearsal',
+      model: 'rehearsal-script',
+      tier: 'free',
+      latencyMs: 1,
+      tokensIn: 0,
+      tokensOut: 0,
+      content: reply.content,
+      attempts: [],
+      meta: { rehearsal: true },
+    };
+    writeRunLedger(runId, result);
+    emitEvent({
+      type: 'route.success',
+      agent: role,
+      provider: 'rehearsal',
+      model: 'rehearsal-script',
+      task,
+      tokensIn: 0,
+      tokensOut: 0,
+      latencyMs: 1,
+      meta: { rehearsal: true },
+      msg: `Completed via rehearsal script`,
+    });
+    return result;
+  }
+
   const cap = dailyCap();
   if (cap > 0) {
     const used = spendToday();
@@ -369,6 +406,8 @@ export async function routeChatCompletion({
           tokensIn: response.tokensIn,
           tokensOut: response.tokensOut,
           latencyMs,
+          // 2.30e: the token ledger estimates a free model's tokens from this when it reported none.
+          meta: { free: def.tier === 'free' || undefined, charsIn: messages.reduce((n, m) => n + String(m.content || '').length, 0), charsOut: String(response.content || '').length },
           msg: `Completed via ${channel.channelKey} in ${latencyMs}ms`,
         });
 

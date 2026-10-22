@@ -211,7 +211,7 @@ From a read-only review of 2.11.0 by Gemini on Windows (2026-10-20), each findin
 | R3 | `npm run run-report`: REPORT.md, hourly snapshots and the run's files in a shared results folder | done (2.14.0) |
 | R4 | The browser test of the War Room runs in CI | done (2.14.0) |
 | R5 | Every command reads studio settings from `.env` (backup and results folders, Producer name) | done (2.14.0) |
-| R6 | Rehearsal mode with a fake model, phone alerts | after the first test |
+| R6 | Rehearsal mode with a fake model, phone alerts | rehearsal done (2.30e); phone alerts planned |
 
 ## 2.15.0 — Content and craft pipelines
 
@@ -246,7 +246,7 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F14f | Test #2 fixes: one launcher, quota marks from the right tool with real resets and a probe, selftest reads only the template, a bot's loss isn't a red gate, auto hand-back and parking of looping tasks, owed reviews, relayed verdicts; cheaper to read: repo map, pitfall list, real token counts, readable sessions | done (2.26.0) |
 | F14g | Engine track after Phase 1 and the dev's approval: engine/<name>/ from a worked Godot template, its own gate, a parity test against the web sim, frames, the Arcade links its build | done (2.27.0); a Godot-first game (no web version) next |
 | F14c | A Producer staffing plan applied by one "Staff the studio" click; "close?" hints for idle departments | planned |
-| F15 | A cheap vision model checks screenshot proof against the art reference | planned |
+| F15 | A cheap vision model checks screenshot proof against the art reference | done (2.30e), opt-in |
 | F16 | A browser regression proven to fail on the code before the fix | done (2.12.0, qa/fails-before.mjs) |
 | F17 | Room spec export and a dressing gate (keep-out zones, per-floor budgets) for set dressing | planned |
 

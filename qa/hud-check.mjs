@@ -63,6 +63,21 @@ fs.writeFileSync(path.join(dir, 'studio/art/concept.png'), Buffer.from('iVBORw0K
 fs.writeFileSync(path.join(dir, 'assets/placeholder/crate.glb'), 'glTF placeholder');
 sh('harness/art.mjs', 'propose', 'studio/art/concept.png', '--kind', 'style', '--title', 'Mossy pastel, soft light', '--by', 'art-1');
 sh('harness/art.mjs', 'propose', 'assets/placeholder/crate.glb', '--title', 'Garden crate', '--thumb', 'studio/art/concept.png', '--by', 'art-1');
+// 2.30e: two ended sessions (one finished its task) and a free model call with no usage, for the ledger tiles.
+{
+  // Over a day old, so the top bar's tokens-today stays "not tracked" (its own check below).
+  const t = (minAgo) => new Date(Date.now() - (26 * 60 + minAgo) * 60000).toISOString();
+  const ev = [
+    { ts: t(50), type: 'agent.session.start', agent: 'builder-h1', task: 'T-101', meta: { role: 'builder', tool: 'claude' } },
+    { ts: t(40), type: 'task.done', agent: 'builder-h1', task: 'T-101' },
+    { ts: t(39), type: 'agent.session.end', agent: 'builder-h1', model: 'claude-sonnet', tokensIn: 2000, tokensOut: 1000, meta: { role: 'builder', tool: 'claude', turns: 12 } },
+    { ts: t(30), type: 'agent.session.start', agent: 'builder-h2', task: 'T-102', meta: { role: 'builder', tool: 'claude' } },
+    { ts: t(20), type: 'agent.session.end', agent: 'builder-h2', model: 'claude-sonnet', tokensIn: 3000, tokensOut: 500, meta: { role: 'builder', tool: 'claude', turns: 40 } },
+    { ts: t(10), type: 'route.success', agent: 'liaison', provider: 'nvidia-nim', model: 'glm-flash', meta: { free: true, chars: 4000 } },
+  ];
+  fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
+  fs.appendFileSync(path.join(dir, '.studio', 'events.jsonl'), ev.map((e) => JSON.stringify(e)).join('\n') + '\n');
+}
 // A fake local model for the Liaison chat: it answers with a brief straight away.
 const fakeModel = http.createServer((req, res) => {
   req.resume();
@@ -342,6 +357,26 @@ try {
   check('2.30c: Unblock clears the breaker: the card goes and the task can start again', !/circuit breaker/.test(await page.locator('#o-holdlist').innerText()) && !holds[trip]?.parked, JSON.stringify(holds[trip] || null));
   if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-after-unblock.png'), fullPage: false });
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
+
+  // 2.30e: the token ledger tiles, from the seeded sessions: 3k tokens for the one finished task, 1 of 2
+  // sessions ended with no task done, turns 12 / 40, and the free model flagged as estimated.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await until(async () => (await page.locator('#o-ledger .tile').count()) === 4, 15000);
+  const tileText = async (id) => (await page.locator(`#o-ledger [data-tile="${id}"]`).innerText().catch(() => '')).replace(/\s+/g, ' ');
+  // The no-done share counts every session in this run's events (earlier steps start and pause agents), so compare with the ledger's own number.
+  const ledgerNoDone = (() => { try { return Math.round(JSON.parse(spawnSync(process.execPath, [path.join(dir, 'harness/ledger.mjs'), '--json'], { cwd: dir, encoding: 'utf8' }).stdout).noDonePct); } catch { return 'x'; } })();
+  const tiles = { task: await tileText('tokens-per-task'), nodone: await tileText('no-done'), turns: await tileText('turns'), budget: await tileText('budget'), note: await page.locator('#o-ledger .tiles-note').innerText().catch(() => '') };
+  check('the ledger tiles show tokens per finished task, no-done %, turns p50/p95 and the budget', /3k tokens per finished task/.test(tiles.task) && new RegExp(`^${ledgerNoDone}% sessions with no task done`).test(tiles.nodone.trim()) && /12 \/ 40 turns/.test(tiles.turns) && /(\d+%|cap off) daily budget used/.test(tiles.budget) && /nvidia-nim \(est\.\)/.test(tiles.note), JSON.stringify(tiles));
+  const taskModel = await page.locator('#o-ledger [data-tile="tokens-per-task"] [data-models]').innerText().catch(() => '');
+  check('every token count on the ledger tiles names its model (one model, or a mixed share)', /claude|mixed: /.test(taskModel) && /Models: /.test(tiles.note), JSON.stringify({ taskModel, note: tiles.note }));
+  const box = page.locator('#o-ledgerbox');
+  await box.scrollIntoViewIfNeeded();
+  if (shotsAt) fs.mkdirSync(shotsAt, { recursive: true }), await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await wait(300);
+  const sideways = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  check('the ledger tiles wrap on a phone with no sideways scroll', !sideways && (await page.locator('#o-ledger .tile').count()) === 4, `scrollWidth past the screen: ${sideways}`);
+  if (shotsAt) await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-phone.png') });
 } finally {
   await browser.close();
   hub.kill();

@@ -38,7 +38,7 @@ export function readManifest() {
     return { assets: [] };
   }
 }
-function writeManifest(m) {
+export function writeManifest(m) {
   fs.mkdirSync(path.dirname(MANIFEST), { recursive: true });
   fs.writeFileSync(MANIFEST, `${JSON.stringify(m, null, 2)}\n`);
 }
@@ -55,11 +55,20 @@ const relOf = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join('/');
  * the dev), madeBy (the agent that made or fetched it), generated ({ tool, model, prompt, terms }
  * for AI-made art: the first thing a buyer or a store asks).
  */
-export function entryFor(rel, { id, owner, licence, origin, by, author = '', credit = '', madeBy = '', generated = null, design = null, pack = null }) {
+const inferKind = (file) => {
+  const ext = path.extname(file).toLowerCase();
+  if (['.obj', '.glb', '.gltf', '.fbx'].includes(ext)) return 'model';
+  if (['.png', '.jpg', '.jpeg', '.webp', '.tga', '.psd'].includes(ext)) return 'texture';
+  if (ext === '.json' && file.includes('palette')) return 'palette';
+  return null;
+};
+
+export function entryFor(rel, { id, owner, licence, origin, by, author = '', credit = '', madeBy = '', generated = null, design = null, pack = null, kind = null }) {
   const holder = owner || by;
   return {
     id,
     file: rel,
+    kind: kind || inferKind(rel),
     pack: pack || rel.split('/').slice(1, -1).join('/').replace(/^(approved|staging)\//, '') || null,
     sha256: sha256(path.join(REPO_ROOT, rel)),
     use: 'game',

@@ -45,6 +45,7 @@ import { budgetStatus } from './budget.mjs';
 import { holdReason, holdOwner, readHolds } from './task-hold.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { tokenTotals } from './tokens.mjs';
+import { ledgerMetrics, readProxyLogs } from './ledger.mjs';
 import { refreshBoard, sessionLimits } from './session-cap.mjs';
 import { modelWarning } from './model-tiers.mjs';
 import { allAttached } from './cheatsheet.mjs';
@@ -192,6 +193,23 @@ function tokensCached() {
     tokenCache = { at: Date.now(), value: null };
   }
   return tokenCache.value;
+}
+
+
+// Token ledger across all sources, cached for 30s.
+let ledgerCache = { at: 0, value: null };
+function ledgerCached() {
+  if (Date.now() - ledgerCache.at < 30000) return ledgerCache.value;
+  try {
+    const events = readRecentEvents(100000);
+    const logs = readProxyLogs();
+    const { rows, ...rest } = ledgerMetrics({ events, now: Date.now(), logs });
+    ledgerCache = { at: Date.now(), value: { ...rest, rows: rows.length } };
+  } catch (e) {
+    console.error('[hud] error building ledger metrics:', e);
+    ledgerCache = { at: Date.now(), value: null };
+  }
+  return ledgerCache.value;
 }
 
 export function buildHudState() {
@@ -502,6 +520,7 @@ export function buildHudState() {
     lessons: lessons(),
     rtk: rtkGain(),
     tokenUse: tokensCached(),
+    ledger: ledgerCached(),
     // 2.29.2: the budget meter with cache reads, per model; sessions against the refresh point; the
     // top-tier warning; the cheat sheet tricks attached to each task.
     meter: (() => {

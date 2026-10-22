@@ -594,6 +594,12 @@
   #away .aw.done { opacity: .55; }
   #away .learned { padding: 0 18px 18px; font-size: 13px; color: #9aa0a6; }
   #away .awaybar { padding: 10px 18px; background: #1d2a1f; color: #a5d6a7; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+    .tile { text-align: center; padding: 10px 6px; background: var(--bg-deep, #000); border: 1px solid var(--line, #333); border-radius: 4px; min-width: 0; }
+    .tile .num { font-size: 1.6rem; font-weight: bold; }
+    .tile .label { font-size: 0.8rem; color: var(--text-mute, #888); }
+    .tile .tile-model { overflow-wrap: anywhere; font-style: italic; }
+    .tiles-note { grid-column: 1 / -1; }
 </style>
 </head>
 <body data-skin="ops">
@@ -660,6 +666,7 @@
       <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
       <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
       <section><h2>Sessions and context <small>refresh by default</small></h2><div id="o-sessions"></div></section>
+      <section id="o-ledgerbox"><h2>Token ledger</h2><div class="tiles" id="o-ledger"></div></section>
       <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
       <section><h2>Model calls today</h2><div id="o-router"></div></section>
       <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
@@ -1286,6 +1293,7 @@
     // Every open task is listed; the list scrolls inside its box. Done shows the latest ten.
     $('o-queue').innerHTML = lane('In progress', s.queue.inProgress, Infinity) + lane('Next up', s.queue.backlog, Infinity) + lane('Done', [...s.queue.done].reverse(), 10);
     renderMeter(s.meter);
+    renderLedger(s.ledger);
     renderSessions(s.sessionCap, ro);
     renderStatus(s.status);
     renderYourCall(s, ro);
@@ -1326,6 +1334,21 @@
       (rows.length ? `<table class="score" id="o-meter-models"><tr><th>Model</th><th>Sessions</th><th>In</th><th>Out</th><th>Cache reads</th><th>Counted</th></tr>${rows.map((r) => `<tr><td>${esc(r.model)}</td><td>${r.sessions}</td><td>${big(r.tokensIn)}</td><td>${big(r.tokensOut)}</td><td>${big(r.cacheRead)}</td><td>${big(r.counted)}</td></tr>`).join('')}</table><p class="note">Counts are each tool's own; compare tokens within a model, since every model family counts text differently.</p>` : '<p class="note">No launched session has ended today.</p>');
     const cc = state?.ccusage;
     if (cc) box.insertAdjacentHTML('beforeend', `<p class="note" id="o-ccusage">Claude Code's own log (ccusage, ${esc(cc.date)}): ${big(cc.total)} tokens, cache reads ${big(cc.cacheRead)}${cc.models?.length ? `, ${esc(cc.models.join(', '))}` : ''}.</p>`);
+  }
+  // 2.30e: the token ledger tiles (every provider; estimated counts are flagged).
+  function renderLedger(l) {
+    const box = $('o-ledger');
+    if (!box) return;
+    const tile = (id, num, label, model) => `<div class="tile" data-tile="${id}"><div class="num">${num}</div><div class="label">${label}</div>${model != null ? `<div class="label tile-model" data-models>${esc(model || 'no model yet')}</div>` : ''}</div>`;
+    const v = l || {};
+    const mm = v.models || {};
+    const prov = (v.providers || []).map((p) => `${esc(p.provider)}${p.estimated ? ' (est.)' : ''}`).join(', ');
+    const html = tile('tokens-per-task', v.tokensPerDoneTask != null ? big(v.tokensPerDoneTask) : '–', 'tokens per finished task', v.tokensPerDoneTask != null ? (mm.tokensPerDoneTask || 'model not recorded') : '') +
+      tile('no-done', v.noDonePct != null ? `${Math.round(v.noDonePct)}%` : '–', 'sessions with no task done') +
+      tile('turns', v.turns_p50 != null ? `${v.turns_p50} / ${v.turns_p95}` : '–', 'turns p50 / p95') +
+      tile('budget', v.budgetPct != null ? `${Math.round(v.budgetPct)}%` : 'cap off', 'daily budget used', v.budgetPct != null ? (mm.budget || '') : null) +
+      `<p class="note tiles-note">${prov ? `Providers: ${prov}.${mm.all ? ` Models: ${esc(mm.all)}.` : ''} Est. means a free model reported no usage, so it is counted at 4 characters per token.` : 'No token use recorded yet.'}</p>`;
+    if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
   }
   // 2.30 (J10): one plain line: building now, waiting on you, tokens today with the model named.
   function renderStatus(st) {

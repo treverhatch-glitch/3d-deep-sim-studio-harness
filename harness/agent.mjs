@@ -425,7 +425,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const file = path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
-  const custom = process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
+  // 2.30e (R6): In rehearsal mode, use the rehearsal agent unless a custom command is set.
+  let custom = process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
+  if (process.env.STUDIO_REHEARSAL === '1' && !custom) {
+    custom = `node harness/rehearsal-agent.mjs {agent} {task} ok`;
+  }
   const effort = { 'every-build': 'high', systems: 'medium' }[effectiveMode().review] || null;
   const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort });
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };

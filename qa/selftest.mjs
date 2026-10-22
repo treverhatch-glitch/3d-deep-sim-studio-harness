@@ -2726,6 +2726,197 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
   report('2.30d: the War Room state carries away mode and its review, pending forced work, proposals, waves, alerts and phone', hs.away && hs.pending && hs.waves === true && hs.alerts === true && hs.phone === false, JSON.stringify(hs));
 }
 
+// 2.30e: the art scout widened (palettes, kinds) and the art agent's adapt step (recolour, resize, LODs, mesh fixes).
+{
+  const dir = copyRepo();
+  const zlib = await import('node:zlib');
+  // An offline Lospec: one CC0 palette, one CC-BY-NC palette.
+  const fake = path.join(dir, 'fake-lospec.mjs');
+  fs.writeFileSync(fake, `export default async (url) => {
+  const nc = url.includes('nc-pal');
+  if (url.endsWith('.json')) return { ok: true, json: async () => ({ name: nc ? 'NC Pal' : 'Sea Four', author: 'Pal Maker', colors: ['102030', 'e0d0c0', '3070b0', 'f0a040'] }) };
+  return { ok: true, text: async () => '<p>Licence: ' + (nc ? 'CC BY-NC 4.0' : 'CC0') + '</p>' };
+};\n`);
+  const palOk = run(dir, `node harness/asset-scout.mjs palette sea-four --fetch fake-lospec.mjs`);
+  const palNc = run(dir, `node harness/asset-scout.mjs palette nc-pal --fetch fake-lospec.mjs`);
+  const pal = fs.existsSync(path.join(dir, 'studio/art/palette.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'studio/art/palette.json'), 'utf8')) : {};
+  const man = () => JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8')).assets;
+  report('2.30e G7: a CC0 palette is pulled into the ledger (kind palette) and becomes studio/art/palette.json; a CC-BY-NC one is refused', palOk.status === 0 && pal.colors?.length === 4 && man().some((a) => a.kind === 'palette' && a.file === 'assets/scouted/lospec/sea-four.json') && palNc.status !== 0 && /only CC0 or CC-BY/.test(palNc.stderr) && !fs.existsSync(path.join(dir, 'assets/scouted/lospec/nc-pal.json')), `${palOk.stdout}${palOk.stderr}${palNc.stdout}${palNc.stderr}`);
+  // An 8x4 RGBA texture with colours off the palette, written by hand (not by the module's encoder).
+  const crcT = new Uint32Array(256).map((_, k) => { let c = k; for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
+  const crc = (b) => { let c = -1; for (const x of b) c = (c >>> 8) ^ crcT[(c ^ x) & 0xff]; return (c ^ -1) >>> 0; };
+  const chunk = (t, d) => { const l = Buffer.alloc(4); l.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(t), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); };
+  const W = 8, H = 4;
+  const rows = [];
+  // Row 1 uses the Sub filter (each byte minus the one a pixel left), so the decoder's filters are exercised.
+  for (let y = 0; y < H; y++) {
+    const raw = [];
+    for (let x = 0; x < W; x++) raw.push((x * 37 + y * 11) % 256, (x * 91) % 256, (y * 70) % 256, 200);
+    rows.push(Buffer.from([y === 1 ? 1 : 0, ...(y === 1 ? raw.map((v, i) => (v - (i >= 4 ? raw[i - 4] : 0) + 256) % 256) : raw)]));
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(H, 4); ihdr[8] = 8; ihdr[9] = 6;
+  fs.writeFileSync(path.join(dir, 'tex.png'), Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]));
+  const pulled = run(dir, 'node harness/asset-scout.mjs pull tex.png --licence CC-BY-4.0 --author "Tex Author" --source https://example.org/tex --title "Sand tex" --kind texture');
+  const texId = (pulled.stdout.match(/A-\d+/) || [])[0];
+  const ad = run(dir, `node harness/art-adapt.mjs ${texId} --max 4 --by art-1`);
+  const out = path.join(dir, 'assets/adapted/tex.png');
+  let colours = [], size = '';
+  if (fs.existsSync(out)) {
+    const { decodePng } = await import(pathToFileURL(path.join(dir, 'harness/art-adapt.mjs')).href);
+    const img = decodePng(fs.readFileSync(out));
+    size = `${img.width}x${img.height}`;
+    for (let i = 0; i < img.pixels.length; i += 4) colours.push('#' + [0, 1, 2].map((c) => img.pixels[i + c].toString(16).padStart(2, '0')).join('') + `/${img.pixels[i + 3]}`);
+  }
+  const adapted = man().find((a) => a.file === 'assets/adapted/tex.png');
+  const credits = fs.existsSync(path.join(dir, 'CREDITS.md')) ? fs.readFileSync(path.join(dir, 'CREDITS.md'), 'utf8') : '';
+  report('2.30e G7: adapt recolours a texture to the palette (alpha kept), resizes it to a power of two, and records it as derived with the credit carried', ad.status === 0 && size === '4x2' && colours.length === 8 && colours.every((c) => pal.colors.includes(c.split('/')[0]) && c.endsWith('/200')) && adapted?.derivedFrom === texId && /palette/.test(adapted?.adapted?.palette || '') && adapted?.licence === 'CC-BY-4.0' && (credits.match(/Tex Author/g) || []).length >= 2, `size=${size} ${colours.join(',')} ${ad.stdout}${ad.stderr} ${JSON.stringify(adapted)}\n${credits}`);
+  // A 10x10 grid of quads, with a duplicate vertex and a degenerate face to fix.
+  const L = [];
+  for (let y = 0; y <= 10; y++) for (let x = 0; x <= 10; x++) L.push(`v ${x / 10} ${y / 10} 0`);
+  L.push('v 0 0 0');
+  for (let y = 0; y < 10; y++) for (let x = 0; x < 10; x++) { const a = y * 11 + x + 1; L.push(`f ${a} ${a + 1} ${a + 12} ${a + 11}`); }
+  L.push('f 1 1 2', 'f 122 2 13');
+  fs.writeFileSync(path.join(dir, 'grid.obj'), `${L.join('\n')}\n`);
+  const pm = run(dir, 'node harness/asset-scout.mjs pull grid.obj --licence CC0 --source https://example.org/grid --title Grid');
+  const meshId = (pm.stdout.match(/A-\d+/) || [])[0];
+  const am = run(dir, `node harness/art-adapt.mjs ${meshId} --lod 2 --by art-1`);
+  const faces = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter((l) => l.startsWith('f ')).length : -1);
+  const verts = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter((l) => l.startsWith('v ')).length : -1);
+  const fixedF = faces('assets/adapted/grid.obj'), l1 = faces('assets/adapted/grid.lod1.obj'), l2 = faces('assets/adapted/grid.lod2.obj');
+  const badRef = fs.existsSync(path.join(dir, 'assets/adapted/grid.lod1.obj')) && fs.readFileSync(path.join(dir, 'assets/adapted/grid.lod1.obj'), 'utf8').split('\n').filter((l) => l.startsWith('f ')).some((l) => l.slice(2).split(' ').some((v) => Number(v.split('/')[0]) > verts('assets/adapted/grid.lod1.obj')));
+  report('2.30e G7: adapt fixes a mesh (welds the duplicate vertex, drops the degenerate face) and makes LODs with fewer faces and valid indices, all in the ledger', am.status === 0 && fixedF === 101 && verts('assets/adapted/grid.obj') === 121 && l1 > 0 && l1 < fixedF && l2 > 0 && l2 < l1 && !badRef && man().filter((a) => a.derivedFrom === meshId).length === 3, `${am.stdout}${am.stderr} fixed=${fixedF} v=${verts('assets/adapted/grid.obj')} lod1=${l1} lod2=${l2} badRef=${badRef}`);
+  // glTF/GLB: checked, then passed through unchanged; a broken one is refused and nothing is written.
+  const glb = (json, bin, lie = 0) => {
+    const pad = (b, c) => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4, c)]);
+    const j = pad(Buffer.from(JSON.stringify(json)), 0x20), b = pad(bin, 0);
+    const head = Buffer.alloc(12); head.write('glTF', 0, 'ascii'); head.writeUInt32LE(2, 4); head.writeUInt32LE(12 + 8 + j.length + 8 + b.length + lie, 8);
+    const ch = (buf, type) => { const h = Buffer.alloc(8); h.writeUInt32LE(buf.length, 0); h.writeUInt32LE(type, 4); return Buffer.concat([h, buf]); };
+    return Buffer.concat([head, ch(j, 0x4e4f534a), ch(b, 0x004e4942)]);
+  };
+  const gj = { asset: { version: '2.0' }, buffers: [{ byteLength: 12 }], bufferViews: [{ buffer: 0, byteLength: 12 }], accessors: [{ bufferView: 0, componentType: 5126, count: 1, type: 'VEC3' }] };
+  fs.writeFileSync(path.join(dir, 'boat.glb'), glb(gj, Buffer.alloc(12)));
+  fs.writeFileSync(path.join(dir, 'bad.glb'), glb({ ...gj, bufferViews: [{ buffer: 0, byteLength: 64 }] }, Buffer.alloc(12), 4));
+  fs.writeFileSync(path.join(dir, 'lost.gltf'), JSON.stringify({ asset: { version: '2.0' }, buffers: [{ uri: 'lost.bin', byteLength: 12 }] }));
+  const gid = (f) => (run(dir, `node harness/asset-scout.mjs pull ${f} --licence CC0 --source https://example.org/${f} --title ${f}`).stdout.match(/A-\d+/) || [])[0];
+  const okG = run(dir, `node harness/art-adapt.mjs ${gid('boat.glb')} --by art-1`);
+  const badG = run(dir, `node harness/art-adapt.mjs ${gid('bad.glb')} --by art-1`);
+  const lostG = run(dir, `node harness/art-adapt.mjs ${gid('lost.gltf')} --by art-1`);
+  const same = fs.existsSync(path.join(dir, 'assets/adapted/boat.glb')) && fs.readFileSync(path.join(dir, 'assets/adapted/boat.glb')).equals(fs.readFileSync(path.join(dir, 'boat.glb')));
+  report('2.30e G7: adapt checks a GLB and copies it unchanged into the ledger; a GLB with a wrong length and a view past its buffer, and a .gltf with a missing buffer file, are refused with nothing written', okG.status === 0 && same && man().some((a) => a.file === 'assets/adapted/boat.glb' && a.derivedFrom && a.adapted?.steps?.includes('validate-gltf')) && badG.status !== 0 && /header says/.test(badG.stderr) && /bufferView 0 runs past/.test(badG.stderr) && !fs.existsSync(path.join(dir, 'assets/adapted/bad.glb')) && lostG.status !== 0 && /lost\.bin is missing/.test(lostG.stderr) && !fs.existsSync(path.join(dir, 'assets/adapted/lost.gltf')), `${okG.stdout}${okG.stderr}|${badG.stderr}|${lostG.stderr}`);
+  const gate = run(dir, 'node scripts/check-assets.mjs');
+  report('2.30e G7: the assets gate passes with palettes and adapted art in the ledger', gate.status === 0, `${gate.stdout}${gate.stderr}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// 2.30e: the scout judges quality (0-10) from resolution, maps, poly count, popularity and tags, with an optional vision judge.
+{
+  const dir = copyRepo();
+  fs.writeFileSync(path.join(dir, 'fake-sources.mjs'), `export default async (url, opts) => {
+  if (url.includes('api.polyhaven.com')) return { ok: true, json: async () => ({
+    crate_good: { name: 'Crate Good', type: 2, tags: ['crate', 'wood', 'box', 'prop', 'cargo', 'old'], max_resolution: [4096, 4096], polycount: 5000, download_count: 900000, authors: { A: 'All' }, thumbnail_url: 'https://x/crate_good.png' },
+    crate_bad: { name: 'Crate Bad', type: 2, tags: ['crate'], max_resolution: [512, 512], polycount: 3000000, download_count: 3, authors: { B: 'All' }, thumbnail_url: 'https://x/crate_bad.png' },
+  }) };
+  if (url.includes('ambientcg.com')) return { ok: true, json: async () => ({ foundAssets: [
+    { assetId: 'CrateFull', displayName: 'Crate Full', maps: ['color', 'normal', 'roughness'], downloadCount: '5000', tags: ['crate', 'wood', 'planks', 'box'] },
+    { assetId: 'CrateFlat', displayName: 'Crate Flat', maps: ['color'], downloadCount: '5000', tags: ['crate', 'wood', 'planks', 'box'] },
+  ] }) };
+  if (url.endsWith('/chat/completions')) return { ok: true, json: async () => ({ choices: [{ message: { content: '{"score": 2, "why": "muddy"}' } }], usage: { prompt_tokens: 700, completion_tokens: 30 } }) };
+  return { ok: false, status: 404 };
+};\n`);
+  const all = run(dir, 'node harness/asset-scout.mjs find crate --kind any --fetch fake-sources.mjs');
+  const q = (name, out = all.stdout) => Number((out.match(new RegExp(`q\\s*([\\d.]+)\\s+\\S+\\s+\\[\\w+\\] ${name} `)) || [])[1]);
+  const order = [...all.stdout.matchAll(/q\s*([\d.]+)\s/g)].map((m) => Number(m[1]));
+  report('2.30e G7: the scout scores each hit 0-10: a 4k, sane-poly, popular, well-tagged model beats a 512px 3M-tri one, and full maps beat colour only', all.status === 0 && q('Crate Good') >= 8 && q('Crate Bad') <= 3 && q('Crate Full') > q('Crate Flat') && order.length === 4 && order.every((v, i) => i === 0 || order[i - 1] >= v) && /maps albedo\+normal\+roughness/.test(all.stdout) && /poly 3000000 tris/.test(all.stdout), all.stdout + all.stderr);
+  const min = run(dir, 'node harness/asset-scout.mjs find crate --kind any --min-quality 6 --fetch fake-sources.mjs');
+  report('2.30e G7: --min-quality drops hits under the bar and says how many were left out', min.status === 0 && /Crate Good/.test(min.stdout) && !/Crate Bad/.test(min.stdout) && /below --min-quality 6 left out/.test(min.stdout), min.stdout + min.stderr);
+  const vis = run(dir, 'node harness/asset-scout.mjs find crate --kind model --vision --fetch fake-sources.mjs', { STUDIO_VISION_URL: 'http://vision.test/v1', STUDIO_VISION_MODEL: 'fake-vision-1' });
+  const led = run(dir, 'node harness/ledger.mjs --by model');
+  report('2.30e G7: the vision judge (STUDIO_VISION_URL) is averaged into the score, and its tokens land in the token ledger under its model', vis.status === 0 && /vision 2\/10 \(fake-vision-1\)/.test(vis.stdout) && q('Crate Good', vis.stdout) < q('Crate Good') && /fake-vision-1\s+2 calls\s+in\s+1k/.test(led.stdout), vis.stdout + vis.stderr + led.stdout);
+  const pulled = run(dir, `node harness/asset-scout.mjs pull fake-sources.mjs --licence CC0 --source https://polyhaven.com/a/crate_good --title "Crate Good" --quality ${q('Crate Good')}`);
+  const entry = JSON.parse(fs.readFileSync(path.join(dir, 'studio/assets/manifest.json'), 'utf8')).assets.find((a) => a.title === 'Crate Good');
+  report('2.30e G7: a pulled asset keeps its quality score in the asset ledger', pulled.status === 0 && entry?.quality === q('Crate Good'), pulled.stdout + pulled.stderr + JSON.stringify(entry));
+}
+
+// 2.30e: token ledger and gate cache.
+{
+  const dir = copyRepo();
+  const eventsPath = path.join(dir, '.studio', 'events.jsonl');
+  fs.mkdirSync(path.dirname(eventsPath), { recursive: true });
+  const ledgerLogPath = path.join(dir, 'studio', 'ledger', 'proxy.jsonl');
+  fs.mkdirSync(path.dirname(ledgerLogPath), { recursive: true });
+
+  const now = Date.now();
+  const ts = (offset) => new Date(now - offset).toISOString();
+
+  const events = [
+    { ts: ts(3600e3), type: 'agent.session.start', agent: 'agent-1', task: 'T-001' },
+    { ts: ts(3100e3), type: 'task.done', agent: 'agent-1', task: 'T-001' },
+    { ts: ts(3000e3), type: 'agent.session.end', agent: 'agent-1', model: 'claude-3-opus', tokensIn: 100, tokensOut: 200, meta: { tool: 'anthropic', turns: 10 } },
+    { ts: ts(2000e3), type: 'agent.session.start', agent: 'agent-2', task: 'T-002' },
+    { ts: ts(1000e3), type: 'agent.session.end', agent: 'agent-2', model: 'claude-3-sonnet', tokensIn: 50, tokensOut: 50, meta: { tool: 'anthropic', turns: 5 } },
+    { ts: ts(500e3), type: 'route.success', provider: 'openrouter-free', model: 'some-free-model', agent: 'agent-3', meta: { chars: 1000 } },
+  ];
+  fs.writeFileSync(eventsPath, events.map(JSON.stringify).join('\n') + '\n');
+  fs.writeFileSync(ledgerLogPath, JSON.stringify({ at: ts(400e3), agent: 'agent-4', role: 'executor', model: 'gemini-1.5-pro', tokensIn: 1000, tokensOut: 1000 }) + '\n');
+
+  const res = run(dir, 'node harness/ledger.mjs');
+  report('2.30e: ledger: noDonePct is 50% for 2 sessions, 1 done; 300 tokens for the finished task', /No-done sessions: 50%/.test(res.stdout) && /Tokens per finished task: 300\b/.test(res.stdout), res.stdout + res.stderr);
+  report('2.30e: ledger: every token count names its model (single model by name, mixed totals as shares, per group)', /Tokens per finished task: 300 \(claude-3-opus\)/.test(res.stdout) && /Measured: .*\(mixed: gemini-1\.5-pro \d+%, claude-3-opus \d+%/.test(res.stdout) && /Estimated: .*\(some-free-model est\.\)/.test(res.stdout) && /google .*\[gemini-1\.5-pro\]/.test(res.stdout), res.stdout + res.stderr);
+  {
+    const mod = await import(pathToFileURL(path.join(dir, 'harness/ledger.mjs')).href);
+    const mix = mod.modelMix([{ model: 'unknown', tokensIn: 1, tokensOut: 0 }, { tokensIn: 1, tokensOut: 0 }]);
+    report('2.30e: ledger: a session with no model reads "model not recorded", never "unknown"', mix === 'model not recorded', mix);
+  }
+  report('2.30e: ledger: free provider call is estimated', /openrouter-free .*\(1 est\. calls, out 250\)/.test(res.stdout), res.stdout + res.stderr);
+  report('2.30e: ledger: proxy log is counted under google', /google\s+1 calls\s+in\s+1k\s+out\s+1k/.test(res.stdout), res.stdout + res.stderr);
+  report('2.30e: ledger: output contains no cost figures', !/\$|cost/i.test(res.stdout), res.stdout + res.stderr);
+
+  const dir2 = copyRepo();
+  const cmd = 'node scripts/run-gates.mjs --tier fast --only purity';
+  const res1 = run(dir2, cmd);
+  report('2.30e: gate-cache: first run of purity passes', res1.status === 0 && /PASS purity/.test(res1.stdout) && !/cached/.test(res1.stdout), `${res1.stdout}${res1.stderr}`);
+
+  const res2 = run(dir2, cmd);
+  report('2.30e: gate-cache: second run of purity is cached', res2.status === 0 && /PASS purity \(cached/.test(res2.stdout), `${res2.stdout}${res2.stderr}`);
+
+  SABOTAGE.purity(dir2);
+  const res3 = run(dir2, cmd);
+  report('2.30e: gate-cache: purity fails after sabotage, not from cache', res3.status === 1 && /FAIL purity/.test(res3.stdout) && !/cached/.test(res3.stdout), `${res3.stdout}${res3.stderr}`);
+
+  const dir3 = copyRepo();
+  run(dir3, 'node scripts/run-gates.mjs --tier fast --only purity'); // prime cache
+  const resMerge = run(dir3, 'node scripts/run-gates.mjs --tier merge --only purity');
+  report('2.30e: gate-cache: merge tier ignores cache', resMerge.status === 0 && /PASS purity/.test(resMerge.stdout) && !/\(cached/.test(resMerge.stdout), `${resMerge.stdout}${resMerge.stderr}`);
+  for (const d of [dir, dir2, dir3]) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// 2.30e: rehearsal mode (R6) runs the real launcher on board tasks with no model; F15 vision check is opt-in.
+{
+  const dir = copyRepo();
+  run(dir, 'node harness/task.mjs add "Rehearsal task one" --role builder');
+  run(dir, 'node harness/task.mjs add "Rehearsal task two" --role builder');
+  const reh = run(dir, 'node harness/rehearsal.mjs --tasks 3', { STUDIO_HEARTBEAT_SEC: '1' });
+  const ev = fs.existsSync(path.join(dir, '.studio/events.jsonl')) ? fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+  const ends = ev.filter((e) => e.type === 'agent.session.end' && /rehearsal/.test(e.agent));
+  const docs = fs.existsSync(path.join(dir, 'docs/rehearsal')) ? fs.readdirSync(path.join(dir, 'docs/rehearsal')).length : 0;
+  report('2.30e R6: rehearse takes 3 builder tasks through the launcher (claim, work, done, session events) with 0 model tokens', reh.status === 0 && /3 started, 3 done/.test(reh.stdout) && /model tokens 0/.test(reh.stdout) && ends.length === 3 && ends.every((e) => !e.tokensIn && !e.tokensOut) && docs === 3, `${reh.stdout}${reh.stderr}`);
+  const routed = run(dir, `node -e "import('./harness/route.mjs').then(async (m) => { const r = await m.routeChatCompletion({ role: 'producer', messages: [{ role: 'user', content: 'hi' }] }); console.log(JSON.stringify({ ok: r.ok, provider: r.provider, t: r.tokensIn + r.tokensOut, c: r.content })); })"`, { STUDIO_REHEARSAL: '1' });
+  report('2.30e R6: in rehearsal the router answers from the script with zero tokens and no provider called', /"ok":true,"provider":"rehearsal","t":0,"c":"[^"]+"/.test(routed.stdout), `${routed.stdout}${routed.stderr}`);
+  const off = run(dir, 'node qa/vision-check.mjs');
+  fs.mkdirSync(path.join(dir, 'studio/proof'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'shot.png'), 'png');
+  fs.writeFileSync(path.join(dir, 'studio/proof/T-800.json'), JSON.stringify({ task: 'T-800', shots: [{ file: 'shot.png', says: 'the beach' }], checks: [] }));
+  fs.mkdirSync(path.join(dir, 'studio/art'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ref.png'), 'png');
+  fs.writeFileSync(path.join(dir, 'studio/art/references.json'), JSON.stringify({ references: [{ id: 'AR-001', kind: 'look', label: 'the look', file: 'ref.png', image: true }] }));
+  const low = run(dir, 'node qa/vision-check.mjs T-800 --on --min 60', { STUDIO_VISION_FAKE: '40' });
+  const high = run(dir, 'node qa/vision-check.mjs T-800 --on --min 60', { STUDIO_VISION_FAKE: '80' });
+  const advisory = run(dir, 'node qa/vision-check.mjs --on', { STUDIO_VISION_FAKE: '10' });
+  const noModel = run(dir, 'node qa/vision-check.mjs T-800 --on --min 60', { STUDIO_VISION_URL: '', STUDIO_VISION_MODEL: '' });
+  report('2.30e F15: the vision check is off by default; on, it blocks below --min, passes above it, is advisory without --min, and fails when blocking with no model set', off.status === 0 && /off/.test(off.stdout) && low.status === 1 && /score 40 < 60/.test(low.stdout) && high.status === 0 && /score 80 >= 60/.test(high.stdout) && advisory.status === 0 && /T-800|shot\.png/.test(advisory.stdout) && noModel.status === 1 && /no vision model set/.test(noModel.stdout) && fs.existsSync(path.join(dir, 'qa/reports/vision-T-800.json')), JSON.stringify({ off: off.stdout, low: low.stdout, high: high.stdout, advisory: advisory.stdout, noModel: noModel.stdout }));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
