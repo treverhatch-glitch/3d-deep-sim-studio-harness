@@ -1010,7 +1010,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const q = JSON.parse(run(dir, 'node q.mjs', env).stdout);
   report('a tool out of quota is skipped until its reset time, for the next tool in the order', /T\d{2}:12/.test(new Date(q.until).toTimeString().slice(0, 5).replace(/^(\d{2}):(\d{2})$/, 'T$1:$2')) && q.next === 'codex', JSON.stringify(q));
   run(dir, 'node harness/budget.mjs set codex --weekly 1000 --reset monday --target 100%', env);
-  report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens in the last 5 h, [\d,]+ this week \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
+  report('npm run budget shows tokens used against the week\'s target', /codex: [\d,]+ tokens in the last 5 h, [\d,]+ this week, cache reads counted at [\d.]+x \([\d,]+ read\) \(\d+% of 1,000; target \d+% by now/.test(run(dir, 'node harness/budget.mjs', env).stdout), run(dir, 'node harness/budget.mjs', env).stdout);
 }
 
 // Hiring into departments, and the dev hacker: trick cards that reach the Producer without holding anything up.
@@ -1233,7 +1233,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('tasks and notes carry a version tag (web or engine:<name>)', added?.meta?.track === 'engine:godot' && /· engine:godot\] the Godot import is slow/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')), JSON.stringify(added?.meta));
   // The Prototype sprint pace.
   run(dir, 'node harness/mode.mjs set prototype --by hatch', env);
-  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /18\. In the Prototype sprint pace/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout + fs.readFileSync(path.join(dir, 'harness/kickoff.mjs'), 'utf8')));
+  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /20\. In the Prototype sprint pace/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout + fs.readFileSync(path.join(dir, 'harness/kickoff.mjs'), 'utf8')));
 }
 
 // 2.26: from test #2 (Next Floor on 2.24 and 2.25) and the token work: another tool's limit is that tool's,
@@ -2105,6 +2105,109 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   fs.writeFileSync(path.join(dir, 'game/sz/src/a.js'), body(95, 1));
   const grown = growth();
   report('the size ratchet lets an edit inside an over-limit function through, and refuses one that makes it bigger', edited === '[]' && /big\(\) is 9\d lines \(was 9\d\)/.test(grown), `${edited}\n${grown}`);
+}
+
+// 2.29.2: refresh context by default, cache reads in the budget, a daily cap by default, per-role model
+// warning, the cheat sheet check. Each module is exercised in a copy; the launcher end to end with a fake agent.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p2292-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  const asst = (id, inp, cache) => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: inp, cache_read_input_tokens: cache, cache_creation_input_tokens: 0 } } });
+  const sc = probe(`import * as m from ${u('harness/session-cap.mjs')};
+const log = [${JSON.stringify(asst('a', 10, 1000))}, ${JSON.stringify(asst('a', 10, 1000))}, ${JSON.stringify(asst('b', 20, 130000))}].join('\\n');
+const lim = m.sessionLimits({});
+const out = { p: m.sessionProgress(log), lim, ok: m.refreshState({ turns: 10, context: 50000 }, null, lim).state, due: m.refreshState({ turns: 41, context: 1 }, null, lim), exc: m.refreshState({ turns: 41, context: 1 }, { exception: { why: 'x' } }, lim), late: m.refreshState({ turns: 61, context: 1 }, null, lim), ctx: m.refreshState({ turns: 5, context: 165000 }, { exception: { why: 'x' } }, lim) };
+console.log(JSON.stringify(out));`);
+  report('session progress: turns by message id and context from the last usage (input + cache)', sc.p?.turns === 2 && sc.p?.context === 130020, JSON.stringify(sc));
+  report('refresh point: 40 turns or 120k tokens by default; past it the state is due, or exception when flagged', sc.lim?.turns === 40 && sc.lim?.context === 120000 && sc.lim?.ceilingTurns === 80 && sc.ok === 'ok' && sc.due?.state === 'due' && sc.exc?.state === 'exception', JSON.stringify(sc));
+  report('a flagged agent owes a check at the refresh point and every 20 turns / 40k tokens; an unflagged one a step later', sc.exc?.checkDue === true && sc.due?.checkDue === false && sc.late?.checksOwed === 1 && sc.ctx?.checksOwed === 2, JSON.stringify(sc));
+  const hb = probe(`import * as m from ${u('harness/session-cap.mjs')};
+import fs from 'node:fs';
+const log = Array.from({ length: 45 }, (_, i) => JSON.stringify({ type: 'assistant', message: { id: 'm' + i, usage: { input_tokens: 5, cache_read_input_tokens: 1000 * i, cache_creation_input_tokens: 0 } } })).join('\\n');
+const a = m.heartbeatCheck('hb-1', { log, model: 'claude-opus-5-5', task: 'T-1' });
+const b = m.heartbeatCheck('hb-1', { log, model: 'claude-opus-5-5', task: 'T-1' });
+m.flagException('hb-1', 'seed 7 tick 300 desyncs');
+const c = m.heartbeatCheck('hb-1', { log, model: 'claude-opus-5-5', task: 'T-1' });
+const ev = fs.readFileSync('.studio/events.jsonl', 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
+m.recordCheck('hb-1', 'continue', { by: 'producer-1' });
+console.log(JSON.stringify({ a: a.state, c: c.state, due: ev.filter((e) => e.type === 'agent.refresh.due').length, exc: ev.filter((e) => e.type === 'agent.refresh.exception').length, cards: ev.filter((e) => e.type === 'agent.ask' && /Check hb-1/.test(e.msg)).map((e) => e.msg), board: m.refreshBoard() }));`);
+  report('the heartbeat marks a session past 40 turns as due once, and a flagged one gets one check card naming the model', hb.a === 'due' && hb.c === 'exception' && hb.due === 1 && hb.exc === 1 && hb.cards?.length === 1 && /claude-opus-5-5/.test(hb.cards[0]) && hb.board?.[0]?.checks?.length === 1 && hb.board[0].checks[0].decision === 'continue', JSON.stringify(hb).slice(0, 1500));
+  const argv = probe(`import { toolCommand } from ${u('harness/agent.mjs')};
+console.log(JSON.stringify(toolCommand('claude', { model: 'claude-sonnet-5-5', prompt: 'x' }).argv));`);
+  const argvOff = probe(`import { toolCommand } from ${u('harness/agent.mjs')};
+console.log(JSON.stringify(toolCommand('claude', { model: 'claude-sonnet-5-5', prompt: 'x' }).argv));`, { STUDIO_SESSION_CEILING_TURNS: '0' });
+  report('Claude Code sessions get --max-turns at the ceiling (80), and 0 turns it off', Array.isArray(argv) && argv.join(' ').includes('--max-turns 80') && Array.isArray(argvOff) && !argvOff.includes('--max-turns'), JSON.stringify({ argv, argvOff }));
+  const rule = probe(`import { refreshRule } from ${u('harness/agent.mjs')};
+import { kickoff } from ${u('harness/kickoff.mjs')};
+console.log(JSON.stringify({ rule: refreshRule({ oneTask: true, task: 'T-9' }), prod: kickoff({ role: 'producer', agent: 'producer-1', model: 'm' }), dir: kickoff({ role: 'director', agent: 'director-1', model: 'm' }) }));`);
+  report('the kickoff gives launched sessions the refresh rule: one task, 40 turns / 120k, the hand-back template, the exception', /one task/.test(rule.rule || '') && /40 turns or 120k/.test(rule.rule || '') && /task\.mjs pause T-9 --note "Done:/.test(rule.rule || '') && /session -- exception/.test(rule.rule || ''), String(rule.rule || JSON.stringify(rule)));
+  report('the Producer attaches cheat sheet tricks before handing out a task, and the Director checks the sheet for the next work', /cheatsheet -- attach <ID>/.test(rule.prod || '') && /cheatsheet -- match/.test(rule.dir || ''), '');
+  // Budget: cache reads count, weighted; the daily cap has a default.
+  const bud = probe(`import * as b from ${u('harness/budget.mjs')};
+import { spentToday } from ${u('harness/agent.mjs')};
+const ts = new Date().toISOString();
+const ev = [{ type: 'agent.session.end', ts, model: 'claude-opus-5-5', tokensIn: 1000, tokensOut: 500, meta: { tool: 'claude', cacheRead: 100000 } }];
+console.log(JSON.stringify({ used: b.usedSince('claude', 0, ev), w: b.cacheReadWeight(), cap: b.dailyCap({}), off: b.dailyCap({ STUDIO_DAILY_TOKEN_CAP: 'off' }), zero: b.dailyCap({ STUDIO_DAILY_TOKEN_CAP: '0' }), set: b.dailyCap({ STUDIO_DAILY_TOKEN_CAP: '1234' }), today: spentToday(Date.now(), ev), cache: b.cacheSince('claude', 0, ev) }));`);
+  report('the budget meter counts cache reads at 0.1x by default (1,000 in + 500 out + 100,000 cache reads = 11,500)', bud.used === 11500 && bud.w === 0.1 && bud.cache?.cacheRead === 100000 && bud.cache?.models?.[0] === 'claude-opus-5-5', JSON.stringify(bud));
+  report('the daily token cap defaults to 50M counted tokens; off and 0 turn it off; a number sets it; the launcher counts cache reads', bud.cap === 50000000 && bud.off === 0 && bud.zero === 0 && bud.set === 1234 && bud.today?.used === 11500, JSON.stringify(bud));
+  const w2 = probe(`import * as b from ${u('harness/budget.mjs')};
+console.log(JSON.stringify({ used: b.usedSince('claude', 0, [{ type: 'agent.session.end', ts: new Date().toISOString(), tokensIn: 0, tokensOut: 0, meta: { tool: 'claude', cacheRead: 1000 } }]) }));`, { STUDIO_CACHE_READ_WEIGHT: '0.5' });
+  report('STUDIO_CACHE_READ_WEIGHT sets the cache-read weight', w2.used === 500, JSON.stringify(w2));
+  // Per-role models: a warning, never a block.
+  const mw = probe(`import * as m from ${u('harness/model-tiers.mjs')};
+const top = { STUDIO_AGENT_MODEL: 'claude-opus-5-5' };
+const mixed = { STUDIO_AGENT_MODEL: 'claude-opus-5-5', STUDIO_BUILDER_MODEL: 'claude-sonnet-5-5' };
+const before = m.modelWarning(top, []);
+m.acceptModelWarning('dev', top);
+const after = m.modelWarning(top, []);
+const changed = m.modelWarning({ STUDIO_AGENT_MODEL: 'gpt-5' }, []);
+console.log(JSON.stringify({ before: before.show, roles: before.roles.length, after: after.show, acceptedBy: after.accepted?.by, mixed: m.modelWarning(mixed, []).allTop, changed: changed.show, tiers: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gpt-5-mini'].map(m.tierOf) }));`);
+  report('top-tier models on every role show the warning; accepting hides it until the models change; a mid-tier builder never shows it', mw.before === true && mw.roles >= 2 && mw.after === false && mw.acceptedBy === 'dev' && mw.mixed === false && mw.changed === true, JSON.stringify(mw));
+  report('model tiers: opus and gemini pro top, sonnet and gpt mini mid, haiku and flash cheap', JSON.stringify(mw.tiers) === JSON.stringify(['top', 'mid', 'cheap', 'top', 'cheap', 'mid']), JSON.stringify(mw.tiers));
+  const startTop = run(dir, 'node harness/agent.mjs start --role builder --agent mw-1 --task T-999', { STUDIO_AGENT_MODEL: 'claude-opus-5-5', STUDIO_BUILDER_CMD: 'node -e "process.exit(0)"' });
+  report('the warning never blocks: an agent on the top tier still starts', !/Not started/.test(startTop.stdout + startTop.stderr) && fs.existsSync(path.join(dir, '.studio/agents/mw-1.json')), startTop.stdout + startTop.stderr);
+  // Cheat sheet: at most 3 matching tricks, attached to the brief.
+  const cs = probe(`import * as c from ${u('harness/cheatsheet.mjs')};
+console.log(JSON.stringify({ n: c.readCheatsheet().length, m: c.matchTricks('Add Godot unit tests for the elevator'), none: c.matchTricks('zzzz qqqq') }));`);
+  report('studio/CHEATSHEET.md parses, stays under 150 lines, and a Godot test task matches at most 3 tricks including Gut', cs.n > 20 && fs.readFileSync(path.join(dir, 'studio/CHEATSHEET.md'), 'utf8').split('\n').length < 150 && cs.m?.length === 3 && cs.m.some((t) => /bitwes\/Gut/.test(t.text)) && cs.none?.length === 0, JSON.stringify(cs).slice(0, 1500));
+  const tid = (run(dir, 'node harness/task.mjs add "Godot unit tests for the elevator" --role builder --priority P1').stdout.match(/"id": "(T-\d+)"/) || [])[1];
+  const att = run(dir, `node harness/cheatsheet.mjs attach ${tid} --by producer-1`);
+  fs.mkdirSync(path.join(dir, 'studio/handoffs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, `studio/handoffs/${tid}.md`), `# Handoff ${tid}\n\nOLDEST-NOTE ${'x'.repeat(5000)}\nNEWEST-NOTE: next step is the elevator test\n`);
+  const brief = run(dir, `node harness/focus.mjs ${tid}`).stdout;
+  report('cheatsheet attach puts the tricks in the task\'s brief as pre-approved, by whoever assigned it', att.status === 0 && /bitwes\/Gut/.test(att.stdout) && /## Pre-approved tricks for this task \(studio\/CHEATSHEET\.md, approved by producer-1\)/.test(brief) && /without asking\. Anything not listed here follows the normal approval rules/.test(brief) && /C-\d+ .*bitwes\/Gut/.test(brief), att.stdout + att.stderr + brief.slice(0, 2000));
+  const pre = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.type === 'cheatsheet.preapproved' && e.task === tid).pop();
+  report('the pre-approval is recorded: task id, trick ids, approved_by', pre?.meta?.task === tid && pre.meta.approved_by === 'producer-1' && pre.meta.tricks?.length >= 1 && pre.meta.tricks.length <= 3 && pre.meta.tricks.every((x) => /^C-\d+$/.test(x)), JSON.stringify(pre));
+  const dm = probe(`import * as c from ${u('harness/cheatsheet.mjs')};
+console.log(JSON.stringify({ dir: c.matchTricks('queue the next tasks with dependencies, split by size, one lane each', { forRole: 'director' }), work: c.matchTricks('queue the next tasks with dependencies, split by size, one lane each'), ids: c.readCheatsheet().map((e) => e.id) }));`);
+  report('the cheat sheet has a director section (dependencies, size-3 split, one owner per lane) that only the Director and Producer get', dm.dir?.length === 3 && dm.dir.every((t) => t.tags.includes('director')) && (dm.work || []).every((t) => !t.tags.includes('director')) && dm.ids?.every(Boolean) && new Set(dm.ids).size === dm.ids.length, JSON.stringify(dm).slice(0, 1500));
+  report('the Director consults its cheat sheet section when planning, and agents are told attached tricks are pre-approved', /match "<what you are planning>" --for director/.test(rule.dir || '') && /--for director/.test(rule.prod || '') && /pre-approved/.test(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8')), '');
+  report('the brief carries the newest 3k characters of the hand-back notes, not all of them', /NEWEST-NOTE/.test(brief) && !/OLDEST-NOTE/.test(brief) && /Older notes in studio\/handoffs/.test(brief), brief.slice(0, 600));
+  // The launcher end to end: a session that hits the turn ceiling is a refresh, not a failure.
+  const tr = (run(dir, 'node harness/task.mjs add "Refresh me" --role builder --priority P1').stdout.match(/"id": "(T-\d+)"/) || [])[1];
+  const fake = path.join(tmpRoot, 'fake-capped.mjs');
+  fs.writeFileSync(fake, `import { spawnSync } from 'node:child_process';\nimport fs from 'node:fs';\nconst [task, agent] = process.argv.slice(2);\nspawnSync('node harness/task.mjs start ' + task + ' --agent ' + agent, { shell: true });\nconst n = Number(fs.existsSync('.studio/fake-runs') ? fs.readFileSync('.studio/fake-runs', 'utf8') : 0) + 1;\nfs.writeFileSync('.studio/fake-runs', String(n));\nif (n === 1) { console.log(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 80, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 9000 } })); process.exit(1); }\nspawnSync('node harness/task.mjs pause ' + task + ' --agent ' + agent + ' --note "second session"', { shell: true });\nconsole.log(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 3, usage: { input_tokens: 1, output_tokens: 1 } }));\n`);
+  const cap = run(dir, `node harness/agent.mjs start --role builder --agent rf-1 --task ${tr} --one-task`, { STUDIO_BUILDER_CMD: `node "${fake}" {task} {agent}`, STUDIO_REFRESH_RELAUNCH: '1', STUDIO_LOOP_HANDBACKS: '1' });
+  const evs = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const ends = evs.filter((e) => e.type === 'agent.session.end' && e.agent === 'rf-1');
+  const hand = fs.existsSync(path.join(dir, `studio/handoffs/${tr}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${tr}.md`), 'utf8') : '';
+  report('a session that reaches the turn ceiling hands off: no failure, a refresh note, and a fresh session on the same task at once', ends.length === 2 && ends[0].status === 'ok' && ends[0].meta?.refreshed === true && /refreshed/.test(hand) && evs.some((e) => e.type === 'agent.refresh' && e.task === tr) && fs.readFileSync(path.join(dir, '.studio/fake-runs'), 'utf8') === '2', JSON.stringify(ends).slice(0, 1500) + cap.stdout + cap.stderr + hand);
+  report('a refresh hand-back never parks the task as looping', !evs.some((e) => e.type === 'task.hold' && e.task === tr && /Parked/.test(e.msg || '')), JSON.stringify(evs.filter((e) => e.task === tr).map((e) => e.type)));
+  // The War Room reads all of it.
+  const hud = probe(`import { buildHudState } from ${u('harness/hud.mjs')};
+const s = buildHudState();
+console.log(JSON.stringify({ meter: s.meter, sc: s.sessionCap?.limits, rows: s.sessionCap?.sessions?.length, mw: typeof s.modelWarning?.show, cs: Object.keys(s.cheatsheet || {}) }));`, { STUDIO_AGENT_MODEL: 'claude-opus-5-5' });
+  report('the War Room state has the budget meter (per model, cache reads), the sessions against the refresh point, the model warning and the attached tricks', hud.meter?.cap === 50000000 && hud.meter?.byModel?.length >= 1 && hud.sc?.turns === 40 && hud.rows >= 1 && hud.mw === 'boolean' && hud.cs?.includes(tid), JSON.stringify(hud).slice(0, 1500));
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
