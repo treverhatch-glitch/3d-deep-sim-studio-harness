@@ -247,7 +247,7 @@ From the Producer's notes on the first real game run (B1 to B13) and the owner's
 | F14g | Engine track after Phase 1 and the dev's approval: engine/<name>/ from a worked Godot template, its own gate, a parity test against the web sim, frames, the Arcade links its build | done (2.27.0); a Godot-first game (no web version) next |
 | F14c | A Producer staffing plan applied by one "Staff the studio" click; "close?" hints for idle departments | planned |
 | F15 | A cheap vision model checks screenshot proof against the art reference | planned |
-| F16 | A browser regression proven to fail on the code before the fix | planned |
+| F16 | A browser regression proven to fail on the code before the fix | done (2.12.0, qa/fails-before.mjs) |
 | F17 | Room spec export and a dressing gate (keep-out zones, per-floor budgets) for set dressing | planned |
 
 ## 2.10.0 and later — Verifiable results, data, and the platform
@@ -280,11 +280,11 @@ issue or trade crypto or NFTs.
 | # | What | How | Status |
 | --- | --- | --- | --- |
 | H1 | Talk to the Producer | A "Message the Producer" box on the Ops tab writes to the Producer's inbox (no AI, behind the token); the briefing lists new messages first. Replies in the HUD come later. | done (2.8.0) |
-| H2 | A fourth view: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | planned |
+| H2 | A fourth view: Dungeon | Each phase is a floor; a task opens a room, finishing it clears it and drops loot; P0 bugs are bosses; task points are XP; agents are the party. Reads HUD data only. | done (2.21.0, the Arcade in hub/v3) |
 | H3 | Phone access | Tailscale in the docs, never port-forwarding. A one-time login sets an `HttpOnly; SameSite=Strict` cookie for reads and the WebSocket, and writes still need the token header, so the token never sits in an address. | planned |
 | H4 | Phone alerts | ntfy or Telegram when a person is needed: a forced done, a Bible or phase sign-off, an idea waiting for approval, the spend cap, a Director verdict of "off course". | planned |
 | H5 | Agents on several machines | Make the HUB the single home for tasks, locks and events (agents call it with their token; locks keep a heartbeat so a dead remote worker's claims expire), so separate clones and cloud sandboxes share one studio. | planned |
-| H6 | Play the latest build | A link to the latest web build with the seed and phase scenario shown. | planned |
+| H6 | Play the latest build | A link to the latest web build with the seed and phase scenario shown. | done (2.21.0, the Arcade in hub/v3) |
 | H8 | A friendly front end | The same flow (intake, follow-ups, references, assets, the Liaison, ideas, experiments) for people who don't use GitHub or a terminal, on the HUB endpoints. Asks play length first and suggests a demo; says plainly that longer games need more of the dev's own time. | later |
 | H7 | Game plan view with the Idea Board | Phases, layers, crossed-out layers, approved ideas, the Idea Board, a box to pitch an idea, the Director's verdict and drift. | done (2.8.0) |
 

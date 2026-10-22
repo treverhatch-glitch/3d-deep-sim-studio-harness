@@ -858,6 +858,18 @@ export function createHubServer() {
       broadcastSnapshot();
       return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: `Confirmed: ${r.echo.asked}` } : { ok: false, error: r.message });
     }
+    // 2.30c (#8): Unblock on a circuit-breaker card.
+    if (url.pathname === '/api/task-unblock' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || 'war-room-human').slice(0, 60);
+      noteHuman(by);
+      const id = String(body.task || '');
+      if (!/^[A-Z]+-\d+$/.test(id)) return sendJson(res, 400, { ok: false, error: 'Which task?' });
+      const { unblockTask } = await import('../harness/breaker.mjs');
+      const r = unblockTask(id, by, String(body.note || '').slice(0, 300));
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: r.message } : { ok: false, error: r.message });
+    }
     if (url.pathname === '/api/task-yes' && req.method === 'POST') {
       const body = await readBody(req);
       const by = String(body.by || 'war-room-human').slice(0, 60);

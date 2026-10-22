@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * scripts/release.mjs — the one command to run before you tag, merge or hand off.  `npm run release`
+ * `npm run release -- <version>` ships a release end to end instead: scripts/release-ship.mjs.
  *
  * 1. Syntax-checks every JS module and Python tool.
  * 2. Runs every required gate (scripts/run-gates.mjs --required-only).
@@ -16,6 +17,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 2.30c: `npm run release -- <version>` ships (scripts/release-ship.mjs); with no version, this is the check CI runs.
+if (/^\d+\.\d+\.\d+/.test(process.argv[2] || '')) {
+  const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'release-ship.mjs'), ...process.argv.slice(2)], { cwd: root, stdio: 'inherit' });
+  process.exit(r.status ?? 1);
+}
 const steps = [];
 const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
 const step = (label, ok, detail = '') => {

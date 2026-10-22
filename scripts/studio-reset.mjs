@@ -35,7 +35,7 @@ const rel = (p) => path.relative(root, p).replace(/\\/g, '/');
 // Folders whose files belong to the previous project (README.md files stay).
 const CLEAR = ['studio/meetings', 'studio/handoffs', 'studio/game', 'studio/research', 'studio/reviews', 'studio/memory/retros', 'studio/bible'];
 const SIGNOFFS = [['studio/balance', /^decision-.*\.md$/], ['studio/fun', /^review-.*\.md$/], ['studio', /^PITFALLS(-ARCHIVE)?\.md$/]];
-const REWRITE = ['studio/PLAN.md', 'studio/producer/LOG.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md'];
+const REWRITE = ['studio/PLAN.md', 'studio/producer/LOG.md', 'studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md'];
 
 const toRemove = [];
 const walk = (dir) => {
@@ -139,6 +139,13 @@ _No task currently in progress. Run \`node harness/task.mjs next\`._
 - [ ] **T-003** [P1] (\`builder\`) — Prototype: scaffold the ${name} cartridge (\`npm run new-game ${slug}\`) and get \`npm run verify\` green
 - [ ] **T-004** [P1] (\`qa-playtester\`) — Playtest: first seeded run of ${name} and read the report
 - [ ] **T-005** [P2] (\`reviewer\`) — Review: read the first merge and write a note in \`studio/reviews/\`
+
+## DONE
+_Finished tasks are in \`studio/DONE.md\` (newest first). This file keeps only open work._
+`);
+write('studio/DONE.md', `# Finished tasks (\`studio/DONE.md\`)
+
+> Managed by \`node harness/task.mjs\`. Newest first. Open work is in \`studio/NEXT.md\`; agents don't need to read this file.
 
 ## DONE
 - [x] **T-000** [P0] (\`producer\`) — Fresh studio for ${name}

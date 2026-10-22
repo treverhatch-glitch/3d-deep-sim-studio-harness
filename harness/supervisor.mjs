@@ -149,6 +149,23 @@ export async function supervise(opts, state, now = Date.now()) {
     if (!groups.has(key)) groups.set(key, { role: t.role, lane, tasks: [] });
     groups.get(key).tasks.push(t);
   }
+  // 2.30c (#12): skip a task whose prerequisite isn't merged yet or whose folder another agent holds,
+  // and try the next one in its group; mark it "waiting on X" for the War Room.
+  const { handoutBlock, writeWaiting } = await import('./handout.mjs');
+  const { listLocks } = await import('./lock.mjs');
+  const { unmerged } = await import('./worktree.mjs');
+  const locksNow = listLocks();
+  const waitingOn = {};
+  for (const g of groups.values()) {
+    g.tasks = g.tasks.filter((t) => {
+      const b = handoutBlock(t.id, q, { locks: locksNow, unmerged, lane: g.lane });
+      if (b) waitingOn[t.id] = b;
+      return !b;
+    });
+  }
+  for (const [k, g] of [...groups.entries()]) if (!g.tasks.length) groups.delete(k);
+  if (Object.keys(waitingOn).length) why.push(`waiting: ${Object.entries(waitingOn).slice(0, 4).map(([id, b]) => `${id} ${b.why}`).join('; ')}`);
+  if (!opts.dryRun) writeWaiting(waitingOn);
   const canStart = new Set(launchableRoles([...new Set(waiting.map((t) => t.role))]));
   const started = [];
   // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
@@ -177,6 +194,15 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`lane ${g.lane} is held by ${lockStatus(`path:${g.lane}`).lock.owner}`);
       continue;
     }
+    // 2.30c (#11): the Producer starts on events only, at most every 15 min unless urgent, backing off when quiet.
+    if (g.role === 'producer') {
+      const { producerWake } = await import('./producer-wake.mjs');
+      const w = producerWake({ now, queue: q, commit: true });
+      if (!w.wake) {
+        why.push(`producer: ${w.why}`);
+        continue;
+      }
+    }
     const preferred = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
     const custom = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_CMD`];
     // Before believing a mark older than 10 minutes, ask the tool once (one tiny call, at most every
@@ -198,6 +224,7 @@ export async function supervise(opts, state, now = Date.now()) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
       live.push({ agent, role: g.role, lane: g.lane || null, running: true });
+      if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
       room -= 1;
     } else why.push(`${g.role}: ${r.message}`);
   }
@@ -248,8 +275,12 @@ async function main(argv) {
     save();
     const mins = Math.round((Date.now() - state.startedAt) / 60000);
     emitEvent({ type: 'supervisor.stop', agent: 'supervisor', to: 'producer', msg: `Supervisor stopped (${why}) after ${mins >= 120 ? `${Math.round(mins / 60)} h` : `${mins} min`}: ${state.sessions} sessions started, ${parseNextQueue().done.length - state.doneAtStart} tasks done, ${(state.tokens || 0).toLocaleString()} tokens reported` });
-    hub?.kill();
-    setTimeout(() => process.exit(0), 300);
+    // 2.30c (G6): at --until, a one-page overnight summary (studio/daily/overnight-<date>.md).
+    const summary = opts.until ? import('./overnight.mjs').then(({ writeOvernight }) => writeOvernight({ from: state.startedAt })).catch(() => {}) : Promise.resolve();
+    summary.finally(() => {
+      hub?.kill();
+      setTimeout(() => process.exit(0), 300);
+    });
   };
   process.on('SIGINT', () => finish('stopped by hand'));
   process.on('SIGTERM', () => finish('stopped by the system'));

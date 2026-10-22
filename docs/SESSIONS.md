@@ -91,4 +91,4 @@ scout and keeps it under 150 lines.
 ## Not in 2.29.2
 
 The opt-in overnight watchdog, model escalation after a failed hand-back, the task-size cap with
-auto-split and the auto-match of tricks inside `task add` are planned for 2.30.
+auto-split and the auto-match of tricks inside `task add` are planned for 2.30d.

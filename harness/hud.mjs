@@ -7,6 +7,9 @@
  */
 
 import fs from 'node:fs';
+import { readWaiting } from './handout.mjs';
+import { breakerCards } from './breaker.mjs';
+import { producerWake } from './producer-wake.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
@@ -194,8 +197,10 @@ export function buildHudState() {
   const locks = listLocks();
   // 2.30 (J10): every "waiting on" names its owner; (J2) every task says whose idea it is.
   const holders = new Map(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l.owner]));
-  if (Object.keys(holds).length) queue.backlog = queue.backlog.map((t) => {
-    const w = holdOwner(t.id, queue, now, holds, holders);
+  // 2.30c (#12): the supervisor's handout marks (prerequisite not merged, folder held) count as waiting too.
+  const handout = readWaiting();
+  if (Object.keys(holds).length || Object.keys(handout).length) queue.backlog = queue.backlog.map((t) => {
+    const w = holdOwner(t.id, queue, now, holds, holders) || handout[t.id] || null;
     return { ...t, hold: w?.why || undefined, waitOwner: w?.owner || undefined, needsYes: Boolean(holds[t.id]?.needsYes) || undefined };
   });
   const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task);
@@ -338,6 +343,8 @@ export function buildHudState() {
   }
   // Forced work, one card per cause (harness/causes.mjs), not one per task.
   for (const g of forcedGroups(queue)) needs.push({ agent: 'producer', msg: `${g.tasks.length} task${g.tasks.length === 1 ? '' : 's'} closed past the same check: ${g.cause} (${g.tasks.slice(0, 6).join(', ')}${g.tasks.length > 6 ? ', …' : ''})`, task: g.checks[0], action: { type: 'accept-cause', cause: g.cause, label: 'Accept for this run' } });
+  // 2.30c (#8): a task parked by the circuit breaker gets its own card, with Unblock.
+  needs.push(...breakerCards(holds));
   for (const t of [...queue.inProgress, ...queue.backlog]) {
     if (/^Watch:/i.test(t.title)) needs.push({ agent: 'watch', msg: t.title, task: t.id });
   }
@@ -528,6 +535,8 @@ export function buildHudState() {
     ...st.queue.backlog.filter((t) => t.needsYes).map((t) => ({ what: `${t.id}: ${t.title}`, owner: 'you', why: 'an agent-proposed mechanic needs your yes' })),
     ...(st.modelWarning?.show ? [{ what: 'top-tier models on every role', owner: 'you', why: 'accept or change the models' }] : []),
     ...st.asks.open.filter((a) => !a.to || /human|dev|you/i.test(a.to)).map((a) => ({ what: `${a.id}: ${a.question}`, owner: 'you', why: 'a question' })),
+    // 2.30c (#8): a task the circuit breaker parked waits for someone to fix the reason and Unblock.
+    ...breakerCards().map((c) => ({ what: `${c.task}: tripped`, owner: 'you', why: c.msg })),
   ];
   const waitingOnOthers = st.queue.backlog.filter((t) => t.waitOwner && t.waitOwner !== 'the dev').map((t) => ({ what: t.id, owner: t.waitOwner, why: t.hold }));
   const building = st.launched.filter((l) => l.running).map((l) => ({ agent: l.agent, task: l.task, model: l.model }));
@@ -540,6 +549,14 @@ export function buildHudState() {
     models: top,
     line: `Building now: ${building.length ? building.map((b) => `${b.agent} on ${b.task || 'no task'}`).join(', ') : 'nothing'} · Waiting on you: ${waitingOnYou.length || 'nothing'} · Tokens today: ${st.meter.used.toLocaleString()}${top.length ? ` (${top.join(', ')})` : ''}`,
   };
+  // 2.30c: when the Producer starts next (#11), and the last overnight summary (G6).
+  try {
+    const w = producerWake({ now, events: readRecentEvents(5000), queue: { backlog: st.queue.backlog } });
+    st.status.producer = { wake: w.wake, why: w.why };
+  } catch {}
+  const ovDir = path.join(REPO_ROOT, 'studio', 'daily');
+  const ov = fs.existsSync(ovDir) ? fs.readdirSync(ovDir).filter((f) => /^overnight-.*\.md$/.test(f)).sort().pop() : null;
+  if (ov) st.status.overnight = { file: `studio/daily/${ov}`, head: fs.readFileSync(path.join(ovDir, ov), 'utf8').split('\n').filter((l) => /^## /.test(l)).slice(0, 4).map((l) => l.slice(3)) };
   // 2.30 (J8): what changed in each build, from the tasks finished between it and the build before.
   const doneEv = readRecentEvents(20000).filter((e) => e.type === 'task.done' && e.task);
   st.builds = st.builds.map((b, i) => {

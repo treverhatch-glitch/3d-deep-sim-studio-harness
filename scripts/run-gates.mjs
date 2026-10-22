@@ -49,6 +49,12 @@ for (const gate of gates) {
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
 }
 
+// 2.30c (G3): failing first, in plain words; "not run" apart from "pass".
+{
+  const { gateWords } = await import('../harness/gate-words.mjs');
+  console.log('\n[gates] in plain words');
+  for (const l of gateWords({ rows, skipped, partial: Boolean(only) }, all).lines) console.log(`  ${l}`);
+}
 console.log('\n[gates] summary');
 for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.required ? '' : '  (optional)'}`);
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).

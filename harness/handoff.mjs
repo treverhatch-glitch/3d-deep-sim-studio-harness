@@ -314,6 +314,15 @@ export function renderHandoff(h) {
   return L.filter((l, i) => !(l === '' && L[i - 1] === '')).join('\n') + '\n';
 }
 
+export const HANDOFF_PRINT_MAX = 3000;
+/** The briefing cut to HANDOFF_PRINT_MAX characters at a line, with where the rest is. */
+export function shortHandoff(md, max = HANDOFF_PRINT_MAX) {
+  if (md.length <= max) return md;
+  const tail = '\n… (cut at 3k characters; the full briefing is in .studio/briefs/producer.md, or npm run handoff -- --full)';
+  const cut = md.slice(0, max - tail.length);
+  return cut.slice(0, Math.max(0, cut.lastIndexOf('\n'))) + tail;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'note') {
@@ -333,7 +342,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const md = renderHandoff(h);
       fs.mkdirSync(path.join(STUDIO_STATE_DIR, 'briefs'), { recursive: true });
       fs.writeFileSync(path.join(STUDIO_STATE_DIR, 'briefs', 'producer.md'), md);
-      console.log(md);
+      // 2.30c (#4): the printed briefing is at most 3k characters, cut at a line; the full one is saved.
+      const full = cmd === '--full' || process.env.STUDIO_HANDOFF_FULL === '1';
+      console.log(full ? md : shortHandoff(md));
       console.log('Saved to .studio/briefs/producer.md');
     }
   }

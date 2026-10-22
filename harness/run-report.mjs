@@ -27,6 +27,7 @@ import { describeConsent } from './data-consent.mjs';
 import { describeMode } from './mode.mjs';
 import { sessions as agentSessions } from './agent.mjs';
 import { allAsks } from './ask.mjs';
+import { gateWords } from './gate-words.mjs';
 
 const read = (rel) => {
   try {
@@ -114,6 +115,8 @@ export function renderRunReport(r) {
   L.push(`${t.done} tasks done, ${t.inProgress} in progress, ${t.waiting} waiting.`, '');
   L.push('| Type | Done | Open |', '| --- | --- | --- |', ...Object.entries(t.byType).sort().map(([k, v]) => `| ${k} | ${v.done} | ${v.open} |`), '');
   L.push('## Did the checks hold?', '');
+  // 2.30c (G3): failing gates first, in plain words; "not run" kept apart from "pass".
+  L.push('Gates, failing first:', '', ...gateWords(json('.studio/gates-last.json'), json('studio/gates.json')?.gates || []).lines.map((x) => `    ${x}`), '');
   const c = r.checks;
   L.push(`- "Done" refused by a check: ${c.refused}. Forced past a check: ${c.forced}. Reopened: ${c.reopened}. Handed back: ${c.handedBack}. Lock clashes: ${c.lockDenied}. Closed-loop escalations: ${c.escalations}.`);
   L.push(`- Last full verify: ${r.gates ? `${r.gates.green} of ${r.gates.required} required gates green at ${String(r.gates.at).slice(0, 16).replace('T', ' ')}${r.gates.partial ? ' (partial run)' : ''}${r.gates.failed.length ? `; failing: ${r.gates.failed.join(', ')}` : ''}` : 'never run'}`);
@@ -185,7 +188,7 @@ export function renderRunReport(r) {
   return L.join('\n');
 }
 
-const COPY = ['studio/mode.json', 'studio/decisions/decided-without-you.md', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/STORYBOARD.md', 'studio/PLAN.md', 'studio/NEXT.md', 'studio/CURRENT_TASK.md', 'studio/memory/failures.md', 'studio/memory/LEARNED.md', 'studio/harness-notes/NOTES.md', 'studio/producer/LOG.md', 'studio/data-consent.json', '.studio/gates-last.json'];
+const COPY = ['studio/mode.json', 'studio/decisions/decided-without-you.md', 'studio/bible/BIBLE.md', 'studio/bible/NOT-DOING.md', 'studio/bible/STORYBOARD.md', 'studio/PLAN.md', 'studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/memory/failures.md', 'studio/memory/LEARNED.md', 'studio/harness-notes/NOTES.md', 'studio/producer/LOG.md', 'studio/data-consent.json', '.studio/gates-last.json'];
 const COPY_DIRS = ['studio/memory/retros', 'studio/reviews', 'studio/bible/reviews', 'studio/bible/ideas', 'studio/signed', 'studio/meetings', 'studio/experiments'];
 
 export function writeRunReport({ to = process.env.STUDIO_RESULTS_DIR, final = false } = {}) {

@@ -17,6 +17,7 @@
  *     and providers that ran out (route.exhausted) in the last hour.
  */
 import fs from 'node:fs';
+import { producerWake, producerLaunched } from './producer-wake.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,7 @@ const ago = (ms) => `${Math.max(0, Math.round((Date.now() - ms) / 60000))} min`;
 function trail(events, agent) {
   const said = events.filter((e) => e.agent === agent && e.msg).slice(-3).map((e) => `- ${e.ts.slice(11, 16)} ${e.type}: ${e.msg}${e.target ? ` (${e.target})` : ''}`);
   const st = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
-  const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs|producer|meetings|game|memory\/retros|balance\/latest|fun\/latest))/.test(l)) : [];
+  const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/(NEXT\.md|DONE\.md|CURRENT_TASK\.md|handoffs|producer|meetings|game|memory\/retros|balance\/latest|fun\/latest))/.test(l)) : [];
   return [
     said.length ? `Its last words:\n${said.join('\n')}` : 'It left no messages.',
     dirty.length ? `Uncommitted changes in the repo (check before you continue):\n${dirty.slice(0, 8).map((l) => `- ${l.trim()}`).join('\n')}${dirty.length > 8 ? `\n- …and ${dirty.length - 8} more` : ''}` : 'No uncommitted changes.',
@@ -217,7 +218,11 @@ export function producerCheckinIfDue(now = Date.now(), events = readRecentEvents
   if (last && now - Date.parse(last.ts) < mode.producerEveryHours * 3600000) return null;
   emitEvent({ type: 'producer.checkin', agent: 'watch', to: 'producer', msg: `Producer check-in (${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, every ${mode.producerEveryHours} h): read the handoff, accept or reopen forced work, unblock stalled agents, keep the queue fed` });
   const running = sessions().some((s) => s.running && s.role === 'producer');
+  // 2.30c (#11): the check-in is logged on its clock, but a Producer session starts only when something happened.
+  const wake = !running ? producerWake({ now, events: readRecentEvents(5000), queue: parseNextQueue(), commit: true }) : null;
+  if (wake && !wake.wake) return { pinged: true, started: null, why: `not started: ${wake.why}` };
   if (!running && (process.env.STUDIO_PRODUCER_CMD || process.env.STUDIO_PRODUCER_TOOL || (mode.autoLaunch && process.env.STUDIO_AGENT_TOOL))) {
+    producerLaunched(now);
     const r = startAgent({ role: 'producer', agent: process.env.STUDIO_PRODUCER_NAME || 'producer-1' }, { detach: true });
     return { pinged: true, started: r.ok ? r.agent : null, why: r.ok ? null : r.message };
   }

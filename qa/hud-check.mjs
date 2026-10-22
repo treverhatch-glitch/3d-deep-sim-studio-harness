@@ -78,6 +78,19 @@ env.STUDIO_PREPARE_CHAIN = 'ollama-local';
 // When the game's own browser check fails there is no build to play: the Arcade checks that need one are
 // skipped and say why, instead of turning the HUD red for the game's bug (Jed's run: one red became three).
 const noBuild = sh('qa/browser-play.mjs', '--no-shots').status !== 0;
+// 2.30c: a task the circuit breaker parked (two hand-backs for the same reason), and an overnight summary.
+const trip = (() => {
+  try {
+    return JSON.parse(sh('harness/task.mjs', 'add', 'Tidy the credits screen', '--infra', '--role', 'reviewer').stdout).id;
+  } catch {
+    return null;
+  }
+})();
+for (let i = 0; i < 2 && trip; i++) {
+  sh('harness/task.mjs', 'start', trip, '--agent', 'rev-9');
+  sh('harness/task.mjs', 'pause', trip, '--agent', 'rev-9', '--note', 'verify failed: the docs gate cannot find docs/CREDITS.md');
+}
+sh('harness/overnight.mjs', '--since', '8h');
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 
 const port = await new Promise((resolve) => {
@@ -314,6 +327,20 @@ try {
   await page.click('#o-restartno');
   await wait(300);
   check('the restart button warns twice, and Cancel on the second warning changes nothing', /Throw away/.test(warn1) && /git tag/.test(warn1) && /Last warning/.test(warn2) && (await page.locator('#o-restartbox').isHidden()) && /Nothing changed/.test(await page.locator('#o-actmsg').innerText()) && fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).stdout || ''), warn1 + ' / ' + warn2);
+  // 2.30c: the breaker card with Unblock, the Producer's wake line and the overnight summary in Ops.
+  await page.click('#tycoon .switch[data-to="ops"]').catch(() => {});
+  await wait(1500);
+  const holdTxt = await page.locator('#o-holdlist').innerText();
+  const statusTxt = await page.locator('#o-status').innerText();
+  check('2.30c: a task the circuit breaker parked has a card with Unblock, and the status line says when the Producer starts and where the overnight summary is', Boolean(trip) && /circuit breaker/.test(holdTxt) && (await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).count()) === 1 && /Producer: /.test(statusTxt) && /overnight-\d{4}-\d{2}-\d{2}\.md/.test(statusTxt), `${holdTxt}\n${statusTxt}`);
+  await page.locator('#o-hold').scrollIntoViewIfNeeded().catch(() => {});
+  if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-breaker-card.png'), fullPage: false });
+  if (shotsAt) await page.locator('#o-status').screenshot({ path: path.join(shotsAt, '230c-status-line.png') }).catch(() => {});
+  await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).click().catch(() => {});
+  await until(async () => !/circuit breaker/.test(await page.locator('#o-holdlist').innerText()), 10000);
+  const holds = JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks || {};
+  check('2.30c: Unblock clears the breaker: the card goes and the task can start again', !/circuit breaker/.test(await page.locator('#o-holdlist').innerText()) && !holds[trip]?.parked, JSON.stringify(holds[trip] || null));
+  if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-after-unblock.png'), fullPage: false });
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close();

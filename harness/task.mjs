@@ -17,18 +17,30 @@ import { holdReason, setHold, readHolds } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
+import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
+import { startSummary, carryForward } from './carry.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
+// 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
+export const DONE_FILE = path.join(REPO_ROOT, 'studio', 'DONE.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 
 const TASK_LINE_RE = /^-\s+\[([ x>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[(P[0-3])\]\s+\(`([^`]+)`\)\s+—\s+(.+)$/;
 
 export function parseNextQueue() {
-  if (!fs.existsSync(NEXT_FILE)) {
+  const tasks = parseQueueFile(NEXT_FILE);
+  // Older studios kept DONE in NEXT.md: those still count, and move to DONE.md on the next write.
+  const seen = new Set(tasks.done.map((t) => t.id));
+  for (const t of parseQueueFile(DONE_FILE, 'done').done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  return tasks;
+}
+
+function parseQueueFile(file, start = 'backlog') {
+  if (!fs.existsSync(file)) {
     return { inProgress: [], backlog: [], done: [] };
   }
-  const lines = fs.readFileSync(NEXT_FILE, 'utf8').replace(/\r\n/g, '\n').split('\n');
-  let section = 'backlog';
+  const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
+  let section = start;
   const tasks = { inProgress: [], backlog: [], done: [] };
 
   for (const line of lines) {
@@ -82,13 +94,21 @@ export function writeNextQueue(tasks) {
       : ['_Backlog is empty._']),
     '',
     '## DONE',
-    ...(tasks.done.length
-      ? tasks.done.map((t) => formatTaskLine(t, 'x'))
-      : ['_No completed tasks yet._']),
+    `_${tasks.done.length ? `${tasks.done.length} finished task${tasks.done.length === 1 ? ' is' : 's are'}` : 'Finished tasks are'} in \`studio/DONE.md\` (newest first). This file keeps only open work._`,
     '',
   ];
   fs.mkdirSync(path.dirname(NEXT_FILE), { recursive: true });
   fs.writeFileSync(NEXT_FILE, out.join('\n'), 'utf8');
+  const done = [
+    '# Finished tasks (`studio/DONE.md`)',
+    '',
+    '> Managed by `node harness/task.mjs`. Newest first. Open work is in `studio/NEXT.md`; agents don\'t need to read this file.',
+    '',
+    '## DONE',
+    ...(tasks.done.length ? tasks.done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
+    '',
+  ];
+  fs.writeFileSync(DONE_FILE, done.join('\n'), 'utf8');
 }
 
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
@@ -354,6 +374,8 @@ function holderRunning(owner) {
     return err.code === 'EPERM';
   }
 }
+/** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
+export const HANDBACK_MAX = 2400;
 export function pauseTask(taskId, agent = null, note = '', { force = false } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
@@ -377,20 +399,22 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   // A hand-back note is for the next agent, who shouldn't have to read the last one's logs: 20 lines
   // at most, in a fixed shape (done, not done, files, next step, proof). Longer notes are cut.
   const capLines = String(note || '').split('\n');
-  if (capLines.length > 20 || String(note || '').length > 2400) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
+  if (capLines.length > 20 || String(note || '').length > HANDBACK_MAX) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
   if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
   fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
-  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}` });
+  emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: isFailureNote(note) ? { reasonKey: reasonKey(note) } : {} });
+  // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.
+  const tripped = checkBreaker(target.id, note, who);
   // "blocked by T-12" (or "waits for", "needs T-12 first") in the note: hold the task until T-12 is done,
   // so it isn't picked up again only to be handed back for the same reason (Jed's run).
   const deps = [...String(note || '').matchAll(/\b(?:blocked (?:by|on)|waits? (?:for|on)|needs|after)\s+((?:T-\d+(?:\s*(?:,|and)\s*)?)+)/gi)].flatMap((m) => m[1].match(/T-\d+/g) || []);
   const open = deps.filter((d) => d !== target.id && !q.done.some((t) => t.id === d) && [...q.inProgress, ...q.backlog].some((t) => t.id === d));
   if (open.length) setHold(target.id, { after: [...new Set([...(readHolds()[target.id]?.after || []), ...open])] }, { by: who, msg: `${target.id} waits for ${open.join(', ')} (from ${who}'s hand-back note)` });
-  return { ...target, handoffFile: path.relative(REPO_ROOT, file), waitsFor: open };
+  return { ...target, handoffFile: path.relative(REPO_ROOT, file), waitsFor: open, ...(tripped ? { parked: tripped } : {}) };
 }
 
 export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
@@ -620,10 +644,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(started.error === 'locked' ? `Task "${targetId}" is claimed by ${started.lock?.owner}. Pick another task.` : started.message);
       process.exit(1);
     }
-    if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)`);
-    if (started.handoff) console.error(`Picking up where someone else stopped. Notes (studio/handoffs/${started.id}.md):\n${started.handoff}`);
+    // 2.30c (#4): short output. The brief's path and a 10-line summary; the carry-forward note (newest
+    // notes, at most 3k characters) replaces re-reading the whole hand-off history.
+    if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
-    console.log(JSON.stringify(started, null, 2));
+    if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
+    const { handoff, ...rest } = started;
+    console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}) }, null, 2));
     process.exit(0);
   }
 
@@ -679,6 +706,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   // Holds: dependencies, parking, blocks and lanes (harness/task-hold.mjs).
+  if (cmd === 'unblock') {
+    if (!arg1) {
+      console.error('Usage: npm run task -- unblock <TASK_ID> --by <name> [--note "what was fixed"]');
+      process.exit(1);
+    }
+    const r = unblockTask(arg1, typeof flags.by === 'string' ? flags.by : process.env.STUDIO_LOCK_OWNER || 'human', typeof flags.note === 'string' ? flags.note : '');
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
   if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const all = [...q.inProgress, ...q.backlog, ...q.done];
@@ -822,5 +858,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }

@@ -337,7 +337,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   run(dir, 'node harness/task.mjs start T-003 --agent alice-1');
   run(dir, 'node harness/task.mjs done T-003 --agent alice-1 --force');
   const note = run(dir, 'node harness/handoff.mjs note "Chose spawnCost 400 because wins land on time" --agent producer');
-  const brief = run(dir, 'node harness/handoff.mjs');
+  const brief = run(dir, 'node harness/handoff.mjs --full');
   const out = brief.stdout;
   report('handoff briefing builds from files', brief.status === 0 && fs.existsSync(path.join(dir, '.studio/briefs/producer.md')), `${brief.stdout}${brief.stderr}`);
   report('handoff shows the plan, the newest log note and decisions', note.status === 0 && /## The plan/.test(out) && /Chose spawnCost 400/.test(out) && /ADR-0001/.test(out), out);
@@ -387,7 +387,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const sheet = fs.existsSync(path.join(dir, 'studio/game/GAME.md')) ? fs.readFileSync(path.join(dir, 'studio/game/GAME.md'), 'utf8') : '';
   report('onboard writes a fact sheet with engine and unrepeatable calls', first.status === 0 && /Phaser/.test(sheet) && /Math\.random: 1/.test(sheet), `${first.stdout}${first.stderr}`);
   report('onboard leaves the game untouched and queues its tasks once', fs.readFileSync(path.join(gameDir, 'src/sim.js'), 'utf8') === before && /started an unsigned Game Bible/.test(first.stdout) && /queued 9 task/.test(first.stdout) && /queued 0 task/.test(second.stdout), `${first.stdout}${second.stdout}`);
-  report('the Producer briefing shows the onboarded game', /## The game[\s\S]*Tiny: A tiny test game/.test(run(dir, 'node harness/handoff.mjs').stdout));
+  report('the Producer briefing shows the onboarded game', /## The game[\s\S]*Tiny: A tiny test game/.test(run(dir, 'node harness/handoff.mjs --full').stdout));
 }
 
 // Model scorecard: bugs land on the model that closed the work; the retro turns patterns into suggestions.
@@ -417,7 +417,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const retro = run(dir, 'node harness/retro.mjs');
   const retroText = fs.existsSync(path.join(dir, 'studio/memory/retros')) ? fs.readdirSync(path.join(dir, 'studio/memory/retros')).filter((f) => f !== 'README.md').map((f) => fs.readFileSync(path.join(dir, 'studio/memory/retros', f), 'utf8')).join('') : '';
   report('retro writes suggestions from what happened', retro.status === 0 && /ran out of usage/.test(retroText) && /reopened/.test(retroText), `${retro.stdout}${retro.stderr}\n${retroText}`);
-  report('the briefing shows the scorecard and the retro suggestions', /## Models[\s\S]*model-a/.test(run(dir, 'node harness/handoff.mjs').stdout) && /What the studio learned[\s\S]*ran out of usage/.test(run(dir, 'node harness/handoff.mjs').stdout));
+  report('the briefing shows the scorecard and the retro suggestions', /## Models[\s\S]*model-a/.test(run(dir, 'node harness/handoff.mjs --full').stdout) && /What the studio learned[\s\S]*ran out of usage/.test(run(dir, 'node harness/handoff.mjs --full').stdout));
 }
 
 // The daily spend cap stops model calls before they reach a provider; studio:reset starts a fresh project.
@@ -561,7 +561,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const sched = add('"Fireflies glow over the moss" --phase 2 --idea I-001');
   const idea = JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/ideas/I-001.json'), 'utf8'));
   report('an approved idea becomes a task and is marked scheduled', sched.status === 0 && idea.stage === 'scheduled' && idea.tasks.length === 1 && /I-001 Fireflies/.test(fs.readFileSync(path.join(dir, 'studio/bible/BIBLE.md'), 'utf8')), sched.stderr + JSON.stringify(idea));
-  const brief2 = run(dir, 'node harness/handoff.mjs', env).stdout;
+  const brief2 = run(dir, 'node harness/handoff.mjs --full', env).stdout;
   report('the Producer briefing shows the game plan and the idea waiting to be routed', /## The game plan/.test(brief2) && /Phase 2 of 3 is open/.test(brief2) && /New idea I-002/.test(brief2), brief2.slice(0, 1500));
 
   // A fresh studio starts in pre-production.
@@ -958,7 +958,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('the launcher reports session start and end, with the tokens the agent printed', /agent\.session\.start/.test(ev) && /"type":"agent\.session\.end"[^\n]*"tokensIn":1200/.test(ev), ev.split('\n').filter((l) => /agent\.session/.test(l)).join('\n'));
   fs.rmSync(path.join(dir, 'docs/fake'), { recursive: true, force: true });
   const ok = run(dir, 'node harness/agent.mjs start --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
-  report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), ok.stdout + ok.stderr);
+  report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8')), ok.stdout + ok.stderr);
   // Caps: Precise allows one builder; MAX SPEED doubles it.
   const waitEnv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-004 wait' };
   run(dir, 'node harness/mode.mjs set precise --by hatch', env);
@@ -1270,11 +1270,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('preflight clears a quota mark an older harness wrote, and says so', !quota().claude && /Cleared a stale quota mark for claude/.test(pf0.stdout), pf0.stdout.split('\n').filter((l) => /quota/i.test(l)).join('\n'));
   // A session that ends without task done or a hand-back gives the task back at once, with a note.
   const t2 = id('node harness/task.mjs add "Wire the bellhop sweep" --role builder');
-  run(dir, `node harness/agent.mjs start --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  // STUDIO_BREAKER=off: this proves the older 3-in-2-h rule still holds as the fallback (2.30c's breaker trips at 2; its own checks are below).
+  run(dir, `node harness/agent.mjs start --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const ql = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
   const hf = path.join(dir, `studio/handoffs/${t2}.md`);
   report('a session that ends without task done hands its task back at once, with what it left (test #2: claims sat for an hour)', ql.backlog.some((t) => t.id === t2) && !/quit-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout) && fs.existsSync(hf) && /ended without task done/.test(fs.readFileSync(hf, 'utf8')), JSON.stringify(ql.inProgress) + (fs.existsSync(hf) ? fs.readFileSync(hf, 'utf8') : 'no handoff'));
-  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const holds = run(dir, 'node harness/task.mjs holds', env).stdout;
   report('a task handed back three times in two hours is parked, with its last note, and the Producer is told (test #2: T-110 went to 12 sessions)', new RegExp(`${t2}[^\\n]*parked[^\\n]*launcher[^\\n]*handed back 3 times`).test(holds) && /keeps coming back/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), holds);
   // Anyone may hand back a task whose holder's session has ended.
@@ -1751,7 +1752,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const cause = (run(dir, 'node harness/causes.mjs', env).stdout.match(/accept "([^"]+)"/) || [])[1];
   const acc = run(dir, `node harness/causes.mjs accept "${cause}" --by hatch --why "known: no git here"`, env);
   force(c);
-  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
+  const q2 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8') + fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8'); // 2.30c: done tasks are in DONE.md
   report('accepting a cause closes its check task, and later tasks forced for it don\'t ask again', acc.status === 0 && !/- \[ \][^\n]*Check forced done/.test(q2) && /\[x\][^\n]*Check forced done/.test(q2), acc.stdout + acc.stderr + q2);
   run(dir, 'node harness/notes.mjs add --kind bad "the agy line exits early"', { ...env, STUDIO_LOCK_OWNER: 'art-1' });
   report('a note is credited to the agent that wrote it, not the Producer', /· art-1\] the agy line exits early/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')));
@@ -1882,7 +1883,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('kickoff refuses a shared agent name', run(dir, 'node harness/kickoff.mjs --role builder --agent claude').status !== 0);
   run(dir, 'node harness/notes.mjs add --kind workaround "Rerun the done-check by hand on suspicious work"');
   run(dir, 'node scripts/studio-reset.mjs --name "Next Game" --yes');
-  report('harness notes survive a studio reset and show in the briefing', /Rerun the done-check by hand/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')) && /Workaround: Rerun the done-check by hand/.test(run(dir, 'node harness/handoff.mjs').stdout));
+  report('harness notes survive a studio reset and show in the briefing', /Rerun the done-check by hand/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')) && /Workaround: Rerun the done-check by hand/.test(run(dir, 'node harness/handoff.mjs --full').stdout));
 }
 
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
@@ -2065,7 +2066,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     const mainLog = g('log --oneline').stdout;
     const statusInCopy = (logA.split('$ git status --porcelain\n')[1] || '').split('[exit')[0].trim();
     report('an agent with a code lane works in its own copy, and its git status shows only its own change', /[\\/]\.lanes[\\/]lane-a1/.test(logA) && statusInCopy === 'M cartridges/example-sim/index.mjs', logA.slice(0, 1500));
-    report('task done in a copy adds its commit to the studio\'s branch, and the copy and its branch are removed', new RegExp(`${t1}: lane-a1`).test(mainLog) && /- \[x\] \*\*/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')) && !fs.existsSync(path.join(dir, '.lanes/lane-a1')) && !/lane\/lane-a1/.test(g('branch').stdout), mainLog + g('branch').stdout + logA.slice(-1500));
+    report('task done in a copy adds its commit to the studio\'s branch, and the copy and its branch are removed', new RegExp(`${t1}: lane-a1`).test(mainLog) && /- \[x\] \*\*/.test(fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8')) && !fs.existsSync(path.join(dir, '.lanes/lane-a1')) && !/lane\/lane-a1/.test(g('branch').stdout), mainLog + g('branch').stdout + logA.slice(-1500));
     start(t2, 'lane-b1', 'lane-quit.mjs');
     const hand = fs.existsSync(path.join(dir, `studio/handoffs/${t2}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${t2}.md`), 'utf8') : '';
     report('a session that quits in its copy keeps its commits on its branch and saves what it hadn\'t committed', /not yet in the studio's branch are on lane\/lane-b1/.test(hand) && fs.existsSync(path.join(dir, `.studio/wip/${t2}-lane-b1.patch`)) && /lane\/lane-b1/.test(g('branch').stdout) && !fs.existsSync(path.join(dir, '.lanes/lane-b1')), hand + g('branch').stdout);
@@ -2073,7 +2074,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     const mainLog2 = g('log --oneline').stdout;
     start(t3, 'lane-d1', 'lane-nodone.mjs');
     const endD = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter((l) => /agent\.session\.end/.test(l) && /lane-d1/.test(l)).pop() || '';
-    report('an agent that committed and verified but never called task done: the launcher closes the task once its check passes', new RegExp(`${t3}: lane-d1`).test(g('log --oneline').stdout) && /the launcher closed its task/.test(endD) && fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').includes(`- [x] **${t3}**`), endD + g('log --oneline').stdout);
+    report('an agent that committed and verified but never called task done: the launcher closes the task once its check passes', new RegExp(`${t3}: lane-d1`).test(g('log --oneline').stdout) && /the launcher closed its task/.test(endD) && fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8').includes(`- [x] **${t3}**`), endD + g('log --oneline').stdout);
     report('the next agent\'s copy gets the earlier commits merged in, and done adds both; no lane branches are left', new RegExp(`${t2}: lane-b1`).test(mainLog2) && new RegExp(`${t2}: lane-c1`).test(mainLog2) && !/lane\//.test(g('branch').stdout) && !g('status --porcelain').stdout.split('\n').some((l) => /\.lanes/.test(l)), mainLog2 + g('branch').stdout + fs.readFileSync(path.join(dir, '.studio/agents/lane-c1.log'), 'utf8').slice(-1500));
   }
 }
@@ -2425,6 +2426,137 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
   fs.writeFileSync(mf, JSON.stringify(m));
   const g3 = gate();
   report('G7: the assets gate passes a credited ledger and fails a stale CREDITS.md or a disallowed licence', g1.status === 0 && g2.status !== 0 && /CREDITS\.md is missing or out of date/.test(g2.stdout) && g3.status !== 0 && /not CC0 or CC-BY/.test(g3.stdout), JSON.stringify({ g1: g1.stdout, g2: g2.stdout, g3: g3.stdout }));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// 2.30c: short output (#4), circuit breakers (#8), the Producer on events (#11), dependency-aware
+// handout (#12), DONE.md (#13), the allowlist in the kickoff (#15), gates in plain words (G3), the
+// overnight summary (G6) and the release command. Each in a copy.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p230c-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  // #4: a 21k hand-off history becomes a carry-forward of at most 3k, newest note kept; start prints a path and 10 lines.
+  const long = ['# Handoff notes for T-003: x', '', 'Newest last. Read these before you pick the task up.', ...Array.from({ length: 30 }, (_, i) => `\n## 2026-10-2${i % 9}T0${i % 9}:00:00Z · b-${i}\n${`note ${i} `.repeat(90)}`), '\n## 2026-10-23T01:00:00Z · b-last\nNEWEST: the golden moved; regenerate it.'].join('\n');
+  fs.mkdirSync(path.join(dir, 'studio', 'handoffs'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'studio', 'handoffs', 'T-003.md'), long);
+  const st = run(dir, 'node harness/task.mjs start T-003 --agent b-1');
+  let js = {};
+  try { js = JSON.parse(st.stdout); } catch {}
+  const [summary, carry = ''] = (st.stderr.split('Your brief:')[1] || '').split('\nPicking up where someone else stopped.');
+  const carryBody = carry.split('\n').slice(1).join('\n');
+  report('#4: task start prints the brief path and a 10-line summary, and a carry-forward note of at most 3k characters instead of the whole history', long.length > 20000 && /\.studio\/briefs\/T-003\.md/.test(st.stderr) && summary.trim().split('\n').length <= 11 && carryBody.length <= 3000 && /NEWEST: the golden moved/.test(carryBody) && !('handoff' in js) && js.handoffFile === 'studio/handoffs/T-003.md' && !st.stderr.includes('note 3 note 3'), `${st.stderr.slice(0, 1500)}\n${carryBody.length}`);
+  const longNote = 'x'.repeat(9000);
+  run(dir, `node harness/task.mjs pause T-003 --agent b-1 --note "${longNote}"`);
+  const h = fs.readFileSync(path.join(dir, 'studio', 'handoffs', 'T-003.md'), 'utf8');
+  const last = h.split(/\n## /).pop();
+  const ho = run(dir, 'node harness/handoff.mjs');
+  const hf = run(dir, 'node harness/handoff.mjs --full');
+  const printed = ho.stdout.replace(/\nSaved to .*\n?$/, '');
+  report('#4: a hand-back note is cut under 3k characters, and npm run handoff prints at most 3k (the full briefing is saved and --full prints it)', last.length < 3000 && /Cut to 20 lines/.test(last) && printed.length <= 3000 && hf.stdout.length > printed.length && /Before you assign work/.test(hf.stdout) && fs.existsSync(path.join(dir, '.studio', 'briefs', 'producer.md')), `${last.length} ${printed.length} ${hf.stdout.length}`);
+  // #8: two hand-backs for the same reason park the task with a card; a refresh never trips it; other work goes on; unblock clears it.
+  const bp = probe(`import { startTask, pauseTask, nextFor, parseNextQueue } from ${u('harness/task.mjs')};
+import { readHolds } from ${u('harness/task-hold.mjs')};
+import { readRecentEvents } from ${u('harness/event.mjs')};
+import { unblockTask } from ${u('harness/breaker.mjs')};
+import { buildHudState } from ${u('harness/hud.mjs')};
+const cycle = (id, note) => { startTask(id, 'b-2'); return pauseTask(id, 'b-2', note, { force: true }); };
+const r1 = cycle('T-004', 'refreshed: reached the 40-turn refresh point');
+const r2 = cycle('T-004', 'refreshed: reached the 40-turn refresh point');
+const d1 = cycle('T-005', 'verify failed: golden mismatch in cartridges/example-sim (run 3)');
+const d2 = cycle('T-005', 'tick-budget failed on soak seed 4');
+const s1 = cycle('T-002', 'verify failed: golden mismatch in cartridges/example-sim (run 3)');
+const s2 = cycle('T-002', 'verify failed: golden mismatch in cartridges/example-sim (run 4)');
+const holds = readHolds();
+const card = buildHudState().needs.find((n) => n.task === 'T-002' && n.action?.type === 'unblock');
+const other = nextFor({}, parseNextQueue()).task?.id;
+const blockedStart = startTask('T-002', 'b-3');
+const ub = unblockTask('T-002', 'dev');
+const after = readHolds()['T-002'];
+console.log(JSON.stringify({ refreshParked: Boolean(holds['T-004']?.parked), diffParked: Boolean(holds['T-005']?.parked), sameParked: holds['T-002']?.parked?.breaker, s2: s2.parked || null, ev: readRecentEvents(500).some((e) => e.type === 'task.breaker' && e.task === 'T-002'), card: Boolean(card), other, blocked: blockedStart?.error, ub: ub.ok, after: after?.parked || null }));`);
+  report('#8: a second hand-back for the same reason parks the task with that reason and a War Room card with Unblock; different reasons and refreshes never trip it', bp.sameParked === true && /circuit breaker/.test(bp.s2 || '') && bp.ev && bp.card && bp.refreshParked === false && bp.diffParked === false, JSON.stringify(bp));
+  report('#8: other work keeps going while a task is tripped, and task unblock clears it', bp.other && bp.other !== 'T-002' && bp.blocked === 'held' && bp.ub === true && bp.after === null, JSON.stringify(bp));
+  const ubCli = run(dir, 'node harness/task.mjs unblock T-001 --by dev');
+  report('#8: task unblock on a task that is not parked says so', ubCli.status === 1 && /nothing to unblock/.test(ubCli.stderr), ubCli.stderr);
+  // #11: the Producer starts on events only, at most every 15 min unless urgent, and backs off when nothing changed.
+  const pw = probe(`import { producerWake, producerLaunched, readWake } from ${u('harness/producer-wake.mjs')};
+const t0 = Date.parse('2026-10-23T00:00:00Z');
+const ev = (type, min, extra = {}) => ({ ts: new Date(t0 + min * 60000).toISOString(), type, agent: 'b-1', msg: '', ...extra });
+producerLaunched(t0);
+const quiet = producerWake({ now: t0 + 20 * 60000, events: [], commit: true });
+const i1 = readWake().interval;
+producerWake({ now: t0 + 50 * 60000, events: [], commit: true });
+const i2 = readWake().interval;
+const soon = producerWake({ now: t0 + 5 * 60000, events: [ev('task.done', 2)] });
+const urgent = producerWake({ now: t0 + 5 * 60000, events: [ev('closedloop.escalate', 2)] });
+const p0 = producerWake({ now: t0 + 5 * 60000, events: [], queue: { backlog: [{ role: 'producer', priority: 'P0' }] } });
+const later = producerWake({ now: t0 + 16 * 60000, events: [ev('task.forced', 10)] });
+const own = producerWake({ now: t0 + 16 * 60000, events: [ev('task.done', 10, { agent: 'prod-1' })] });
+producerLaunched(t0 + 60 * 60000);
+console.log(JSON.stringify({ quiet: quiet.wake, i1, i2, soon: soon.wake, urgent: urgent.wake, p0: p0.wake, later: later.wake, own: own.wake, reset: readWake().interval }));`);
+  report('#11: the Producer starts only on an event, at most once per 15 min unless urgent, and the wait doubles while nothing changes', pw.quiet === false && pw.i1 === 30 * 60000 && pw.i2 === 60 * 60000 && pw.soon === false && pw.urgent === true && pw.p0 === true && pw.later === true && pw.own === false && pw.reset === 15 * 60000, JSON.stringify(pw));
+  // #12: a task whose prerequisite is done but unmerged, or whose folder another agent holds, is skipped and marked waiting.
+  const hb = probe(`import { handoutBlock } from ${u('harness/handout.mjs')};
+const q = { done: [{ id: 'T-010' }], inProgress: [], backlog: [] };
+const holds = { 'T-011': { after: ['T-010'] } };
+const a = handoutBlock('T-011', q, { holds, branches: { 'T-010': 'lane/b-1-x' }, unmerged: () => 2 });
+const b = handoutBlock('T-011', q, { holds, branches: { 'T-010': 'lane/b-1-x' }, unmerged: () => 0 });
+const c = handoutBlock('T-012', q, { holds: {}, lane: 'game/x/src/floors', locks: [{ key: 'path:game/x/src', owner: 'b-7' }] });
+const d = handoutBlock('T-012', q, { holds: {}, lane: 'game/x/src/floors', locks: [{ key: 'path:game/x/docs', owner: 'b-7' }] });
+console.log(JSON.stringify({ a, b, c, d }));`);
+  report('#12: the handout skips a task whose prerequisite is done but not merged, or whose folder is held, and says who it waits on', /waiting on T-010: done, but 2 commits/.test(hb.a?.why || '') && hb.b === null && hb.c?.owner === 'b-7' && /holds path:game\/x\/src/.test(hb.c.why) && hb.d === null, JSON.stringify(hb));
+  // #13: finished tasks move to studio/DONE.md; NEXT.md keeps open work only; an old NEXT.md's DONE still counts.
+  const next0 = fs.readFileSync(path.join(root, 'qa', 'fixtures', 'studio', 'NEXT.md'), 'utf8'); // the board a copy starts with
+  run(dir, 'node harness/task.mjs start T-001 --agent p-1');
+  const dn = run(dir, 'node harness/task.mjs done T-001 --agent p-1 --force --reason "selftest"');
+  const nx = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
+  const dm = fs.existsSync(path.join(dir, 'studio', 'DONE.md')) ? fs.readFileSync(path.join(dir, 'studio', 'DONE.md'), 'utf8') : '';
+  const list = JSON.parse(run(dir, 'node harness/task.mjs list').stdout || '{}');
+  report('#13: a finished task moves to studio/DONE.md; NEXT.md keeps only open work; an older NEXT.md\'s DONE section still counts', /\[x\] \*\*T-000\*\*/.test(next0) && dn.status === 0 && !/- \[x\]/.test(nx) && /studio\/DONE\.md/.test(nx) && /\[x\] \*\*T-001\*\*/.test(dm) && /\[x\] \*\*T-000\*\*/.test(dm) && list.done?.some((t) => t.id === 'T-001') && list.done?.some((t) => t.id === 'T-000'), `${dn.stderr}\n${nx}\n${dm}`);
+  // #15: every kickoff prints exactly what the agent may run, the same list the launcher allows.
+  const ka = probe(`import { kickoff } from ${u('harness/kickoff.mjs')};
+import { toolCommand } from ${u('harness/agent.mjs')};
+import { ALLOWED, allowedTools } from ${u('harness/allowlist.mjs')};
+const k = ['builder', 'producer', 'director', 'liaison'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
+const c = toolCommand('claude', { model: 'm', prompt: 'x' });
+console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv[c.argv.indexOf('--allowedTools') + 1] === allowedTools(), n: ALLOWED.length }));`);
+  report('#15: every kickoff lists exactly what the agent may run, the same allowlist the launcher passes (the 2.23 set)', ka.all === true && ka.same === true && ka.n === 15, JSON.stringify(ka));
+  // G3: failing first in plain words; "not run" is never a pass.
+  const gw = probe(`import { gateWords } from ${u('harness/gate-words.mjs')};
+const all = [{ id: 'golden' }, { id: 'soak' }, { id: 'selftest', deep: true }, { id: 'fun', required: false }];
+const w = gateWords({ rows: [{ id: 'soak', ok: true, required: true }, { id: 'golden', ok: false, required: true }], skipped: ['selftest (deep)'] }, all);
+const none = gateWords(null, all);
+console.log(JSON.stringify({ lines: w.lines, none: none.lines }));`);
+  report('G3: gate results list failing first in plain words, and "not run" apart from "pass"', /^FAILING \(1\):/.test(gw.lines?.[0] || '') && /golden: the recorded results/.test(gw.lines[1]) && gw.lines.some((l) => /^NOT RUN \(2, not a pass\)/.test(l)) && gw.lines.some((l) => /selftest: deep check/.test(l)) && /^PASSING \(1\): soak$/.test(gw.lines.at(-1)) && /^NOT RUN: no verify/.test(gw.none?.[0] || '') && /^PASSING \(0\)/.test(gw.none.at(-1)), JSON.stringify(gw));
+  const rr = run(dir, 'node harness/run-report.mjs --to "' + path.join(tmpRoot, 'rr230c') + '"');
+  const rep = (() => { try { return fs.readFileSync(path.join(tmpRoot, 'rr230c', fs.readdirSync(path.join(tmpRoot, 'rr230c'))[0], 'REPORT.md'), 'utf8'); } catch { return ''; } })();
+  report('G3: the run report shows the gates failing first, with "not run" kept apart', rr.status === 0 && /Gates, failing first:[\s\S]*NOT RUN/.test(rep), `${rr.stderr}${rep.slice(0, 600)}`);
+  // G6: the overnight summary, from the run's events.
+  const ov = probe(`import { buildOvernight, renderOvernight } from ${u('harness/overnight.mjs')};
+const t0 = Date.parse('2026-10-23T00:00:00Z');
+const e = (type, min, x = {}) => ({ ts: new Date(t0 + min * 60000).toISOString(), type, msg: '', ...x });
+const events = [
+  e('agent.session.start', 1, { agent: 'b-1', task: 'T-1' }), e('task.done', 30, { agent: 'b-1', task: 'T-1', msg: 'Completed T-1: Boats dock' }), e('agent.session.end', 31, { agent: 'b-1', model: 'model-a', tokensIn: 1000, tokensOut: 500, meta: { cacheRead: 100000 } }),
+  e('agent.session.start', 40, { agent: 'b-2', task: 'T-2' }), e('agent.session.end', 90, { agent: 'b-2', model: 'model-b', tokensIn: 5000, tokensOut: 1000, meta: { cacheRead: 900000, reason: 'finished without task done' } }),
+  e('task.forced', 95, { task: 'T-3', msg: 'Forced T-3 done without: a clip' }), e('review.written', 96, { task: 'T-1' }), e('task.done', 9999, { task: 'T-9' }),
+];
+const o = buildOvernight({ from: t0, to: t0 + 600 * 60000, events, openCards: ['T-4: parked by the circuit breaker'] });
+const md = renderOvernight(o);
+console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.agent), forced: o.forced.length, reviews: o.reviews, top: o.top.map((s) => s.agent + '/' + s.model), perDone: o.perDone, md }));`);
+  report('G6: the overnight summary counts tasks done, tokens per finished task (model named), no-done sessions, forced closes, reviews, the top sessions and open cards', ov.done === 1 && JSON.stringify(ov.noDone) === '["b-2"]' && ov.forced === 1 && ov.reviews === 1 && ov.top?.[0] === 'b-2/model-b' && ov.perDone > 0 && /Tasks done: 1/.test(ov.md) && /model-a: 1 session/.test(ov.md) && /Open cards: 1/.test(ov.md) && ov.md.split('\n').length <= 60, JSON.stringify(ov).slice(0, 1500));
+  // Release tooling: refuses a bad version, and never runs outside main in step with origin.
+  const rl = run(dir, 'node scripts/release-ship.mjs not-a-version');
+  const rl2 = run(dir, 'node scripts/release-ship.mjs 9.9.9-z --dry-run');
+  report('release: npm run release -- <version> ships; a bad version or a checkout not on main in step with origin is refused before anything changes', rl.status === 1 && /Usage/.test(rl.stderr) && rl2.status === 1 && /FAIL/.test(rl2.stdout) && JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version !== '9.9.9-z', `${rl.stdout}${rl.stderr}\n${rl2.stdout}${rl2.stderr}`);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

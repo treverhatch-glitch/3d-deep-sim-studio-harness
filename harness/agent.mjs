@@ -33,6 +33,7 @@
  * or STUDIO_AGENT_TOOL / STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
  */
 import fs from 'node:fs';
+import { allowedTools } from './allowlist.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -108,7 +109,7 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
       // stream-json (2.26): the log keeps every message and tool call, not only the final result, so a
       // session can be read back (test #2: --output-format json left nothing but the last answer).
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
-      const allowed = 'Bash(node *),Bash(npm *),Bash(npx *),Bash(ffmpeg *),Bash(blender *),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *),Bash(git log *),Bash(git show *),Bash(ls *),Bash(mkdir *),Bash(cp *),Bash(mv *)';
+      const allowed = allowedTools(); // harness/allowlist.mjs: the same list the kickoff prints (2.30c)
       // 2.29.2: a turn ceiling, so no session runs 126 turns again (the refresh point, 40 turns, is in the kickoff).
       const ceiling = sessionLimits().ceilingTurns;
       return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };

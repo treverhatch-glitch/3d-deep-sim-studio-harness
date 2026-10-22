@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-c] — 2026-10-23
+2.30c, the quick wins: agents read less at the start, a task that keeps failing the same way stops costing sessions, the Producer starts only when something happened, and a release ships with one command. Details in docs/RELEASE.md.
+### Added
+- **Short command output (#4).** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) in place of the whole hand-off history, which stays in studio/handoffs/<ID>.md. Hand-back notes stay under 3k characters (20 lines). `npm run handoff` prints at most 3k characters (`-- --full` prints all; the full briefing is always saved).
+- **Circuit breakers (#8).** After one failed hand-back, a second with the same reason (numbers, ids and paths ignored) parks the task with that reason and a War Room card with Unblock. Refreshes, stops and quota hand-backs never count. Other tasks and lanes keep starting. `npm run task -- unblock <ID> --by <name>`; `STUDIO_BREAKER=off`.
+- **The Producer on events (#11).** The supervisor and the watcher's check-in start a Producer session only after a task is done, forced or tripped, or a card or question appears; at most once per 15 min unless urgent (a P0 Producer task, an escalation); the wait doubles while nothing changes, up to 4 h. A person starting it is never held back. The status line says when it starts next. `STUDIO_PRODUCER_MIN_MIN`, `STUDIO_PRODUCER_WAKE=always`.
+- **Dependency-aware handout (#12).** The supervisor skips a task whose `--after` prerequisite is done but still on an unmerged lane branch, or whose folder another agent holds, tries the next task in that group, and marks it "waiting on X" in the queue.
+- **studio/DONE.md (#13).** Finished tasks move there; NEXT.md keeps only open work. An older NEXT.md's DONE section still counts and moves on the next write; `studio:reset` resets both.
+- **The allowlist in every kickoff (#15).** Builder, Producer, Director and Liaison kickoffs list exactly what runs without asking; it is the same 2.23 list the launcher passes to Claude Code (harness/allowlist.mjs).
+- **Gates in plain words (G3).** `npm run verify`, the run report and the release report list failing gates first, one plain sentence each; "not run" is listed apart and never read as a pass.
+- **Overnight summary (G6).** At `--until` the supervisor writes studio/daily/overnight-<date>.md: tasks done, tokens per finished task with the model named, sessions that finished nothing, forced closes, reviews, the top 5 sessions by tokens and open cards. `npm run overnight -- --since 8h` by hand. The status line links the latest one.
+- **Release tooling.** `npm run release -- <version> [--notes f] [--title "…"] [--shots dir] [--backup-dir dir] [--dry-run]`: checks main is in step with origin, bumps the version, writes the CHANGELOG entry, makes one squashed commit, runs verify --deep (self-test included) and the War Room browser check in a fresh clone, bundles origin/main to the backup folder, pushes to main without force, waits for CI (a failed job is re-run once) and reports failing first. Any red step before the push undoes the commit and pushes nothing. `npm run release` with no version is still the check CI runs. This release shipped with it.
+### Self-test
+14 more checks: the 3k carry-forward and the 10-line start, the hand-back and briefing caps, the breaker (trips on the same reason, not on refreshes or different reasons, other work goes on, unblock), the Producer's events, 15-minute floor, urgency and doubling wait, the handout's unmerged prerequisite and held folder, DONE.md and the old layout, the allowlist in every kickoff and the launcher, gates in plain words in verify and the run report, the overnight summary, and the release command's refusals. The War Room browser check adds 2: the breaker card with Unblock plus the Producer and overnight lines, and Unblock clearing it.
+
+- Docs: ROADMAP marks F16 (qa/fails-before.mjs, since 2.12.0), H2 and H6 (the Arcade, since 2.21.0) done; SESSIONS.md names 2.30d for the remaining planned items.
+
+---
+
 ## [2.30.0-b] — 2026-10-22
 2.30b, the hard batch: gameplay is checked with real keys and clicks, a sim feature counts only once the build shows it, and free art comes in with its licence and credit on record.
 ### Added

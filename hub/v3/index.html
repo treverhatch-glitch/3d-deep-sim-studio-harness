@@ -1188,7 +1188,7 @@
     $('o-stopmsg').textContent = s.stopped ? `By ${s.stopped.by} at ${hhmm(s.stopped.at)}${s.stopped.reason ? `: ${s.stopped.reason}` : ''}. No task can start; agents hand back what they hold. Resume from Act.` : '';
     $('o-stopbtn').textContent = s.stopped ? 'Resume the studio' : 'Stop all agents';
     $('o-hold').classList.toggle('on', s.needs.length > 0);
-    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task && n.action?.type !== 'accept-cause' ? ` (<code>${esc(n.task)}</code>)` : ''}${n.action ? ` <button type="button" data-need="${esc(n.action.type)}" data-cause="${esc(n.action.cause || '')}" data-sha="${esc(n.action.sha || '')}">${esc(n.action.label)}</button>` : ''}</div>`).join('');
+    $('o-holdlist').innerHTML = s.needs.map((n) => `<div>${n.ts ? `${esc(hhmm(n.ts))} · ` : ''}${esc(n.agent)}: ${esc(n.msg)}${n.task && n.action?.type !== 'accept-cause' ? ` (<code>${esc(n.task)}</code>)` : ''}${n.action ? ` <button type="button" data-need="${esc(n.action.type)}" data-cause="${esc(n.action.cause || '')}" data-sha="${esc(n.action.sha || '')}" data-task="${esc(n.action.task || '')}">${esc(n.action.label)}</button>` : ''}</div>`).join('');
 
     $('o-agents').innerHTML = s.agents.some((a) => !a.placeholder)
       ? s.agents.filter((a) => !a.placeholder).map((a) => `<div class="cue" data-agent="${esc(a.name)}" role="button" tabindex="0" title="Show ${esc(a.name)}'s task and checklist"><span class="lamp ${a.status}" role="img" aria-label="${a.status}"></span><span class="who">${esc(a.name)}${a.model ? ` <span style="color:var(--quiet);font-weight:400">· ${esc(a.model)}</span>` : ''}</span><span class="what">${a.status === 'out-of-quota' ? `<b>out of quota${a.quotaUntil ? ` until ${esc(a.quotaUntil)}` : ''}</b> · ` : ''}${a.task ? `${esc(a.task)} · ` : ''}${esc(short(a.lastMsg, 110))} <span style="opacity:.7">(${ago(a.idleMin)})</span></span></div>`).join('')
@@ -1261,7 +1261,7 @@
   function renderStatus(st) {
     const box = $('o-status');
     if (!box || !st) return;
-    box.innerHTML = `<b>Building now:</b> ${st.building.length ? st.building.map((b) => `${esc(b.agent)} on ${esc(b.task || 'no task')}${b.model ? ` (${esc(b.model)})` : ''}`).join(', ') : 'nothing'} · <b>Waiting on you:</b> <span class="${st.waitingOnYou.length ? 'you' : ''}">${st.waitingOnYou.length ? `${st.waitingOnYou.length} (${esc(st.waitingOnYou.map((w) => w.what).slice(0, 3).join('; '))}${st.waitingOnYou.length > 3 ? '; …' : ''})` : 'nothing'}</span> · <b>Tokens today:</b> ${big(st.tokensToday)}${st.models.length ? ` (${esc(st.models.join(', '))})` : ''}${st.waitingOnOthers.length ? ` · <span class="note">also waiting: ${esc(st.waitingOnOthers.slice(0, 3).map((w) => `${w.what} on ${w.owner}`).join(', '))}</span>` : ''}`;
+    box.innerHTML = `<b>Building now:</b> ${st.building.length ? st.building.map((b) => `${esc(b.agent)} on ${esc(b.task || 'no task')}${b.model ? ` (${esc(b.model)})` : ''}`).join(', ') : 'nothing'} · <b>Waiting on you:</b> <span class="${st.waitingOnYou.length ? 'you' : ''}">${st.waitingOnYou.length ? `${st.waitingOnYou.length} (${esc(st.waitingOnYou.map((w) => w.what).slice(0, 3).join('; '))}${st.waitingOnYou.length > 3 ? '; …' : ''})` : 'nothing'}</span> · <b>Tokens today:</b> ${big(st.tokensToday)}${st.models.length ? ` (${esc(st.models.join(', '))})` : ''}${st.waitingOnOthers.length ? ` · <span class="note">also waiting: ${esc(st.waitingOnOthers.slice(0, 3).map((w) => `${w.what} on ${w.owner}`).join(', '))}</span>` : ''}${st.producer ? `<div class="note" id="o-prodwake" title="2.30c: the Producer starts on events only, at most every 15 min unless urgent">Producer: ${st.producer.wake ? 'starts on its next pass' : 'resting'} (${esc(st.producer.why)})</div>` : ''}${st.overnight ? `<div class="note" id="o-overnight">Last overnight summary: <code>${esc(st.overnight.file)}</code>: ${esc(st.overnight.head.join(' · '))}</div>` : ''}`;
   }
   // 2.30: what only the dev answers. Intent cards (J2), agent mechanics (J2), do it now (J3), the watchdog (G1).
   function renderYourCall(s, ro) {
@@ -2449,6 +2449,9 @@
       } else if (t.dataset.need === 'golden-ok') {
         const r = await post('/api/golden', { sha: t.dataset.sha, by: actor() });
         say(r.next);
+      } else if (t.dataset.need === 'unblock') {
+        const r = await post('/api/task-unblock', { task: t.dataset.task, by: actor() });
+        say(r.next || r.error);
       } else if (t.dataset.need === 'supervisor-resume') {
         const r = await post('/api/supervisor', { action: 'resume', by: actor() });
         say(r.next);

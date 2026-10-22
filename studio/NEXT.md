@@ -13,4 +13,4 @@ _No task currently in progress. Run `node harness/task.mjs next`._
 - [ ] **T-005** [P2] (`reviewer`) — Review: read the last merge and write a note in `studio/reviews/`
 
 ## DONE
-- [x] **T-000** [P0] (`producer`) — Scaffold the studio harness
+_1 finished task is in `studio/DONE.md` (newest first). This file keeps only open work._

@@ -12,6 +12,7 @@
  * gives it the loop: next, start (which writes its one-page brief), claim, work, done or hand back.
  */
 import fs from 'node:fs';
+import { allowedNote, allowedTools } from './allowlist.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
@@ -26,7 +27,7 @@ import { readMode, scopeOf } from './mode.mjs';
 export const TOOLS = {
   claude: {
     name: 'Claude Code',
-    line: (f) => `claude -p "$(cat ${f})" --permission-mode acceptEdits --allowedTools "Bash(node harness/*),Bash(npm run *),Bash(npm test*),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *)" --output-format json --max-budget-usd 5`,
+    line: (f) => `claude -p "$(cat ${f})" --permission-mode acceptEdits --allowedTools "${allowedTools()}" --output-format json --max-budget-usd 5`,
     note: 'Not --bare: it skips CLAUDE.md and AGENTS.md. The JSON result has total_cost_usd. Add --permission-prompts none for unattended runs.',
   },
   codex: {
@@ -89,6 +90,8 @@ Set up once in your shell: \`${env}\`
 
 Read \`${roleFile}\`, \`studio/skills/liaison.md\`, \`studio/bible/BIBLE.md\` and \`studio/bible/NOT-DOING.md\`, and run \`npm run handoff\` once. Don't scan the repo.
 
+${allowedNote()}
+
 Then talk with the game dev. For each thing they bring:
 1. Ask short questions until you understand it well enough to explain it to a builder.
 2. \`npm run liaison -- draft --kind idea|direction|asset|question --title "…" --summary "…" --from <their name>\`.
@@ -104,6 +107,8 @@ Never: confirm on a maybe, promise it will be built, assign work, or edit the ga
 Set up once in your shell: \`${env}\`
 
 The Game Bible (\`studio/bible/\`) is the authority on what the game is; you guard it. The Producer creates and assigns tasks; you tell it whether the work is on course and what the next work should serve. Read \`${roleFile}\` and \`studio/skills/direction.md\`. Don't scan the repo.
+
+${allowedNote()}
 
 When you are started (by a ping, daily, or by a person):
 1. \`node harness/task.mjs next --role director --agent ${agent}\` and start what it gives you (a \`Director review\`, a storyboard, or another task for your role): \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`.
@@ -124,6 +129,8 @@ Never: change a signed pillar, bring back a crossed-out layer, sign the Bible, a
 Set up once in your shell: \`${env} STUDIO_PRODUCER_NAME=${agent}\`
 
 Start every session with \`npm run handoff\` and read it. New here? Read \`studio/MASTER.md\` and \`${roleFile}\` first. Don't scan the repo.
+
+${allowedNote()}
 
 Your job is decisions, not code:
 0. No Game Bible, or not signed? Pre-production comes first: \`npm run intake\` with the person (play length first; a demo is the easiest start), studies, storyboards, prototypes. Build tasks wait for the person's signature.
@@ -166,6 +173,8 @@ Before you stop: write a log note with what the next Producer should do, and you
 Set up once in your shell: \`${env}\`
 
 Read \`AGENTS.md\`, \`studio/skills/README.md\`${hasRole ? ` and \`${roleFile}\`` : ''}. Don't scan the rest of the repo; your task brief tells you what to open.
+
+${allowedNote()}
 
 Loop:
 1. \`node harness/task.mjs next --role ${role} --agent ${agent}\` gives your most urgent task (or the one you already hold). \`node harness/task.mjs show <ID>\` shows its notes and checklist.
