@@ -59,8 +59,8 @@
   Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop. `--tool` adds a headless launch line (`docs/AGENT-TOOLS.md`).
 - `npm run brief -- <ID> [--model] [--template] [--force]`
   Cheap prepare, strong act: a 300-word brief from a bounded window of the task's history. With `--model` a local or free model drafts it and a script checks it (sections, word cap, real files and task IDs). Skips the model when the history is short. Writes `.studio/briefs/<ID>.prepared.md`.
-- `npm run models:check [-- --dry-run]`
-  Asks each provider you have a key for which models it serves (free model-list endpoints, no tokens); exits 1 if a configured model is gone.
+- `npm run models:check [-- --dry-run | --accept-top-tier <name>]`
+  Asks each provider you have a key for which models it serves (free model-list endpoints, no tokens); exits 1 if a configured model is gone. It also prints each role's model tier (a suggestion, never enforced) and the warning when every role is on the top tier (docs/SESSIONS.md).
 - `npm run focus -- <ID>` (written for you by `task start`)
   The agent's one-page brief in `.studio/briefs/<ID>.md`: done means, the skill's steps, notes from before, lanes, related lessons, finish commands.
 - `npm run notes -- add --kind well|bad|workaround|upgrade "…"` · `list` · `export`
@@ -124,6 +124,8 @@
 - `npm run studio:restart [-- --by <name> --yes --yes [--name "<new>"]]` — throw the game away and restart at the intake; saved first as git tag archive/<game>-<time> (War Room: two warnings)
 - Quota: only a real 429/usage-limit error counts; STUDIO_QUOTA_SKIP=off turns quota-skipping off. studio:start detaches unless --foreground; two identical failed sessions halt it with a Needs-you card
 - Reviews with no router keys go to another family's agent CLI (STUDIO_REVIEWER_TOOL, STUDIO_REVIEW_TOOLS); qa/chromium.mjs finds a browser (Chrome/Edge too); preflight fails when a frozen harness file was edited
+- `npm run session [-- exception "<repro>" | check <agent> continue|handoff --by <name>]` — refresh context by default: sessions hand off at 40 turns / 120k tokens of context; a mid-debug exception is flagged and checked every 20 turns / 40k tokens (docs/SESSIONS.md)
+- `npm run cheatsheet -- match "<title>" | attach <ID> [--tags a,b] | show <ID>` — up to 3 tricks from studio/CHEATSHEET.md into a task's brief, before it's handed out (docs/SESSIONS.md)
 - `npm run trick -- propose "<title>" --problem … --trick … --fits … --avoid-if … --proof … | none "<why>" | adopt K-001 --by <p> | park K-001 --why … --by <p> | list` — the dev hacker's trick cards (Dev Hacker Lab, off by default, P3, never blocks; docs/DEV-HACKER.md)
 - Golden changes need a `Golden-Reason:` trailer (commit-msg hook adds `Golden-Diff:`); the War Room asks someone to check them
 - `node scripts/check-module-size.mjs` — modules over 300 lines block parallel lanes (studio/rules/lanes.md)
