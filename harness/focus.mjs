@@ -17,6 +17,8 @@ import { parseNextQueue, readTaskHandoff } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { checkDone } from './done-check.mjs';
 import { DEFAULT_SIZE } from './scorecard.mjs';
+import { readAttached } from './cheatsheet.mjs';
+import { HANDOFF_MAX } from './session-cap.mjs';
 
 const read = (rel) => {
   try {
@@ -90,7 +92,7 @@ export function buildFocus(taskId, agent = null) {
   const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
-  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice };
+  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice };
 }
 
 export function renderVoice(v) {
@@ -113,7 +115,12 @@ export function renderFocus(f) {
   }
   if (f.prepared) L.push('', '## Prepared brief', `A short summary of this task's history is in \`${f.prepared}\`. Read it instead of the event log.`);
   else if (f.historyWords >= Number(process.env.STUDIO_PREPARE_MIN_WORDS || 500)) L.push('', '## Long history', `This task has ${f.historyWords} words of history. Run \`npm run brief -- ${f.task.id}\` for a 300-word summary (a cheap or local model drafts it, a script checks it).`);
-  if (f.handoff) L.push('', '## Notes from whoever worked on this before', f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim());
+  if (f.handoff) {
+    // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
+    const h = f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim();
+    L.push('', '## Notes from whoever worked on this before', h.length > HANDOFF_MAX ? `(Older notes in studio/handoffs/${f.task.id}.md.)\n…${h.slice(-HANDOFF_MAX)}` : h);
+  }
+  if (f.tricks?.length) L.push('', `## Pre-approved tricks for this task (studio/CHEATSHEET.md, approved by ${f.tricksBy || 'the assigner'})`, 'Use these for this task without asking. Anything not listed here follows the normal approval rules.', ...f.tricks.map((t) => `- ${t.id ? `${t.id} ` : ''}${t.text}`));
   if (f.meetingNotes.length) L.push('', '## Mentioned in a meeting', ...f.meetingNotes.map((t) => `- ${(t.match(/^# (.+)$/m) || [, ''])[1]}`));
   L.push('', '## Stay in your lane');
   L.push(f.mine.length ? `- You hold: ${f.mine.map((l) => `\`${l.key}\``).join(', ')}` : `- Claim the files you will touch first: \`node harness/lock.mjs claim path:<folder> --owner ${a}\``);
