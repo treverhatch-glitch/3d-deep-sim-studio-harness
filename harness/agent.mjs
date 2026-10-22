@@ -44,7 +44,8 @@ import { listLocks, release, claim, renewOwner } from './lock.mjs';
 import { savePatch } from './wip.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
-import { markExhausted, toolNamed } from './budget.mjs';
+import { markExhausted, toolNamed, weightedTokens, dailyCap } from './budget.mjs';
+import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
@@ -105,7 +106,9 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
       // session can be read back (test #2: --output-format json left nothing but the last answer).
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       const allowed = 'Bash(node *),Bash(npm *),Bash(npx *),Bash(ffmpeg *),Bash(blender *),Bash(git status*),Bash(git diff *),Bash(git add *),Bash(git commit *),Bash(git log *),Bash(git show *),Bash(ls *),Bash(mkdir *),Bash(cp *),Bash(mv *)';
-      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'stream-json', '--verbose', ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
+      // 2.29.2: a turn ceiling, so no session runs 126 turns again (the refresh point, 40 turns, is in the kickoff).
+      const ceiling = sessionLimits().ceilingTurns;
+      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
     }
     case 'codex': {
       // In a frozen test clone, Codex's sandbox can't write .git or bind 127.0.0.1 on macOS; the clone itself is the boundary.
@@ -194,11 +197,12 @@ function caps(role, extra = 0) {
   return { ok: true, mode };
 }
 
-function spentToday() {
-  const cap = Number(process.env.STUDIO_DAILY_TOKEN_CAP || 0);
-  if (!cap) return { over: false };
-  const today = new Date().toISOString().slice(0, 10);
-  const used = readRecentEvents(50000).filter((e) => String(e.ts).startsWith(today)).reduce((n, e) => n + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0), 0);
+// 2.29.2: cache reads count (weighted, see budget.mjs), and the cap has a default instead of 0 = none.
+export function spentToday(now = Date.now(), events = readRecentEvents(50000)) {
+  const cap = dailyCap();
+  if (!cap) return { over: false, used: null, cap: 0 };
+  const today = new Date(now).toISOString().slice(0, 10);
+  const used = Math.round(events.filter((e) => String(e.ts).startsWith(today)).reduce((n, e) => n + weightedTokens(e), 0));
   return { over: used >= cap, used, cap };
 }
 
@@ -251,7 +255,11 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   const other = found?.named && found.named !== tool ? found.named : null;
   const t = other ? null : found;
   const trouble = t?.text || null;
-  const bad = code !== 0 || Boolean(trouble);
+  // 2.29.2: a session that reached the turn ceiling, or was asked to hand off at a refresh check, refreshed:
+  // that's the plan working, not a failure, so no failover, and a fresh session continues the task.
+  const refresh = readFlag(agent);
+  const capped = !trouble && (/"subtype"\s*:\s*"error_max_turns"/.test(String(log).slice(-20000)) || Boolean(refresh?.endedBy));
+  const bad = !capped && (code !== 0 || Boolean(trouble));
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
@@ -273,12 +281,14 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     const onBranch = ahead ? ` ${ahead} commit(s) not yet in the studio's branch are on ${s0.copy.branch}; the next agent's copy gets them merged in.` : '';
     // A session that ended without task done or a hand-back still holds its task (test #2: claims sat
     // for up to an hour). Hand it back now, with what it last said and what it left.
-    const note = bad
+    const note = capped
+      ? `${agent} (${tool}, ${model}) refreshed: ${refresh?.endedBy || `it reached the ${sessionLimits().ceilingTurns}-turn ceiling`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} A fresh session continues from this hand-back${s0.now ? `; it last said: "${s0.now}"` : ''}.`
+      : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, note, { force: true });
     handed.push({ task: id, patch });
-    parkIfLooping(id);
+    if (!capped) parkIfLooping(id);
   }
   for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
@@ -290,11 +300,11 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     markExhausted(who, line);
   }
   const tok = tokensFrom(log);
-  const reason = trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other } });
+  const reason = capped ? 'refreshed (session cap): a fresh session continues' : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
-  return { bad, trouble, handed, reason };
+  return { bad, trouble, handed, reason, capped };
 }
 
 /**
@@ -352,8 +362,30 @@ export function parkIfLooping(id, now = Date.now()) {
   return why;
 }
 
+/** The last part of a log (stream-json logs grow large; the refresh check needs only the latest usage). */
+function tailOf(file, bytes = 2 * 1024 * 1024) {
+  try {
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(Math.min(bytes, size));
+    fs.readSync(fd, buf, 0, buf.length, Math.max(0, size - buf.length));
+    fs.closeSync(fd);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+/** Refresh context by default (2.29.2): the rule every launched session gets, in a few lines. */
+export function refreshRule({ oneTask = false, task = null } = {}) {
+  const l = sessionLimits();
+  const id = task || '<ID>';
+  return `\nRefresh context by default: the studio's files are the memory, not this chat.${oneTask ? ' Do this one task, finish it (task done) or hand it back, then stop; a fresh session starts for the next task.' : ''}${l.turns || l.context ? ` At ${l.turns || '∞'} turns or ${l.context ? `${Math.round(l.context / 1000)}k` : '∞'} tokens of context, whichever comes first, refresh: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` (under 3k characters) and stop; a fresh session continues from that note.` : ''} Refresh at a natural breakpoint, not every few turns.${l.turns || l.context ? ` Mid-debug with a live repro? \`npm run session -- exception "<repro>"\` lets you go on${l.ceilingTurns ? ` to ${l.ceilingTurns} turns` : ''}; you are flagged and the Director or Producer checks on you every ${l.checkTurns} turns / ${Math.round(l.checkTokens / 1000)}k tokens.` : ''}\n`;
+}
+
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
-export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null }) {
+export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
+  const opts2 = { refreshes };
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   if (lane) {
     const c = claim(`path:${lane}`, agent, 6 * 3600);
@@ -372,7 +404,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
-    + (oneTask ? `\nDo this one task, finish it (task done) or hand it back with a note, then stop. A fresh session starts for the next task, so you never carry a long history.\n` : '')
+    + refreshRule({ oneTask, task })
     // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
     // and the rules this game has learned the hard way.
     // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
@@ -413,6 +445,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.stdin.end(cmd.stdin);
   }
   const startedAt = new Date().toISOString();
+  clearFlag(agent);
   const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
@@ -420,7 +453,13 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
     const wip = wipSummary(agent);
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip }, null, 2));
+    let progress = null;
+    try {
+      progress = heartbeatCheck(agent, { log: tailOf(logFile), model, task });
+    } catch {
+      // the refresh check is a help, never a blocker
+    }
+    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip, ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }, null, 2));
     renewOwner(agent);
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
@@ -437,6 +476,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model });
   if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   if (lane) release(`path:${lane}`, agent);
+  // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
+  // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).
+  const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
+  const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
+  if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
+    emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
+    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note: `Fresh session after a refresh: read studio/handoffs/${again}.md first; don't redo what it says is done.`, by, refreshes: (opts2.refreshes || 0) + 1 });
+  }
   if (result.bad && fallback.length) {
     const [next, ...rest] = fallback;
     const [ftool, fmodel] = next.split(':');

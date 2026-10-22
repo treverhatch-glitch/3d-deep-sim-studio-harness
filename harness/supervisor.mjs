@@ -116,7 +116,8 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
-  const spentHere = readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0), 0);
+  const { weightedTokens } = await import('./budget.mjs');
+  const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
   state.tokens = spentHere;
   if (opts.budget?.tokens && spentHere >= opts.budget.tokens) return { stop: true, started: [], why: [`the budget is spent (${spentHere.toLocaleString()} of ${opts.budget.tokens.toLocaleString()} tokens)`] };
   const known = st.filter((t) => t.weekly);
@@ -233,6 +234,11 @@ async function main(argv) {
   const save = (extra = {}) => fs.writeFileSync(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
   emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}` });
   console.log(`[supervisor] running (pid ${process.pid}). npm run studio:stop to stop; agents finish their current task.`);
+  // 2.29.2: --budget 50% paces against the week's tokens; without --weekly it can never trip.
+  if (opts.budget?.share) {
+    const { readBudget } = await import('./budget.mjs');
+    if (!Object.values(readBudget().tools || {}).some((t) => Number(t.weeklyTokens) > 0)) console.warn(`[supervisor] --budget ${budgetArg} needs a week's tokens to pace against, and none is set: npm run budget -- set claude --weekly <tokens> --reset <day>. Until then only the daily cap applies.`);
+  }
   let stopping = false;
   const finish = (why) => {
     if (stopping) return;
