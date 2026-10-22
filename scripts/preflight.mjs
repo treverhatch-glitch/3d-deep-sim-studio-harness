@@ -24,7 +24,7 @@ import { activeCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
 import { ensureGameId } from '../harness/game-id.mjs';
 import { launchableRoles } from '../harness/agent.mjs';
 import { effectiveMode, describeMode, readMode, scopeOf, CLAUDE_MD, SCOPES } from '../harness/mode.mjs';
-import { cleanQuotaMarks } from '../harness/budget.mjs';
+import { cleanQuotaMarks, dailyCap } from '../harness/budget.mjs';
 import { readTrack, engineBin } from '../harness/engine.mjs';
 import { modelFamily } from '../harness/families.mjs';
 import { worktreeSupport, laneCopies, removeLaneCopy } from '../harness/worktree.mjs';
@@ -167,7 +167,7 @@ export function preflight() {
   // Keys and the spend cap (names only, never values).
   const keys = [...envText.matchAll(/^([A-Z0-9_]*(?:API_KEY|_TOKEN)(?:_\d+)?)=[ \t]*([^\s]+)/gm)].map((m) => m[1]).filter((k) => k !== 'HUB_TOKEN');
   row('ok', keys.length ? `Router keys set: ${keys.join(', ')}` : 'No router keys set', keys.length ? '' : 'fine when agents run in their own tools (Claude Code, Codex, ...)');
-  const cap = Number(envVal('STUDIO_DAILY_TOKEN_CAP') || 0);
+  const cap = dailyCap({ STUDIO_DAILY_TOKEN_CAP: envVal('STUDIO_DAILY_TOKEN_CAP') ?? '' });
   if (keys.length) row(cap > 0 ? 'ok' : 'warn', `Daily token cap: ${cap ? cap.toLocaleString() : 'none'}`, cap ? '' : 'set STUDIO_DAILY_TOKEN_CAP before running with paid keys');
 
   // The game the gates test, and its ID (made here if it has none: harness/game-id.mjs).

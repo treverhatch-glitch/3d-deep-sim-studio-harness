@@ -42,6 +42,10 @@ import { budgetStatus } from './budget.mjs';
 import { holdReason, readHolds } from './task-hold.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { tokenTotals } from './tokens.mjs';
+import { refreshBoard, sessionLimits } from './session-cap.mjs';
+import { modelWarning } from './model-tiers.mjs';
+import { allAttached } from './cheatsheet.mjs';
+import { dailyCap, cacheReadWeight, weightedTokens } from './budget.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -465,6 +469,29 @@ export function buildHudState() {
     lessons: lessons(),
     rtk: rtkGain(),
     tokenUse: tokensCached(),
+    // 2.29.2: the budget meter with cache reads, per model; sessions against the refresh point; the
+    // top-tier warning; the cheat sheet tricks attached to each task.
+    meter: (() => {
+      const today = new Date(now).toISOString().slice(0, 10);
+      const w = cacheReadWeight();
+      const ends = events.filter((e) => e.type === 'agent.session.end' && String(e.ts).startsWith(today));
+      const byModel = {};
+      for (const e of ends) {
+        const m = (byModel[e.model || 'unknown'] ||= { model: e.model || 'unknown', sessions: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, counted: 0 });
+        m.sessions += 1;
+        m.tokensIn += Number(e.tokensIn || 0);
+        m.tokensOut += Number(e.tokensOut || 0);
+        m.cacheRead += Number(e.meta?.cacheRead || 0);
+        m.counted += weightedTokens(e, w);
+      }
+      const rows = Object.values(byModel).map((m) => ({ ...m, counted: Math.round(m.counted) }));
+      const used = rows.reduce((n, m) => n + m.counted, 0);
+      const cap = dailyCap();
+      return { day: today, cacheWeight: w, cap, used, pct: cap ? Math.round((used / cap) * 1000) / 10 : null, byModel: rows };
+    })(),
+    sessionCap: { limits: sessionLimits(), sessions: refreshBoard().sort((a, b) => Number(b.running) - Number(a.running)).slice(0, 12) },
+    modelWarning: modelWarning(process.env, events, now),
+    cheatsheet: allAttached(),
   };
 }
 
