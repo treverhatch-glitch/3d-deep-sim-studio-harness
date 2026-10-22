@@ -1315,10 +1315,16 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   fs.rmSync(path.join(dir, '.studio/supervisor.json'));
   report('while the supervisor runs, the watcher starts nothing (test #2: two launchers, four collisions)', /supervisor \(pid \d+\) starts agents/.test(f1.stdout), f1.stdout + f1.stderr);
   const f2 = run(dir, 'node harness/agent.mjs fill', wenv);
-  pause(2500);
+  // Poll, not fixed waits: a detached agent can take several seconds to show as running on a slow
+  // Windows runner (CI, 2.30c: a 2.5 s + 1.5 s wait saw no session at all).
+  const liveList = () => JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"', env).stdout || '[]');
+  let liveNow = [];
+  const tf = Date.now();
+  while (Date.now() - tf < 10000 && !(liveNow = liveList()).length) pause(300);
   run(dir, 'node harness/agent.mjs fill', wenv);
-  pause(1500);
-  const liveNow = JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"', env).stdout || '[]');
+  // The second fill must not add a builder to the same lane: watch for one for a few seconds.
+  const tg = Date.now();
+  while (Date.now() - tg < 3000 * SLOW && (liveNow = liveList()).length <= 1) pause(300);
   report('without a supervisor, the watcher uses its picker: one builder per lane, named from the name list', liveNow.length === 1 && /^builder-auto-\d+$/.test(liveNow[0]) && /docs\/lobby/.test(f2.stdout), f2.stdout + JSON.stringify(liveNow));
   for (const s of liveNow) run(dir, `node harness/agent.mjs stop ${s}`, env);
   // A halt names the program, not "custom".
