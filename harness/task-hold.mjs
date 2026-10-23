@@ -110,20 +110,78 @@ export function gameFolders() {
   return { name, sim: rel(`cartridges/${name}`), renderer: rel(`game/${name}`) || rel(`web/${name}`) };
 }
 
-/** A task's lane: `task lane`, else --lane when added, else from --part; null = the whole game. */
+/** A lane as a list of paths (2.30k): one folder, or several files joined by commas. */
+export const laneList = (lane) => (Array.isArray(lane) ? lane : String(lane || '').split(','))
+  .map((p) => p.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter(Boolean);
+
+// Words in a title that point at a file whose name doesn't say it (2.30k). Kept short on purpose.
+const HINTS = {
+  boats: /\b(boats?|ships?|yachts?|vessels?|wake|dock(ing|ed)?|moor(ing)?|sail(ing|s)?|ferr(y|ies))\b/i,
+  water: /\b(water|waves?|sea|ocean|tide|foam|ripples?)\b/i,
+  world: /\b(world|buildings?|harbou?r|marina|piers?|scenery|lights?|lighting|sky|terrain|fuel dock|shadows?)\b/i,
+  hud: /\b(hud|ui|buttons?|panels?|menus?|toolbar|tooltips?|css|layout)\b/i,
+  copy: /\b(copy|text|labels?|wording|messages?|strings?)\b/i,
+  sim: /\b(sim|economy|money|balance|prices?|score|win|lose|losing|bankrupt|rules?|fees?|policy)\b/i,
+};
+
+/**
+ * The files a task likely touches (2.30k), from its title and brief and the game's own code files.
+ * A file counts when its name is in the text or a hint word for it is. Returns [] when nothing
+ * matches, so the caller falls back to the whole folder.
+ */
+export function inferPaths(text, folder, files = null) {
+  if (!folder || !text) return [];
+  let list = files;
+  if (!list) {
+    const map = (() => { try { return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, '.studio', 'MAP.json'), 'utf8')); } catch { return null; } })();
+    list = (map?.files || []).map((f) => f.file);
+    if (!list.some((f) => f.startsWith(`${folder}/`))) {
+      const walk = (d) => { try { return fs.readdirSync(path.join(REPO_ROOT, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`])); } catch { return []; } };
+      list = walk(folder);
+    }
+  }
+  const own = list.filter((f) => f.startsWith(`${folder}/`) && !/\/(jsm|vendor|node_modules|assets?)\//.test(f) && !/(^|\/)three\.[^/]+$/.test(f) && /\.(m?js|ts|css|html|gd|json)$/.test(f));
+  const out = new Set();
+  for (const f of own) {
+    const rel = f.slice(folder.length + 1);
+    const stem = path.basename(f).replace(/\.[^.]+$/, '').toLowerCase();
+    const dir = rel.includes('/') ? rel.split('/')[0] : null;
+    const key = dir && HINTS[dir] ? dir : stem;
+    if (stem.length > 2 && new RegExp(`\\b${stem.replace(/[^a-z0-9]/g, '')}\\b`, 'i').test(text)) out.add(dir && HINTS[dir] ? `${folder}/${dir}` : f);
+    else if (HINTS[key] && HINTS[key].test(text)) out.add(dir && HINTS[dir] ? `${folder}/${dir}` : f);
+  }
+  // "hud" hints mean the page's markup and styles both.
+  if ([...out].some((f) => /hud\.css$/.test(f))) for (const f of own) if (/index\.html$/.test(f)) out.add(f);
+  return [...out].sort();
+}
+
+/** A task's lane: `task lane`, else --paths/--lane when added, else files from its title, else --part; null = the whole game. */
 export function laneOf(taskId, events = readRecentEvents(20000), holds = readHolds()) {
   const h = holds[taskId];
   if (h && 'lane' in h) return h.lane || null;
-  const meta = events.filter((e) => e.type === 'task.added' && e.task === taskId).pop()?.meta || {};
+  const added = events.filter((e) => e.type === 'task.added' && e.task === taskId).pop();
+  const meta = added?.meta || {};
+  if (meta.paths?.length) return laneList(meta.paths).join(',');
   if (meta.lane) return meta.lane;
   const f = gameFolders();
+  // 2.30k: guess the files from the title and brief, so builders on different files run side by side.
+  if (process.env.STUDIO_LANE_INFER !== 'off' && f.renderer && added) {
+    const text = `${String(added.msg || '').replace(/^Queued [^:]+:\s*/, '')} ${meta.why || ''} ${meta.asked || ''}`;
+    const guess = meta.part === 'sim' ? [] : inferPaths(text, f.renderer);
+    if (guess.length) return guess.join(',');
+  }
   if (meta.part === 'sim') return f.sim;
   if (meta.part === 'renderer') return f.renderer;
   return null;
 }
 
-/** Two lanes clash when one holds the other (or either is the whole game). */
-export const lanesClash = (a, b) => !a || !b || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+/** Two lanes clash when any path of one holds a path of the other (or either is the whole game). */
+const pathsClash = (a, b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+export const lanesClash = (a, b) => {
+  const A = laneList(a);
+  const B = laneList(b);
+  return !A.length || !B.length || A.some((x) => B.some((y) => pathsClash(x, y)));
+};
 
 /** After `agent stop` / `agent pause`: the task can't restart for a while (default 15 min). */
 export function cooldown(taskId, by, minutes = STOP_COOLDOWN_MIN()) {

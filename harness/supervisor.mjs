@@ -86,7 +86,7 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
-  const { holdReason, laneOf, lanesClash } = await import('./task-hold.mjs');
+  const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
   const { effectiveMode } = await import('./mode.mjs');
   const { budgetStatus, pickTool, quotaMark, probeTool } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
@@ -207,8 +207,9 @@ export async function supervise(opts, state, now = Date.now()) {
     const perRole = (mode.perRole || {})[g.role] ?? 1;
     // One agent per lane (the clash check above); without a lane, the pace's per-role cap.
     if (!g.lane && sameRole.length >= perRole + (extra ? 1 : 0)) continue;
-    if (g.lane && lockStatus(`path:${g.lane}`).locked) {
-      why.push(`lane ${g.lane} is held by ${lockStatus(`path:${g.lane}`).lock.owner}`);
+    const heldPath = g.lane ? laneList(g.lane).find((p) => lockStatus(`path:${p}`).locked) : null;
+    if (heldPath) {
+      why.push(`lane ${heldPath} is held by ${lockStatus(`path:${heldPath}`).lock.owner}`);
       continue;
     }
     // 2.30c (#11): the Producer starts on events only, at most every 15 min unless urgent, backing off when quiet.

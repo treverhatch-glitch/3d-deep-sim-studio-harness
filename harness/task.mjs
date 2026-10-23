@@ -13,7 +13,7 @@ import { checkDone, taskType, joinWaveIfGameplay } from './done-check.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { holdReason, setHold, readHolds } from './task-hold.mjs';
+import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
@@ -287,6 +287,26 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
       ].filter(Boolean).join('\n'),
     };
+  }
+
+  // 2.30k: done means committed. Uncommitted changes in the task's claimed files (or the game's
+  // folders when it claimed none) are refused, so they aren't later committed under another task
+  // (T-013 in the Marina run was accepted with its diff left uncommitted).
+  if (!force && !inLaneCopy() && process.env.STUDIO_DONE_UNCOMMITTED !== 'allow') {
+    const owner = lock.locked ? lock.lock.owner : agent;
+    let scope = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
+    if (!scope.length) {
+      const f = gameFolders();
+      scope = [f.renderer, f.sim].filter(Boolean);
+    }
+    if (scope.length) {
+      const st = spawnSync('git', ['status', '--porcelain', '--', ...scope], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).map((l) => l.slice(3)) : [];
+      if (dirty.length) {
+        emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} (${dirty.slice(0, 3).join(', ')})` });
+        return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them (git add <files> && git commit -m "${target.id}: …"), then run task done again.` };
+      }
+    }
   }
 
   // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
@@ -799,7 +819,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`Usage: npm run task -- lane ${arg1} <folder|none> --by <name>`);
         process.exit(1);
       }
-      const lane = folder === 'none' ? null : folder.replace(/\\/g, '/').replace(/\/+$/, '');
+      const lane = folder === 'none' ? null : laneList(folder).join(',') || null;
       if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
         process.exit(1);
@@ -880,7 +900,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -914,6 +934,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
         ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
         ...(typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
+        ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneList(flags.paths) } : {}),
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
         ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
@@ -942,5 +963,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }

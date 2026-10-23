@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-k] — 2026-10-23
+2.30k: builders lock only the files a task touches, so builders on different files run side by side.
+### Changed
+- A lane can be several files (`a.js,b.js`). `task add --paths a.js,b.js` sets them; `task lane <ID> a.js,b.js` changes them.
+- With no lane given, the files are guessed from the task's title and brief against the game's own code files (boats, water, world, HUD, copy, sim hints; vendored three.js/jsm never). Nothing matched: the whole game folder, as before. `STUDIO_LANE_INFER=off` turns the guess off.
+- The launcher claims each file and lets go of all of them; the Director's overlap check is per file.
+### Fixed
+- `task done` refuses uncommitted changes in the task's claimed files (or the game's folders when it claimed none), so they aren't committed later under another task. `--force` still saves them as a patch; `STUDIO_DONE_UNCOMMITTED=allow` turns the check off.
+
 ## [2.30.0-j] — 2026-10-23
 2.30j: fixes from driving a real game (Marina) from the War Room. No new features.
 ### Fixed

@@ -3184,6 +3184,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30k: file-level lanes, task done refuses uncommitted changes (qa/selftest-230k.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230k } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230k.mjs')).href);
+  await selftest230k({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

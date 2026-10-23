@@ -46,6 +46,7 @@ import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner } from './lock.mjs';
 import { savePatch } from './wip.mjs';
+import { laneList } from './task-hold.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from './budget.mjs';
@@ -442,9 +443,14 @@ export function refreshRule({ oneTask = false, task = null } = {}) {
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
   const opts2 = { refreshes };
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
-  if (lane) {
-    const c = claim(`path:${lane}`, agent, 6 * 3600);
-    if (c && c.ok === false) return { ok: false, message: `Lane ${lane} is taken: ${c.message || 'claimed by another agent'}` };
+  // 2.30k: a lane can be several files (a,b,c); each is claimed, and all are let go if one is taken.
+  const lanePaths = laneList(lane);
+  for (const [i, p] of lanePaths.entries()) {
+    const c = claim(`path:${p}`, agent, 6 * 3600);
+    if (c && c.ok === false) {
+      for (const q of lanePaths.slice(0, i)) release(`path:${q}`, agent);
+      return { ok: false, message: `Lane ${p} is taken: ${c.message || `claimed by ${c.lock?.owner || 'another agent'}`}` };
+    }
   }
   // A code lane gets its own working copy (2.29), so half-done work never leaks into another agent's
   // tests or commits. Not possible here (old git, STUDIO_WORKTREES=off): the shared checkout, as before.
@@ -554,7 +560,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model });
   if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
-  if (lane) release(`path:${lane}`, agent);
+  for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
   // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).
   const again = result.capped ? result.handed[0]?.task || (task && !parseNextQueue().done.some((t) => t.id === task) ? task : null) : null;
