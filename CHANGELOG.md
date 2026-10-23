@@ -13,10 +13,11 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - **Model limits as Director awareness (#4).** `npm run models:limits`: each model's context size and rate limits (built-in approximate figures, overridden by studio/model-limits.json), use in the last 24 h, and flags (near the day's cap, a prompt near the context size, 429s, reasoning-only replies), in the Director's brief and the Director card. Nothing reads it to block a model; the Director decides routing.
 - **CI watch (#5).** `npm run ci:watch [-- --sha <c>] [--detach]` waits for CI on a commit, re-runs failed jobs once, and when still red raises `ci.failed` (Director card, phone alert), runs `STUDIO_CI_NOTIFY_CMD` (a notification hook) and records .studio/ci-watch.json. `npm run release -- <version>` uses it for its CI step.
 - **GDScript parse check (#7).** `harness/gdscript-parse.mjs` (`npm run gdscript:parse -- <project>`) parses every .gd on its own with `godot --check-only`. The engine gate, the Godot template check (CI's engine-godot job) and the godot-unit gate fail, naming the file and Godot's error, when one doesn't parse, even when the engine's run exited 0.
+- **Director-adjustable trick cap.** `npm run cheatsheet -- cap N` sets how many cheat sheet tricks each new task gets pre-approved (default 3, 1 to 6; .studio/cheatsheet-cap.json, logged as `cheatsheet.cap`). `task add --tricks N` and `--max N` on `cheatsheet match`/`attach` override it for one task. Never over 6.
 ### Fixed
 - `npm run release` sets package-lock.json's version itself outside CI (scripts/lock-version.mjs, shared with the release ship), so a bumped package.json can't ship with a lagging lock (the 2.30d miss). In CI it still only checks.
 ### Self-test
-20 more checks (qa/selftest-230h.mjs), plus a sabotage that proves the fidelity gate fails on a missing mechanic. The HUD check adds the Director card (a starved flow and a red CI job).
+21 more checks (qa/selftest-230h.mjs), plus a sabotage that proves the fidelity gate fails on a missing mechanic. The HUD check adds the Director card (a starved flow and a red CI job).
 
 ---
 

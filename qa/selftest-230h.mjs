@@ -200,4 +200,17 @@ const again = syncLockVersion(process.cwd(), '9.9.9-h');
 console.log(JSON.stringify({ r, v: after.version, p: after.packages[''].version, again: again.changed }));`);
     report('2.30h: the release step sets both package-lock.json versions to the release, and leaves a matching lock alone', lk.r?.changed === true && lk.r.from === '0.0.1' && lk.v === '9.9.9-h' && lk.p === '9.9.9-h' && lk.again === false, JSON.stringify(lk));
   }
+
+  // The Director's per-task trick cap: default 3, clamped to 1..6, per-task override.
+  {
+    const tc = probe(`import { clampTricks, trickCap, setTrickCap, matchTricks, MAX_TRICKS } from ${u('harness/cheatsheet.mjs')};
+const entries = Array.from({ length: 9 }, (_, i) => ({ id: 'C-' + i, tags: ['test'], text: 't' + i }));
+const d = trickCap(); const a = matchTricks('test', { entries }).length;
+setTrickCap(5, 'director'); const b = matchTricks('test', { entries }).length;
+setTrickCap(40, 'director'); const c = trickCap();
+const one = matchTricks('test', { entries, max: clampTricks(2) }).length;
+setTrickCap(MAX_TRICKS, 'director');
+console.log(JSON.stringify({ d, a, b, c, one, z: clampTricks(0), bad: clampTricks('x') }));`);
+    report('2.30h: the Director can set the trick cap (default 3, never over 6) and a task can override it', tc.d === 3 && tc.a === 3 && tc.b === 5 && tc.c === 6 && tc.one === 2 && tc.z === 3 && tc.bad === 3, JSON.stringify(tc));
+  }
 }

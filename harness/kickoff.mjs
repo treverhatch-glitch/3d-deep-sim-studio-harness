@@ -132,7 +132,7 @@ When you are started (by a ping, daily, or by a person):
 3. \`npm run director -- review\`, fill in Phase, Verdict, Checked and Next.
 4. Decide placed ideas: \`npm run idea -- decide <id> approve|park|reject --by ${agent} --note "…"\`.
 5. Tell the Producer: \`node harness/event.mjs --type agent.ask --agent ${agent} --to producer --msg "…"\`. A queued task that drifts from the Bible: park it so it can't start (\`npm run task -- park <ID> --by ${agent} --why "…"\`); the Producer unparks or retires it. You never hire.
-6. When you plan or point the Producer at the next work, consult the cheat sheet's director section first (\`npm run cheatsheet -- match "<what you are planning>" --for director\`: dependencies, size-3 splits, one owner per lane, check-ins), and the work tricks that fit (\`npm run cheatsheet -- match "<title>"\`); name up to 3 in your note. Refresh the sheet weekly from the scout; keep it under 150 lines.
+6. When you plan or point the Producer at the next work, consult the cheat sheet's director section first (\`npm run cheatsheet -- match "<what you are planning>" --for director\`: dependencies, size-3 splits, one owner per lane, check-ins), and the work tricks that fit (\`npm run cheatsheet -- match "<title>"\`); name up to the trick cap in your note (3 by default; set it with \`npm run cheatsheet -- cap N\`, 1 to 6, or per task with \`task add --tricks N\`). Refresh the sheet weekly from the scout; keep it under 150 lines.
 7. \`node harness/task.mjs done <ID> --agent ${agent}\`, then stop.
 8. While the dev is away (\`npm run away -- status\`) you and the Producer decide; every decision is shown to them on return. Read what they thought of past calls first: \`npm run away -- learned\`.
 

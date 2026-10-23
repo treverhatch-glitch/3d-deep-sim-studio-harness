@@ -553,7 +553,7 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
   let tricks = null;
   if (process.env.STUDIO_AUTO_TRICKS !== '0') {
     try {
-      const r = attachTricks(newTask.id, { title, tags: [role, meta.type, meta.part, meta.track].filter(Boolean), by: agent });
+      const r = attachTricks(newTask.id, { title, tags: [role, meta.type, meta.part, meta.track].filter(Boolean), by: agent, max: meta.tricks ?? null });
       tricks = r.tricks?.length ? r.tricks.map((t) => t.id || t.text.slice(0, 40)) : null;
     } catch {
       // the cheat sheet is a help, never a blocker
@@ -880,7 +880,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
       process.exit(1);
     }
     // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -907,6 +907,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       agent: typeof flags.agent === 'string' ? flags.agent : actor(),
       meta: {
         ...(size ? { size } : {}),
+        ...(flags.tricks !== undefined ? { tricks: Math.max(1, Math.min(6, Math.round(Number(flags.tricks)) || 3)) } : {}),
         ...(causedBy ? { causedBy } : {}),
         ...(flags.phase !== undefined ? { phase: Number(flags.phase) } : {}),
         ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}),
