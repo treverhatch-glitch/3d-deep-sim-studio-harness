@@ -35,8 +35,7 @@ export function shouldRun(cfg, changedFiles) {
   if (!fs.existsSync(projectPath) || !fs.existsSync(path.join(projectPath, 'project.godot'))) {
     return { run: false, reason: `project path '${cfg.project}' not found` };
   }
-  const runtestPath = path.join(projectPath, 'addons/gdUnit4/runtest.sh');
-  if (!fs.existsSync(runtestPath)) {
+  if (!runnerFor(projectPath)) {
     return { run: false, reason: `addons/gdUnit4/runtest.sh not found. Install gdUnit4 ${cfg.gdunit} from https://github.com/MikeSchulze/gdUnit4` };
   }
   if (changedFiles) {
@@ -45,6 +44,21 @@ export function shouldRun(cfg, changedFiles) {
     if (!relevantChange) return { run: false, reason: 'no changes in watched directories' };
   }
   return { run: true };
+}
+
+/**
+ * How to launch gdUnit4's runner. cmd.exe cannot run a .sh, so on Windows use gdUnit4's own runtest.cmd
+ * when present, else run runtest.sh through sh (Git for Windows). Elsewhere run runtest.sh directly.
+ */
+export function runnerFor(projectPath, platform = process.platform) {
+  const sh = path.join(projectPath, 'addons', 'gdUnit4', 'runtest.sh');
+  const cmd = path.join(projectPath, 'addons', 'gdUnit4', 'runtest.cmd');
+  if (platform === 'win32') {
+    if (fs.existsSync(cmd)) return { file: cmd, pre: [], shell: true };
+    if (fs.existsSync(sh)) return { file: 'sh', pre: ['./addons/gdUnit4/runtest.sh'], shell: false };
+    return null;
+  }
+  return fs.existsSync(sh) ? { file: './addons/gdUnit4/runtest.sh', pre: [], shell: true } : null;
 }
 
 const unxml = (t) => String(t || '').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
@@ -83,7 +97,8 @@ export function runGodotUnit({ changedOnly = false } = {}) {
   }
 
   const projectPath = path.join(REPO_ROOT, cfg.project);
-  const result = spawnSync('./addons/gdUnit4/runtest.sh', ['--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: true });
+  const runner = runnerFor(projectPath);
+  const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
 
   const ok = result.status === 0;
   console.log(`[godot-unit] ${ok ? 'PASS' : 'FAIL'} (exit code ${result.status})`);

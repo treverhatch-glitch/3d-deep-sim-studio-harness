@@ -3137,6 +3137,14 @@ addVerdictNote({ by: 'hatch', verdict: '❌', on: null, comment: 'ships all foll
 addVerdictNote({ by: 'hatch', verdict: '✅', on: 'T-7', comment: 'upkeep finally drains money' });
 console.log(JSON.stringify({ a: notesForBrief({ id: 'T-9', title: 'Give ships varied paths', role: 'builder' }), b: notesForBrief({ id: 'T-7', title: 'x', role: 'builder' }), c: notesForBrief({ id: 'T-1', title: 'Docs: credits', role: 'docs' }) }));`);
   report('2.30g: verdict notes reach the briefs they touch as context, not rules', /context, not rules/.test(vn.a || '') && /same path/.test(vn.a) && /upkeep/.test(vn.b || '') && vn.c === '', JSON.stringify(vn).slice(0, 600));
+  const gr = probe(`import fs from 'node:fs'; import path from 'node:path'; import { runnerFor } from ${u('harness/godot-unit.mjs')};
+const p = fs.mkdtempSync(path.join(process.cwd(), 'gr-')); fs.mkdirSync(path.join(p, 'addons', 'gdUnit4'), { recursive: true });
+fs.writeFileSync(path.join(p, 'addons', 'gdUnit4', 'runtest.sh'), '');
+const a = runnerFor(p, 'win32'), b = runnerFor(p, 'linux');
+fs.writeFileSync(path.join(p, 'addons', 'gdUnit4', 'runtest.cmd'), '');
+const c = runnerFor(p, 'win32'); fs.rmSync(p, { recursive: true, force: true });
+console.log(JSON.stringify({ a, b, c }));`);
+  report('2.30g: on Windows the godot-unit gate runs runtest.cmd, or runtest.sh through sh, never a bare .sh in cmd.exe', gr.a?.file === 'sh' && gr.a.shell === false && /runtest\.sh$/.test(gr.a.pre[0]) && /runtest\.sh$/.test(gr.b?.file || '') && /runtest\.cmd$/.test(gr.c?.file || ''), JSON.stringify(gr).slice(0, 600));
   const gu = run(dir, 'node harness/godot-unit.mjs --changed');
   report('2.30g: the godot-unit gate skips cleanly when the game has no Godot project or has not opted in', gu.status === 0 && /skipped/.test(gu.stdout), `${gu.stdout}${gu.stderr}`);
   const ss = run(dir, 'node scripts/session-start.mjs', { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-1' });
