@@ -775,6 +775,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
+  // 2.30l: which game the studio builds (lanes and file guesses read it); the gates' cartridge is unchanged.
+  if (cmd === 'game') {
+    const { activeGame, setActiveGame } = await import('./cartridge.mjs');
+    const name = process.argv[3] && !process.argv[3].startsWith('--') ? process.argv[3] : null;
+    if (name) {
+      if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) {
+        console.error('Usage: npm run task -- game [<name>] --by <name>');
+        process.exit(1);
+      }
+      setActiveGame(name);
+      emitEvent({ type: 'game.set', agent: actor(), msg: `The studio's game is ${name}` });
+    }
+    const g = activeGame();
+    const f = gameFolders();
+    console.log(`Game: ${g.name || 'none'} (from ${g.from || 'nothing'}); renderer ${f.renderer || 'none'}, sim ${f.sim || 'none'}.`);
+    process.exit(0);
+  }
   if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const all = [...q.inProgress, ...q.backlog, ...q.done];

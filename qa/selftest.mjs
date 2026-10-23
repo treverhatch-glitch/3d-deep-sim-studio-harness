@@ -3192,6 +3192,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30l: one builder per task, the studio's game apart from the cartridge (qa/selftest-230l.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230l } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230l.mjs')).href);
+  await selftest230l({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

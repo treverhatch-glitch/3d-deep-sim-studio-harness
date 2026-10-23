@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-l] — 2026-10-23
+2.30l: two fixes from the 2.30k Marina run.
+### Fixed
+- One builder per task: two passes at once (the watcher and the Director flow) started T-025 twice at 17:13. The supervisor now skips a task with a live agent or a task lock, and takes an atomic launch lock (`launch:<task>`, 120 s, `STUDIO_LAUNCH_LOCK_SEC`) before it starts one.
+- The studio's game is set apart from the gates' cartridge: `npm run task -- game <name>` (studio/game.json "game", or `STUDIO_GAME`). Lanes and file guesses use it, and a web game's sim is found at web/<game>/sim, so a web game like Marina gets file lanes instead of none.
+
 ## [2.30.0-k] — 2026-10-23
 2.30k: builders lock only the files a task touches, so builders on different files run side by side.
 ### Changed

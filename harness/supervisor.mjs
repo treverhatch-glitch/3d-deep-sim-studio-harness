@@ -237,11 +237,24 @@ export async function supervise(opts, state, now = Date.now()) {
     }
     const agent = nextAgentName(g.role, opts.prefix || 's');
     state.names = [...(state.names || []), agent].slice(-200);
+    // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
+    // T-025 at 17:13:02. A launch lock (one atomic file per task) and the live sessions decide who starts it.
+    const taskId = g.tasks[0].id;
+    if (live.some((s) => s.running !== false && s.task === taskId) || lockStatus(`task:${taskId}`).locked) {
+      why.push(`${taskId} already has an agent`);
+      continue;
+    }
+    const { claim: claimLaunch } = await import('./lock.mjs');
+    const launch = claimLaunch(`launch:${taskId}`, agent, Number(process.env.STUDIO_LAUNCH_LOCK_SEC || 120));
+    if (launch && launch.ok === false) {
+      why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
+      continue;
+    }
     const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra }, { detach: true });
     if (r.ok) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
-      live.push({ agent, role: g.role, lane: g.lane || null, running: true });
+      live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true });
       if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
       room -= 1;
     } else why.push(`${g.role}: ${r.message}`);

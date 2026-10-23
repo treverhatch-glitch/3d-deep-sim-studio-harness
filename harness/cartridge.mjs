@@ -52,6 +52,33 @@ export function activeCartridge() {
   const first = listCartridges()[0] || null;
   return { name: first, from: first ? 'first cartridge' : null };
 }
+/**
+ * 2.30l: the game the studio is building, which can differ from the cartridge the gates check (a web
+ * game such as web/youda-marina-v2 keeps its sim beside its renderer, with no cartridge of its own).
+ * STUDIO_GAME, else studio/game.json "game", else the active cartridge. Set it: npm run task -- game <name>.
+ */
+export function activeGame() {
+  if (process.env.STUDIO_GAME) return { name: process.env.STUDIO_GAME, from: 'STUDIO_GAME' };
+  try {
+    const g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+    if (g.game) return { name: g.game, from: 'studio/game.json game' };
+  } catch {
+    // no game file yet
+  }
+  return activeCartridge();
+}
+
+/** Set the game (2.30l), keeping whatever else studio/game.json holds. */
+export function setActiveGame(name) {
+  let g = {};
+  try {
+    g = JSON.parse(fs.readFileSync(GAME_FILE, 'utf8'));
+  } catch {}
+  g.game = name;
+  fs.mkdirSync(path.dirname(GAME_FILE), { recursive: true });
+  fs.writeFileSync(GAME_FILE, `${JSON.stringify(g, null, 2)}\n`);
+  return g;
+}
 export const isTemplateCartridge = (name) => !name || name === 'example-sim' || /^[_.]/.test(name);
 
 export function defaultCartridgeName() {

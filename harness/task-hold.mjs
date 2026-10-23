@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
-import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
+import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -104,10 +104,12 @@ export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), hold
 
 /** The game's folders, for lanes inferred from --part. */
 export function gameFolders() {
-  const name = activeCartridge().name;
+  const name = activeGame().name;
   if (!name || isTemplateCartridge(name)) return { sim: null, renderer: null, name };
   const rel = (p) => (fs.existsSync(path.join(REPO_ROOT, p)) ? p : null);
-  return { name, sim: rel(`cartridges/${name}`), renderer: rel(`game/${name}`) || rel(`web/${name}`) };
+  const renderer = rel(`game/${name}`) || rel(`web/${name}`);
+  // 2.30l: a web game keeps its sim beside the renderer (web/<game>/sim) when it has no cartridge.
+  return { name, sim: rel(`cartridges/${name}`) || (renderer ? rel(`${renderer}/sim`) : null), renderer };
 }
 
 /** A lane as a list of paths (2.30k): one folder, or several files joined by commas. */
