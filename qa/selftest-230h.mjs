@@ -50,7 +50,8 @@ export async function selftest230h({ dir, run, report, tmpRoot }) {
     write('qa/fidelity/varied-paths.mjs', 'export default async () => ({ ok: true, why: "3 distinct paths over 20 ships" });\n');
     const f1 = run(dir, 'node harness/fidelity.mjs');
     const out = `${f1.stdout}${f1.stderr}`;
-    report('2.30h: the fidelity gate scores mechanics one by one and fails on a missing required one, naming it and the probe\'s reason', f1.status === 1 && /1\/2 mechanics of Youda Marina/.test(out) && /MISSING lose-money/.test(out) && /money never went down in \d+ ticks/.test(out) && /unscored night-shift/.test(out), out);
+    const fs1 = run(dir, 'node harness/fidelity.mjs --strict');
+    report('2.30h: the fidelity report scores mechanics one by one and names a missing required one with the probe\'s reason; a report (exit 0), failing only with --strict', f1.status === 0 && fs1.status === 1 && /REPORT \(required missing\)/.test(out) && /1\/2 mechanics of Youda Marina/.test(out) && /MISSING lose-money/.test(out) && /money never went down in \d+ ticks/.test(out) && /unscored night-shift/.test(out), out);
     const sb = run(dir, 'node harness/fidelity.mjs send-back --by director');
     const sb2 = run(dir, 'node harness/fidelity.mjs send-back --by director');
     const next = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
@@ -59,6 +60,14 @@ export async function selftest230h({ dir, run, report, tmpRoot }) {
     const f2 = run(dir, 'node harness/fidelity.mjs');
     report('2.30h: a checklist entry that asks to copy the reference\'s code or art is refused (mechanics only)', f2.status === 1 && /mechanics only, never the reference's code or art/.test(`${f2.stdout}${f2.stderr}`), `${f2.stdout}${f2.stderr}`);
     fs.rmSync(path.join(dir, 'studio', 'fidelity.json'));
+    // The Bible's fidelity section is the source when it has one.
+    const bf = path.join(dir, 'studio', 'bible', 'bible.json');
+    const had = fs.existsSync(bf) ? fs.readFileSync(bf, 'utf8') : null;
+    write('studio/bible/bible.json', JSON.stringify({ ...(had ? JSON.parse(had) : {}), fidelity: { reference: 'Youda Marina', mechanics: [{ id: 'varied-paths', says: 'ships take varied paths' }] } }));
+    const fb = run(dir, 'node harness/fidelity.mjs');
+    report('2.30h: the fidelity report reads its mechanics list from the Game Bible', fb.status === 0 && /1\/1 mechanics of Youda Marina/.test(fb.stdout), `${fb.stdout}${fb.stderr}`);
+    if (had) fs.writeFileSync(bf, had);
+    else fs.rmSync(bf);
     fs.rmSync(path.join(dir, '.studio', 'fidelity-last.json'), { force: true });
   }
 
@@ -212,5 +221,31 @@ const one = matchTricks('test', { entries, max: clampTricks(2) }).length;
 setTrickCap(MAX_TRICKS, 'director');
 console.log(JSON.stringify({ d, a, b, c, one, z: clampTricks(0), bad: clampTricks('x') }));`);
     report('2.30h: the Director can set the trick cap (default 3, never over 6) and a task can override it', tc.d === 3 && tc.a === 3 && tc.b === 5 && tc.c === 6 && tc.one === 2 && tc.z === 3 && tc.bad === 3, JSON.stringify(tc));
+  }
+
+  // Reviewer follow-ups: flow skips failing tasks, dead-agent locks, capture path, Claude/Opus ceiling.
+  {
+    const fr = probe(`import { flowReport } from ${u('harness/director-flow.mjs')}; import { failingTasks } from ${u('harness/breaker.mjs')};
+const ev = [{ type: 'task.paused', task: 'T-1', meta: { reasonKey: 'verify failed' } }, { type: 'task.paused', task: 'T-2', meta: {} }, { type: 'task.paused', task: 'T-3', meta: { reasonKey: 'x' } }, { type: 'task.unblocked', task: 'T-3' }];
+const failing = failingTasks(ev);
+const queue = { inProgress: [], backlog: [{ id: 'T-1', role: 'builder', title: 'a' }, { id: 'T-2', role: 'builder', title: 'b' }, { id: 'T-4', role: 'builder', title: 'c' }] };
+const r = flowReport({ queue, failing, held: (id) => (id === 'T-4' ? 'parked' : null) });
+console.log(JSON.stringify({ f: [...failing], ready: r.ready.total, failingList: r.failing, held: r.ready.held }));`);
+    report('2.30h: the flow refills only from clean work: a task whose last hand-back failed and a parked task are never counted ready', JSON.stringify(fr.f) === '["T-1"]' && fr.ready === 1 && JSON.stringify(fr.failingList) === '["T-1"]' && fr.held === 1, JSON.stringify(fr));
+    const dl = probe(`import { claim, listLocks, releaseDeadOwners } from ${u('harness/lock.mjs')};
+claim('task:T-90', 'builder-dead'); claim('task:T-91', 'builder-live'); claim('task:T-92', 'hatch');
+const known = { 'builder-dead': false, 'builder-live': true };
+const freed = releaseDeadOwners((o) => o in known && !known[o]);
+const left = listLocks().map((l) => l.owner).sort();
+console.log(JSON.stringify({ freed, left }));`);
+    report('2.30h: locks of an agent whose process is gone are freed; a live agent\'s and a person\'s stay', dl.freed?.length === 1 && /builder-dead/.test(dl.freed[0]) && dl.left?.includes('builder-live') && dl.left?.includes('hatch') && !dl.left?.includes('builder-dead'), JSON.stringify(dl));
+    const cp = probe(`import path from 'node:path'; import { engineCommand } from ${u('harness/engine.mjs')};
+const c = engineCommand({ engine: 'godot', capture: '{bin} --path engine/g --write-movie engine/g/captures/frame.png --quit-after {frames}' }, 'capture', { frames: 5 });
+const m = c.match(/--write-movie "([^"]+)"/);
+console.log(JSON.stringify({ c, abs: Boolean(m && path.isAbsolute(m[1]) && m[1].endsWith(path.join('engine', 'g', 'captures', 'frame.png'))) }));`);
+    report('2.30h: the Godot capture command writes frames to an absolute path (not relative to the project folder)', cp.abs === true, JSON.stringify(cp));
+    const ml = probe(`import { limitsFor } from ${u('harness/model-limits.mjs')};
+console.log(JSON.stringify({ o: limitsFor('claude-opus-4-1').context, o1m: limitsFor('claude-opus-4-6[1m]').context, s: limitsFor('sonnet').context }));`);
+    report('2.30h: Claude/Opus have a context ceiling in the model limits, like the free models', ml.o === 200000 && ml.o1m === 1000000 && ml.s === 200000, JSON.stringify(ml));
   }
 }

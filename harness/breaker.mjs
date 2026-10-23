@@ -55,6 +55,21 @@ export function checkBreaker(taskId, note, who = 'launcher', now = Date.now()) {
   return parkWhy;
 }
 
+/**
+ * 2.30h (#2): tasks whose newest hand-back since the last reset was a failure. The Director's flow pass
+ * never refills from these (one failure in, the breaker hasn't tripped yet, but a fresh session on the
+ * same task is the loop the breaker exists to stop). Returns a Set of task ids.
+ */
+export function failingTasks(evs = readRecentEvents(20000)) {
+  const last = new Map();
+  for (const e of evs) {
+    if (!e.task) continue;
+    if (e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))) last.set(e.task, false);
+    else if (e.type === 'task.paused') last.set(e.task, Boolean(e.meta?.reasonKey));
+  }
+  return new Set([...last].filter(([, f]) => f).map(([id]) => id));
+}
+
 /** Clear a breaker (or any park): the task can start again, and the hand-back count starts over. */
 export function unblockTask(taskId, by = 'human', note = '') {
   const h = readHolds()[taskId];

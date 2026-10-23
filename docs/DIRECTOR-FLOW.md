@@ -5,10 +5,11 @@ catches three ways a run went wrong before: builders sat idle with work waiting,
 reasoning, and a red CI check went unnoticed. Every piece is a script: no model calls, no tokens, and nothing
 waits on it, so agents are never slowed down.
 
-## 1. Design fidelity (`npm run fidelity`)
+## 1. Design fidelity (`npm run fidelity`): a scored report, not a gate
 
 Tests can pass while the game still plays thin. Each game keeps its own list of the reference game's mechanics in
-`studio/fidelity.json`:
+its Game Bible (`studio/bible/bible.json`, a `fidelity` section of the shape below); `studio/fidelity.json` is
+the fallback when the Bible has none:
 
 ```json
 { "reference": "Youda Marina",
@@ -31,15 +32,16 @@ export default async ({ cartridge, runScenario }) => {
 };
 ```
 
-- `npm run fidelity` scores the mechanics one at a time (`2/3 mechanics of Youda Marina present`). The gate
-  fails when a required mechanic is missing, or when the score falls under `minScore`. A mechanic that has no
-  probe yet shows as "not scored" and doesn't fail the gate on its own.
+- `npm run fidelity` scores the mechanics one at a time (`2/3 mechanics of Youda Marina present`) and writes a
+  report the Director reads. It is not a hard gate: it exits 0 even when a required mechanic is missing (1 only
+  for a bad checklist). `--strict` makes it fail on a missing required mechanic or a score under `minScore`.
+  A mechanic that has no probe yet shows as "not scored".
 - `npm run fidelity -- send-back` adds a builder task for each missing mechanic, tagged `[fidelity:<id>]`
   (P0 if it's required). It also asks for a probe for each mechanic that has none. It never adds a second
   task for the same mechanic. The Director's flow pass does this on its own after a failed score.
 - The list is for mechanics only, never code or art. An entry that asks to copy the reference's code, art,
   sprites, models, textures, sounds or text is refused.
-- With no `studio/fidelity.json`, the gate passes with a note. The gate writes only
+- With no checklist, it reports so and exits 0. It writes only
   `.studio/fidelity-last.json`.
 
 ## 2. The Director keeps the builders working (`npm run director -- flow`)
@@ -47,8 +49,11 @@ export default async ({ cartridge, runScenario }) => {
 The Director owns the flow. A flow pass runs every minute: in the War Room hub's loop (`STUDIO_FLOW_INTERVAL`,
 default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. Each pass:
 
+0. frees the locks of agents whose process is gone (agents with a launcher session record only; never a person's);
 1. hands back a claim that ran out: a task in progress that nobody holds and that has no running session;
-2. counts idle builder slots against ready work across the whole board, every role and lane, minus held tasks;
+2. counts idle builder slots against ready work across the whole board, every role and lane, minus held and
+   parked tasks (breaker parks included) and minus failing tasks: a task whose last hand-back was a failure is
+   never re-fed by the flow; the circuit breaker or a person decides what happens to it;
 3. refills idle slots through the launcher (`fillAgents`), with the same caps, lanes and pace as always. A
    pace that doesn't start agents on its own (Precise, Budget) gets an alert instead;
 4. sends back missing design-fidelity mechanics;

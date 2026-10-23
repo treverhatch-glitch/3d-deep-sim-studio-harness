@@ -27,6 +27,8 @@ export const BUILT_IN = [
   [/gemini-3(\.\d)?-flash/i, { context: 1048576, rpm: 1000, rpd: 10000, tpm: 1000000, note: 'quick, simple calls' }],
   [/gemini-2\.5-pro/i, { context: 1048576, rpm: 5, rpd: 100, tpm: 250000 }],
   [/gemini-2\.5-flash/i, { context: 1048576, rpm: 10, rpd: 250, tpm: 250000 }],
+  // Claude/Opus get a context ceiling like every other model (the reviewer's ask); the 1M beta when the id says so.
+  [/(opus|sonnet).*(\[1m\]|-1m\b|1m-context)/i, { context: 1000000, note: 'long-context beta; plan limits (5-hour and weekly windows), see npm run budget' }],
   [/claude.*(opus|sonnet)|^(opus|sonnet)/i, { context: 200000, note: 'plan limits (5-hour and weekly windows), see npm run budget' }],
   [/claude.*haiku|^haiku/i, { context: 200000 }],
   [/gpt-5|codex/i, { context: 400000, note: 'plan limits, see npm run budget' }],

@@ -150,6 +150,20 @@ export function release(key, owner) {
 }
 
 /**
+ * 2.30h: drop every lock an agent holds whose process is gone. `isDead(owner)` decides (the launcher's
+ * session records); owners it doesn't know (a person, a CLI user) are never touched. Returns the keys freed.
+ */
+export function releaseDeadOwners(isDead) {
+  const freed = [];
+  for (const l of listLocks()) {
+    if (!isDead(l.owner)) continue;
+    fs.rmSync(lockPath(l.key), { force: true });
+    freed.push(`${l.key} (${l.owner})`);
+  }
+  return freed;
+}
+
+/**
  * Extend every claim an owner holds to at least `ttlSec` from now. The launcher calls it on each
  * heartbeat, so a long task never loses its claim mid-work while the agent is alive (Jed's run: claims
  * ran out under a working agent and the watcher requeued its task).

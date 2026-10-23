@@ -8,6 +8,10 @@
  *                                                    a "Needs you" question for the game dev (Phase 1 must be proven)
  *   npm run engine -- start godot --by <person>      what a yes does (the War Room's yes calls it)
  *   npm run engine -- capture [--frames 120]         frames of the engine build to engine/<game>/captures/
+ *   npm run engine -- port --from <sha> [--by <name>] pin the web rules the port follows to one commit: copies
+ *                                                    cartridges/<game>/ at that commit to engine/<game>/port-src/
+ *                                                    and records it in engine.json (portFrom), so a moving web game
+ *                                                    doesn't block the port. `port` alone shows the pin.
  *
  * The engine's program: STUDIO_GODOT, STUDIO_UNITY or STUDIO_UNREAL (a full path), else godot, unity,
  * UnrealEditor-Cmd on the PATH. A Godot track starts from engine/_godot/: a worked port of the template
@@ -92,6 +96,9 @@ export function engineCommand(track, which, { seeds = [], frames = 120 } = {}) {
   const raw = which === 'parity' ? track.parity?.command : track[which];
   if (!raw) return null;
   let cmd = raw.replaceAll('{bin}', /\s/.test(engineBin(track.engine)) ? `"${engineBin(track.engine)}"` : engineBin(track.engine)).replaceAll('{seeds}', seeds.join(',')).replaceAll('{frames}', String(frames));
+  // 2.30h: Godot resolves a relative --write-movie path against the project folder (--path), not the repo, so
+  // "engine/<game>/captures/frame.png" landed in engine/<game>/engine/<game>/captures/ (or failed). Make it absolute.
+  if (which === 'capture') cmd = cmd.replace(/--write-movie\s+("?)([^"\s]+)\1/, (_, _q, p) => `--write-movie "${path.isAbsolute(p) ? p : path.join(REPO_ROOT, p)}"`);
   // Frames need a display; a Linux server without one gets a virtual one when xvfb-run is installed.
   if (which === 'capture' && process.platform === 'linux' && !process.env.DISPLAY && spawnSync('which', ['xvfb-run']).status === 0) cmd = `xvfb-run -a -s "-screen 0 1280x720x24" ${cmd}`;
   return cmd;
@@ -192,6 +199,46 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await startEngine(argv[1], { by: flag('by') || actor() });
     console[r.ok ? 'log' : 'error'](r.ok ? (r.already ? 'The engine track already exists.' : `Started: ${r.track.folder} (${r.track.label}); ${r.tasks.join(', ')} queued.`) : r.message);
     process.exit(r.ok ? 0 : 1);
+  }
+  if (argv[0] === 'port') {
+    const t = readTrack();
+    if (!t) {
+      console.error('No engine track.');
+      process.exit(1);
+    }
+    const from = flag('from');
+    if (!from) {
+      console.log(t.portFrom ? `The port follows the web rules at ${t.portFrom.sha} (pinned by ${t.portFrom.by}, ${t.portFrom.at.slice(0, 10)}): ${t.folder}/port-src/` : 'Not pinned: the port follows the live web rules. Pin with npm run engine -- port --from <sha>.');
+      process.exit(0);
+    }
+    const sha = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+    if (!sha) {
+      console.error(`${from} isn't a commit in this repo.`);
+      process.exit(1);
+    }
+    const game = t.game || activeCartridge().name;
+    const src = `cartridges/${game}`;
+    const ls = spawnSync('git', ['ls-tree', '-r', '--name-only', sha, '--', src], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const files = String(ls.stdout).split('\n').filter(Boolean);
+    if (!files.length) {
+      console.error(`${src}/ doesn't exist at ${sha.slice(0, 7)}.`);
+      process.exit(1);
+    }
+    const out = path.join(REPO_ROOT, t.folder, 'port-src');
+    fs.rmSync(out, { recursive: true, force: true }); // the harness's own previous pin copy
+    for (const f of files) {
+      const b = spawnSync('git', ['show', `${sha}:${f}`], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
+      const dest = path.join(out, path.relative(src, f));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, b.stdout);
+    }
+    const by = flag('by') || actor();
+    t.portFrom = { sha, by, at: new Date().toISOString(), files: files.length };
+    fs.writeFileSync(trackFile(game), `${JSON.stringify(t, null, 2)}\n`);
+    logEngine(`port pinned to ${sha.slice(0, 7)} (${files.length} files)`, by);
+    emitEvent({ type: 'engine.port_pinned', agent: by, track: t.track, msg: `${t.label} port pinned to the web rules at ${sha.slice(0, 7)} (${files.length} files in ${t.folder}/port-src/)`, meta: { sha } });
+    console.log(`Pinned: the port follows ${src}/ at ${sha.slice(0, 7)}; ${files.length} file(s) in ${t.folder}/port-src/.`);
+    process.exit(0);
   }
   if (argv[0] === 'capture') {
     const t = readTrack();

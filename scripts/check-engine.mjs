@@ -51,8 +51,12 @@ if (haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'proje
   if (parse.error) parse.broken.push({ file: '(godot)', error: parse.error });
   if (parse.broken.length) console.error(`[engine] ${parse.broken.length} GDScript file(s) don't parse:\n${formatBroken(parse)}`);
 }
-const ok = r.status === 0 && scriptErrors === 0 && parse.broken.length === 0;
+// 2.30h: a Godot gate that only rendered smoke frames checked nothing. When the run reports frames, it must
+// also show at least one test script that ran (a "[gate] PASS|FAIL <file>.gd" line or "N test script(s)" with N > 0).
+const framesOnly = t.engine === 'godot' && /smoke frames/i.test(out) && !/\[gate\] (?:PASS|FAIL) \S+\.gd/.test(out) && !/\b[1-9]\d* test script\(s\)/.test(out);
+if (framesOnly) console.error('[engine] the Godot gate rendered smoke frames but ran no test: frames alone are not a check. Add a test in res://tests/.');
+const ok = r.status === 0 && scriptErrors === 0 && parse.broken.length === 0 && !framesOnly;
 emitEvent({ type: ok ? 'qa.engine.pass' : 'qa.engine.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', track: t.track, msg: `${t.label} gate ${ok ? 'passed' : 'failed'} in ${Math.round((Date.now() - start) / 1000)} s${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}` });
 logEngine(`gate ${ok ? 'PASS' : 'FAIL'}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}, log ${logFile}`, process.env.STUDIO_LOCK_OWNER || 'qa');
-console[ok ? 'log' : 'error'](`[engine] ${ok ? 'PASS' : 'FAIL'} ${t.label}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}${parse.checked ? `, ${parse.checked - parse.broken.length}/${parse.checked} GDScript file(s) parse` : ''}. Log ${logFile}`);
+console[ok ? 'log' : 'error'](`[engine] ${ok ? 'PASS' : 'FAIL'} ${t.label}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}${framesOnly ? ', frames only (no test ran)' : ''}${parse.checked ? `, ${parse.checked - parse.broken.length}/${parse.checked} GDScript file(s) parse` : ''}. Log ${logFile}`);
 process.exit(ok ? 0 : 1);

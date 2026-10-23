@@ -170,6 +170,19 @@ export function sessions() {
 }
 
 /**
+ * 2.30h: locks held by agents whose process is gone are freed at once (not left to run out): an owner with a
+ * launcher session record and no running session. People and CLI owners have no record and are left alone.
+ */
+export async function releaseDeadLocks(list = sessions()) {
+  const known = new Map();
+  for (const s of list) known.set(s.agent, (known.get(s.agent) || false) || s.running);
+  const { releaseDeadOwners } = await import('./lock.mjs');
+  const freed = releaseDeadOwners((owner) => known.has(owner) && !known.get(owner));
+  if (freed.length) emitEvent({ type: 'lock.dead_released', agent: 'watch', msg: `Freed ${freed.length} lock(s) held by agents whose process is gone: ${freed.join(', ')}`.slice(0, 300), meta: { freed } });
+  return freed;
+}
+
+/**
  * Sessions whose record says "running" but whose process is gone (killed with the shell that started it,
  * a crash, a reboot) are marked ended, so the War Room and agent list stop showing them and the watcher
  * hands their task back and frees their claims (test #3). Returns the agents marked.

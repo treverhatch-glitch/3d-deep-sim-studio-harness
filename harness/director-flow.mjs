@@ -34,14 +34,16 @@ const readJson = (f) => {
  * The flow, from plain data (testable): queue {inProgress, backlog}, sessions [{agent, role, running,
  * task}], task locks [{key, owner}], a hold function, the pace (maxAgents, perRole), the previous report.
  */
-export function flowReport({ queue, sessions = [], locks = [], held = () => null, mode = { maxAgents: 4, perRole: { builder: 3 } }, prev = null, now = Date.now(), idleMin = Number(process.env.STUDIO_FLOW_IDLE_MIN || 10) }) {
+export function flowReport({ queue, sessions = [], locks = [], held = () => null, failing = new Set(), mode = { maxAgents: 4, perRole: { builder: 3 } }, prev = null, now = Date.now(), idleMin = Number(process.env.STUDIO_FLOW_IDLE_MIN || 10) }) {
   const live = sessions.filter((s) => s.running);
   const builders = live.filter((s) => s.role === 'builder');
   const slots = Math.max(0, Math.min(mode.maxAgents ?? 4, mode.perRole?.builder ?? Math.max(1, Math.floor((mode.maxAgents ?? 4) / 2))));
   const holders = new Set(locks.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5)));
   const onTask = new Set(live.map((s) => s.task).filter(Boolean));
   const expired = queue.inProgress.filter((t) => !holders.has(t.id) && !onTask.has(t.id) && t.role !== 'human' && t.role !== 'producer' && !/^Watch:|^Check forced done/i.test(t.title)).map((t) => t.id);
-  const ready = queue.backlog.filter((t) => t.role !== 'human' && !held(t.id));
+  // 2.30h (#2): refill only from work that isn't parked or held (breakers included) and whose last hand-back wasn't a failure.
+  const failed = queue.backlog.filter((t) => t.role !== 'human' && !held(t.id) && failing.has(t.id)).map((t) => t.id);
+  const ready = queue.backlog.filter((t) => t.role !== 'human' && !held(t.id) && !failing.has(t.id));
   const readyByRole = {};
   for (const t of ready) readyByRole[t.role] = (readyByRole[t.role] || 0) + 1;
   const readyBuild = readyByRole.builder || 0;
@@ -57,7 +59,8 @@ export function flowReport({ queue, sessions = [], locks = [], held = () => null
     state,
     builders: { running: builders.length, slots, idle: idleSlots, agents: builders.map((s) => `${s.agent}${s.task ? ` on ${s.task}` : ''}`) },
     agents: { running: live.length, max: mode.maxAgents ?? 4 },
-    ready: { total: ready.length, byRole: readyByRole, held: queue.backlog.length - ready.length },
+    ready: { total: ready.length, byRole: readyByRole, held: queue.backlog.length - ready.length - failed.length, failing: failed.length },
+    failing: failed,
     expired,
     starved,
     starvedSince: since,
@@ -73,13 +76,20 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
   const { parseNextQueue, pauseTask } = await import('./task.mjs');
   const { holdReason } = await import('./task-hold.mjs');
   const { listLocks } = await import('./lock.mjs');
-  const { sessions, fillAgents } = await import('./agent.mjs');
+  const { sessions, fillAgents, releaseDeadLocks } = await import('./agent.mjs');
+  let freedLocks = [];
+  if (!dryRun) freedLocks = await releaseDeadLocks().catch(() => []);
   const { effectiveMode } = await import('./mode.mjs');
   const queue = parseNextQueue();
   const mode = effectiveMode();
   const prev = readJson(FLOW_FILE());
-  const r = flowReport({ queue, sessions: sessions(), locks: listLocks(), held: (id) => holdReason(id, queue, now), mode, prev, now });
-  const actions = [];
+  const { failingTasks } = await import('./breaker.mjs');
+  let failing = new Set();
+  try {
+    failing = failingTasks();
+  } catch {}
+  const r = flowReport({ queue, sessions: sessions(), locks: listLocks(), held: (id) => holdReason(id, queue, now), failing, mode, prev, now });
+  const actions = freedLocks.length ? [`freed ${freedLocks.length} lock(s) of agents whose process is gone`] : [];
   for (const id of r.expired) {
     if (!dryRun) pauseTask(id, 'director', 'The claim ran out with no running session on it: handed back by the Director\'s flow pass so a free builder can take it.', { force: true });
     actions.push(`handed back ${id} (claim ran out)`);

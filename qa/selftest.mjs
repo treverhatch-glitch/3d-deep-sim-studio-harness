@@ -154,12 +154,6 @@ const SABOTAGE = {
     fs.writeFileSync(path.join(d, 'studio', 'godot-unit.json'), JSON.stringify({ enabled: true, project: 'gtest', tests: 'res://test_gdunit', gdunit: 'v6.2.2', godot: '4.7.2', watch: ['sim'] }));
     return { GODOT_BIN: path.join(d, 'fake-godot'), STUDIO_GODOT_UNIT_ALL: '1' };
   },
-  // 2.30h: a checklist whose required mechanic's probe says it's missing.
-  fidelity: (d) => {
-    fs.writeFileSync(path.join(d, 'studio', 'fidelity.json'), JSON.stringify({ reference: 'Youda Marina', mechanics: [{ id: 'lose-money', says: 'the player can lose money' }] }));
-    fs.mkdirSync(path.join(d, 'qa', 'fidelity'), { recursive: true });
-    fs.writeFileSync(path.join(d, 'qa', 'fidelity', 'lose-money.mjs'), "export default async () => ({ ok: false, why: 'money only goes up' });\n");
-  },
   session: (d) => fs.rmSync(path.join(d, 'studio/CURRENT_TASK.md')),
   // An alias a regex cannot see: only the runtime probe catches it.
   purity: (d) => edit(d, SIM, (s) => s.replace('const drift =', "const M = Math; const k = 'ran' + 'dom'; M[k]();\n  const drift =")),
@@ -206,7 +200,6 @@ const EXPECT = {
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
   'godot-unit': /test_money_drains: expected money to drop/,
-  fidelity: /MISSING lose-money: the player can lose money — money only goes up/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -1467,6 +1460,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const rmade = fs.existsSync(rto) ? fs.readdirSync(rto) : [];
   const rrep = rmade[0] ? fs.readFileSync(path.join(rto, rmade[0], 'REPORT.md'), 'utf8') : '';
   report('the engine track keeps its own log (start, gate, parity) and the run report shows it, with cache reads per session by role', /track started: Godot 4/.test(elog) && /gate PASS/.test(elog) && /gate FAIL[^\n]*script error/.test(elog) && /parity FAIL on seeds/.test(elog) && /## Engine track[\s\S]*Gate: 1 passed, 1 failed/.test(rrep) && /\| engine-porter \| 1 \| 0 \| 1\.5M \|/.test(rrep), elog + rrep.slice(rrep.indexOf('## Tokens'), rrep.indexOf('## Tokens') + 900));
+  // 2.30h: a Godot run that only rendered smoke frames (no test ran) fails; the capture path is absolute.
+  fs.writeFileSync(path.join(dir, 'fake-gate-frames.mjs'), "console.log('[gate] PASS: 0 test script(s), 0 failure(s), 300 smoke frames');\n");
+  fs.writeFileSync(path.join(dir, 'engine/tin-moon/engine.json'), JSON.stringify({ ...track, gate: 'node fake-gate-frames.mjs' }, null, 2));
+  const g3 = run(dir, 'node scripts/check-engine.mjs', env);
+  fs.writeFileSync(path.join(dir, 'engine/tin-moon/engine.json'), JSON.stringify({ ...track, gate: 'node fake-gate.mjs' }, null, 2));
+  report('2.30h: the engine gate fails a Godot run that rendered smoke frames but ran no test', g3.status !== 0 && /frames alone are not a check/.test(g3.stderr), g3.stdout + g3.stderr);
   // Asset studio: approving the last design waiting moves it to assets/approved/ and asks for the next round.
   fs.mkdirSync(path.join(dir, 'assets/staging/props'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'assets/staging/props/lamp.png'), 'png');
@@ -1501,7 +1500,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     const web = JSON.parse(node('webp.mjs', "import { loadCartridge, runScenario } from './harness/cartridge.mjs';\nconst cart = await loadCartridge('example-sim');\nconsole.log(JSON.stringify([1, 2, 3, 1337].map((s) => { const r = runScenario(cart, 'start-to-win', { seed: s }); return { seed: s, outcome: r.outcome, tick: r.ticksRun, 'resources.credits': r.state.resources.credits }; })));\n").stdout || '[]');
     report('with Godot installed: the shipped Godot port matches the web game on outcome, tick and credits (seeds 1, 2, 3, 1337)', lines.length === 4 && JSON.stringify(lines.map((l) => [l.seed, l.outcome, l.tick, l['resources.credits']])) === JSON.stringify(web.map((w) => [w.seed, w.outcome, w.tick, w['resources.credits']])), JSON.stringify(lines) + JSON.stringify(web) + out.stderr);
     const gate = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 180000 });
-    report('with Godot installed: the template\'s gate runs its tests and a smoke run, and passes', gate.status === 0 && /\[gate\] PASS: 0 test failure/.test(gate.stdout) && !/SCRIPT ERROR/.test(gate.stdout + gate.stderr), gate.stdout + gate.stderr);
+    report('with Godot installed: the template\'s gate runs its tests and a smoke run, and passes', gate.status === 0 && /\[gate\] PASS: [1-9]\d* test script\(s\), 0 failure/.test(gate.stdout) && !/SCRIPT ERROR/.test(gate.stdout + gate.stderr), gate.stdout + gate.stderr);
   } else console.log('[selftest] note: no Godot (set STUDIO_GODOT) so the real template parity and gate were not run');
 }
 

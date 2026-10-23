@@ -3,12 +3,14 @@
  * harness/fidelity.mjs — the design-fidelity gate (2.30h, item 1): score the build against the reference
  * game's mechanics, one by one, and send missing ones back as work.
  *
- *   npm run fidelity                 score now; exit 1 when a required mechanic is missing (the gate)
+ *   npm run fidelity                 score now: a report the Director reads (exit 0; 1 only for a bad checklist)
+ *   npm run fidelity -- --strict     exit 1 when a required mechanic is missing (opt-in; it is not a hard gate)
  *   npm run fidelity -- --json
  *   npm run fidelity -- send-back [--by director]   queue a builder task per missing mechanic (once each)
  *   npm run fidelity -- list         the checklist
  *
- * The checklist is the game's own (studio/fidelity.json):
+ * The checklist is the game's own, read from the Game Bible (studio/bible/bible.json, its "fidelity"
+ * section, same shape as below); studio/fidelity.json is the fallback:
  *   { "reference": "Youda Marina",
  *     "minScore": 0.8,                          optional: the share of scored mechanics that must pass
  *     "mechanics": [
@@ -35,9 +37,24 @@ export const CHECKLIST = () => path.join(REPO_ROOT, 'studio', 'fidelity.json');
 export const LAST = () => path.join(STUDIO_STATE_DIR, 'fidelity-last.json');
 const COPYING = /\b(copy|copies|copied|reuse|rip|ripped|port|lift|clone|trace|extract)\b[^.]{0,40}\b(code|source|art|sprites?|models?|textures?|meshes|sounds?|music|audio|assets?|text|dialogue|ui art|icons?)\b/i;
 
-export function readChecklist(file = CHECKLIST()) {
-  if (!fs.existsSync(file)) return null;
-  const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+/** The Bible's fidelity section, when it has one. */
+export function bibleChecklist() {
+  try {
+    const b = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'bible', 'bible.json'), 'utf8'));
+    const f = b.fidelity || (Array.isArray(b.mechanics) ? { mechanics: b.mechanics, reference: b.reference } : null);
+    return f && Array.isArray(f.mechanics) && f.mechanics.length ? { reference: f.reference || b.reference || b.inspiration, ...f, source: 'bible' } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readChecklist(file = null) {
+  let c = file ? null : bibleChecklist();
+  if (!c) {
+    file = file || CHECKLIST();
+    if (!fs.existsSync(file)) return null;
+    c = JSON.parse(fs.readFileSync(file, 'utf8'));
+  }
   const problems = [];
   const seen = new Set();
   for (const m of c.mechanics || []) {
@@ -51,7 +68,7 @@ export function readChecklist(file = CHECKLIST()) {
 }
 
 /** Run every probe. Returns { reference, score, passed, scored, missing, unscored, rows, ok }. */
-export async function scoreFidelity({ file = CHECKLIST(), timeoutMs = Number(process.env.STUDIO_FIDELITY_TIMEOUT_MS || 60000) } = {}) {
+export async function scoreFidelity({ file = null, timeoutMs = Number(process.env.STUDIO_FIDELITY_TIMEOUT_MS || 60000) } = {}) {
   const c = readChecklist(file);
   if (!c) return { configured: false, ok: true, rows: [] };
   const { activeCartridge, loadCartridge, runScenario } = await import('./cartridge.mjs');
@@ -127,8 +144,8 @@ export async function sendBack({ by = actor(), result = readLastFidelity() } = {
 }
 
 export function formatScore(r) {
-  if (!r.configured) return '[fidelity] no checklist (studio/fidelity.json): nothing to score';
-  const L = [`[fidelity] ${r.ok ? 'PASS' : 'FAIL'} ${r.passed}/${r.scored} mechanics of ${r.reference} present${r.score != null ? ` (${Math.round(r.score * 100)}%)` : ''}${r.unscored.length ? `, ${r.unscored.length} not scored yet` : ''}`];
+  if (!r.configured) return '[fidelity] no checklist (the Bible\'s fidelity section or studio/fidelity.json): nothing to score';
+  const L = [`[fidelity] REPORT (${r.ok ? 'all required present' : 'required missing'}) ${r.passed}/${r.scored} mechanics of ${r.reference} present${r.score != null ? ` (${Math.round(r.score * 100)}%)` : ''}${r.unscored.length ? `, ${r.unscored.length} not scored yet` : ''}`];
   for (const p of r.problems) L.push(`  checklist: ${p}`);
   for (const x of r.rows) L.push(`  ${x.state === 'present' ? 'ok     ' : x.state === 'missing' ? 'MISSING' : 'unscored'} ${x.id}${x.required ? '' : ' (optional)'}: ${x.says}${x.why ? ` — ${x.why}` : ''}`);
   if (!r.ok && r.missing.length) L.push(`  Send back: npm run fidelity -- send-back (the Director's flow pass does this on its own)`);
@@ -140,7 +157,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const cmd = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'check';
   if (cmd === 'list') {
     const c = readChecklist();
-    console.log(c ? c.mechanics.map((m) => `- ${m.id}${m.required === false ? ' (optional)' : ''}: ${m.says}`).join('\n') || '(empty)' : 'No studio/fidelity.json');
+    console.log(c ? c.mechanics.map((m) => `- ${m.id}${m.required === false ? ' (optional)' : ''}: ${m.says}`).join('\n') || '(empty)' : 'No checklist (Bible fidelity section or studio/fidelity.json)');
     process.exit(0);
   }
   if (cmd === 'send-back') {
@@ -152,5 +169,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const r = await scoreFidelity();
   console.log(argv.includes('--json') ? JSON.stringify(r, null, 2) : formatScore(r));
   if (r.configured) emitEvent({ type: r.ok ? 'qa.fidelity.pass' : 'qa.fidelity.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: `Design fidelity vs ${r.reference}: ${r.passed}/${r.scored} present${r.missing.length ? `; missing ${r.missing.join(', ')}` : ''}` });
-  process.exit(r.ok ? 0 : 1);
+  // 2.30h: a scored report the Director reads, not a hard gate. A bad checklist (e.g. asks to copy art) still fails.
+  process.exit(r.problems?.length || (argv.includes('--strict') && !r.ok) ? 1 : 0);
 }

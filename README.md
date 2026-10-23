@@ -67,6 +67,12 @@ contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would p
 | `secrets` | a key-shaped string would be committed |
 | `selftest` | any required gate cannot be shown to fail when its rule is broken |
 
+`fidelity` is a scored report, not a gate: it scores the build against the reference game's mechanics listed in the Game Bible's `fidelity` section (fallback `studio/fidelity.json`) and the Director reads it; `npm run fidelity -- --strict` makes it fail on a missing required mechanic.
+
+## The daily token cap (on by default)
+
+Every studio has a daily cap of **50M tokens** (50,000,000 weighted tokens per UTC day, summed across all models, cache reads at a reduced weight set by `STUDIO_CACHE_READ_WEIGHT`; `harness/budget.mjs`, `DEFAULT_DAILY_TOKEN_CAP`). When the day's use reaches it, the launcher stops starting new sessions until the next day. Change it with `STUDIO_DAILY_TOKEN_CAP` in `.env` (a number of tokens, e.g. `STUDIO_DAILY_TOKEN_CAP=80000000`); `off` or `0` turns it off. `npm run budget` shows the day's use against the cap.
+
 ## Where things are
 
 | Path | What |

@@ -52,7 +52,8 @@ for (const gate of gates) {
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
   // Only the in-session fast tier reads the cache; everyday verify, --deep and the merge tier always run.
-  if (useCache && cacheable && isFastTier) {
+  // 2.30h (#6): a gate with cacheDeep (the HUD check) also reuses its last pass in a --deep run; the merge tier still always runs it.
+  if (useCache && cacheable && (isFastTier || (gate.cacheDeep && !isMergeTier))) {
     key = getKey(gate);
     const cached = get(gate, key);
     if (cached) {
