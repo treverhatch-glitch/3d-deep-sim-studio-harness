@@ -80,11 +80,11 @@ export function engineGates(paths) {
 
 function runGodot(project) {
   const bin = godotBin();
-  const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024 };
+  const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
   const steps = [['--headless', '--path', project, '--import']];
   if (fs.existsSync(path.join(REPO_ROOT, project, 'tools', 'gate.gd'))) steps.push(['--headless', '--path', project, '--script', 'res://tools/gate.gd']);
   for (const args of steps) {
-    const r = spawnSync(bin, args, opts);
+    const r = spawnSync(opts.shell ? `"${bin}"` : bin, args, opts);
     const text = `${r.stdout || ''}\n${r.stderr || ''}`;
     if (r.error) return { ok: false, why: `could not run Godot (${bin}): ${r.error.code || r.error.message}` };
     const bad = text.split('\n').find((l) => ERR.test(l));
@@ -106,6 +106,12 @@ export async function runGameGates({ paths = [], quiet = false } = {}) {
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
       rows.push({ id: g.id, ok: r.status === 0, required: g.required, why: r.status === 0 ? '' : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
     }
+  }
+  // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
+  if (game?.root && fs.existsSync(path.join(REPO_ROOT, game.root, 'studio.layout.json')) && process.env.STUDIO_LAYOUT_GATE !== 'off') {
+    const { runLayoutGate } = await import('./layout-gate.mjs');
+    const lay = runLayoutGate({ gameDir: game.root });
+    rows.push({ id: 'game:layout', ok: lay.ok, required: true, why: lay.ok ? '' : lay.why.slice(0, 400) });
   }
   for (const e of engineGates(paths)) {
     const r = runGodot(e.project);

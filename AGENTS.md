@@ -134,3 +134,16 @@ Optional external tools are listed in `docs/EXTERNAL-TOOLS.md`. Do not vendor th
 Not rules, but they keep accounts in good standing and the team fast: commit locally and push in batches,
 stay in your own repos, use fine-grained tokens, use only keys you are entitled to (extra free accounts break most providers' terms), tools before freehand.
 See `docs/BEST-PRACTICES.md`.
+
+## 10. The attending game dev is optional (2.30o)
+
+The harness must run without anyone watching. While a studio has an active game, the hub runs the
+game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the hub: `npm run gamedev`;
+`STUDIO_WATCHDOG=off` opts out): stalled sessions end, a low queue is refilled from unmet charter exit
+criteria, met milestones close, idle builder slots fill, landings are checked (layout, visual), a tool at
+its quota or spend guard hands over to the next in the budget order, and the Director/Producer
+development cycle keeps planning forward. Away mode means more autonomy, not just review logging.
+
+Expected role of an attending game dev (a person or an agent): **optional**. Their input adds tasks or
+reprioritises them, approves assumptions the Director marked, and judges whether it is fun. Nothing in
+production waits for them; if it does, that is a harness defect.

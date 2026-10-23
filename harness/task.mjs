@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
 import { checkDone, taskType, joinWaveIfGameplay } from './done-check.mjs';
+import { summarize as summarizeVerdict } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
@@ -316,6 +317,17 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
           }
         }
       }
+    }
+  }
+
+  // 2.30o: a render task (Godot, graphics, scene ...) needs a passing visual result (before/after captures from
+  // fixed cameras, not blank, not near-identical): harness/verdict-split.mjs + harness/visual-proof.mjs.
+  if (!force && process.env.STUDIO_VISUAL_GATE !== 'off') {
+    const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track;
+    const vs = summarizeVerdict(target.id, { ...target, track });
+    if (!vs.ok) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${vs.why.slice(0, 200)}` });
+      return { error: 'visual', verdict: vs, message: `${target.id} is not done: ${vs.why}\nChecked: ${vs.passed.join(', ') || 'nothing'}; unchecked: ${vs.unchecked.join(', ') || 'none'}.` };
     }
   }
 

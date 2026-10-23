@@ -133,7 +133,7 @@ const harnessVersion = () => {
  * line is kept word for word, so whoever reads "out of quota" sees what the provider actually said.
  */
 // Only a real limit message from a provider (shared with the launcher, the probe and the reviewer).
-export const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)/i;
+export const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)|credits? (?:refused|exhausted|depleted)|payment required|\b402\b|spend(?:ing)? (?:limit|cap|guard) (?:reached|exceeded|hit)|budget (?:exceeded|exhausted)|token (?:cap|limit|budget) (?:reached|exceeded|hit)/i;
 /** The provider's limit line in a failed command's stderr (or stdout when it printed nothing else), or null. */
 export function limitLine(stderr = '', stdout = '', code = 1) {
   if (code === 0) return null;
@@ -166,7 +166,10 @@ export function clearQuota(tool) {
 /** The tool a provider error names, if it names one (an error printed by another program in this session). */
 export function toolNamed(line = '') {
   const l = String(line);
-  if (/AGY_ERROR|antigravity|\bagy\b|gemini/i.test(l)) return 'agy';
+  if (/\bhermes\b/i.test(l)) return 'hermes';
+  if (/\bgrokbot\b/i.test(l)) return 'grokbot';
+  if (/AGY_ERROR|antigravity|\bagy\b/i.test(l)) return 'agy';
+  if (/gemini/i.test(l)) return (readBudget().order || []).includes('gemini') ? 'gemini' : 'agy';
   if (/\bcodex\b|chatgpt|openai/i.test(l)) return 'codex';
   if (/\bclaude\b|anthropic/i.test(l)) return 'claude';
   if (/\bgrok\b|x\.ai\b/i.test(l)) return 'grok';
@@ -221,7 +224,8 @@ export const quotaMark = (tool) => readJson(QUOTA_FILE, {})[tool] || null;
 /** The first tool in the order that isn't out of quota, starting from the preferred one. */
 export function pickTool(preferred, now = Date.now()) {
   const order = [...new Set([preferred, ...(readBudget().order || [])].filter(Boolean))];
-  return order.find((t) => !exhaustedUntil(t, now)) || null;
+  // 2.30o: an entry may be tool or tool:model; it is out when either it or its tool is marked.
+  return order.find((t) => !exhaustedUntil(t, now) && !(t.includes(':') && exhaustedUntil(t.split(':')[0], now))) || null;
 }
 
 /** Per tool: used, the week's tokens if known, the target by now, and a verdict. */

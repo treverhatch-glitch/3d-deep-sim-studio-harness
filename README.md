@@ -73,6 +73,19 @@ contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would p
 
 Every studio has a daily cap of **50M tokens** (50,000,000 weighted tokens per UTC day, summed across all models, cache reads at a reduced weight set by `STUDIO_CACHE_READ_WEIGHT`; `harness/budget.mjs`, `DEFAULT_DAILY_TOKEN_CAP`). When the day's use reaches it, the launcher stops starting new sessions until the next day. Change it with `STUDIO_DAILY_TOKEN_CAP` in `.env` (a number of tokens, e.g. `STUDIO_DAILY_TOKEN_CAP=80000000`); `off` or `0` turns it off. `npm run budget` shows the day's use against the cap.
 
+## The attending game dev is optional (2.30o)
+
+The harness must run without anyone watching. While a studio has an active game, the hub runs the
+game-dev loop every few minutes (`STUDIO_GAMEDEV_INTERVAL`, 180 s; without the hub: `npm run gamedev`;
+`STUDIO_WATCHDOG=off` opts out): stalled sessions end, a low queue is refilled from unmet charter exit
+criteria, met milestones close, idle builder slots fill, landings are checked (layout, visual), a tool at
+its quota or spend guard hands over to the next in the budget order, and the Director/Producer
+development cycle keeps planning forward. Away mode means more autonomy, not just review logging.
+
+Expected role of an attending game dev (a person or an agent): **optional**. Their input adds tasks or
+reprioritises them, approves assumptions the Director marked, and judges whether it is fun. Nothing in
+production waits for them; if it does, that is a harness defect.
+
 ## Where things are
 
 | Path | What |

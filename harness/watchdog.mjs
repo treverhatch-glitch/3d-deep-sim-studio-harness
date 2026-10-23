@@ -42,8 +42,17 @@ export function setWatchdog(on, by) {
 /** One pass. Returns what it did. Does nothing while off. */
 export async function watchdogPass(now = Date.now(), { events = readRecentEvents(5000), lim = watchdogLimits() } = {}) {
   const w = readWatchdog();
-  if (!w.on) return { on: false, actions: [] };
+  // 2.30o: always on while a studio has an active game (STUDIO_WATCHDOG=off is the only way out), so
+  // production never depends on someone attending. Away mode is no longer needed to turn it on.
+  const { gameActive, gamedevPass } = await import('./gamedev-loop.mjs');
+  const auto = !w.on && !/^off$/i.test(process.env.STUDIO_WATCHDOG || '') && (await gameActive());
+  if (!w.on && !auto) return { on: false, actions: [] };
   const actions = [];
+  try {
+    for (const a of await gamedevPass(now, { events })) actions.push(a);
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `game-dev loop: ${e.message}` });
+  }
   // 1. Unanswered checks.
   const { refreshBoard, endForRefresh, readFlag } = await import('./session-cap.mjs');
   for (const r of refreshBoard()) {
@@ -66,7 +75,7 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   }
   // 3. An idle studio: sessions ran for the whole window, nothing finished.
   const win = now - lim.idleHours * 3600000;
-  const turnedOnAt = Date.parse(w.at || '') || 0;
+  const turnedOnAt = auto ? 0 : Date.parse(w.at || '') || 0;
   if (lim.idleHours > 0 && turnedOnAt <= win) {
     const ran = events.filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= win).length;
     const done = events.filter((e) => e.type === 'task.done' && Date.parse(e.ts) >= win).length;
@@ -77,7 +86,7 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
     }
   }
   for (const a of actions) emitEvent({ type: 'watchdog.action', agent: 'watchdog', to: 'producer', task: a.task, msg: `Watchdog ${a.msg}`, meta: { kind: a.kind } });
-  return { on: true, actions };
+  return { on: true, auto, actions };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -91,15 +100,26 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(r.message);
       process.exit(1);
     }
+  } else if (cmd === 'loop') {
+    // 2.30o: the game-dev loop without the hub (the hub runs it itself every STUDIO_GAMEDEV_INTERVAL s).
+    const every = Number(argv[1] || 180);
+    const once = async () => {
+      const r = await watchdogPass();
+      console.log(`[gamedev] ${r.on ? (r.actions.length ? r.actions.map((a) => a.msg).join(' | ') : 'nothing to do') : 'off (no active game, or STUDIO_WATCHDOG=off)'}`);
+      return r;
+    };
+    const r = await once();
+    if (every > 0 && r.on && !argv.includes('--once')) setInterval(() => once().catch((e) => console.error(`[gamedev] ${e.message}`)), every * 1000);
+    else process.exit(0);
   } else if (cmd === 'pass') {
     const r = await watchdogPass();
     console.log(r.on ? (r.actions.length ? r.actions.map((a) => a.msg).join('\n') : 'Watchdog: nothing to do.') : 'Watchdog is off.');
     process.exit(0);
   } else if (cmd !== 'status') {
-    console.log('Usage: npm run watchdog -- on|off --by <name> | status | pass');
+    console.log('Usage: npm run watchdog -- on|off --by <name> | status | pass | loop [seconds] [--once]');
     process.exit(1);
   }
   const w = readWatchdog();
   const l = watchdogLimits();
-  console.log(w.on ? `Watchdog is on (${w.by}, ${w.at}): unanswered checks hand off after ${l.checkMin} min, a task handed back ${l.handBacks} times in 2 h parks, no task done in ${l.idleHours} h stops the studio.` : 'Watchdog is off (the default). Turn it on for runs nobody watches: npm run watchdog -- on --by <you>');
+  console.log(w.on ? `Watchdog is on (${w.by}, ${w.at}): unanswered checks hand off after ${l.checkMin} min, a task handed back ${l.handBacks} times in 2 h parks, no task done in ${l.idleHours} h stops the studio.` : 'Watchdog is off: no studio game is active (it turns on by itself while one is; STUDIO_WATCHDOG=off opts out). Force it on: npm run watchdog -- on --by <you>');
 }

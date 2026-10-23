@@ -56,6 +56,10 @@ import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
+import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mjs';
+import { profileGuard, profileOf } from './profile-guard.mjs';
+import { toolCmd } from './spend-guard.mjs';
+import { pickTool, readBudget } from './budget.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -76,6 +80,10 @@ export function providerTrouble(log, code) {
       }
     } catch {}
   }
+  // 2.30o: repeated provider refusals (5xx / overloaded / unavailable) are a run-out like a quota error, for
+  // any launcher: three or more in the session's last lines.
+  const refusals = lines.slice(-60).filter((l) => /\b(?:HTTP|status|code)?\W{0,3}5(?:00|02|03|04|29)\b.*(?:error|overloaded|unavailable|bad gateway|timeout)|\boverloaded(?:_error)?\b|service unavailable/i.test(l) && !/"type"\s*:\s*"(?:user|assistant|tool_result)"/.test(l));
+  if (refusals.length >= Number(process.env.STUDIO_5XX_RUNOUT ?? 3)) return { kind: 'quota', text: `provider refused ${refusals.length} times (5xx)`, line: refusals[refusals.length - 1].slice(0, 240), named: toolNamed(refusals[refusals.length - 1]) };
   // A final result object (claude stream-json, codex --json) decides when there is one.
   for (const l of lines.slice(-40).reverse()) {
     if (!l.startsWith('{')) continue;
@@ -342,7 +350,9 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
   const quota = (other ? found : t)?.kind === 'quota' ? (other ? found : t) : null;
   if (quota && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
-    const who = other || tool;
+    // 2.30o: generic: the order entry this session ran as (tool:model when the order lists it, else the tool).
+    const order = (() => { try { return readBudget().order || []; } catch { return []; } })();
+    const who = other || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
     const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
     markExhausted(who, line);
   }
@@ -496,7 +506,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
   // 2.30e (R6): In rehearsal mode, use the rehearsal agent unless a custom command is set.
-  let custom = process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
+  // 2.30o: a tool in the budget order may carry its own launch command (hermes, gemini, grokbot ...):
+  // STUDIO_TOOL_<TOOL>_CMD. It wins over the role's command, so a takeover changes the program too.
+  const viaTool = toolCmd(tool);
+  let custom = viaTool || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
   if (process.env.STUDIO_REHEARSAL === '1' && !custom) {
     custom = `node harness/rehearsal-agent.mjs {agent} {task} ok`;
   }
@@ -531,7 +544,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   const beat = setInterval(() => {
@@ -544,8 +557,35 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     } catch {
       // the refresh check is a help, never a blocker
     }
-    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip, ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }, null, 2));
+    // 2.30o: the stall check (harness/stall.mjs): no progress, a read-only burn, or past the wall-clock cap ends it.
+    let stall = null;
+    try {
+      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile)), cwd });
+    } catch {
+      // the stall check is a guard, never a crash
+    }
+    fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, lastBeat: now, wip, ...(stall?.stalled ? { stalled: stall } : {}), ...(progress ? { progress: { turns: progress.turns, context: progress.context, state: progress.state } } : {}) }, null, 2));
     renewOwner(agent);
+    // 2.30o: an idle session exits and frees its slot: no task claimed for STUDIO_IDLE_EXIT_MIN (5) minutes.
+    let idle = null;
+    try {
+      const holds = listLocks().some((l) => l.owner === agent && l.key.startsWith('task:'));
+      const lastProg = readStall(agent)?.lastProgressAt;
+      const since = holds ? null : [s.idleSince || now, lastProg].filter(Boolean).sort().pop();
+      idle = idleVerdict({ role, startedAt, idleSince: since });
+      fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleSince: holds ? null : s.idleSince || now }, null, 2));
+    } catch {
+      // never a crash
+    }
+    if (idle?.exit && !s.idleExit) {
+      fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleExit: idle.why }, null, 2));
+      emitEvent({ type: 'agent.idle_exit', agent, to: 'producer', msg: `${agent} ended: ${idle.why}; its slot is free (a new session starts only when a task is ready)` });
+      stopAgent(child.pid);
+    }
+    if (stall?.stalled && !s.stalled) {
+      logStall({ ...session, ...s }, stall);
+      stopAgent(child.pid);
+    }
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
   const code = await new Promise((resolve) => {
@@ -571,6 +611,15 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   if (result.bad && !fallback.length && result.troubleKind === 'quota') {
     if (isNim(model, tool) && process.env.STUDIO_NIM_FALLBACK) fallback = [process.env.STUDIO_NIM_FALLBACK];
+  }
+  // 2.30o: any run-out (quota, 429 loop, spend or token cap, credit refused, 5xx refusals) on any launcher:
+  // with no fallback given, the next tool in the budget order that isn't marked out takes the task over.
+  if (result.bad && !fallback.length && result.troubleKind === 'quota' && process.env.STUDIO_TAKEOVER !== 'off') {
+    const nxt = pickTool(tool);
+    if (nxt && nxt !== tool && nxt !== `${tool}:${model}`) {
+      fallback = [nxt];
+      emitEvent({ type: 'tool.takeover', agent, to: 'human', status: 'warn', msg: `${agent} ran out on ${tool}${model ? ` (${model})` : ''}: ${nxt} takes over${task ? ` ${task}` : ''}` });
+    }
   }
   // 2.30i: the launcher closed the task after a crash, so nothing is left to fail over.
   if (result.bad && fallback.length && !(result.finished?.length && !result.handed.length)) {
@@ -809,6 +858,27 @@ export function startAgent(opts, { detach = false } = {}) {
   if (spend.over) return { ok: false, message: `Not started: the daily token cap is spent (${spend.used} of ${spend.cap}).` };
   let tool = opts.tool || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
   let model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
+  // 2.30o: with no tool given, the first tool in the budget order that isn't marked out (a quota error or a
+  // spend guard, harness/spend-guard.mjs) takes the session.
+  if (!opts.tool) {
+    const t = pickTool(tool);
+    if (t && t !== tool) {
+      emitEvent({ type: 'tool.takeover', agent: 'launcher', to: 'producer', msg: `${tool} is marked out; ${agent} starts on ${t}` });
+      const [tt, ...mm] = t.split(':');
+      tool = tt;
+      if (!opts.model) model = mm.join(':') || process.env[`STUDIO_TOOL_${roleKey(tt)}_MODEL`] || model;
+    }
+  }
+  // 2.30o: profile check before launch: a planning role never shares a builder's profile; per-profile limits.
+  {
+    const profile = profileOf(role, toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : ''));
+    const running = sessions().filter((x) => x.running).map((x) => ({ agent: x.agent, role: x.role, profile: x.profile || 'default' }));
+    const g = profileGuard({ role, profile, running });
+    if (!g.ok) {
+      emitEvent({ type: 'profile.refused', agent: 'launcher', to: 'producer', status: 'blocked', msg: `Not started (${role} on ${profile}): ${g.why}` });
+      return { ok: false, message: `Not started: ${g.why}.` };
+    }
+  }
   // 2.30d (plan #3): a task that came back without being done starts one model tier up.
   if (opts.task && !opts.model) {
     const esc = escalationFor(opts.task);
@@ -862,9 +932,10 @@ export function startAgent(opts, { detach = false } = {}) {
  * FIX 02): while the supervisor runs, it starts the agents and this does nothing; otherwise this uses
  * the supervisor's own picker (lanes, holds, task claims, caps, quota) with -auto- names.
  */
-export async function fillAgents({ byDirector = false } = {}) {
+export async function fillAgents({ byDirector = false, autonomous = false } = {}) {
   const mode = effectiveMode();
-  if (!mode.autoLaunch) {
+  // 2.30o: away mode (or the game-dev loop asking for it) means the studio starts agents on its own.
+  if (!mode.autoLaunch && !autonomous) {
     if (!(byDirector && !mode.chosen)) return { started: [], why: `${mode.label} doesn't start agents on its own` };
   }
   if (readStop()) return { started: [], why: 'the studio is stopped' };

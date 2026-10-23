@@ -222,7 +222,11 @@ export async function supervise(opts, state, now = Date.now()) {
       }
     }
     const preferred = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
-    const custom = process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_CMD`];
+    // 2.30o: when the tools in the budget order carry their own launch commands (STUDIO_TOOL_<TOOL>_CMD), the
+    // order decides (a quota error or spend guard hands over); a role command only applies otherwise.
+    const { toolCmd } = await import('./spend-guard.mjs');
+    const orderCmds = [preferred, ...((await import('./budget.mjs')).readBudget().order || [])].some((t) => toolCmd(t));
+    const custom = orderCmds ? undefined : process.env[`STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_CMD`];
     // Before believing a mark older than 10 minutes, ask the tool once (one tiny call, at most every
     // 10 minutes per tool). Test #2: a wrong mark idled the studio; the provider never said "limit".
     const mark = !custom && !opts.watcher ? quotaMark(preferred) : null;

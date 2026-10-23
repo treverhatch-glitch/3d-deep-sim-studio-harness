@@ -49,8 +49,11 @@ export async function selftest230n({ dir, run, report, tmpRoot }) {
 
   w('godot/zz/project.godot', 'config_version=5\n');
   w('godot/zz/main.gd', 'extends Node\n');
-  w('fake-godot.sh', '#!/bin/sh\necho "Godot Engine v4.7.2.stable"\nif [ "$ZZ_GODOT" = bad ]; then echo "SCRIPT ERROR: Parse Error: Unexpected identifier"; fi\nexit 0\n', 0o755);
-  const genv = { ...base, STUDIO_GODOT: path.join(dir, 'fake-godot.sh') };
+  // 2.30o: a node stand-in (a .cmd wrapper on Windows), not a shell script: Windows can't run a .sh (EFTYPE in the 2.30n CI).
+  w('fake-godot.mjs', "console.log('Godot Engine v4.7.2.stable'); if (process.env.ZZ_GODOT === 'bad') console.log('SCRIPT ERROR: Parse Error: Unexpected identifier'); process.exit(0);\n");
+  if (process.platform === 'win32') w('fake-godot.cmd', `@node "%~dp0fake-godot.mjs" %*\r\n`);
+  else w('fake-godot', `#!/usr/bin/env node\nimport(${JSON.stringify(pathToFileURL(path.join(dir, 'fake-godot.mjs')).href)});\n`, 0o755);
+  const genv = { ...base, STUDIO_GODOT: path.join(dir, process.platform === 'win32' ? 'fake-godot.cmd' : 'fake-godot') };
   const gBad = run(dir, 'node harness/game-gates.mjs --paths godot/zz/main.gd', { ...genv, ZZ_GODOT: 'bad' });
   const gOk = run(dir, 'node harness/game-gates.mjs --paths godot/zz/main.gd', genv);
   const gNot = run(dir, 'node harness/game-gates.mjs --paths web/zz-game/index.html', { ...genv, ZZ_GODOT: 'bad' });
@@ -95,6 +98,17 @@ export async function selftest230n({ dir, run, report, tmpRoot }) {
   const mine = chk();
   report('2.30n: the system done-check wants a spec naming this task, not any spec written meanwhile', /"ok":false/.test(out(other)) && /"ok":true/.test(out(mine)), `${out(other)}${out(mine)}`);
 
+  // 2.30o: finding a process by its working folder needs /proc (Linux). Elsewhere (the 2.30n Windows CI) the
+  // live check rests on claims and recent changes, so test that instead of a live process.
+  if (process.platform !== 'linux') {
+    const lw = path.join(dir, '.lanes', 'zz-live');
+    fs.mkdirSync(lw, { recursive: true });
+    const rmw = (min) => run(dir, `node -e "import('./harness/worktree.mjs').then(m=>console.log(JSON.stringify(m.removeLaneCopy('zz-live',{ifIdle:true}))))"`, { STUDIO_LANE_LIVE_MIN: min });
+    const keptW = rmw('20');
+    const stillW = fs.existsSync(lw);
+    const goneW = rmw('0');
+    report('2.30n: lane cleanup keeps a recently changed copy and removes it once idle (non-Linux: no /proc process check)', /"kept":true/.test(out(keptW)) && stillW && !fs.existsSync(lw), `${out(keptW)}${out(goneW)}`);
+  } else {
   const live = path.join(dir, '.lanes', 'zz-live');
   fs.mkdirSync(live, { recursive: true });
   const p = spawn('sleep', ['30'], { cwd: live, stdio: 'ignore' });
@@ -106,6 +120,7 @@ export async function selftest230n({ dir, run, report, tmpRoot }) {
   await new Promise((r) => setTimeout(r, 200));
   const gone = rm();
   report('2.30n: lane cleanup keeps a copy a live process is working in, and removes it once idle', /"kept":true/.test(out(kept)) && stillThere && !fs.existsSync(live), `${out(kept)}${out(gone)}`);
+  }
 
   // The other half: the lane-root derivation (qa/selftest-230n-lane.mjs).
   const { selftest230nLane } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230n-lane.mjs')).href);
