@@ -6,6 +6,7 @@
  * playtest), studio/divisions.json (switches), studio/memory/failures.md (lessons).
  */
 
+import { limitWatch, describeLimits } from './model-limits.mjs';
 import fs from 'node:fs';
 import { readWaiting } from './handout.mjs';
 import { breakerCards } from './breaker.mjs';
@@ -594,6 +595,14 @@ export function buildHudState() {
         main: { n: b.phase?.open || 1, stage: b.phase?.stage || 'build' },
         open: b.phase?.floors || []
       };
+    })(),
+    // 2.30h: the Director's card. The flow (idle builders, expired claims, refills), model limits as
+    // awareness (never locks), the last CI watch and the design-fidelity score.
+    director: (() => {
+      const rj = (f) => { try { return JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, f), 'utf8')); } catch { return null; } };
+      let limits = [];
+      try { limits = limitWatch().slice(0, 6).map((r) => ({ model: r.model, family: r.family, limits: describeLimits(r.limits), calls24h: r.calls24h, flags: r.flags })); } catch {}
+      return { flow: rj('director-flow.json'), limits, ci: rj('ci-watch.json'), fidelity: rj('fidelity-last.json') };
     })(),
     ccusage: (() => {
       const c = readCcusage();

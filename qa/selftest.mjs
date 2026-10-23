@@ -154,6 +154,12 @@ const SABOTAGE = {
     fs.writeFileSync(path.join(d, 'studio', 'godot-unit.json'), JSON.stringify({ enabled: true, project: 'gtest', tests: 'res://test_gdunit', gdunit: 'v6.2.2', godot: '4.7.2', watch: ['sim'] }));
     return { GODOT_BIN: path.join(d, 'fake-godot'), STUDIO_GODOT_UNIT_ALL: '1' };
   },
+  // 2.30h: a checklist whose required mechanic's probe says it's missing.
+  fidelity: (d) => {
+    fs.writeFileSync(path.join(d, 'studio', 'fidelity.json'), JSON.stringify({ reference: 'Youda Marina', mechanics: [{ id: 'lose-money', says: 'the player can lose money' }] }));
+    fs.mkdirSync(path.join(d, 'qa', 'fidelity'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'qa', 'fidelity', 'lose-money.mjs'), "export default async () => ({ ok: false, why: 'money only goes up' });\n");
+  },
   session: (d) => fs.rmSync(path.join(d, 'studio/CURRENT_TASK.md')),
   // An alias a regex cannot see: only the runtime probe catches it.
   purity: (d) => edit(d, SIM, (s) => s.replace('const drift =', "const M = Math; const k = 'ran' + 'dom'; M[k]();\n  const drift =")),
@@ -200,6 +206,7 @@ const EXPECT = {
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
   'godot-unit': /test_money_drains: expected money to drop/,
+  fidelity: /MISSING lose-money: the player can lose money — money only goes up/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -3150,6 +3157,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   const ss = run(dir, 'node scripts/session-start.mjs', { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-1' });
   report('2.30g: a launched session gets one fixed session-start line, so the kickoff stays first in the cache', ss.stdout.trim() === 'Session start: launched by the studio; your kickoff has your task.', ss.stdout.slice(0, 300));
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// 2.30h: design fidelity, the Director's flow, reasoning-only replies, model limits as awareness, the CI
+// watch, GDScript parse failures and the lock version (qa/selftest-230h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230h } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230h.mjs')).href);
+  await selftest230h({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.

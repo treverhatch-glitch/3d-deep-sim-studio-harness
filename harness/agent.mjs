@@ -39,6 +39,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { escalationFor } from './model-tiers.mjs';
+import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
 import { kickoffParts } from './kickoff.mjs';
 import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
@@ -265,7 +266,9 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   // that's the plan working, not a failure, so no failover, and a fresh session continues the task.
   const refresh = readFlag(agent);
   const capped = !trouble && (/"subtype"\s*:\s*"error_max_turns"/.test(String(log).slice(-20000)) || Boolean(refresh?.endedBy));
-  const bad = !capped && (code !== 0 || Boolean(trouble));
+  // 2.30h (3): an empty final answer after spending output tokens is a failed hand-off, not a finish.
+  const reasoningOnly = !capped && !trouble && code === 0 && sessionReasoningOnly(log);
+  const bad = !capped && (code !== 0 || Boolean(trouble) || reasoningOnly);
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
@@ -290,9 +293,10 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     const note = capped
       ? `${agent} (${tool}, ${model}) refreshed: ${refresh?.endedBy || `it reached the ${sessionLimits().ceilingTurns}-turn ceiling`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} A fresh session continues from this hand-back${s0.now ? `; it last said: "${s0.now}"` : ''}.`
       : bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, note, { force: true });
+    if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
     if (!capped) parkIfLooping(id);
   }
@@ -751,7 +755,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (!c.ok) return { ok: false, message: `Not started: ${c.why}.` };
   const spend = spentToday();
   if (spend.over) return { ok: false, message: `Not started: the daily token cap is spent (${spend.used} of ${spend.cap}).` };
-  const tool = opts.tool || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
+  let tool = opts.tool || process.env[`STUDIO_${roleKey(role)}_TOOL`] || process.env.STUDIO_AGENT_TOOL || 'claude';
   let model = opts.model || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown';
   // 2.30d (plan #3): a task that came back without being done starts one model tier up.
   if (opts.task && !opts.model) {
@@ -759,6 +763,17 @@ export function startAgent(opts, { detach = false } = {}) {
     if (esc && esc.tier !== esc.from) {
       if (esc.applied) model = esc.model;
       emitEvent({ type: esc.applied ? 'model.escalated' : 'model.escalation_suggested', agent: opts.by || 'producer', task: opts.task, msg: `${opts.task} was handed back ${esc.failed} time${esc.failed === 1 ? '' : 's'} without being done: ${esc.applied ? `starting on ${esc.model}` : `suggest a ${esc.tier}-tier model (set STUDIO_TIER_${esc.tier.toUpperCase()}_MODEL)`} instead of ${esc.fromModel || 'the last model'} (${esc.from})`, meta: esc });
+    }
+  }
+  // 2.30h (3): the last hand-off was reasoning only: the Director's reroute moves the task to another family.
+  if (opts.task && !opts.model) {
+    const rr = rerouteFor(opts.task, readRecentEvents(5000));
+    if (rr) {
+      if (rr.applied) {
+        model = rr.model;
+        if (rr.tool && !opts.tool) tool = rr.tool;
+      }
+      emitEvent({ type: rr.applied ? 'model.rerouted' : 'model.reroute_suggested', agent: 'director', to: 'producer', task: opts.task, msg: `${opts.task}: ${rr.fromModel} (${rr.fromFamily}) replied with reasoning only; ${rr.applied ? `rerouted to ${rr.model}${rr.tool ? ` on ${rr.tool}` : ''}` : 'route it to another model family (set STUDIO_REROUTE_MODELS, e.g. codex:gpt-5)'}`, meta: rr });
     }
   }
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };

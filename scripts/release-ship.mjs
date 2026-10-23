@@ -78,13 +78,8 @@ if (!step(`version ${version} is new`, !shipped.split('\n').some((s) => s.starts
 // 2. Version and changelog.
 pkg.version = version;
 fs.writeFileSync(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`);
-const lockFile = path.join(root, 'package-lock.json');
-if (fs.existsSync(lockFile)) {
-  const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
-  lock.version = version;
-  if (lock.packages?.['']) lock.packages[''].version = version;
-  fs.writeFileSync(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
-}
+// 2.30h: one helper sets the lock's version (scripts/lock-version.mjs), the same one the release check uses.
+(await import('./lock-version.mjs')).syncLockVersion(root, version);
 const clFile = path.join(root, 'CHANGELOG.md');
 let cl = fs.readFileSync(clFile, 'utf8');
 if (!cl.includes(`## [${version}]`)) {
@@ -177,47 +172,16 @@ if (has('no-ci') || !ghOk) {
   step('CI on main', true, has('no-ci') ? '--no-ci' : 'gh CLI not found: CI not checked', 'not run');
   finish(0);
 }
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const runs = () => {
-  const r = sh('gh', ['run', 'list', '--commit', report.sha, '--json', 'databaseId,name,status,conclusion,workflowName', '--limit', '20']);
-  try {
-    return JSON.parse(r.stdout).filter((x) => x.workflowName === 'ci' || x.name === 'ci');
-  } catch {
-    return [];
-  }
-};
-const waitFor = (min = 60) => {
-  const until = Date.now() + min * 60000;
-  let r = [];
-  while (Date.now() < until) {
-    r = runs();
-    if (r.length && r.every((x) => x.status === 'completed')) return r;
-    sleep(30000);
-  }
-  return r;
-};
-let r = waitFor();
-const jobs = (id) => {
-  const j = sh('gh', ['run', 'view', String(id), '--json', 'jobs']);
-  try {
-    return JSON.parse(j.stdout).jobs.map((x) => ({ name: x.name, conclusion: x.conclusion }));
-  } catch {
-    return [];
-  }
-};
-const green = (rs) => rs.length && rs.every((x) => x.conclusion === 'success');
-report.ci = { first: r.map((x) => ({ id: x.databaseId, conclusion: x.conclusion, jobs: jobs(x.databaseId) })) };
-if (!r.length || r.some((x) => x.status !== 'completed')) {
-  step('CI on main', false, 'no finished CI run after 60 min');
+// 2.30h (5): the CI watch (harness/ci-watch.mjs) waits, re-runs failed jobs once, and alerts when still red.
+const { watchCi } = await import('../harness/ci-watch.mjs');
+const w = watchCi({ sha: report.sha, timeoutMin: 60 });
+report.ci = { first: w.first, rerun: w.rerun, state: w.state };
+if (w.state === 'timed out' || !w.first) {
+  step('CI on main', false, 'no finished CI run after 60 min (ci.failed raised)');
   finish(1);
 }
-if (!green(r)) {
-  const bad = report.ci.first.flatMap((x) => x.jobs.filter((j) => j.conclusion !== 'success').map((j) => j.name));
-  step('CI on main, first run', false, `failed: ${bad.join(', ')}; re-running the failed jobs once`);
-  for (const x of r.filter((y) => y.conclusion !== 'success')) sh('gh', ['run', 'rerun', String(x.databaseId), '--failed']);
-  sleep(60000);
-  r = waitFor();
-  report.ci.rerun = r.map((x) => ({ id: x.databaseId, conclusion: x.conclusion, jobs: jobs(x.databaseId) }));
-  if (!step('CI on main, after one re-run', green(r), green(r) ? 'green on the re-run (a flaky check; see the first run)' : 'still red')) finish(1);
-} else step('CI on main', true, `${report.ci.first.reduce((n, x) => n + x.jobs.length, 0)} jobs green`);
+if (w.rerun) {
+  step('CI on main, first run', false, `failed: ${w.first.flatMap((x) => x.jobs.filter((j) => j.conclusion !== 'success').map((j) => j.name)).join(', ')}; re-ran the failed jobs once`);
+  if (!step('CI on main, after one re-run', w.state !== 'red', w.state !== 'red' ? 'green on the re-run (a flaky check; see the first run)' : `still red: ${w.failing.join(', ')} (ci.failed raised)`)) finish(1);
+} else step('CI on main', true, `${w.first.reduce((n, x) => n + x.jobs.length, 0)} jobs green`);
 finish(0);

@@ -18,7 +18,7 @@ import { STUDIO_STATE_DIR, emitEvent, readRecentEvents, actor } from './event.mj
 const ALERTS_FILE = path.join(STUDIO_STATE_DIR, 'alerts.json');
 const ALERTS_CURSOR_FILE = path.join(STUDIO_STATE_DIR, 'alerts-cursor.json');
 
-export const ALERT_KINDS = ['studio.stopped', 'watchdog.action', 'task.pending_review', 'away.summary_ready', 'task.parked', 'budget.stop'];
+export const ALERT_KINDS = ['studio.stopped', 'watchdog.action', 'task.pending_review', 'away.summary_ready', 'task.parked', 'budget.stop', 'director.flow.starved', 'ci.failed'];
 
 export function readAlerts() {
   try {

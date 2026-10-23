@@ -16,6 +16,7 @@
     { "id": "hub-smoke", "command": "node qa/hub-smoke.mjs", "required": true, "deep": true, "cache": false },
     { "id": "assets", "command": "node scripts/check-assets.mjs", "required": true },
     { "id": "docs", "command": "node scripts/check-docs.mjs", "required": true },
+    { "id": "fidelity", "command": "node harness/fidelity.mjs", "required": true, "description": "2.30h: scores the build against the reference game's mechanics one by one (studio/fidelity.json, a probe per mechanic); a missing required mechanic fails and the Director's flow pass sends it back. Mechanics only, never code or art. No checklist: passes." },
     { "id": "godot-unit", "command": "node harness/godot-unit.mjs --changed", "required": true, "lite": true },
     { "id": "secrets", "command": "node scripts/secret-scan.mjs", "required": true, "lite": true },
     { "id": "content-schema", "command": "node scripts/check-content-schema.mjs", "required": false, "lite": true },

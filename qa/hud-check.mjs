@@ -108,6 +108,10 @@ for (let i = 0; i < 2 && trip; i++) {
 sh('harness/overnight.mjs', '--since', '8h');
 sh('harness/ask.mjs', 'Which floor first?', '--options', 'Cubicle,Food court', '--default', 'Cubicle', '--timeout', '4h', '--why', 'it teaches the controls', '--by', 'prod-1');
 fs.writeFileSync(path.join(dir, 'studio/floors.json'), JSON.stringify({ maxParallel: 2 }));
+// 2.30h: the Director's card reads the flow pass and the CI watch.
+fs.mkdirSync(path.join(dir, '.studio'), { recursive: true });
+fs.writeFileSync(path.join(dir, '.studio/director-flow.json'), JSON.stringify({ at: new Date().toISOString(), state: 'starved', starved: true, idleFor: 12, builders: { running: 0, slots: 3, idle: 3, agents: [] }, agents: { running: 0, max: 4 }, ready: { total: 5, byRole: { builder: 5 }, held: 1 }, expired: [], actions: ['handed back T-1 (claim ran out)'], launcherWhy: 'builder: no tool set to start it' }));
+fs.writeFileSync(path.join(dir, '.studio/ci-watch.json'), JSON.stringify({ sha: 'abcdef1234', state: 'red', failing: ['ci/windows'] }));
 const bFloors = JSON.parse(fs.readFileSync(path.join(dir, "studio/bible/bible.json"), "utf8"));
 bFloors.phase.floors = [{ n: 2, stage: 'build', by: 'hatch', openedAt: new Date().toISOString() }];
 fs.writeFileSync(path.join(dir, 'studio/bible/bible.json'), JSON.stringify(bFloors));
@@ -175,6 +179,7 @@ try {
       const wide = await page.evaluate((s) => [...document.querySelectorAll(`#${s} *`)].filter((e) => !e.closest('.ticker') && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > innerWidth + 1).slice(0, 3).map((e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ''}`), skin);
       check(`${size} ${skin}: loads without errors`, errs.length === 0, errs.slice(0, 3).join(' | '));
       check(`${size} ${skin}: nothing runs off the side`, wide.length === 0, wide.join(', '));
+      if (skin === 'ops') check(`${size} ops: the Director card shows the flow (starved, builders 0/3) and the red CI job (2.30h)`, await until(async () => { const t = await page.locator('#o-director').textContent(); return /starved/.test(t) && /builders 0\/3/.test(t) && /ci\/windows/.test(t); }, 4000));
       if (skin === 'ops') check(`${size} ops: the Floors card shows the main phase and Floor 2 (2.30f)`, await until(async () => /Main Phase 1/.test(await page.locator('#o-floors').textContent()) && /Floor 2/.test(await page.locator('#o-floors').textContent()), 4000));
       if (shotsAt) {
         fs.mkdirSync(shotsAt, { recursive: true });

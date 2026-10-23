@@ -6,6 +6,7 @@
  *   npm run director -- review [--phase 1]   start a dated review for the Director agent to fill in
  *   npm run director -- drift [--json]       the free drift report (a script, no tokens)
  *   npm run director -- brief                rewrite the Director's brief only
+ *   npm run director -- flow [--json]        the flow pass: idle builders, expired claims, refill (2.30h)
  *
  * A ping means: a "Director review" task is queued (or the open one gets the new reason), the
  * Director's brief is written to .studio/briefs/director.md (the docs to read first, the open phase,
@@ -31,6 +32,9 @@ import { readBible, checkBible, latestReview, crossedLayersIn, readIdeas, LAYERS
 import { spendToday } from './route.mjs';
 import { effectiveMode } from './mode.mjs';
 import { startAgent } from './agent.mjs';
+import { flowBrief, flowPass } from './director-flow.mjs';
+import { limitsBrief } from './model-limits.mjs';
+import { readLastFidelity } from './fidelity.mjs';
 
 const BRIEF = path.join(STUDIO_STATE_DIR, 'briefs', 'director.md');
 const PHASE_NAMES = { 1: 'early game', 2: 'mid game', 3: 'endgame' };
@@ -85,6 +89,11 @@ export function writeDirectorBrief(reasons = []) {
   }
   L.push('## Finished since your last review', ...(finished.length ? finished.map((e) => `- ${e.task}: ${e.msg}`) : ['- Nothing.']), '');
   L.push('## Drift report (free, from scripts)', ...(drift.items.length ? drift.items.map((i) => `- ${i.msg}`) : ['- Nothing drifting.']), '');
+  // 2.30h: the Director owns the flow (idle builders, expired claims), knows each model's limits, and sees the fidelity score.
+  L.push('## The flow (you keep the builders working)', ...flowBrief(), '');
+  L.push('## Models in use and their limits', ...limitsBrief(), '');
+  const fid = readLastFidelity();
+  if (fid?.configured) L.push('## Design fidelity', `- ${fid.passed}/${fid.scored} mechanics of ${fid.reference} present${fid.missing.length ? `; missing: ${fid.missing.join(', ')}` : ''}${fid.unscored.length ? `; no probe yet: ${fid.unscored.join(', ')}` : ''}. Missing ones go back to the builders as tasks (tagged [fidelity:<id>]).`, '');
   L.push('## 2. Answer', '`npm run director -- review` starts a dated file in `studio/bible/reviews/`. Fill in:', '```', `Phase: ${b?.phase?.open || 1}`, 'Verdict: on course | drifting | off course | phase-ready', 'Checked: pillar:<name>, layer:<id>, …', '', '## Findings', '## Stop', '## Next', '- suggested tasks, each with --phase and --serves', '```');
   L.push('', 'You may edit the Bible through `npm run bible` and `npm run idea -- decide`. You may not change a signed pillar or bring back a crossed-out layer; ask the person. Talk to the Producer with `node harness/event.mjs --type agent.ask --agent <you> --to producer --msg "…"` until it has what it needs, then finish your task.');
   fs.mkdirSync(path.dirname(BRIEF), { recursive: true });
@@ -184,6 +193,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     else console.log(d.items.length ? d.items.map((i) => `- ${i.msg}`).join('\n') : 'Nothing drifting.');
     process.exit(0);
   }
-  console.log('Usage: npm run director -- ping --reason "…" | review [--phase n] | drift [--json] | brief');
+  if (cmd === 'flow') {
+    const r = await flowPass({ fill: !argv.includes('--no-fill') });
+    console.log(argv.includes('--json') ? JSON.stringify(r, null, 2) : flowBrief(r).join('\n'));
+    process.exit(0);
+  }
+  console.log('Usage: npm run director -- ping --reason "…" | review [--phase n] | drift [--json] | brief | flow [--json] [--no-fill]');
   process.exit(1);
 }

@@ -4,6 +4,22 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-h] — 2026-10-23
+2.30h: the Director keeps the builders working and scores the build against the reference game's mechanics; reasoning-only replies count as failed hand-offs; model limits are shown to the Director, never enforced; CI is watched after a push; a GDScript that doesn't parse fails the Godot gates. Details in docs/DIRECTOR-FLOW.md.
+### Added
+- **Design-fidelity gate (#1).** `npm run fidelity` scores the build against the game's own checklist of the reference game's mechanics (studio/fidelity.json, a probe per mechanic in qa/fidelity/), one by one. A missing required mechanic, or a score under `minScore`, fails the gate; mechanics without a probe show as "not scored". `npm run fidelity -- send-back` (and the Director's flow pass) queues one `[fidelity:<id>]` builder task per missing mechanic, once. Mechanics only: an entry that asks to copy the reference's code or art is refused. No checklist: passes with a note. A required gate (it costs nothing without a checklist).
+- **The Director keeps the builders working (#2).** `npm run director -- flow`, and a pass every minute in the hub (STUDIO_FLOW_INTERVAL) and in the supervisor's loop. It hands back claims that ran out, counts idle builder slots against ready work across the whole board, refills them through the launcher (same caps, lanes and pace), sends back missing mechanics, and raises `director.flow.starved` (a phone-alert kind) after STUDIO_FLOW_IDLE_MIN (10) idle minutes, with the launcher's reasons. The War Room's new Director card (Ops) and the Director's brief show the flow.
+- **Reasoning-only replies are failed hand-offs (#3).** In the router, a reply with reasoning and no answer is `route.reasoning_only`: the attempt fails (no cooldown) and that model family is passed over for the rest of the call. A launched session that ends with an empty result after spending output tokens is handed back as failed (`agent.reasoning_only`), and its next session is rerouted to another family (`STUDIO_REROUTE_MODELS`, or suggested to the Director when none is set).
+- **Model limits as Director awareness (#4).** `npm run models:limits`: each model's context size and rate limits (built-in approximate figures, overridden by studio/model-limits.json), use in the last 24 h, and flags (near the day's cap, a prompt near the context size, 429s, reasoning-only replies), in the Director's brief and the Director card. Nothing reads it to block a model; the Director decides routing.
+- **CI watch (#5).** `npm run ci:watch [-- --sha <c>] [--detach]` waits for CI on a commit, re-runs failed jobs once, and when still red raises `ci.failed` (Director card, phone alert), runs `STUDIO_CI_NOTIFY_CMD` (a notification hook) and records .studio/ci-watch.json. `npm run release -- <version>` uses it for its CI step.
+- **GDScript parse check (#7).** `harness/gdscript-parse.mjs` (`npm run gdscript:parse -- <project>`) parses every .gd on its own with `godot --check-only`. The engine gate, the Godot template check (CI's engine-godot job) and the godot-unit gate fail, naming the file and Godot's error, when one doesn't parse, even when the engine's run exited 0.
+### Fixed
+- `npm run release` sets package-lock.json's version itself outside CI (scripts/lock-version.mjs, shared with the release ship), so a bumped package.json can't ship with a lagging lock (the 2.30d miss). In CI it still only checks.
+### Self-test
+20 more checks (qa/selftest-230h.mjs), plus a sabotage that proves the fidelity gate fails on a missing mechanic. The HUD check adds the Director card (a starved flow and a red CI job).
+
+---
+
 ## [2.30.0-g] — 2026-10-23
 2.30g, token savers: every session of a role starts with the same bytes, long output is trimmed before an agent reads it, know-how loads only when a task needs it, and a Godot unit gate. Details in docs/TOKEN-SAVERS.md.
 ### Added

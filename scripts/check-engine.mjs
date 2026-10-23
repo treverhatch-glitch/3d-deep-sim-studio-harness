@@ -16,6 +16,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { readTrack, ENGINES, engineBin, engineCommand, logEngine } from '../harness/engine.mjs';
+import { parseCheck, formatBroken } from '../harness/gdscript-parse.mjs';
 
 const t = readTrack();
 if (!t) {
@@ -38,8 +39,20 @@ const logFile = path.join('qa', 'reports', `engine_${Date.now()}.log`);
 fs.writeFileSync(path.join(REPO_ROOT, logFile), out);
 // Godot's SCRIPT ERROR, Unity's unhandled exceptions, Unreal's script errors: any one fails the gate.
 const scriptErrors = (out.match(/SCRIPT ERROR|Unhandled exception|LogScript: Error|Parse Error/gi) || []).length;
-const ok = r.status === 0 && scriptErrors === 0;
+// 2.30h (7): a Godot run only loads the scripts its smoke run touches; every .gd must parse on its own too.
+let parse = { checked: 0, broken: [] };
+// The parse check needs Godot itself (STUDIO_GODOT or godot on the PATH), which may differ from the gate's
+// program (a wrapper script). Without one it is skipped with a note; the gate's own run still counts.
+const godot = t.engine === 'godot' ? engineBin('godot') : null;
+const haveGodot = godot && (fs.existsSync(godot) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [godot], { encoding: 'utf8' }).status === 0);
+if (godot && !haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'project.godot'))) console.log(`[engine] note: GDScript parse check skipped: Godot not found (set STUDIO_GODOT)`);
+if (haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'project.godot'))) {
+  parse = parseCheck(path.join(REPO_ROOT, t.folder), { godot });
+  if (parse.error) parse.broken.push({ file: '(godot)', error: parse.error });
+  if (parse.broken.length) console.error(`[engine] ${parse.broken.length} GDScript file(s) don't parse:\n${formatBroken(parse)}`);
+}
+const ok = r.status === 0 && scriptErrors === 0 && parse.broken.length === 0;
 emitEvent({ type: ok ? 'qa.engine.pass' : 'qa.engine.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', track: t.track, msg: `${t.label} gate ${ok ? 'passed' : 'failed'} in ${Math.round((Date.now() - start) / 1000)} s${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}` });
 logEngine(`gate ${ok ? 'PASS' : 'FAIL'}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}, log ${logFile}`, process.env.STUDIO_LOCK_OWNER || 'qa');
-console[ok ? 'log' : 'error'](`[engine] ${ok ? 'PASS' : 'FAIL'} ${t.label}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}. Log ${logFile}`);
+console[ok ? 'log' : 'error'](`[engine] ${ok ? 'PASS' : 'FAIL'} ${t.label}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}${parse.checked ? `, ${parse.checked - parse.broken.length}/${parse.checked} GDScript file(s) parse` : ''}. Log ${logFile}`);
 process.exit(ok ? 0 : 1);

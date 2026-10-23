@@ -18,6 +18,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isReasoningOnly } from './reasoning-only.mjs';
+import { modelFamily } from './families.mjs';
 import { PROVIDERS, COOLDOWN_DEFAULTS, getChainForRole } from './models.config.mjs';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR, REPO_ROOT } from './event.mjs';
 import { dailyCap } from './budget.mjs';
@@ -212,6 +214,7 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
         : '';
       return {
         content,
+        reasoning: Array.isArray(data.content) ? data.content.map((c) => c.thinking || '').join('') : '',
         model: data.model || provider.model,
         tokensIn: data.usage?.input_tokens || 0,
         tokensOut: data.usage?.output_tokens || 0,
@@ -249,9 +252,12 @@ async function callChannel(channel, { messages, temperature = 0.2, maxTokens = 2
     }
 
     const data = JSON.parse(bodyText);
-    const choice = data.choices?.[0]?.message?.content ?? '';
+    const msg = data.choices?.[0]?.message || {};
+    const choice = msg.content ?? '';
     return {
       content: choice,
+      // 2.30h (3): what the model reasoned, kept apart so a reply with only this counts as failed.
+      reasoning: msg.reasoning_content || msg.reasoning || '',
       model: data.model || provider.model,
       tokensIn: data.usage?.prompt_tokens || 0,
       tokensOut: data.usage?.completion_tokens || 0,
@@ -342,6 +348,8 @@ export async function routeChatCompletion({
   }
   const chainIds = getChainForRole(role, customChain);
   const attempts = [];
+  // 2.30h (3): families that answered with reasoning only in this call are passed over for the rest of it.
+  const skipFamilies = new Set();
 
   for (const providerId of chainIds) {
     const def = PROVIDERS[providerId];
@@ -354,6 +362,10 @@ export async function routeChatCompletion({
     }
 
     for (const channel of channels) {
+      if (skipFamilies.has(modelFamily(def.model))) {
+        attempts.push({ channelKey: channel.channelKey, providerId: def.id, status: 'skipped_family', reason: `${modelFamily(def.model)} replied with reasoning only in this call` });
+        continue;
+      }
       const cd = isCoolingDown(channel.channelKey);
       if (cd) {
         attempts.push({
@@ -396,6 +408,15 @@ export async function routeChatCompletion({
 
         const response = await callChannel(channel, { messages, temperature, maxTokens });
         const latencyMs = Date.now() - startMs;
+        if (isReasoningOnly(response)) {
+          // A failed hand-off, not a success: no cooldown (the model works), but this call moves to another family.
+          const fam = modelFamily(response.model || def.model);
+          skipFamilies.add(fam);
+          skipFamilies.add(modelFamily(def.model));
+          attempts.push({ channelKey: channel.channelKey, providerId: def.id, status: 'reasoning_only', latencyMs, tokensOut: response.tokensOut });
+          emitEvent({ type: 'route.reasoning_only', agent: role, provider: def.id, model: response.model || def.model, task, status: 'warn', tokensIn: response.tokensIn, tokensOut: response.tokensOut, latencyMs, msg: `${response.model || def.model} replied with reasoning only (${response.tokensOut || 0} output tokens, no answer): failed hand-off, rerouted to another model family`, meta: { family: fam } });
+          continue;
+        }
 
         emitEvent({
           type: 'route.success',

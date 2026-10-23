@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { REPO_ROOT } from '../harness/event.mjs';
 import { loadCartridge, runScenario } from '../harness/cartridge.mjs';
+import { parseCheck } from '../harness/gdscript-parse.mjs';
 
 const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot']).status === 0 ? 'godot' : null);
 if (!godot) {
@@ -33,6 +34,10 @@ for (const s of seeds) {
 }
 const gate = g(['--script', 'res://tools/gate.gd']);
 if (gate.status !== 0 || /SCRIPT ERROR/.test(gate.stdout + gate.stderr)) problems.push(`the template's gate failed (exit ${gate.status}): ${(gate.stdout + gate.stderr).trim().split('\n').slice(-3).join(' ')}`);
+// 2.30h (7): every template script parses on its own, not just the ones the gate loads.
+const parsed = parseCheck(tpl, { godot });
+if (parsed.error) problems.push(parsed.error);
+for (const b of parsed.broken) problems.push(`${b.file} doesn't parse: ${b.error}`);
 for (const p of problems) console.error(`[engine-template] FAIL ${p}`);
 if (problems.length) process.exit(1);
-console.log(`[engine-template] PASS the Godot port matches the web game on ${seeds.length} seeds (outcome, tick, credits), and its gate passes`);
+console.log(`[engine-template] PASS the Godot port matches the web game on ${seeds.length} seeds (outcome, tick, credits), and its gate passes; ${parsed.checked} GDScript file(s) parse`);

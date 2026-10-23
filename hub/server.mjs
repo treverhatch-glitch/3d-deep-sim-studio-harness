@@ -1425,6 +1425,9 @@ export function startHubCli() {
     };
     setTimeout(pass, 5000).unref();
     setInterval(pass, WATCH_EVERY * 1000).unref();
+    // 2.30h (2): the Director's flow pass, every minute: expired claims back, idle builder slots refilled.
+    const FLOW_EVERY = Number(process.env.STUDIO_FLOW_INTERVAL ?? 60);
+    if (FLOW_EVERY > 0) setInterval(() => import('../harness/director-flow.mjs').then(({ flowPass }) => flowPass({ throttleMs: (FLOW_EVERY - 5) * 1000 })).catch((err) => console.error(`[flow] ${err.message}`)), FLOW_EVERY * 1000).unref();
   }
   return server;
 }

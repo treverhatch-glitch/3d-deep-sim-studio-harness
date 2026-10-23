@@ -322,6 +322,8 @@ async function main(argv) {
     state.sessions += r.started.length;
     state.last = { at: new Date().toISOString(), started: r.started, why: r.why.slice(0, 6) };
     if (r.started.length) emitEvent({ type: 'supervisor.started', agent: 'supervisor', to: 'producer', msg: `Started ${r.started.join(', ')}` });
+    // 2.30h (2): the Director's flow pass sees what the supervisor couldn't start, and why (no model, no tokens).
+    await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     save();
     if (r.stop) finish(r.why[0]);
   };

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { parseCheck, formatBroken } from './gdscript-parse.mjs';
 
 const CONFIG_FILE = path.join(REPO_ROOT, 'studio', 'godot-unit.json');
 const LAST_RUN_FILE = path.join(STUDIO_STATE_DIR, 'godot-unit-last.json');
@@ -97,6 +98,13 @@ export function runGodotUnit({ changedOnly = false } = {}) {
   }
 
   const projectPath = path.join(REPO_ROOT, cfg.project);
+  // 2.30h (7): a script that doesn't parse fails the gate by name, before gdUnit4 runs (it may never load it).
+  const parsed = parseCheck(projectPath, { godot: godotBin });
+  if (parsed.broken.length) {
+    console.error(`[godot-unit] FAIL ${parsed.broken.length} GDScript file(s) don't parse:\n${formatBroken(parsed)}`);
+    emitEvent({ type: 'gate.godot-unit', ok: false, meta: { parse: parsed.broken } });
+    process.exit(1);
+  }
   const runner = runnerFor(projectPath);
   const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
 

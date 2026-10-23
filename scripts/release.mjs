@@ -77,7 +77,15 @@ let lockVersion = null;
 try {
   lockVersion = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')).version;
 } catch {}
-step(`package-lock.json says ${version} too`, lockVersion === null || lockVersion === version, `package-lock.json has ${lockVersion}; set its two "version" fields to ${version}`);
+// 2.30h: outside CI the check sets the lock's version itself (the 2.30d miss: package.json bumped, lock not).
+// In CI it only checks, so a commit with a lagging lock still fails there.
+if (lockVersion !== null && lockVersion !== version && !process.env.CI && !process.argv.includes('--check-only')) {
+  const { syncLockVersion } = await import('./lock-version.mjs');
+  syncLockVersion(root, version);
+  console.log(`[release] set package-lock.json's version from ${lockVersion} to ${version} (commit it)`);
+  lockVersion = version;
+}
+step(`package-lock.json says ${version} too`, lockVersion === null || lockVersion === version, `package-lock.json has ${lockVersion}; set its two "version" fields to ${version} (npm run release sets them itself outside CI)`);
 
 const failed = steps.filter((s) => !s.ok);
 console.log(`\n[release] ${steps.length - failed.length}/${steps.length} steps passed`);

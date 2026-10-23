@@ -1377,6 +1377,26 @@
         f.open.map(fl => `<div><b>Floor ${fl.n}</b>: ${esc(fl.stage)} <span class="note">(by ${esc(fl.by)})</span></div>`).join('');
       if (fbox.dataset.sig !== html) { fbox.dataset.sig = html; fbox.innerHTML = html; }
     }
+    // 2.30h: the Director's card: the flow (idle builders, expired claims, refills), CI, design fidelity, model limits.
+    let dbox = $('o-director');
+    if (!dbox) {
+      dbox = document.createElement('div');
+      dbox.id = 'o-director';
+      dbox.className = 'card';
+      fbox.parentNode.insertBefore(dbox, fbox.nextSibling);
+    }
+    {
+      const d = s.director || {};
+      const fl = d.flow;
+      const ci = d.ci;
+      const fi = d.fidelity;
+      const html = '<h3>Director: the flow</h3>' +
+        (fl ? `<div><b>${esc(fl.state)}</b>${fl.starved ? ` for ${fl.idleFor} min` : ''} · builders ${fl.builders.running}/${fl.builders.slots} · ${fl.ready.total} ready${fl.ready.held ? `, ${fl.ready.held} held` : ''}</div>${fl.actions?.length ? `<p class="note">${esc(fl.actions.join('; '))}</p>` : ''}${fl.launcherWhy && fl.starved ? `<p class="note">Why nothing started: ${esc(short(fl.launcherWhy, 160))}</p>` : ''}` : '<p class="note">No flow pass yet.</p>') +
+        (ci ? `<div>CI <code>${esc(String(ci.sha || '').slice(0, 7))}</code>: <b class="${/red|timed/.test(ci.state) ? 'you' : ''}">${esc(ci.state)}</b>${ci.failing?.length ? ` <span class="note">(${esc(ci.failing.join(', '))})</span>` : ''}</div>` : '') +
+        (fi?.configured ? `<div>Design fidelity vs ${esc(fi.reference)}: <b>${fi.passed}/${fi.scored}</b>${fi.missing?.length ? ` <span class="note">missing: ${esc(fi.missing.join(', '))}</span>` : ''}</div>` : '') +
+        ((d.limits || []).length ? `<details><summary>Model limits (awareness, nothing is blocked)</summary>${d.limits.map((m) => `<div><code>${esc(m.model)}</code> ${esc(m.limits)} · ${m.calls24h} call(s)/24 h${m.flags.length ? ` <b class="you">${esc(m.flags.join('; '))}</b>` : ''}</div>`).join('')}</details>` : '');
+      if (dbox.dataset.sig !== html) { dbox.dataset.sig = html; dbox.innerHTML = html; }
+    }
     const dis = ro ? 'disabled title="Needs the HUB token"' : '';
     const ph = s.phases || [];
     const open = ph.filter((p) => p.open).map((p) => p.n).pop() || 0;
