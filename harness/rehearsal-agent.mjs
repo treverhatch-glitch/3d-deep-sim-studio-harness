@@ -34,7 +34,7 @@ fs.writeFileSync(path.join(docDir, `${agent}.md`), `# Rehearsal work by ${agent}
 console.log(JSON.stringify({ usage: { input_tokens: 0, output_tokens: 0 } }));
 
 // It marks the task as done.
-const res = sh('harness/task.mjs', 'done', task, '--agent', agent, '--force', '--reason', 'rehearsal', '--accepted-by', 'rehearsal');
+const res = sh('harness/task.mjs', 'done', task, '--agent', agent, '--force', '--reason', 'rehearsal run (no model)', '--accepted-by', 'rehearsal');
 if (res.status !== 0) {
   console.error(`[rehearsal-agent] Failed to mark task ${task} as done.`);
   console.error(res.stderr);

@@ -33,8 +33,14 @@ const LITE = all.some((g) => 'lite' in g) ? new Set(all.filter((g) => g.lite).ma
 const { readMode, scopeOf } = await import('../harness/mode.mjs');
 const scope = argv.includes('--full') || deep ? 'full' : scopeOf(readMode());
 const skipped = [];
+// 2.30n: with a studio game that isn't a cartridge, the cartridge gates (example-sim's goldens, playtest,
+// regressions...) say nothing about it; the "game" gate runs the game's own checks instead.
+const { studioGame, declaredGates } = await import('../harness/game-gates.mjs');
+const sg = await studioGame();
+const gameOwnsGates = Boolean(sg && declaredGates(sg).length);
 const gates = all.filter((g) => {
   if (only) return only.has(g.id);
+  if (gameOwnsGates && g.cartridge) return skipped.push(`${g.id} (cartridge; ${sg.name} runs its own)`), false;
   if (argv.includes('--required-only') && g.required === false) return false;
   if (isFastTier && !LITE.has(g.id)) return false;
   if (!deep && DEEP.has(g.id)) return skipped.push(`${g.id} (deep)`), false;
@@ -44,7 +50,7 @@ const gates = all.filter((g) => {
 
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
-console.log(`[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
+console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); the cartridge gates are skipped` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
 const rows = [];
 let cachedCount = 0;

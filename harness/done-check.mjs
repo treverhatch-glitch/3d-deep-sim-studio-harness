@@ -422,11 +422,13 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Note gives a verdict', notes.some((t) => /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/i.test(t)), 'the review note has no verdict (approve, request changes, or reject)');
   }
   if (type === 'system') {
-    const specs = newestSince(filesUnder('studio/bible/systems', (n) => n.endsWith('.md') && n !== 'README.md'), since);
-    check('Spec written in studio/bible/systems/ since the task started', specs.length, 'no spec in studio/bible/systems/ since this task started (what it does, its phase and layer, its rules and invariants)');
+    // 2.30n: the spec must be this task's (its ID in the file name or text), not any spec written meanwhile.
+    const idRe = new RegExp(`\\b${task.id}\\b`);
+    const specs = newestSince(filesUnder('studio/bible/systems', (n) => n.endsWith('.md') && n !== 'README.md'), since).filter((f) => idRe.test(path.basename(f)) || idRe.test(fs.readFileSync(abs(f), 'utf8')));
+    check('Spec for this task written in studio/bible/systems/ since it started', specs.length, `no spec in studio/bible/systems/ naming ${task.id} since this task started (what it does, its phase and layer, its rules and invariants; put ${task.id} in its name or text)`);
     check('Spec ends with a hand-off for the next agent', specs.some((f) => /^##\s*For the next agent/im.test(fs.readFileSync(abs(f), 'utf8')) && words(f) >= 80), 'the spec has no "## For the next agent" section, or is under 80 words');
     const ch = taskChanges(task.id, since);
-    check('A scenario for it in the cartridge\'s qa.mjs', ch.files.some((f) => /^cartridges\/[^/]+\/qa\.mjs$/.test(f)), 'qa.mjs wasn\'t changed: add a scenario that exercises the system');
+    check('A scenario for it in the game\'s qa.mjs', ch.files.some((f) => /^cartridges\/[^/]+\/qa\.mjs$/.test(f) || /^(web|game)\/[^/]+\/sim\/qa\.mjs$/.test(f)), 'qa.mjs wasn\'t changed: add a scenario that exercises the system (cartridges/<game>/qa.mjs, or web/<game>/sim/qa.mjs)');
     check('Goldens updated with it', ch.files.some((f) => f.startsWith('qa/golden/')), 'no golden changed: the system changes the game, so regenerate (npm run golden -- --update) and commit the goldens with it');
     const fresh2 = lastGameChange();
     const reps = newestSince(filesUnder('qa/reports', (n) => /^qa_.*\.json$/.test(n)), since).filter((f) => mtime(f) >= fresh2);

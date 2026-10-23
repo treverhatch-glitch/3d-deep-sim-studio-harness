@@ -16,6 +16,7 @@ import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
+import { isEngineChurn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
 import { startSummary, carryForward } from './carry.mjs';
@@ -254,11 +255,31 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
 }
 
 /**
+ * 2.30n: who is acting. --agent first, then the lane copy's own name (<main>/.lanes/<agent>), and only then
+ * STUDIO_LOCK_OWNER. In the Marina run a shared tool gateway handed every builder shell the same
+ * environment, so one builder took on another's identity from an inherited STUDIO_LOCK_OWNER.
+ */
+export function whoAmI(flags = {}, root = REPO_ROOT, env = process.env) {
+  if (typeof flags.agent === 'string' && flags.agent) return flags.agent;
+  const m = String(root).replace(/\\/g, '/').match(/\/\.lanes\/([^/]+)$/);
+  if (m) {
+    if (env.STUDIO_LOCK_OWNER && env.STUDIO_LOCK_OWNER !== m[1]) console.error(`[task] STUDIO_LOCK_OWNER=${env.STUDIO_LOCK_OWNER} doesn't match this lane copy (${m[1]}); acting as ${m[1]}. Pass --agent to be explicit.`);
+    return m[1];
+  }
+  return env.STUDIO_LOCK_OWNER || null;
+}
+
+/**
  * Only the lock owner can finish a claimed task, and only once the done-check for its type passes
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
 export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '' } = {}) {
+  // 2.30n: a builder in a lane copy (.lanes/<agent>) launched without STUDIO_MAIN_ROOT used to be
+  // "done" with its work never merged (T-028 in the Marina run). Refuse, forced or not.
+  if (/[\\/]\.lanes[\\/][^\\/]+$/.test(REPO_ROOT) && !inLaneCopy()) {
+    return { error: 'no-main-root', message: `This is a lane copy (${REPO_ROOT}) but STUDIO_MAIN_ROOT isn't set, so task done can't merge your work into the studio's branch. Relaunch with STUDIO_MAIN_ROOT=<the main checkout>, or run task done there. Nothing was closed.` };
+  }
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
@@ -284,7 +305,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     } else {
       const start = readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.meta?.head).pop()?.meta?.head;
       if (start) {
-        const isCode = (f) => f && !/^(studio|\.studio|\.lanes|qa\/reports)\//.test(f);
+        const isCode = (f) => f && !/^(studio|\.studio|\.lanes|qa\/reports)\//.test(f) && !isEngineChurn(f);
         const committed = spawnSync('git', ['diff', '--name-only', `${start}..HEAD`], { cwd: REPO_ROOT, encoding: 'utf8' });
         const working = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
         if (committed.status === 0) {
@@ -313,6 +334,23 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     };
   }
 
+  // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
+  // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
+  if (!force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
+    const owner = lock.locked ? lock.lock.owner : agent;
+    const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
+    const lanePaths = laneList(readHolds()[target.id]?.lane);
+    const paths = [...new Set([...claimed, ...lanePaths])];
+    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 32 * 1024 * 1024 });
+    let res = null;
+    try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
+    if (gg.status !== 0) {
+      const failed = res?.failed?.length ? res.failed : [{ id: 'game-gates', why: `${(gg.stderr || gg.stdout || '').trim().slice(0, 300)}` }];
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${failed.map((f) => f.id).join(', ')} failed` });
+      return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
+    }
+  }
+
   // 2.30k: done means committed. Uncommitted changes in the task's claimed files (or the game's
   // folders when it claimed none) are refused, so they aren't later committed under another task
   // (T-013 in the Marina run was accepted with its diff left uncommitted).
@@ -325,7 +363,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
     if (scope.length) {
       const st = spawnSync('git', ['status', '--porcelain', '--', ...scope], { cwd: REPO_ROOT, encoding: 'utf8' });
-      const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).map((l) => l.slice(3)) : [];
+      const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).map((l) => l.slice(3)).filter((f) => !isEngineChurn(f)) : [];
       if (dirty.length) {
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} (${dirty.slice(0, 3).join(', ')})` });
         return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them (git add <files> && git commit -m "${target.id}: …"), then run task done again.` };
@@ -719,7 +757,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
     }
-    const started = startTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force) });
+    const started = startTask(targetId, whoAmI(flags), { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force) });
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);
@@ -740,7 +778,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'pause') {
     const targetId = arg1;
-    const res = targetId && pauseTask(targetId, flags.agent || process.env.STUDIO_LOCK_OWNER || null, typeof flags.note === 'string' ? flags.note : '', { force: Boolean(flags.force) });
+    const res = targetId && pauseTask(targetId, whoAmI(flags), typeof flags.note === 'string' ? flags.note : '', { force: Boolean(flags.force) });
     if (!res) {
       if (!targetId) console.error('Usage: node harness/task.mjs pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"');
       else {
@@ -772,10 +810,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
-    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+    // 2.30n: a forced done says why (10+ characters); "no reason given" taught the Producer nothing.
+    if (flags.force && String(typeof flags.reason === 'string' ? flags.reason : '').trim().length < 10) {
+      console.error(`--force needs --reason "<why the check can't pass yet>" (10+ characters). Nothing was closed.`);
+      process.exit(1);
+    }
+    const done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
     if (!done) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);

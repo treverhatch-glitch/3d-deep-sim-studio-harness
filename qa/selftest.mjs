@@ -143,6 +143,13 @@ const report = (label, ok, detail = '') => {
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
+  // 2.30n: the studio's game (not a cartridge) whose own scenarios fail.
+  game: (d) => {
+    fs.writeFileSync(path.join(d, 'studio/game.json'), JSON.stringify({ game: 'zz-sab' }));
+    fs.mkdirSync(path.join(d, 'web/zz-sab/sim'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'web/zz-sab/index.html'), '<!doctype html>\n');
+    fs.writeFileSync(path.join(d, 'web/zz-sab/sim/qa.mjs'), "console.log('FAIL idle: expected lost'); process.exit(1);\n");
+  },
   'godot-unit': (d) => {
     // An enabled Godot project whose gdUnit4 run fails (exit 100) with one failing test in its JUnit XML.
     const g = path.join(d, 'gtest');
@@ -200,6 +207,7 @@ const EXPECT = {
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
   'godot-unit': /test_money_drains: expected money to drop/,
+  game: /FAIL game:qa/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -335,7 +343,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   fs.writeFileSync(path.join(dir, 'studio/research/build-menus/study.md'), `# Question\nHow do build menus group items?\n\n# Findings\n${'Both games group buildings by job, then by size, and show cost before placement. '.repeat(12)}\n`);
 
   report('done-check passes a study task once study.md exists', run(dir, `node harness/task.mjs done ${ids.study} --agent alice-1`).status === 0);
-  const forced = run(dir, `node harness/task.mjs done ${ids.change} --agent alice-1 --force`);
+  const forced = run(dir, `node harness/task.mjs done ${ids.change} --agent alice-1 --force --reason "selftest forced close"`);
   const queue = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
   const events = fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8');
   report('--force closes the task and queues a check for the Producer', forced.status === 0 && new RegExp(`\\(\`producer\`\\) — Check forced done ${ids.change}`).test(queue), `${forced.stdout}${forced.stderr}\n${queue}`);
@@ -347,7 +355,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const dir = copyRepo();
   run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner alice-1');
   run(dir, 'node harness/task.mjs start T-003 --agent alice-1');
-  run(dir, 'node harness/task.mjs done T-003 --agent alice-1 --force');
+  run(dir, 'node harness/task.mjs done T-003 --agent alice-1 --force --reason "selftest forced close"');
   const note = run(dir, 'node harness/handoff.mjs note "Chose spawnCost 400 because wins land on time" --agent producer');
   const brief = run(dir, 'node harness/handoff.mjs --full');
   const out = brief.stdout;
@@ -406,7 +414,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 {
   const dir = copyRepo();
   run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model model-a');
-  run(dir, 'node harness/task.mjs done T-003 --agent cursor-a --force');
+  run(dir, 'node harness/task.mjs done T-003 --agent cursor-a --force --reason "selftest forced close"');
   run(dir, 'node harness/task.mjs start T-004 --agent gem-b --model model-b');
   run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
   run(dir, 'node harness/task.mjs done T-004 --agent gem-b');
@@ -846,9 +854,9 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system', env).stdout).id;
   run(dir, `node harness/task.mjs start ${id} --agent builder-1 --model claude-opus-5-5`, env);
   const empty = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
-  report('a system task starts with everything missing', /is a "system" task/.test(empty) && /\[ \] Spec written/.test(empty) && /\[ \] Approved by a reviewer/.test(empty), empty);
+  report('a system task starts with everything missing', /is a "system" task/.test(empty) && /\[ \] Spec (for this task )?written/.test(empty) && /\[ \] Approved by a reviewer/.test(empty), empty);
   fs.mkdirSync(path.join(dir, 'studio/bible/systems'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals; the invariant keeps ratings between 0 and 5.\n`);
+  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors (${id})\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals; the invariant keeps ratings between 0 and 5.\n`);
   edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// visitors scenario\n`);
   edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1500,', 'startCredits: 1550,'));
   run(dir, 'node qa/check-golden.mjs --update');
@@ -949,7 +957,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const dc = run(dir, `node harness/done-check.mjs ${t}`, env).stdout;
   report('done-check counts commits tagged with the task from before a hand-back', /\[x\] Docs changed for this task/.test(dc), dc);
   // Forcing with a person's acceptance is logged, without a follow-up task.
-  const forced = run(dir, `node harness/task.mjs done ${t} --agent writer-2 --force --reason "fixture" --accepted-by jed`, env);
+  const forced = run(dir, `node harness/task.mjs done ${t} --agent writer-2 --force --reason "fixture forced" --accepted-by jed`, env);
   report('a forced done accepted by a person is logged without a follow-up task', forced.status === 0 && /accepted by jed/.test(forced.stderr) && !/Check forced done/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), forced.stdout + forced.stderr);
   report('npm run idea -- --help prints how to use it', /Usage: npm run idea/.test(run(dir, 'node harness/ideas.mjs --help', env).stdout));
 }
@@ -1107,7 +1115,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const nx = run(dir, 'node harness/task.mjs next --role builder', env).stdout;
   report('a parked task is never picked, and what waits on it waits too', !new RegExp(`"${a}"|"${b}"`).test(nx), nx);
   run(dir, `node harness/task.mjs unpark ${a} --by prod-1`, env);
-  run(dir, `node harness/task.mjs done ${a} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${a} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
   report('once the task it waits for is done, the waiting task can start', run(dir, `node harness/task.mjs start ${b} --agent qa-x`, env).status === 0);
   // A stopped agent's task doesn't restart for a while.
   const c = id('node harness/task.mjs add "Floor two lighting" --role builder');
@@ -1120,8 +1128,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   while (Date.now() - t2 < 15000 * SLOW && /stop-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) pause(400);
   const again = run(dir, `node harness/task.mjs start ${c} --agent other-1`, env);
   report('after agent stop, its task can\'t restart straight away (run #1: it restarted within seconds)', st.status === 0 && /won't restart before/.test(st.stdout) && again.status !== 0 && /can restart after/.test(again.stderr), st.stdout + again.stdout + again.stderr);
-  run(dir, `node harness/task.mjs done ${c} --agent prod-1 --force --reason test --accepted-by selftest`, env);
-  run(dir, `node harness/task.mjs done ${b} --agent qa-x --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${c} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${b} --agent qa-x --force --reason "selftest forced" --accepted-by selftest`, env);
   // Builders never share files: without lanes one builder holds the whole game; with lanes, one per lane.
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   for (const t of ['Fix the elevator doors', 'Fix the gun direction']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
@@ -1139,7 +1147,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
     q0 = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
   }
   const [l1, l2] = q0.backlog.filter((t) => /^Fix the/.test(t.title)).map((t) => t.id);
-  run(dir, `node harness/task.mjs done ${tq2} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${tq2} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
   run(dir, `node harness/task.mjs lane ${l1} docs/lane-c --by prod-1`, env);
   run(dir, `node harness/task.mjs lane ${l2} docs/lane-d --by prod-1`, env);
   // Other waiting builder tasks have no lane, so one of them would take the whole game: park them.
@@ -1314,7 +1322,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   while (Date.now() - tw < 8000 * SLOW && !fs.existsSync(wipF)) pause(300);
   report('Stop all saves a running agent\'s uncommitted work as a patch, then hands its task back', fs.existsSync(wipF) && /docs\/fake\/mid-1\.md/.test(fs.readFileSync(wipF, 'utf8')) && /saved to \.studio\/wip\//.test(fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8')), fs.existsSync(path.join(dir, `studio/handoffs/${t4}.md`)) ? fs.readFileSync(path.join(dir, `studio/handoffs/${t4}.md`), 'utf8') : 'no handoff');
   run(dir, 'node harness/task.mjs resume --by jed', env);
-  run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason test --accepted-by selftest`, env);
+  run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
   // One launcher: the watcher's auto-start does nothing while a supervisor runs, and uses lanes when none does.
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder')) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
@@ -1764,7 +1772,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const add = (t) => JSON.parse(run(dir, `node harness/task.mjs add "${t}"`, env).stdout).id;
   const force = (id) => {
     run(dir, `node harness/task.mjs start ${id} --agent builder-1`, env);
-    return run(dir, `node harness/task.mjs done ${id} --agent builder-1 --force`, env);
+    return run(dir, `node harness/task.mjs done ${id} --agent builder-1 --force --reason "selftest forced close"`, env);
   };
   const [a, b, c] = [add('Tidy the HUD label'), add('Tidy the menu label'), add('Tidy the end label')];
   force(a);
@@ -1837,7 +1845,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const id = JSON.parse(run(dir, 'node harness/task.mjs add "Visitors" --type system --origin dev', ollama).stdout).id;
   run(dir, `node harness/task.mjs start ${id} --agent builder-1 --model claude-opus-5-5`, ollama);
   fs.mkdirSync(path.join(dir, 'studio/bible/systems'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals.\n`);
+  fs.writeFileSync(path.join(dir, 'studio/bible/systems/visitors.md'), `# Visitors (${id})\n\n${'Visitors arrive after the first terrace opens and rate the garden by moss coverage and paths. '.repeat(6)}\n\n## For the next agent\n\nTUNING.visitorRate sets arrivals.\n`);
   edit(dir, 'cartridges/example-sim/qa.mjs', (s) => `${s}\n// visitors scenario\n`);
   edit(dir, 'cartridges/example-sim/index.mjs', (s) => s.replace('startCredits: 1500,', 'startCredits: 1550,'));
   run(dir, 'node qa/check-golden.mjs --update');
@@ -2546,7 +2554,7 @@ console.log(JSON.stringify({ a, b, c, d }));`);
   // #13: finished tasks move to studio/DONE.md; NEXT.md keeps open work only; an old NEXT.md's DONE still counts.
   const next0 = fs.readFileSync(path.join(root, 'qa', 'fixtures', 'studio', 'NEXT.md'), 'utf8'); // the board a copy starts with
   run(dir, 'node harness/task.mjs start T-001 --agent p-1');
-  const dn = run(dir, 'node harness/task.mjs done T-001 --agent p-1 --force --reason "selftest"');
+  const dn = run(dir, 'node harness/task.mjs done T-001 --agent p-1 --force --reason "selftest forced"');
   const nx = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
   const dm = fs.existsSync(path.join(dir, 'studio', 'DONE.md')) ? fs.readFileSync(path.join(dir, 'studio', 'DONE.md'), 'utf8') : '';
   const list = JSON.parse(run(dir, 'node harness/task.mjs list').stdout || '{}');
@@ -2622,7 +2630,7 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
   report('2.30d #9: the forcing agent and a same-family reviewer cannot close it; another family (or a person) can', self.status !== 0 && same.status !== 0 && /another model family/.test(same.stderr) && agentNoModel.status !== 0 && other.status === 0 && ev().some((e) => e.type === 'task.pending_closed' && e.task === tf), [self.stderr, same.stderr, agentNoModel.stderr, other.stdout + other.stderr].join('\n'));
   run(dir, 'node harness/task.mjs add "Write the pier notes" --type docs --infra');
   const tf2 = idOf('Write the pier notes');
-  run(dir, `node harness/task.mjs done ${tf2} --agent builder-7 --force --reason "no time"`);
+  run(dir, `node harness/task.mjs done ${tf2} --agent builder-7 --force --reason "no time left today"`);
   const reo = run(dir, `node harness/task.mjs review ${tf2} --reopen --by trever --note "needs the pier length"`);
   report('2.30d #9: a person reopens forced work: it goes back on the queue with the note', reo.status === 0 && new RegExp(`\\[ \\] \\*\\*${tf2}\\*\\*`).test(queue()) && /needs the pier length/.test(fs.readFileSync(path.join(dir, 'studio', 'handoffs', `${tf2}.md`), 'utf8')), reo.stdout + reo.stderr);
   // #5: a builder task over size 3 gets a linked planner split and waits for it.
@@ -3205,6 +3213,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest230m } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230m.mjs')).href);
   await selftest230m({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.30n: the gates follow the studio's game; engine gate; lane, force and spec fixes (qa/selftest-230n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230n } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230n.mjs')).href);
+  await selftest230n({ dir, run, report, tmpRoot });
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 

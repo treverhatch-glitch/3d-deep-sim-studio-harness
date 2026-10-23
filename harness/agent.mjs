@@ -210,7 +210,7 @@ export function markGone() {
     if (s.copy) {
       const mine = listLocks().filter((l) => l.owner === s.agent);
       for (const t of tasksOf(s.agent, s)) saveWorkOf(s.agent, t, mine, s);
-      removeLaneCopy(s.agent, { keepBranch: unmerged(s.copy.branch) > 0 });
+      removeLaneCopy(s.agent, { keepBranch: unmerged(s.copy.branch) > 0, ifIdle: true });
     }
     gone.push(s.agent);
   }

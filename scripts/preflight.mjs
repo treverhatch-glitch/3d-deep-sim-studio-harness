@@ -27,7 +27,7 @@ import { effectiveMode, describeMode, readMode, scopeOf, CLAUDE_MD, SCOPES } fro
 import { cleanQuotaMarks, dailyCap } from '../harness/budget.mjs';
 import { readTrack, engineBin } from '../harness/engine.mjs';
 import { modelFamily } from '../harness/families.mjs';
-import { worktreeSupport, laneCopies, removeLaneCopy } from '../harness/worktree.mjs';
+import { worktreeSupport, laneCopies, removeLaneCopy, laneLive } from '../harness/worktree.mjs';
 import { sessions } from '../harness/agent.mjs';
 import { savePatch } from '../harness/wip.mjs';
 
@@ -243,8 +243,9 @@ export function preflight() {
     const stale = laneCopies().filter((c) => !live.has(c.agent));
     if (stale.length && FIX) {
       for (const c of stale) {
+        if (laneLive(c.agent).live) continue;
         if (c.dirty) savePatch(c.agent, 'lane-copy', [], { cwd: c.dir });
-        removeLaneCopy(c.agent, { keepBranch: c.unmerged > 0 });
+        removeLaneCopy(c.agent, { keepBranch: c.unmerged > 0, ifIdle: true });
       }
     }
     if (stale.length) row(FIX ? 'ok' : 'warn', FIX ? `Removed ${stale.length} lane copy(ies) left by ended sessions (unmerged commits kept on their branches, uncommitted work saved in .studio/wip/)` : `${stale.length} lane copy(ies) left by ended sessions: ${stale.map((c) => c.agent).join(', ')}`, FIX ? '' : 'npm run preflight -- --fix removes them and keeps unmerged commits on their branches');

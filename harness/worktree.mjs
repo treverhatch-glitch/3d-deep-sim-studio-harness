@@ -24,15 +24,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { listLocks } from './lock.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 /** The main checkout: this one, or the one a lane copy was made from. */
-export const mainRoot = () => (process.env.STUDIO_MAIN_ROOT ? path.resolve(process.env.STUDIO_MAIN_ROOT) : REPO_ROOT);
+// 2.30n: a lane copy lives at <main>/.lanes/<agent>; that path names the main checkout even when the
+// shell lost STUDIO_MAIN_ROOT (a shared tool gateway in the Marina run), so done never skips the merge.
+const fromPath = () => {
+  const m = REPO_ROOT.replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+$/);
+  return m && fs.existsSync(path.join(m[1], '.git')) ? path.resolve(m[1]) : null;
+};
+export const mainRoot = () => (process.env.STUDIO_MAIN_ROOT ? path.resolve(process.env.STUDIO_MAIN_ROOT) : fromPath() || REPO_ROOT);
 /** True inside a lane copy. */
-export const inLaneCopy = () => Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== REPO_ROOT;
+export const inLaneCopy = () => mainRoot() !== REPO_ROOT;
 
 export function gitVersion() {
   const m = (git(REPO_ROOT, '--version').stdout || '').match(/(\d+)\.(\d+)/);
@@ -118,7 +125,7 @@ export function createLaneCopy(agent, { task = null } = {}) {
   const dir = path.join(root, LANES_DIR, agent);
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13).replace('T', '-');
   const branch = `lane/${agent}-${stamp}`;
-  if (fs.existsSync(dir)) removeLaneCopy(agent, { keepBranch: true });
+  if (fs.existsSync(dir) && removeLaneCopy(agent, { keepBranch: true, ifIdle: true }).kept) return { error: `${LANES_DIR}/${agent} is still in use; not replacing it` };
   fs.mkdirSync(path.join(root, LANES_DIR), { recursive: true });
   ignoreLanes(root);
   const add = git(root, 'worktree', 'add', '--no-checkout', '-b', branch, dir, 'HEAD');
@@ -193,10 +200,53 @@ export function unmerged(branch, root = mainRoot()) {
   return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
 }
 
-/** Remove an agent's copy; its branch goes too once merged, unless keepBranch. */
-export function removeLaneCopy(agent, { keepBranch = false } = {}) {
+/**
+ * 2.30n: is someone still working in this lane copy? A builder launched outside the harness has no
+ * session record, so "no running session" is not proof it is gone (T-024 in the Marina run: preflight
+ * --fix deleted a live builder's copy mid-task). Live when a process has its working folder inside the
+ * copy, the agent holds a claim renewed in the last STUDIO_LANE_LIVE_MIN minutes (20), or the copy's git
+ * index or folder changed that recently.
+ */
+export function laneLive(agent, root = mainRoot()) {
+  const dir = path.join(root, LANES_DIR, agent);
+  if (!fs.existsSync(dir)) return { live: false };
+  const win = Number(process.env.STUDIO_LANE_LIVE_MIN || 20) * 60000;
+  const now = Date.now();
+  try {
+    if (process.platform === 'linux') {
+      const real = fs.realpathSync(dir);
+      for (const pid of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+        let cwd = '';
+        try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { continue; }
+        if (cwd === real || cwd.startsWith(`${real}/`)) return { live: true, why: `process ${pid} is working in it` };
+      }
+    }
+  } catch {}
+  try {
+    const held = listLocks().filter((l) => l.owner === agent && Date.parse(l.expiresAt) > now && now - Date.parse(l.renewedAt || l.claimedAt) < win);
+    if (held.length) return { live: true, why: `${agent} holds ${held[0].key}, renewed ${Math.round((now - Date.parse(held[0].renewedAt || held[0].claimedAt)) / 60000)} min ago` };
+  } catch {}
+  try {
+    const idx = git(dir, 'rev-parse', '--git-path', 'index').stdout?.trim();
+    const times = [fs.statSync(dir).mtimeMs, idx ? fs.statSync(path.resolve(dir, idx)).mtimeMs : 0];
+    const t = Math.max(...times);
+    if (now - t < win) return { live: true, why: `changed ${Math.round((now - t) / 60000)} min ago` };
+  } catch {}
+  return { live: false };
+}
+
+/** Remove an agent's copy; its branch goes too once merged, unless keepBranch. ifIdle: keep a live copy. */
+export function removeLaneCopy(agent, { keepBranch = false, ifIdle = false } = {}) {
   const root = mainRoot();
   const dir = path.join(root, LANES_DIR, agent);
+  if (ifIdle) {
+    const l = laneLive(agent, root);
+    if (l.live) {
+      emitEvent({ type: 'lane.kept', agent, msg: `Kept ${agent}'s lane copy: ${l.why}` });
+      return { kept: true, why: l.why };
+    }
+  }
   const branch = fs.existsSync(dir) ? git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() : null;
   // Unlink the shared folders first so nothing can follow them while the copy is removed.
   for (const rel of ['studio', '.studio', ...nodeModuleDirs(root)]) {

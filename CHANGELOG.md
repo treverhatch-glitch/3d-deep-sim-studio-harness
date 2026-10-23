@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-n] — 2026-10-23
+2.30n: the gates check the game the studio is building, not the bundled example. Found in the Marina build: every `npm run verify` and `task done` gated cartridges/example-sim, so the real game was never gated and builders had to --force.
+### Fixed
+- **Gates follow the studio's game.** With `task game <name>` set to a game that isn't a cartridge, the new `game` gate (harness/game-gates.mjs) runs the game's own checks: `<game>/studio.gates.json` if present, else `<game>/sim/qa.mjs`, `sim/playtest.mjs`, `sim/golden.mjs`. The cartridge gates (gates.json `"cartridge": true`: purity, isolation, golden, golden-py, regressions, vertical-slice, playtest, browser-play, soak, tick-budget) are skipped for it. A game that declares no checks fails the gate. No game set: example-sim's gates, as before.
+- **`task done` runs them**, plus the engine gate, and refuses when they fail (`STUDIO_DONE_GAME_GATES=skip` turns it off).
+- **Engine gate.** When a task's files (claims or lane) are in a Godot project, Godot runs headless: `--import`, then `tools/gate.gd` if the project has one. A non-zero exit or a SCRIPT ERROR / Parse Error / ERROR: line fails it. Binary: `STUDIO_GODOT`, else `godot`. Generated `.godot/`, `*.import` and `*.uid` files never count as code or as uncommitted work.
+- **Lane copies.** A lane copy finds its main checkout from its own path (`<main>/.lanes/<agent>`) when `STUDIO_MAIN_ROOT` is missing (a shared tool gateway lost it in the Marina run, and T-034's forced done left its commit on the lane branch). When the path names no checkout, `task done` refuses instead of skipping the merge.
+- **Identity.** `task start/done/pause` act as `--agent`, else the lane copy's name, and only then `STUDIO_LOCK_OWNER`; an inherited owner that disagrees with the lane is overridden with a warning.
+- **`--force` needs `--reason`** of 10+ characters.
+- **The system done-check's spec must name this task** (its ID in the file name or text), not any spec written since it started. The qa.mjs scenario check also accepts `web|game/<game>/sim/qa.mjs`.
+- **Lane cleanup never removes a live copy.** preflight --fix, the gone-session sweep and lane re-creation keep a copy when a process works in it, its agent holds a claim renewed in the last `STUDIO_LANE_LIVE_MIN` minutes (20), or it changed that recently (T-024: a live externally launched builder's copy was deleted).
+
 ## [2.30.0-m] — 2026-10-23
 2.30m: a build task has to change code.
 ### Fixed
