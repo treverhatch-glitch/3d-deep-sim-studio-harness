@@ -258,7 +258,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '' } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '' } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent && !force) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
@@ -273,6 +273,30 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+
+  // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
+  // (the agent judged the existing code good enough). Zero code changes since the task started are
+  // refused unless the task is marked no-op with a reason (task done <ID> --no-op "<why>").
+  if (!force && target.role === 'builder' && ['change', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
+    if (noop && String(noop).trim().length >= 10) {
+      emitEvent({ type: 'task.noop', agent: agent || target.role, task: target.id, msg: `${target.id} closed as no-op: ${String(noop).trim().slice(0, 300)}` });
+      note = `${note ? `${note}; ` : ''}no-op: ${String(noop).trim().slice(0, 200)}`;
+    } else {
+      const start = readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.meta?.head).pop()?.meta?.head;
+      if (start) {
+        const isCode = (f) => f && !/^(studio|\.studio|\.lanes|qa\/reports)\//.test(f);
+        const committed = spawnSync('git', ['diff', '--name-only', `${start}..HEAD`], { cwd: REPO_ROOT, encoding: 'utf8' });
+        const working = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+        if (committed.status === 0) {
+          const files = [...committed.stdout.split('\n'), ...(working.stdout || '').split('\n').map((l) => l.slice(3))].filter(isCode);
+          if (!files.length) {
+            emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: no code changed since it started` });
+            return { error: 'no-change', message: `${target.id} is a build task and no code changed since it started (${String(start).slice(0, 7)}). Make the change and commit it, or, if the work truly is already there, close it with: task done ${target.id} --no-op "<what already does it, and where>".` };
+          }
+        }
+      }
+    }
+  }
 
   const check = checkDone(target);
   if (!check.ok && !force) {
@@ -751,7 +775,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force]');
       process.exit(1);
     }
-    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '' });
+    const done = completeTask(targetId, flags.note || '', flags.agent || process.env.STUDIO_LOCK_OWNER || null, { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
     if (!done) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);

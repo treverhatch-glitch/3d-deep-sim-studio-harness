@@ -4,6 +4,11 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-m] — 2026-10-23
+2.30m: a build task has to change code.
+### Fixed
+- `task done` refuses a builder's change, system, bug, fun or balance task when no code changed since it started (committed or not; studio/ and .studio/ don't count). If the work truly is already there, close it with `task done <ID> --no-op "<what already does it, and where>"` (10+ characters, logged as task.noop). `STUDIO_DONE_NOOP=allow` turns it off. In the Marina run T-017 was closed with no change: its done check most likely counted an unrelated orchestrator commit whose message mentions "T-017".
+
 ## [2.30.0-l] — 2026-10-23
 2.30l: two fixes from the 2.30k Marina run.
 ### Fixed

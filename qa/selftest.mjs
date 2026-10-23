@@ -458,7 +458,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
   const change = add('node harness/task.mjs add "Faster spawns" --role builder');
   run(dir, `node harness/task.mjs start ${change} --agent alice-1 --model model-a`);
   const none = run(dir, `node harness/task.mjs done ${change} --agent alice-1`);
-  report('done-check refuses a change task with no changes', none.status !== 0 && /\[ \] Changes exist/.test(`${none.stdout}${none.stderr}`), `${none.stdout}${none.stderr}`);
+  report('done-check refuses a change task with no changes', none.status !== 0 && /\[ \] Changes exist|no code changed since it started/.test(`${none.stdout}${none.stderr}`), `${none.stdout}${none.stderr}`);
   edit(dir, 'cartridges/example-sim/qa.mjs', (x) => `${x}\n// faster spawns\n`);
   const noVerify = run(dir, `node harness/task.mjs done ${change} --agent alice-1`);
   report('done-check sees the change but still wants a verify after it', noVerify.status !== 0 && /\[x\] Changes exist/.test(`${noVerify.stdout}${noVerify.stderr}`), `${noVerify.stdout}${noVerify.stderr}`);
@@ -3197,6 +3197,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest230l } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230l.mjs')).href);
   await selftest230l({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.30m: build tasks must change code or be closed as no-op with a reason (qa/selftest-230m.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230m } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230m.mjs')).href);
+  await selftest230m({ dir, run, report, tmpRoot });
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
