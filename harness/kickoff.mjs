@@ -190,7 +190,7 @@ Loop:
 2. \`node harness/task.mjs start <ID> --agent ${agent} --model ${model}\`. It writes your one-page brief to \`.studio/briefs/<ID>.md\`: read that (its pre-approved tricks you may use without asking), it has the steps, what done means, notes from anyone before you, and what not to touch. If it says the history is long, run \`npm run brief -- <ID>\` and read the 300-word summary instead of the logs.
 3. Claim what you will edit: \`node harness/lock.mjs claim path:<folder> --owner ${agent}\`.
 4. Work in small steps; run the narrowest check first. Three failed tries: stop and hand back with a note.
-5. Run \`npm run verify\` in the foreground and wait for it (never in the background), then \`node harness/task.mjs done <ID> --agent ${agent}\`. If it refuses, do what it says is missing. Only \`--force\` with a reason; the Producer will check it.
+5. Run \`npm run verify\` in the foreground and wait for it (never run verify/check/test commands in the background: no &, no run_in_background, no nohup; if it is slow, wait), then \`node harness/task.mjs done <ID> --agent ${agent}\`. If it refuses, do what it says is missing. Only \`--force\` with a reason; the Producer will check it.
 6. Release your claims (\`node harness/lock.mjs release <key> --owner ${agent}\`) and go back to 1.
 
 Running low on usage or being stopped: \`node harness/task.mjs pause <ID> --agent ${agent} --note "what is done, what is left, files touched"\`.

@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-i] — 2026-10-23
+2.30i: two fixes from real game builds (Marina, and a two-task A/B on another studio) plus NIM limits. No new features.
+### Fixed
+- **Sessions that end without `task done`.** When a session ends without `task done` (a clean exit, or a crash after it committed) and the task has a new commit from that session, the launcher runs `npm run verify` in the foreground itself; if it passes it closes the task with a logged reason (exit code, verify passed, commit). Otherwise the task is handed back with the last lines of the verify output in the note. A crash without a commit, provider trouble, a reasoning-only reply or a refresh is handed back as before. `STUDIO_AUTO_FINISH=off` turns it off. The builder loop now says never to run verify, checks or tests in the background (no `&`, `run_in_background` or `nohup`).
+- **`agent start` reads `.env`.** The agent CLI loads `.env` (harness/dotenv.mjs) before it starts anything, so keys like `ANTHROPIC_API_KEY` reach the session without a wrapper. It never overrides what the shell already set and never prints a value.
+- **NVIDIA NIM: one session at a time, and 429s in the stream.** NIM sessions default to one at a time (`STUDIO_NIM_MAX_SESSIONS` raises it); a second is refused at start. An HTTP 429 the provider writes into the stream json (`error.code`, `error.status`, `status`, `api_error_status`) now counts as a rate limit, not only one on stderr, so the session fails over: to `--fallback`, or to `STUDIO_NIM_FALLBACK` (tool:model, another family) when none was given.
+### Tests
+- qa/selftest-230i.mjs: which ended sessions get the launcher verify, 429 in stream json vs an agent mentioning 429, .env loading without override, NIM detection and default of one, and the builder loop's no-background rule.
+
 ## [2.30.0-h] — 2026-10-23
 2.30h, in the reviewer's order: the cheap false-green stoppers first (reasoning-only replies fail, Godot gates fail on scripts that don't parse or on frames-only smoke runs, CI is watched after a push), then the Director keeps builders fed from clean work only, model limits (Claude/Opus included) as Director awareness, and design fidelity as a scored report the Director reads. Details in docs/DIRECTOR-FLOW.md.
 ### Added — false-green stoppers

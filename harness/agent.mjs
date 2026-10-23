@@ -54,6 +54,7 @@ import { setHold } from './task-hold.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
+import { isNim, providerConcurrency } from './families.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -64,6 +65,16 @@ const HEARTBEAT_MS = Number(process.env.STUDIO_HEARTBEAT_SEC || 120) * 1000;
 const AUTH_ERROR = /\b401\b|unauthori[sz]ed|invalid (?:api|x-api) key|authentication (?:failed|error|required)|not logged in|please (?:run )?\/?login/i;
 export function providerTrouble(log, code) {
   const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // 2.30i: an HTTP 429 the provider put in the stream json (Marina's NIM sessions), not only on stderr.
+  for (const l of lines.slice(-40).reverse()) {
+    if (!l.startsWith('{')) continue;
+    try {
+      const o = JSON.parse(l);
+      if (o?.error?.code === 429 || o?.status === 429 || o?.error?.status === 429 || o?.api_error_status === 429) {
+        return { kind: 'quota', text: '429', line: l, named: toolNamed(l) };
+      }
+    } catch {}
+  }
   // A final result object (claude stream-json, codex --json) decides when there is one.
   for (const l of lines.slice(-40).reverse()) {
     if (!l.startsWith('{')) continue;
@@ -267,6 +278,12 @@ export function tokensFrom(log) {
   return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost, turns: r.turns || null } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null, turns: null };
 }
 
+/** 2.30i: a session that ended without task done gets the launcher's foreground verify: a clean exit, or a crash after it committed. */
+export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit }) {
+  if (trouble || reasoningOnly || capped) return false;
+  return Boolean(hasCommit) && Number.isInteger(code);
+}
+
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
 export function cleanUp(agent, { code, log = '', role, tool, model }) {
   const found = providerTrouble(log, code);
@@ -291,12 +308,18 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
   for (const id of tasks) {
-    // Ended cleanly but never called task done (test #3: 18 of 64 sessions, most while "running the full
-    // verify" in the background, which ends with the session). The launcher runs the check itself and
-    // finishes the task when it passes; otherwise it is handed back as before.
-    if (!bad && autoFinish(agent, id, copyDir, mine)) {
-      finished.push(id);
-      continue;
+    const hasCommit = ahead > 0 || (() => {
+      const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
+      const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { cwd, encoding: 'utf8' });
+      return git.status === 0 && git.stdout.trim().length > 0;
+    })();
+    let af = null;
+    if (crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit })) {
+      af = autoFinish(agent, id, copyDir, mine, code);
+      if (af.ok) {
+        finished.push(id);
+        continue;
+      }
     }
     const patch = savePatch(agent, id, copyDir ? [] : mine.map((l) => l.key), copyDir && fs.existsSync(copyDir) ? { cwd: copyDir } : {});
     if (ahead) rememberTaskBranch(id, s0.copy.branch);
@@ -308,7 +331,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
       : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
-    pauseTask(id, agent, note, { force: true });
+    pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
     if (!capped) parkIfLooping(id);
@@ -330,7 +353,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
-  return { bad, trouble, handed, reason, capped };
+  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped };
 }
 
 /**
@@ -339,32 +362,34 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
  * verify first. In the shared checkout, only when the agent left nothing uncommitted under its claims.
  * STUDIO_AUTO_FINISH=off turns it off.
  */
-export function autoFinish(agent, id, copyDir, mine) {
-  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_AUTO_FINISH || '')) return false;
-  // Only work a check can vouch for: a task whose done means "a person or the agent decided" stays with them.
+export function autoFinish(agent, id, copyDir, mine, code) {
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_AUTO_FINISH || '')) return { ok: false, output: 'disabled' };
   const t = parseNextQueue().inProgress.find((x) => x.id === id);
-  if (!t || taskType(t) === 'none') return false;
+  if (!t || taskType(t) === 'none') return { ok: false, output: 'not checkable' };
   const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
   if (cwd === REPO_ROOT) {
     const paths = mine.filter((l) => l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean);
-    if (!paths.length) return false;
+    if (!paths.length) return { ok: false, output: 'no claims' };
     const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { cwd, encoding: 'utf8' }).stdout || '';
-    if (dirty.trim()) return false;
+    if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
-  const done = () => spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', 'closed by the launcher after its check passed'], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
-  let r = done();
-  if (r.status !== 0 && /verify/i.test(`${r.stdout}${r.stderr}`) && !/Commit your work first|conflict/i.test(`${r.stdout}${r.stderr}`)) {
-    const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
-    if (g.status === 0) r = done();
+  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  if (g.status !== 0) {
+    const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
+    return { ok: false, output: out || 'verify failed' };
   }
-  if (r.status !== 0) {
-    const why = `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').filter((l) => /\[ \]|missing|refus|Commit|fail|not /i.test(l)).slice(0, 2).join(' ').slice(0, 300);
-    emitEvent({ type: 'agent.finish_refused', agent: 'launcher', task: id, msg: `${agent} ended without task done, and its check doesn't pass yet: ${why || `exit ${r.status}`}` });
-    return false;
+  const gitLog = spawnSync('git', ['log', '-1', '--format=%h', '--grep', id], { cwd, encoding: 'utf8' });
+  const sha = gitLog.status === 0 && gitLog.stdout.trim() ? gitLog.stdout.trim() : 'none';
+  const ext = code === 0 ? 'clean exit' : `exit code ${code}`;
+  const note = `closed by the launcher: session ended without task done (${ext}), verify passed in the foreground, commit ${sha}`;
+  const done = spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', note], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  if (done.status !== 0) {
+    const out = `${done.stderr || ''}${done.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
+    return { ok: false, output: out || 'task done failed' };
   }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
-  return true;
+  return { ok: true, output: '' };
 }
 
 /**
@@ -534,7 +559,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
     return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note: `Fresh session after a refresh: read studio/handoffs/${again}.md first; don't redo what it says is done.`, by, refreshes: (opts2.refreshes || 0) + 1 });
   }
-  if (result.bad && fallback.length) {
+  if (result.bad && !fallback.length && result.troubleKind === 'quota') {
+    if (isNim(model, tool) && process.env.STUDIO_NIM_FALLBACK) fallback = [process.env.STUDIO_NIM_FALLBACK];
+  }
+  // 2.30i: the launcher closed the task after a crash, so nothing is left to fail over.
+  if (result.bad && fallback.length && !(result.finished?.length && !result.handed.length)) {
     const [next, ...rest] = fallback;
     const [ftool, fmodel] = next.split(':');
     const resume = result.handed[0]?.task || task;
@@ -790,6 +819,12 @@ export function startAgent(opts, { detach = false } = {}) {
     }
   }
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
+  // 2.30i: NIM's free tier serves one session at a time (Marina: parallel NIM sessions all got 429).
+  if (isNim(model, tool)) {
+    const limit = providerConcurrency(model, tool, process.env);
+    const nimRunning = sessions().filter((s) => s.running && isNim(s.model, s.tool));
+    if (nimRunning.length >= limit) return { ok: false, message: `Not started: NIM allows ${limit} session(s) at a time; ${nimRunning[0]?.agent || 'an agent'} is on it.` };
+  }
   // The Director watches for drift and files corrections; the Producer decides staffing.
   if (opts.by && /^director\b/i.test(String(opts.by))) return { ok: false, message: 'The Director does not hire: file a correction task for the Producer instead.' };
   // A frozen clone (a test run) keeps agents out of the harness itself.
@@ -852,6 +887,9 @@ export function launchableRoles(roles = ['producer', 'director', 'builder', 'qa-
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  // 2.30i: keys in .env reach the agents (Jed's test needed a wrapper); never overrides the shell, never printed.
+  const { loadDotEnv } = await import('./dotenv.mjs');
+  loadDotEnv(path.join(REPO_ROOT, '.env'));
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const cmd = argv[0];

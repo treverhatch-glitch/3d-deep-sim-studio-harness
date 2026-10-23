@@ -3167,6 +3167,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30i: launcher verify after a session ends without task done, .env for agent start, NIM one at a time,
+// 429 in the stream json (qa/selftest-230i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230i } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230i.mjs')).href);
+  await selftest230i({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
