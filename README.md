@@ -94,4 +94,4 @@ Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-
 How a game starts (intake, phases, layers) and stays on course (Director, Idea Board): [docs/GAME-BIBLE.md](docs/GAME-BIBLE.md).
 What's next for the harness, and how each known gap gets fixed: [docs/ROADMAP.md](docs/ROADMAP.md).
 
-MIT licensed.
+Proprietary. Copyright (c) 2026 Trever Max Hatch, all rights reserved. See LICENSE.
