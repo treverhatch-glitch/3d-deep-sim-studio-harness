@@ -162,3 +162,9 @@
 - Reviews nobody could do are owed (studio/reviews/OWED.json) and retried by the watcher when the reviewer resets. `npm run balance -- --cartridge <game> --knob <TUNING key> --values a,b,c`. browser-play: a loss with the screen matching the sim passes with a note (browser.mustWin to fail it), inputs saved as a trace for replay --trace; `input` may return `{ move: [x, y] }`
 - Engine track (2.27, docs/ENGINE-TRACK.md): `npm run engine [-- propose godot|unity|unreal --by <producer> --why "…" | start <engine> --by <person> | capture [--frames 120]]` — only after Phase 1 is proven, only on a person's yes (a Needs-you ask; `ask -- answer <id> yes` runs it too): engine/<game>/ from engine/_godot/ (a worked Godot port with gate, parity and capture), engine.json, the Engine Transfer department, `engine-porter` tasks in that lane. `npm run engine:gate` (the engine's headless tests + smoke run; a script error fails it), `npm run parity [-- --seeds 1,2,3]` (same seeds, same outcome and tick as the web game). STUDIO_GODOT / STUDIO_UNITY / STUDIO_UNREAL point at the program. The Arcade links the engine build and its last frame
 - 2.27.2: the Arcade serves a bundled build's root files (/assets/…) from the build it opened; "Play it here" plays the engine's web export in the Arcade; studio/engine/LOG.md (every gate, parity, capture); run report: Tokens by role, Engine track; approving the last waiting design queues the art department's next round; role `narrator` (Narrative department)
+
+## Token savers (2.30g)
+- npm run prefix: how stable each role's prompt prefix is (cache-friendly kickoff)
+- npm run token-norms: each task type's normal token use and the sessions far above it (flags only)
+- npm run verdict-note -- add|list: verdicts kept as notes for briefs (context, not rules)
+- npm run godot-unit [-- --changed]: gdUnit4 headless tests, opt-in in studio/godot-unit.json

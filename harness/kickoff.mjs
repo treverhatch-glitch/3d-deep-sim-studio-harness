@@ -65,19 +65,34 @@ export function launchLine(tool, { agent, model }) {
 }
 
 export function kickoff(opts) {
-  let text = kickoffText(opts);
+  const { stable, volatile } = kickoffParts(opts, { named: true });
+  return volatile ? `${stable}\n${volatile}` : stable;
+}
+
+/**
+ * 2.30g: the kickoff split for the prompt cache. `stable` is byte-identical for every session of a role in
+ * this studio (it names the agent and model as $STUDIO_LOCK_OWNER and $STUDIO_AGENT_MODEL, which the
+ * launcher sets); `volatile` holds what changes between sessions (how long the last verify took).
+ * named: true writes the real name and model in (the paste-ready kickoff a person copies by hand).
+ */
+export function kickoffParts(opts, { named = false } = {}) {
+  const who = named ? { agent: opts.agent, model: opts.model } : { agent: '$STUDIO_LOCK_OWNER', model: '$STUDIO_AGENT_MODEL' };
+  let text = kickoffText({ ...opts, ...who });
   // Started by the launcher: the environment is already set (Jed's run: agents exported it again, and some
   // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
-  if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER=${a} and STUDIO_AGENT_MODEL=${m}${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
+  if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER and STUDIO_AGENT_MODEL${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
   if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
   // How long the verify takes here, so nobody sends it to the background and ends the session under it.
+  // It changes with every full verify, so it goes in the volatile part, never mid-prefix.
+  let volatile = '';
   try {
     const last = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last-full.json'), 'utf8'));
     const min = Math.ceil((last.rows || []).reduce((n, r) => n + (Number(r.ms) || 0), 0) / 60000);
-    if (min) text = text.replace('(never in the background)', `(never in the background: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min)`);
+    if (min) volatile = `Run \`npm run verify\` in the foreground: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min.\n`;
   } catch {}
-  return text;
+  return { stable: text, volatile };
 }
+
 
 function kickoffText({ role, agent, model = 'unknown' }) {
   const roleFile = `studio/roles/${role}.md`;
@@ -147,15 +162,7 @@ Your job is decisions, not code:
 9. In a test run, the HUB writes the run report hourly when STUDIO_RESULTS_DIR is set; write one yourself after each milestone (\`npm run run-report\`) and a final one at the end (\`npm run run-report -- --final\`). If a person stops the studio (\`task start\` refuses), stop assigning and wait.
 10. Pace: \`npm run mode\` says how fast the game dev wants the studio to go (agents at once, reviews, how often you check in). Start agents within it: \`npm run agent -- start --role <role> --agent <name> --tool <tool> --model <model>\` (or the War Room's Start agent); the launcher hands back a dead agent's work. With MAX SPEED on, check in every hour and keep the queue fed.
 11. Ask the game dev instead of guessing: \`npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…"\`. If nobody answers in time your default applies and is logged for them to review. Never put signing, pillars, money or deleting on a timer.
-12. Keep the studio running when nobody is watching: \`npm run studio:start -- --until 23:00 [--budget 50%] [--lanes auto]\` (or \`--install\` so it comes back after a restart). It keeps the War Room up and starts a fresh agent per task. Give tasks a lane (\`task add … --lane game/<game>/src/floors\`) so builders work in parallel without sharing a folder, and split big renderer files early (studio/rules/lanes.md). \`npm run budget\` shows each tool's plan use against its target.
-13. Progress is by phase: when a phase opens, write studio/bible/PHASE-<n>-EXIT.md as a checklist ("- [ ] floors 1-3 playable start to win"), tick items as they're proved, and queue the next phase's tasks with --phase so it doesn't read "not planned".
-14. The art department works in the Asset studio (War Room view 4): rounds don't wait for the dev, and you approve provisionally when they're slow. The Arcade (view 5) plays the last good build: point the dev there when they ask to play.
-15. You staff the studio. Open a department when the work needs it (\`npm run division -- open sound --reason "…" --by ${agent}\`), then hire into it: \`npm run agent -- hire --role sound-designer --division sound --next --by ${agent} [--note "…"]\`. You may hire up to the limit in studio/budget.json (producerMayHireUpTo); past it the hire becomes a question for the game dev. Pause an agent on the wrong work with \`npm run agent -- pause <name> --note "…"\`. Close departments that have nothing left to do.
-16. If the Dev Hacker Lab is open, a "Tricks:" task brings the dev hacker's cards (\`npm run trick -- list\`). Adopt a card only when it names a problem this game really has and a way to prove it helped (\`npm run trick -- adopt K-001 --by ${agent} --phase 1 --serves pillar:<p>\`); park the rest with a reason. Nothing waits on the lab.
-17. Cheat sheet check: when you plan or queue, \`npm run cheatsheet -- match "<plan>" --for director\` first. Before you hand out a task, \`npm run cheatsheet -- attach <ID> --by ${agent}\` attaches up to 3 matching tricks to its brief as pre-approved for that task (recorded; one file read, no wait). Anything else the agent wants still follows the approval rules.
-18. Agents refresh their context at the task boundary or ~120k tokens / 40 turns (\`npm run session\`). A "Check <agent>" ask means one is past that point, flagged mid-debug or not: \`npm run session -- check <agent> continue|handoff --by ${agent}\`.
-19. Work that must wait for other work says so: \`--after T-146\` when you add it, or \`npm run task -- block <ID> --until T-146 --by ${agent}\`. Give builder tasks a lane (\`--lane <folder>\` or \`npm run task -- lane <ID> <folder>\`): a builder without one holds the whole game. \`npm run task -- holds\` shows what can't start and why.
-20. In the Prototype sprint pace (\`npm run mode\`), you are the one accountable lead: split the game into folders first and give every builder a lane; merge a builder's work only when the gate that plays the game passes and you looked at its before/after frames (\`npm run shot\`); queue no Director check per task (the Director reviews at the end of the phase); and point the game dev at the Arcade early, because a phase only closes when a person plays a build and says it's fun (\`npm run verdict\`).
+12. Running the studio unattended, phases, the art department, staffing, the lab, the cheat sheet, session checks, waiting work and lanes, and the Prototype sprint pace (your items 12 to 20) are in the \`producer-playbook\` skill (\`.claude/skills/producer-playbook/SKILL.md\`). Load it when you plan, staff or queue; it is not needed for a quick check-in. Before you plan or queue, always run \`npm run cheatsheet -- match "<plan>" --for director\`.
 
 21. The dev's words are the spec. When you turn their feedback into tasks, add them with \`--origin dev --asked "<their words>"\`, then show the dev one card: \`npm run intent -- echo --asked "<what they asked>" --wont "<what you will not change>" --tasks <IDs> --by ${agent}\`. Anything you or an agent thought of is agent-proposed (the default); an agent-proposed mechanic waits for the dev's yes (\`npm run task -- yes <ID> --by <dev>\`), other work starts at once. Steer the queue with \`npm run task -- drop <ID> --why "…"\` and \`npm run task -- reorder <ID> --to top\`, never by editing NEXT.md. When the dev says "do it now" about a phase, they open it themselves (War Room, "Your call") or you relay it: \`npm run bible -- phase open <n> --now "<their words>" --by <dev> --source "<where they said it>"\`. The risk is logged.
 22. 2.30d: only you, the Director and the planner add to the live queue; other roles' adds wait on \`npm run task -- proposed\` with a reason. Promote them in batches: \`npm run task -- promote P-3,P-4 --by ${agent}\` (or \`--all\`, \`--drop P-5\`). Builder tasks are size 3 at most: \`--size 4|5\` queues a planner split first. Forced work is "done (pending)": \`npm run task -- pending\`; a person or a reviewer from another model family closes it (\`task review <ID> --close|--reopen --by <name> --model <m>\`). Gameplay work joins the open fun wave; mark it ready when the batch is in a good state (\`npm run wave -- ready --by ${agent}\`) and keep other lanes building. While the dev is away you decide; read \`npm run away -- learned\` to see what they confirmed or sent back.

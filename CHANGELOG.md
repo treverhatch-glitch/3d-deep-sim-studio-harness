@@ -4,6 +4,19 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-g] — 2026-10-23
+2.30g, token savers: every session of a role starts with the same bytes, long output is trimmed before an agent reads it, know-how loads only when a task needs it, and a Godot unit gate. Details in docs/TOKEN-SAVERS.md.
+### Added
+- **Cache-friendly kickoff.** Fixed role text first, per-session text last; prefix hashes in `.studio/prefix-ledger.jsonl` with a `prompt.prefix.changed` event; cache write and hit rate on every session end; 1-hour cache for the Director and Producer; a quiet SessionStart for launched sessions. `npm run prefix`.
+- **Hooks.** Output trimming (PostToolUse), a guard on generated folders (PreToolUse), and a Stop gate that runs the fast checks. The Stop gate is fast-only: a 6 s budget (hook timeout 10 s), and checks that don't finish in time are skipped rather than blocking, so it can never add minutes to a run.
+- **Skills on demand.** `.claude/skills/` (Godot, gdUnit, web build, assets, the Producer's playbook).
+- **Token norms per task type** (`npm run token-norms`, HUD flags only, never a cap) and **verdict notes** in briefs (context, not rules).
+- **`godot-unit` gate** (gdUnit4 v6.2.2, Godot 4.7.2), opt-in per game.
+### Not possible here
+- Server-side clearing of old tool results is an API option; the harness runs Claude through the CLI, so trimming and the session cap stand in for it.
+### Self-test
+11 more checks (one proves a hanging check is skipped inside the Stop gate's budget), plus a sabotage that proves the godot-unit gate fails on a failing gdUnit run and names the test.
+
 ## [2.30.0-f] — 2026-10-23
 2.30f: parallel floors. A later phase can start its own pipeline while the one before it is in art or polish, behind an objective scenario gate, and game content becomes data with a schema per layer. Details in docs/FLOORS.md.
 ### Added

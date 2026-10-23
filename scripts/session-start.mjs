@@ -8,7 +8,17 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const run = (...args) => spawnSync(process.execPath, args, { cwd: ROOT, stdio: 'inherit' }).status ?? 1;
+// 2.30g: a session the launcher started already has its task in the kickoff. Anything this hook prints is
+// added to the context before that kickoff, so changing text here (the current task, the queue) broke the
+// prompt cache on every launch. Launched sessions get one fixed line; the checks still run, silently.
+const LAUNCHED = Boolean(process.env.STUDIO_ROLE && process.env.STUDIO_LOCK_OWNER) && process.env.STUDIO_SESSION_START_QUIET !== 'off';
+const run = (...args) => spawnSync(process.execPath, args, { cwd: ROOT, stdio: LAUNCHED ? 'ignore' : 'inherit' }).status ?? 1;
+if (LAUNCHED) {
+  console.log('Session start: launched by the studio; your kickoff has your task.');
+  run('scripts/verify-session.mjs');
+  if (run('harness/watch.mjs') === 0) run('harness/retro.mjs', '--if-due');
+  process.exit(0);
+}
 
 console.log('Session start');
 run('scripts/verify-session.mjs');

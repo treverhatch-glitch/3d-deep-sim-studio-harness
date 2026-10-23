@@ -71,6 +71,13 @@ export async function addVerdict({ by, fun, build = null, note = '', quote = '',
     fs.appendFileSync(inbox, `- [${v.at.slice(0, 16).replace('T', ' ')}] **${by}** played build ${b.id}: not fun yet${v.note ? `: ${v.note}` : ''}\n`);
   }
   emitEvent({ type: 'playtest.verdict', agent: by, to: relay ? 'human' : 'producer', msg: `${by} played build ${b.id}${phase ? ` (Phase ${phase})` : ''}: ${fun === 'yes' ? 'yes, it\'s fun' : 'not fun yet'}${v.note ? `: ${v.note}` : ''}${relay ? ` (relayed by ${relay} from ${v.relayed.source}: "${v.relayed.quote.slice(0, 120)}"; ${by}, if that's wrong, record not-yet in the Arcade)` : ''}` });
+  // 2.30g: the verdict and its words become a note later briefs can show as context (never a rule).
+  if (String(v.note || v.relayed?.quote || '').trim()) {
+    try {
+      const { addVerdictNote } = await import('./verdict-notes.mjs');
+      addVerdictNote({ by: v.by, verdict: v.fun, on: v.build || null, tags: ['playtest'], comment: String(v.note || v.relayed?.quote).trim() });
+    } catch {}
+  }
   return { ok: true, verdict: v };
 }
 

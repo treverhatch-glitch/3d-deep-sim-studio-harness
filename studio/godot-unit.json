@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "project": "game/godot",
+  "tests": "res://test_gdunit",
+  "gdunit": "v6.2.2",
+  "godot": "4.7.2",
+  "godotBin": "",
+  "watch": [
+    "sim",
+    "scripts",
+    "test_gdunit"
+  ],
+  "note": "Opt-in per game (2.30g). Set enabled true once the game has a Godot project with addons/gdUnit4 v6.2.2. GODOT_BIN overrides godotBin."
+}

@@ -39,7 +39,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { escalationFor } from './model-tiers.mjs';
-import { kickoff } from './kickoff.mjs';
+import { kickoffParts } from './kickoff.mjs';
+import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner } from './lock.mjs';
@@ -305,8 +306,11 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     markExhausted(who, line);
   }
   const tok = tokensFrom(log);
+  // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
+  const cache = cacheStats(log);
+  const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const reason = capped ? 'refreshed (session cap): a fresh session continues' : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined } });
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
   return { bad, trouble, handed, reason, capped };
@@ -404,18 +408,32 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = c;
   }
-  const prompt = kickoff({ role, agent, model, launched: true })
-    + (task ? `\n\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
-    + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
-    + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
-    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
-    + refreshRule({ oneTask, task })
+  // 2.30g: cache-friendly order. The fixed part (role kickoff, rules, the map tip, pitfalls) comes first
+  // and never names this agent, its model or the time, so every session of a role starts with the same
+  // bytes and Claude reads it from the prompt cache. Everything that changes per session goes last.
+  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true });
+  const stable = (kick
     // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
     // and the rules this game has learned the hard way.
     // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
     + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
-    + pitfallsForPrompt()
+    + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
+    + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
+    + pitfallsForPrompt());
+  const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
+    + kickTail
+    + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
+    + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
+    + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
+    + refreshRule({ oneTask, task })
     + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
+  const prompt = layoutPrompt({ stable, volatile });
+  let prefix = null;
+  try {
+    prefix = recordPrefix({ role, agent, prompt });
+  } catch {
+    // the ledger is a measurement, never a blocker
+  }
   // The map the prompt points at, refreshed when code changed since it was made.
   try {
     if (mapStale()) writeMap();
@@ -443,6 +461,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // background and their session ended with it (test #3). Give commands 10 minutes unless set.
   env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';
   env.BASH_MAX_TIMEOUT_MS ||= '1200000';
+  // 2.30g: the Director and Producer start from the same prefix every time, often more than 5 minutes
+  // apart, so they ask Claude Code for the 1-hour cache (Claude Code 2.1.108+; older versions ignore it).
+  if (LONG_CACHE_ROLES.has(role) && process.env.STUDIO_LONG_CACHE !== 'off') {
+    env.ENABLE_PROMPT_CACHING_1H ||= '1';
+    env.CLAUDE_CODE_PROMPT_CACHE_TTL ||= '1h';
+  }
   const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role).replaceAll('{task}', task || '');
   if (copy) env.STUDIO_MAIN_ROOT = REPO_ROOT;
   const cwd = copy ? copy.dir : REPO_ROOT;
@@ -455,7 +479,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom ? 'custom' : tool, model, pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   const beat = setInterval(() => {

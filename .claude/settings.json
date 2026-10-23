@@ -1,26 +1,19 @@
 {
   "hooks": {
     "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node scripts/session-start.mjs"
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [{ "type": "command", "command": "node scripts/session-start.mjs" }] }
     ],
     "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node scripts/pre-compact.mjs"
-          }
-        ]
-      }
+      { "matcher": "", "hooks": [{ "type": "command", "command": "node scripts/pre-compact.mjs" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Read|Grep|Glob|Bash", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-paths.mjs\"", "timeout": 10 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/trim-output.mjs\"", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-gate.mjs\"", "timeout": 10 }] }
     ]
   }
 }

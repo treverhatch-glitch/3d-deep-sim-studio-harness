@@ -12,7 +12,7 @@ import { breakerCards } from './breaker.mjs';
 import { producerWake } from './producer-wake.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { DEFAULT_DIVISIONS, listDivisions, setDivision } from './divisions.mjs';
 
 export { DEFAULT_DIVISIONS, listDivisions, setDivision };
@@ -46,6 +46,8 @@ import { holdReason, holdOwner, readHolds } from './task-hold.mjs';
 import { latestVerdict } from './verdict.mjs';
 import { tokenTotals } from './tokens.mjs';
 import { ledgerMetrics, readProxyLogs } from './ledger.mjs';
+import { prefixStability } from './prompt-layout.mjs';
+import { outliers as tokenOutliers } from './token-norms.mjs';
 import { refreshBoard, sessionLimits } from './session-cap.mjs';
 import { modelWarning } from './model-tiers.mjs';
 import { allAttached } from './cheatsheet.mjs';
@@ -188,7 +190,7 @@ function tokensCached() {
   try {
     const events = readRecentEvents(100000);
     const pick = (t) => ({ total: t.total, byRole: t.byRole, byModel: t.byModel, byAgent: t.byAgent.slice(0, 12), untracked: t.untracked });
-    tokenCache = { at: Date.now(), value: { last5h: pick(tokenTotals({ since: '5h', events })), today: pick(tokenTotals({ since: 'today', events })), all: pick(tokenTotals({ since: 'all', events })), notCounted: 'Work outside the launcher (your own chat, IDE or terminal sessions) is not counted.' } };
+    tokenCache = { at: Date.now(), value: { last5h: pick(tokenTotals({ since: '5h', events })), today: pick(tokenTotals({ since: 'today', events })), all: pick(tokenTotals({ since: 'all', events })), notCounted: 'Work outside the launcher (your own chat, IDE or terminal sessions) is not counted.', savers: saversOf(events) } };
   } catch {
     tokenCache = { at: Date.now(), value: null };
   }
@@ -210,6 +212,30 @@ function ledgerCached() {
     ledgerCache = { at: Date.now(), value: null };
   }
   return ledgerCache.value;
+}
+
+/**
+ * 2.30g token savers on the HUD: how stable each role's prompt prefix is, cache hit vs write over the
+ * last day, sessions far above their task type's normal use (a flag, never a cap), the last Godot unit run.
+ */
+export function saversOf(events) {
+  const safe = (fn, d) => {
+    try {
+      return fn();
+    } catch {
+      return d;
+    }
+  };
+  const dayAgo = Date.now() - 864e5;
+  const ends = events.filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) > dayAgo);
+  const cache = ends.reduce((c, e) => ({ read: c.read + (Number(e.meta?.cacheRead) || 0), write: c.write + (Number(e.meta?.cacheWrite) || 0), input: c.input + Math.max(0, (Number(e.tokensIn) || 0) - (Number(e.meta?.cacheWrite) || 0)), sessions: c.sessions + (e.meta?.cacheWrite != null ? 1 : 0) }), { read: 0, write: 0, input: 0, sessions: 0 });
+  const all = cache.read + cache.write + cache.input;
+  return {
+    prefix: safe(() => prefixStability(), {}),
+    cache: { ...cache, hitRate: all ? cache.read / all : null },
+    outliers: safe(() => tokenOutliers({ events }).slice(0, 8), []),
+    godotUnit: safe(() => JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'godot-unit-last.json'), 'utf8')), null),
+  };
 }
 
 export function buildHudState() {

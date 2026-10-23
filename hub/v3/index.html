@@ -1448,6 +1448,19 @@
     box.innerHTML = `<dl class="facts"><dt>Sessions</dt><dd>${t.sessions} ended, ${t.measured} reported usage</dd><dt>In / out</dt><dd>${big(t.tokensIn)} / ${big(t.tokensOut)}</dd><dt>Cache reads</dt><dd>${big(t.cacheRead)}${t.measured ? ` (${big(t.cacheRead / t.measured)} per session${t.tasksDone ? `, ${big(t.cacheRead / t.tasksDone)} per task done` : ''})` : ''}</dd></dl>` +
       `<table class="score"><tr><th>Name</th><th>Sessions</th><th>In</th><th>Out</th><th>Cache reads</th></tr>${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.sessions}${r.measured < r.sessions ? ` <span title="sessions whose tool reported no usage">(${r.sessions - r.measured} not measured)</span>` : ''}</td><td>${big(r.tokensIn)}</td><td>${big(r.tokensOut)}</td><td>${big(r.cacheRead)}</td></tr>`).join('')}</table>` +
       `<p class="note">${un.length ? `Not measured: ${un.map(([tool, n]) => `${n} ${esc(tool)} session${n === 1 ? '' : 's'}`).join(', ')}. ` : ''}${esc(tokLast.notCounted)}</p>`;
+    box.innerHTML += saversHtml(tokLast.savers);
+  }
+  // 2.30g: token savers. Flags only: a session above its task type's normal use is shown, never stopped.
+  function saversHtml(sv) {
+    if (!sv) return '';
+    const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+    const pre = Object.entries(sv.prefix || {});
+    const c = sv.cache || {};
+    const g = sv.godotUnit;
+    return `<h4 id="o-savers">Token savers</h4><dl class="facts"><dt>Cache hit (24 h)</dt><dd>${c.sessions ? `${pct(c.hitRate)} read · ${big(c.write)} written · ${big(c.read)} read, over ${c.sessions} session${c.sessions === 1 ? '' : 's'}` : 'no session with cache data yet'}</dd>` +
+      `<dt>Prompt prefix</dt><dd>${pre.length ? pre.map(([r, p]) => `${esc(r)} ${pct(p.stableRate)} stable (${p.sessions} sessions, ${p.changes} change${p.changes === 1 ? '' : 's'})`).join(' · ') : 'no launch recorded yet'}</dd>` +
+      `<dt>Godot unit</dt><dd>${g ? `${g.ok ? 'PASS' : 'FAIL'} · ${g.tests} tests${g.failures?.length ? ` · ${g.failures.slice(0, 3).map((f) => esc(f.name)).join(', ')}` : ''} · gdUnit4 ${esc(g.version?.gdunit || '')}, Godot ${esc(g.version?.godot || '')}` : 'not run (opt-in per game)'}</dd></dl>` +
+      `<p class="note">Above normal for their task type (flag only, nothing is capped):</p>${sv.outliers?.length ? `<table class="score"><tr><th>Agent</th><th>Task</th><th>Type</th><th>Use</th><th>× normal</th></tr>${sv.outliers.map((o) => `<tr><td>${esc(o.agent)}</td><td>${esc(o.task || '')}</td><td>${esc(o.type)}</td><td>${big(o.units)}</td><td>${o.ratio.toFixed(1)}×</td></tr>`).join('')}</table>` : '<p class="note">None: every session is within its type\'s normal range (or the type has fewer than 5 sessions).</p>'}`;
   }
   document.querySelectorAll('.tokwin').forEach((b) => b.addEventListener('click', () => { tokWin = b.dataset.w; renderTokens(); }));
   $('o-tokby')?.addEventListener('change', () => renderTokens());

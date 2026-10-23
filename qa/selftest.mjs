@@ -143,6 +143,17 @@ const report = (label, ok, detail = '') => {
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
+  'godot-unit': (d) => {
+    // An enabled Godot project whose gdUnit4 run fails (exit 100) with one failing test in its JUnit XML.
+    const g = path.join(d, 'gtest');
+    fs.mkdirSync(path.join(g, 'addons', 'gdUnit4'), { recursive: true });
+    fs.writeFileSync(path.join(g, 'project.godot'), '[application]\nconfig/name="gtest"\n');
+    const xml = '<testsuites><testsuite name="Economy"><testcase name="test_ok" classname="Economy"/><testcase name="test_money_drains" classname="Economy"><failure message="expected money to drop"/></testcase></testsuite></testsuites>';
+    fs.writeFileSync(path.join(g, 'addons', 'gdUnit4', 'runtest.sh'), `#!/bin/sh\nmkdir -p reports/report_1\ncat > reports/report_1/results.xml <<'X'\n${xml}\nX\nexit 100\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(d, 'fake-godot'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(d, 'studio', 'godot-unit.json'), JSON.stringify({ enabled: true, project: 'gtest', tests: 'res://test_gdunit', gdunit: 'v6.2.2', godot: '4.7.2', watch: ['sim'] }));
+    return { GODOT_BIN: path.join(d, 'fake-godot'), STUDIO_GODOT_UNIT_ALL: '1' };
+  },
   session: (d) => fs.rmSync(path.join(d, 'studio/CURRENT_TASK.md')),
   // An alias a regex cannot see: only the runtime probe catches it.
   purity: (d) => edit(d, SIM, (s) => s.replace('const drift =', "const M = Math; const k = 'ran' + 'dom'; M[k]();\n  const drift =")),
@@ -188,6 +199,7 @@ const EXPECT = {
   'browser-play': /a real game needs the browser check/,
   docs: /npm run no-such-script/,
   secrets: /leak\.txt/,
+  'godot-unit': /test_money_drains: expected money to drop/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -1233,7 +1245,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('tasks and notes carry a version tag (web or engine:<name>)', added?.meta?.track === 'engine:godot' && /· engine:godot\] the Godot import is slow/.test(fs.readFileSync(path.join(dir, 'studio/harness-notes/NOTES.md'), 'utf8')), JSON.stringify(added?.meta));
   // The Prototype sprint pace.
   run(dir, 'node harness/mode.mjs set prototype --by hatch', env);
-  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /20\. In the Prototype sprint pace/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout + fs.readFileSync(path.join(dir, 'harness/kickoff.mjs'), 'utf8')));
+  report('the Prototype sprint pace: several builders in lanes, the watcher starts them, the Director at phase end', /Prototype sprint/.test(run(dir, 'node harness/mode.mjs', env).stdout) && /20\. In the Prototype sprint pace/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /producer-playbook/.test(run(dir, 'node harness/kickoff.mjs --role producer --agent prod-1 --model m', env).stdout));
 }
 
 // 2.26: from test #2 (Next Floor on 2.24 and 2.25) and the token work: another tool's limit is that tool's,
@@ -2158,7 +2170,7 @@ console.log(JSON.stringify(toolCommand('claude', { model: 'claude-sonnet-5-5', p
 import { kickoff } from ${u('harness/kickoff.mjs')};
 console.log(JSON.stringify({ rule: refreshRule({ oneTask: true, task: 'T-9' }), prod: kickoff({ role: 'producer', agent: 'producer-1', model: 'm' }), dir: kickoff({ role: 'director', agent: 'director-1', model: 'm' }) }));`);
   report('the kickoff gives launched sessions the refresh rule: one task, 40 turns / 120k, the hand-back template, the exception', /one task/.test(rule.rule || '') && /40 turns or 120k/.test(rule.rule || '') && /task\.mjs pause T-9 --note "Done:/.test(rule.rule || '') && /session -- exception/.test(rule.rule || ''), String(rule.rule || JSON.stringify(rule)));
-  report('the Producer attaches cheat sheet tricks before handing out a task, and the Director checks the sheet for the next work', /cheatsheet -- attach <ID>/.test(rule.prod || '') && /cheatsheet -- match/.test(rule.dir || ''), '');
+  report('the Producer attaches cheat sheet tricks before handing out a task, and the Director checks the sheet for the next work', /producer-playbook/.test(rule.prod || '') && /cheatsheet -- attach <ID>/.test(fs.readFileSync(path.join(dir, '.claude/skills/producer-playbook/SKILL.md'), 'utf8')) && /cheatsheet -- match/.test(rule.dir || ''), '');
   // Budget: cache reads count, weighted; the daily cap has a default.
   const bud = probe(`import * as b from ${u('harness/budget.mjs')};
 import { spentToday } from ${u('harness/agent.mjs')};
@@ -3050,6 +3062,86 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
   run(dir, 'node harness/bible.mjs layer gear-crafting no --by hatch', env);
   const crossedOutFail = run(dir, 'npm run check:content', env);
   report('content-gate: crossed-out layer fails', crossedOutFail.status !== 0 && /corresponds to layer "gear-crafting" which is not 'yes' in the bible/.test(crossedOutFail.stderr), crossedOutFail.stderr);
+}
+
+// 2.30g: token savers. The kickoff's fixed part is the same bytes for every session of a role, the
+// ledger measures it, cache writes are read from Claude's own usage, the hooks trim / guard / gate, token
+// norms flag (never cap), verdicts become notes in briefs, and the Godot unit gate skips or reports.
+{
+  const dir = copyRepo();
+  const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
+  const probe = (code, env = {}) => {
+    const f = path.join(tmpRoot, `p230g-${++n}.mjs`);
+    fs.writeFileSync(f, code);
+    const r = run(dir, `node "${f}"`, env);
+    try {
+      return JSON.parse(r.stdout.trim().split('\n').pop());
+    } catch {
+      return { error: r.stdout + r.stderr };
+    }
+  };
+  const k = probe(`import { kickoffParts, kickoff } from ${u('harness/kickoff.mjs')};
+import { layoutPrompt, prefixHash, recordPrefix, prefixStability, cacheStats } from ${u('harness/prompt-layout.mjs')};
+const a = kickoffParts({ role: 'builder', agent: 'claude-a', model: 'm-1', launched: true });
+const b = kickoffParts({ role: 'builder', agent: 'codex-b', model: 'gpt-x', launched: true });
+const p1 = layoutPrompt({ stable: a.stable, volatile: 'You are claude-a. T-1' });
+const p2 = layoutPrompt({ stable: b.stable, volatile: 'You are codex-b. T-2' });
+const r1 = recordPrefix({ role: 'builder', agent: 'claude-a', prompt: p1 });
+const r2 = recordPrefix({ role: 'builder', agent: 'codex-b', prompt: p2 });
+const r3 = recordPrefix({ role: 'builder', agent: 'x', prompt: layoutPrompt({ stable: a.stable + 'changed', volatile: '' }) });
+const log = [JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 5, cache_read_input_tokens: 900, cache_creation_input_tokens: 100 } } }), JSON.stringify({ type: 'result', usage: { input_tokens: 10, cache_read_input_tokens: 8000, cache_creation_input_tokens: 1990 } })].join('\\n');
+console.log(JSON.stringify({ same: a.stable === b.stable, named: /claude-a|codex-b|m-1|gpt-x/.test(a.stable), paste: /claude-a/.test(kickoff({ role: 'builder', agent: 'claude-a', model: 'm-1' })), h: prefixHash(p1) === prefixHash(p2), r2: r2.changed, r3: r3.changed, st: prefixStability().builder, c: cacheStats(log) }));`);
+  report('2.30g: the kickoff prefix is byte-identical across agents and models of a role, and the paste-ready kickoff still names the agent', k.same === true && k.named === false && k.paste === true && k.h === true, JSON.stringify(k).slice(0, 800));
+  report('2.30g: the prefix ledger flags a changed prefix and reports stability per role', k.r2 === false && k.r3 === true && k.st?.sessions === 3 && k.st?.changes === 1 && Math.abs(k.st.stableRate - 0.5) < 1e-9, JSON.stringify(k.st));
+  report('2.30g: cache hit vs write comes from Claude\'s result usage', k.c?.cacheRead === 8000 && k.c?.cacheWrite === 1990 && Math.abs(k.c.hitRate - 0.8) < 1e-9, JSON.stringify(k.c));
+  const hook = (name, input, env = {}) => spawnSync(process.execPath, [path.join(dir, '.claude', 'hooks', name)], { cwd: dir, input: JSON.stringify(input), encoding: 'utf8', env: { ...CLEAN_ENV, CLAUDE_PROJECT_DIR: dir, ...env } });
+  const big = Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\n') + '\nError: planted failure\n' + Array.from({ length: 60 }, (_, i) => `tail ${i}`).join('\n');
+  const t = hook('trim-output.mjs', { tool_name: 'Bash', tool_use_id: 'tu1', tool_response: { stdout: big, stderr: '' } });
+  let to = null;
+  try {
+    to = JSON.parse(t.stdout).hookSpecificOutput.updatedToolOutput.stdout;
+  } catch {}
+  const small = hook('trim-output.mjs', { tool_name: 'Bash', tool_response: { stdout: 'ok\n', stderr: '' } });
+  report('2.30g: the trim hook keeps the failure and the tail of long output, saves the full text, and leaves short output alone', Boolean(to) && /planted failure/.test(to) && /tail 59/.test(to) && !/line 5\n/.test(to) && fs.existsSync(path.join(dir, '.studio', 'trimmed', 'tu1.log')) && small.stdout.trim() === '', `${t.stdout.slice(0, 400)}${t.stderr}`);
+  const g1 = hook('guard-paths.mjs', { tool_name: 'Read', tool_input: { file_path: `${dir}/node_modules/x/index.js` } });
+  const g2 = hook('guard-paths.mjs', { tool_name: 'Bash', tool_input: { command: 'npm run build && node build/serve.mjs' } });
+  const g3 = hook('guard-paths.mjs', { tool_name: 'Bash', tool_input: { command: 'rg foo game/godot/.godot/imported' } });
+  report('2.30g: the path guard denies reads of node_modules / build / .godot and lets running a build through', /"deny"/.test(g1.stdout) && g2.stdout.trim() === '' && /"deny"/.test(g3.stdout), JSON.stringify([g1.stdout, g2.stdout, g3.stdout]));
+  const s0 = hook('stop-gate.mjs', { stop_hook_active: false });
+  const s1 = hook('stop-gate.mjs', { stop_hook_active: true }, { STUDIO_LOCK_OWNER: 'builder-1' });
+  report('2.30g: the stop gate stays out of a person\'s session and never loops', s0.status === 0 && s0.stdout.trim() === '' && s1.status === 0 && s1.stdout.trim() === '', JSON.stringify([s0.stdout, s1.stdout]));
+  {
+    // Fast-only: a lite gate that hangs is skipped inside the budget, the agent is never held up.
+    const gj = path.join(dir, 'studio', 'gates.json');
+    const keep = fs.readFileSync(gj, 'utf8');
+    fs.writeFileSync(gj, JSON.stringify({ gates: [{ id: 'slow', command: 'node -e "setTimeout(()=>{},30000)"', required: true, lite: true }] }));
+    fs.writeFileSync(path.join(dir, 'stop-gate-probe.txt'), 'x');
+    const t0 = Date.now();
+    const s2 = hook('stop-gate.mjs', { stop_hook_active: false }, { STUDIO_LOCK_OWNER: 'builder-1', STUDIO_STOP_GATE_MS: '3000' });
+    const took = Date.now() - t0;
+    fs.writeFileSync(gj, keep);
+    fs.rmSync(path.join(dir, 'stop-gate-probe.txt'), { force: true });
+    report('2.30g: the stop gate is fast-only: a hanging check is skipped within its few-second budget and never blocks', s2.status === 0 && !/"block"/.test(s2.stdout) && took < 8000, JSON.stringify({ took, out: s2.stdout.slice(0, 300) }));
+  }
+  const tn = probe(`import { tokenNorms, outliers } from ${u('harness/token-norms.mjs')};
+const ev = [];
+const add = (agent, task, type, tin) => { ev.push({ type: 'task.added', task, meta: { type } }); ev.push({ type: 'agent.session.start', agent, task, meta: { role: 'builder' } }); ev.push({ type: 'agent.session.end', agent, task, tokensIn: tin, tokensOut: 0, meta: {} }); };
+for (let i = 0; i < 6; i++) add('d' + i, 'D' + i, 'docs', 1000 + i * 10);
+for (let i = 0; i < 6; i++) add('g' + i, 'G' + i, 'godot-3d', 50000 + i * 1000);
+add('d9', 'D9', 'docs', 9000);
+add('g9', 'G9', 'godot-3d', 60000);
+console.log(JSON.stringify({ norms: tokenNorms({ events: ev }), out: outliers({ events: ev }) }));`);
+  report('2.30g: token norms are per task type: a 9k docs task is flagged, a 60k Godot 3D task is not', tn.out?.length === 1 && tn.out[0].task === 'D9' && tn.norms?.['godot-3d']?.n === 7, JSON.stringify(tn).slice(0, 600));
+  const vn = probe(`import { addVerdictNote, notesForBrief } from ${u('harness/verdict-notes.mjs')};
+addVerdictNote({ by: 'hatch', verdict: '❌', on: null, comment: 'ships all follow the same path, boats look narrow' });
+addVerdictNote({ by: 'hatch', verdict: '✅', on: 'T-7', comment: 'upkeep finally drains money' });
+console.log(JSON.stringify({ a: notesForBrief({ id: 'T-9', title: 'Give ships varied paths', role: 'builder' }), b: notesForBrief({ id: 'T-7', title: 'x', role: 'builder' }), c: notesForBrief({ id: 'T-1', title: 'Docs: credits', role: 'docs' }) }));`);
+  report('2.30g: verdict notes reach the briefs they touch as context, not rules', /context, not rules/.test(vn.a || '') && /same path/.test(vn.a) && /upkeep/.test(vn.b || '') && vn.c === '', JSON.stringify(vn).slice(0, 600));
+  const gu = run(dir, 'node harness/godot-unit.mjs --changed');
+  report('2.30g: the godot-unit gate skips cleanly when the game has no Godot project or has not opted in', gu.status === 0 && /skipped/.test(gu.stdout), `${gu.stdout}${gu.stderr}`);
+  const ss = run(dir, 'node scripts/session-start.mjs', { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-1' });
+  report('2.30g: a launched session gets one fixed session-start line, so the kickoff stays first in the cache', ss.stdout.trim() === 'Session start: launched by the studio; your kickoff has your task.', ss.stdout.slice(0, 300));
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
