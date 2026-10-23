@@ -643,7 +643,8 @@
           <select id="o-size" aria-label="Size, 1 easy to 5 big"><option value="">size</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
           <input id="o-cause" placeholder="caused by T-…" aria-label="For a bug: the task whose work caused it" size="9">
           <button>Add task</button></form>
-        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button id="o-restart" type="button" class="stop restart" title="Saved as a git tag first; asks twice">Throw it all away and restart</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <div class="act-row"><input id="o-note" placeholder="Note for pause, reopen or sign-off" aria-label="Note for the next action"> <button id="o-watch" type="button">Run the watcher</button> <button type="button" data-sign="balance">Sign off balance</button> <button type="button" data-sign="fun">Sign off fun</button></div>
+        <div class="act-row danger-row"><span class="note">Danger zone:</span> <button id="o-stopbtn" type="button" class="stop">Stop all agents</button> <button id="o-restart" type="button" class="stop restart" title="Saved as a git tag first; asks twice">Throw it all away and restart</button></div>
         <form id="o-agentform" class="act-row"><select id="o-arole" aria-label="Role for the new agent"><option>builder</option><option>qa-playtester</option><option>rnd</option><option>art</option><option>director</option><option>producer</option><option>reviewer</option><option>planner</option><option>liaison</option></select>
           <select id="o-atool" aria-label="Agent tool"><option value="">tool from .env</option><option>claude</option><option>codex</option><option>agy</option><option>cursor</option><option>grok</option><option>aider</option><option>custom</option></select>
           <input id="o-amodel" placeholder="model (blank: from .env)" aria-label="Model for the new agent" size="18"> <button>Start agent</button></form>
@@ -684,7 +685,7 @@
     <span class="stat" id="t-checks-stat" title="Required checks green in the last verify">Checks <b id="t-fans">–</b></span>
     <span class="stat" title="Lessons in studio/memory/failures.md">Research <b id="t-research">0</b></span>
     <span class="stat" title="Tokens reported today">Tokens used <b id="t-tokens">–</b></span>
-    <span class="stat" title="Local time">Day <b id="t-clock">--:--</b></span>
+    <span class="stat" title="Local time (2.30j: a clock, not a game day)">Time <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
     <button class="switch" data-to="ops">Ops view</button>
     <button class="switch" data-to="plan">Game plan</button>
@@ -925,6 +926,8 @@
     if (state) render();
   });
   const notify = (msg) => { $('o-actmsg').textContent = msg; };
+  // 2.30j (M6): the banner said read-only even with a token loaded from the link.
+  if (hubToken()) notify('Buttons on: the HUB token is loaded for this tab (it is sent with every change).');
   async function post(path, body) {
     const headers = { 'Content-Type': 'application/json' };
     if (memToken || sess.get(tokenKey)) headers['X-Hub-Token'] = memToken || sess.get(tokenKey);
@@ -1249,7 +1252,7 @@
     const nowList = s.now && s.now.length ? s.now : s.queue.inProgress.slice(0, 1).map((t) => ({ id: t.id, title: t.title, agents: [] }));
     $('o-now').innerHTML = nowList.length ? `Now: ${nowList.slice(0, 4).map((t) => `<b>${esc(t.id)}</b> ${esc(short(t.title, nowList.length > 1 ? 50 : 90))}${t.agents.length ? ` <span style="opacity:.7">(${esc(t.agents.join(', '))})</span>` : ''}`).join(' · ')}${nowList.length > 4 ? ` · +${nowList.length - 4} more` : ''}` : 'Nothing in progress. Pull the next task from the queue.';
     const funTxt = (p) => (p.open ? (p.fun ? (p.fun.said === 'yes' ? `, fun: yes (${p.fun.by})` : `, fun: not yet (${p.fun.by})`) : ', fun: not played yet') : '');
-    const opPh = (s.phases || []).map((p) => `Phase ${p.n}: ${p.planned ? `${p.done} of ${p.total}${p.exit.total ? `, exit ${p.exit.done}/${p.exit.total}` : ''}${funTxt(p)}` : 'not planned yet'}`).join(' · ');
+    const opPh = (s.phases || []).map((p) => `Phase ${p.n}: ${p.planned ? `${p.done} of ${p.total}${p.exit.total ? `, exit ${p.exit.done}/${p.exit.total}` : ''}${funTxt(p)}` : 'not planned yet (no tasks for it: the Producer plans it when the phase before is near done)'}`).join(' · ');
     const sv = s.supervisor;
     $('o-sup').innerHTML = `${sv ? `<p>${sv.running ? '<b>Running</b>' : 'Stopped'} since ${esc(hhmm(sv.startedAt))}${sv.opts?.until ? `, until ${esc(hhmm(sv.opts.until))}` : ''}${sv.opts?.window ? `, window ${esc(sv.opts.window)}` : ''}: ${sv.sessions} sessions, ${sv.tasksDone} tasks done${sv.tokens ? `, ${Number(sv.tokens).toLocaleString()} tokens` : ''}.${sv.stopReason ? ` Stopped: ${esc(sv.stopReason)}.` : ''}${sv.last?.why?.length && sv.running ? ` <span class="note">Last pass: ${esc(sv.last.why.join('; '))}</span>` : ''}${sv.hubDown?.length ? ` <span class="note">Hub was down ${sv.hubDown.map((d) => `${esc(hhmm(d.from))}–${esc(hhmm(d.to))}`).join(', ')}.</span>` : ''}</p>` : '<p class="note">Not running. <code>npm run studio:start -- --until 23:00</code> keeps the hub up and starts a fresh agent per task until then; <code>--install</code> starts it after a restart.</p>'}${(s.budget || []).map((b) => `<p class="note">${esc(b.text)}</p>`).join('')}`;
     $('o-prog').textContent = `${s.progress.done} of ${s.progress.total} tasks done${opPh ? ` · ${opPh}` : ''}`;
@@ -1301,9 +1304,9 @@
     $('o-actstate').textContent = ro ? 'read-only' : `as ${actor()}`;
 
     const p = s.playtest;
-    $('o-play').innerHTML = p
+    $('o-play').innerHTML = p && !p.none
       ? `<dl class="facts"><dt>Result</dt><dd style="color:${p.passed ? 'var(--go)' : 'var(--hold)'}">${p.passed ? 'Passed' : 'Failed'}${p.outcome ? `, ${esc(p.outcome)}` : ''} at tick ${esc(p.ticksRun)}</dd><dt>Cartridge</dt><dd>${esc(p.cartridge)} · ${esc(p.scenario || 'no scenario')} · seed ${esc(p.seed)}</dd>${p.failingTick ? `<dt>Failing tick</dt><dd>${esc(p.failingTick)}: ${esc(p.finding)}</dd>` : ''}<dt>State hash</dt><dd><code>${esc(p.hash)}</code></dd><dt>Report</dt><dd><code>${esc(p.report)}</code></dd><dt>When</dt><dd>${esc(hhmm(p.at))}</dd></dl>`
-      : '<p class="note">No playtest yet. Run <code>node qa/playtest.mjs --stage 1</code>.</p>';
+      : `<p class="note">No playtest for ${esc(p?.cartridge || 'main')} yet. Run <code>node qa/playtest.mjs --stage 1 --cartridge ${esc(p?.cartridge || 'main')}</code>.</p>`;
 
     $('o-score').innerHTML = (s.scorecard || []).length
       ? `<table class="score"><tr><th>Model</th><th>Done</th><th>Pts</th><th>Bugs</th><th>/10 pts</th><th>Slips</th></tr>${s.scorecard.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.done}</td><td>${m.points}</td><td class="${m.bugs + (m.traced || 0) ? 'bad' : ''}" title="confirmed ${m.bugs}, traced through commits ${m.traced || 0}">${m.bugs + (m.traced || 0)}${m.suspected ? ` <span title="suspected from closed-loop failures">+${m.suspected}?</span>` : ''}</td><td>${m.per10 ?? '–'}</td><td title="done refused by a check / forced / handed back">${m.refused}/${m.forced}/${m.handedBack}</td></tr>`).join('')}</table>`
@@ -2007,9 +2010,10 @@
     const tests = office.querySelector('[data-dyn="tests"]');
     if (tests) {
       const p = s.playtest;
-      tests.querySelector('i').innerHTML = Array.from({ length: 16 }, (_, k) => `<span class="${!p ? 'n' : !p.passed && k % 5 === 2 ? 'r' : ''}"></span>`).join('');
-      tests.querySelector('b').textContent = p ? `${p.passed ? 'Pass' : 'FAIL'} t${p.ticksRun}` : 'No run yet';
-      tests.title = p ? `Latest playtest: ${p.passed ? 'passed' : `failed at tick ${p.failingTick}`}` : 'No playtest yet';
+      const none = !p || p.none;
+      tests.querySelector('i').innerHTML = Array.from({ length: 16 }, (_, k) => `<span class="${none ? 'n' : !p.passed && k % 5 === 2 ? 'r' : ''}"></span>`).join('');
+      tests.querySelector('b').textContent = !none ? `${p.passed ? 'Pass' : 'FAIL'} t${p.ticksRun}` : 'No run yet';
+      tests.title = !none ? `Latest playtest: ${p.passed ? 'passed' : `failed at tick ${p.failingTick}`}` : 'No playtest yet';
     }
   }
 

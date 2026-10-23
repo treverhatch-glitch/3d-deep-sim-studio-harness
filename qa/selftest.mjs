@@ -3167,6 +3167,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30j: fixes from real HUD use (qa/selftest-230j.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230j } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230j.mjs')).href);
+  await selftest230j({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // 2.30i: launcher verify after a session ends without task done, .env for agent start, NIM one at a time,
 // 429 in the stream json (qa/selftest-230i.mjs).
 {

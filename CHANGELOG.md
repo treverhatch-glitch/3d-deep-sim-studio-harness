@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-j] — 2026-10-23
+2.30j: fixes from driving a real game (Marina) from the War Room. No new features.
+### Fixed
+- **Tasks added in the HUD sat idle when no pace was chosen.** The Director's flow pass now starts builders for ready tasks when the dev never chose a pace (`fillAgents({ byDirector: true })`); a pace the dev chose that doesn't auto-start is still respected. The flow's activity line is only repeated when it changes or after 30 minutes.
+- **Latest playtest showed the example game.** The panel (and the Tycoon test light) read only reports for the active cartridge, and say "No playtest for <game> yet" instead of falling back to another one.
+- **Liaison replied "User Safety: safe".** Safety-classifier lines and empty replies are no longer shown as answers (`isClassifierReply`); routes that answer 404/410 cool down for a day instead of being retried every message.
+- **Token ledger, budget and sessions empty for sessions started by scripts.** New `npm run session:report -- start|end --agent A --model M [--role] [--tool] [--task] [--in N] [--out N]` (harness/session-report.mjs) records outside sessions with their model, so the panels count them.
+- **Producer messages with no tool set.** The hub raises one "No tool is set to start the Producer" warning an hour, naming the .env setting.
+- **Stale HUB-token banner.** When a token is loaded for the tab, the banner says so.
+- **Duplicate Needs-you cards.** One card per task and reason (numbers in the text don't make a new card).
+- **Danger buttons beside Sign off.** "Stop all agents" and "Throw it all away and restart" moved to their own danger row (restart still asks twice).
+- **Cheat-sheet tips on unrelated tasks.** A tip needs two tag hits, or one hit on a narrow entry (at least a fifth of its tags), or a tag given explicitly; one word hitting a broad rule no longer attaches it.
+- **Arcade had nothing playable.** After the launcher closes a task it runs the browser check (`qa/browser-play.mjs`, best effort, 5 min cap) so a passing build reaches the Arcade; `STUDIO_POST_BROWSER_PLAY=off` turns it off.
+- **Small labels.** "Phase not planned yet" explains itself; the Tycoon clock is labelled Time, not Day.
+
 ## [2.30.0-i] — 2026-10-23
 2.30i: two fixes from real game builds (Marina, and a two-task A/B on another studio) plus NIM limits. No new features.
 ### Fixed

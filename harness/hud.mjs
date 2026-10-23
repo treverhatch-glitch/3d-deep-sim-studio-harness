@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { DEFAULT_DIVISIONS, listDivisions, setDivision } from './divisions.mjs';
+import { activeCartridge } from './cartridge.mjs';
 
 export { DEFAULT_DIVISIONS, listDivisions, setDivision };
 const divisions = () => listDivisions();
@@ -134,14 +135,20 @@ const TO_PRODUCER = new Set(['task.done', 'task.forced', 'task.not_done', 'task.
 
 function latestPlaytest() {
   const dir = path.join(REPO_ROOT, 'qa', 'reports');
-  if (!fs.existsSync(dir)) return null;
+  // 2.30j (H2): only the active game's playtests (activeCartridge() returns {name, from}).
+  const cart = activeCartridge().name || null;
+  if (!fs.existsSync(dir)) return { none: true, cartridge: cart };
   const files = fs
     .readdirSync(dir)
     .filter((f) => /^qa_.*\.json$/.test(f))
-    .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .map((f) => {
+      const r = readJson(path.join('qa', 'reports', f));
+      return { f, t: fs.statSync(path.join(dir, f)).mtimeMs, r };
+    })
+    .filter((o) => o.r?.stage1?.cartridge === cart)
     .sort((a, b) => b.t - a.t);
-  if (!files.length) return null;
-  const report = readJson(path.join('qa', 'reports', files[0].f));
+  if (!files.length) return { none: true, cartridge: cart };
+  const report = files[0].r;
   const s1 = report?.stage1 || {};
   return {
     report: `qa/reports/${files[0].f.replace(/\.json$/, '.md')}`,
@@ -418,6 +425,13 @@ export function buildHudState() {
   // The supervisor stopped starting agents after two identical failures (exit 127: tool not on PATH).
   const sup = supervisorStatus();
   if (sup?.halted && sup.status === 'running') needs.push({ ts: sup.halted.at, agent: 'supervisor', msg: `The supervisor stopped starting agents: ${sup.halted.why}`, action: { type: 'supervisor-resume', label: 'Fixed it: try again' } });
+  const seenNeed = new Set();
+  // 2.30j (M7): one card per task and reason (numbers like line counts don't make a new card).
+  for (let i = 0; i < needs.length; i += 1) {
+    const key = `${needs[i].task || ''}|${String(needs[i].msg || '').replace(/\d+/g, '#')}`;
+    if (seenNeed.has(key)) needs.splice(i--, 1);
+    else seenNeed.add(key);
+  }
   // Money, licences, publishing and deleting first; then what breaks play; then housekeeping.
   const rank = (n) => (/money|spend|pay|licen[cs]e|credit line|publish|delet/i.test(n.msg) ? 0 : /playtest|browser|blank|escalat|exhausted|won't load|idle|stopped starting/i.test(n.msg) ? 1 : 2);
   needs.sort((x, y) => rank(x) - rank(y));

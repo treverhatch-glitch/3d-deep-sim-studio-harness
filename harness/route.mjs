@@ -455,7 +455,9 @@ export async function routeChatCompletion({
         const isQuota = /quota|insufficient|credit|billing/i.test(err.message);
         const baseCooldown = isQuota
           ? COOLDOWN_DEFAULTS.quotaExhaustedMs
-          : statusCode === 429
+          : statusCode === 404 || statusCode === 410
+            ? 24 * 3600 * 1000
+            : statusCode === 429
             ? COOLDOWN_DEFAULTS.rateLimitMs
             : COOLDOWN_DEFAULTS.serverErrorMs;
         const cooldownMs = Math.max(baseCooldown, err.retryAfterMs || 0);

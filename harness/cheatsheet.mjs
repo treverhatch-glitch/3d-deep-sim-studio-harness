@@ -55,13 +55,16 @@ export function readCheatsheet(file = CHEATSHEET_FILE) {
 const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9.]+/).filter((w) => w.length > 1);
 
 /** The best matching entries (most tags hit; ties keep the sheet's order), at most the cap (3 unless the Director changed it, never over 6). */
+// 2.30j (M9): a trick matches with 2+ tag hits, or one hit on a narrow entry (at least a fifth of its tags),
+// or a tag passed explicitly; one word hitting a broad 9-tag rule (C-65 on a boat-wake task) no longer does.
 export function matchTricks(text, { tags = [], entries = readCheatsheet(), max = trickCap(), forRole = 'agent' } = {}) {
   // Director lines are for planning; the rest are for the work itself.
   entries = entries.filter((e) => (forRole === 'director') === e.tags.includes('director'));
-  const ws = new Set([...words(text), ...tags.map((t) => String(t).toLowerCase())]);
+  const explicitTags = new Set(tags.map((t) => String(t).toLowerCase()));
+  const ws = new Set([...words(text), ...explicitTags]);
   // Simple stems, so "tests" finds [test] and "replays" finds [replay].
   for (const w of [...ws]) if (w.endsWith('s')) ws.add(w.slice(0, -1));
-  return entries.map((e, i) => ({ ...e, i, hits: e.tags.filter((t) => ws.has(t)) })).filter((e) => e.hits.length).sort((a, b) => b.hits.length - a.hits.length || a.i - b.i).slice(0, max).map(({ id, tags: t, text: x, hits }) => ({ id, tags: t, text: x, hits }));
+  return entries.map((e, i) => ({ ...e, i, hits: e.tags.filter((t) => ws.has(t)) })).filter((e) => e.hits.length && (e.hits.length >= 2 || e.hits.length / Math.max(1, e.tags.filter((t) => t !== 'director').length) >= 0.2 || e.hits.some((t) => explicitTags.has(t)))).sort((a, b) => b.hits.length - a.hits.length || a.i - b.i).slice(0, max).map(({ id, tags: t, text: x, hits }) => ({ id, tags: t, text: x, hits }));
 }
 
 const attachFile = (id) => path.join(ATTACH_DIR, `${id}.json`);

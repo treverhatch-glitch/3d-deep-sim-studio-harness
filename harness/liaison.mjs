@@ -115,6 +115,12 @@ export function confirmBrief(id, { by, quote = '' }) {
  * to the game dev, who confirms with a button (confirmBrief). The transcript is kept in
  * studio/liaison/chat.md so the Producer and the Director can see what was said.
  */
+export function isClassifierReply(text) {
+  text = String(text || '').trim();
+  if (!text || /^safe$/i.test(text) || /^unsafe$/i.test(text)) return true;
+  return /^\s*(user\s*safety|safety|content\s*safety)\s*[:=]\s*(safe|unsafe)\b/i.test(text);
+}
+
 export async function chatTurn({ messages = [], from = 'game-dev', pending = null }) {
   const turns = (Array.isArray(messages) ? messages : []).filter((m) => m && ['user', 'assistant'].includes(m.role) && String(m.content || '').trim()).slice(-12).map((m) => ({ role: m.role, content: String(m.content).slice(0, 1500) }));
   if (!turns.length || turns[turns.length - 1].role !== 'user') return { ok: false, message: 'Say something first.' };
@@ -138,6 +144,11 @@ idea = something new for the game; direction = change how the studio works or wh
     return { ok: true, reply: `I can't chat right now: ${why}. Send it as a pitch or a message to the Producer instead; both still reach the studio.`, offline: true };
   }
   const text = String(res.content || '').trim();
+  if (isClassifierReply(text)) {
+    const r = "The Liaison's model gave no real answer (a safety-check reply). Try again, or send it as a pitch or a message to the Producer.";
+    fs.appendFileSync(log, `- ${now().slice(0, 16).replace('T', ' ')} **liaison**: (classifier output blocked)\n`);
+    return { ok: true, reply: r, offline: true };
+  }
   const m = text.match(/BRIEF\s*(\{[\s\S]*\})/);
   if (m) {
     let j = null;

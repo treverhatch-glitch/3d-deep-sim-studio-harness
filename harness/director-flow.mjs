@@ -95,10 +95,10 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     actions.push(`handed back ${id} (claim ran out)`);
   }
   if (r.starved && fill && !dryRun) {
-    const f = await fillAgents().catch((err) => ({ started: [], why: err.message }));
+    const f = await fillAgents({ byDirector: true }).catch((err) => ({ started: [], why: err.message }));
     if (f.started.length) actions.push(`started ${f.started.join(', ')}`);
     else if (f.why) launcherWhy = launcherWhy || f.why;
-    if (!mode.autoLaunch) actions.push(`the ${mode.label || 'current'} pace doesn't start agents on its own`);
+    if (mode.chosen && !mode.autoLaunch) actions.push(`the ${mode.label || 'current'} pace doesn't start agents on its own`);
   }
   // 4. Missing mechanics go back as builder work (once each).
   try {
@@ -118,7 +118,12 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
     if (out.state === 'starved' && (!prev || prev.state !== 'starved' || !lastAlert || now - Date.parse(lastAlert.ts) > 30 * 60000)) {
       emitEvent({ type: 'director.flow.starved', agent: 'director', to: 'producer', status: 'warn', msg: `Builders idle ${out.idleFor} min with ${out.ready.byRole.builder || 0} builder task(s) ready (${out.builders.running}/${out.builders.slots} builder slots used)${out.launcherWhy ? `: ${out.launcherWhy}` : ''}`.slice(0, 300), meta: { ready: out.ready, builders: out.builders } });
     }
-    if (actions.length) emitEvent({ type: 'director.flow', agent: 'director', to: 'producer', msg: `Flow: ${actions.join('; ')}`.slice(0, 300) });
+    if (actions.length) {
+      const actionsText = actions.join('; ');
+      if (!prev || prev.actions?.join('; ') !== actionsText || now - Date.parse(prev.at) >= 30 * 60000) {
+        emitEvent({ type: 'director.flow', agent: 'director', to: 'producer', msg: `Flow: ${actionsText}`.slice(0, 300) });
+      }
+    }
   }
   return out;
 }

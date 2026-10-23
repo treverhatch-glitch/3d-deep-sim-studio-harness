@@ -388,6 +388,10 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     const out = `${done.stderr || ''}${done.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'task done failed' };
   }
+  if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_POST_BROWSER_PLAY || '')) {
+    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
+    emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? 'passed' : 'failed or skipped'}` });
+  }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
   return { ok: true, output: '' };
 }
@@ -852,15 +856,20 @@ export function startAgent(opts, { detach = false } = {}) {
  * FIX 02): while the supervisor runs, it starts the agents and this does nothing; otherwise this uses
  * the supervisor's own picker (lanes, holds, task claims, caps, quota) with -auto- names.
  */
-export async function fillAgents() {
+export async function fillAgents({ byDirector = false } = {}) {
   const mode = effectiveMode();
-  if (!mode.autoLaunch) return { started: [], why: `${mode.label} doesn't start agents on its own` };
+  if (!mode.autoLaunch) {
+    if (!(byDirector && !mode.chosen)) return { started: [], why: `${mode.label} doesn't start agents on its own` };
+  }
   if (readStop()) return { started: [], why: 'the studio is stopped' };
   const { readStatus, supervise } = await import('./supervisor.mjs');
   const sup = readStatus();
   if (sup?.status === 'running' && alive(sup.pid)) return { started: [], why: `the supervisor (pid ${sup.pid}) starts agents` };
   const r = await supervise({ watcher: true, prefix: 'auto-', deps: { sessions, startAgent, launchableRoles, nextAgentName } }, { startedAt: Date.now(), names: [] });
-  if (r.started.length) emitEvent({ type: 'agent.auto_start', agent: 'watch', to: 'producer', msg: `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})` });
+  if (r.started.length) {
+    const msg = byDirector && !mode.chosen ? `Started ${r.started.join(', ')} (pace not chosen yet: the Director started it)` : `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})`;
+    emitEvent({ type: 'agent.auto_start', agent: 'watch', to: 'producer', msg });
+  }
   return { started: r.started, why: r.why.join('; ') };
 }
 
@@ -874,7 +883,12 @@ export function wake(role, { task = null, why = '' } = {}) {
   const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
   const busy = sessions().find((s) => s.role === role && s.running);
   if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
-  if (!launchableRoles([role]).length) return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
+  if (!launchableRoles([role]).length) {
+    const msg = `No tool is set to start ${label}: set STUDIO_AGENT_TOOL (or STUDIO_${roleKey(role)}_TOOL) in .env, or start it in Ops`;
+    const lastAlert = readRecentEvents(2000).filter((e) => e.type === 'agent.no_tool' && e.msg === msg).pop();
+    if (!lastAlert || Date.now() - Date.parse(lastAlert.ts) > 3600000) emitEvent({ type: 'agent.no_tool', agent: 'war-room', to: 'human', status: 'warn', msg });
+    return { started: false, next: `${task ? `Queued as ${task} for ${label}. ` : `Saved for ${label}. `}No tool is set to start ${label} on its own (STUDIO_AGENT_TOOL or STUDIO_${roleKey(role)}_TOOL in .env), so it waits until someone starts that agent (Start agent in Ops, or npm run agent).` };
+  }
   const r = startAgent({ role, agent: nextAgentName(role), task }, { detach: true });
   if (!r.ok) return { started: false, next: `${task ? `Queued as ${task}. ` : ''}${label} didn't start: ${r.message.replace(/^Not started: /, '')} It starts when a slot frees.` };
   emitEvent({ type: 'agent.wake', agent: 'war-room', to: role, task, msg: `Started ${r.agent} (${label})${why ? ` for ${why}` : ''}` });
