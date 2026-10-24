@@ -111,7 +111,11 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { 
  * the board write go in here (seconds), never the gates. A lock older than STUDIO_LAND_LOCK_STALE_MS
  * (120 s) or held by a dead process is broken.
  */
+const held = new Map();
 export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND_LOCK_WAIT_MS || 180000), name = 'land' } = {}) {
+  // Re-entrant within one process (deliver → board write → writeNextQueue).
+  const key = `${path.resolve(root)}|${name}`;
+  if (held.get(key)) return fn();
   const dir = path.join(root, '.studio', 'locks');
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, `${name}.lock`);
@@ -131,5 +135,6 @@ export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND
       sleep(25);
     }
   }
-  try { return fn(); } finally { try { fs.rmSync(f, { force: true }); } catch {} }
+  held.set(key, true);
+  try { return fn(); } finally { held.delete(key); try { fs.rmSync(f, { force: true }); } catch {} }
 }

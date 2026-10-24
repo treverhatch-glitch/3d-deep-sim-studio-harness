@@ -103,6 +103,18 @@ for (let i = 0; i < 5; i++) withLandLock(${JSON.stringify(dir)}, () => { const v
   const kept = ['one', 'two', 'three'].filter((k) => next.includes(`Queued mid-done ${k}`)).length;
   report('2.30p: a done that ran its gates for seconds keeps every task queued meanwhile (board re-read under the lock), and is in DONE', Boolean(id) && d.status === 0 && kept === 3 && doneMd.includes(`**${id}**`) && !new RegExp(`\\*\\*${id}\\*\\*`).test(next), `kept=${kept} ${d.out.slice(-800)} ${adds.map(out).join('').slice(0, 400)}`);
 
+  // 5b. Any stale board writer (not only done) keeps tasks another agent added after its read.
+  const stale = path.join(tmpRoot, `p230p-stale-${process.pid}.mjs`);
+  fs.writeFileSync(stale, `import { parseNextQueue, writeNextQueue } from ${u('harness/task.mjs')};
+const q = parseNextQueue(); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+q.backlog = q.backlog.filter((t) => !/Queued mid-done one/.test(t.title)); writeNextQueue(q); console.log('wrote');`);
+  const staleP = spawnP(`node "${stale}"`, { ...senv, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '' });
+  await new Promise((r) => setTimeout(r, 600));
+  run(dir, 'node harness/task.mjs add "Added after the stale read" --role producer --origin dev --asked "test"', senv);
+  const sw = await staleP;
+  const next2 = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
+  report('2.30p: a stale board writer keeps a task added after its read, and its own intended removal still applies', /wrote/.test(sw.out) && next2.includes('Added after the stale read') && !next2.includes('Queued mid-done one') && next2.includes('Queued mid-done two'), `${sw.out} ${next2.slice(-800)}`);
+
   // 6. A real lane copy: an engine-only lane rebased over a browser-only landing reuses its pass;
   //    a landing inside its scope re-runs the checks (path-scoped).
   const sh = (cwd, cmd) => run(cwd, cmd, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' });

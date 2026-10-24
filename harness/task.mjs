@@ -38,6 +38,8 @@ export function parseNextQueue() {
   // Older studios kept DONE in NEXT.md: those still count, and move to DONE.md on the next write.
   const seen = new Set(tasks.done.map((t) => t.id));
   for (const t of parseQueueFile(DONE_FILE, 'done').done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  // 2.30p: remember which tasks this snapshot saw, so a later write can keep tasks added since.
+  Object.defineProperty(tasks, 'readIds', { value: new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id)), enumerable: false });
   return tasks;
 }
 
@@ -83,7 +85,30 @@ function formatTaskLine(t, mark) {
   return `- [${mark}] **${t.id}** [${t.priority}] (\`${t.role}\`) — ${t.title}`;
 }
 
+/**
+ * 2.30p: every board write takes the short land lock and re-reads the board first. A task on disk that
+ * the caller's snapshot never saw (another agent added it meanwhile) is kept, never overwritten.
+ */
 export function writeNextQueue(tasks) {
+  const doWrite = () => {
+    if (tasks.readIds) {
+      const disk = parseNextQueue();
+      const mine = new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id));
+      for (const sec of ['inProgress', 'backlog', 'done']) {
+        for (const t of disk[sec]) if (!mine.has(t.id) && !tasks.readIds.has(t.id)) { tasks[sec].push(t); mine.add(t.id); }
+      }
+    }
+    writeNextQueueRaw(tasks);
+  };
+  try {
+    withLandLock(mainRoot(), doWrite, { waitMs: Number(process.env.STUDIO_BOARD_LOCK_WAIT_MS || 30000) });
+  } catch (err) {
+    if (err.code !== 'LAND_BUSY') throw err;
+    doWrite();
+  }
+}
+
+function writeNextQueueRaw(tasks) {
   const out = [
     '# Studio Task Queue (`studio/NEXT.md`)',
     '',
