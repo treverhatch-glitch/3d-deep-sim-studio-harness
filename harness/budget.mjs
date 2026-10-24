@@ -228,6 +228,41 @@ export function pickTool(preferred, now = Date.now()) {
   return order.find((t) => !exhaustedUntil(t, now) && !(t.includes(':') && exhaustedUntil(t.split(':')[0], now))) || null;
 }
 
+/**
+ * 2.30q (#7): is this launch stopped by a budget mark? In the Marina run gemini was marked out by its spend
+ * guard at 20:27 UTC, yet 69 Gemini sessions started afterwards: they ran as tool "custom" (the role's
+ * STUDIO_<ROLE>_CMD wraps gemini), so the mark on "gemini" never matched, and with every tool marked out
+ * pickTool() returned null and startAgent kept the original tool. A launch is stopped when any active mark
+ * (quota or spend guard) names its tool, its tool:model, its model's family (gemini-3.1-pro-preview ->
+ * gemini) or a word of its launch command, or a .studio/credit.json meter for one of those is at its guard.
+ * Returns { stopped, by, until, why } (stopped false when nothing applies).
+ */
+export function budgetStopFor({ tool = '', model = '', cmd = '' } = {}, now = Date.now(), env = process.env) {
+  if (/^(off|0|false|no)$/i.test(env.STUDIO_BUDGET_STOP || '')) return { stopped: false };
+  const names = new Set();
+  const add = (x) => { const v = String(x || '').toLowerCase().trim(); if (v && v !== 'unknown' && v !== 'custom') names.add(v); };
+  add(tool); add(model); if (tool && model) add(`${tool}:${model}`);
+  const fam = String(model || '').toLowerCase().match(/^[a-z]+/); if (fam) add(fam[0]);
+  const words = String(cmd || '').toLowerCase().split(/[^a-z0-9.:_-]+/).filter(Boolean);
+  const hit = (key) => {
+    const k = String(key).toLowerCase();
+    if (k.includes(':')) return names.has(k);
+    return names.has(k) || words.some((w) => w === k || w.startsWith(`${k}-`) || w.endsWith(`/${k}`));
+  };
+  const q = readJson(QUOTA_FILE, {});
+  for (const [key, m] of Object.entries(q)) {
+    if (!m || !(Date.parse(m.until) > now)) continue;
+    if (hit(key)) return { stopped: true, by: key, until: m.until, why: `${key} is marked out until ${m.until}: ${String(m.why || m.line || '').slice(0, 120)}` };
+  }
+  const at = Number(env.STUDIO_SPEND_GUARD_AT ?? 0.95);
+  const credit = readJson(path.join(STUDIO_STATE_DIR, 'credit.json'), {});
+  for (const [key, c] of Object.entries(credit)) {
+    if (!(Number(c?.guard) > 0) || Number(c.used) / Number(c.guard) < at) continue;
+    if (hit(key)) return { stopped: true, by: key, until: null, why: `${key} is at ${Math.round((Number(c.used) / Number(c.guard)) * 100)}% of its credit guard` };
+  }
+  return { stopped: false };
+}
+
 /** Per tool: used, the week's tokens if known, the target by now, and a verdict. */
 export function budgetStatus(now = Date.now(), events = readRecentEvents(50000)) {
   const b = readBudget();

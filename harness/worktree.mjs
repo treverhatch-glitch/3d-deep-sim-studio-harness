@@ -350,18 +350,10 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
           onLanded?.();
           return { ok: true, merged: 0 };
         }
-        // The studio's branch moves only forward; another agent's index lock gets a few retries.
-        let ff = null;
-        for (let i = 0; i < 5; i += 1) {
-          ff = git(root, 'merge', '--ff-only', branch);
-          if (ff.status === 0) break;
-          if (!/index\.lock/.test(ff.stderr || '')) break;
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
-        }
-        if (ff.status !== 0) {
-          const why = (ff.stderr || ff.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ');
-          return { ok: false, message: `Your work couldn't be added to ${main} in the main checkout: ${why}. If ${main} moved, run task done again (it rebases); if files there are edited but not committed, ask the Producer.` };
-        }
+        // 2.30q (#5): the merge runs in a dedicated merge worktree and the branch ref moves by compare-and-swap;
+        // the main checkout's index is only touched to bring its files up to date afterwards.
+        const ff = landFastForward(root, main, branch, { taskId });
+        if (!ff.ok) return { ok: false, message: ff.message };
         const n = Number(git(root, 'rev-list', '--count', `${base}..${branch}`).stdout.trim()) || 0;
         onLanded?.();
         return { ok: true, merged: n };
@@ -382,6 +374,85 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
     return res;
   }
   return { ok: false, message: `${main} kept moving while ${taskId} was landing (${tries} tries). Run task done again.` };
+}
+
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export const MERGE_WT = '.studio/merge-wt';
+
+/** 2.30q (#5): the dedicated merge worktree (detached, no checkout: its own HEAD and index, no files). */
+export function mergeWorktree(root = mainRoot()) {
+  const dir = path.join(root, MERGE_WT);
+  if (!fs.existsSync(path.join(dir, '.git'))) {
+    git(root, 'worktree', 'prune');
+    const r = git(root, 'worktree', 'add', '--detach', '--no-checkout', dir, 'HEAD');
+    if (r.status !== 0) return { ok: false, why: (r.stderr || r.stdout || '').trim().split('\n').pop() };
+  }
+  return { ok: true, dir };
+}
+
+/**
+ * 2.30q (#5): land a lane branch on the studio's branch without the main checkout's index.
+ * In the Marina run 12 landings failed in `git merge --ff-only` run inside the main checkout ("Please commit
+ * your changes or stash them", untracked files in the way, index.lock). Now:
+ *   1. in the merge worktree, `git merge-tree --write-tree` proves the result is exactly the lane's tree (a
+ *      fast-forward), touching no one's index;
+ *   2. the main checkout's own uncommitted edits to files the lane changed are kept in a named stash (never
+ *      lost; STUDIO_LAND_STASH=off refuses instead, as before);
+ *   3. `git update-ref` moves the branch from old to new only if it still points at old (compare-and-swap);
+ *   4. the main checkout's index and files follow (`read-tree -m -u old new`, index.lock retries); if they
+ *      can't, the ref is swapped back and the landing reports why.
+ * Returns { ok, merged, stashed } or { ok: false, message }.
+ */
+export function landFastForward(root, main, branch, { taskId = '' } = {}) {
+  const rev = (r) => git(root, 'rev-parse', '--verify', `${r}^{commit}`).stdout.trim();
+  const oldTip = rev(`refs/heads/${main}`);
+  const neu = rev(branch);
+  if (!oldTip || !neu) return { ok: false, message: `Couldn't read ${main} or ${branch}. Run task done again.` };
+  if (oldTip === neu) return { ok: true, merged: 0 };
+  if (git(root, 'merge-base', '--is-ancestor', oldTip, neu).status !== 0) return { ok: false, message: `${branch} is not ahead of ${main} (the studio's branch moved). Run task done again (it rebases).` };
+  const mw = mergeWorktree(root);
+  if (mw.ok) {
+    const t = git(mw.dir, 'merge-tree', '--write-tree', oldTip, neu);
+    const want = git(root, 'rev-parse', `${neu}^{tree}`).stdout.trim();
+    if (t.status === 0 && t.stdout.trim().split('\n')[0] !== want) return { ok: false, message: `The merge worktree's result for ${branch} differs from its own tree; run task done again.` };
+  }
+  const headRef = git(root, 'symbolic-ref', '-q', 'HEAD').stdout.trim();
+  const checkedOut = headRef === `refs/heads/${main}`;
+  let stashed = null;
+  if (checkedOut) {
+    const incoming = new Set(changedSince(root, oldTip, neu));
+    const dirty = (git(root, 'status', '--porcelain', '--untracked-files=all').stdout || '').split('\n').filter(Boolean).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+    const overlap = dirty.filter((f) => incoming.has(f));
+    if (overlap.length) {
+      if (/^(off|0|false|no)$/i.test(process.env.STUDIO_LAND_STASH || '')) return { ok: false, message: `The main checkout has uncommitted edits to ${overlap.length} file(s) this landing changes (${overlap.slice(0, 3).join(', ')}). Commit or stash them there, then run task done again.` };
+      const msg = `studio land ${taskId || branch}: main checkout's own edits to ${overlap.slice(0, 3).join(', ')}${overlap.length > 3 ? ` +${overlap.length - 3}` : ''}`;
+      let st = null;
+      for (let i = 0; i < 20; i += 1) {
+        st = git(root, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'stash', 'push', '--include-untracked', '-m', msg, '--', ...overlap);
+        if (st.status === 0 || !/index\.lock/.test(st.stderr || '')) break;
+        sleepMs(500);
+      }
+      if (st.status !== 0) return { ok: false, message: `The main checkout has uncommitted edits to ${overlap.slice(0, 3).join(', ')} and they couldn't be set aside (${(st.stderr || '').trim().split('\n').pop()}). Run task done again.` };
+      stashed = { files: overlap, message: msg };
+      emitEvent({ type: 'land.stashed', agent: process.env.STUDIO_LOCK_OWNER || 'launcher', to: 'human', task: taskId || undefined, status: 'warn', msg: `${taskId || branch} landed over uncommitted edits in the main checkout; they are kept in git stash "${msg}" (git stash list)`, meta: { files: overlap } });
+    }
+  }
+  const up = git(root, 'update-ref', '-m', `studio land ${taskId || branch}`, `refs/heads/${main}`, neu, oldTip);
+  if (up.status !== 0) return { ok: false, message: `${main} moved while ${taskId || branch} was landing. Run task done again (it rebases).` };
+  if (checkedOut) {
+    let rt = null;
+    for (let i = 0; i < Number(process.env.STUDIO_LAND_SYNC_TRIES || 20); i += 1) {
+      rt = git(root, 'read-tree', '-m', '-u', oldTip, neu);
+      if (rt.status === 0 || !/index\.lock/.test(`${rt.stderr}`)) break;
+      sleepMs(500);
+    }
+    if (rt.status !== 0) {
+      git(root, 'update-ref', '-m', `studio land ${taskId || branch}: undone`, `refs/heads/${main}`, oldTip, neu);
+      const why = (rt.stderr || rt.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ');
+      return { ok: false, message: `${taskId || branch} reached ${main}, but the main checkout couldn't follow (${why}), so it was undone. Run task done again; if it repeats, ask the Producer.${stashed ? ` Edits set aside: git stash "${stashed.message}".` : ''}` };
+    }
+  }
+  return { ok: true, stashed };
 }
 
 /** Lane copies on disk, for the War Room and preflight. */

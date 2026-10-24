@@ -41,7 +41,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { escalationFor } from './model-tiers.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
 import { kickoffParts } from './kickoff.mjs';
-import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES } from './prompt-layout.mjs';
+import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES, volatileLeaks } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner } from './lock.mjs';
@@ -59,7 +59,8 @@ import { isNim, providerConcurrency } from './families.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
-import { pickTool, readBudget } from './budget.mjs';
+import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
+import { harnessCaused } from './busy.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -417,7 +418,8 @@ export function parkIfLooping(id, now = Date.now()) {
   if (!(limit > 0)) return null;
   const evs = readRecentEvents(20000).filter((e) => e.task === id && Date.parse(e.ts) >= now - 2 * 3600000);
   const lastDone = evs.filter((e) => e.type === 'task.done').pop();
-  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts));
+  // 2.30q (#6): harness-caused hand-backs (claim ran out during gates, merge refused, land lock) don't count.
+  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts) && !harnessCaused(e));
   const unparked = evs.filter((e) => e.type === 'task.hold' && /unparked/.test(e.msg || '')).pop();
   const since = unparked ? pauses.filter((e) => e.ts > unparked.ts) : pauses;
   if (since.length < limit) return null;
@@ -449,9 +451,32 @@ export function refreshRule({ oneTask = false, task = null } = {}) {
   return `\nRefresh context by default: the studio's files are the memory, not this chat.${oneTask ? ' Do this one task, finish it (task done) or hand it back, then stop; a fresh session starts for the next task.' : ''}${l.turns || l.context ? ` At ${l.turns || '∞'} turns or ${l.context ? `${Math.round(l.context / 1000)}k` : '∞'} tokens of context, whichever comes first, refresh: commit, then \`node harness/task.mjs pause ${id} --note "${HANDOFF_TEMPLATE}"\` (under 3k characters) and stop; a fresh session continues from that note.` : ''} Refresh at a natural breakpoint, not every few turns.${l.turns || l.context ? ` Mid-debug with a live repro? \`npm run session -- exception "<repro>"\` lets you go on${l.ceilingTurns ? ` to ${l.ceilingTurns} turns` : ''}; you are flagged and the Director or Producer checks on you every ${l.checkTurns} turns / ${Math.round(l.checkTokens / 1000)}k tokens.` : ''}\n`;
 }
 
+/**
+ * 2.30q (#7): check the budget stop before any session starts (startAgent, refresh relaunch, failover).
+ * A stopped launch logs one launch.skipped event (once per role/tool/model per STUDIO_SKIP_LOG_MIN, 10, min)
+ * instead of starting a session that exits at once.
+ */
+export function launchStop({ role, tool, model, agent = null, task = null }, now = Date.now()) {
+  const cmd = toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD || '' : '');
+  const st = budgetStopFor({ tool, model, cmd }, now);
+  if (!st.stopped) return null;
+  const f = path.join(STUDIO_STATE_DIR, 'launch-skips.json');
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  const k = `${role}|${tool}|${model}`;
+  if (!(now - (seen[k] || 0) < Number(process.env.STUDIO_SKIP_LOG_MIN ?? 10) * 60000)) {
+    seen[k] = now;
+    try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(seen, null, 2)}\n`); } catch {}
+    emitEvent({ type: 'launch.skipped', agent: 'launcher', to: 'producer', task: task || undefined, status: 'warn', msg: `Not started (${role}${agent ? ` ${agent}` : ''} on ${tool}${model && model !== 'unknown' ? `, ${model}` : ''}): budget stop: ${st.why}`, meta: { role, tool, model, by: st.by, until: st.until } });
+  }
+  return st;
+}
+
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
   const opts2 = { refreshes };
+  // 2.30q (#7): every start path (first start, refresh relaunch, failover) checks the budget stop first.
+  { const st = launchStop({ role, tool, model, agent, task }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   // 2.30k: a lane can be several files (a,b,c); each is claimed, and all are let go if one is taken.
   const lanePaths = laneList(lane);
@@ -480,6 +505,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     // 2.29: a lookup, not a read-first step (Jed's A/B: reading a map, then line ranges, added turns and cost 27% more).
     + `\nTo find a function, constant or TUNING key, run \`npm run map -- find <name>\`: one call gives the file, the line range and the arguments, so you read only those lines. .studio/MAP.md lists every code file in one line if you need the lay of the land. Every turn re-reads your whole conversation, so fewer, bigger steps cost less than many small ones. Never read CHANGELOG.md; studio/llms.txt lists every command. If you hand work back, keep the note under 20 lines: done, not done, files touched, next step, proof.\n`
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
+    + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
     + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
     + pitfallsForPrompt());
   const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
@@ -489,6 +515,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
     + refreshRule({ oneTask, task })
     + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
+  // 2.30q (#8): warn when something session-specific slipped into the stable prefix (it would break the cache).
+  { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitEvent({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }); }
   const prompt = layoutPrompt({ stable, volatile });
   let prefix = null;
   try {
@@ -521,7 +549,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const out = fs.openSync(logFile, 'a');
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, ...(track ? { STUDIO_TRACK: track } : {}) };
+  // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
+  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) };
   // Claude Code stops a shell command after 2 minutes by default, so agents sent a long verify to the
   // background and their session ended with it (test #3). Give commands 10 minutes unless set.
   env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';
@@ -869,6 +898,8 @@ export function startAgent(opts, { detach = false } = {}) {
       if (!opts.model) model = mm.join(':') || process.env[`STUDIO_TOOL_${roleKey(tt)}_MODEL`] || model;
     }
   }
+  // 2.30q (#7): the budget stop is checked after the takeover picked a tool; with every tool out, nothing starts.
+  { const st = launchStop({ role, tool, model, agent, task: opts.task || null }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // 2.30o: profile check before launch: a planning role never shares a builder's profile; per-profile limits.
   {
     const profile = profileOf(role, toolCmd(tool) || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : ''));

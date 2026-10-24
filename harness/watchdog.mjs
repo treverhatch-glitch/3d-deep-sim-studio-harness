@@ -66,10 +66,14 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   const { setHold, readHolds } = await import('./task-hold.mjs');
   const since = now - 2 * 3600000;
   const counts = new Map();
-  for (const e of events) if (e.type === 'task.paused' && e.task && Date.parse(e.ts) >= since) counts.set(e.task, (counts.get(e.task) || 0) + 1);
+  // 2.30q (#6): hand-backs the harness caused (claim ran out during gates, merge refused by the main checkout,
+  // land lock) are not the task looping, so they never count toward parking.
+  const { harnessCaused, taskBusy } = await import('./busy.mjs');
+  for (const e of events) if (e.type === 'task.paused' && e.task && Date.parse(e.ts) >= since && !harnessCaused(e)) counts.set(e.task, (counts.get(e.task) || 0) + 1);
   const holds = readHolds();
   for (const [task, n] of counts) {
     if (n < lim.handBacks || holds[task]?.parked) continue;
+    if ((await taskBusy(task, { now })).busy) continue;
     setHold(task, { parked: { by: 'watchdog', why: `handed back ${n} times in 2 h; a person or the Producer looks before it runs again`, at: new Date(now).toISOString() } }, { by: 'watchdog', msg: `watchdog parked ${task}: handed back ${n} times in 2 h` });
     actions.push({ kind: 'park', task, msg: `parked ${task} (handed back ${n} times in 2 h)` });
   }

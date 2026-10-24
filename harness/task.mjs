@@ -754,6 +754,27 @@ export function reorderTask(id, { to, before, by = actor() } = {}) {
   return { ok: true, message: `${id} is now number ${at + 1} of ${q.backlog.length} waiting.` };
 }
 
+/**
+ * 2.30q (#8): parse and log self-reported usage. spec: "<model>:<in>/<out>[,<model>:<in>/<out>]" (k/M suffixes ok).
+ * One usage.reported event per model, provider "self-report", tracked false.
+ */
+export function parseUsage(spec) {
+  const num = (x) => { const m = String(x).trim().match(/^(\d+(?:\.\d+)?)([kKmM]?)$/); return m ? Math.round(Number(m[1]) * ({ k: 1e3, m: 1e6 }[m[2].toLowerCase()] || 1)) : NaN; };
+  const out = [];
+  for (const part of String(spec ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const m = part.match(/^(.+):([^:/]+)\/([^:/]+)$/);
+    if (!m || !Number.isFinite(num(m[2])) || !Number.isFinite(num(m[3]))) return { error: `--usage wants <model>:<in>/<out> (e.g. grok-4:180k/12k), got "${part}". Nothing was closed.` };
+    out.push({ model: m[1].trim(), tokensIn: num(m[2]), tokensOut: num(m[3]) });
+  }
+  return out.length ? { list: out } : { error: '--usage wants <model>:<in>/<out> (e.g. grok-4:180k/12k). Nothing was closed.' };
+}
+export function reportUsage(task, agent, spec) {
+  const p = parseUsage(spec);
+  if (p.error) return p;
+  for (const u of p.list) emitEvent({ type: 'usage.reported', agent: agent || 'unknown', task, model: u.model, provider: 'self-report', tokensIn: u.tokensIn, tokensOut: u.tokensOut, msg: `${agent || 'an agent'} reported ${u.tokensIn} in / ${u.tokensOut} out on ${u.model} for ${task} (untracked: outside the harness)`, meta: { tracked: false, source: 'self' } });
+  return { ok: true, list: p.list };
+}
+
 function parseFlags(argv) {
   const flags = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -803,6 +824,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   if (cmd === 'list') {
+    // 2.30q (#8): in a launched session (STUDIO_COMPACT_OUTPUT=on) or with --mine, only the tasks that matter to
+    // this agent: what it holds, in progress, and the next few for its role; --all prints the whole board.
+    if (!flags.all && (flags.mine || /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || ''))) {
+      const role = typeof flags.role === 'string' ? flags.role : process.env.STUDIO_ROLE || null;
+      const n = Number(flags.limit || 8);
+      const slim = (t) => ({ id: t.id, title: t.title, role: t.role, priority: t.priority });
+      console.log(JSON.stringify({ inProgress: q.inProgress.map(slim), backlog: q.backlog.filter((t) => !role || t.role === role || !t.role).slice(0, n).map(slim), backlogTotal: q.backlog.length, doneTotal: q.done.length, note: 'trimmed: --all for the whole board, task show <ID> for one task' }, null, 2));
+      process.exit(0);
+    }
     console.log(JSON.stringify(q, null, 2));
     process.exit(0);
   }
@@ -849,6 +879,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
 
   if (cmd === 'pause') {
     const targetId = arg1;
+    if (targetId && flags.usage !== undefined) { const u = reportUsage(targetId, whoAmI(flags), flags.usage); if (u.error) { console.error(u.error); process.exit(1); } }
     const res = targetId && pauseTask(targetId, whoAmI(flags), typeof flags.note === 'string' ? flags.note : '', { force: Boolean(flags.force) });
     if (!res) {
       if (!targetId) console.error('Usage: node harness/task.mjs pause <TASK_ID> --agent <owner> --note "where you stopped and what is left"');
@@ -889,7 +920,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(`--force needs --reason "<why the check can't pass yet>" (10+ characters). Nothing was closed.`);
       process.exit(1);
     }
-    const done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+    // 2.30q (#8): --usage <model>:<in>/<out> (comma-separated for several models): a builder launched outside
+    // the harness reports its own tokens; the ledger shows them as untracked (self-reported).
+    if (flags.usage !== undefined) { const u = reportUsage(targetId, whoAmI(flags), flags.usage); if (u.error) { console.error(u.error); process.exit(1); } }
+    // 2.30q (#6): while done runs (gates, landing: often 10+ min), the task counts as busy for the
+    // Director's flow pass, the stall check and the watchdog (harness/busy.mjs).
+    const busyMod = await import('./busy.mjs');
+    await busyMod.markDoneRunning(targetId, whoAmI(flags)).catch(() => {});
+    let done;
+    try {
+      done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+    } finally {
+      await busyMod.clearDoneRunning(targetId).catch(() => {});
+    }
     if (!done) {
       console.error(`Task "${targetId}" not found.`);
       process.exit(1);

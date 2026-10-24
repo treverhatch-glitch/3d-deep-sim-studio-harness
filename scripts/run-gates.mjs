@@ -54,6 +54,7 @@ console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
 const rows = [];
 let cachedCount = 0;
+const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
 for (const gate of gates) {
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
@@ -71,7 +72,15 @@ for (const gate of gates) {
   }
 
   const start = Date.now();
-  const res = spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
+  // 2.30q (#8): compact output (STUDIO_COMPACT_OUTPUT=on, set for launched sessions): a gate's own output goes to
+  // .studio/gates/out/<gate>.log and only a failure's last lines are printed, so an agent's context doesn't
+  // carry every passing gate's log into every later turn (verify was ~3k chars a call in the Marina run).
+  const res = compact ? spawnSync(gate.command, { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) : spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
+  if (compact) {
+    const text = `${res.stdout || ''}${res.stderr || ''}`;
+    try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
+    if (res.status !== 0) { const lines = text.trimEnd().split('\n'); const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40); console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${lines.length} lines; full: .studio/gates/out/${gate.id}.log)`); console.log(lines.slice(-n).join('\n')); }
+  }
   const ms = Date.now() - start;
   const ok = res.status === 0;
   const required = gate.required !== false;
@@ -90,8 +99,8 @@ for (const gate of gates) {
   console.log('\n[gates] in plain words');
   for (const l of gateWords({ rows, skipped, partial: Boolean(only) }, all).lines) console.log(`  ${l}`);
 }
-console.log('\n[gates] summary');
-for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.cached ? ' (cached)' : ''}${r.required ? '' : '  (optional)'}`);
+if (!compact) console.log('\n[gates] summary');
+if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.cached ? ' (cached)' : ''}${r.required ? '' : '  (optional)'}`);
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });

@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { doneRunning } from './busy.mjs';
 
 export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -98,7 +99,9 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const prev = readStall(session.agent);
   const fresh = !prev || prev.startedAt !== session.startedAt;
   let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
-  if (!fresh && fp !== prev.fp) s = { ...s, fp, lastProgressAt: new Date(now).toISOString(), baseIn: tokens.in, baseOut: tokens.out };
+  // 2.30q (#6): a session waiting on its own task done (gates, landing) is busy, not stalled.
+  const doing = session.task ? doneRunning(session.task, { dir: STUDIO_STATE_DIR, now }) : null;
+  if (!fresh && (fp !== prev.fp || doing)) s = { ...s, fp, lastProgressAt: new Date(now).toISOString(), baseIn: tokens.in, baseOut: tokens.out };
   s.tokensIn = tokens.in; s.tokensOut = tokens.out;
   s.windowIn = tokens.in - (s.baseIn || 0); s.windowOut = tokens.out - (s.baseOut || 0);
   const v = stallVerdict(s, now);

@@ -32,6 +32,20 @@ export function stablize(text, { agent, model }) {
   return stableText;
 }
 
+/**
+ * 2.30q (#8): anything session-specific in the stable prefix breaks the prompt cache for every later session of
+ * the role. Returns what leaked: the agent's name, its model, a task id, a clock time or date.
+ */
+export function volatileLeaks(stable, { agent, model, task } = {}) {
+  const out = [];
+  const t = String(stable || '');
+  if (agent && agent !== 'unknown' && t.includes(agent)) out.push(`agent name ${agent}`);
+  if (model && model !== 'unknown' && t.includes(model)) out.push(`model ${model}`);
+  if (task && t.includes(task)) out.push(`task ${task}`);
+  if (/\b20\d\d-\d\d-\d\dT\d\d:\d\d/.test(t)) out.push('a timestamp');
+  return out;
+}
+
 /** Returns a short hash of the prompt's stable prefix. */
 export function prefixHash(prompt) {
   const stableEnd = prompt.indexOf(STABLE_MARKER);

@@ -53,6 +53,21 @@ const newestPngs = () => {
   return best;
 };
 
+/**
+ * 2.30q (#6): review and visual filings were the watchdog's main noise in the Marina run: 88 "filed"
+ * actions named only 31 distinct tasks (a duplicate key returned the old task and was logged as filed again),
+ * and every landing without a visual result filed its own task (22 in 9 h). Now a key files at most once per
+ * STUDIO_REVIEW_FILE_MIN (60) minutes, a duplicate is never logged as filed, unchanged cameras are one task per
+ * pass, and landings without visuals are one task per pass.
+ */
+export function mayFile(st, key, now = Date.now(), env = process.env) {
+  const win = Number(env.STUDIO_REVIEW_FILE_MIN ?? 60) * 60000;
+  st.filed = Object.fromEntries(Object.entries(st.filed || {}).filter(([, t]) => now - t < Math.max(win, 86400000)));
+  if (win > 0 && st.filed[key] && now - st.filed[key] < win) return false;
+  st.filed[key] = now;
+  return true;
+}
+
 export async function gamedevPass(now = Date.now(), { events = readRecentEvents(5000) } = {}) {
   const st = read(FILE(), {});
   // 2.30o: away mode means more autonomy: a deeper queue, launches whatever the pace, more frequent reviews.
@@ -103,11 +118,17 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
       const { summarize } = await import('./verdict-split.mjs');
       const { parseNextQueue } = await import('./task.mjs');
       const done = parseNextQueue().done;
+      const missing = [];
       for (const id of landed) {
         const t = done.find((x) => x.id === id);
         if (!t) continue;
         const s = summarize(id, t);
-        if (s.render && !s.ok) { const r = await fileTask(`visual:${id}`, `Prove ${id} visually: ${s.why.slice(0, 160)}`); if (r.id && !r.skipped) actions.push({ kind: 'task', msg: `filed ${r.id}: ${id} landed without a passing visual result` }); }
+        if (s.render && !s.ok && mayFile(st, `visual:${id}`, now)) missing.push({ id, why: s.why });
+      }
+      if (missing.length) {
+        const ids = missing.map((m) => m.id);
+        const r = await fileTask(`visual:${ids.join('+')}`, `Prove ${ids.join(', ')} visually: ${missing[0].why.slice(0, 140)}${missing.length > 1 ? ` (+${missing.length - 1} more)` : ''}`);
+        if (r.id && !r.skipped) actions.push({ kind: 'task', msg: `filed ${r.id}: ${ids.join(', ')} landed without a passing visual result` });
       }
     }
   }
@@ -136,18 +157,21 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
     const shots = newestPngs();
     const baseDir = path.join(STUDIO_STATE_DIR, 'review');
     fs.mkdirSync(baseDir, { recursive: true });
+    const unchanged = [];
     for (const [cam, s] of Object.entries(shots)) {
       try {
         const img = decodePng(fs.readFileSync(s.p));
         const base = path.join(baseDir, cam);
         const stats = imageStats(img);
-        if (stats.blank) { const r = await fileTask(`review:blank:${cam}`, `Game-dev review: the newest ${cam} capture (${s.task}) is ${stats.why}`); if (r.id) actions.push({ kind: 'review', msg: `filed ${r.id}: ${cam} blank` }); }
-        else if (fs.existsSync(base) && st.lastReview && imageDiff(decodePng(fs.readFileSync(base)), img) < visualLimits().diffMin) {
-          const r = await fileTask(`review:unchanged:${cam}:${Math.floor(now / 86400000)}`, `Game-dev review: the ${cam} view is unchanged since the last review; make a visible improvement from the next unmet charter goal`);
-          if (r.id) actions.push({ kind: 'review', msg: `filed ${r.id}: ${cam} unchanged` });
-        }
+        if (stats.blank) { if (mayFile(st, `review:blank:${cam}`, now)) { const r = await fileTask(`review:blank:${cam}`, `Game-dev review: the newest ${cam} capture (${s.task}) is ${stats.why}`); if (r.id && !r.skipped) actions.push({ kind: 'review', msg: `filed ${r.id}: ${cam} blank` }); } }
+        else if (fs.existsSync(base) && st.lastReview && imageDiff(decodePng(fs.readFileSync(base)), img) < visualLimits().diffMin) unchanged.push(cam);
         fs.copyFileSync(s.p, base);
       } catch {}
+    }
+    // One task for every unchanged camera in this pass, at most once an hour (2.30q).
+    if (unchanged.length && mayFile(st, 'review:unchanged', now)) {
+      const r = await fileTask(`review:unchanged:${Math.floor(now / 86400000)}`, `Game-dev review: ${unchanged.join(', ')} unchanged since the last review; make a visible improvement from the next unmet charter goal`);
+      if (r.id && !r.skipped) actions.push({ kind: 'review', msg: `filed ${r.id}: ${unchanged.length} view(s) unchanged (${unchanged.join(', ')})` });
     }
     if (process.env.STUDIO_REVIEWER_TOOL) { try { (await import('./agent.mjs')).wake('reviewer', { why: 'game-dev review: compare the newest captures in .studio/proof/*/visual/after and .studio/review with studio/bible/CHARTER.md and file quality tasks' }); } catch {} }
     st.lastReview = now;

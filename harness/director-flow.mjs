@@ -90,6 +90,15 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
   } catch {}
   const r = flowReport({ queue, sessions: sessions(), locks: listLocks(), held: (id) => holdReason(id, queue, now), failing, mode, prev, now });
   const actions = freedLocks.length ? [`freed ${freedLocks.length} lock(s) of agents whose process is gone`] : [];
+  // 2.30q (#6): a task whose done is running or whose lane is queued to land is busy, not abandoned.
+  const { taskBusy } = await import('./busy.mjs');
+  const busyNow = [];
+  for (const id of r.expired) { const b = await taskBusy(id, { now }); if (b.busy) busyNow.push({ id, why: b.why }); }
+  if (busyNow.length) {
+    r.expired = r.expired.filter((id) => !busyNow.some((b) => b.id === id));
+    r.busy = busyNow;
+    actions.push(`kept ${busyNow.map((b) => b.id).join(', ')} (busy: ${busyNow[0].why})`);
+  }
   for (const id of r.expired) {
     if (!dryRun) pauseTask(id, 'director', 'The claim ran out with no running session on it: handed back by the Director\'s flow pass so a free builder can take it.', { force: true });
     actions.push(`handed back ${id} (claim ran out)`);

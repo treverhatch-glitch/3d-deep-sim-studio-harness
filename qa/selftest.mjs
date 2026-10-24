@@ -3240,6 +3240,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30q: merge worktree landing, busy-not-stalled, budget stop on every launch path, untracked usage (qa/selftest-230q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230q.mjs')).href);
+  await selftest230q({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

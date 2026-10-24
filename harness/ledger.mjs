@@ -81,6 +81,10 @@ export function ledgerMetrics({ events, now, logs }) {
           turns: e.meta?.turns, startTs: start?.ts,
         });
       }
+    } else if (e.type === 'usage.reported' && (e.tokensIn || e.tokensOut)) {
+      // 2.30q (#8): a builder launched outside the harness (a Grok builder in the Marina run) reports its own
+      // usage with task done/pause --usage <model>:<in>/<out>. Its own bucket: "untracked (self-reported)".
+      rows.push({ source: 'self-report', ts: e.ts, provider: e.provider || providerFromModel(e.model), model: e.model, agent: e.agent, role: e.meta?.role || 'builder', task: e.task || null, tokensIn: Number(e.tokensIn) || 0, tokensOut: Number(e.tokensOut) || 0, cacheRead: Number(e.meta?.cacheRead) || 0, estimated: false, untracked: true });
     } else if (e.type === 'qa.vision' && (e.tokensIn || e.tokensOut)) {
       rows.push({ source: 'vision', ts: e.ts, provider: 'vision', model: e.model, agent: e.agent, role: 'qa', task: e.task || null, tokensIn: Number(e.tokensIn) || 0, tokensOut: Number(e.tokensOut) || 0, cacheRead: 0, estimated: false });
     } else if (e.type === 'route.success') {
@@ -146,7 +150,17 @@ export function ledgerMetrics({ events, now, logs }) {
     budget: modelMix(sessions.filter((r) => Date.parse(r.ts) >= midnightMs)),
     all: modelMix(rows),
   };
-  return { rows, providers, models, tokensPerDoneTask, noDonePct, turns_p50, turns_p95, budgetPct };
+  // 2.30q (#8): tasks finished by agents with no harness session and no self-report: their tokens are unknown.
+  const metered = new Set([...rows.map((r) => r.agent).filter(Boolean)]);
+  const blind = allEvents.filter((e) => e.type === 'task.done' && e.agent && !metered.has(e.agent) && !/^(launcher|watchdog|watch|director|producer)$/.test(e.agent));
+  const untracked = {
+    reported: rows.filter((r) => r.untracked).length,
+    agents: [...new Set(rows.filter((r) => r.untracked).map((r) => r.agent))],
+    models: modelMix(rows.filter((r) => r.untracked)),
+    unreportedDone: blind.length,
+    unreportedAgents: [...new Set(blind.map((e) => e.agent))],
+  };
+  return { rows, providers, models, tokensPerDoneTask, noDonePct, turns_p50, turns_p95, budgetPct, untracked };
 }
 
 export function readProxyLogs() {
@@ -172,15 +186,17 @@ function formatLedger(data, { since, by = 'provider' }) {
   const groupRows = {};
   const measRows = [];
   const estRows = [];
-  const totals = { measured: { in: 0, out: 0, cache: 0, n: 0 }, estimated: { in: 0, out: 0, n: 0 } };
+  const untrRows = [];
+  const totals = { measured: { in: 0, out: 0, cache: 0, n: 0 }, estimated: { in: 0, out: 0, n: 0 }, untracked: { in: 0, out: 0, n: 0 } };
 
   for (const r of rows) {
     const key = by === 'model' && (!r.model || /^unknown( model)?$/i.test(r.model)) ? 'model not recorded' : r[by] || 'unknown';
     (groupRows[key] ||= []).push(r);
-    (r.estimated ? estRows : measRows).push(r);
+    if (r.untracked) { untrRows.push(r); totals.untracked.in += r.tokensIn; totals.untracked.out += r.tokensOut; totals.untracked.n += 1; }
+    (r.untracked ? [] : r.estimated ? estRows : measRows).push(r);
     const g = (groups[key] ||= { measured: { in: 0, out: 0, cache: 0, n: 0 }, estimated: { in: 0, out: 0, n: 0 } });
     const bucket = r.estimated ? g.estimated : g.measured;
-    const totalBucket = r.estimated ? totals.estimated : totals.measured;
+    const totalBucket = r.untracked ? { in: 0, out: 0, cache: 0, n: 0 } : r.estimated ? totals.estimated : totals.measured;
     bucket.in += r.tokensIn;
     bucket.out += r.tokensOut;
     bucket.cache += r.cacheRead || 0;
@@ -202,6 +218,7 @@ function formatLedger(data, { since, by = 'provider' }) {
   L.push('');
   L.push(`Totals:`);
   L.push(`  Measured: ${totals.measured.n} calls, in ${M(totals.measured.in)}, out ${M(totals.measured.out)}, cache ${M(totals.measured.cache)}${measRows.length ? ` (${modelMix(measRows)})` : ''}`);
+  L.push(`  Untracked (outside the harness, self-reported): ${totals.untracked.n ? `${totals.untracked.n} reports, in ${M(totals.untracked.in)}, out ${M(totals.untracked.out)} (${modelMix(untrRows)})` : 'none reported'}${data.untracked?.unreportedDone ? `; ${data.untracked.unreportedDone} task(s) done with no usage at all (${data.untracked.unreportedAgents.slice(0, 4).join(', ')}): task done <ID> --usage <model>:<in>/<out>` : ''}`);
   if (totals.estimated.n) L.push(`  Estimated: ${totals.estimated.n} calls, in ${M(totals.estimated.in)}, out ${M(totals.estimated.out)} (${modelMix(estRows)})`);
   L.push('');
   L.push(`By ${by}:`);
