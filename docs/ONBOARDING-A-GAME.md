@@ -65,8 +65,8 @@ A game with more than one build (for example a browser build under `web/` and an
 {
   "shared": ["data/rules/**"],
   "gates": [
-    { "id": "playtest", "command": "node tools/mygame/playtest.mjs", "paths": ["web/mygame/**", "tools/mygame/**"], "track": "web" },
-    { "id": "engine-smoke", "command": "node tools/mygame/engine-smoke.mjs", "paths": ["godot/**"], "track": "engine" }
+    { "id": "playtest", "command": "npm run playtest", "paths": ["web/mygame/**", "tools/mygame/**"], "track": "web" },
+    { "id": "engine-smoke", "command": "npm run godot-unit", "paths": ["godot/**"], "track": "engine" }
   ]
 }
 ```
