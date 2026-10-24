@@ -14,7 +14,11 @@
  * headless: --import, then tools/gate.gd when the project has one. A non-zero exit or a SCRIPT ERROR /
  * Parse Error / ERROR: line fails it. Godot binary: STUDIO_GODOT, else godot on PATH.
  *
- *   node harness/game-gates.mjs [--paths a,b] [--json]     exit 1 when a required check fails
+ *   node harness/game-gates.mjs [--paths a,b] [--changed a,b] [--json]   exit 1 when a required check fails
+ *
+ * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
+ * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
+ * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
  * No game set (or the game is a cartridge): nothing extra runs, the cartridge gates cover it.
  */
 import fs from 'node:fs';
@@ -22,6 +26,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
+import { selectGates, scopeOf } from './merge-lane.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -45,7 +50,7 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    return (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false }));
+    return (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}) }));
   }
   const out = [];
   if (game.sim) {
@@ -53,6 +58,15 @@ export function declaredGates(game) {
       if (exists(`${game.sim}/${f}`)) out.push({ id: `game:${id}`, command: `node ${game.sim}/${f}`, required: true });
     }
   }
+  return out;
+}
+
+/** 2.30p: the manifest's shared globs (a change there runs every gate), plus the manifest itself. */
+export function sharedPaths(game) {
+  if (!game?.root) return [];
+  const out = [`${game.root}/studio.gates.json`];
+  const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
+  try { const j = JSON.parse(fs.readFileSync(man, 'utf8')); if (Array.isArray(j.shared)) out.push(...j.shared.map(String)); } catch {}
   return out;
 }
 
@@ -94,13 +108,21 @@ function runGodot(project) {
 }
 
 /** Run the game's checks and the engine gate for these paths. */
-export async function runGameGates({ paths = [], quiet = false } = {}) {
+export async function runGameGates({ paths = [], changed = null, quiet = false } = {}) {
   const game = await studioGame();
   const rows = [];
+  const skipped = [];
+  let scope = null;
   const log = (s) => !quiet && console.log(s);
   if (game) {
-    const gates = declaredGates(game);
-    if (!gates.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
+    const all = declaredGates(game);
+    const shared = sharedPaths(game);
+    const sel = selectGates(all, changed, { shared });
+    const gates = sel.run;
+    skipped.push(...sel.skipped);
+    scope = all.length ? scopeOf(gates, shared) : null;
+    if (sel.why) log(`[game-gates] ${sel.why}`);
+    if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
     for (const g of gates) {
       const r = spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
@@ -112,21 +134,29 @@ export async function runGameGates({ paths = [], quiet = false } = {}) {
     const { runLayoutGate } = await import('./layout-gate.mjs');
     const lay = runLayoutGate({ gameDir: game.root });
     rows.push({ id: 'game:layout', ok: lay.ok, required: true, why: lay.ok ? '' : lay.why.slice(0, 400) });
+    // 2.30p: the layout gate is unscoped unless the manifest names its inputs ("layoutPaths").
+    let lp = null;
+    try { lp = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).layoutPaths; } catch {}
+    scope = scope && Array.isArray(lp) && lp.length ? [...scope, ...lp.map(String)] : null;
   }
-  for (const e of engineGates(paths)) {
+  const eg = engineGates(paths);
+  if (scope) scope = [...new Set([...scope, ...eg.map((e) => `${e.project}/**`)])];
+  for (const e of eg) {
     const r = runGodot(e.project);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
   for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+  for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
   if (!rows.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);
-  return { ok: failed.length === 0, game: game?.name || null, rows, failed };
+  return { ok: failed.length === 0, game: game?.name || null, rows, failed, skipped, scope };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const a = process.argv.slice(2);
   const paths = String(a.includes('--paths') ? a[a.indexOf('--paths') + 1] || '' : process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
-  const res = await runGameGates({ paths, quiet: a.includes('--json') });
+  const ch = String(a.includes('--changed') ? a[a.indexOf('--changed') + 1] || '' : process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
+  const res = await runGameGates({ paths, changed: ch.length ? ch : null, quiet: a.includes('--json') });
   if (a.includes('--json')) console.log(JSON.stringify(res));
   process.exit(res.ok ? 0 : 1);
 }

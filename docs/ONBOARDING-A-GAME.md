@@ -56,3 +56,21 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
   sheet; agents prepare, that person decides.
 - **Mid-development games:** pick a freeze point, finish or park open branches, and let the old
   workflow's CI keep running alongside until the studio's gates cover the same ground.
+
+## Path-scoped gates and parallel tracks (2.30p)
+
+A game with more than one build (for example a browser build under `web/` and an engine build under `godot/`) should scope its gates, so a change to one build doesn't run the other's checks:
+
+```json
+{
+  "shared": ["data/rules/**"],
+  "gates": [
+    { "id": "playtest", "command": "node tools/mygame/playtest.mjs", "paths": ["web/mygame/**", "tools/mygame/**"], "track": "web" },
+    { "id": "engine-smoke", "command": "node tools/mygame/engine-smoke.mjs", "paths": ["godot/**"], "track": "engine" }
+  ]
+}
+```
+
+- `task done` in a lane copy runs only the gates whose `paths` its diff touches and logs each skipped gate with the reason. A change under `shared` (or `harness/`, `scripts/`, `studio/gates.json`, package files, the manifest) runs every gate. A gate without `paths` always runs, so manifests without them behave as before.
+- The pass is recorded with its commit and scope. If the studio's branch moves before the lane lands, and everything it brought in is outside that scope, the pass is reused instead of re-run.
+- Only the final fast-forward and the board write take the short land lock, so the tracks verify and land in parallel.

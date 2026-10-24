@@ -25,6 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
+import { changedSince, readPass, recordPass, canReuse, withLandLock } from './merge-lane.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -279,56 +280,108 @@ export function catchUp() {
   return r.status === 0 ? { ok: true } : { ok: false, why: 'this copy has its own commits; they reach the studio at task done' };
 }
 
+/** 2.30p: what this lane copy changed against the studio's branch: { base, head, changed }. */
+export function laneDiff() {
+  if (!inLaneCopy()) return null;
+  const main = mainBranch(mainRoot());
+  const base = git(REPO_ROOT, 'merge-base', 'HEAD', main).stdout.trim();
+  const head = git(REPO_ROOT, 'rev-parse', 'HEAD').stdout.trim();
+  return { base, head, changed: changedSince(REPO_ROOT, base, head) };
+}
+
 /**
- * Task done in a lane copy: the work must be committed; it is rebased on the studio's branch (the
- * everyday checks run again if that branch moved) and then the studio's branch fast-forwards to it.
- * Returns null when not in a lane copy, { ok: true, merged } or { ok: false, message }.
+ * Task done in a lane copy: the work must be committed; it is rebased on the studio's branch and then
+ * the studio's branch fast-forwards to it. Returns null when not in a lane copy, { ok: true, merged }
+ * or { ok: false, message }.
+ *
+ * 2.30p: after a clean rebase the checks re-run only when the incoming changes touch this lane's gate
+ * scope (recorded by task done in .studio/gate-pass/<task>.json); otherwise the earlier pass is reused.
+ * Re-runs are path-scoped too (STUDIO_GATE_CHANGED). Only the final "did the branch move?" check, the
+ * fast-forward and onLanded (the board write) hold the short land lock, so tracks land in parallel.
  */
-export function deliver(taskId, { runChecks = true } = {}) {
+export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   if (!inLaneCopy()) return null;
   const root = mainRoot();
   const main = mainBranch(root);
   const dirty = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').trim().split('\n').filter(Boolean);
   if (dirty.length) return { ok: false, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
   const branch = git(REPO_ROOT, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
-  const before = git(REPO_ROOT, 'merge-base', 'HEAD', main).stdout.trim();
-  const tip = git(root, 'rev-parse', main).stdout.trim();
-  if (before !== tip) {
-    const rb = git(REPO_ROOT, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'rebase', main);
-    if (rb.status !== 0) {
-      git(REPO_ROOT, 'rebase', '--abort');
-      return { ok: false, message: `The studio's branch (${main}) changed files you changed too. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again.` };
-    }
-    if (runChecks) {
-      const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env } });
-      if (g.status !== 0) {
-        const red = (g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]).slice(0, 4).join(', ');
-        return { ok: false, message: `Your work was rebased on the latest ${main}, and the checks now fail${red ? ` (${red})` : ''}. Fix it in your copy, commit, run npm run verify, then task done again.` };
+  const tries = Number(process.env.STUDIO_LAND_TRIES || 6);
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const before = git(REPO_ROOT, 'merge-base', 'HEAD', main).stdout.trim();
+    const tip = git(root, 'rev-parse', main).stdout.trim();
+    if (before !== tip) {
+      const preHead = git(REPO_ROOT, 'rev-parse', 'HEAD').stdout.trim();
+      const rb = git(REPO_ROOT, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'rebase', main);
+      if (rb.status !== 0) {
+        git(REPO_ROOT, 'rebase', '--abort');
+        return { ok: false, message: `The studio's branch (${main}) changed files you changed too. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again.` };
+      }
+      const head = git(REPO_ROOT, 'rev-parse', 'HEAD').stdout.trim();
+      if (runChecks) {
+        const incoming = changedSince(REPO_ROOT, before, tip);
+        const rec = readPass(root, taskId);
+        const reuse = canReuse(rec, { head: preHead, incoming });
+        if (reuse.ok) {
+          recordPass(root, taskId, { ...rec, head, base: tip, reusedFrom: preHead });
+          emitEvent({ type: 'gates.reused', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: rebased on ${main}; checks not re-run: ${reuse.why}` });
+          console.log(`[deliver] ${taskId}: checks reused after rebase: ${reuse.why}`);
+        } else {
+          const changed = changedSince(REPO_ROOT, tip, head);
+          console.log(`[deliver] ${taskId}: checks re-run after rebase: ${reuse.why}`);
+          const env = { ...process.env, ...(changed.length ? { STUDIO_GATE_CHANGED: changed.join(','), STUDIO_GATE_PATHS: process.env.STUDIO_GATE_PATHS || changed.join(',') } : {}) };
+          const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+          if (g.status !== 0) {
+            const red = (g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]).slice(0, 4).join(', ');
+            return { ok: false, message: `Your work was rebased on the latest ${main}, and the checks now fail${red ? ` (${red})` : ''}. Fix it in your copy, commit, run npm run verify, then task done again.` };
+          }
+          if (rec) recordPass(root, taskId, { ...rec, head, base: tip });
+        }
       }
     }
+    let res;
+    try {
+      res = withLandLock(root, () => {
+        // Under the lock: if the branch moved while the checks ran, go round again (rebase, scope check).
+        const nowTip = git(root, 'rev-parse', main).stdout.trim();
+        const base = git(REPO_ROOT, 'merge-base', 'HEAD', main).stdout.trim();
+        if (base !== nowTip) return { retry: true };
+        if (unmerged(branch, root) === 0) {
+          onLanded?.();
+          return { ok: true, merged: 0 };
+        }
+        // The studio's branch moves only forward; another agent's index lock gets a few retries.
+        let ff = null;
+        for (let i = 0; i < 5; i += 1) {
+          ff = git(root, 'merge', '--ff-only', branch);
+          if (ff.status === 0) break;
+          if (!/index\.lock/.test(ff.stderr || '')) break;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+        }
+        if (ff.status !== 0) {
+          const why = (ff.stderr || ff.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ');
+          return { ok: false, message: `Your work couldn't be added to ${main} in the main checkout: ${why}. If ${main} moved, run task done again (it rebases); if files there are edited but not committed, ask the Producer.` };
+        }
+        const n = Number(git(root, 'rev-list', '--count', `${base}..${branch}`).stdout.trim()) || 0;
+        onLanded?.();
+        return { ok: true, merged: n };
+      });
+    } catch (err) {
+      if (err.code === 'LAND_BUSY') return { ok: false, message: `Another landing held the land lock too long (${err.message}). Run task done again.` };
+      throw err;
+    }
+    if (res.retry) continue;
+    if (!res.ok || !res.merged) return res;
+    // The task's branch and any earlier agents' branches it carried are in the studio's branch now.
+    const b = readBranches();
+    for (const old of b[`${taskId}:carried`] || []) git(root, 'branch', '-D', old);
+    delete b[`${taskId}:carried`];
+    if (b[taskId] === branch) delete b[taskId];
+    writeBranches(b);
+    if (res.merged) emitEvent({ type: 'lane.merged', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${branch} added to ${main}` });
+    return res;
   }
-  if (unmerged(branch, root) === 0) return { ok: true, merged: 0 };
-  // The studio's branch moves only forward; another agent's index lock gets a few retries.
-  let ff = null;
-  for (let i = 0; i < 5; i += 1) {
-    ff = git(root, 'merge', '--ff-only', branch);
-    if (ff.status === 0) break;
-    if (!/index\.lock/.test(ff.stderr || '')) break;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
-  }
-  if (ff.status !== 0) {
-    const why = (ff.stderr || ff.stdout || '').trim().split('\n').filter(Boolean).slice(-2).join(' ');
-    return { ok: false, message: `Your work couldn't be added to ${main} in the main checkout: ${why}. If ${main} moved, run task done again (it rebases); if files there are edited but not committed, ask the Producer.` };
-  }
-  const n = Number(git(root, 'rev-list', '--count', `${before}..${branch}`).stdout.trim()) || 0;
-  // The task's branch and any earlier agents' branches it carried are in the studio's branch now.
-  const b = readBranches();
-  for (const old of b[`${taskId}:carried`] || []) git(root, 'branch', '-D', old);
-  delete b[`${taskId}:carried`];
-  if (b[taskId] === branch) delete b[taskId];
-  writeBranches(b);
-  emitEvent({ type: 'lane.merged', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${branch} added to ${main}` });
-  return { ok: true, merged: n };
+  return { ok: false, message: `${main} kept moving while ${taskId} was landing (${tries} tries). Run task done again.` };
 }
 
 /** Lane copies on disk, for the War Room and preflight. */

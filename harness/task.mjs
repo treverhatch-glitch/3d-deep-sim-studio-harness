@@ -16,7 +16,8 @@ import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
 import { savePatch } from './wip.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, deliver } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
+import { recordPass, clearPass, withLandLock } from './merge-lane.mjs';
 import { isEngineChurn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
@@ -285,7 +286,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (lock.locked && lock.lock.owner !== agent && !force) {
     return { error: 'locked', lock: lock.lock, message: `Task ${taskId} is claimed by ${lock.lock.owner}. Finish it as that owner or pass --force.` };
   }
-  const q = parseNextQueue();
+  let q = parseNextQueue();
   let idx = q.inProgress.findIndex((t) => t.id === taskId);
   let target = null;
   if (idx !== -1) {
@@ -352,10 +353,22 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const owner = lock.locked ? lock.lock.owner : agent;
     const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
     const lanePaths = laneList(readHolds()[target.id]?.lane);
-    const paths = [...new Set([...claimed, ...lanePaths])];
-    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 32 * 1024 * 1024 });
+    // 2.30p: in a lane copy the diff against the studio's branch picks the gates (path-scoped gates);
+    // its files also feed the engine gate. Outside a lane copy the diff is unknown and every gate runs.
+    const ld = laneDiff();
+    const changed = ld?.changed?.length ? ld.changed : null;
+    const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
+    const ggEnv = { ...process.env };
+    delete ggEnv.STUDIO_GATE_CHANGED;
+    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
     let res = null;
     try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
+    if (res?.skipped?.length) {
+      for (const sk of res.skipped) console.log(`[task done] skipped gate ${sk.id}: ${sk.why}`);
+      emitEvent({ type: 'gates.skipped', agent: agent || target.role, task: target.id, msg: `${target.id}: skipped ${res.skipped.map((x) => x.id).join(', ')} (outside the change's paths)` });
+    }
+    // Record the pass so deliver can reuse it after a rebase that only brings in other tracks' files.
+    if (gg.status === 0 && ld) recordPass(mainRoot(), target.id, { head: ld.head, base: ld.base, changed: ld.changed, scope: res?.scope ?? null, ran: (res?.rows || []).map((r) => r.id), skipped: (res?.skipped || []).map((x) => x.id) });
     if (gg.status !== 0) {
       const failed = res?.failed?.length ? res.failed : [{ id: 'game-gates', why: `${(gg.stderr || gg.stdout || '').trim().slice(0, 300)}` }];
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${failed.map((f) => f.id).join(', ')} failed` });
@@ -383,16 +396,6 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
-  // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
-  // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
-  if (inLaneCopy()) {
-    const d = deliver(taskId);
-    if (d && !d.ok) {
-      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
-      return { error: 'not-delivered', message: d.message };
-    }
-  }
-
   // Forced past a failing check: the owner's uncommitted work in its claimed folders is saved as a patch
   // first, so it isn't lost or committed later under another task (test #3: 12 forced, several with work
   // left uncommitted that later tasks committed).
@@ -407,10 +410,41 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
-  target.status = 'done';
-  if (note) target.title = `${target.title} _(✓ ${note})_`;
-  q.done.unshift(target);
-  writeNextQueue(q);
+  // 2.30p: the board is re-read right before it is written (under the land lock) and only this task's
+  // move to DONE is applied, so tasks other agents queued while the gates ran are never overwritten.
+  let landed = false;
+  const writeBoard = () => {
+    const fresh = parseNextQueue();
+    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== target.id);
+    fresh.backlog = fresh.backlog.filter((t) => t.id !== target.id);
+    fresh.done = fresh.done.filter((t) => t.id !== target.id);
+    target.status = 'done';
+    if (note) target.title = `${target.title} _(✓ ${note})_`;
+    fresh.done.unshift(target);
+    writeNextQueue(fresh);
+    q = fresh;
+    landed = true;
+  };
+
+  // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
+  // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
+  if (inLaneCopy()) {
+    const d = deliver(taskId, { onLanded: writeBoard });
+    if (d && !d.ok) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
+      return { error: 'not-delivered', message: d.message };
+    }
+  }
+
+  if (!landed) {
+    try {
+      withLandLock(mainRoot(), writeBoard);
+    } catch (err) {
+      if (err.code !== 'LAND_BUSY') throw err;
+      writeBoard(); // still a fresh re-read and merge, just without the lock
+    }
+  }
+  clearPass(mainRoot(), taskId);
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
 
   const nextActive = q.inProgress[0] || null;

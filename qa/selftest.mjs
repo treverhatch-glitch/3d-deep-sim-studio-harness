@@ -3232,6 +3232,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.30p: path-scoped gates, reused lane results, the land lock and a safe board write (qa/selftest-230p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest230p } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230p.mjs')).href);
+  await selftest230p({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -4,6 +4,16 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.30.0-p] — 2026-10-24
+2.30p: tracks land on their own. Found in a live run with a browser build and an engine build in one repo: an engine-only task spent 695 s in browser gates, every landing re-ran every gate for every other in-flight `task done` (one chain ran 23 min, then failed), and a done read the board at its start and wrote it ~11 min later, wiping 5 tasks queued meanwhile.
+### Added
+- **Path-scoped gates.** A gate in `<game>/studio.gates.json` may declare `"paths"` (globs) and `"track"`; the manifest may declare `"shared"` globs (and `"layoutPaths"` for the layout gate). `task done` in a lane copy passes its diff against the studio's branch (`game-gates.mjs --changed`, or `STUDIO_GATE_CHANGED`) and only the gates whose paths it touches run; each skipped gate is logged with the reason (`gates.skipped` event). A gate with no paths always runs, and no known diff runs everything, so older manifests behave exactly as before. `harness/**`, `scripts/**`, `studio/gates.json`, package files and the manifest itself always count as shared.
+- **Lane verify results are reused** (harness/merge-lane.mjs, `.studio/gate-pass/<task>.json`). A passing done records its commit, diff and gate scope. After a clean rebase, when every file the studio's branch brought in is outside that scope, deliver reuses the pass (`gates.reused` event) instead of re-running; otherwise it re-runs, scoped to the lane's own diff. `STUDIO_GATE_REUSE=off` always re-runs.
+- **Short land lock** (`.studio/locks/land.lock`). Only the final "did the branch move?" check, the fast-forward and the board write hold it (seconds); gates run outside it, so different tracks verify and land in parallel. If the branch moved meanwhile, deliver rebases and re-checks scope (up to `STUDIO_LAND_TRIES`, 6). A lock older than `STUDIO_LAND_LOCK_STALE_MS` (120 s) or held by a dead process is broken; waits give up after `STUDIO_LAND_LOCK_WAIT_MS` (180 s).
+### Fixed
+- **Stale board overwrite.** `task done` re-reads `studio/NEXT.md` under the land lock right before writing and applies only its own move to DONE, so tasks queued, edited or closed while its gates ran are kept.
+- qa/selftest-230p.mjs: gate selection, skip logging, reuse rules, a 4-process lock race, a concurrent done + board-write race (fails on 2.30o), and a real lane copy landing over the other track (reused) and its own track (re-run, scoped).
+
 ## [2.30.0-o] — 2026-10-24
 2.30o: the studio supervises itself. Ideas (not code) from a study of OhMyGame, plus fixes from the Marina overnight run: a Director planning session read ~2M tokens and landed nothing in 56 minutes, Godot tasks passed with no visible change, docks sat on the sand, the queue ran dry after the early game, and the watchdog only ran in away mode.
 ### Added
