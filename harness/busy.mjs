@@ -67,3 +67,39 @@ export async function taskBusy(task, { now = Date.now(), env = process.env } = {
 export const HARNESS_CAUSE = /claim ran out|couldn't be added to \S+ in the main checkout|land lock|kept moving while|index\.lock|merge worktree|done is running|queued to land/i;
 export const harnessCaused = (e) => e?.meta?.cause === 'harness' || HARNESS_CAUSE.test(String(e?.msg || ''));
 
+
+/**
+ * 2.30q: drain. `task drain on --by <name>` makes new `task done` landings wait (they poll until drain is off,
+ * up to STUDIO_DRAIN_WAIT_MIN, 120, then refuse with nothing closed); dones already running finish.
+ * `task drain wait` blocks until no done is running (for upgrades); `task drain status` exits 3 while on,
+ * so builder wait scripts can check it before calling done.
+ */
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export async function readDrain() { return read(path.join(await stateDir(), 'drain.json'), { on: false }); }
+export async function setDrain(on, by, why = '') {
+  const d = await stateDir();
+  fs.mkdirSync(d, { recursive: true });
+  const rec = { on: Boolean(on), by: by || 'unknown', why, at: new Date().toISOString() };
+  fs.writeFileSync(path.join(d, 'drain.json'), `${JSON.stringify(rec, null, 2)}\n`);
+  return rec;
+}
+export async function runningDones({ now = Date.now() } = {}) {
+  const dir = await stateDir();
+  const dd = doneDir(dir);
+  if (!fs.existsSync(dd)) return [];
+  return fs.readdirSync(dd).filter((f) => f.endsWith('.json')).map((f) => doneRunning(f.slice(0, -5), { dir, now })).filter(Boolean);
+}
+/** Called by task done before anything closes. Returns { ok } or { ok: false, message }. */
+export async function waitForDrain({ log = console.error, env = process.env } = {}) {
+  const max = Number(env.STUDIO_DRAIN_WAIT_MIN ?? 120) * 60000;
+  const poll = Number(env.STUDIO_DRAIN_POLL_MS ?? 15000);
+  const start = Date.now();
+  let told = false;
+  for (;;) {
+    const d = await readDrain();
+    if (!d.on) return { ok: true, waitedMs: Date.now() - start };
+    if (!told) { log(`[drain] landings are paused (drain on by ${d.by}${d.why ? `: ${d.why}` : ''}); waiting until npm run task -- drain off`); told = true; }
+    if (Date.now() - start >= max) return { ok: false, message: `Drain is still on after ${Math.round(max / 60000)} min (by ${d.by}). Nothing was closed; run task done again after drain off.` };
+    sleep(poll);
+  }
+}

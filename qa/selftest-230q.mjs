@@ -218,4 +218,23 @@ import { kickoffParts } from ${u('harness/kickoff.mjs')};
 const k = kickoffParts({ role: 'builder', agent: 'builder-auto-64', model: 'gemini-3.1-pro-preview', launched: true });
 console.log(JSON.stringify({ clean: volatileLeaks(k.stable, { agent: 'builder-auto-64', model: 'gemini-3.1-pro-preview', task: 'T-142' }), leak: volatileLeaks('You are builder-auto-64 on T-142 at 2026-10-24T05:20', { agent: 'builder-auto-64', task: 'T-142' }) }));`, base);
   report('2.30q #8: the builder kickoff stable prefix carries no agent, model, task or time; a leak is named', Array.isArray(vl.clean) && vl.clean.length === 0 && vl.leak?.length === 3, JSON.stringify(vl));
+
+  // ---- drain ----
+  const dOn = run(dir, 'node harness/task.mjs drain on --by selftest --why upgrade', base);
+  const dSt = run(dir, 'node harness/task.mjs drain status', base);
+  const t0 = Date.now();
+  const dDone = run(dir, 'node harness/task.mjs done T-001 --agent builder-q1', { ...base, STUDIO_DRAIN_WAIT_MIN: '0.03', STUDIO_DRAIN_POLL_MS: '200' });
+  const waited = Date.now() - t0;
+  const board = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
+  report('2.30q drain: drain on makes status exit 3 and a new done wait, then refuse with nothing closed', dOn.status === 0 && dSt.status === 3 && /Drain on/.test(dSt.stdout) && dDone.status !== 0 && /Drain is still on/.test(out(dDone)) && waited >= 1500 && !/\[x\][^\n]*T-001/.test(board), `${dSt.status} ${waited} ${out(dDone).slice(0, 300)}`);
+  fs.mkdirSync(path.join(dir, '.studio', 'done-running'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.studio', 'done-running', 'T-920.json'), JSON.stringify({ task: 'T-920', agent: 'b', pid: process.pid, at: new Date().toISOString() }));
+  const wt = probe(`import { runningDones } from ${u('harness/busy.mjs')};
+console.log(JSON.stringify((await runningDones()).map((x) => x.task)));`, base);
+  const dWait = run(dir, 'node harness/task.mjs drain wait --max 0.01', { ...base, STUDIO_DRAIN_POLL_MS: '100' });
+  fs.rmSync(path.join(dir, '.studio', 'done-running', 'T-920.json'), { force: true });
+  const dWait2 = run(dir, 'node harness/task.mjs drain wait', base);
+  const dOff = run(dir, 'node harness/task.mjs drain off --by selftest', base);
+  const dSt2 = run(dir, 'node harness/task.mjs drain status', base);
+  report('2.30q drain: drain wait blocks while a done is running and returns when none is; drain off resumes', JSON.stringify(wt) === '["T-920"]' && dWait.status === 1 && dWait2.status === 0 && dOff.status === 0 && dSt2.status === 0, `${JSON.stringify(wt)} ${out(dWait)} ${out(dWait2)}`);
 }

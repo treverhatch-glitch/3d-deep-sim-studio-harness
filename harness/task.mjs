@@ -823,6 +823,30 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
+  if (cmd === 'drain') {
+    const b = await import('./busy.mjs');
+    const sub = arg1 || 'status';
+    if (sub === 'on' || sub === 'off') {
+      const r = await b.setDrain(sub === 'on', typeof flags.by === 'string' ? flags.by : process.env.STUDIO_LOCK_OWNER || 'human', typeof flags.why === 'string' ? flags.why : '');
+      emitEvent({ type: 'studio.drain', agent: r.by, to: 'producer', msg: `Drain ${sub} (${r.by})${sub === 'on' ? ': new task done landings wait; running ones finish' : ': landings resume'}` });
+      const run = await b.runningDones();
+      console.log(`Drain ${sub}.${sub === 'on' ? ` ${run.length} done(s) still running${run.length ? `: ${run.map((x) => x.task).join(', ')}` : ''}; npm run task -- drain wait blocks until none.` : ''}`);
+      process.exit(0);
+    }
+    if (sub === 'wait') {
+      const max = Number(flags.max || 60) * 60000; const t0 = Date.now();
+      for (;;) {
+        const run = await b.runningDones();
+        if (!run.length) { console.log('No task done is running.'); process.exit(0); }
+        if (Date.now() - t0 > max) { console.error(`Still running after ${Math.round(max / 60000)} min: ${run.map((x) => x.task).join(', ')}`); process.exit(1); }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.STUDIO_DRAIN_POLL_MS ?? 10000));
+      }
+    }
+    const d = await b.readDrain(); const run = await b.runningDones();
+    console.log(`Drain ${d.on ? `on (by ${d.by}, ${d.at})` : 'off'}; ${run.length} done(s) running${run.length ? `: ${run.map((x) => x.task).join(', ')}` : ''}.`);
+    process.exit(d.on ? 3 : 0);
+  }
+
   if (cmd === 'list') {
     // 2.30q (#8): in a launched session (STUDIO_COMPACT_OUTPUT=on) or with --mine, only the tasks that matter to
     // this agent: what it holds, in progress, and the next few for its role; --all prints the whole board.
@@ -926,6 +950,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.30q (#6): while done runs (gates, landing: often 10+ min), the task counts as busy for the
     // Director's flow pass, the stall check and the watchdog (harness/busy.mjs).
     const busyMod = await import('./busy.mjs');
+    // 2.30q: drain on: a new done waits here (before its marker, so drain wait doesn't wait for it).
+    { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }
     await busyMod.markDoneRunning(targetId, whoAmI(flags)).catch(() => {});
     let done;
     try {
