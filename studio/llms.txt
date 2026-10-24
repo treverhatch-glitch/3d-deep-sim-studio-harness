@@ -89,6 +89,7 @@
 - `npm run task -- next [--role r --agent a]` — your most urgent task for your role, or the one you hold; `npm run task -- show <ID>` — lane, owner, meta, hand-off notes, history, checklist
 - `npm run task -- done <ID> --force --reason "…" --accepted-by <person>` — a forced done a person accepted is logged without a follow-up task
 - `npm run task -- done <ID> --usage <model>:<in>/<out>` — (2.30q) a builder launched outside the harness (e.g. a Grok builder) reports its own tokens; `npm run ledger` lists them as untracked (self-reported). Also on `pause`.
+- `npm run task -- drain on|off --by <name>` / `drain wait` / `drain status` — (2.30q) pause new task done landings (running ones finish); status exits 3 while on: check it before task done in wait scripts
 - `npm run task -- list --mine` / `--all` — (2.30q) only your role's next tasks (the default in launched sessions) or the whole board
 - `node harness/lock.mjs claim path:<narrow path> --owner <name>` — whole top-level folders (studio, qa, cartridges, src, …) need `--wide "<why>"`
 - `npm run task -- add "…" --not-layer <id>` — when a title's word matches a crossed-out layer but means something else (logged for the Director)
