@@ -4,6 +4,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.38.0] — 2026-10-31
+2.38.0: built but not wired. The research pack's Hatchfield audit found about 43 systems that were built and unit-tested but that nothing in the game used ("nothing in the game imports it, only tests, scripts/*.html demos"); their tasks closed as done because their own tests passed.
+### Added
+- **Reachability** (harness/reachability.mjs, `npm run reach [-- <files>]`): walks the game from its entry points the way it runs. Web: every `index.html` under web/ and game/ (its `<script src>` and inline module imports), every cartridge's `index.mjs`, package.json `main`, and any `entries` a game's studio.gates.json lists; then static, side-effect, re-export, dynamic, `require`, `new URL(..., import.meta.url)` and Worker imports, tsconfig/jsconfig `paths` aliases (`@/x`), `"/x"` from the page's folder, and a `.ts` behind a `.js` import. Godot: each project's main scene and autoloads, every `res://` path a reached file names, and scripts whose `class_name` a reached script uses. Tests, tools, demos and the harness are never entry points.
+- **The done-check notes a build task's game code that nothing reaches** (types change, bug, system): **opt-in** to fail. By default it is a note on `task done` and in `done-check` output plus a `task.unwired` event; `STUDIO_REACHABILITY=fail` makes it a failing check ("New game code is wired into the game"); `off` turns it off.
+- qa/selftest-238.mjs: 4 checks (the import forms; a web module only a test or a demo imports is flagged while index.html-reached ones are not; Godot main scene, autoload and class_name reach, an orphan flagged; the done-check notes, refuses when opted in, and stops once the module is wired).
+
 ## [2.37.0] — 2026-10-31
 2.37.0: after work lands, every check runs on the whole game. Per-task checks are scoped to the files a task touched (2.31.0): fast, but blind to a change that breaks something elsewhere. In the research pack's Marina experiment the standard checks caught 1 of 7 planted drift edits; every check on the whole project after each landing caught 7 of 7, for about 36% more time.
 ### Added

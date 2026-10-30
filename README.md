@@ -107,6 +107,10 @@ A task that uses its whole budget isn't handed straight to you, and no step can 
 
 The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
+## Built but not wired (2.38.0)
+
+A system can be finished and tested and still never reach the player, because nothing in the game uses it. `task done` now walks the game from its entry points (index.html, cartridges, Godot's main scene and autoloads) and notes any game file the task changed that nothing reaches. Tests and demo pages don't count. `STUDIO_REACHABILITY=fail` makes it refuse; `npm run reach -- <files>` checks by hand. A game with other entry pages lists them as `"entries"` in its studio.gates.json.
+
 ## The whole game is checked after every landing (2.37.0)
 
 A task's own verify only covers the files it touched, so it can't see that it broke something elsewhere. With `STUDIO_WHOLE_GAME=on`, every commit that lands on the studio's branch gets every required check on the whole game, in the background, in a clean copy of exactly that commit. A failure is re-run alone first (so a busy machine isn't blamed on the game); if it is still red, a P0 task names the failing checks and the tasks that landed since the last green run, and the morning report says so. `npm run whole-game` runs it by hand; `-- --status` shows the last result.
