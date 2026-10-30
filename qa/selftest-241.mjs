@@ -12,7 +12,12 @@ export async function selftest241({ dir, run, report, tmpRoot }) {
   const reports = path.join(dir, 'qa', 'reports');
   fs.mkdirSync(reports, { recursive: true });
   fs.mkdirSync(path.join(dir, 'qa', 'regressions', 'browser'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'qa', 'regressions', 'browser', 'T-50.mjs'), 'export async function check() { return { ok: true }; }\n');
+  const reg = path.join(dir, 'qa', 'regressions', 'browser', 'T-50.mjs');
+  fs.writeFileSync(reg, 'export async function check() { return { ok: true }; }\n');
+  // Written a few seconds before the plays, as in a real run (a report's "at" has whole milliseconds; a file's
+  // time has finer ones, so a report written in the same millisecond would look older than the change).
+  const t = (Date.now() - 5000) / 1000;
+  fs.utimesSync(reg, t, t);
   let k = 0;
   const play = (ok) => {
     const id = 1793400000000 + (++k);
