@@ -121,8 +121,37 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
       actions.push({ kind: 'stop', msg: `stopped the studio: ${ran} sessions, no task finished in ${lim.idleHours} h` });
     }
   }
-  for (const a of actions) emitEvent({ type: 'watchdog.action', agent: 'watchdog', to: 'producer', task: a.task, msg: `Watchdog ${a.msg}`, meta: { kind: a.kind } });
-  return { on: true, auto, actions };
+  const logged = logActions(actions, { now });
+  return { on: true, auto, actions, quieted: actions.length - logged.length };
+}
+
+/**
+ * 2.40.0: log the watchdog's actions as watchdog.action events. With STUDIO_WATCHDOG_QUIET_MIN (opt-in) the
+ * same action (kind, task and message, numbers ignored) is logged once per window; when it shows again after
+ * the window, its line says how many times it repeated meanwhile. The actions themselves still happen every
+ * pass; only the log is quieter (the research pack counted 11-23 watchdog events per finished task).
+ * Returns the actions that were logged.
+ */
+export function logActions(actions, { now = Date.now(), env = process.env, file = path.join(STUDIO_STATE_DIR, 'watchdog-quiet.json') } = {}) {
+  const quietMs = Number(env.STUDIO_WATCHDOG_QUIET_MIN || 0) * 60000;
+  let seen = {};
+  if (quietMs > 0) { try { seen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {} }
+  const logged = [];
+  for (const a of actions) {
+    const key = `${a.kind}|${a.task || ''}|${String(a.msg || '').replace(/\d+(\.\d+)?/g, '#')}`;
+    const s = seen[key];
+    if (quietMs > 0 && s && now - s.at < quietMs) { s.count = (s.count || 0) + 1; continue; }
+    const again = s?.count ? ` (repeated ${s.count} more time${s.count === 1 ? '' : 's'} since ${new Date(s.at).toISOString().slice(11, 16)} UTC)` : '';
+    emitEvent({ type: 'watchdog.action', agent: 'watchdog', to: 'producer', task: a.task, msg: `Watchdog ${a.msg}${again}`, meta: { kind: a.kind, ...(s?.count ? { repeated: s.count } : {}) } });
+    logged.push(a);
+    if (quietMs > 0) seen[key] = { at: now, count: 0 };
+  }
+  if (quietMs > 0) {
+    for (const [k, v] of Object.entries(seen)) if (now - v.at > Math.max(quietMs * 4, 86400000)) delete seen[k];
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(seen)}\n`); } catch {}
+  }
+  return logged;
+
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

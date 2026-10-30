@@ -430,6 +430,14 @@ export function checkDone(task, since = startedAt(task.id)) {
       const plays = newestSince(filesUnder('qa/reports', (n) => /^browser_\d+\.json$/.test(n)), since).map((f) => readJson(f)).filter(Boolean);
       const good = plays.filter((r) => r.passed && (Date.parse(r.at) || 0) >= lastChange && bregs.every((f) => (r.regressions || []).some((x) => x.file === f && x.ok)));
       check('Browser play passed with the regression, after the last change', good.length, 'no passing browser play (npm run play:browser) that ran the new regression after your last change');
+      // 2.41.0: STUDIO_TWO_GREENS=on (opt-in): a new browser regression joins the protected set only after two
+      // separate passing plays since the last change and no failing one. The research pack: "one flaky input
+      // test turned the main branch red even though the game code was fine".
+      if (/^(on|1|true|yes)$/i.test(process.env.STUDIO_TWO_GREENS || '') && good.length) {
+        const after = plays.filter((r) => (Date.parse(r.at) || 0) >= lastChange);
+        const red = after.filter((r) => bregs.some((f) => (r.regressions || []).some((x) => x.file === f && !x.ok)));
+        check('The new regression passed twice in a row, never failing (it is not flaky)', good.length >= 2 && !red.length, red.length ? `the new regression failed in ${red.length} of ${after.length} browser plays since your last change (${red.map((r) => (r.regressions || []).find((x) => bregs.includes(x.file) && !x.ok)?.why).filter(Boolean)[0] || 'see the report'}): a flaky test must not be protected; make it deterministic` : `it has passed once since your last change; run npm run play:browser again (a new regression must pass twice before it is protected)`);
+      }
     }
     check('Lesson written in studio/memory/failures.md', named || dated, `no lesson in studio/memory/failures.md naming ${ids.join(' or ')} or dated since the task started (\`node scripts/distill-bug.mjs\`)`);
     workAndVerify();

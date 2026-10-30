@@ -4,6 +4,21 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.41.0] — 2026-10-31
+2.41.0: a new browser regression must pass twice before it is protected. The research pack: "one flaky input test turned the main branch red even though the game code was fine"; regressions are add-only protected files (2.32), so a flaky one is hard to take back.
+### Added
+- **`STUDIO_TWO_GREENS=on`** (opt-in; harness/done-check.mjs): a renderer bug closes only when its new browser regression passed in two separate browser plays since the last change and failed in none. One pass: "run npm run play:browser again". A failure: named with its reason ("a flaky test must not be protected; make it deterministic"). Sim regressions replay deterministically from a seed, so they are not affected.
+### Fixed
+- **The War Room test's Stop/Pause step** (qa/hud-check.mjs) failed in CI twice in about six runs ("Stop ends it and hands its task back": an agent still listed). It pressed "the first" Stop button every 3 s, so an agent still stopping took every press and a second one was never stopped. It now presses Stop (or Pause) once per agent, by name, waits up to 30 s for the list to empty, and presses again for any agent still listed. It couldn't be reproduced locally (3 runs at once under load all passed), so a failure now also prints each agent's record, log tail and stop/launch events, to show the cause if it recurs.
+- qa/selftest-241.mjs: 1 check (off by default; one pass, two passes, two passes and a failure).
+
+## [2.40.0] — 2026-10-31
+2.40.0: a quieter watchdog log, and the new signals in the health report. The research pack counted 11 to 23 watchdog events per finished task in the Marina run; the same error, logged every 3 minutes, buries the lines that matter.
+### Added
+- **`STUDIO_WATCHDOG_QUIET_MIN`** (opt-in; harness/watchdog.mjs `logActions`): the same watchdog action (kind, task and message, numbers ignored) is logged once per window; when it shows up again after the window, its line says how many times it repeated meanwhile (`meta.repeated`). The actions themselves still happen every pass. 60 is a good start.
+- **Harness health** (`npm run harness-health`) counts watchdog log lines per landing, checks that passed having run nothing (`gate.silent_green`, 2.36), whole-game reds and environment re-runs (2.37), and unwired code noted at done (`task.unwired`, 2.38).
+- qa/selftest-240.mjs: 2 checks (a repeating action is logged once per window with its count, different tasks still logged, off by default; the health counts and their line).
+
 ## [2.39.0] — 2026-10-31
 2.39.0: the Game Bible says what each control must change. Until now a control's "did it work" test was the game's own `expect` in qa.mjs, written by the same agents that build the game: a weak or gamed one (`expect: () => true`) passes a buy button that buys nothing. The research pack's Hatchfield timeline has them ("Fire bell does nothing", "Extra jet bridges ... buy nothing").
 ### Added
