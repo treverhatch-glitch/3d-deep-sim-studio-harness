@@ -107,6 +107,10 @@ A task that uses its whole budget isn't handed straight to you, and no step can 
 
 The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
+## The whole game is checked after every landing (2.37.0)
+
+A task's own verify only covers the files it touched, so it can't see that it broke something elsewhere. With `STUDIO_WHOLE_GAME=on`, every commit that lands on the studio's branch gets every required check on the whole game, in the background, in a clean copy of exactly that commit. A failure is re-run alone first (so a busy machine isn't blamed on the game); if it is still red, a P0 task names the failing checks and the tasks that landed since the last green run, and the morning report says so. `npm run whole-game` runs it by hand; `-- --status` shows the last result.
+
 ## A check that ran nothing is not a pass (2.36.0)
 
 Some test runners exit 0 when no test ran (GUT prints "Nothing was run"; vitest and jest can find no test files). The studio game's checks and the Godot unit gate now spot that and say so in a WARN line; `STUDIO_SILENT_GREEN=fail` makes it fail the check (recommended once a game's tests are set up), `off` turns it off.

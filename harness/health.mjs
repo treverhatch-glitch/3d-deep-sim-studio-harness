@@ -135,6 +135,7 @@ export async function needsYou(events, { since = 0 } = {}) {
   } catch {}
   try { const { listPending } = await import('./pending-review.mjs'); out.pending = listPending().map((i) => ({ id: i.task, why: String(i.reason || i.missing || '').slice(0, 120) })); } catch {}
   try { const { checkProtected } = await import('./approve.mjs'); const r = checkProtected(); if (r.enforced && !r.ok) out.protectedChanges = r.changes.map((c) => c.path); } catch {}
+  try { const { wholeLine } = await import('./whole-game.mjs'); out.whole = wholeLine(); } catch {}
   try { const { readStop } = await import('./task.mjs'); const st = readStop(); if (st) out.stopped = `${st.by}${st.reason ? `: ${st.reason}` : ''}`; } catch {}
   // The main branch's CI on GitHub, when the GitHub CLI is there and signed in (a week of red CI went unseen).
   if (process.env.STUDIO_HEALTH_CI !== 'off') {
@@ -150,6 +151,7 @@ export async function needsYou(events, { since = 0 } = {}) {
 export function renderNeeds(n) {
   const lines = ['', '## Landed', n.landed.length ? n.landed.join(', ') : 'nothing', '', '## Needs you'];
   if (n.stopped) lines.push(`- The studio is stopped (${n.stopped}).`);
+  if (n.whole) lines.push(`- ${n.whole}`);
   if (n.ci && n.ci.status === 'completed' && n.ci.conclusion !== 'success') lines.push(`- CI on main is ${n.ci.conclusion} (${n.ci.sha}, ${String(n.ci.at).slice(0, 16).replace('T', ' ')} UTC): nothing new should land until it is green.`);
   for (const p of n.parked) lines.push(p.shelved ? `- ${p.id} is shelved (the studio works around it): ${p.why.replace(/^shelved:\s*/, '')}` : `- ${p.id} is parked by ${p.by}: ${p.why}`);
   for (const p of n.pending) lines.push(`- ${p.id} was forced done and waits for your review: ${p.why}`);

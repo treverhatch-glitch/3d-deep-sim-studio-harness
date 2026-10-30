@@ -92,7 +92,7 @@ export function ignoreLanes(root = mainRoot()) {
 }
 
 /** Link a folder (a junction on Windows, which needs no admin rights). */
-function linkDir(target, link) {
+export function linkDir(target, link) {
   try {
     fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
     return true;
@@ -102,7 +102,7 @@ function linkDir(target, link) {
 }
 
 /** node_modules folders worth linking: the root's, hub/'s, and one level into game/, web/, engine/. */
-function nodeModuleDirs(root) {
+export function nodeModuleDirs(root) {
   const out = [];
   const add = (rel) => fs.existsSync(path.join(root, rel, 'node_modules')) && out.push(path.join(rel, 'node_modules'));
   add('');
