@@ -34,6 +34,27 @@ for (const s of seeds) {
 }
 const gate = g(['--script', 'res://tools/gate.gd']);
 if (gate.status !== 0 || /SCRIPT ERROR/.test(gate.stdout + gate.stderr)) problems.push(`the template's gate failed (exit ${gate.status}): ${(gate.stdout + gate.stderr).trim().split('\n').slice(-3).join(' ')}`);
+// 2.32.0: the gate presses every control for real, and a dead control fails it. A copy of the template
+// with the Buy button unwired must fail on exactly that control (the Marina Godot build had dead buttons
+// and passed every gate).
+{
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const ctlOut = path.join(os.tmpdir(), `engine-template-controls-${process.pid}.json`);
+  const ok = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 300000, env: { ...process.env, STUDIO_CONTROLS_OUT: ctlOut } });
+  let res = null;
+  try { res = JSON.parse(fs.readFileSync(ctlOut, 'utf8')); } catch {}
+  const ids = (res?.controls || []).filter((c) => c.ok).map((c) => c.id).sort().join(',');
+  if (ok.status !== 0 || ids !== 'buy-button,buy-unit') problems.push(`the template's controls didn't all pass by real input (passed: ${ids || 'none'}): ${(ok.stdout + ok.stderr).trim().split('\n').filter((l) => /\[gate\]/.test(l)).slice(-4).join(' | ')}`);
+  const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-dead-control-'));
+  fs.cpSync(tpl, broken, { recursive: true, filter: (s) => !/[\\/]\.godot([\\/]|$)/.test(s) });
+  const mainGd = path.join(broken, 'main.gd');
+  fs.writeFileSync(mainGd, fs.readFileSync(mainGd, 'utf8').replace('buy_button.pressed.connect(buy)', 'pass # unwired for the dead-control check'));
+  spawnSync(godot, ['--headless', '--path', broken, '--import'], { encoding: 'utf8', timeout: 300000 });
+  const dead = spawnSync(godot, ['--headless', '--path', broken, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 300000 });
+  if (dead.status === 0 || !/control buy-button did nothing/.test(dead.stdout + dead.stderr)) problems.push('a template with the Buy button unwired still passed its gate: the real-input controls check is not working');
+  fs.rmSync(broken, { recursive: true, force: true });
+}
 // 2.30h (7): every template script parses on its own, not just the ones the gate loads.
 const parsed = parseCheck(tpl, { godot });
 if (parsed.error) problems.push(parsed.error);

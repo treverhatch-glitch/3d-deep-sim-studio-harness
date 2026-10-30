@@ -143,6 +143,11 @@ const report = (label, ok, detail = '') => {
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
+  // 2.32.0: the newest real-input report says the Bible's Buy button did nothing.
+  controls: (d) => {
+    fs.mkdirSync(path.join(d, 'qa/reports'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'qa/reports/browser_9999999999999.json'), JSON.stringify({ controls: [{ id: 'buy-unit', ok: true }, { id: 'buy-button', ok: false, why: 'planted: nothing happened' }] }));
+  },
   // 2.30n: the studio's game (not a cartridge) whose own scenarios fail.
   game: (d) => {
     fs.writeFileSync(path.join(d, 'studio/game.json'), JSON.stringify({ game: 'zz-sab' }));
@@ -208,6 +213,7 @@ const EXPECT = {
   secrets: /leak\.txt/,
   'godot-unit': /test_money_drains: expected money to drop/,
   game: /FAIL game:qa/,
+  controls: /web: "buy-button" did nothing \(planted/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -3253,6 +3259,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest231 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-231.mjs')).href);
   await selftest231({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.32.0: the Game Bible's controls list against each track's real-input results (qa/selftest-232.mjs).
+{
+  const dir = copyRepo();
+  const { selftest232 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-232.mjs')).href);
+  await selftest232({ dir, run, report, tmpRoot });
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 

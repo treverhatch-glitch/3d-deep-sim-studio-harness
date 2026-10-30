@@ -94,7 +94,12 @@ export function engineGates(paths) {
 
 function runGodot(project) {
   const bin = godotBin();
-  const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
+  // 2.32.0: tools/gate.gd presses every control in tools/controls.gd and writes one result per id here,
+  // for the controls check (qa/controls-check.mjs).
+  const reports = path.join(REPO_ROOT, 'qa', 'reports');
+  fs.mkdirSync(reports, { recursive: true });
+  const env = { ...process.env, STUDIO_CONTROLS_OUT: path.join(reports, `controls-godot-${project.replace(/[^\w.-]+/g, '_')}.json`) };
+  const opts = { cwd: REPO_ROOT, encoding: 'utf8', env, timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
   const steps = [['--headless', '--path', project, '--import']];
   if (fs.existsSync(path.join(REPO_ROOT, project, 'tools', 'gate.gd'))) steps.push(['--headless', '--path', project, '--script', 'res://tools/gate.gd']);
   for (const args of steps) {

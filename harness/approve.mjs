@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+/**
+ * harness/approve.mjs — 2.32.0: changes only the owner can approve, proved with the owner's signature.
+ *
+ * Agents can edit any file they can write, including the tests that judge them: in the Marina run a
+ * protected-test list was re-initialised by agent commits, and changing a scenario's expected outcome
+ * turned a broken game green. So some files are protected (studio/protected.json "globs"), and a change
+ * to them lands only with an approval signed by the owner's key:
+ *
+ *   npm run approve -- keygen                       make the owner key pair, once, on the owner's own machine.
+ *                                                   The private key goes to ~/.studio-owner/ (STUDIO_OWNER_KEY
+ *                                                   to put it elsewhere), never into the repo and never on a
+ *                                                   machine agents run on. Commit studio/keys/owner-ed25519.pub.pem.
+ *   npm run approve -- show [--base <ref>]          the protected files this branch changes, and whether approved
+ *   npm run approve -- protected --note "why" [--base <ref>]   sign exactly those changes (by content)
+ *   npm run approve -- force <T-ID> --reason "why"  let task done --force / --accepted-by close that task
+ *
+ * An approval is a file in studio/approvals/ (commit it with the change). It holds what was approved
+ * (each protected file's path and content hash, or the task) and an Ed25519 signature. The check
+ * (qa/protected-check.mjs) verifies it against the owner's public key read from the BASE branch, never
+ * from the branch under review, so an agent can't swap in its own key; and the signed hashes must match
+ * the files exactly, so an approval can't be reused for a different edit. Until the base branch has an
+ * owner key, nothing is enforced (the check says so).
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { REPO_ROOT, emitEvent } from './event.mjs';
+import { canonicalBytes } from './hash.mjs';
+import { matchAny } from './merge-lane.mjs';
+
+export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
+export const APPROVALS_REL = 'studio/approvals';
+const PROTECTED_REL = 'studio/protected.json';
+export const DEFAULT_PROTECTED = [
+  'studio/protected.json', 'studio/keys/**', 'studio/gates.json', 'studio/bible/controls.json',
+  'cartridges/*/qa.mjs', 'web/*/sim/qa.mjs', 'game/*/sim/qa.mjs', 'qa/regressions/**',
+  'qa/controls-check.mjs', 'qa/protected-check.mjs', 'harness/approve.mjs',
+  '**/tools/controls.gd', '**/tools/gate.gd', '.github/workflows/**',
+];
+
+// The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
+// (STUDIO_PROTECT_ROOT), so a branch can't weaken the check that judges it.
+const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : REPO_ROOT;
+const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+export const ownerKeyPath = (env = process.env) => env.STUDIO_OWNER_KEY || path.join(os.homedir(), '.studio-owner', 'owner-ed25519.pem');
+
+/** The protected globs: studio/protected.json at the base (so a branch can't shrink its own list), else the defaults. */
+export function protectedGlobs(base = null) {
+  const text = base ? git(['show', `${base}:${PROTECTED_REL}`]).stdout : (fs.existsSync(path.join(ROOT, PROTECTED_REL)) ? fs.readFileSync(path.join(ROOT, PROTECTED_REL), 'utf8') : '');
+  try { const g = JSON.parse(text).globs; if (Array.isArray(g) && g.length) return g.map(String); } catch {}
+  return DEFAULT_PROTECTED;
+}
+
+/** The owner's public key as the base branch has it (null: no key yet, nothing enforced). */
+export function ownerPublicKey(base = null) {
+  const pem = base ? git(['show', `${base}:${OWNER_PUB_REL}`]).stdout : (fs.existsSync(path.join(ROOT, OWNER_PUB_REL)) ? fs.readFileSync(path.join(ROOT, OWNER_PUB_REL), 'utf8') : '');
+  return /BEGIN PUBLIC KEY/.test(pem || '') ? pem : null;
+}
+
+/** Which branch to compare with: STUDIO_PROTECT_BASE, the PR's base in CI, the lane's studio branch, else origin/main. */
+export function resolveBase(env = process.env) {
+  const tries = [];
+  if (env.STUDIO_PROTECT_BASE) tries.push(env.STUDIO_PROTECT_BASE);
+  if (env.GITHUB_BASE_REF) tries.push(`origin/${env.GITHUB_BASE_REF}`);
+  if (env.STUDIO_MAIN_ROOT) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) tries.push(b); }
+  tries.push('origin/main', 'main');
+  const head = git(['rev-parse', 'HEAD']).stdout.trim();
+  for (const t of tries) {
+    const mb = git(['merge-base', 'HEAD', t]).stdout.trim();
+    if (/^[0-9a-f]{40}$/.test(mb) && (mb !== head || t === env.STUDIO_PROTECT_BASE)) return { ref: t, base: mb };
+  }
+  return null;
+}
+
+const blobSha = (rel) => {
+  const f = path.join(ROOT, rel);
+  return fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : 'deleted';
+};
+
+/** Globs where a NEW file needs no approval (a new regression only makes the judge stricter); edits and deletes still do. */
+export function addOnlyGlobs(base = null) {
+  const text = base ? git(['show', `${base}:${PROTECTED_REL}`]).stdout : (fs.existsSync(path.join(ROOT, PROTECTED_REL)) ? fs.readFileSync(path.join(ROOT, PROTECTED_REL), 'utf8') : '');
+  try { const g = JSON.parse(text).addOnly; if (Array.isArray(g)) return g.map(String); } catch {}
+  return ['qa/regressions/**'];
+}
+const inBase = (base, f) => git(['cat-file', '-e', `${base}:${f}`]).status === 0;
+
+/** Protected files changed since base (committed or not), each with its content hash now. */
+export function protectedChanges(base, globs = protectedGlobs(base)) {
+  const committed = git(['diff', '--name-only', `${base}...HEAD`]).stdout.split('\n');
+  const dirty = git(['status', '--porcelain', '--untracked-files=all']).stdout.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+  const addOnly = addOnlyGlobs(base);
+  const files = [...new Set([...committed, ...dirty].map((f) => f.trim()).filter(Boolean))]
+    .filter((f) => matchAny(f, globs))
+    .filter((f) => !(matchAny(f, addOnly) && !inBase(base, f) && fs.existsSync(path.join(ROOT, f))))
+    .sort();
+  return files.map((f) => ({ path: f, sha256: blobSha(f) }));
+}
+
+export const changeId = (changes) => crypto.createHash('sha256').update(canonicalBytes(changes.map((c) => [c.path, c.sha256]))).digest('hex');
+
+function readApprovals() {
+  const dir = path.join(ROOT, APPROVALS_REL);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => { try { return { file: `${APPROVALS_REL}/${f}`, ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) }; } catch { return null; } }).filter(Boolean);
+}
+
+export function verifyApproval(doc, publicPem) {
+  try {
+    return crypto.verify(null, Buffer.from(canonicalBytes(doc.approval)), crypto.createPublicKey(publicPem), Buffer.from(String(doc.signature), 'base64'));
+  } catch {
+    return false;
+  }
+}
+
+/** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
+export function checkProtected({ env = process.env } = {}) {
+  const b = resolveBase(env);
+  if (!b) return { enforced: false, ok: true, changes: [], why: 'no base branch to compare with' };
+  const pub = ownerPublicKey(b.base);
+  const changes = protectedChanges(b.base);
+  if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: run npm run approve -- keygen on the owner's machine and commit the public key` };
+  if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: 'no protected file changed' };
+  const id = changeId(changes);
+  const approved = readApprovals().filter((a) => a.approval?.kind === 'protected' && a.approval.change === id && verifyApproval(a, pub));
+  if (approved.length) return { enforced: true, ok: true, changes, base: b.ref, why: `approved by ${approved[0].approval.by} (${approved[0].file})`, change: id };
+  const stale = readApprovals().filter((a) => a.approval?.kind === 'protected' && verifyApproval(a, pub)).length;
+  return { enforced: true, ok: false, changes, base: b.ref, change: id, why: `${changes.length} protected file(s) changed since ${b.ref} with no owner approval for exactly these contents${stale ? ' (an approval exists, but for different contents: the files changed after it was signed)' : ''}` };
+}
+
+/** A task done --force / --accepted-by for this task: is it signed by the owner? null = no owner key (not enforced). */
+export function forceApproved(taskId, { env = process.env } = {}) {
+  const b = resolveBase(env);
+  const pub = ownerPublicKey(b?.base || null);
+  if (!pub) return null;
+  const a = readApprovals().find((x) => x.approval?.kind === 'force' && x.approval.task === taskId && verifyApproval(x, pub));
+  return a ? { ok: true, by: a.approval.by, reason: a.approval.reason, file: a.file } : { ok: false };
+}
+
+function sign(approval) {
+  const keyFile = ownerKeyPath();
+  if (!fs.existsSync(keyFile)) throw new Error(`no owner key at ${keyFile}: approvals are signed on the owner's machine (npm run approve -- keygen there)`);
+  const privateKey = crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8'));
+  return crypto.sign(null, Buffer.from(canonicalBytes(approval)), privateKey).toString('base64');
+}
+function writeApproval(name, approval) {
+  const doc = { approval, signature: sign(approval) };
+  const dir = path.join(ROOT, APPROVALS_REL);
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, `${name}.json`);
+  fs.writeFileSync(f, `${JSON.stringify(doc, null, 2)}\n`);
+  return path.relative(ROOT, f).split(path.sep).join('/');
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const a = process.argv.slice(2);
+  const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
+  if (flag('--base')) process.env.STUDIO_PROTECT_BASE = flag('--base');
+  const by = flag('--by') || process.env.USER || process.env.USERNAME || 'owner';
+  const cmd = a[0] || 'show';
+  try {
+    if (cmd === 'keygen') {
+      const keyFile = ownerKeyPath();
+      if (fs.existsSync(keyFile) && !a.includes('--force')) throw new Error(`an owner key already exists at ${keyFile} (--force replaces it; old approvals stop verifying)`);
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+      fs.mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(keyFile, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      const pub = path.join(ROOT, OWNER_PUB_REL);
+      fs.mkdirSync(path.dirname(pub), { recursive: true });
+      fs.writeFileSync(pub, publicKey.export({ type: 'spki', format: 'pem' }));
+      console.log(`Owner key made. Private: ${keyFile} (keep it on this machine only; never copy it to a machine agents use).\nPublic: ${OWNER_PUB_REL}. Commit it and merge it to main: from then on, protected files change only with your approval.`);
+    } else if (cmd === 'show') {
+      const r = checkProtected();
+      console.log(`${r.ok ? 'OK' : 'NEEDS APPROVAL'}: ${r.why}`);
+      for (const c of r.changes) console.log(`  ${c.path}  ${c.sha256 === 'deleted' ? 'deleted' : c.sha256.slice(0, 12)}`);
+      process.exit(r.ok ? 0 : 3);
+    } else if (cmd === 'protected') {
+      const note = flag('--note') || '';
+      if (note.trim().length < 10) throw new Error('say why, in 10+ characters: --note "…"');
+      const b = resolveBase();
+      if (!b) throw new Error('no base branch to compare with (--base <ref>)');
+      const changes = protectedChanges(b.base);
+      if (!changes.length) throw new Error(`no protected file changed since ${b.ref}`);
+      const id = changeId(changes);
+      for (const c of changes) console.log(`  ${c.path}  ${c.sha256 === 'deleted' ? 'deleted' : c.sha256.slice(0, 12)}`);
+      const file = writeApproval(`protected-${id.slice(0, 16)}`, { kind: 'protected', change: id, files: changes, base: b.ref, by, note, at: new Date().toISOString() });
+      emitEvent({ type: 'approval.protected', agent: by, msg: `${by} approved ${changes.length} protected change(s): ${note.slice(0, 200)}` });
+      console.log(`Approved ${changes.length} protected change(s). Commit ${file} with them. Any later edit to these files needs a new approval.`);
+    } else if (cmd === 'force') {
+      const task = a[1];
+      const reason = flag('--reason') || '';
+      if (!/^[A-Z]+-\d+$/.test(task || '')) throw new Error('Usage: npm run approve -- force <T-ID> --reason "why it can close without its check"');
+      if (reason.trim().length < 10) throw new Error('say why, in 10+ characters: --reason "…"');
+      const file = writeApproval(`force-${task}`, { kind: 'force', task, reason, by, at: new Date().toISOString() });
+      emitEvent({ type: 'approval.force', agent: by, task, msg: `${by} approved closing ${task} without its check: ${reason.slice(0, 200)}` });
+      console.log(`Approved: ${task} may close with task done --force. Commit ${file}.`);
+    } else {
+      console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…"   [--base <ref>] [--by <name>]');
+      process.exit(1);
+    }
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+}

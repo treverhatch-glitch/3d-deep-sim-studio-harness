@@ -92,6 +92,11 @@ The task budget counts every session on a task, including builders the harness d
 
 In a lane copy, `npm run verify` and `task done` check only what the lane changed: a Godot-only change runs the Godot gate and skips the web checks, and the reverse. Heavy checks share `STUDIO_GATE_SLOTS` (2) slots on the machine, so one web and one Godot check run at once without timing each other out. Only the final fast-forward and board write take the short land lock.
 
+## Every control is pressed, and only the owner changes the judges (2.32.0)
+
+- **Controls.** The Game Bible lists every control a player has (`studio/bible/controls.json`). Each track's input test presses them for real (the browser check for web, `tools/controls.gd` in the Godot gate) and the `controls` gate fails when one was never pressed or did nothing.
+- **Protected files.** Scenarios' expected outcomes, regressions, the controls list, the gates and the checks themselves (`studio/protected.json`) change only with the owner's signed approval: `npm run approve -- keygen` once on your own machine, then `npm run approve -- protected --note "why"` for a change you want. CI checks it with the main branch's copy of the checker, so a branch can't weaken it. A forced `task done` needs `npm run approve -- force <ID>`.
+
 ## The attending game dev is optional (2.30o)
 
 The harness must run without anyone watching. While a studio has an active game, the hub runs the

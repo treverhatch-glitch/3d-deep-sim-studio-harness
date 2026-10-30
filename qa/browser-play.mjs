@@ -215,7 +215,8 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
         await sleep(Number(c.waitMs ?? 300));
         const after = await page.evaluate(() => window.__sim.getState());
         const ok = err ? false : typeof c.expect === 'function' ? Boolean(c.expect(before, after)) : null;
-        report.controls.push({ name: c.name, ok, ...(err ? { why: err } : {}) });
+        // 2.32.0: the id ties the result to the Game Bible's controls list (qa/controls-check.mjs).
+        report.controls.push({ id: c.id || c.name, name: c.name, ok, ...(err ? { why: err } : {}) });
         if (ok === false) fail('CONTROL-DEAD', `${c.name}: ${err ? `couldn't be pressed (${err})` : `didn't do what it should${c.what ? ` (${c.what})` : ''}`}`);
       }
       await page.reload({ waitUntil: 'load' });

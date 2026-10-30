@@ -16,9 +16,24 @@ jobs:
         node: ['22', '24'] # the two supported LTS lines
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the protected-files check compares the PR with its base branch
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
+      # 2.32.0: protected files (studio/protected.json) change only with the owner's signed approval. The check
+      # that judges a PR is the BASE branch's copy, run against the PR's checkout, so a PR can't weaken it.
+      - name: Protected files need the owner's approval
+        if: github.event_name == 'pull_request'
+        env:
+          STUDIO_PROTECT_BASE: origin/${{ github.base_ref }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "origin/${{ github.base_ref }}"
+          if [ -f "$RUNNER_TEMP/base/qa/protected-check.mjs" ]; then
+            STUDIO_PROTECT_ROOT="$GITHUB_WORKSPACE" node "$RUNNER_TEMP/base/qa/protected-check.mjs"
+          else
+            node qa/protected-check.mjs
+          fi
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'

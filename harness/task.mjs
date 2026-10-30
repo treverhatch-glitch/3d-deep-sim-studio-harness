@@ -944,6 +944,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
+    // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
+    // approval for this task, and --accepted-by comes from that approval, never from a flag an agent types.
+    if (flags.force || flags['accepted-by']) {
+      const { forceApproved } = await import('./approve.mjs');
+      const fa = forceApproved(targetId);
+      if (fa && !fa.ok) {
+        console.error(`${targetId} can't be forced closed without the owner's approval. Hand it back (task pause ${targetId} --note "…") and ask; the owner runs: npm run approve -- force ${targetId} --reason "…". Nothing was closed.`);
+        process.exit(1);
+      }
+      if (fa?.ok) { flags.force = true; flags['accepted-by'] = `${fa.by} (signed approval ${fa.file})`; if (typeof flags.reason !== 'string' || flags.reason.trim().length < 10) flags.reason = fa.reason; }
+    }
     // 2.30n: a forced done says why (10+ characters); "no reason given" taught the Producer nothing.
     if (flags.force && String(typeof flags.reason === 'string' ? flags.reason : '').trim().length < 10) {
       console.error(`--force needs --reason "<why the check can't pass yet>" (10+ characters). Nothing was closed.`);
