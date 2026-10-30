@@ -143,6 +143,15 @@ const report = (label, ok, detail = '') => {
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
+  // 2.32.0: a branch changes a scenario's expected outcome while main has an owner key, with no approval.
+  protected: (d) => {
+    const env = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', STUDIO_OWNER_KEY: path.join(d, '..', `owner-sab-${path.basename(d)}.pem`) };
+    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, ...env } });
+    sh('git init -q -b main && git add -A && git commit -qm base && node harness/approve.mjs keygen && git add -A && git commit -qm key && git checkout -q -b sab');
+    const qa = path.join(d, 'cartridges', 'example-sim', 'qa.mjs');
+    fs.writeFileSync(qa, fs.readFileSync(qa, 'utf8').replace("expect: 'won' }", "expect: 'lost' }"));
+    return { STUDIO_PROTECT_BASE: 'main' };
+  },
   // 2.32.0: the newest real-input report says the Bible's Buy button did nothing.
   controls: (d) => {
     fs.mkdirSync(path.join(d, 'qa/reports'), { recursive: true });
@@ -214,6 +223,7 @@ const EXPECT = {
   'godot-unit': /test_money_drains: expected money to drop/,
   game: /FAIL game:qa/,
   controls: /web: "buy-button" did nothing \(planted/,
+  protected: /protected file\(s\) changed since main with no owner approval/,
 };
 const CANNOT = { selftest: 'this file' };
 
