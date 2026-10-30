@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.42.0] — 2026-10-31
+2.42.0: the Godot pieces that must be the same version are checked together. The research pack's Marina run had a 4.5.1 binary with only 4.7.2 export templates on the box, and gdUnit4 set up for another Godot than the gate ran; a newer binary silently upgrades a project on import.
+### Added
+- **Godot version check in the engine gate** (harness/godot-version.mjs): the binary's version (`--version`) against the project's (`config/features`), export templates installed for the binary's exact version when the project has export presets (the Godot data folder, or `STUDIO_GODOT_TEMPLATES`), and the version studio/godot-unit.json set gdUnit4 up for. Versions compare as numbers. **Opt-in to fail**: by default each mismatch is a WARN line in the gate's output; `STUDIO_GODOT_PIN=fail` makes it fail the gate; `off` turns it off. The template (a 4.5 project, Godot 4.5.1 in CI) has none.
+- qa/selftest-242.mjs: 2 checks (the Marina box's three mismatches named, a matching set clean, numeric order; the engine gate warns by default and fails when opted in, with a fake Godot that reports its version).
+
 ## [2.41.0] — 2026-10-31
 2.41.0: a new browser regression must pass twice before it is protected. The research pack: "one flaky input test turned the main branch red even though the game code was fine"; regressions are add-only protected files (2.32), so a flaky one is hard to take back.
 ### Added

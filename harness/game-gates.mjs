@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { judgePass } from './silent-green.mjs';
+import { pinMode, checkGodotVersions } from './godot-version.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
@@ -95,6 +96,14 @@ export function engineGates(paths) {
 
 function runGodot(project) {
   const bin = godotBin();
+  // 2.42.0: the binary, the project, the export templates and gdUnit4 must agree on the version
+  // (harness/godot-version.mjs). Notes by default; STUDIO_GODOT_PIN=fail makes a mismatch fail the gate.
+  let notes = [];
+  if (pinMode() !== 'off') {
+    const v = checkGodotVersions(project, { bin });
+    notes = v.problems.map((p) => `Godot version: ${p}`);
+    if (pinMode() === 'fail' && v.problems.length) return { ok: false, why: notes.join('; '), notes: [] };
+  }
   // 2.32.0: tools/gate.gd presses every control in tools/controls.gd and writes one result per id here,
   // for the controls check (qa/controls-check.mjs).
   const reports = path.join(REPO_ROOT, 'qa', 'reports');
@@ -106,11 +115,11 @@ function runGodot(project) {
   for (const args of steps) {
     const r = spawnSync(opts.shell ? `"${bin}"` : bin, args, opts);
     const text = `${r.stdout || ''}\n${r.stderr || ''}`;
-    if (r.error) return { ok: false, why: `could not run Godot (${bin}): ${r.error.code || r.error.message}` };
+    if (r.error) return { ok: false, why: `could not run Godot (${bin}): ${r.error.code || r.error.message}`, notes };
     const bad = text.split('\n').find((l) => ERR.test(l));
-    if (r.status !== 0 || bad) return { ok: false, why: `${args.includes('--import') ? 'import' : 'gate.gd'} ${r.status !== 0 ? `exited ${r.status}` : 'printed an error'}${bad ? `: ${bad.trim().slice(0, 200)}` : ''}` };
+    if (r.status !== 0 || bad) return { ok: false, why: `${args.includes('--import') ? 'import' : 'gate.gd'} ${r.status !== 0 ? `exited ${r.status}` : 'printed an error'}${bad ? `: ${bad.trim().slice(0, 200)}` : ''}`, notes };
   }
-  return { ok: true, why: '' };
+  return { ok: true, why: '', notes };
 }
 
 /** Run the game's checks and the engine gate for these paths. */
@@ -157,6 +166,7 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
   if (scope) scope = [...new Set([...scope, ...eg.map((e) => `${e.project}/**`)])];
   for (const e of eg) {
     const r = slot(e.id, () => runGodot(e.project));
+    for (const n of r.notes || []) log(`[game-gates] WARN ${e.id}: ${n} (STUDIO_GODOT_PIN=fail makes this fail the gate)`);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
   for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
