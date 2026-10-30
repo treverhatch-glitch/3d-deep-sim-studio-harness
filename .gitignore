@@ -1,5 +1,6 @@
 # deps & builds
 node_modules/
+node_modules
 hub/node_modules/
 dist/
 hub/dist/
