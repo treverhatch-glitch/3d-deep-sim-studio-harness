@@ -26,7 +26,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
-import { selectGates, scopeOf } from './merge-lane.mjs';
+import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -114,6 +114,10 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
   const skipped = [];
   let scope = null;
   const log = (s) => !quiet && console.log(s);
+  // 2.31.0: heavy checks take a box-wide gate slot (shared by every lane copy through the main checkout).
+  let slotRoot = REPO_ROOT;
+  try { slotRoot = (await import('./worktree.mjs')).mainRoot(); } catch {}
+  const slot = (label, fn) => withGateSlot(slotRoot, label, fn, { log: (m) => console.error(m) });
   if (game) {
     const all = declaredGates(game);
     const shared = sharedPaths(game);
@@ -124,7 +128,8 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
     if (sel.why) log(`[game-gates] ${sel.why}`);
     if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
     for (const g of gates) {
-      const r = spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
+      const r = slot(g.id, () => spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
+      if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS)`;
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
       rows.push({ id: g.id, ok: r.status === 0, required: g.required, why: r.status === 0 ? '' : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
     }
@@ -142,7 +147,7 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
   const eg = engineGates(paths);
   if (scope) scope = [...new Set([...scope, ...eg.map((e) => `${e.project}/**`)])];
   for (const e of eg) {
-    const r = runGodot(e.project);
+    const r = slot(e.id, () => runGodot(e.project));
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
   for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);

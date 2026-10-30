@@ -15,6 +15,7 @@ import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS }
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
+import { stopIfOverBudget } from './task-budget.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock } from './merge-lane.mjs';
@@ -240,6 +241,10 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
   const held = holdReason(taskId, parseNextQueue());
   if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: `${taskId} can't start yet: ${held}. Pick another task (npm run task -- next), or a person releases it.` };
+  // 2.31.0: a task that used its budget (sessions, claimed minutes, tokens; harness/task-budget.mjs) is
+  // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
+  const overWhy = stopIfOverBudget(taskId, { by: 'budget' });
+  if (overWhy) return { error: 'over-budget', message: `${taskId} can't start: ${overWhy}` };
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
     if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };

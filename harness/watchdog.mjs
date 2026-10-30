@@ -77,6 +77,20 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
     setHold(task, { parked: { by: 'watchdog', why: `handed back ${n} times in 2 h; a person or the Producer looks before it runs again`, at: new Date(now).toISOString() } }, { by: 'watchdog', msg: `watchdog parked ${task}: handed back ${n} times in 2 h` });
     actions.push({ kind: 'park', task, msg: `parked ${task} (handed back ${n} times in 2 h)` });
   }
+  // 2b. 2.31.0: tasks over their own budget (sessions, claimed minutes, tokens). This also covers builders
+  // the harness never launched: their claims count, so a long outside claim is parked and flagged here.
+  try {
+    const { stopIfOverBudget } = await import('./task-budget.mjs');
+    const { parseNextQueue } = await import('./task.mjs');
+    const before = readHolds();
+    for (const t of parseNextQueue().inProgress) {
+      if (before[t.id]?.parked) continue;
+      const why = stopIfOverBudget(t.id, { by: 'watchdog', now });
+      if (why) actions.push({ kind: 'budget', task: t.id, msg: `stopped ${t.id}: ${why.split('. ')[0]}` });
+    }
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `task budgets: ${e.message}` });
+  }
   // 3. An idle studio: sessions ran for the whole window, nothing finished.
   const win = now - lim.idleHours * 3600000;
   const turnedOnAt = auto ? 0 : Date.parse(w.at || '') || 0;

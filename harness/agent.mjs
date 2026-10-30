@@ -52,6 +52,7 @@ import { effectiveMode } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
+import { stopIfOverBudget } from './task-budget.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
@@ -477,6 +478,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const opts2 = { refreshes };
   // 2.30q (#7): every start path (first start, refresh relaunch, failover) checks the budget stop first.
   { const st = launchStop({ role, tool, model, agent, task }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
+  // 2.31.0: a task that used its own budget (harness/task-budget.mjs) gets no new session, refresh or failover.
+  { const over = task ? stopIfOverBudget(task, { by: 'launcher' }) : null; if (over) { emitEvent({ type: 'launch.skipped', agent, task, msg: `${agent} not started on ${task}: ${over.split('. ')[0]}` }); return { ok: false, skipped: true, message: `Not started: ${over}` }; } }
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   // 2.30k: a lane can be several files (a,b,c); each is claimed, and all are let go if one is taken.
   const lanePaths = laneList(lane);
@@ -614,6 +617,20 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (stall?.stalled && !s.stalled) {
       logStall({ ...session, ...s }, stall);
       stopAgent(child.pid);
+    }
+    // 2.31.0: the task this session holds used its budget across sessions: end the session, the task stays parked.
+    try {
+      const heldTask = listLocks().find((l) => l.owner === agent && l.key.startsWith('task:'))?.key.slice(5) || task;
+      if (heldTask && !s.budgetStop) {
+        const over = stopIfOverBudget(heldTask, { by: 'launcher' });
+        if (over) {
+          fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), budgetStop: over }, null, 2));
+          emitEvent({ type: 'agent.budget_stop', agent, task: heldTask, to: 'producer', msg: `${agent} ended: ${over.split('. ')[0]}` });
+          stopAgent(child.pid);
+        }
+      }
+    } catch {
+      // the budget check is a guard, never a crash
     }
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);

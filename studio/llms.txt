@@ -91,6 +91,8 @@
 - `npm run task -- done <ID> --usage <model>:<in>/<out>` — (2.30q) a builder launched outside the harness (e.g. a Grok builder) reports its own tokens; `npm run ledger` lists them as untracked (self-reported). Also on `pause`.
 - `npm run task -- drain on|off --by <name>` / `drain wait` / `drain status` — (2.30q) pause new task done landings (running ones finish); status exits 3 while on: check it before task done in wait scripts
 - `npm run task -- list --mine` / `--all` — (2.30q) only your role's next tasks (the default in launched sessions) or the whole board
+- `node harness/task-budget.mjs <ID>` — (2.31.0) what a task has spent (sessions, claimed minutes, tokens) against its budget; over budget it is parked, `npm run task -- unpark <ID> --by <name>` resets it
+- `npm run verify -- --all` — (2.31.0) in a lane copy verify is scoped to the lane's changes; --all runs every game check
 - `node harness/lock.mjs claim path:<narrow path> --owner <name>` — whole top-level folders (studio, qa, cartridges, src, …) need `--wide "<why>"`
 - `npm run task -- add "…" --not-layer <id>` — when a title's word matches a crossed-out layer but means something else (logged for the Director)
 - `studio/game.json` — the game the gates test (`npm run new-game <name>` writes it; never frozen); every gate run prints it

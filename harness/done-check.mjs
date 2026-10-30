@@ -275,7 +275,7 @@ function lastGameChange() {
   for (const d of ['cartridges', 'src']) walkSince(d, 0, out);
   return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
 }
-function gatesAfter(at) {
+export function gatesAfter(at, files = null) {
   let run = null;
   try {
     // The agent's own full run first (2.29: in its own copy, the studio-wide record is someone else's code).
@@ -288,6 +288,13 @@ function gatesAfter(at) {
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
   if ((Date.parse(run.at) || 0) < at) return 'no full `npm run verify` after your last change; run it again';
+  // 2.31.0: a verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds
+  // every file this task changed.
+  if (run.scoped && Array.isArray(run.changed) && files?.length) {
+    const inScope = new Set(run.changed);
+    const outside = files.filter((f) => !inScope.has(f));
+    if (outside.length) return `the last verify was scoped to ${run.changed.length} file(s) and missed ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}; run \`npm run verify\` again (or \`npm run verify -- --all\`)`;
+  }
   const red = (run.rows || []).filter((r) => r.required && !r.ok).map((r) => r.id);
   return red.length ? `the last verify failed: ${red.join(', ')}` : null;
 }
@@ -350,7 +357,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     const ch = taskChanges(task.id, since);
     const relevant = docsOnly ? ch.files.filter((f) => f.endsWith('.md')) : ch.files;
     check(docsOnly ? 'Docs changed for this task' : 'Changes exist for this task', relevant.length, docsOnly ? 'no changed .md file since this task started' : `no changes found for ${task.id}: no commit tagged Studio-Task: ${task.id} and no edits since it started`);
-    const why = gatesAfter(Math.max(since, ch.lastAt));
+    const why = gatesAfter(Math.max(since, ch.lastAt), relevant);
     check('Full verify green after the last change', !why, why);
     if (!docsOnly) {
       const grew = sizeGrowth(task.id, ch.files);

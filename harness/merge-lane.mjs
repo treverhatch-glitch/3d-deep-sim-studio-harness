@@ -112,6 +112,57 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { 
  * (120 s) or held by a dead process is broken.
  */
 const held = new Map();
+
+/**
+ * 2.31.0 (Gap 3): gate slots. Heavy game checks (the game's own gates, the Godot engine gate) take one of
+ * STUDIO_GATE_SLOTS (2) box-wide slots in <root>/.studio/locks/gate-slot-<n>.lock while they run, so two
+ * tracks (web and Godot) check in parallel but five lanes don't pile onto one machine and time out (the
+ * Marina run: 600 s gate timeouts at load ~25 on 8 cores). The wait for a slot is logged and never counts
+ * toward a gate's own timeout. A slot held by a dead process, or older than STUDIO_GATE_SLOT_STALE_MIN
+ * (120), is taken over. After STUDIO_GATE_SLOT_WAIT_MIN (60) of waiting the gate runs anyway, with a note.
+ * STUDIO_GATE_SLOTS=0 turns slots off.
+ */
+export function withGateSlot(root, label, fn, { log = () => {}, env = process.env } = {}) {
+  const n = Number(env.STUDIO_GATE_SLOTS ?? 2);
+  if (!(n > 0)) return fn();
+  const dir = path.join(root, '.studio', 'locks');
+  fs.mkdirSync(dir, { recursive: true });
+  const staleMs = Number(env.STUDIO_GATE_SLOT_STALE_MIN ?? 120) * 60000;
+  const deadline = Date.now() + Number(env.STUDIO_GATE_SLOT_WAIT_MIN ?? 60) * 60000;
+  const poll = Number(env.STUDIO_GATE_SLOT_POLL_MS ?? 1000);
+  const t0 = Date.now();
+  let mine = null;
+  let told = false;
+  while (!mine) {
+    for (let i = 1; i <= n && !mine; i += 1) {
+      const f = path.join(dir, `gate-slot-${i}.lock`);
+      try {
+        fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), label }), { flag: 'wx' });
+        mine = f;
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+        try {
+          const h = JSON.parse(fs.readFileSync(f, 'utf8'));
+          if ((h.pid && !alive(h.pid)) || Date.now() - h.at > staleMs) fs.rmSync(f, { force: true });
+        } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 5000) fs.rmSync(f, { force: true }); } catch {} }
+      }
+    }
+    if (mine) break;
+    if (Date.now() > deadline) {
+      log(`[gate-slots] waited ${Math.round((Date.now() - t0) / 60000)} min for a free slot; running ${label} anyway`);
+      return fn();
+    }
+    if (!told) {
+      const holders = [];
+      for (let i = 1; i <= n; i += 1) { try { holders.push(JSON.parse(fs.readFileSync(path.join(dir, `gate-slot-${i}.lock`), 'utf8')).label); } catch {} }
+      log(`[gate-slots] waiting for one of ${n} gate slot(s) (busy: ${holders.join(', ') || 'unknown'}); waiting doesn't count toward ${label}'s timeout`);
+      told = true;
+    }
+    sleep(poll);
+  }
+  if (told) log(`[gate-slots] got a slot after ${Math.round((Date.now() - t0) / 1000)} s`);
+  try { return fn(); } finally { try { fs.rmSync(mine, { force: true }); } catch {} }
+}
 export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND_LOCK_WAIT_MS || 180000), name = 'land' } = {}) {
   // Re-entrant within one process (deliver → board write → writeNextQueue).
   const key = `${path.resolve(root)}|${name}`;

@@ -3248,6 +3248,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.31.0: task budgets, gate slots, verify scoped to a lane, scoped verify coverage, engine cache landings (qa/selftest-231.mjs).
+{
+  const dir = copyRepo();
+  const { selftest231 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-231.mjs')).href);
+  await selftest231({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
