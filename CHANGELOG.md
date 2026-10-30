@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.33.0] — 2026-10-31
+2.33.0: one door to the studio's branch, agents see only their own keys, and the Marina builders' false refusals. In the Marina run builders outside the harness committed game code straight onto the studio's branch; every agent inherited the launcher's whole environment (every provider key, HUB_TOKEN); a re-claimed task was refused as "no code changed" 3 times; a done refused for uncommitted files only after its 10+ minute game checks; and a dropped task's id was handed out again.
+### Added
+- **Agents see only their own credentials** (harness/agent-env.mjs). A launched agent gets the system basics, the studio's settings (`STUDIO_`, `AGENT_`, `PLAYTEST_`, `PLAYWRIGHT_`, `NODE_`, `npm_`) and its own tool's keys (claude `ANTHROPIC_`/`CLAUDE_`, codex `OPENAI_`/`CODEX_`, grok `XAI_`/`GROK_`, agy and gemini `GEMINI_`/`GOOGLE_`, cursor `CURSOR_`, aider `OLLAMA_`; a custom launcher gets its model family's). Never `HUB_TOKEN` or `STUDIO_OWNER_KEY`. More by name: `STUDIO_AGENT_ENV_PASS` (every agent) or `STUDIO_<ROLE>_ENV` (one role; a custom launcher lists what its command needs). `STUDIO_AGENT_ENV=full` restores the old behaviour.
+- **The guard hook refuses reads of keys** (.claude/hooks/guard-paths.mjs): `.env` and `.env.*` (not `.env.example`), `~/.studio-owner/`, `.studio/keys/` and the key files, through Read/Grep/Glob and shell readers (cat, grep, cp, base64, source, …).
+- **One door to the studio's branch** (scripts/hooks/pre-commit): when the studio works in lanes, a commit on the main checkout may touch only `studio/` and `.studio/` (notes, the board); game work lands through `task done` in a lane. `STUDIO_MAIN_COMMIT=allow` lets a person through.
+- **`task done <ID> --check`**: every quick precondition (no-change, visual proof, the task's done-check, uncommitted files) in seconds, stopping before the game checks; a missing full verify is reported as the next step, not refused. Run it before `npm run verify`.
+### Fixed
+- **A re-claim no longer reads as "no code changed"**: the no-change check compares from the task's FIRST start since it was last done or reopened (done-check's `taskBase`), and in a lane copy the lane's unlanded commits count too.
+- **Uncommitted files are refused before the game checks**, not after them.
+- **Task ids are never reused** (`allocateTaskId`): one past the highest ever issued on the board, in the event log and in `<main>/.studio/task-counter`, chosen under a short lock.
+- **`task done` outside a lane keeps the caller's `STUDIO_GATE_CHANGED`** instead of dropping it (a Godot-only done from the main checkout ran every web check).
+- qa/selftest-233.mjs: 6 checks (agent env per tool and role, model-family keys for custom launchers, held-back names; guard hook on .env and key files; ids after a drop; re-claim keeps the earlier commit and --check runs no game check; --check still refuses a no-change build task; one door on the main checkout with lanes).
+
 ## [2.32.0] — 2026-10-31
 2.32.0: nothing a player can do goes unchecked, and the checks can't be edited by the agents they judge. In the Marina run the Godot build passed every gate while its build buttons, dock placement and world clicks did nothing (no gate pressed them, no task listed them), and the harness's own Godot template played itself with an auto-player. A protected-test list was re-initialised by agent commits, and in the owner review changing a scenario's expected outcome turned a broken game green.
 ### Added

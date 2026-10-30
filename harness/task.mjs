@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
-import { checkDone, taskType, joinWaveIfGameplay } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase } from './done-check.mjs';
 import { summarize as summarizeVerdict } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
@@ -306,7 +306,7 @@ export function whoAmI(flags = {}, root = REPO_ROOT, env = process.env) {
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '' } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false } = {}) {
   // 2.30n: a builder in a lane copy (.lanes/<agent>) launched without STUDIO_MAIN_ROOT used to be
   // "done" with its work never merged (T-028 in the Marina run). Refuse, forced or not.
   if (/[\\/]\.lanes[\\/][^\\/]+$/.test(REPO_ROOT) && !inLaneCopy()) {
@@ -335,13 +335,17 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       emitEvent({ type: 'task.noop', agent: agent || target.role, task: target.id, msg: `${target.id} closed as no-op: ${String(noop).trim().slice(0, 300)}` });
       note = `${note ? `${note}; ` : ''}no-op: ${String(noop).trim().slice(0, 200)}`;
     } else {
-      const start = readRecentEvents(20000).filter((e) => e.task === target.id && e.type === 'task.start' && e.meta?.head).pop()?.meta?.head;
+      // 2.33.0: from the FIRST start since the task was last done/reopened (taskBase), not the newest: a
+      // re-claim after a hand-back used to reset the baseline and refuse real work as "no code changed"
+      // (3 false refusals in the Marina run). In a lane copy, the lane's unlanded commits count too.
+      const start = taskBase(target.id);
       if (start) {
         const isCode = (f) => f && !/^(studio|\.studio|\.lanes|qa\/reports)\//.test(f) && !isEngineChurn(f);
         const committed = spawnSync('git', ['diff', '--name-only', `${start}..HEAD`], { cwd: REPO_ROOT, encoding: 'utf8' });
         const working = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+        const lane = (() => { try { return laneDiff()?.changed || []; } catch { return []; } })();
         if (committed.status === 0) {
-          const files = [...committed.stdout.split('\n'), ...(working.stdout || '').split('\n').map((l) => l.slice(3))].filter(isCode);
+          const files = [...committed.stdout.split('\n'), ...(working.stdout || '').split('\n').filter((l) => l.length > 3).map((l) => l.slice(3)), ...lane].filter(isCode);
           if (!files.length) {
             emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: no code changed since it started` });
             return { error: 'no-change', message: `${target.id} is a build task and no code changed since it started (${String(start).slice(0, 7)}). Make the change and commit it, or, if the work truly is already there, close it with: task done ${target.id} --no-op "<what already does it, and where>".` };
@@ -363,7 +367,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   }
 
   const check = checkDone(target);
-  if (!check.ok && !force) {
+  // 2.33.0: task done --check runs every cheap precondition and stops before the game gates. A missing
+  // full verify is reported, not refused: running it is the next step.
+  const VERIFY_LABEL = 'Full verify green after the last change';
+  const blocking = check.checks?.length ? check.checks.filter((c) => !c.ok && !(checkOnly && c.label === VERIFY_LABEL)) : check.ok ? [] : [{ why: check.missing[0] }];
+  if (!check.ok && !force && blocking.length) {
     emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${check.missing[0]}` });
     return {
       error: 'not-done',
@@ -377,35 +385,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     };
   }
 
-  // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
-  // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
-  if (!force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
-    const owner = lock.locked ? lock.lock.owner : agent;
-    const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
-    const lanePaths = laneList(readHolds()[target.id]?.lane);
-    // 2.30p: in a lane copy the diff against the studio's branch picks the gates (path-scoped gates);
-    // its files also feed the engine gate. Outside a lane copy the diff is unknown and every gate runs.
-    const ld = laneDiff();
-    const changed = ld?.changed?.length ? ld.changed : null;
-    const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
-    const ggEnv = { ...process.env };
-    delete ggEnv.STUDIO_GATE_CHANGED;
-    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
-    let res = null;
-    try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
-    if (res?.skipped?.length) {
-      for (const sk of res.skipped) console.log(`[task done] skipped gate ${sk.id}: ${sk.why}`);
-      emitEvent({ type: 'gates.skipped', agent: agent || target.role, task: target.id, msg: `${target.id}: skipped ${res.skipped.map((x) => x.id).join(', ')} (outside the change's paths)` });
-    }
-    // Record the pass so deliver can reuse it after a rebase that only brings in other tracks' files.
-    if (gg.status === 0 && ld) recordPass(mainRoot(), target.id, { head: ld.head, base: ld.base, changed: ld.changed, scope: res?.scope ?? null, ran: (res?.rows || []).map((r) => r.id), skipped: (res?.skipped || []).map((x) => x.id) });
-    if (gg.status !== 0) {
-      const failed = res?.failed?.length ? res.failed : [{ id: 'game-gates', why: `${(gg.stderr || gg.stdout || '').trim().slice(0, 300)}` }];
-      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${failed.map((f) => f.id).join(', ')} failed` });
-      return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
-    }
-  }
-
+  // 2.33.0: checked BEFORE the game gates (seconds, not 10+ minutes): a refusal for uncommitted files
+  // used to come only after the full game checks had run.
   // 2.30k: done means committed. Uncommitted changes in the task's claimed files (or the game's
   // folders when it claimed none) are refused, so they aren't later committed under another task
   // (T-013 in the Marina run was accepted with its diff left uncommitted).
@@ -423,6 +404,42 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} (${dirty.slice(0, 3).join(', ')})` });
         return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them (git add <files> && git commit -m "${target.id}: …"), then run task done again.` };
       }
+    }
+  }
+
+  if (checkOnly) {
+    const verifyNeeded = Boolean(check.checks?.some((c) => !c.ok && c.label === VERIFY_LABEL));
+    return { checkOnly: true, ok: true, id: target.id, verifyNeeded, message: `${target.id}: every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
+  }
+
+  // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
+  // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
+  if (!force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
+    const owner = lock.locked ? lock.lock.owner : agent;
+    const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
+    const lanePaths = laneList(readHolds()[target.id]?.lane);
+    // 2.30p: in a lane copy the diff against the studio's branch picks the gates (path-scoped gates);
+    // its files also feed the engine gate. Outside a lane copy the diff is unknown and every gate runs.
+    const ld = laneDiff();
+    // 2.33.0: outside a lane copy, the caller's STUDIO_GATE_CHANGED (an explicit list) is used instead of dropped.
+    const callerChanged = String(process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
+    const changed = ld?.changed?.length ? ld.changed : callerChanged.length ? callerChanged : null;
+    const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
+    const ggEnv = { ...process.env };
+    delete ggEnv.STUDIO_GATE_CHANGED;
+    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+    let res = null;
+    try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
+    if (res?.skipped?.length) {
+      for (const sk of res.skipped) console.log(`[task done] skipped gate ${sk.id}: ${sk.why}`);
+      emitEvent({ type: 'gates.skipped', agent: agent || target.role, task: target.id, msg: `${target.id}: skipped ${res.skipped.map((x) => x.id).join(', ')} (outside the change's paths)` });
+    }
+    // Record the pass so deliver can reuse it after a rebase that only brings in other tracks' files.
+    if (gg.status === 0 && ld) recordPass(mainRoot(), target.id, { head: ld.head, base: ld.base, changed: ld.changed, scope: res?.scope ?? null, ran: (res?.rows || []).map((r) => r.id), skipped: (res?.skipped || []).map((x) => x.id) });
+    if (gg.status !== 0) {
+      const failed = res?.failed?.length ? res.failed : [{ id: 'game-gates', why: `${(gg.stderr || gg.stdout || '').trim().slice(0, 300)}` }];
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${failed.map((f) => f.id).join(', ')} failed` });
+      return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
     }
   }
 
@@ -655,6 +672,34 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
   return { ok: true, warnings };
 }
 
+/**
+ * 2.33.0: a task id is never reused. The next id is one past the highest ever issued: on the board, in the
+ * event log (a task dropped from the board keeps its number there), and in <main>/.studio/task-counter,
+ * chosen under a short lock so two agents adding at once get different ids. In the Marina run a dropped
+ * T-172 was handed out again, so the log's T-172 meant two tasks.
+ */
+export function allocateTaskId(q = parseNextQueue()) {
+  const num = (id) => (/^T-(\d+)$/.test(String(id || '')) ? Number(String(id).slice(2)) : 0);
+  const root = mainRoot();
+  const counter = path.join(root, '.studio', 'task-counter');
+  const pick = () => {
+    let max = 0;
+    for (const t of [...q.inProgress, ...q.backlog, ...q.done]) max = Math.max(max, num(t.id));
+    for (const e of readRecentEvents(0)) if (e.type === 'task.added') max = Math.max(max, num(e.task));
+    try { max = Math.max(max, Number(fs.readFileSync(counter, 'utf8').trim()) || 0); } catch {}
+    const next = max + 1;
+    fs.mkdirSync(path.dirname(counter), { recursive: true });
+    fs.writeFileSync(counter, `${next}\n`);
+    return `T-${String(next).padStart(3, '0')}`;
+  };
+  try {
+    return withLandLock(root, pick, { name: 'task-id', waitMs: 10000 });
+  } catch (err) {
+    if (err.code !== 'LAND_BUSY') throw err;
+    return pick();
+  }
+}
+
 export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
   // 2.30d (#6): only the Director, Producer and planner (and people) add to the live queue; anyone
   // else's add waits in studio/proposed.json with a one-line reason until the Producer promotes it.
@@ -670,13 +715,8 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
   }
   if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
   const q = parseNextQueue();
-  const all = [...q.inProgress, ...q.backlog, ...q.done];
-  const maxNum = all.reduce((max, t) => {
-    const num = Number((t.id.split('-')[1]) || 0);
-    return num > max ? num : max;
-  }, 0);
   const newTask = {
-    id: `T-${String(maxNum + 1).padStart(3, '0')}`,
+    id: allocateTaskId(q),
     priority: priority.toUpperCase(),
     role,
     title,
@@ -941,7 +981,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--note "..."] [--force --reason "<10+ chars>"]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
     // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
@@ -965,6 +1005,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (flags.usage !== undefined) { const u = reportUsage(targetId, whoAmI(flags), flags.usage); if (u.error) { console.error(u.error); process.exit(1); } }
     // 2.30q (#6): while done runs (gates, landing: often 10+ min), the task counts as busy for the
     // Director's flow pass, the stall check and the watchdog (harness/busy.mjs).
+    if (flags.check) {
+      const pre = completeTask(targetId, '', whoAmI(flags), { checkOnly: true, noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+      if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
+      console.log(pre.error ? pre.message : pre.message);
+      process.exit(pre.error ? 1 : 0);
+    }
     const busyMod = await import('./busy.mjs');
     // 2.30q: drain on: a new done waits here (before its marker, so drain wait doesn't wait for it).
     { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }

@@ -14,7 +14,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 - Use a unique name (`claude-a`, not `claude`): `export STUDIO_LOCK_OWNER=claude-a`.
 - Claim: `npm run task -- start <ID> --agent <you>`. If it refuses, pick another task.
 - Edit only inside your task's lane or a path you claimed (`node harness/lock.mjs claim path:<dir> --owner <you>`).
-- Done: `npm run verify` in the foreground, then `npm run task -- done <ID> --agent <you>`.
+- Done: `npm run task -- done <ID> --agent <you> --check` first (seconds), then `npm run verify` in the foreground, then `npm run task -- done <ID> --agent <you>`.
   `node harness/done-check.mjs <ID>` says what is missing.
 - Stopping early: `npm run task -- pause <ID> --agent <you> --note "where you stopped"`.
 

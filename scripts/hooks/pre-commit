@@ -22,6 +22,21 @@ if [ -f .studio/harness-frozen ]; then
 fi
 node harness/lock.mjs check-staged ${STUDIO_LOCK_OWNER:+--owner "$STUDIO_LOCK_OWNER"}
 
+# 2.33.0: one door to the studio's branch. When the studio works in lanes (.lanes/<agent> copies), game work
+# reaches the main checkout only by landing (task done in a lane). A commit made straight on the main
+# checkout may touch studio/ notes and the board, nothing else; builders outside the harness committed
+# game code there in the Marina run, unchecked and unrecorded. STUDIO_MAIN_COMMIT=allow lets a person through.
+if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "${STUDIO_MAIN_COMMIT:-}" != "allow" ] \
+   && git worktree list --porcelain | grep -q '/\.lanes/'; then
+  outside="$(git diff --cached --name-only | grep -vE '^(studio|\.studio)/' || true)"
+  if [ -n "$outside" ]; then
+    echo "[pre-commit] FAIL this studio works in lanes: game work lands through task done in a lane copy, not a commit on the main checkout:"
+    echo "$outside" | head -10 | sed 's/^/  /'
+    echo "  (only studio/ notes and the board are committed here; a person can override with STUDIO_MAIN_COMMIT=allow)"
+    exit 1
+  fi
+fi
+
 if git diff --cached --name-only | grep -qE '^(cartridges|src/sim)/'; then
   node scripts/check-sim-purity.mjs >/dev/null || { echo "[pre-commit] FAIL sim purity: run node scripts/check-sim-purity.mjs"; exit 1; }
   node qa/check-golden.mjs >/dev/null || { echo "[pre-commit] FAIL golden hashes changed: if intended, npm run golden -- --update and commit them together"; exit 1; }

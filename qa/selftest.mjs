@@ -3270,6 +3270,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.33.0: one door, scoped agent env, guard hook, re-claim baseline, --check, monotonic ids (qa/selftest-233.mjs).
+{
+  const dir = copyRepo();
+  const { selftest233 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-233.mjs')).href);
+  await selftest233({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

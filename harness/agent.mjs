@@ -53,6 +53,7 @@ import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from 
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
+import { agentEnv } from './agent-env.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
@@ -553,7 +554,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) };
+  // 2.33.0: the agent sees only its own tool's credentials and the studio's settings (harness/agent-env.mjs).
+  const env = agentEnv({ tool: custom ? 'custom' : tool, role, model, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
   // Claude Code stops a shell command after 2 minutes by default, so agents sent a long verify to the
   // background and their session ended with it (test #3). Give commands 10 minutes unless set.
   env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';
