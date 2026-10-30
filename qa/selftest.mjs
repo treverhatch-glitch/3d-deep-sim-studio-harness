@@ -3352,6 +3352,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.42.0: Godot versions agree (qa/selftest-242.mjs).
+{
+  const dir = copyRepo();
+  const { selftest242 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-242.mjs')).href);
+  await selftest242({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
