@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
- *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge] [--no-cache]
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge] [--no-cache] [--all]
+ * In a lane copy the game checks are scoped to the lane's changes (2.31.0); --all runs every one.
  * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
  *
  * --tier fast (in-session): runs only the `lite` gates; a gate whose command and input files are unchanged
@@ -51,6 +52,35 @@ const gates = all.filter((g) => {
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
 console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); the cartridge gates are skipped` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
+// 2.31.0: in a lane copy, verify tests what this lane changed against the studio's branch (committed and
+// not), the same scope `task done` uses. Before, verify had no diff, so a Godot-only lane ran every web
+// game check (~11 min in the Marina run) and never ran the Godot gate, which only runs for changed paths.
+// --all (or STUDIO_GATE_CHANGED set by the caller) overrides. Changes to shared files still run everything.
+let changedFiles = null;
+let changedBase = null;
+if (process.env.STUDIO_GATE_CHANGED) changedFiles = process.env.STUDIO_GATE_CHANGED.split(',').filter(Boolean);
+else if (!argv.includes('--all')) {
+  try {
+    const { inLaneCopy, laneDiff } = await import('../harness/worktree.mjs');
+    if (inLaneCopy()) {
+      const ld = laneDiff();
+      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8' }).stdout || '';
+      const dirty = st.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+      const files = [...new Set([...(ld?.changed || []), ...dirty])];
+      if (files.length) {
+        changedFiles = files;
+        changedBase = ld?.base || null;
+      }
+    }
+  } catch {
+    // no lane diff: every gate runs, as before
+  }
+}
+if (changedFiles?.length) {
+  process.env.STUDIO_GATE_CHANGED = changedFiles.join(',');
+  if (!process.env.STUDIO_GATE_PATHS) process.env.STUDIO_GATE_PATHS = changedFiles.join(',');
+  console.log(`[gates] scoped to the ${changedFiles.length} file(s) this lane changed${changedBase ? ` since ${changedBase.slice(0, 8)}` : ''}; game checks outside them are skipped (--all runs everything)`);
+}
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
 const rows = [];
 let cachedCount = 0;
@@ -104,7 +134,7 @@ if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required 
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
-  const rec = JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows }, null, 2);
+  const rec = JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;
@@ -120,6 +150,12 @@ try {
   }
 } catch {
   // read-only checkout: the board just shows "not run"
+}
+// 2.31.0: fail closed. A verify where no gate ran checked nothing; it used to print "0/0 passed, all
+// required gates green" and count as a full verify.
+if (!rows.length) {
+  console.error('[gates] no gate ran, so nothing was checked: this is not a pass. Check studio/gates.json, --only, and the scope (npm run mode).');
+  process.exit(1);
 }
 const failed = rows.filter((r) => !r.ok && r.required);
 if (failed.length) {

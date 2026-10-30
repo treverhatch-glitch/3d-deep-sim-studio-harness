@@ -73,6 +73,25 @@ contains no keys; `node scripts/secret-scan.mjs` checks exactly what git would p
 
 Every studio has a daily cap of **50M tokens** (50,000,000 weighted tokens per UTC day, summed across all models, cache reads at a reduced weight set by `STUDIO_CACHE_READ_WEIGHT`; `harness/budget.mjs`, `DEFAULT_DAILY_TOKEN_CAP`). When the day's use reaches it, the launcher stops starting new sessions until the next day. Change it with `STUDIO_DAILY_TOKEN_CAP` in `.env` (a number of tokens, e.g. `STUDIO_DAILY_TOKEN_CAP=80000000`); `off` or `0` turns it off. `npm run budget` shows the day's use against the cap.
 
+## No agent runs forever (2.31.0)
+
+Limits stack, from one session up to the whole studio:
+
+| Limit | Default | What happens |
+|---|---|---|
+| Refresh point | 40 turns or 120k context | the session hands off and a fresh one continues from the notes |
+| Turn ceiling | 80 turns | the session is ended |
+| Stall | 15 min with no file, commit or task change | the session is ended, the task handed back |
+| Session wall clock | 90 min (25 for planners) | the session is ended |
+| **Task budget** | 6 sessions, 240 claimed minutes or 10M tokens per task | the task is parked until a person unparks it |
+| Daily cap | 50M tokens a day | no new session starts until tomorrow |
+
+The task budget counts every session on a task, including builders the harness didn't launch (their claims count). `node harness/task-budget.mjs <ID>` shows the spend; `STUDIO_TASK_MAX_SESSIONS`, `STUDIO_TASK_MAX_MIN` and `STUDIO_TASK_MAX_TOKENS` change it.
+
+## Web and engine tracks land in parallel (2.30p, 2.31.0)
+
+In a lane copy, `npm run verify` and `task done` check only what the lane changed: a Godot-only change runs the Godot gate and skips the web checks, and the reverse. Heavy checks share `STUDIO_GATE_SLOTS` (2) slots on the machine, so one web and one Godot check run at once without timing each other out. Only the final fast-forward and board write take the short land lock.
+
 ## The attending game dev is optional (2.30o)
 
 The harness must run without anyone watching. While a studio has an active game, the hub runs the
