@@ -37,6 +37,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { cartridgeFromArgv, loadCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
 import { runProbes, checkSimFeatures } from './fun-probes.mjs';
+import { checkEffects } from '../harness/control-effects.mjs';
 
 const REPORTS = path.join(REPO_ROOT, 'qa', 'reports');
 export const BROWSER_REGRESSIONS = path.join(REPO_ROOT, 'qa', 'regressions', 'browser');
@@ -214,10 +215,15 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
         else if (c.mouse) await page.mouse.click(c.mouse[0], c.mouse[1]);
         await sleep(Number(c.waitMs ?? 300));
         const after = await page.evaluate(() => window.__sim.getState());
-        const ok = err ? false : typeof c.expect === 'function' ? Boolean(c.expect(before, after)) : null;
+        let ok = err ? false : typeof c.expect === 'function' ? Boolean(c.expect(before, after)) : null;
+        // 2.39.0: what the Game Bible says this control must change (harness/control-effects.mjs), checked here
+        // on the same before/after states, so the game's own `expect` can't be the only judge.
+        const effects = err ? [] : checkEffects(c.id || c.name, before, after);
+        const effectWhy = effects.filter((e) => !e.ok).map((e) => e.why).join('; ');
+        if (effects.length && !err) ok = (ok === null ? true : ok) && !effectWhy;
         // 2.32.0: the id ties the result to the Game Bible's controls list (qa/controls-check.mjs).
-        report.controls.push({ id: c.id || c.name, name: c.name, ok, ...(err ? { why: err } : {}) });
-        if (ok === false) fail('CONTROL-DEAD', `${c.name}: ${err ? `couldn't be pressed (${err})` : `didn't do what it should${c.what ? ` (${c.what})` : ''}`}`);
+        report.controls.push({ id: c.id || c.name, name: c.name, ok, ...(err ? { why: err } : effectWhy ? { why: `Game Bible: ${effectWhy}` } : {}), ...(effects.length ? { effects } : {}) });
+        if (ok === false) fail('CONTROL-DEAD', `${c.name}: ${err ? `couldn't be pressed (${err})` : effectWhy ? `didn't change what the Game Bible says (${effectWhy})` : `didn't do what it should${c.what ? ` (${c.what})` : ''}`}`);
       }
       await page.reload({ waitUntil: 'load' });
       await page.waitForFunction(() => window.__sim && typeof window.__sim.getState === 'function', null, { timeout: 8000 }).catch(() => {});

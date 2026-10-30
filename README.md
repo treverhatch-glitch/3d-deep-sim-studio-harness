@@ -107,6 +107,10 @@ A task that uses its whole budget isn't handed straight to you, and no step can 
 
 The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
+## The Game Bible says what each control must change (2.39.0)
+
+A control's own test is written by the agents that build the game, so a weak one can pass a button that does nothing. In `studio/bible/controls.json` (which only the owner changes) a control can say what it must change in the game's state, for example `"effect": { "path": "entities.length", "change": "up" }`. The browser check presses it for real and checks that, whatever the game's own test says. Pick a value only that control moves in the moment after the press (income can outrun a purchase's cost).
+
 ## Built but not wired (2.38.0)
 
 A system can be finished and tested and still never reach the player, because nothing in the game uses it. `task done` now walks the game from its entry points (index.html, cartridges, Godot's main scene and autoloads) and notes any game file the task changed that nothing reaches. Tests and demo pages don't count. `STUDIO_REACHABILITY=fail` makes it refuse; `npm run reach -- <files>` checks by hand. A game with other entry pages lists them as `"entries"` in its studio.gates.json.

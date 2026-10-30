@@ -1,8 +1,8 @@
 {
-  "note": "Every control a player has, in the Game Bible. The controls check (qa/controls-check.mjs) fails the build when a control listed here has no passing real-input result on a track the game ships. Ids are what each track's input test reports. Only a person changes this list (2.32.0: it is a protected file).",
+  "note": "Every control a player has, in the Game Bible. The controls check (qa/controls-check.mjs) fails the build when a control listed here has no passing real-input result on a track the game ships. Ids are what each track's input test reports. Only a person changes this list (2.32.0: it is a protected file). 2.39.0: an effect says what a control must change in the sim state (path + up|down|changes|same|a number), measured from just before the real press to just after it (its wait), so pick a value only that control moves in that time; the browser check tests it, so the game's own test can't be the only judge.",
   "tracks": ["web"],
   "controls": [
-    { "id": "buy-unit", "name": "B buys a unit", "input": "key B", "expect": "a unit appears and credits are spent" },
-    { "id": "buy-button", "name": "The Buy button buys a unit", "input": "click the Buy button", "expect": "a unit appears and credits are spent" }
+    { "id": "buy-unit", "name": "B buys a unit", "input": "key B", "expect": "a unit appears and credits are spent", "effect": { "path": "entities.length", "change": "up" } },
+    { "id": "buy-button", "name": "The Buy button buys a unit", "input": "click the Buy button", "expect": "a unit appears and credits are spent", "effect": { "path": "entities.length", "change": "up" } }
   ]
 }

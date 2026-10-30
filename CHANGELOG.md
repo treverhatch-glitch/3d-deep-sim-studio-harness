@@ -4,6 +4,14 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.39.0] — 2026-10-31
+2.39.0: the Game Bible says what each control must change. Until now a control's "did it work" test was the game's own `expect` in qa.mjs, written by the same agents that build the game: a weak or gamed one (`expect: () => true`) passes a buy button that buys nothing. The research pack's Hatchfield timeline has them ("Fire bell does nothing", "Extra jet bridges ... buy nothing").
+### Added
+- **Control effects in the Game Bible** (harness/control-effects.mjs; `studio/bible/controls.json`, a protected file): a control may carry `effect`, one or a list of `{ "path": "<sim state path>", "change": "up" | "down" | "changes" | "same" | <exact difference> }`. Paths take dotted keys, `.length` and `list[field=value]` filters. The browser check (qa/browser-play.mjs) tests it on the sim state just before and just after the real press, next to the game's own `expect`; a miss fails the control with the Bible's reason. The controls gate refuses a web pass for a control whose Bible effect the result doesn't show was checked; other tracks get a note (web only so far).
+- The template's Bible names an effect for both controls (`entities.length` up). Measuring "credits down" failed for real: income during the 300 ms after the press outran the cost, so an effect should name a value only that control moves in that time (the Bible's note says so).
+- **CI proof in a real browser** (scripts/check-control-effects.mjs, in the war-room-browser job): a Buy button left unwired, with its qa.mjs `expect` gamed to `() => true`, passes the browser check and the controls gate without the Bible effect, and fails both with it, naming the effect.
+- qa/selftest-239.mjs: 3 checks (paths, filters and each kind of change with its reason; the controls gate wants the effect shown in the result, notes other tracks; the template's Bible and CI step).
+
 ## [2.38.0] — 2026-10-31
 2.38.0: built but not wired. The research pack's Hatchfield audit found about 43 systems that were built and unit-tested but that nothing in the game used ("nothing in the game imports it, only tests, scripts/*.html demos"); their tasks closed as done because their own tests passed.
 ### Added

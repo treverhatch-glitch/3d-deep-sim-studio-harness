@@ -3328,6 +3328,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.39.0: what a control must change, in the Game Bible (qa/selftest-239.mjs).
+{
+  const dir = copyRepo();
+  const { selftest239 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-239.mjs')).href);
+  await selftest239({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
