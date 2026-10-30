@@ -3312,6 +3312,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.37.0: the whole-game check after work lands (qa/selftest-237.mjs).
+{
+  const dir = copyRepo();
+  const { selftest237 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-237.mjs')).href);
+  await selftest237({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

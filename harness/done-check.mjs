@@ -39,6 +39,8 @@ function firstTaggedCommit(taskId) {
 const PREFIX = [
   // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
   [/^rescue:/i, 'rescue'],
+  // 2.37.0: the whole-game check went red after a landing (harness/whole-game.mjs).
+  [/^whole-game check red\b/i, 'whole'],
   // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
   // (Jed's run: docs-gate bugs could only close with --force).
   [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
@@ -94,6 +96,7 @@ export const TYPES = {
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   art: { skill: 'studio/skills/art.md', means: 'designs proposed for the game dev since the task started (npm run art -- propose); approving them is the dev\'s call, not part of done' },
   trick: { skill: 'studio/skills/dev-hacker.md', means: 'a trick card proposed since the task started (npm run trick -- propose), or a note that nothing is worth doing now (npm run trick -- none "why")' },
+  whole: { skill: null, means: 'a fix committed for this task, then a full verify of the whole game (npm run verify -- --all), not one scoped to the files you changed, green after your last change' },
   rescue: { skill: 'studio/skills/rescue.md', means: 'studio/rescues/<the stuck task>.md written since the rescue started, with a Diagnosis of 40+ words and one Decision: retry, split (smaller tasks naming the stuck task are queued) or needs-person' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
@@ -278,6 +281,18 @@ function lastGameChange() {
   for (const d of ['cartridges', 'src']) walkSince(d, 0, out);
   return out.reduce((m, f) => Math.max(m, mtime(f)), 0);
 }
+/** The record gatesAfter reads (the agent's own full run, else the studio's). */
+export function lastFullRecord() {
+  try {
+    const owner = process.env.STUDIO_LOCK_OWNER;
+    const own = owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : null;
+    const file = own && fs.existsSync(abs(own)) ? own : fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json';
+    return JSON.parse(fs.readFileSync(abs(file), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 export function gatesAfter(at, files = null) {
   let run = null;
   try {
@@ -488,6 +503,12 @@ export function checkDone(task, since = startedAt(task.id)) {
     check(`Title names an idea (${id || 'I-…'})`, idea, id ? `no idea ${id} on the Idea Board` : 'the title names no idea (like I-001)');
     const moved = idea && (idea.history || []).some((h) => Date.parse(h.at) >= since && ['shaped', 'placed', 'approved', 'parked', 'rejected'].includes(h.stage));
     check('The idea moved to its next stage since the task started', moved, `${id || 'the idea'} hasn't moved since this task started (npm run idea -- shape|place|decide ${id || 'I-…'})`);
+  }
+  if (type === 'whole') {
+    workAndVerify();
+    // The fix must be checked the way the break was found: every check on the whole game.
+    const rec = lastFullRecord();
+    check('The verify ran on the whole game (--all), not scoped to your files', rec && !rec.scoped, rec ? 'the last verify was scoped to the files you changed; this task needs npm run verify -- --all' : 'no full verify recorded');
   }
   if (type === 'rescue') {
     const stuck = (String(task.title).match(/^Rescue:\s*(T-\d+)/i) || [])[1];

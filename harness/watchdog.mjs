@@ -100,6 +100,15 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   } catch (e) {
     actions.push({ kind: 'error', msg: `rescues: ${e.message}` });
   }
+  // 2d. 2.37.0: the whole-game check (STUDIO_WHOLE_GAME=on): a new commit on the studio's branch starts a
+  // background run of every check on the whole game (harness/whole-game.mjs).
+  try {
+    const { wholeKick } = await import('./whole-game.mjs');
+    const a = wholeKick();
+    if (a) actions.push(a);
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `whole-game check: ${e.message}` });
+  }
   // 3. An idle studio: sessions ran for the whole window, nothing finished.
   const win = now - lim.idleHours * 3600000;
   const turnedOnAt = auto ? 0 : Date.parse(w.at || '') || 0;

@@ -4,6 +4,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.37.0] — 2026-10-31
+2.37.0: after work lands, every check runs on the whole game. Per-task checks are scoped to the files a task touched (2.31.0): fast, but blind to a change that breaks something elsewhere. In the research pack's Marina experiment the standard checks caught 1 of 7 planted drift edits; every check on the whole project after each landing caught 7 of 7, for about 36% more time.
+### Added
+- **The whole-game check** (harness/whole-game.mjs, `npm run whole-game`; **opt-in**: `STUDIO_WHOLE_GAME=on`). The watchdog starts it in the background whenever the studio's branch has a commit it hasn't checked. It checks out that exact commit in its own clean copy (`.studio/whole-wt`, never the main checkout), runs every required check (`--all --full`: every file, every gate a Full studio runs, whatever the studio's scope) in a gate slot, and re-runs anything that failed once, alone: a check that passes alone is logged as "environment" (a busy or flaky box), not a break. Still red: one P0 task "Whole-game check red at <commit>: <checks> after <tasks>" with a brief naming the commits since the last green run (`git log <range>`), and a line in the morning report. Events `whole.green`, `whole.red`, `whole.environment`, `whole.error`. `STUDIO_WHOLE_CMD` and `STUDIO_WHOLE_TIMEOUT_MS` (1 h) override the command and its time limit.
+- **Task type `whole`** in the done-check: the fix closes only with a full verify of the whole game (`npm run verify -- --all`), not one scoped to the files the fix touched.
+- qa/selftest-237.mjs: 6 checks (off by default and due on a new commit; a green run at the exact commit in a clean copy with the main checkout untouched; red after a landing queues one P0 task naming the check, the commits and the landed task, with a brief and a morning-report line; no second task while one is open; a failure that passes alone is environment; the watchdog's background start runs once).
+
 ## [2.36.0] — 2026-10-31
 2.36.0: a check that exits 0 but ran no tests is not a pass. The research pack measured it: GUT 9.5.0 with a test file that doesn't parse prints "Nothing was run" and exits 0, and the harness's Godot unit gate read the newest gdUnit4 report folder even when this run wrote none, so a run that tested nothing could show an older green.
 ### Added
