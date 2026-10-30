@@ -29,6 +29,7 @@ export async function selftest230q({ dir, run, report, tmpRoot }) {
     fs.rmSync(r, { recursive: true, force: true });
     fs.mkdirSync(r, { recursive: true });
     g(r, 'init', '-q', '-b', 'marina');
+    g(r, 'config', 'core.autocrlf', 'false'); // Windows runners convert to CRLF on checkout; the checks compare exact bytes
     g(r, 'config', 'user.email', 'q@t'); g(r, 'config', 'user.name', 'q');
     fs.writeFileSync(path.join(r, '.gitignore'), '.studio/\n.lanes/\n');
     fs.writeFileSync(path.join(r, 'f.txt'), 'one\n'); fs.writeFileSync(path.join(r, 'other.txt'), 'x\n');
