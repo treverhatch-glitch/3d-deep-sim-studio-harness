@@ -4,6 +4,12 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.41.0] — 2026-10-31
+2.41.0: a new browser regression must pass twice before it is protected. The research pack: "one flaky input test turned the main branch red even though the game code was fine"; regressions are add-only protected files (2.32), so a flaky one is hard to take back.
+### Added
+- **`STUDIO_TWO_GREENS=on`** (opt-in; harness/done-check.mjs): a renderer bug closes only when its new browser regression passed in two separate browser plays since the last change and failed in none. One pass: "run npm run play:browser again". A failure: named with its reason ("a flaky test must not be protected; make it deterministic"). Sim regressions replay deterministically from a seed, so they are not affected.
+- qa/selftest-241.mjs: 1 check (off by default; one pass, two passes, two passes and a failure).
+
 ## [2.40.0] — 2026-10-31
 2.40.0: a quieter watchdog log, and the new signals in the health report. The research pack counted 11 to 23 watchdog events per finished task in the Marina run; the same error, logged every 3 minutes, buries the lines that matter.
 ### Added
