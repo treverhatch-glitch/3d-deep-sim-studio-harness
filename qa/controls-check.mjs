@@ -40,7 +40,7 @@ export function trackResults(track, dir = REPORTS) {
     .sort((a, b) => b.m - a.m);
   if (!files.length) return null;
   const results = new Map();
-  for (const c of files[0].j.controls) results.set(String(c.id || c.name), { ok: c.ok, why: c.why || null });
+  for (const c of files[0].j.controls) results.set(String(c.id || c.name), { ok: c.ok, why: c.why || null, effects: Array.isArray(c.effects) ? c.effects : null });
   return { file: path.relative(REPO_ROOT, files[0].f).split(path.sep).join('/'), results };
 }
 
@@ -73,7 +73,10 @@ export async function controlsCheck({ bibleFile = BIBLE, reportsDir = REPORTS, t
       const got = r.results.get(c.id);
       checked += 1;
       if (!got) problems.push(`${track}: "${c.id}" (${c.name || c.input || 'listed in the Bible'}) was never pressed by the ${track} input test (${r.file})`);
-      else if (got.ok !== true) problems.push(`${track}: "${c.id}" ${got.ok === false ? `did nothing${got.why ? ` (${got.why})` : ''}` : 'has no check of what it should do (not a pass)'}; expected: ${c.expect || 'see the Bible'}`);
+      else if (got.ok !== true) problems.push(`${track}: "${c.id}" ${got.ok === false ? (/^Game Bible:/.test(got.why || '') ? `didn't change what the Game Bible says (${got.why.replace(/^Game Bible:\s*/, '')})` : `did nothing${got.why ? ` (${got.why})` : ''}`) : 'has no check of what it should do (not a pass)'}; expected: ${c.expect || 'see the Bible'}`);
+      // 2.39.0: a control whose Bible entry names an effect passes only when that effect was checked (web).
+      else if (c.effect && track === 'web' && !got.effects?.length) problems.push(`web: "${c.id}" passed, but the result doesn't show the Game Bible's effect was checked (${JSON.stringify(c.effect)}); run npm run play:browser again`);
+      else if (c.effect && track !== 'web' && !got.effects?.length) notes.push(`${track}: "${c.id}"'s Game Bible effect is checked on the web track only so far`);
     }
     const listed = new Set(list.map((c) => c.id));
     const extra = [...r.results.keys()].filter((id) => !listed.has(id));
