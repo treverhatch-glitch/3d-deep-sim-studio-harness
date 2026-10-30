@@ -8,6 +8,8 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 2.41.0: a new browser regression must pass twice before it is protected. The research pack: "one flaky input test turned the main branch red even though the game code was fine"; regressions are add-only protected files (2.32), so a flaky one is hard to take back.
 ### Added
 - **`STUDIO_TWO_GREENS=on`** (opt-in; harness/done-check.mjs): a renderer bug closes only when its new browser regression passed in two separate browser plays since the last change and failed in none. One pass: "run npm run play:browser again". A failure: named with its reason ("a flaky test must not be protected; make it deterministic"). Sim regressions replay deterministically from a seed, so they are not affected.
+### Fixed
+- **The War Room test's Stop/Pause step** (qa/hud-check.mjs) failed in CI twice in about six runs ("Stop ends it and hands its task back": an agent still listed). It pressed "the first" Stop button every 3 s, so an agent still stopping took every press and a second one was never stopped. It now presses Stop (or Pause) once per agent, by name, waits up to 30 s for the list to empty, and presses again for any agent still listed. It couldn't be reproduced locally (3 runs at once under load all passed), so a failure now also prints each agent's record, log tail and stop/launch events, to show the cause if it recurs.
 - qa/selftest-241.mjs: 1 check (off by default; one pass, two passes, two passes and a failure).
 
 ## [2.40.0] — 2026-10-31

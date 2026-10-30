@@ -156,6 +156,35 @@ const check = (label, ok, detail = '') => {
 const read = (rel) => (fs.existsSync(path.join(dir, rel)) ? fs.readFileSync(path.join(dir, rel), 'utf8') : '');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 // Poll until a condition holds (or the deadline passes): for steps whose time varies by machine.
+// 2.41.0: press Stop (or Pause) once for each agent listed, by name, and wait for the list to empty; an
+// agent still listed after that gets one more press.
+// 2.41.0: what each agent's record and log said, printed when a stop check fails (the CI failure couldn't be
+// reproduced locally; this shows its cause next time).
+const agentsDiag = () => {
+  const d = path.join(dir, '.studio', 'agents');
+  if (!fs.existsSync(d)) return '';
+  const out = [];
+  for (const f of fs.readdirSync(d).filter((n) => n.endsWith('.json'))) {
+    let j = {};
+    try { j = JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')); } catch {}
+    const log = (() => { try { return fs.readFileSync(path.join(dir, j.log || ''), 'utf8').split('\n').slice(-6).join(' | '); } catch { return ''; } })();
+    out.push(`${f}: status ${j.status} pid ${j.pid} supervisor ${j.supervisor} task ${j.task} started ${j.startedAt} ended ${j.endedAt || '-'} reason ${j.reason || '-'}; log: ${log.slice(-600)}`);
+  }
+  const ev = (() => { try { return fs.readFileSync(path.join(dir, '.studio', 'events.jsonl'), 'utf8').split('\n').filter((l) => /agent\.(stopped|paused|session|wake|refresh|failover)|launch/.test(l)).slice(-15).join('\n'); } catch { return ''; } })();
+  return `\n--- agent records ---\n${out.join('\n')}\n--- agent events ---\n${ev}`;
+};
+const stopEach = async (page, attr) => {
+  const empty = async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText());
+  for (let round = 0; round < 2 && !(await empty()); round++) {
+    const names = [...new Set(await page.locator(`#o-launched [data-${attr}]`).evaluateAll((els, a) => els.map((e) => e.getAttribute(`data-${a}`)), attr))];
+    for (const name of names) {
+      const btn = page.locator(`#o-launched [data-${attr}="${name}"]`);
+      if (await btn.count()) await btn.first().click().catch(() => {});
+      await wait(500);
+    }
+    await until(empty, 30000);
+  }
+};
 const until = async (fn, ms) => {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -321,14 +350,12 @@ try {
   await wait(4000);
   check('Start agent launches one, and it shows with its heartbeat', /builder-/.test(await page.locator('#o-launched').innerText()) && /heartbeat/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-actmsg').innerText());
   // Stop every agent started from the page (the bug note above woke a builder too).
-  for (let k = 0; k < 4 && (await page.locator('#o-launched [data-stopagent]').count()); k++) {
-    await page.locator('#o-launched [data-stopagent]').first().click();
-    await wait(3000);
-  }
-  // Stopping kills the process tree, saves a patch and hands the task back: on Windows that takes a few
-  // seconds (Gemini's run raced it), so wait for the page to say so instead of a fixed pause.
-  await until(async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), 20000);
-  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
+  // Stopping kills the process tree, saves a patch and hands the task back: on Windows, or a busy CI box, that
+  // takes a few seconds (Gemini's run raced it). Each agent is stopped by name, once (2.41.0: clicking "the
+  // first" Stop every 3 s kept hitting an agent still stopping and never reached the second), then the page
+  // must say so.
+  await stopEach(page, 'stopagent');
+  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), `${await page.locator('#o-launched').innerText()}${agentsDiag()}`);
   // + Hire in an open room of the Studio view: an agent for that department, which Pause hands back.
   await page.click('#ops .switch[data-to="tycoon"]');
   await wait(800);
@@ -338,12 +365,8 @@ try {
   await wait(1500);
   const hired = await page.locator('#o-launched').innerText();
   check('+ Hire in an open room hires an agent for that department, with a Pause button', /builder-/.test(hired) && (await page.locator('#o-launched [data-pauseagent]').count()) > 0, hired);
-  for (let k = 0; k < 4 && (await page.locator('#o-launched [data-pauseagent]').count()); k++) {
-    await page.locator('#o-launched [data-pauseagent]').first().click();
-    await wait(3000);
-  }
-  await until(async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), 20000);
-  check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-launched').innerText());
+  await stopEach(page, 'pauseagent');
+  check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), `${await page.locator('#o-launched').innerText()}${agentsDiag()}`);
   // Throw it all away and restart: two warnings back to back; Cancel on the second changes nothing.
   await page.click('#o-restart');
   await wait(800);
