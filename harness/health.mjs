@@ -17,13 +17,15 @@
  *                     builders with no usage at all are counted apart (untracked)
  *   launches skipped  budget stops, over-budget tasks
  * --morning adds what landed and what needs a person: parked tasks (budget, breaker, watchdog), forced work
- * waiting for review, protected changes waiting for the owner's approval, a stopped studio.
+ * waiting for review, protected changes waiting for the owner's approval, a stopped studio, a red CI on main
+ * (when the GitHub CLI is signed in; STUDIO_HEALTH_CI=off skips it).
  * --write puts HEALTH-<date>.md in the folder (STUDIO_RESULTS_DIR works).
  * Targets (a release must not make these worse): refusals per landing ≤ 1.5, harness-caused hand-backs ≤ 5%.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { readRecentEvents } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
 import { harnessCaused } from './busy.mjs';
@@ -126,12 +128,21 @@ export async function needsYou(events, { since = 0 } = {}) {
   try { const { listPending } = await import('./pending-review.mjs'); out.pending = listPending().map((i) => ({ id: i.task, why: String(i.reason || i.missing || '').slice(0, 120) })); } catch {}
   try { const { checkProtected } = await import('./approve.mjs'); const r = checkProtected(); if (r.enforced && !r.ok) out.protectedChanges = r.changes.map((c) => c.path); } catch {}
   try { const { readStop } = await import('./task.mjs'); const st = readStop(); if (st) out.stopped = `${st.by}${st.reason ? `: ${st.reason}` : ''}`; } catch {}
+  // The main branch's CI on GitHub, when the GitHub CLI is there and signed in (a week of red CI went unseen).
+  if (process.env.STUDIO_HEALTH_CI !== 'off') {
+    try {
+      const r = spawnSync('gh', ['run', 'list', '--branch', 'main', '--workflow', 'ci.yml', '--limit', '1', '--json', 'conclusion,status,headSha,createdAt'], { encoding: 'utf8', timeout: 15000 });
+      const run = r.status === 0 ? JSON.parse(r.stdout || '[]')[0] : null;
+      if (run) out.ci = { status: run.status, conclusion: run.conclusion, sha: String(run.headSha || '').slice(0, 7), at: run.createdAt };
+    } catch {}
+  }
   return out;
 }
 
 export function renderNeeds(n) {
   const lines = ['', '## Landed', n.landed.length ? n.landed.join(', ') : 'nothing', '', '## Needs you'];
   if (n.stopped) lines.push(`- The studio is stopped (${n.stopped}).`);
+  if (n.ci && n.ci.status === 'completed' && n.ci.conclusion !== 'success') lines.push(`- CI on main is ${n.ci.conclusion} (${n.ci.sha}, ${String(n.ci.at).slice(0, 16).replace('T', ' ')} UTC): nothing new should land until it is green.`);
   for (const p of n.parked) lines.push(`- ${p.id} is parked by ${p.by}: ${p.why}`);
   for (const p of n.pending) lines.push(`- ${p.id} was forced done and waits for your review: ${p.why}`);
   if (n.protectedChanges?.length) lines.push(`- Protected files changed without your approval: ${n.protectedChanges.join(', ')}`);
