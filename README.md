@@ -83,7 +83,7 @@ Limits stack, from one session up to the whole studio:
 | Turn ceiling | 80 turns | the session is ended |
 | Stall | 15 min with no file, commit or task change | the session is ended, the task handed back |
 | Session wall clock | 90 min (25 for planners) | the session is ended |
-| **Task budget** | 6 sessions, 240 claimed minutes or 10M tokens per task | the task is parked until a person unparks it |
+| **Task budget** | 6 sessions, 240 claimed minutes or 10M tokens per task | the task is parked and climbs the rescue ladder (below) |
 | Daily cap | 50M tokens a day | no new session starts until tomorrow |
 
 The task budget counts every session on a task, including builders the harness didn't launch (their claims count). `node harness/task-budget.mjs <ID>` shows the spend; `STUDIO_TASK_MAX_SESSIONS`, `STUDIO_TASK_MAX_MIN` and `STUDIO_TASK_MAX_TOKENS` change it.
@@ -96,6 +96,16 @@ In a lane copy, `npm run verify` and `task done` check only what the lane change
 
 - **Controls.** The Game Bible lists every control a player has (`studio/bible/controls.json`). Each track's input test presses them for real (the browser check for web, `tools/controls.gd` in the Godot gate) and the `controls` gate fails when one was never pressed or did nothing.
 - **Protected files.** Scenarios' expected outcomes, regressions, the controls list, the gates and the checks themselves (`studio/protected.json`) change only with the owner's signed approval: `npm run approve -- keygen` once on your own machine, then `npm run approve -- protected --note "why"` for a change you want. CI checks it with the main branch's copy of the checker, so a branch can't weaken it. A forced `task done` needs `npm run approve -- force <ID>`.
+
+## A stuck task climbs a ladder, not a wall (2.35.0)
+
+A task that uses its whole budget isn't handed straight to you, and no step can jam the studio:
+
+1. **Rescue** on a stronger model from a **different family** than the ones that got stuck, so the same blind spot doesn't repeat. It reads the hand-backs and refusals, writes `studio/rescues/<ID>.md` (a diagnosis and one decision) and either clears the blocker and retries, splits the task into smaller ones, or says a person must decide.
+2. **Split rescue** on the next model on the list, when the first rescue is stuck too (its own budget ran out, nobody picked it up in an hour, or its retry got stuck again). This one may only split or ask a person.
+3. **Shelved**: the task is parked with the diagnoses, the studio works around it, and it waits in the morning report's "Needs you". Nothing blocks on it.
+
+The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
 ## The harness's own numbers (2.34.0)
 

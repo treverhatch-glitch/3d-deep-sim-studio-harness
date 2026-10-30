@@ -3296,6 +3296,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.35.0: the rescue ladder for a task stopped by its budget (qa/selftest-235.mjs).
+{
+  const dir = copyRepo();
+  const { selftest235 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-235.mjs')).href);
+  await selftest235({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

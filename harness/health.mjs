@@ -120,10 +120,18 @@ export function renderHealth(h) {
 /** What landed since, and what is waiting on a person: the second half of the morning report. */
 export async function needsYou(events, { since = 0 } = {}) {
   const landed = events.filter((e) => e.type === 'lane.merged' && (Date.parse(e.ts) || 0) >= since).map((e) => e.task).filter(Boolean);
-  const out = { landed: [...new Set(landed)], parked: [], pending: [], protectedChanges: null, stopped: null };
+  const out = { landed: [...new Set(landed)], parked: [], rescuing: [], pending: [], protectedChanges: null, stopped: null };
   try {
     const { readHolds } = await import('./task-hold.mjs');
-    for (const [id, h] of Object.entries(readHolds())) if (h?.parked) out.parked.push({ id, by: h.parked.by, why: String(h.parked.why || '').split('. ')[0].slice(0, 160) });
+    for (const [id, h] of Object.entries(readHolds())) {
+      const p = h?.parked;
+      if (!p || p.superseded) continue; // a stuck rescue the next ladder step replaced
+      const row = { id, by: p.by, why: String(p.why || '').split('. ')[0].slice(0, 160), shelved: Boolean(p.shelved) };
+      // A rescue is working on it (harness/rescue.mjs): reported, but not a person's job yet.
+      if (/^T-\d+$/.test(String(p.rescue || ''))) out.rescuing.push({ ...row, rescue: `rescue ${p.rescue} is on it` });
+      else if (p.rescue === 'split') out.rescuing.push({ ...row, rescue: 'split into smaller tasks; close it when they land' });
+      else out.parked.push(row);
+    }
   } catch {}
   try { const { listPending } = await import('./pending-review.mjs'); out.pending = listPending().map((i) => ({ id: i.task, why: String(i.reason || i.missing || '').slice(0, 120) })); } catch {}
   try { const { checkProtected } = await import('./approve.mjs'); const r = checkProtected(); if (r.enforced && !r.ok) out.protectedChanges = r.changes.map((c) => c.path); } catch {}
@@ -143,10 +151,11 @@ export function renderNeeds(n) {
   const lines = ['', '## Landed', n.landed.length ? n.landed.join(', ') : 'nothing', '', '## Needs you'];
   if (n.stopped) lines.push(`- The studio is stopped (${n.stopped}).`);
   if (n.ci && n.ci.status === 'completed' && n.ci.conclusion !== 'success') lines.push(`- CI on main is ${n.ci.conclusion} (${n.ci.sha}, ${String(n.ci.at).slice(0, 16).replace('T', ' ')} UTC): nothing new should land until it is green.`);
-  for (const p of n.parked) lines.push(`- ${p.id} is parked by ${p.by}: ${p.why}`);
+  for (const p of n.parked) lines.push(p.shelved ? `- ${p.id} is shelved (the studio works around it): ${p.why.replace(/^shelved:\s*/, '')}` : `- ${p.id} is parked by ${p.by}: ${p.why}`);
   for (const p of n.pending) lines.push(`- ${p.id} was forced done and waits for your review: ${p.why}`);
   if (n.protectedChanges?.length) lines.push(`- Protected files changed without your approval: ${n.protectedChanges.join(', ')}`);
   if (lines.at(-1) === '## Needs you') lines.push('nothing');
+  if (n.rescuing?.length) lines.push('', '## Being rescued (no action needed)', ...n.rescuing.map((p) => `- ${p.id}: ${p.rescue}`));
   return `${lines.join('\n')}\n`;
 }
 

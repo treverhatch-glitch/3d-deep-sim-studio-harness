@@ -16,6 +16,7 @@ import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
 import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
+import { applyRescue, rescueOf } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock } from './merge-lane.mjs';
@@ -497,6 +498,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
+  // 2.35.0: a finished rescue acts on its decision (retry unparks the stuck task, split keeps it parked, needs-person asks).
+  if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
   joinWaveIfGameplay(target, agent || target.role);
 
   if (!check.ok) {
@@ -701,6 +704,15 @@ export function allocateTaskId(q = parseNextQueue()) {
 }
 
 export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
+  // 2.35.0: a rescuer splitting a stuck task (it holds "Rescue: T-x" and the new title names T-x) queues directly.
+  if (!meta.promoted && agent && !isDecider(agent, process.env)) {
+    try {
+      const board = parseNextQueue();
+      const held = listLocks().filter((l) => l.owner === agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
+      const stuck = held.map((id) => [...board.inProgress, ...board.backlog].find((t) => t.id === id)).filter(Boolean).map((t) => rescueOf(t.title)).filter(Boolean);
+      if (stuck.some((sid) => new RegExp(`\\b${sid}\\b`).test(title))) meta = { ...meta, promoted: true, origin: 'rescue' };
+    } catch {}
+  }
   // 2.30d (#6): only the Director, Producer and planner (and people) add to the live queue; anyone
   // else's add waits in studio/proposed.json with a one-line reason until the Producer promotes it.
   if (!meta.promoted && !isDecider(agent, process.env)) {
@@ -723,11 +735,13 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     status: 'backlog',
   };
   // 2.30 (J2): every task says whose idea it is; an agent's own mechanic waits for the dev's yes.
-  meta = { ...meta, origin: originOf({ origin: meta.origin, agent, asked: meta.asked }) };
+  // A rescue's split pieces are parts of a task already in the plan, not new mechanics: no dev "yes" needed.
+  const fromRescue = meta.origin === 'rescue';
+  meta = { ...meta, origin: originOf({ origin: meta.origin, agent, asked: meta.asked }), ...(fromRescue ? { rescueSplit: true } : {}) };
   q.backlog.push(newTask);
   writeNextQueue(q);
   if (meta.after?.length) setHold(newTask.id, { after: meta.after });
-  if (meta.origin === 'agent-proposed' && isMechanic(title, meta)) {
+  if (meta.origin === 'agent-proposed' && !fromRescue && isMechanic(title, meta)) {
     setHold(newTask.id, { needsYes: { by: agent, at: new Date().toISOString() } });
     newTask.needsYes = true;
   }

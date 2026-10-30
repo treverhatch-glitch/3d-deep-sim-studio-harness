@@ -110,10 +110,12 @@ export function stopIfOverBudget(taskId, { by = 'budget', events, now = Date.now
   if (!b.over) return null;
   const held = readHolds()[taskId]?.parked;
   if (held?.budget) return held.why;
-  const why = `${b.why}. A person looks before it runs again: split it, fix the blocker, or raise the limit, then npm run task -- unpark ${taskId} --by <name>`;
+  const why = `${b.why}. A rescue on another model looks first (it retries, splits or asks a person); a person can also split it, fix the blocker or raise the limit, then npm run task -- unpark ${taskId} --by <name>`;
   setHold(taskId, { parked: { by: 'budget', why, budget: true, spend: b.spend, at: new Date(now).toISOString() } }, { by, msg: `Parked ${taskId}: ${why}` });
   emitEvent({ type: 'task.budget', agent: by, to: 'producer', task: taskId, status: 'blocked', msg: `${taskId} stopped: ${b.why}`, meta: { spend: b.spend, limits: b.limits } });
-  emitEvent({ type: 'agent.ask', agent: by, to: 'producer', task: taskId, msg: `Needs you: ${b.why}. It is parked until someone unparks it.` });
+  // 2.35.0: a rescue on a different model comes first (the watchdog's next pass files it, harness/rescue.mjs);
+  // a person is asked here only when rescues are off.
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_RESCUE || '')) emitEvent({ type: 'agent.ask', agent: by, to: 'producer', task: taskId, msg: `Needs you: ${b.why}. It is parked until someone unparks it.` });
   return why;
 }
 

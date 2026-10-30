@@ -37,6 +37,8 @@ function firstTaggedCommit(taskId) {
 }
 
 const PREFIX = [
+  // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
+  [/^rescue:/i, 'rescue'],
   // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
   // (Jed's run: docs-gate bugs could only close with --force).
   [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
@@ -92,6 +94,7 @@ export const TYPES = {
   idea: { skill: 'studio/skills/ideas.md', means: 'the idea named in the title moved to its next stage (shaped, placed, or decided) since the task started' },
   art: { skill: 'studio/skills/art.md', means: 'designs proposed for the game dev since the task started (npm run art -- propose); approving them is the dev\'s call, not part of done' },
   trick: { skill: 'studio/skills/dev-hacker.md', means: 'a trick card proposed since the task started (npm run trick -- propose), or a note that nothing is worth doing now (npm run trick -- none "why")' },
+  rescue: { skill: 'studio/skills/rescue.md', means: 'studio/rescues/<the stuck task>.md written since the rescue started, with a Diagnosis of 40+ words and one Decision: retry, split (smaller tasks naming the stuck task are queued) or needs-person' },
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
 
@@ -485,6 +488,22 @@ export function checkDone(task, since = startedAt(task.id)) {
     check(`Title names an idea (${id || 'I-…'})`, idea, id ? `no idea ${id} on the Idea Board` : 'the title names no idea (like I-001)');
     const moved = idea && (idea.history || []).some((h) => Date.parse(h.at) >= since && ['shaped', 'placed', 'approved', 'parked', 'rejected'].includes(h.stage));
     check('The idea moved to its next stage since the task started', moved, `${id || 'the idea'} hasn't moved since this task started (npm run idea -- shape|place|decide ${id || 'I-…'})`);
+  }
+  if (type === 'rescue') {
+    const stuck = (String(task.title).match(/^Rescue:\s*(T-\d+)/i) || [])[1];
+    const rel = stuck ? `studio/rescues/${stuck}.md` : null;
+    const text = rel && fs.existsSync(abs(rel)) && mtime(rel) >= since ? fs.readFileSync(abs(rel), 'utf8') : '';
+    const decision = ((text.match(/^\s*Decision:\s*([\w-]+)/im) || [])[1] || '').toLowerCase();
+    const diag = (text.split(/^\s*Diagnosis:\s*/im)[1] || '').split(/^\s*Decision:/im)[0];
+    check('Rescue report written since the rescue started', Boolean(text), `no ${rel || 'studio/rescues/<T-ID>.md'} since this rescue started (see studio/skills/rescue.md)`);
+    check('A diagnosis of 40+ words (what kept failing, and why)', (diag.match(/[A-Za-z0-9]{2,}/g) || []).length >= 40, 'the report has no "Diagnosis:" section of 40+ words');
+    check('One decision: retry, split or needs-person', ['retry', 'split', 'needs-person'].includes(decision), `the report has no "Decision: retry|split|needs-person" line${decision ? ` ("${decision}" isn't one)` : ''}`);
+    // Step 2 of the ladder (the title says "split it"): a retry already failed once, so only split or needs-person.
+    if (/split it into small pieces/i.test(task.title)) check('Step 2 decides split or needs-person (a retry already failed)', decision !== 'retry', 'this is rescue step 2: the decision must be split or needs-person, not retry');
+    if (decision === 'split') {
+      const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && Date.parse(e.ts) >= since && e.task !== task.id && new RegExp(`\\b${stuck}\\b`).test(e.msg || ''));
+      check('The smaller tasks are queued, each naming the stuck task', added.length > 0, `split: no task added since the rescue started whose title names ${stuck}`);
+    }
   }
   if (seen && ['change', 'bug', 'system'].includes(type)) {
     const pr = proofStatus(task.id, since);

@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.35.0] — 2026-10-31
+2.35.0: a task stopped by its budget climbs a rescue ladder instead of waiting for a person, and no step on it can gridlock the studio. Before, a budget stop parked the task and asked a person; overnight that meant a stalled board until morning.
+### Added
+- **The rescue ladder** (harness/rescue.mjs, run by the watchdog every pass): (1) a P0 rescue task on a different model family than the ones that worked on the task; (2) when that rescue is stuck (its own budget, unclaimed for `STUDIO_RESCUE_WAIT_MIN` 60 min, or its retry got stuck again) it is superseded by a split rescue on the next model, which may only decide split or needs-person; (3) past `STUDIO_RESCUE_LEVELS` (2) steps in a day the task is **shelved**: parked with the diagnoses, listed under "Needs you", nothing waits on it. Events `task.rescue`, `task.rescue.done`, `task.shelved`, `model.rescue`.
+- **Rescue models with fallbacks**: `STUDIO_RESCUE_MODEL`, `STUDIO_RESCUE_MODELS`, `STUDIO_TIER_TOP_MODEL`; each step skips models marked out by quota or spend guard (harness/budget.mjs `budgetStopFor`) and models an earlier step used, then falls back to the same family, then to the launcher's choice. A rescue's model is a preference, never a blocker.
+- **The rescue done-check** (task type `rescue`, studio/skills/rescue.md): `studio/rescues/<ID>.md` written since the rescue started, a diagnosis of 40+ words, one decision (retry, split, needs-person); a split needs the smaller tasks queued, each naming the stuck task (they skip the dev "yes": they are parts of a planned task). A finished rescue acts on its decision: retry unparks and resets the budget, split keeps it parked until the pieces land, needs-person asks.
+- **The morning report** separates "Being rescued (no action needed)" from "Needs you", lists shelved tasks as shelved, and leaves out rescues a later step replaced.
+- qa/selftest-235.mjs: 6 checks (model choice and fallbacks; ladder steps 1, 2 and 3 end to end; rescues off; decisions applied and step 2 can't retry).
+
 ## [2.34.0] — 2026-10-31
 2.34.0: the harness's own numbers, every night. The Marina measurements (refusals per landing, harness-caused hand-backs, verify time, untracked builders) were dug out of the event log by hand, and nothing said when a release made them worse.
 ### Added
