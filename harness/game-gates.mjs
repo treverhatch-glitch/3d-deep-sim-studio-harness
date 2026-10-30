@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { judgePass } from './silent-green.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
@@ -136,7 +137,10 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
       const r = slot(g.id, () => spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
       if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS)`;
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
-      rows.push({ id: g.id, ok: r.status === 0, required: g.required, why: r.status === 0 ? '' : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
+      // 2.36.0: exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
+      const sg = r.status === 0 ? judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` }) : null;
+      if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

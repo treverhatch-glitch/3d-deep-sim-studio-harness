@@ -107,6 +107,10 @@ A task that uses its whole budget isn't handed straight to you, and no step can 
 
 The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
+## A check that ran nothing is not a pass (2.36.0)
+
+Some test runners exit 0 when no test ran (GUT prints "Nothing was run"; vitest and jest can find no test files). The studio game's checks and the Godot unit gate now spot that and say so in a WARN line; `STUDIO_SILENT_GREEN=fail` makes it fail the check (recommended once a game's tests are set up), `off` turns it off.
+
 ## The harness's own numbers (2.34.0)
 
 `npm run harness-health -- --morning` is the morning report: what landed, what needs you (parked tasks, forced work, protected changes waiting for your approval), and how the harness itself did: refusals per landing (target ≤ 1.5), hand-backs the harness caused (target ≤ 5%), verify time, tokens per landing, and builders whose usage wasn't recorded. The hourly run report carries the same numbers.

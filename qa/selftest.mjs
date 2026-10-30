@@ -3304,6 +3304,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.36.0: a check that exits 0 but ran no tests (qa/selftest-236.mjs).
+{
+  const dir = copyRepo();
+  const { selftest236 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-236.mjs')).href);
+  await selftest236({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

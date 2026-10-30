@@ -4,6 +4,14 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.36.0] — 2026-10-31
+2.36.0: a check that exits 0 but ran no tests is not a pass. The research pack measured it: GUT 9.5.0 with a test file that doesn't parse prints "Nothing was run" and exits 0, and the harness's Godot unit gate read the newest gdUnit4 report folder even when this run wrote none, so a run that tested nothing could show an older green.
+### Added
+- **Silent-green guard** (harness/silent-green.mjs), in the studio game's checks (harness/game-gates.mjs) and the Godot unit gate: "Nothing was run", "No test files found", "collected 0 items", "# tests 0", "Tests: 0 total" and similar, or 0 test cases counted, on a check that exited 0. **Opt-in**: by default the check still passes with a WARN line and a `gate.silent_green` event (the morning report can count them); `STUDIO_SILENT_GREEN=fail` makes it fail; `off` turns it off.
+### Fixed
+- **The Godot unit gate counts only a report written by this run** (an older `reports/report_*` left behind no longer stands in for a run that wrote none). Its PASS line says how many tests ran.
+- qa/selftest-236.mjs: 3 checks (the phrases, and that ordinary passes such as "0 failing" are not flagged; a game check that ran nothing warns, fails when opted in, and a real pass passes; the Godot gate with a stale report, a missing report and a fresh one).
+
 ## [2.35.0] — 2026-10-31
 2.35.0: a task stopped by its budget climbs a rescue ladder instead of waiting for a person, and no step on it can gridlock the studio. Before, a budget stop parked the task and asked a person; overnight that meant a stalled board until morning.
 ### Added

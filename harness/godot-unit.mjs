@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { parseCheck, formatBroken } from './gdscript-parse.mjs';
+import { judgePass } from './silent-green.mjs';
 
 const CONFIG_FILE = path.join(REPO_ROOT, 'studio', 'godot-unit.json');
 const LAST_RUN_FILE = path.join(STUDIO_STATE_DIR, 'godot-unit-last.json');
@@ -106,18 +107,23 @@ export function runGodotUnit({ changedOnly = false } = {}) {
     process.exit(1);
   }
   const runner = runnerFor(projectPath);
+  const startedAt = Date.now() - 2000;
   const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
 
-  const ok = result.status === 0;
-  console.log(`[godot-unit] ${ok ? 'PASS' : 'FAIL'} (exit code ${result.status})`);
-
   const reportDir = path.join(projectPath, 'reports');
-  const reports = fs.existsSync(reportDir) ? fs.readdirSync(reportDir).filter(d => d.startsWith('report_')).sort((x, y) => fs.statSync(path.join(reportDir, y)).mtimeMs - fs.statSync(path.join(reportDir, x)).mtimeMs) : [];
+  // 2.36.0: only a report this run wrote counts (an older one made a run that tested nothing look green).
+  const reports = fs.existsSync(reportDir) ? fs.readdirSync(reportDir).filter(d => d.startsWith('report_') && fs.statSync(path.join(reportDir, d)).mtimeMs >= startedAt).sort((x, y) => fs.statSync(path.join(reportDir, y)).mtimeMs - fs.statSync(path.join(reportDir, x)).mtimeMs) : [];
   let reportData = { tests: 0, failures: [] };
   if (reports.length > 0) {
     const resultsXmlPath = path.join(reportDir, reports[0], 'results.xml');
     if (fs.existsSync(resultsXmlPath)) reportData = parseJUnit(fs.readFileSync(resultsXmlPath, 'utf8'));
   }
+  // 2.36.0: exit 0 with no tests counted (no fresh report, or 0 test cases) is a silent green.
+  const sg = result.status === 0 ? judgePass('godot-unit', { output: `${result.stdout || ''}${result.stderr || ''}`, count: reportData.tests }) : null;
+  if (sg?.note) console.log(`[godot-unit] WARN ${sg.note}`);
+  if (sg && !sg.ok) console.error(`[godot-unit] FAIL ${sg.why}`);
+  const ok = result.status === 0 && sg.ok;
+  console.log(`[godot-unit] ${ok ? 'PASS' : 'FAIL'} (exit code ${result.status}, ${reportData.tests} test(s))`);
 
   const lastRun = { at: new Date().toISOString(), ok, code: result.status, ...reportData, version: { gdunit: cfg.gdunit, godot: cfg.godot } };
   fs.mkdirSync(path.dirname(LAST_RUN_FILE), { recursive: true });
