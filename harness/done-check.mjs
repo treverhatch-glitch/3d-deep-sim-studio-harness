@@ -24,6 +24,7 @@ import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
 import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
 import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
+import { reachMode, unreached } from './reachability.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -385,6 +386,21 @@ export function checkDone(task, since = startedAt(task.id)) {
 
   if (type === 'change') workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
+  // 2.38.0: built but not wired. Game code this task changed that nothing in the game reaches from its entry
+  // points (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
+  const notes = [];
+  if (['change', 'bug', 'system'].includes(type) && reachMode() !== 'off') {
+    try {
+      const u = unreached(taskChanges(task.id, since).files);
+      if (u.length) {
+        const why = `${u.slice(0, 4).join(', ')}${u.length > 4 ? ` and ${u.length - 4} more` : ''} ${u.length === 1 ? 'is' : 'are'} not reached from the game (nothing imports ${u.length === 1 ? 'it' : 'them'} from an entry point; tests and demos don't count): wire ${u.length === 1 ? 'it' : 'them'} in, or say in the hand-back why ${u.length === 1 ? 'it waits' : 'they wait'}`;
+        if (reachMode() === 'fail') check('New game code is wired into the game', false, why);
+        else notes.push(why);
+      }
+    } catch {
+      // the reachability walk is a help, never a crash
+    }
+  }
   if (type === 'docs') workAndVerify(true);
   if (type === 'bug') {
     const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
@@ -532,7 +548,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, part, since, checks, missing, ...TYPES[type] };
+  return { ok: missing.length === 0, type, part, since, checks, missing, notes, ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -546,6 +562,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const res = checkDone(task);
   console.log(`${task.id} is a "${res.type}" task. Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
+  for (const n of res.notes || []) console.log(`  note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);
 }

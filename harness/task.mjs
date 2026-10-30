@@ -368,6 +368,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   }
 
   const check = checkDone(target);
+  // 2.38.0: notes that don't block (built but not wired, in warn mode), shown and logged once per done.
+  for (const n of check.notes || []) {
+    console.warn(`[done] note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);
+    emitEvent({ type: 'task.unwired', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: ${n}`.slice(0, 400) });
+  }
   // 2.33.0: task done --check runs every cheap precondition and stops before the game gates. A missing
   // full verify is reported, not refused: running it is the next step.
   const VERIFY_LABEL = 'Full verify green after the last change';

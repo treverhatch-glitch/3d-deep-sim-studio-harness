@@ -3320,6 +3320,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.38.0: built but not wired (qa/selftest-238.mjs).
+{
+  const dir = copyRepo();
+  const { selftest238 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-238.mjs')).href);
+  await selftest238({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
