@@ -3336,6 +3336,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.40.0: a quieter watchdog log and the health counts (qa/selftest-240.mjs).
+{
+  const dir = copyRepo();
+  const { selftest240 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-240.mjs')).href);
+  await selftest240({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

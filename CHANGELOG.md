@@ -4,6 +4,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.40.0] — 2026-10-31
+2.40.0: a quieter watchdog log, and the new signals in the health report. The research pack counted 11 to 23 watchdog events per finished task in the Marina run; the same error, logged every 3 minutes, buries the lines that matter.
+### Added
+- **`STUDIO_WATCHDOG_QUIET_MIN`** (opt-in; harness/watchdog.mjs `logActions`): the same watchdog action (kind, task and message, numbers ignored) is logged once per window; when it shows up again after the window, its line says how many times it repeated meanwhile (`meta.repeated`). The actions themselves still happen every pass. 60 is a good start.
+- **Harness health** (`npm run harness-health`) counts watchdog log lines per landing, checks that passed having run nothing (`gate.silent_green`, 2.36), whole-game reds and environment re-runs (2.37), and unwired code noted at done (`task.unwired`, 2.38).
+- qa/selftest-240.mjs: 2 checks (a repeating action is logged once per window with its count, different tasks still logged, off by default; the health counts and their line).
+
 ## [2.39.0] — 2026-10-31
 2.39.0: the Game Bible says what each control must change. Until now a control's "did it work" test was the game's own `expect` in qa.mjs, written by the same agents that build the game: a weak or gamed one (`expect: () => true`) passes a buy button that buys nothing. The research pack's Hatchfield timeline has them ("Fire bell does nothing", "Extra jet bridges ... buy nothing").
 ### Added

@@ -92,6 +92,14 @@ export function health(events, { since = 0, now = Date.now() } = {}) {
     tokens: Math.round(sessionTokens + reported),
     tokensPerLanding: landings ? Math.round((sessionTokens + reported) / landings) : null,
     untrackedDones,
+    // 2.40.0: the watchdog's own noise (the research pack measured 11-23 watchdog events per finished task),
+    // and the 2.36-2.38 signals: checks that ran nothing, whole-game reds, unwired code at done.
+    watchdogEvents: evs.filter((e) => e.type === 'watchdog.action').length,
+    watchdogPerLanding: landings ? +(evs.filter((e) => e.type === 'watchdog.action').length / landings).toFixed(1) : null,
+    silentGreens: evs.filter((e) => e.type === 'gate.silent_green').length,
+    wholeRed: evs.filter((e) => e.type === 'whole.red').length,
+    wholeEnvironment: evs.filter((e) => e.type === 'whole.environment').length,
+    unwired: evs.filter((e) => e.type === 'task.unwired').length,
   };
   out.misses = [];
   if (out.refusalsPerLanding !== null && out.refusalsPerLanding > TARGETS.refusalsPerLanding) out.misses.push(`refusals per landing ${out.refusalsPerLanding} (target ≤ ${TARGETS.refusalsPerLanding})`);
@@ -113,6 +121,7 @@ export function renderHealth(h) {
     `- Forced dones: ${h.forced}; stopped by budget: ${h.budgetStops}; stalled sessions: ${h.stalls}; launches skipped: ${h.launchesSkipped}`,
     `- Verify (median): ${v.scoped !== null ? `${Math.round(v.scoped)} s scoped` : 'no scoped runs'}, ${v.unscoped !== null ? `${Math.round(v.unscoped)} s unscoped` : 'no unscoped runs'} (${v.runs} runs); task done to landed: ${h.doneMedianMin !== null ? `${h.doneMedianMin} min` : 'n/a'}`,
     `- Tokens: ${(h.tokens / 1e6).toFixed(2)}M${h.tokensPerLanding !== null ? ` (${(h.tokensPerLanding / 1e6).toFixed(2)}M per landing)` : ''}; dones with no usage recorded: ${h.untrackedDones}`,
+    `- Watchdog log lines: ${h.watchdogEvents ?? 0}${h.watchdogPerLanding != null ? ` (${h.watchdogPerLanding} per landing)` : ''}; checks that ran nothing: ${h.silentGreens ?? 0}; whole-game reds: ${h.wholeRed ?? 0} (environment ${h.wholeEnvironment ?? 0}); unwired code noted at done: ${h.unwired ?? 0}`,
   ];
   return `${lines.join('\n')}\n`;
 }
