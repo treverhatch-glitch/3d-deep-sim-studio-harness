@@ -22,6 +22,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from '../harness/event.mjs';
 
 const REPORTS = path.join(REPO_ROOT, 'qa', 'reports');
@@ -81,7 +82,7 @@ export async function controlsCheck({ bibleFile = BIBLE, reportsDir = REPORTS, t
   return { ok: problems.length === 0, problems, notes, checked };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const res = await controlsCheck();
   if (process.argv.includes('--json')) console.log(JSON.stringify(res));
   for (const n of res.notes) console.log(`[controls] note: ${n}`);

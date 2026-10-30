@@ -91,5 +91,19 @@ fs.writeFileSync(rescueFile('T-903'), '# Rescue of T-903\\n\\n' + diag + 'Decisi
 const d2 = applyRescue({ id: 'T-904', title: 'Rescue: T-903 stuck (sessions)' });
 console.log(JSON.stringify({ d1, h1, d2, h2: readHolds()['T-903']?.parked?.rescue }));`);
   const dc = fs.readFileSync(path.join(dir, 'harness', 'done-check.mjs'), 'utf8');
+  // 5. A script that compares its own path with a URL pathname ("/D:/a/...") never runs its CLI on Windows: the
+  // controls gate passed there without checking anything (PR #5 CI). Every entry check uses fileURLToPath.
+  const offenders = [];
+  for (const sub of ['harness', 'qa', 'scripts', 'hub', 'tools']) {
+    const root = path.join(dir, sub);
+    if (!fs.existsSync(root)) continue;
+    for (const f of fs.readdirSync(root, { recursive: true })) {
+      if (!/\.m?js$/.test(String(f)) || /node_modules/.test(String(f))) continue;
+      const text = fs.readFileSync(path.join(root, String(f)), 'utf8');
+      if (/new URL\(import\.meta\.url\)\.pathname/.test(text) && !/selftest-235/.test(String(f))) offenders.push(`${sub}/${f}`);
+    }
+  }
+  report('2.35.0: no script finds its own path from a URL pathname (on Windows its CLI would never run, and a gate would pass without checking)', offenders.length === 0, offenders.join(', '));
+
   report('2.35.0: a finished rescue acts on its decision (retry unparks the task and resets its budget, split keeps it parked until the pieces land); step 2 must decide split or needs-person', ap.d1 === 'retry' && ap.h1 === null && ap.d2 === 'split' && ap.h2 === 'split' && /step 2: the decision must be split or needs-person/.test(dc), JSON.stringify(ap));
 }

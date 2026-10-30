@@ -11,7 +11,9 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 - **Rescue models with fallbacks**: `STUDIO_RESCUE_MODEL`, `STUDIO_RESCUE_MODELS`, `STUDIO_TIER_TOP_MODEL`; each step skips models marked out by quota or spend guard (harness/budget.mjs `budgetStopFor`) and models an earlier step used, then falls back to the same family, then to the launcher's choice. A rescue's model is a preference, never a blocker.
 - **The rescue done-check** (task type `rescue`, studio/skills/rescue.md): `studio/rescues/<ID>.md` written since the rescue started, a diagnosis of 40+ words, one decision (retry, split, needs-person); a split needs the smaller tasks queued, each naming the stuck task (they skip the dev "yes": they are parts of a planned task). A finished rescue acts on its decision: retry unparks and resets the budget, split keeps it parked until the pieces land, needs-person asks.
 - **The morning report** separates "Being rescued (no action needed)" from "Needs you", lists shelved tasks as shelved, and leaves out rescues a later step replaced.
-- qa/selftest-235.mjs: 6 checks (model choice and fallbacks; ladder steps 1, 2 and 3 end to end; rescues off; decisions applied and step 2 can't retry).
+### Fixed
+- **The controls gate checked nothing on Windows**: qa/controls-check.mjs found its own path from a URL pathname (`/D:/a/...`), so its command line never ran and the gate exited 0 with no checks. It uses `fileURLToPath` now, and a selftest refuses the pattern in any script (the selftest's sabotage of the gate is what caught it in CI).
+- qa/selftest-235.mjs: 7 checks (model choice and fallbacks; ladder steps 1, 2 and 3 end to end; rescues off; decisions applied and step 2 can't retry; no URL-pathname entry checks).
 
 ## [2.34.0] — 2026-10-31
 2.34.0: the harness's own numbers, every night. The Marina measurements (refusals per landing, harness-caused hand-backs, verify time, untracked builders) were dug out of the event log by hand, and nothing said when a release made them worse.
