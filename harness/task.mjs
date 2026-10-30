@@ -1015,6 +1015,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.30q: drain on: a new done waits here (before its marker, so drain wait doesn't wait for it).
     { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }
     await busyMod.markDoneRunning(targetId, whoAmI(flags)).catch(() => {});
+    // 2.34.0: when a done started, so the health report can time each done (the Marina notes asked for it).
+    emitEvent({ type: 'task.done.start', agent: whoAmI(flags), task: targetId, msg: `${targetId}: task done started`, meta: { at: Date.now() } });
     let done;
     try {
       done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });

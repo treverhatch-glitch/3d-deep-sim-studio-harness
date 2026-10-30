@@ -97,6 +97,10 @@ In a lane copy, `npm run verify` and `task done` check only what the lane change
 - **Controls.** The Game Bible lists every control a player has (`studio/bible/controls.json`). Each track's input test presses them for real (the browser check for web, `tools/controls.gd` in the Godot gate) and the `controls` gate fails when one was never pressed or did nothing.
 - **Protected files.** Scenarios' expected outcomes, regressions, the controls list, the gates and the checks themselves (`studio/protected.json`) change only with the owner's signed approval: `npm run approve -- keygen` once on your own machine, then `npm run approve -- protected --note "why"` for a change you want. CI checks it with the main branch's copy of the checker, so a branch can't weaken it. A forced `task done` needs `npm run approve -- force <ID>`.
 
+## The harness's own numbers (2.34.0)
+
+`npm run harness-health -- --morning` is the morning report: what landed, what needs you (parked tasks, forced work, protected changes waiting for your approval), and how the harness itself did: refusals per landing (target ≤ 1.5), hand-backs the harness caused (target ≤ 5%), verify time, tokens per landing, and builders whose usage wasn't recorded. The hourly run report carries the same numbers.
+
 ## The attending game dev is optional (2.30o)
 
 The harness must run without anyone watching. While a studio has an active game, the hub runs the

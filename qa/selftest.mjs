@@ -3278,6 +3278,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.34.0: harness health numbers and the morning report (qa/selftest-234.mjs).
+{
+  const dir = copyRepo();
+  const { selftest234 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-234.mjs')).href);
+  await selftest234({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

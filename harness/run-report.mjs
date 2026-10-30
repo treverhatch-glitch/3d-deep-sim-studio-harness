@@ -23,6 +23,7 @@ import { taskType } from './done-check.mjs';
 import { buildLearned, writeLearned } from './learn.mjs';
 import { renderScorecard } from './scorecard.mjs';
 import { readNotes } from './notes.mjs';
+import { health as harnessHealth, renderHealth } from './health.mjs';
 import { describeConsent } from './data-consent.mjs';
 import { describeMode } from './mode.mjs';
 import { sessions as agentSessions } from './agent.mjs';
@@ -73,7 +74,11 @@ export function buildRunReport({ final = false } = {}) {
   const learned = buildLearned();
   const notes = readNotes();
   const now = Date.now();
+  // 2.34.0: the harness's own numbers over the whole run (harness/health.mjs).
+  let healthNow = null;
+  try { healthNow = harnessHealth(readRecentEvents(0), { since: first ? Date.parse(first) : 0, now }); } catch {}
   return {
+    health: healthNow,
     at: new Date(now).toISOString(),
     final,
     game: slug().title || '(no Bible yet)',
@@ -114,6 +119,7 @@ export function renderRunReport(r) {
   L.push('## Progress', '');
   L.push(`${t.done} tasks done, ${t.inProgress} in progress, ${t.waiting} waiting.`, '');
   L.push('| Type | Done | Open |', '| --- | --- | --- |', ...Object.entries(t.byType).sort().map(([k, v]) => `| ${k} | ${v.done} | ${v.open} |`), '');
+  if (r.health) L.push("## The harness's own numbers", '', ...renderHealth(r.health).split('\n').slice(2).filter(Boolean), '');
   L.push('## Did the checks hold?', '');
   // 2.30c (G3): failing gates first, in plain words; "not run" kept apart from "pass".
   L.push('Gates, failing first:', '', ...gateWords(json('.studio/gates-last.json'), json('studio/gates.json')?.gates || []).lines.map((x) => `    ${x}`), '');

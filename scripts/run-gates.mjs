@@ -29,6 +29,7 @@ const deep = argv.includes('--deep') || process.env.STUDIO_VERIFY_DEEP === '1' |
 const useCache = !(argv.includes('--no-cache') || process.env.STUDIO_GATE_CACHE === '0');
 
 const all = cfg.gates || [];
+const runStarted = Date.now();
 const DEEP = all.some((g) => 'deep' in g) ? new Set(all.filter((g) => g.deep).map((g) => g.id)) : new Set(['selftest', 'hub-smoke', 'hud']);
 const LITE = all.some((g) => 'lite' in g) ? new Set(all.filter((g) => g.lite).map((g) => g.id)) : new Set(['purity', 'isolation', 'golden', 'regressions', 'playtest', 'secrets']);
 const { readMode, scopeOf } = await import('../harness/mode.mjs');
@@ -150,6 +151,13 @@ try {
   }
 } catch {
   // read-only checkout: the board just shows "not run"
+}
+// 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
+try {
+  const { emitEvent } = await import('../harness/event.mjs');
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null } });
+} catch {
+  // the event log is a help, never a blocker
 }
 // 2.31.0: fail closed. A verify where no gate ran checked nothing; it used to print "0/0 passed, all
 // required gates green" and count as a full verify.

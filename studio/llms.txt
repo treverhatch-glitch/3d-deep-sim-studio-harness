@@ -95,6 +95,7 @@
 - `npm run verify -- --all` — (2.31.0) in a lane copy verify is scoped to the lane's changes; --all runs every game check
 - `npm run approve -- show` — (2.32.0) protected files this branch changed, and whether the owner approved them; only the owner runs `approve -- protected --note "…"` / `approve -- force <ID> --reason "…"` (agents hand the task back and ask)
 - `npm run task -- done <ID> --agent <you> --check` — (2.33.0) the quick preconditions in seconds (no-change, proof, done-check, uncommitted), before you spend time on npm run verify
+- `npm run harness-health -- --morning [--since 24h]` — (2.34.0) the harness's own numbers (refusals per landing, harness-caused hand-backs, verify time, tokens per landing) and what needs a person
 - `node qa/controls-check.mjs` — (2.32.0) every control in studio/bible/controls.json passes by real input on every shipped track
 - `node harness/lock.mjs claim path:<narrow path> --owner <name>` — whole top-level folders (studio, qa, cartridges, src, …) need `--wide "<why>"`
 - `npm run task -- add "…" --not-layer <id>` — when a title's word matches a crossed-out layer but means something else (logged for the Director)

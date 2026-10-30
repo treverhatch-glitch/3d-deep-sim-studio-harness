@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.34.0] — 2026-10-31
+2.34.0: the harness's own numbers, every night. The Marina measurements (refusals per landing, harness-caused hand-backs, verify time, untracked builders) were dug out of the event log by hand, and nothing said when a release made them worse.
+### Added
+- **`npm run harness-health`** (harness/health.mjs; `--since 24h|7d|<ISO>`, `--json`, `--write <folder>`): landings; refusals per landing and why (no code changed, uncommitted, game checks, visual proof, verify, merge conflict, regression or lesson, review); hand-backs and the share the harness caused; forced dones, budget stops, stalls, skipped launches; median verify time scoped vs unscoped; median task done to landed; tokens per landing (weighted, launched sessions plus self-reports); dones by builders with no usage recorded. Targets a release must not miss: refusals per landing ≤ 1.5, harness-caused hand-backs ≤ 5%, every done's usage recorded.
+- **The morning report** (`npm run harness-health -- --morning`): the numbers, what landed, and **Needs you**: parked tasks (budget, breaker, watchdog) with why, forced work waiting for review, protected changes waiting for the owner's approval, a stopped studio.
+- **The run report** (`npm run run-report`, hourly from the HUB) has a "The harness's own numbers" section over the whole run.
+- Events: **`gates.run`** after every verify (time, scoped, partial, failed gates, the game gate's time) and **`task.done.start`** when a done begins (not for `--check`).
+- qa/selftest-234.mjs: 3 checks (the numbers from a planted event log; the two new events; the morning report lists a parked task).
+
 ## [2.33.0] — 2026-10-31
 2.33.0: one door to the studio's branch, agents see only their own keys, and the Marina builders' false refusals. In the Marina run builders outside the harness committed game code straight onto the studio's branch; every agent inherited the launcher's whole environment (every provider key, HUB_TOKEN); a re-claimed task was refused as "no code changed" 3 times; a done refused for uncommitted files only after its 10+ minute game checks; and a dropped task's id was handed out again.
 ### Added
