@@ -1,0 +1,8 @@
+{
+  "note": "Every control a player has, in the Game Bible. The controls check (qa/controls-check.mjs) fails the build when a control listed here has no passing real-input result on a track the game ships. Ids are what each track's input test reports. Only a person changes this list (2.32.0: it is a protected file).",
+  "tracks": ["web"],
+  "controls": [
+    { "id": "buy-unit", "name": "B buys a unit", "input": "key B", "expect": "a unit appears and credits are spent" },
+    { "id": "buy-button", "name": "The Buy button buys a unit", "input": "click the Buy button", "expect": "a unit appears and credits are spent" }
+  ]
+}

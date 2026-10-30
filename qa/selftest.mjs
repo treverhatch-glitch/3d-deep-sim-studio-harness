@@ -143,6 +143,20 @@ const report = (label, ok, detail = '') => {
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
+  // 2.32.0: a branch changes a scenario's expected outcome while main has an owner key, with no approval.
+  protected: (d) => {
+    const env = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', STUDIO_OWNER_KEY: path.join(d, '..', `owner-sab-${path.basename(d)}.pem`) };
+    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, ...env } });
+    sh('git init -q -b main && git add -A && git commit -qm base && node harness/approve.mjs keygen && git add -A && git commit -qm key && git checkout -q -b sab');
+    const qa = path.join(d, 'cartridges', 'example-sim', 'qa.mjs');
+    fs.writeFileSync(qa, fs.readFileSync(qa, 'utf8').replace("expect: 'won' }", "expect: 'lost' }"));
+    return { STUDIO_PROTECT_BASE: 'main' };
+  },
+  // 2.32.0: the newest real-input report says the Bible's Buy button did nothing.
+  controls: (d) => {
+    fs.mkdirSync(path.join(d, 'qa/reports'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'qa/reports/browser_9999999999999.json'), JSON.stringify({ controls: [{ id: 'buy-unit', ok: true }, { id: 'buy-button', ok: false, why: 'planted: nothing happened' }] }));
+  },
   // 2.30n: the studio's game (not a cartridge) whose own scenarios fail.
   game: (d) => {
     fs.writeFileSync(path.join(d, 'studio/game.json'), JSON.stringify({ game: 'zz-sab' }));
@@ -208,6 +222,8 @@ const EXPECT = {
   secrets: /leak\.txt/,
   'godot-unit': /test_money_drains: expected money to drop/,
   game: /FAIL game:qa/,
+  controls: /web: "buy-button" did nothing \(planted/,
+  protected: /protected file\(s\) changed since main with no owner approval/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -3253,6 +3269,46 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest231 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-231.mjs')).href);
   await selftest231({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.32.0: the Game Bible's controls list against each track's real-input results (qa/selftest-232.mjs).
+{
+  const dir = copyRepo();
+  const { selftest232 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-232.mjs')).href);
+  await selftest232({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.33.0: one door, scoped agent env, guard hook, re-claim baseline, --check, monotonic ids (qa/selftest-233.mjs).
+{
+  const dir = copyRepo();
+  const { selftest233 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-233.mjs')).href);
+  await selftest233({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.34.0: harness health numbers and the morning report (qa/selftest-234.mjs).
+{
+  const dir = copyRepo();
+  const { selftest234 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-234.mjs')).href);
+  await selftest234({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.35.0: the rescue ladder for a task stopped by its budget (qa/selftest-235.mjs).
+{
+  const dir = copyRepo();
+  const { selftest235 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-235.mjs')).href);
+  await selftest235({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
+// 2.36.0: a check that exits 0 but ran no tests (qa/selftest-236.mjs).
+{
+  const dir = copyRepo();
+  const { selftest236 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-236.mjs')).href);
+  await selftest236({ dir, run, report, tmpRoot });
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 

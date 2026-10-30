@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { judgePass } from './silent-green.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
@@ -94,7 +95,12 @@ export function engineGates(paths) {
 
 function runGodot(project) {
   const bin = godotBin();
-  const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
+  // 2.32.0: tools/gate.gd presses every control in tools/controls.gd and writes one result per id here,
+  // for the controls check (qa/controls-check.mjs).
+  const reports = path.join(REPO_ROOT, 'qa', 'reports');
+  fs.mkdirSync(reports, { recursive: true });
+  const env = { ...process.env, STUDIO_CONTROLS_OUT: path.join(reports, `controls-godot-${project.replace(/[^\w.-]+/g, '_')}.json`) };
+  const opts = { cwd: REPO_ROOT, encoding: 'utf8', env, timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
   const steps = [['--headless', '--path', project, '--import']];
   if (fs.existsSync(path.join(REPO_ROOT, project, 'tools', 'gate.gd'))) steps.push(['--headless', '--path', project, '--script', 'res://tools/gate.gd']);
   for (const args of steps) {
@@ -131,7 +137,10 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
       const r = slot(g.id, () => spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
       if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS)`;
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
-      rows.push({ id: g.id, ok: r.status === 0, required: g.required, why: r.status === 0 ? '' : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
+      // 2.36.0: exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
+      const sg = r.status === 0 ? judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` }) : null;
+      if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

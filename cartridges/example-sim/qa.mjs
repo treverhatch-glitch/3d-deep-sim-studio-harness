@@ -34,7 +34,8 @@ export const browser = {
   input: (action) => (action.type === 'spawn' ? { key: 'b' } : null),
   // Every control and what it must do; the gate presses each one and fails one that does nothing.
   controls: [
-    { name: 'B buys a unit', key: 'b', when: (s) => s.resources.credits >= nextUnitCost(s), expect: (before, after) => unitCount(after) > unitCount(before), what: 'a unit appears and credits are spent' },
+    { id: 'buy-unit', name: 'B buys a unit', key: 'b', when: (s) => s.resources.credits >= nextUnitCost(s), expect: (before, after) => unitCount(after) > unitCount(before), what: 'a unit appears and credits are spent' },
+    { id: 'buy-button', name: 'The Buy button buys a unit', click: '#buy', when: (s) => s.resources.credits >= nextUnitCost(s), expect: (before, after) => unitCount(after) > unitCount(before), what: 'a unit appears and credits are spent' },
   ],
   // What the screen must agree with; each string is a mismatch.
   wiring: (state, view) => {

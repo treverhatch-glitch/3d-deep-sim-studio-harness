@@ -91,6 +91,15 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   } catch (e) {
     actions.push({ kind: 'error', msg: `task budgets: ${e.message}` });
   }
+  // 2c. 2.35.0: the rescue ladder (harness/rescue.mjs). A task stopped by its budget gets a rescue on a
+  // different model family; a stuck rescue (own budget, or unclaimed for an hour) moves it to a split
+  // rescue on the next model; after that it is shelved for the morning report. Nothing waits on it.
+  try {
+    const { rescuePass } = await import('./rescue.mjs');
+    actions.push(...(await rescuePass({ now })));
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `rescues: ${e.message}` });
+  }
   // 3. An idle studio: sessions ran for the whole window, nothing finished.
   const win = now - lim.idleHours * 3600000;
   const turnedOnAt = auto ? 0 : Date.parse(w.at || '') || 0;

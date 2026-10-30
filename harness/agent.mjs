@@ -53,6 +53,8 @@ import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from 
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
+import { agentEnv } from './agent-env.mjs';
+import { rescueOf, rescueModelFor } from './rescue.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
@@ -553,7 +555,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) };
+  // 2.33.0: the agent sees only its own tool's credentials and the studio's settings (harness/agent-env.mjs).
+  const env = agentEnv({ tool: custom ? 'custom' : tool, role, model, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
   // Claude Code stops a shell command after 2 minutes by default, so agents sent a long verify to the
   // background and their session ended with it (test #3). Give commands 10 minutes unless set.
   env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';
@@ -925,6 +928,25 @@ export function startAgent(opts, { detach = false } = {}) {
     if (!g.ok) {
       emitEvent({ type: 'profile.refused', agent: 'launcher', to: 'producer', status: 'blocked', msg: `Not started (${role} on ${profile}): ${g.why}` });
       return { ok: false, message: `Not started: ${g.why}.` };
+    }
+  }
+  // 2.35.0: a rescue runs on the rescue model: a different family from the models that got stuck (harness/rescue.mjs).
+  if (opts.task && !opts.model) {
+    try {
+      const t = [...parseNextQueue().inProgress, ...parseNextQueue().backlog].find((x) => x.id === opts.task);
+      const stuck = t ? rescueOf(t.title) : null;
+      if (stuck) {
+        // A later step skips the models earlier steps used, so the same blind spot isn't asked twice.
+        const earlier = readRecentEvents(20000).filter((e) => e.type === 'task.rescue' && e.task === stuck && e.meta?.rescue !== opts.task).map((e) => e.meta?.model).filter(Boolean);
+        const m = rescueModelFor(stuck, { exclude: earlier });
+        if (m.model) {
+          model = m.model;
+          opts.model = m.model;
+          emitEvent({ type: 'model.rescue', agent: opts.by || 'launcher', task: opts.task, msg: `${opts.task} (rescue of ${stuck}) runs on ${m.model}${m.differentFamily ? `, not ${m.usedFamilies.join('/') || 'the stuck task'}'s family` : ''}` });
+        }
+      }
+    } catch {
+      // the rescue model is a preference, never a blocker
     }
   }
   // 2.30d (plan #3): a task that came back without being done starts one model tier up.
