@@ -4,6 +4,30 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.1] — 2026-11-01
+2.58.1: the crew's Windows launch bug and agy's headless permissions (crew report, 2026-11-01).
+### Fixed
+- **P-066 (crew P-036): on Windows, agents start with their arguments intact.**
+  - The launcher no longer uses `shell: true` (new `harness/launch.mjs`). npm `.cmd` shims run as node on their `.js`
+    entry, `.exe` files start directly, and any other `.cmd` goes through cmd.exe with every argument quoted by one
+    function.
+  - Claude Code gets each allowed-tools pattern as its own argument. Before, every command waited for approval and
+    auto-started agents quit after about 5 turns.
+  - agy gets its prompt as one argument, so no more `unexpected argument`. A prompt too long for the command line goes
+    by kickoff file.
+  - Values filled into a custom command's `{kickoff}`, `{model}` and the like are quoted for the shell.
+  - The quota probe and the reviewer CLI use the same helper.
+  - `qa/selftest-259h.mjs` (9 checks; on Windows CI it runs real `.cmd` shims and a cmd.exe round trip).
+### Added
+- **P-067 (crew P-037): agy's headless allow-rules, enrolled once by the owner.**
+  - `npm run agent -- allow agy --dry-run`, then `--by <owner> --scope user`.
+  - It merges the harness command list (the same one Claude gets) into agy's
+    `~/.gemini/antigravity-cli/settings.json` (agy has no project-level file) as `permissions.allow` rules.
+  - It only adds, backs the file up first, writes atomically, logs who approved it, and never turns on skip-all.
+  - Until the rules are enrolled, starting an agent on agy prints one line saying what to run.
+  - `qa/selftest-259i.mjs` (7 checks).
+  - UNTESTED with real agy: whether it accepts these rules shows on the owner's first run.
+
 ## [2.58.0] — 2026-11-01
 2.58.0: the round-2 break-test fixes and the crew's report, batched (owner's rule). Six parts, each with its own
 commits and selftest file (`qa/selftest-258a.mjs` … `258f`, 56 checks; each check fails on 2.57).

@@ -2596,7 +2596,8 @@ import { toolCommand } from ${u('harness/agent.mjs')};
 import { ALLOWED, allowedTools } from ${u('harness/allowlist.mjs')};
 const k = ['builder', 'producer', 'director', 'liaison'].map((role) => kickoff({ role, agent: role + '-1', model: 'm' }));
 const c = toolCommand('claude', { model: 'm', prompt: 'x' });
-console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv[c.argv.indexOf('--allowedTools') + 1] === allowedTools(), n: ALLOWED.length }));`);
+// P-066: the launcher passes each pattern as its own argument after --allowedTools (no quoting can split them).
+console.log(JSON.stringify({ all: k.every((t) => /You may run, without asking: \`node\`, \`npm\`/.test(t) && ALLOWED.every(([n]) => t.includes('\`' + n + '\`'))), same: c.argv.slice(c.argv.indexOf('--allowedTools') + 1, c.argv.indexOf('--allowedTools') + 1 + ALLOWED.length).join(',') === allowedTools(), n: ALLOWED.length }));`);
   report('#15: every kickoff lists exactly what the agent may run, the same allowlist the launcher passes (the 2.23 set)', ka.all === true && ka.same === true && ka.n === 15, JSON.stringify(ka));
   // G3: failing first in plain words; "not run" is never a pass.
   const gw = probe(`import { gateWords } from ${u('harness/gate-words.mjs')};
@@ -3571,6 +3572,25 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest258C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258c.mjs')).href);
   await selftest258C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// P-066 (crew P-036): agents start with no shell and their arguments intact on Windows: npm .cmd shims run as node on
+// their .js entry, any other .cmd through cmd.exe with one quoting function, custom-command values quoted for the
+// shell; end to end through `agent start` with stand-in programs on PATH (qa/selftest-259h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259h.mjs')).href);
+  await selftest259H({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// P-067 (crew P-037): an owner-approved step writes agy's headless allow-rules from the harness allowlist, and the
+// launcher says when they're missing (qa/selftest-259i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259i.mjs')).href);
+  await selftest259I({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

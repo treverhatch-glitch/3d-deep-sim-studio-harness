@@ -464,3 +464,27 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - Bots wake only on a person's @ping: written into `docs/DISCORD-CREW.md` (2.57.1) and the Unity repo's
   `docs/crew/BOT-RULES.md` rule 17 (Unity PR #12); the 👀/✅ rule was already rule 13 there.
 
+## From the crew, 2026-11-01 night (studio-hatchfield on 2.56.0; their log numbers P-034 to P-037)
+- Their **P-034** (size rule blames merged-in code) = P-061 here: fixed in 2.58.0 (part A).
+- Their **P-035** (`buildingMass.test.ts.snap` line endings) = P-062 here: fixed in 2.58.0 (part F: game checks run with
+  `CI=true`, verify names files it changed); the game repo should still add `*.snap text eol=lf` (crew task).
+
+### P-066 — On Windows the launcher split agent arguments that contain spaces (crew P-036) · fixed in 2.58.1
+- **What happened (crew):** every auto-started Claude agent quit after about 5 turns with its node/npm/git commands
+  waiting for approval; agy failed with `unexpected argument "are"`. The same flag typed by hand worked.
+- **Why (read in code, reproduced on Linux with the same `shell: true` branch):** harness/agent.mjs launched with
+  `spawn(argv[0], argv.slice(1), { shell: IS.win })`; with `shell: true` Node joins the arguments unquoted and cmd.exe
+  splits them again (and reads `( ) & % ^`). Claude's `--allowedTools` arrived as 32 pieces; agy's prompt as words.
+- **Fix:** `harness/launch.mjs`: shell:false; npm shims resolved to node + their `.js`; `.exe` direct; other `.cmd`
+  through cmd.exe with one quoting function; prompts by stdin or one argument (kickoff file when too long).
+- **Proof:** `qa/selftest-259h.mjs` 9/9 (3 runs, Linux); Windows CI runs it with real `.cmd` shims. Real installed
+  `claude.cmd`/`agy.cmd` on Hatch's PC: UNTESTED until one auto-started agent runs `node`.
+- **Supervisor:** stays stopped until 2.58.1 is pulled and one auto-started agent has run `node` successfully.
+
+### P-067 — agy in headless mode denies its own shell commands (crew P-037) · fixed in 2.58.1 (owner runs it once)
+- **Why:** agy reads allowed commands only from `~/.gemini/antigravity-cli/settings.json` (`permissions.allow`); in
+  headless mode an unlisted command is auto-denied. The harness never wrote it.
+- **Fix:** `npm run agent -- allow agy --dry-run`, then `--by <owner> --scope user` (merge only, backup first, atomic,
+  logged, never skip-all). Research links in docs/AGENT-TOOLS.md.
+- **UNTESTED:** real agy accepting the rules (on Windows, the `regex:` form) until the owner's first run.
+
