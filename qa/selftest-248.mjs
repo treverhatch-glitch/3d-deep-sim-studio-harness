@@ -12,6 +12,6 @@ export async function selftest248({ dir, run, report, tmpRoot }) {
   const t = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'engine/moth-run/engine.json'), 'utf8')); } catch { return {}; } })();
   const b = run(dir, 'node harness/unity.mjs build', env);
   const web = run(dir, 'node harness/unity.mjs build --target web', env);
-  const ci = fs.readFileSync(path.join(dir, '.github/workflows/ci.yml'), 'utf8');
+  const ci = fs.readFileSync(path.join(dir, '.github/workflows/ci.yml'), 'utf8').replace(/\r\n/g, '\n'); // Windows checks out CRLF
   report('2.48.0: a Unity track builds a Windows .exe by default with no browser export (the Arcade lists it as native); --target web still makes a WebGL build; CI\'s Unity build job makes the Windows build', st.status === 0 && t.engine === 'unity' && t.webExport === null && t.buildTarget === 'windows' && /Windows build also needs/.test(out(b)) && /WebGL build also needs/.test(out(web)) && /targetPlatform: StandaloneWindows64\n\s+buildMethod: StudioBuild\.Windows/.test(ci) && !/targetPlatform: WebGL/.test(ci), `${out(st)}\n${JSON.stringify(t)}\n${out(b)}\n${out(web)}`);
 }
