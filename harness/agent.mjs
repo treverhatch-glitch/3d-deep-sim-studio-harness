@@ -58,6 +58,7 @@ import { rescueOf, rescueModelFor } from './rescue.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
+import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
@@ -527,6 +528,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + `\nEvery few minutes, say what you are doing in one line: npm run agent -- now "<what you are doing>". The War Room shows it with your work in progress.\n`
     + `\nHarness output is compact in launched sessions: verify prints failures only (each gate's full log is in .studio/gates/out/<gate>.log; open it only when you need it), and \`node harness/task.mjs list\` shows your role's next tasks, not the whole board (--all for everything). Don't cat studio/NEXT.md.\n`
     + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
+    // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
+    // It stays in the stable part (it changes only when a pitfall is added), so the prompt cache still holds.
     + pitfallsForPrompt());
   const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
     + kickTail
@@ -534,7 +537,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.\n` : '')
     + refreshRule({ oneTask, task })
-    + (note ? `\nNote from ${by || 'the Producer'}: ${note}\n` : '');
+    // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
+    + (refreshes > 0 && task ? `\nThis is a fresh session after a refresh: read studio/handoffs/${task}.md first; don't redo what it says is done.\n` : '')
+    // PU-36 (P-049): the --note is written by whoever started the session (a person, the Producer, a chat bot), so it
+    // goes in the marked block with its real sender (--by, or "unknown"), never "the Producer" by default.
+    + (note ? `\n${untrustedBlock([{ label: `Note from ${oneLine(by) || 'unknown'} (sent with --note when this session was started)`, text: note }])}` : '');
   // 2.30q (#8): warn when something session-specific slipped into the stable prefix (it would break the cache).
   { const leaks = volatileLeaks(stable, { agent, model, task }); if (leaks.length) emitEvent({ type: 'prompt.prefix.volatile', agent, to: 'producer', status: 'warn', msg: `${role} prompt prefix carries ${leaks.join(', ')}: every ${role} session misses the prompt cache; move it below the stable marker`, meta: { role, leaks } }); }
   const prompt = layoutPrompt({ stable, volatile });
@@ -671,7 +678,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const maxRefresh = Number(process.env.STUDIO_REFRESH_RELAUNCH ?? 5);
   if (again && !readStop() && (opts2.refreshes || 0) < maxRefresh) {
     emitEvent({ type: 'agent.refresh', agent, task: again, msg: `${agent} refreshed on ${again}; a fresh session continues from studio/handoffs/${again}.md` });
-    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note: `Fresh session after a refresh: read studio/handoffs/${again}.md first; don't redo what it says is done.`, by, refreshes: (opts2.refreshes || 0) + 1 });
+    return runAgent({ role, agent, tool, model, fallback, task: again, lane, oneTask, division, note, by, refreshes: (opts2.refreshes || 0) + 1 });
   }
   if (result.bad && !fallback.length && result.troubleKind === 'quota') {
     if (isNim(model, tool) && process.env.STUDIO_NIM_FALLBACK) fallback = [process.env.STUDIO_NIM_FALLBACK];
