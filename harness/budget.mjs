@@ -22,6 +22,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { spawnAgentSync } from './launch.mjs';
 
 export const BUDGET_FILE = path.join(REPO_ROOT, 'studio', 'budget.json');
 export const QUOTA_FILE = path.join(STUDIO_STATE_DIR, 'tool-quota.json');
@@ -300,7 +301,8 @@ export function probeTool(tool, { timeoutMs = 90000 } = {}) {
   const custom = process.env[`STUDIO_${String(tool).toUpperCase()}_PROBE_CMD`];
   const argv = custom ? null : { claude: ['claude', '-p', 'Reply with the word OK.', '--output-format', 'json', '--max-turns', '1'], codex: ['codex', 'exec', '--json', ...(process.env.STUDIO_AGENT_MODEL ? ['-m', process.env.STUDIO_AGENT_MODEL] : []), 'Reply with the word OK.'], agy: ['agy', '-p', 'Reply with the word OK.', '--print-timeout', '60s'] }[tool];
   if (!custom && !argv) return { ok: null, why: `no probe for ${tool}` };
-  const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  // P-066: no shell for the tool (harness/launch.mjs); on Windows "Reply with the word OK." reached claude word by word.
+  const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
   const out = `${r.stdout || ''}\n${r.stderr || ''}`;
   // 2.30 (J12): the provider's own limit message only; a word like "quota" anywhere in the answer isn't one.
   const said = limitLine(r.stderr, r.stdout, r.status);
