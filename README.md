@@ -107,6 +107,10 @@ A task that uses its whole budget isn't handed straight to you, and no step can 
 
 The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated), then `STUDIO_TIER_TOP_MODEL`. Each step picks the first one that is from another family, isn't out of quota or at its spend guard, and wasn't used by an earlier step; then the same family; then the launcher's own choice. `STUDIO_RESCUE_LEVELS` (2) sets the steps before the shelf, `STUDIO_RESCUE_WAIT_MIN` (60) how long a rescue may sit unclaimed, `STUDIO_RESCUE=off` sends budget stops straight to you. A person is needed only for protected files, forced closes, design calls the Bible doesn't settle, or money and accounts.
 
+## Bring a game that already exists (2.43.0)
+
+`npm run onboard -- --path ../my-game --name "My Game" --adopt --ref <its working branch>` brings a half-built game under the studio: its files at that branch under `game/<slug>/`, its own checks declared from its scripts, the Bible drafted from its design docs for you to check and sign. `npm run onboard -- --export` sends the studio's work back as a patch for the game's own repo, where its own review and CI decide. Guide: docs/ONBOARDING-A-GAME.md.
+
 ## The Game Bible says what each control must change (2.39.0)
 
 A control's own test is written by the agents that build the game, so a weak one can pass a button that does nothing. In `studio/bible/controls.json` (which only the owner changes) a control can say what it must change in the game's state, for example `"effect": { "path": "entities.length", "change": "up" }`. The browser check presses it for real and checks that, whatever the game's own test says. Pick a value only that control moves in the moment after the press (income can outrun a purchase's cost).

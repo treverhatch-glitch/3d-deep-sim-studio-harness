@@ -135,7 +135,10 @@ if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required 
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
-  const rec = JSON.stringify({ at: new Date().toISOString(), partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}) }, null, 2);
+  // 2.43.0: the commit this verify ran on, and whether the tree was clean, so task done can trust it on that commit.
+  const headNow = (() => { try { const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } })();
+  const dirtyNow = (() => { try { const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? Boolean(r.stdout.trim()) : null; } catch { return null; } })();
+  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, dirty: dirtyNow, partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;

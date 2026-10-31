@@ -36,9 +36,16 @@ export function queuePreproduction(b) {
   if (b.preproQueued || !b.answers.title) return [];
   const added = [];
   const t = b.answers.title;
+  // 2.43.0: a game that already exists (origin "existing", or brought in with npm run onboard) starts from
+  // what it has: its art and its build, not placeholders and blank beat sheets.
+  const existing = b.answers.origin === 'existing';
   added.push(addTask({ title: `Study: the reference games for ${t} (what to take, what to avoid)`, role: 'reference-scout', priority: 'P1', meta: { size: 2, preproduction: true } }));
-  added.push(addTask({ title: `Art: style sheet and five placeholder assets for ${t} (npm run art -- propose; the game dev approves them)`, role: 'art', priority: 'P1', meta: { size: 2, preproduction: true } }));
-  added.push(addTask({ title: `Docs: storyboard ${t} Phase 1, 2 and 3 as beat sheets in studio/bible/STORYBOARD.md`, role: 'director', priority: 'P1', meta: { size: 2, preproduction: true } }));
+  added.push(addTask(existing
+    ? { title: `Art: style sheet from ${t}'s existing art (what is there, what is consistent, what to replace first; npm run art -- propose; the game dev approves it)`, role: 'art', priority: 'P1', meta: { size: 2, preproduction: true } }
+    : { title: `Art: style sheet and five placeholder assets for ${t} (npm run art -- propose; the game dev approves them)`, role: 'art', priority: 'P1', meta: { size: 2, preproduction: true } }));
+  added.push(addTask(existing
+    ? { title: `Docs: storyboard ${t} Phase 1, 2 and 3 from the current build and its design docs, marking what exists and what is missing (studio/bible/STORYBOARD.md)`, role: 'director', priority: 'P1', meta: { size: 2, preproduction: true } }
+    : { title: `Docs: storyboard ${t} Phase 1, 2 and 3 as beat sheets in studio/bible/STORYBOARD.md`, role: 'director', priority: 'P1', meta: { size: 2, preproduction: true } }));
   // One study per explore layer, up to what the play length can carry; the rest share one task.
   const explore = LAYERS.filter((x) => b.layers[x.id]?.answer === 'explore');
   const each = PLAY_LENGTHS[b.answers.playLength]?.layers || 3;

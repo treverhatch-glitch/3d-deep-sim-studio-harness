@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord } from './done-check.mjs';
 import { summarize as summarizeVerdict } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
@@ -433,7 +433,24 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
     const ggEnv = { ...process.env };
     delete ggEnv.STUDIO_GATE_CHANGED;
-    const gg = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+    // 2.43.0: STUDIO_DONE_REUSE_VERIFY=on (opt-in): the game's checks passed in this agent's own full verify on
+    // this exact commit with a clean tree are not run a second time (on a real 236k-line game that was another
+    // 6 minutes per task, right after the same checks passed).
+    const reused = (() => {
+      if (!/^(on|1|true|yes)$/i.test(process.env.STUDIO_DONE_REUSE_VERIFY || '')) return null;
+      const rec = lastFullRecord();
+      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+      const dirty = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+      const game = (rec?.rows || []).find((r) => r.id === 'game');
+      if (!rec || rec.partial || !head || rec.head !== head || rec.dirty !== false || dirty || !game?.ok) return null;
+      if (rec.scoped && changed?.length && changed.some((f) => !(rec.changed || []).includes(f))) return null;
+      return rec;
+    })();
+    if (reused) {
+      console.log(`[task done] the game's checks passed in your verify at ${String(reused.at).slice(11, 19)} UTC on this commit (${String(reused.head).slice(0, 8)}, clean tree): not run again (STUDIO_DONE_REUSE_VERIFY)`);
+      emitEvent({ type: 'gates.reused', agent: agent || target.role, task: target.id, msg: `${target.id}: game checks from the verify on ${String(reused.head).slice(0, 8)} reused at done` });
+    }
+    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: [{ id: 'game', ok: true }], skipped: [], scope: null }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
     let res = null;
     try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
     if (res?.skipped?.length) {
@@ -718,6 +735,14 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
       if (stuck.some((sid) => new RegExp(`\\b${sid}\\b`).test(title))) meta = { ...meta, promoted: true, origin: 'rescue' };
     } catch {}
   }
+  // 2.43.0: the same title already open (backlog or in progress) is that task, not a second one: a repeated
+  // add (an agent retrying a command whose output it lost) used to queue a duplicate.
+  try {
+    const norm = (x) => String(x || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const board = parseNextQueue();
+    const same = [...board.inProgress, ...board.backlog].find((t) => norm(t.title) === norm(title));
+    if (same) return { id: same.id, priority: same.priority, role: same.role, title: same.title, status: board.inProgress.includes(same) ? 'in-progress' : 'backlog', duplicate: true, warnings: [`already queued as ${same.id}: not added again`] };
+  } catch {}
   // 2.30d (#6): only the Director, Producer and planner (and people) add to the live queue; anyone
   // else's add waits in studio/proposed.json with a one-line reason until the Producer promotes it.
   if (!meta.promoted && !isDecider(agent, process.env)) {
