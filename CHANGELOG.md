@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.47.0] — 2026-10-31
+2.47.0: the owner-approved upgrades U-001 and U-002 from the studio logs, for a game whose web version is adopted and whose
+Unity port is its own repo, with the harness checks free on a private repo.
+### Added
+- **U-001, an engine port in its own repo:** `npm run engine -- link <engine> <repo> [--build windows] [--web "<cmd> {seeds}"] [--source <paths>]`
+  (`harness/engine.mjs linkEngine`).
+  - Records the port's folder (relative, beside the studio), its remote and commit, its gate and parity
+    commands and its build target, without copying anything into it.
+  - `--build windows` makes the Windows build the default for `npm run engine:build` and turns the browser
+    export off.
+  - `--web` gives parity a web side for a game that isn't a cartridge: a command printing one JSON line per
+    seed, compared field by field (`qa/parity.mjs`).
+  - The engine track now belongs to the studio's game (an adopted game or the cartridge).
+- **U-002, the checks on the owner's PC:** with the repo variable `HARNESS_RUNNER=self-hosted`, every
+  GitHub-hosted CI job is skipped and one self-hosted Windows job runs instead (protected files, the release,
+  the browser checks, the Unity template). See `docs/SELF-HOSTED-RUNNER.md`; only for a private repo.
+- `docs/UNITY-TRACK.md`: a port in its own repo, and how to switch from URP to HDRP later.
+- `qa/selftest-247.mjs` (4 checks).
+
 ## [2.46.0] — 2026-10-31
 2.46.0: Unity support. Until now the engine track named Unity but had no starter project, no reading of test results, no
 version check, no controls test and no CI. The rules of a Unity game now live in a pure C# assembly that .NET tests and

@@ -38,6 +38,40 @@ matches the web game on seeds 1 to 5 and 1337, and a planted `UnityEngine.Random
 caught (`scripts/check-unity-template.mjs`, CI job engine-unity-sim). The editor side is proven by CI's
 engine-unity-editor job once the licence secrets exist (below).
 
+## A port in its own repo (2.47.0)
+
+When the port lives in its own repo (Hatchfield: the web game is adopted into the studio, and the Unity
+project is a separate public repo cloned beside it), link it instead of starting from the template:
+
+```bash
+npm run engine -- link unity ../my-unity-port --build windows --web "<web runs command> {seeds}" --source game/<slug>/src/game
+```
+
+- It records `engine/<game>/engine.json`: the port's folder, its remote and commit, the gate, the parity
+  commands and the build target. Nothing is copied into the port's repo; porters work in it on its own
+  branches.
+- `--build windows` makes the Windows `.exe` the default (`npm run engine:build`) and turns the browser
+  export off; the Arcade lists native builds only.
+- `--web` is the web side of parity for a game that isn't a cartridge: a command that prints one JSON line per
+  seed, like the port's (`{"seed":1,"outcome":"won","tick":300,"cash":…}`). Both are compared field by field.
+- `--source` names the web folders whose changes count as drift (`npm run engine -- drift`).
+
+## Render pipeline: URP now, HDRP later
+
+The template and Hatchfield use **URP** at maximum quality. Unity's 2026 plan puts new lighting work into URP,
+and HDRP gets no new features. HDRP stays an option for the best lighting on PC; it can't build for the
+browser. To switch later:
+
+1. In Unity, Package Manager → install **High Definition RP** (the same 17.x line as URP).
+2. **Window → Rendering → HDRP Wizard → Fix All**: it creates the HDRP asset and global settings and makes
+   them active.
+3. **Edit → Rendering → Materials → Convert All Built-in/URP Materials to HDRP** (the Render Pipeline
+   Converter), then check every scene's lighting: HDRP uses physical light units.
+4. Assign the HDRP asset to every Quality level; set the ray tracing level only if every target PC has an
+   RTX-class card (DirectX 12).
+5. Builds: Windows only; the first build compiles many more shaders (expect 30–60 minutes on CI).
+6. The sim (`Assets/Sim`) doesn't change: it never touches rendering.
+
 ## Adopt an existing Unity game
 
 `npm run onboard -- --path ../my-unity-game --name "…" --adopt` declares its checks in

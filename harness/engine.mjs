@@ -31,7 +31,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor, emitEvent } from './event.mjs';
-import { activeCartridge, isTemplateCartridge } from './cartridge.mjs';
+import { activeCartridge, activeGame, isTemplateCartridge } from './cartridge.mjs';
+
+/** 2.47.0: the studio's game (an adopted game, or else the cartridge): the engine track belongs to it. */
+const activeGameName = () => { try { return activeGame().name || activeCartridge().name; } catch { return activeCartridge().name; } };
 
 // Estimates from run #1's SendIt experiment (Godot: a playable game in 3 hours; Unreal: 7 slow hours).
 export const ENGINES = {
@@ -80,7 +83,7 @@ export const ENGINES = {
 };
 
 export const trackFile = (game) => path.join(REPO_ROOT, 'engine', game, 'engine.json');
-export function readTrack(game = activeCartridge().name) {
+export function readTrack(game = activeGameName()) {
   try {
     return JSON.parse(fs.readFileSync(trackFile(game), 'utf8'));
   } catch {
@@ -181,6 +184,50 @@ export async function queueDrift({ by = actor() } = {}) {
   return { ok: true, drift: d, tasks: ids };
 }
 
+/**
+ * 2.47.0 (U-001): an engine port that lives in its own repo, beside the studio (Hatchfield: the web game is
+ * adopted into the studio, the Unity port is its own public repo). Records engine/<game>/engine.json with the
+ * port's folder (relative to the studio, e.g. ../hatchfield-unity-harness), its gate, its parity commands and
+ * its build target. Nothing is copied into the port's repo: the porters work in it directly, on its own
+ * branches. --build windows makes the Windows build the default and turns the browser export off (the Arcade
+ * then lists native builds only). --web "<command>" is the web side of parity for a game that isn't a
+ * cartridge: a command that prints one JSON line per seed, like the engine's.
+ */
+export async function linkEngine(engine, repo, { by = actor(), build = null, web = null, source = null } = {}) {
+  const e = ENGINES[engine];
+  if (!e) return { ok: false, message: 'Pick godot, unity or unreal.' };
+  if (!repo) return { ok: false, message: 'Name the port\'s folder: npm run engine -- link unity <path to its repo>' };
+  const game = activeGameName();
+  if (!game || isTemplateCartridge(game)) return { ok: false, message: 'There is no game yet to port (npm run new-game, or adopt one with npm run onboard -- --adopt).' };
+  const abs = path.resolve(REPO_ROOT, repo);
+  if (!fs.existsSync(abs)) return { ok: false, message: `${repo} doesn't exist: clone the port's repo there first.` };
+  if (engine === 'unity' && !fs.existsSync(path.join(abs, 'ProjectSettings', 'ProjectVersion.txt'))) return { ok: false, message: `${repo} is not a Unity project (no ProjectSettings/ProjectVersion.txt).` };
+  const folder = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+  const fill = (x) => (x ? x.replaceAll('{folder}', folder).replaceAll('{game}', game) : x);
+  const g = (...a) => spawnSync('git', a, { cwd: abs, encoding: 'utf8' }).stdout.trim();
+  const prev = readTrack(game) || {};
+  const track = {
+    ...prev,
+    engine, label: e.label, game, folder, track: `engine:${engine}`,
+    repo: { remote: g('remote', 'get-url', 'origin') || null, sha: g('rev-parse', 'HEAD') || null, linkedAt: new Date().toISOString() },
+    gate: fill(e.gate),
+    parity: { command: fill(e.parity), compare: prev.parity?.compare || ['outcome', 'tick'], ...(web || prev.parity?.web ? { web: web || prev.parity.web } : {}) },
+    capture: fill(e.capture),
+    webExport: build === 'windows' ? null : fill(e.webExport),
+    ...(build ? { buildTarget: build } : {}),
+    ...(source ? { portSource: source.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
+    started: prev.started || new Date().toISOString(),
+    by: prev.by || by,
+  };
+  fs.mkdirSync(path.dirname(trackFile(game)), { recursive: true });
+  fs.writeFileSync(trackFile(game), `${JSON.stringify(track, null, 2)}\n`);
+  const { setDivision, listDivisions } = await import('./divisions.mjs');
+  if (!listDivisions().find((d) => d.id === 'engine')?.active) setDivision('engine', true, by);
+  logEngine(`linked: ${e.label} port in ${folder} (its own repo${track.repo.remote ? `, ${track.repo.remote}` : ''}); build ${track.buildTarget || 'default'}${track.webExport ? '' : ', no browser export'}`, by);
+  emitEvent({ type: 'engine.linked', agent: by, to: 'producer', track: track.track, msg: `Engine track: ${game} to ${e.label} in ${folder} (its own repo)` });
+  return { ok: true, track };
+}
+
 /** A yes: the folder, the track file, the department, the first tasks and the parity board. */
 export async function startEngine(engine, { by = actor() } = {}) {
   const e = ENGINES[engine];
@@ -231,6 +278,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (argv[0] === 'propose') {
     const r = await proposeEngine(argv[1], { by: flag('by') || actor(), why: flag('why') || '' });
     console[r.ok ? 'log' : 'error'](r.ok ? `Asked the game dev (${r.ask.id}); the track starts when they say yes.` : r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+  if (argv[0] === 'link') {
+    const r = await linkEngine(argv[1], argv[2], { by: flag('by') || actor(), build: flag('build'), web: flag('web'), source: flag('source') });
+    console[r.ok ? 'log' : 'error'](r.ok ? `Linked: ${r.track.label} port in ${r.track.folder} (its own repo). Gate: ${r.track.gate}. Parity: ${r.track.parity.command}${r.track.parity.web ? ` against ${r.track.parity.web}` : ''}. Build: ${r.track.buildTarget || 'default'}${r.track.webExport ? '' : ', no browser export'}.` : r.message);
     process.exit(r.ok ? 0 : 1);
   }
   if (argv[0] === 'start') {
