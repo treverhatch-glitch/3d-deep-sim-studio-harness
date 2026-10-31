@@ -5,16 +5,10 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 ---
 
 ## [2.57.0] — 2026-11-01
-2.57.0: four fixes from the 2026-10-31 break tests, batched into one release (owner-approved). Each has its own commit
-and its own selftest file.
+2.57.0: three fixes from the 2026-10-31 break tests, batched into one release (owner-approved). Each has its own commit
+and its own selftest file. PU-17 (safe agent stop) was taken out before merge: Windows CI showed it regressed agent
+sessions there; it is being reworked.
 ### Fixed
-- **PU-17 (P-039): `agent stop` checks the process is still the agent before killing it.** A crashed session's
-  process number, reused by the OS for another program, could be killed (on Windows `taskkill /T /F`: the whole
-  tree). The launcher now records each process's start time and command line (`harness/proc-identity.mjs`). Five
-  places kill only while the number is still the agent's: Stop, Pause, Stop all, the stall and refresh checks, and
-  `studio:stop`. Otherwise the session is ended, its task handed back and its claims freed (event
-  `agent.pid_reused`). Records from before this version are killed only on a fresh heartbeat. Agent list and the
-  slot caps no longer count a reused number as a live agent. `qa/selftest-pu17.mjs` (6 checks).
 - **PU-19 (P-042): Claude Code's 5-hour, session and weekly limit messages count as usage limits, with their reset
   times.** Recognised forms include "5-hour limit reached ∙ resets 3pm", "Opus weekly limit reached ∙ resets Nov 3,
   9am" and "usage limit reached|<unix time>". Reset times can be weekdays, dates or epochs, with a bracketed zone like

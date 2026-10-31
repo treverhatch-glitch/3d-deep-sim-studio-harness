@@ -319,7 +319,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Effect:** the Producer and the HUB see the wrong state; the launcher starting several agents in one pass (P-024) can hit it. Lower risk at the slow pace (2 agents).
 - **Severity:** medium-high.
 
-### P-039 — `agent stop` can kill an unrelated program · fixed in 2.57.0 (PU-17; Windows and macOS identity reads UNTESTED)
+### P-039 — `agent stop` can kill an unrelated program · open: the PU-17 fix failed on Windows CI and was taken out of 2.57.0 (see P-045)
 - **What happened:** a stale session record whose process number had been reused by another program: `npm run agent -- stop builder-7` killed that other program (a test `sleep`; exit 143).
 - **Why:** `stopAgent(pid)` (harness/agent.mjs ~line 688) kills by number only. On Windows it runs `taskkill /pid N /T /F`, which force-kills that program and everything under it.
 - **When it can happen:** after a crash or reboot, when the old record is still "running" and Windows has handed the number to something else (Discord, Unity, a terminal).
@@ -360,4 +360,10 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **What happened:** main's `war-room-browser` job failed on 2 of 4 pushes (7f4a736, 3eb0cf2) on `[hud] FAIL Stop ends it and hands its task back` (and once on Pause), while the same code passed on its PR.
 - **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
 - **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
+
+### P-045 — The first PU-17 fix regressed agent sessions on Windows · open (rework)
+- **What happened:** 2.57.0's Windows CI job (PR #35, attempt 1) failed 5 selftests, all about agent sessions: PU-17's own launch check (`identity.pid` recorded as null, `alive=false`), "after agent stop, its task can't restart straight away" (`stop-1: it is still starting (no agent process yet)`: nothing was stopped, the task stayed claimed), "task lane gives each builder its own folder", "--lanes auto", "agent names never repeat". Linux passed all of them (865/0).
+- **Why (from the log):** (1) a stop while the agent is still starting no longer stops its launcher (the old code did); on the slower Windows runner the stop lands in that window. (2) Each launch and each session listing adds a PowerShell call (about 1 s or more), which pushes the supervisor tests past their time windows. (3) The agent's own identity could not be read right after start (null).
+- **Done:** PU-17 reverted from 2.57.0 before merge (auto-merge stopped first); the other three fixes ship.
+- **Rework plan:** read identities only when about to kill (not on every listing); a stop during start-up kills the launcher after checking the launcher's identity; compare Windows start times with a tolerance; prove it on Windows CI before merging.
 
