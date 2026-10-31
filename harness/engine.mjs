@@ -62,7 +62,10 @@ export const ENGINES = {
     // Parity needs no editor: the same sim source, built with .NET (engine/_unity/tools/SimCli).
     parity: 'dotnet run --project {folder}/tools/SimCli -- parity {seeds}',
     capture: null,
-    webExport: '{folder}/Build/WebGL',
+    // 2.48.0: a Unity track builds a Windows .exe by default, with no browser export (the web version is the
+    // browser game). npm run engine -- link unity <repo> --build web turns the WebGL export back on.
+    webExport: null,
+    buildTarget: 'windows',
     bin: 'unity',
     env: 'STUDIO_UNITY',
     template: 'engine/_unity',
@@ -213,8 +216,8 @@ export async function linkEngine(engine, repo, { by = actor(), build = null, web
     gate: fill(e.gate),
     parity: { command: fill(e.parity), compare: prev.parity?.compare || ['outcome', 'tick'], ...(web || prev.parity?.web ? { web: web || prev.parity.web } : {}) },
     capture: fill(e.capture),
-    webExport: build === 'windows' ? null : fill(e.webExport),
-    ...(build ? { buildTarget: build } : {}),
+    webExport: build === 'web' ? fill('{folder}/Build/WebGL') : build === 'windows' ? null : fill(e.webExport),
+    ...(build || e.buildTarget ? { buildTarget: build || e.buildTarget } : {}),
     ...(source ? { portSource: source.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
     started: prev.started || new Date().toISOString(),
     by: prev.by || by,
@@ -244,7 +247,7 @@ export async function startEngine(engine, { by = actor() } = {}) {
   }
   // The template game also compares its credits, which proves the RNG port is exact.
   const compare = game === 'example-sim' ? ['outcome', 'tick', 'resources.credits'] : ['outcome', 'tick'];
-  const track = { engine, label: e.label, game, gameId, folder, track: `engine:${engine}`, gate: fill(e.gate), parity: { command: fill(e.parity), compare }, capture: fill(e.capture), webExport: fill(e.webExport), started: new Date().toISOString(), by };
+  const track = { engine, label: e.label, game, gameId, folder, track: `engine:${engine}`, gate: fill(e.gate), parity: { command: fill(e.parity), compare }, capture: fill(e.capture), webExport: fill(e.webExport), ...(e.buildTarget ? { buildTarget: e.buildTarget } : {}), started: new Date().toISOString(), by };
   fs.mkdirSync(path.join(REPO_ROOT, folder), { recursive: true });
   // Start from the worked template: project, sim port, gate, parity, capture, a scene built in code.
   if (e.template && fs.existsSync(path.join(REPO_ROOT, e.template))) {

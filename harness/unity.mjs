@@ -9,9 +9,9 @@
  *                                        runner in batch mode for Edit Mode and Play Mode; results read from
  *                                        its NUnit XML (a run where no test ran fails), Play Mode's controls
  *                                        test writes qa/reports/controls-unity.json for the controls check
- *   npm run engine:build [-- <folder>] [--target web|windows]
- *                                        a playable build: WebGL (the Arcade's engine tab, any browser) or a
- *                                        Windows .exe (Assets/Editor/StudioBuild.cs)
+ *   npm run engine:build [-- <folder>] [--target windows|web]
+ *                                        a playable build: a Windows .exe (the default since 2.48.0) or WebGL
+ *                                        (any browser; the Arcade's engine tab) (Assets/Editor/StudioBuild.cs)
  *   node harness/unity.mjs purity <folder>
  *   node harness/unity.mjs version <folder>
  *
@@ -189,7 +189,7 @@ export function runUnityTests(dir, platform, { controlsOut = null } = {}) {
  * A playable build (Assets/Editor/StudioBuild.cs): web (WebGL, played in a browser and on the Arcade's engine
  * tab) or windows (Build/Windows/Game.exe). Returns { ok, target, out, problems }.
  */
-export function build(dir, target = 'web', { out = null } = {}) {
+export function build(dir, target = 'windows', { out = null } = {}) {
   const t = { web: ['WebGL', 'Build/WebGL'], webgl: ['WebGL', 'Build/WebGL'], windows: ['Windows', 'Build/Windows'] }[String(target).toLowerCase()];
   if (!t) return { ok: false, problems: [`unknown build target "${target}" (web or windows)`] };
   if (!fs.existsSync(path.join(dir, 'Assets', 'Editor', 'StudioBuild.cs'))) return { ok: false, problems: [`${rel(dir)}/Assets/Editor/StudioBuild.cs is missing (copy it from engine/_unity)`] };
@@ -256,7 +256,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
   } else if (cmd === 'build') {
     // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
-    const r = build(dir, flag('target') || track?.buildTarget || 'web', { out: flag('out') });
+    const r = build(dir, flag('target') || track?.buildTarget || 'windows', { out: flag('out') });
     if (!r.ok) fail(r.problems);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else {

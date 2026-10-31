@@ -106,8 +106,8 @@ jobs:
           projectPath: engine/_unity
           testMode: all
 
-  # 2.46.0: a playable WebGL build of the Unity template on every change to main, as a downloadable artifact
-  # (open index.html from a local server, or drop it on any static host). Needs the same licence secrets.
+  # 2.46.0: a playable build of the Unity template on every change to main, as a downloadable artifact.
+  # 2.48.0: a Windows .exe (the Unity track's default), built on Linux with GameCI. Needs the licence secrets.
   engine-unity-build:
     if: github.event_name == 'push' && vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
@@ -125,14 +125,14 @@ jobs:
         if: env.UNITY_LICENSE != ''
         with:
           projectPath: engine/_unity
-          targetPlatform: WebGL
-          buildMethod: StudioBuild.WebGL
-          customParameters: -out Build/WebGL
+          targetPlatform: StandaloneWindows64
+          buildMethod: StudioBuild.Windows
+          customParameters: -out Build/Windows
       - uses: actions/upload-artifact@v4
         if: env.UNITY_LICENSE != ''
         with:
-          name: unity-webgl
-          path: engine/_unity/Build/WebGL
+          name: unity-windows
+          path: engine/_unity/Build/Windows
           if-no-files-found: warn
 
   # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).

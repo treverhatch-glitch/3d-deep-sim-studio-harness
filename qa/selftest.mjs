@@ -3400,6 +3400,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.48.0: Windows by default for a Unity track (qa/selftest-248.mjs).
+{
+  const dir = copyRepo();
+  const { selftest248 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-248.mjs')).href);
+  await selftest248({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

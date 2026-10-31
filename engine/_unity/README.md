@@ -11,7 +11,7 @@ licence**; the editor is needed for the game itself and its Play Mode tests.
 | `Assets/Tests/EditMode/SimTests.cs` | The sim's checks (NUnit). Unity runs them in Edit Mode; `tools/SimTests` runs the same file with .NET. |
 | `Assets/Game/GameDriver.cs` | The playable build: `FixedUpdate` steps the sim at 20 ticks a second; B and a Buy button (Input System, uGUI) ask the sim to buy a unit. The scene is built in code: no scene or prefab YAML. |
 | `Assets/Tests/PlayMode/ControlsTests.cs` | Every Game Bible control pressed through the Input System (`InputTestFixture`): a real key, a real mouse click on the button. Results go to `$STUDIO_CONTROLS_OUT` for the controls check (track `unity`). |
-| `Assets/Editor/StudioBuild.cs` | `npm run engine:build`: a playable WebGL build (the Arcade's engine tab, any browser) or a Windows `.exe`. |
+| `Assets/Editor/StudioBuild.cs` | `npm run engine:build`: the playable Windows `.exe` (the default), or a WebGL build with `--target web`. |
 | `Assets/Editor/Parity.cs` | Parity from inside the editor (`-executeMethod Parity.Run -seeds 1,2,3`). |
 | `tools/SimTests/` | `npm run engine:sim`: the purity check, then `dotnet test` on the sim and its Edit Mode tests (C# 9, Unity 6's language version). |
 | `tools/SimCli/` | `npm run parity`'s command: `dotnet run --project tools/SimCli -- parity 1,2,3,4,5`. |
