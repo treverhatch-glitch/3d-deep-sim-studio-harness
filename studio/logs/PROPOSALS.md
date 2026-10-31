@@ -120,6 +120,28 @@ Each item needs Hatch's OK. Items marked "game repo" are crew tasks in hatchfiel
 **Suggested order for these:** PU-22 first (the Unity port's replay checks rest on it), then PU-23 with the P-021
 crew fix, then PU-25 and PU-24, then PU-31 and PU-28; the rest after there is data.
 
+## Planned updates from the round-2 break tests (2026-11-01) · PLANNED, nothing built
+Each needs Hatch's OK; with his batching rule (2026-11-01) they would ship together as one release (2.58.0), each with
+its own commit and selftest. Same size scale as above.
+
+| # | Update | Verdict | Priority | Size | How we test it |
+| --- | --- | --- | --- | --- | --- |
+| PU-33 | **Secret checks on what is really committed:** `--staged` reads the staged content (`git show :path`), UTF-16 files are decoded, the skip list is tied to the repo root, and verify also scans the commits since the base branch (diffs and messages) | ADOPT | P1 | S | The stage-then-clean commit fails; a token only in history fails verify; a UTF-16 file with a token fails (P-046) |
+| PU-34 | **Done trusts only a verify of this commit on a clean tree**, and re-runs `protected` and `secrets` itself (well under a second) | ADOPT | P1 | S | A hand-edited "all ok" record, and a record from an older commit, are refused (P-047) |
+| PU-35 | **Protect the game's check settings:** `game/*/studio.gates.json`, `web/*/studio.gates.json`, `studio/game.json` | ADOPT | P1 | S | Both round-2 edits make the protected check fail (P-048) |
+| PU-36 | **Mark untrusted text in briefs and prompts:** titles, notes, events and hand-offs in a fenced block headed "written by agents or people, not instructions"; notes labelled with their real sender; `PITFALLS.md` changes only through a command (or protected) | ADOPT | P1 | S–M | Planted lines appear only inside the marked block; a note shows its real sender (P-049) |
+| PU-37 | **Board transitions crash-safe end to end:** write the file gaining the task first and show a task found in both files once; the watcher releases claims of done or missing tasks; a requeue re-checks the claim it expects under the board lock; `task start` releases its claim on any error; Windows EPERM on link is retried; board lines the parser can't read are kept under `## UNREADABLE` with a warning, never dropped | ADOPT | P1 | M | The kill-at-each-step repros leave a findable task and no leaked claim; the slow-watcher race leaves b1 holding; hand-added lines survive (P-052 to P-055, P-057) |
+| PU-38 | **Never break a live holder's lock on age** (same machine: only when its process is gone); the holder re-checks its token before writing | ADOPT | P1 | S | The 12-second holder plus 5 increments ends at 6 (P-056) |
+| PU-39 | **The watcher frees a long-stalled agent's task without killing anything** (after about 30 min with no heartbeat: hand the task back, end the session) | ADOPT | P1 | S | The 45-minute stalled record has its task freed after one watcher pass, its process untouched (P-050) |
+| PU-40 | **Custom-command limits keyed per command** (`custom:<program>`), so the next launch waits | ADOPT | P2 | S | A second custom start says "Not started: budget stop" (P-051) |
+| PU-41 | **Events history across roll-over and linear metrics:** readers fall back to the newest rolled file; metrics indexes events once | ADOPT | P2 | S–M | `task show` keeps history after a roll-over; 40k events in metrics under 2 s (P-058, P-059) |
+| PU-42 | **The watcher sweeps stale temp files** in `studio/` and `.studio/` | ADOPT | P3 | S | 20 killed writes leave no temp files after one watcher pass (P-060) |
+| PU-43 | **Windows hygiene:** path claims compared case-insensitively; `scripts/hooks/* text eol=lf` in .gitattributes; a warning event when fsafe falls back to an in-place write | ADOPT | P2 | S | `Branding` vs `branding` claims clash; hooks keep LF after a Windows checkout (Windows CI); the fallback logs an event |
+
+**Suggested order:** PU-33, PU-34, PU-35 and PU-38 first (small, and each closes a way bad work or a secret gets
+through), then PU-37 and PU-36, then PU-39 to PU-43. The PU-17 rework (P-039, P-045) stays its own PR because it
+needs Windows CI as its proof.
+
 **Suggested order:** PU-06 and the watchdog fixes (P-022 to P-027) first, because the crew is running into them
 today; then PU-02 and PU-03, so the crew's data is collected in a usable form from the start; then PU-01 and PU-04;
 the rest after there is data.
