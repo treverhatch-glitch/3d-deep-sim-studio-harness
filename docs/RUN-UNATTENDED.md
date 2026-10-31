@@ -33,6 +33,11 @@ Scheduler (Windows); `--uninstall` removes it.
   cause, then press "Fixed it: try again".
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
+- **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
+  is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
+  and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
+  or a process id now used by something else, is never killed). End it by hand if it is stuck. A pass right
+  after the machine slept (the watcher's own last pass as old) frees nothing and checks again next pass.
 - **Launched agents inherit your MCP servers.** Jed's Serena server opened its dashboard tab for every
   `claude -p` session and hid the War Room. Turn that off in the server's own settings
   (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).

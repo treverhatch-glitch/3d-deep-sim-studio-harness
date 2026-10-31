@@ -47,7 +47,12 @@ The launcher:
 - passes the kickoff on stdin or as one argument, so the same command works on Windows, macOS and Linux
   (agy gets `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its
   sandbox with `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
-- sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops;
+- sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops. A session whose
+  process is still alive but whose heartbeat is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off)
+  is freed by the watcher: its uncommitted work is saved to `.studio/wip/`, its task goes back to the queue with
+  a note, its claims are released and the session is marked ended ("stalled"), so its slot is free. Nothing is
+  killed (event `agent.stall_released`): end the process by hand if it is stuck. Right after the machine slept
+  (the watcher's own last pass is as old as the threshold) it waits one pass for the heartbeats to come back;
 - when an agent dies (exit code, usage limit, 429, auth), hands its task back with a note, saves its
   uncommitted work under its claims to `.studio/wip/<task>-<agent>.patch`, frees its claims, and with
   `--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5` starts the next tool on the same task;
