@@ -167,7 +167,7 @@ export async function endForRefresh(agent, by) {
   if (!s) return { ok: false, message: `${agent} isn't running.` };
   const f = readFlag(agent) || { agent, checks: [] };
   writeFlag(agent, { ...f, endedBy: `handed off at a refresh check by ${by || 'the Producer'}` });
-  stopAgent(s.pid);
+  stopAgent(s, { by: by || 'producer' }); // PU-17: the record, so the kill checks the process is still the agent
   return { ok: true };
 }
 
