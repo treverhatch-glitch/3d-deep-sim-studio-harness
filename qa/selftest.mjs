@@ -3515,6 +3515,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.0 (F): verify survives being reaped, runs game checks with CI=true, names files it changed (qa/selftest-258f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258f.mjs')).href);
+  await selftest258F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

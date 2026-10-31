@@ -15,6 +15,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 - Claim: `npm run task -- start <ID> --agent <you>`. If it refuses, pick another task.
 - Edit only inside your task's lane or a path you claimed (`node harness/lock.mjs claim path:<dir> --owner <you>`).
 - Done: `npm run task -- done <ID> --agent <you> --check` first (seconds), then `npm run verify` in the foreground, then `npm run task -- done <ID> --agent <you>`.
+  If your verify's shell was killed, the run goes on: `npm run verify -- --wait` shows it and its result.
   `node harness/done-check.mjs <ID>` says what is missing.
 - Stopping early: `npm run task -- pause <ID> --agent <you> --note "where you stopped"`.
 
