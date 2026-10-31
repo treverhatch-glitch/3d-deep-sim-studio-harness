@@ -780,7 +780,7 @@ export function nextAgentName(role, prefix = '') {
  * files there, and its unmerged commits stay on its branch for the next agent; otherwise the files under
  * its claims in the shared checkout.
  */
-function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) {
+export function saveWorkOf(agent, task, mine, s = readJson(sessionFile(agent))) {
   const copyDir = s?.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : null;
   if (copyDir && fs.existsSync(copyDir)) {
     if (unmerged(s.copy.branch) > 0) rememberTaskBranch(task, s.copy.branch);

@@ -12,6 +12,8 @@
  * What it does on its own (safe, mechanical):
  *   - A task in progress whose claim expired or was never made goes back to the top of the queue,
  *     with a handoff note naming the last agent and when it was last heard from.
+ *   - 2.58.0 (PU-39): a launcher session whose process is alive but whose heartbeat is older than
+ *     STUDIO_STALL_RELEASE_MIN (30; 0 = off) hands its task back, frees its claims and its slot. Nothing is killed.
  * What it hands to the Producer (one "Watch:" task at a time, never one per finding):
  *   - agents holding a task but silent past --stall, handed-back work nobody picked up past --wait,
  *     and providers that ran out (route.exhausted) in the last hour.
@@ -29,7 +31,7 @@ import { writeAtomic } from './fsafe.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
 import { listDivisions } from './divisions.mjs';
-import { sessions, fillAgents, startAgent, markGone } from './agent.mjs';
+import { sessions, fillAgents, startAgent, markGone, saveWorkOf, AGENTS_DIR } from './agent.mjs';
 import { effectiveMode } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
@@ -59,12 +61,92 @@ function trail(events, agent) {
   ].join('\n');
 }
 
+/** When the watcher's last pass ran (.studio/watch-last.json), or NaN when it never ran here. */
+export function lastPassAt() {
+  try {
+    return Date.parse(JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'watch-last.json'), 'utf8')).at);
+  } catch {
+    return NaN;
+  }
+}
+
+/** STUDIO_STALL_RELEASE_MIN (default 30): minutes of heartbeat silence before a live session's task is freed; 0 turns it off. */
+export function stallReleaseMin(env = process.env) {
+  const v = env.STUDIO_STALL_RELEASE_MIN;
+  if (v === undefined || v === '') return 30;
+  if (/^(off|no|false|none)$/i.test(String(v))) return 0;
+  return Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 30;
+}
+
+/**
+ * 2.58.0 (PU-39, P-050): a launcher session whose process is alive but whose heartbeat is older than
+ * STUDIO_STALL_RELEASE_MIN held its slot and its task forever: the launcher started no one in its place, nobody
+ * else could hand the task back, and the watcher only reported "stalled". Past the threshold the watcher now saves
+ * its uncommitted work (as a hand-back does), hands its tasks back with a note, frees its claims, marks the
+ * session ended ("stalled") so its slot is free, and says so in an event. It kills NOTHING: the process is left
+ * alone (a frozen machine that wakes up, or a pid that now belongs to something else, must not be killed).
+ * A machine that slept stops every heartbeat and the watcher alike: when the watcher's own last pass
+ * (`prevPassAt`, from .studio/watch-last.json) is older than the threshold, nothing is freed this pass; the
+ * next pass, minutes later, sees whether the heartbeats came back.
+ */
+export function releaseStalled({ now = Date.now(), dryRun = false, events = readRecentEvents(2000), list = sessions(), prevPassAt = lastPassAt() } = {}) {
+  const min = stallReleaseMin();
+  if (!(min > 0)) return [];
+  const away = Number.isFinite(prevPassAt) && now - prevPassAt > min * 60000 ? Math.round((now - prevPassAt) / 60000) : 0;
+  const out = [];
+  for (const s of list) {
+    if (!s.running) continue;
+    const beat = Date.parse(s.lastBeat || s.startedAt || '');
+    if (!Number.isFinite(beat) || now - beat < min * 60000) continue;
+    const age = Math.round((now - beat) / 60000);
+    if (away) {
+      out.push({ agent: s.agent, tasks: [], age, patches: [], skipped: true, msg: `${s.agent}'s heartbeat is ${age} min old, but the watcher itself last ran ${away} min ago (the machine may have slept): not freed this pass` });
+      continue;
+    }
+    const mine = listLocks().filter((l) => l.owner === s.agent);
+    const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
+    const pids = [...new Set([s.pid, s.supervisor].filter(Boolean))].join(', ') || 'unknown';
+    if (dryRun) {
+      out.push({ agent: s.agent, tasks: held, age, patches: [], msg: `Would free ${s.agent}: silent ${age} min with its process alive (pid ${pids})${held.length ? `; would hand back ${held.join(', ')}` : ''}; nothing would be killed` });
+      continue;
+    }
+    const patches = [];
+    for (const t of held) {
+      let patch = null;
+      try {
+        patch = saveWorkOf(s.agent, t, mine, s);
+      } catch {
+        // saving the work is a help, never a blocker
+      }
+      if (patch) patches.push(patch);
+      const note = `${s.agent} (${s.role}, ${s.tool}/${s.model}) went silent: its process is still alive (pid ${pids}) but its last heartbeat was ${age} min ago (STUDIO_STALL_RELEASE_MIN=${min}). The watcher handed ${t} back and freed its claims; nothing was killed.${patch ? ` Its uncommitted work is saved to ${patch} (git apply it to continue).` : ' No uncommitted work under its claims.'} If it wakes up it may still commit: check git log --grep ${t} before redoing anything.\n${trail(events, s.agent)}`;
+      pauseTask(t, s.agent, note, { force: true });
+    }
+    // Its other claims (folders, files) go too, so its lane is free.
+    for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
+    const file = path.join(AGENTS_DIR, `${s.agent}.json`);
+    const reason = `stalled: no heartbeat for ${age} min while its process was alive; the watcher freed its task and slot and killed nothing`;
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeAtomic(file, `${JSON.stringify({ ...raw, status: 'ended', endedAt: new Date(now).toISOString(), reason, stalledRelease: { at: new Date(now).toISOString(), beatAgeMin: age, tasks: held, killed: false } }, null, 2)}\n`, { fsync: false });
+    } catch {
+      // the record is gone already: nothing holds the slot
+    }
+    const msg = `${s.agent} was silent ${age} min with its process alive (pid ${pids}): ${held.length ? `handed back ${held.join(', ')}, ` : ''}freed its claims and its slot. Nothing was killed: the process is left running; end it by hand if it is stuck.`;
+    emitEvent({ type: 'agent.stall_released', agent: 'watch', to: 'producer', status: 'warn', task: held[0], msg, meta: { stalledAgent: s.agent, role: s.role, pid: s.pid || null, supervisor: s.supervisor || null, beatAgeMin: age, thresholdMin: min, tasks: held, patches, killed: false } });
+    out.push({ agent: s.agent, tasks: held, age, patches, msg });
+  }
+  return out;
+}
+
 export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) {
   const now = Date.now();
   const findings = [];
   // 2.57.0 (PU-16, P-037): lock files nobody can read (an agent killed while writing one) are set aside to
   // .studio/locks/broken/ once they are older than STUDIO_BROKEN_LOCK_GRACE_SEC (10), so no claim trips on them.
   for (const f of sweepBrokenLocks({ dryRun })) findings.push({ kind: 'lock', msg: `${dryRun ? 'Would set aside' : 'Set aside'} the unreadable lock file .studio/locks/${f} (in .studio/locks/broken/)`, producer: false });
+  // 2.58.0 (PU-39): a live but long-silent session gives its task and its slot back (nothing is killed).
+  for (const r of releaseStalled({ now, dryRun })) findings.push({ kind: r.skipped ? 'stalled' : 'released', agent: r.agent, task: r.tasks[0], msg: r.msg, producer: false });
   const q = parseNextQueue();
   const locks = listLocks();
   const events = readRecentEvents(2000);
