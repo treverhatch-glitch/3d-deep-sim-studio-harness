@@ -229,7 +229,7 @@ subscription or API billing).
   This time Hatch kept the commit.
 - **Harness fix?** Yes: `--sync --dry-run` should print the commits and files and write nothing.
 
-### P-031 — `npm run hub:build` type check fails on Windows (`*.tsx` not expanded) · fixed in 2.55.0 (PR #29, merged) — hub:build on Windows still UNTESTED (2026-10-31, opus-1)
+### P-031 — `npm run hub:build` type check fails on Windows (`*.tsx` not expanded) · fixed in 2.55.0 (PR #29, merged); tested on Windows 2026-10-31 by grokbot in a fresh clone: Node v24.14.0, commit 3eb0cf2, `EXIT 0`, no "*.tsx" or "No inputs were found" error (2026-10-31, opus-1)
 - **What happened:** `tsc ... *.tsx` → `error TS6053: File '*.tsx' not found` on Windows. The Vite build itself
   succeeds.
 - **Why:** cmd and PowerShell don't expand globs; npm runs the script through cmd on Windows.
@@ -279,3 +279,19 @@ subscription or API billing).
   > runs `vitest run --maxWorkers=2`. Proof: `npm test` green 3 runs in a row locally and on GitHub, with a
   > before/after table of the browser tests' times. Size: half a day to a day. Files: 2 render lines, 8 e2e tests
   > (+1 helper), 4 sim tests, the CI workflow.
+
+## Tests on 2026-10-31 evening (break tests, cloud checks, Unity)
+
+### P-034 — The Unity folder on Hatch's PC had a pre-merge rules file · fixed 2026-10-31
+- **What happened:** `Rules~/hatchfield-sim.mjs` on Hatch's PC had fingerprint `ea3619eb8311`, not main's `55906ed2b3f5`. A diff shows it was packed from the work branch before the P-020 fix: `freshSeed` without the crypto source (plus a build path in a comment).
+- **Why:** I copied the rules file from the branch build, not from a pack of the merged main. `Rules~/` is gitignored, so `git status` never shows the difference.
+- **Effect:** replays still match (they pass a seed); only a brand-new game's seed choice differed.
+- **Workaround:** the old file is kept beside it as `hatchfield-sim.mjs.old-ea3619eb8311` (Unity ignores `~` folders); main's file copied in; fingerprint checked after the copy.
+- **Harness fix?** Yes, small: the Unity repo should print the rules file's fingerprint at load and the replay test should name it, so a stale file shows up in the first line of a run. Logged as PU-25.
+
+### P-035 — Screen control can't see the Unity Hub window · workaround
+- **What happened:** with Unity and Unity Hub approved, the Hub window still showed as a blacked-out box, so the project couldn't be opened by screen control.
+- **Why (guess, not proven):** the Hub's window belongs to a program name other than the approved Store entry.
+- **Workaround:** Hatch opens the project in the Hub; screen control takes over in the editor.
+- **Harness fix?** No (desktop tool limit).
+
