@@ -3,7 +3,7 @@
 One block per problem. **Harness fix?** says whether the harness itself should change (then it goes into
 PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 
-### P-001 — The harness repo is public, and two old public copies exist · open
+### P-001 — The harness repo is public, and two old public copies exist · fixed 2026-10-31 (all three private, confirmed by Hatch)
 - **What happened:** Hatch's rule is "the harness stays private". It is public, with 1 star and 0 forks.
   `hatchfield-ai-studio-template` and `ANTI-GRAV` are public copies of harness 2.1.
 - **Why:** it was kept public earlier ("public for now"), before this rule.

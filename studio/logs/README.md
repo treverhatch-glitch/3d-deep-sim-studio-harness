@@ -5,9 +5,9 @@
 ## Latest summary — 2026-10-31 evening
 - **Done:**
   - HDRP switch and the Unity side of the replay check (Unity repo PR #2).
-  - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003), each in its own PR.
+  - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003): all merged, CI green, a backup branch of main before each.
 - **Untested:** everything that needs the Unity editor (HDRP set-up, Edit/Play Mode in Unity, the Windows build).
-- **Open problems:** P-001 (harness public), P-005 (GPU model), P-009 (no Unity on Claude's side).
+- **Open problems:** P-005 (GPU model), P-009 (no Unity on Claude's side). P-001 fixed: the harness and the two old copies are private (confirmed by Hatch, 2026-10-31).
 - **Waiting for your OK:** U-007 (last, only when nothing else waits).
 
 ## The files
