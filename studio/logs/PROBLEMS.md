@@ -273,7 +273,7 @@ subscription or API billing).
   > Fix: main's red CI. (1) Add a test-only page switch (`?noRender=1`) that skips `renderer.render` in
   > src/render/world.ts and src/render/interior/InteriorView.ts (2 lines; never on in a normal page). (2) The 8
   > *.e2e.test.ts files open the page with it through one shared helper; the tests that save screenshots keep
-  > drawing and move to a separate `npm run test:visual` that CI doesn't run by default. (3) infoViews.e2e uses
+  > drawing and move to a separate visual-test script in the game that CI doesn't run by default. (3) infoViews.e2e uses
   > PLAYWRIGHT_CHROME and Playwright's own Chromium like the others. (4) Heavy sim tests (security.serve,
   > atc/occupancy, contractPacing, hub live.edge) get time limits of at least 3x their measured time alone, and CI
   > runs `vitest run --maxWorkers=2`. Proof: `npm test` green 3 runs in a row locally and on GitHub, with a
