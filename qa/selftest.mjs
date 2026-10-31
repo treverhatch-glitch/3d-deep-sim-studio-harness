@@ -3489,6 +3489,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// PU-18 (P-040): the secret scan catches Discord, Slack, Telegram and AWS secret tokens, named secrets and
+// base64-wrapped tokens; placeholders and base64 data pass (qa/selftest-pu18.mjs).
+{
+  const dir = copyRepo();
+  const { selftestPU18 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu18.mjs')).href);
+  await selftestPU18({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

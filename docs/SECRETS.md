@@ -16,9 +16,15 @@ This repository is a **public open-source template**. It must remain **100% free
 
 ---
 
-## 2. Pre-Push Secret Scan One-Liner
+## 2. Pre-Push Secret Scan
 
-Before pushing to a public remote, run:
+The real check is `node scripts/secret-scan.mjs`: the `secrets` gate runs it in verify and the pre-commit hook runs it on
+staged files. Besides the provider key shapes it catches Discord bot tokens and webhooks, Slack webhooks and tokens, Telegram
+bot tokens, AWS secret keys and session tokens, long random values under names ending in TOKEN, SECRET, API_KEY, PASSWORD
+or WEBHOOK, and those token shapes wrapped in base64. It prints file, line and kind, never the value; placeholders pass.
+What it catches and what it doesn't: [`docs/SECURITY.md`](SECURITY.md#secrets).
+
+A quick manual check for the most common provider prefixes, before pushing to a public remote:
 
 ```bash
 git grep -E "(ghp_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9]{10,}|AIza[A-Za-z0-9_-]{10,}|nvapi-[A-Za-z0-9_-]{10,}|gsk_[A-Za-z0-9]{10,}|r8_[A-Za-z0-9]{10,}|msy_[A-Za-z0-9]{10,})" -- .
