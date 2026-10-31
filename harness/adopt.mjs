@@ -125,8 +125,16 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
       warnings.push(`cleared the template's example controls list (studio/bible/controls.json): write ${name}'s own (a task is queued)`);
     } else if (ids) warnings.push(`studio/bible/controls.json already lists ${cj.controls.length} control(s): check they are ${name}'s`);
   } catch {}
+  // 2.45.0: a web game gets a starter for the real-input controls check (qa/controls-play.mjs).
+  let wroteBrowser = false;
+  const bf = path.join(dest, 'studio.browser.json');
+  if (!fs.existsSync(bf)) {
+    const { starterManifest } = await import('../qa/controls-play.mjs');
+    const st = starterManifest(dest);
+    if (st) { fs.writeFileSync(bf, `${JSON.stringify(st, null, 2)}\n`); wroteBrowser = true; }
+  }
   if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: cd ${rel} && npm ci`);
-  return { ok: true, slug, dir: rel, origin, gates, wroteGates, warnings };
+  return { ok: true, slug, dir: rel, origin, gates, wroteGates, wroteBrowser, warnings };
 }
 
 /**
@@ -140,7 +148,7 @@ export function exportPatch({ root = REPO_ROOT, now = new Date() } = {}) {
   // from HEAD and stopping there (a whole-history walk breaks in a shallow clone, which many people use).
   const first = git(root, 'log', '-n', '1', '--format=%H', '--', 'studio/game/ORIGIN.json').stdout.trim();
   if (!first) return { error: `${o.path} has no commits yet: commit the adopted game first (git add ${o.path})` };
-  const spec = ['--', o.path, `:(exclude)${o.path}/studio.gates.json`];
+  const spec = ['--', o.path, `:(exclude)${o.path}/studio.gates.json`, `:(exclude)${o.path}/studio.browser.json`];
   const names = git(root, 'diff', '--name-only', first, 'HEAD', `--relative=${o.path}`, ...spec).stdout.trim().split('\n').filter(Boolean);
   if (!names.length) return { ok: true, empty: true, files: [], origin: o };
   const diff = git(root, 'diff', '--binary', first, 'HEAD', `--relative=${o.path}`, ...spec);
@@ -173,7 +181,7 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   if (!base) return { error: 'commit the adopted game first (studio/game/ORIGIN.json has no commit yet)' };
   // Studio work since the last sync that hasn't been exported (an export records how far it went).
   const since = o.exportedThrough && git(root, 'merge-base', '--is-ancestor', base, o.exportedThrough).status === 0 ? o.exportedThrough : base;
-  const pending = git(root, 'log', '--format=%h %s', `${since}..HEAD`, '--', o.path, `:(exclude)${o.path}/studio.gates.json`).stdout.trim().split('\n').filter(Boolean);
+  const pending = git(root, 'log', '--format=%h %s', `${since}..HEAD`, '--', o.path, `:(exclude)${o.path}/studio.gates.json`, `:(exclude)${o.path}/studio.browser.json`).stdout.trim().split('\n').filter(Boolean);
   if (pending.length && !force) return { error: `${pending.length} commit(s) to ${o.path} since it was last synced haven't been sent back yet (${pending.slice(0, 3).join('; ')}): npm run onboard -- --export first, or --force to sync anyway`, pending };
   // Tracked changes only: an untracked file (a build output, a cache) isn't touched by the patch.
   const dirty = git(root, 'status', '--porcelain', '--untracked-files=no', '--', o.path).stdout.trim().split('\n').filter(Boolean);
@@ -186,7 +194,7 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   if (tip === o.sha) return { ok: true, upToDate: true, from: o.sha, to: tip, commits: [], files: [] };
   const commits = git(o.source, 'log', '--format=%h %s', `${o.sha}..${tip}`).stdout.trim().split('\n').filter(Boolean);
   const files = git(o.source, 'diff', '--name-only', o.sha, tip).stdout.trim().split('\n').filter(Boolean);
-  const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json');
+  const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json', ':(exclude)studio.browser.json');
   if (diff.status !== 0) return { error: `git diff in ${o.source} failed: ${(diff.stderr || '').trim()}` };
   if (diff.stdout.trim()) {
     const ap = spawnSync('git', ['apply', '--3way', '--whitespace=nowarn', `--directory=${o.path}`], { cwd: root, input: diff.stdout, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });

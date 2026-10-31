@@ -3376,6 +3376,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.45.0: real-input controls for a studio web game, the parts without a browser (qa/selftest-245.mjs).
+{
+  const dir = copyRepo();
+  const { selftest245 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-245.mjs')).href);
+  await selftest245({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

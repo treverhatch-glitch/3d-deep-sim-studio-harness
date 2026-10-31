@@ -64,6 +64,10 @@ STUDIO_WATCHDOG_QUIET_MIN=60    # a repeating watchdog line, once an hour (2.40)
 STUDIO_SILENT_GREEN=fail        # once the game's tests are set up: a run that tested nothing fails (2.36)
 ```
 
+Once the Game Bible's controls list and `game/<slug>/studio.browser.json` are filled in, `npm run play:controls`
+presses every control in a real browser (2.45.0). Ops can run it after a landing that touched input or UI;
+a control that stopped working shows as a failed id, not a log.
+
 With `STUDIO_WHOLE_GAME=on`, a lane's verify runs only the tests related to the change when the game's test
 check declares `related` (an adopted Vitest or Jest game gets one), and the whole suite runs after landing.
 

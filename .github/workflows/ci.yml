@@ -99,6 +99,9 @@ jobs:
       # 2.39.0: a dead Buy button with a gamed test passes without the Game Bible's effect and fails with it.
       - name: Game Bible control effects (planted dead button)
         run: node scripts/check-control-effects.mjs
+      # 2.45.0: a web game that isn't a cartridge, driven by its studio.browser.json: live controls pass, dead ones fail.
+      - name: Real-input controls for a studio web game (npm run play:controls)
+        run: node scripts/check-controls-play.mjs
 
   war-room-build:
     runs-on: ubuntu-latest

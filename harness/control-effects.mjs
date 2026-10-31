@@ -11,6 +11,7 @@
  *   { "path": "resources.credits", "change": "down" }
  *   { "path": "entities[kind=unit].length", "change": "up" }
  *   change: "up" | "down" | "changes" | "same" | a number (the exact difference after - before)
+ *   { "path": "speed", "to": 0 }   (2.45.0: the value it must end at)
  * `path` reads the sim state: dotted keys, `.length` of a list, and `list[field=value]` to keep the items
  * whose field equals value. The web track checks it on the sim state before and after the real press.
  */
@@ -45,6 +46,16 @@ export function checkEffect(effect, before, after) {
   const res = { path: p, change, before: a, after: b, ok: false, why: null };
   if (!p) return { ...res, why: 'the effect names no path' };
   if (a === undefined || b === undefined) return { ...res, why: `the sim state has no ${p}` };
+  // 2.45.0: `to` is the value it must end at (a pause sets speed to 0 whatever it was): { path, to: 0 }.
+  if (effect.to !== undefined) {
+    res.change = 'to';
+    // Already at the value before the press proves nothing: the press might do nothing at all.
+    const already = JSON.stringify(a) === JSON.stringify(effect.to);
+    res.ok = !already && JSON.stringify(b) === JSON.stringify(effect.to);
+    if (already) res.why = `${p} was already ${JSON.stringify(effect.to)} before the press, so the press proved nothing (order the controls so something else changes it first)`;
+    else if (!res.ok) res.why = `${p} should end at ${JSON.stringify(effect.to)} (was ${JSON.stringify(a)}, now ${JSON.stringify(b)})`;
+    return res;
+  }
   const num = typeof a === 'number' && typeof b === 'number';
   if (change === 'changes') res.ok = JSON.stringify(a) !== JSON.stringify(b);
   else if (change === 'same') res.ok = JSON.stringify(a) === JSON.stringify(b);

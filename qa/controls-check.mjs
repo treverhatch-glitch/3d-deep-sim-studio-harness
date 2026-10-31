@@ -33,7 +33,8 @@ const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); }
 /** The newest result file for a track: { file, results: Map(id -> { ok, why }) } or null. */
 export function trackResults(track, dir = REPORTS) {
   if (!fs.existsSync(dir)) return null;
-  const re = track === 'web' ? /^browser_\d+\.json$/ : new RegExp(`^controls-${track.replace(/[^\w-]/g, '')}(-[\\w.-]+)?\\.json$`);
+  // 2.45.0: the web track also takes qa/controls-play.mjs's reports (a studio game that isn't a cartridge).
+  const re = track === 'web' ? /^(browser_\d+|controls-web(-[\w.-]+)?)\.json$/ : new RegExp(`^controls-${track.replace(/[^\w-]/g, '')}(-[\\w.-]+)?\\.json$`);
   const files = fs.readdirSync(dir).filter((f) => re.test(f)).map((f) => path.join(dir, f))
     .map((f) => ({ f, j: readJson(f), m: fs.statSync(f).mtimeMs }))
     .filter((x) => Array.isArray(x.j?.controls))
@@ -77,7 +78,7 @@ export async function controlsCheck({ bibleFile = BIBLE, reportsDir = REPORTS, t
     const want = list.filter((c) => !Array.isArray(c.tracks) || c.tracks.includes(track));
     if (!r) {
       if (template && track === 'web') { notes.push('web: no browser play report yet (the template passes without Chromium)'); continue; }
-      problems.push(`${track}: no real-input results yet (${track === 'web' ? 'npm run play:browser' : track === 'godot' ? 'the Godot gate with tools/controls.gd: node harness/game-gates.mjs --paths <the Godot project>' : `a test that writes qa/reports/controls-${track}.json`})`);
+      problems.push(`${track}: no real-input results yet (${track === 'web' ? 'npm run play:browser, or npm run play:controls for a studio game' : track === 'godot' ? 'the Godot gate with tools/controls.gd: node harness/game-gates.mjs --paths <the Godot project>' : `a test that writes qa/reports/controls-${track}.json`})`);
       continue;
     }
     for (const c of want) {

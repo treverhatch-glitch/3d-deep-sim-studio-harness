@@ -66,6 +66,32 @@ hasn't exported yet (export first), so nothing is lost or sent twice.
 related to the change (an adopted Vitest or Jest game's test check declares `related`), and the whole suite
 runs after landing.
 
+**Real key presses on the real game (2.45.0).** An adopted web game isn't a cartridge, so `npm run play:browser`
+can't drive it. `npm run play:controls` can: it serves the game, clicks from the title screen to play, presses
+every control in the Game Bible and checks what each must change. Adopting a Vite (or Next, or `npm run dev`)
+game writes a starter `game/<slug>/studio.browser.json`; fill it in once:
+
+```json
+{
+  "serve": { "command": "npx vite --port {port} --strictPort --host 127.0.0.1", "url": "http://127.0.0.1:{port}/" },
+  "init": "localStorage.clear(); sessionStorage.clear()",
+  "start": [{ "click": "[data-testid=new-game]" }, { "wait": 400 }, { "click": "[data-testid=start-pax]" }],
+  "ready": "Boolean(window.__game)",
+  "state": "({ cash: window.__game.cash, speed: window.__game.speed, view: window.__game.view })",
+  "settleMs": 8000,
+  "controls": { "view.hall": { "key": "KeyH", "before": "window.__game.buildStarterKit()" } }
+}
+```
+
+- `state` is what the Bible's effects read; the game needs a dev-only handle on `window` for it.
+- A Bible control whose `input` reads `key Space` or `key 2` needs no entry under `controls`; clicks, key
+  combinations and set-up (`before`, run just before the press) go there.
+- Each press waits up to `settleMs` for the effect, so a slow WebGL frame doesn't fail a live control.
+- An effect may say where a value must end: `{ "path": "speed", "to": 0 }`. A value that was already there
+  before the press fails (the press proved nothing): order the Bible's controls so each one moves something.
+- The report (`qa/reports/controls-web-*.json`) is what `qa/controls-check.mjs` reads for the web track. The
+  server it starts is stopped at the end, child processes included.
+
 ## Then fill in what a scan can't know
 
 The top of `GAME.md` is for the person who owns the game: the pitch, the state (prototype, alpha,
