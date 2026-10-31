@@ -35,52 +35,132 @@ export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const DONE_FILE = path.join(REPO_ROOT, 'studio', 'DONE.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 
-const TASK_LINE_RE = /^-\s+\[([ x>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[(P[0-3])\]\s+\(`([^`]+)`\)\s+—\s+(.+)$/;
+// 2.58.0 (P-057): the line the harness writes, plus the drifts people make by hand, read as the same task and put back
+// in shape by the next write: an ASCII "-" (or "--", "–") for the "—", a role without backticks, "[X]", a "*" bullet,
+// a lower-case priority. Anything else that isn't the harness's own heading or note is kept (see UNREADABLE below).
+const TASK_LINE_RE = /^[-*]\s+\[([ xX>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[([Pp][0-3])\]\s+\((`?)([^`()]+?)\4\)\s+(?:—|–|--?)\s+(.+)$/;
+/** The section kept lines go under, at the end of NEXT.md or DONE.md (2.58.0, P-057). */
+export const UNREADABLE_HEADING = '## UNREADABLE (kept by the harness: fix the format)';
+const UNREADABLE_NOTE = '_The harness couldn\'t read these lines as tasks, so it keeps them here instead of dropping them. Rewrite each like a task line ("- [ ] **T-123** [P1] (`builder`) — Title"; it then counts as waiting work), or delete it._';
+// 2.58.0 (P-052): which way a task was moving when a board write was cut off (see parseNextQueue).
+const MOVES_FILE = path.join(STUDIO_STATE_DIR, 'board-move.json');
 
+/**
+ * The board: studio/NEXT.md (open work) and studio/DONE.md (finished). Non-enumerable extras: readIds (what this
+ * snapshot saw), unreadable ({ next, done }: lines kept, see UNREADABLE_HEADING), duplicates (ids found open and done).
+ *
+ * 2.58.0 (P-052): a task moves between the two files in two writes, and the file that GAINS it is written first
+ * (DONE.md on done, NEXT.md on reopen; writeNextQueueRaw). An agent killed between them leaves the task in both
+ * files, never in neither. Read, it shows once: the copy the cut-off write was moving it to wins, so the move counts
+ * as made (done stays done, and the watcher frees the claim the killed done kept; a reopen stays reopened). Which
+ * way it was moving is in .studio/board-move.json, written before the first of the two writes and removed after the
+ * last. A task in both files with no such note (a hand edit, a merge) counts as done: it stays findable, and
+ * `task reopen` brings it back. The next board write keeps only the winning copy.
+ */
 export function parseNextQueue() {
-  const tasks = parseQueueFile(NEXT_FILE);
+  const files = readBoardFiles();
+  const next = parseQueueText(files.next);
+  const doneFile = parseQueueText(files.done, 'done');
+  const tasks = { inProgress: next.inProgress, backlog: next.backlog, done: next.done };
   // Older studios kept DONE in NEXT.md: those still count, and move to DONE.md on the next write.
   const seen = new Set(tasks.done.map((t) => t.id));
-  for (const t of parseQueueFile(DONE_FILE, 'done').done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  for (const t of doneFile.done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  const both = [...new Set([...tasks.inProgress, ...tasks.backlog].map((t) => t.id).filter((id) => seen.has(id)))];
+  if (both.length) {
+    const moves = readMoves();
+    for (const id of both) {
+      if (moves[id] === 'open') tasks.done = tasks.done.filter((t) => t.id !== id);
+      else for (const sec of ['inProgress', 'backlog']) tasks[sec] = tasks[sec].filter((t) => t.id !== id);
+    }
+  }
   // 2.30p: remember which tasks this snapshot saw, so a later write can keep tasks added since.
   Object.defineProperty(tasks, 'readIds', { value: new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id)), enumerable: false });
+  Object.defineProperty(tasks, 'unreadable', { value: { next: next.unreadable, done: doneFile.unreadable }, enumerable: false });
+  Object.defineProperty(tasks, 'duplicates', { value: both, enumerable: false });
   return tasks;
 }
 
-function parseQueueFile(file, start = 'backlog') {
-  if (!fs.existsSync(file)) {
-    return { inProgress: [], backlog: [], done: [] };
+/**
+ * Both board files as one consistent snapshot: NEXT.md is read again after DONE.md, and the pair re-read if it
+ * changed meanwhile (a reader without the board lock could otherwise see a task in neither file mid-move).
+ */
+function readBoardFiles() {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  let next = read(NEXT_FILE);
+  let done = null;
+  for (let i = 0; i < 5; i++) {
+    done = read(DONE_FILE);
+    const again = read(NEXT_FILE);
+    if (again === next) break;
+    next = again;
   }
-  const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
+  return { next, done };
+}
+function readMoves() {
+  try {
+    const m = JSON.parse(fs.readFileSync(MOVES_FILE, 'utf8'))?.moves;
+    return m && typeof m === 'object' ? m : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseQueueText(raw, start = 'backlog') {
+  const tasks = { inProgress: [], backlog: [], done: [], unreadable: [] };
+  if (raw === null || raw === undefined) return tasks;
+  const lines = String(raw).replace(/\r\n/g, '\n').split('\n');
   let section = start;
-  const tasks = { inProgress: [], backlog: [], done: [] };
+  let kept = false; // inside the UNREADABLE section: lines already kept (warned about once)
+  const seen = { open: new Set(), done: new Set() };
 
   for (const line of lines) {
     const trimmed = line.trim();
+    if (!trimmed) continue;
     if (/^##\s+IN_PROGRESS/i.test(trimmed)) {
       section = 'inProgress';
+      kept = false;
       continue;
     }
     if (/^##\s+BACKLOG/i.test(trimmed)) {
       section = 'backlog';
+      kept = false;
       continue;
     }
     if (/^##\s+DONE/i.test(trimmed)) {
       section = 'done';
+      kept = false;
       continue;
     }
+    if (/^##\s+UNREADABLE\b/i.test(trimmed)) {
+      // A kept line fixed in place counts as this file's work: waiting in NEXT.md, finished in DONE.md.
+      section = start;
+      kept = true;
+      continue;
+    }
+    // The harness's own title, its "Managed by" note and the _placeholder_ lines are rewritten on every write.
+    if (/^#\s/.test(trimmed) || /^>\s*Managed by\b/i.test(trimmed) || /^_.*_$/.test(trimmed)) continue;
 
     const m = trimmed.match(TASK_LINE_RE);
     if (m) {
-      const [, mark, id, priority, role, title] = m;
-      tasks[section].push({
-        id,
-        priority,
-        role,
-        title: title.trim(),
-        status: section === 'done' || mark === 'x' ? 'done' : section === 'inProgress' || mark === '>' ? 'in_progress' : 'backlog',
-      });
+      const [, rawMark, id, priority, , role, title] = m;
+      const mark = rawMark.toLowerCase();
+      const kind = section === 'done' ? 'done' : 'open';
+      // The same id twice in one file: the first is the task, the second is kept (never two tasks with one id).
+      if (!seen[kind].has(id)) {
+        seen[kind].add(id);
+        tasks[section].push({
+          id,
+          priority: priority.toUpperCase(),
+          role: role.trim(),
+          title: title.trim(),
+          status: section === 'done' || mark === 'x' ? 'done' : section === 'inProgress' || mark === '>' ? 'in_progress' : 'backlog',
+        });
+        continue;
+      }
     }
+    // 2.58.0 (P-057): never dropped. A line the harness can't read (another format, a note, a heading of its own)
+    // used to vanish on the next write; it is kept under UNREADABLE_HEADING and named in a warning.
+    tasks.unreadable.push({ line: line.replace(/\s+$/, ''), fresh: !kept });
   }
   return tasks;
 }
@@ -88,6 +168,9 @@ function parseQueueFile(file, start = 'backlog') {
 function formatTaskLine(t, mark) {
   return `- [${mark}] **${t.id}** [${t.priority}] (\`${t.role}\`) — ${t.title}`;
 }
+
+// After the file's last section (which ends with a blank line).
+const unreadableBlock = (kept) => (kept.length ? [UNREADABLE_HEADING, UNREADABLE_NOTE, ...kept.map((u) => u.line), ''] : []);
 
 /**
  * 2.57.0 (PU-16, P-038): one agent at a time reads, changes and writes the board (NEXT.md and DONE.md), under a
@@ -102,23 +185,31 @@ export function withBoard(fn) {
 /**
  * 2.30p: every board write re-reads the board first. A task on disk that the caller's snapshot never saw (another
  * agent added it meanwhile) is kept, never overwritten. 2.57.0: under the board lock (it was the land lock, which a
- * landing holds for minutes, after which the write went ahead unlocked).
+ * landing holds for minutes, after which the write went ahead unlocked). 2.58.0: lines the harness can't read are
+ * taken from the file as it is now and kept (P-057).
  */
 export function writeNextQueue(tasks) {
   withBoard(() => {
+    const disk = parseNextQueue();
     if (tasks.readIds) {
-      const disk = parseNextQueue();
       const mine = new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id));
       for (const sec of ['inProgress', 'backlog', 'done']) {
         for (const t of disk[sec]) if (!mine.has(t.id) && !tasks.readIds.has(t.id)) { tasks[sec].push(t); mine.add(t.id); }
       }
     }
-    writeNextQueueRaw(tasks);
+    // A task in both files with no move note (a hand edit) is kept as done: say so, once (this write settles it).
+    const moves = disk.duplicates.length ? readMoves() : {};
+    const settled = disk.duplicates.filter((id) => !moves[id] && tasks.done.some((t) => t.id === id));
+    writeNextQueueRaw(tasks, disk.unreadable);
+    if (settled.length) {
+      console.warn(`[board] ${settled.join(', ')} ${settled.length === 1 ? 'was' : 'were'} in both studio/NEXT.md and studio/DONE.md; kept as done (to reopen: npm run task -- reopen <ID> --reason "...")`);
+      try { emitEvent({ type: 'board.settled', agent: actor(), status: 'warn', msg: `${settled.join(', ')}: in both studio/NEXT.md and studio/DONE.md with no record of a move; kept as done` }); } catch { /* the warning above stands */ }
+    }
   });
 }
 
-function writeNextQueueRaw(tasks) {
-  const out = [
+function renderNext(tasks, kept) {
+  return [
     '# Studio Task Queue (`studio/NEXT.md`)',
     '',
     '> Managed by `node harness/task.mjs`. One line per task so agents and the Zero-Token HUB can parse it without context bloat.',
@@ -136,22 +227,56 @@ function writeNextQueueRaw(tasks) {
     '## DONE',
     `_${tasks.done.length ? `${tasks.done.length} finished task${tasks.done.length === 1 ? ' is' : 's are'}` : 'Finished tasks are'} in \`studio/DONE.md\` (newest first). This file keeps only open work._`,
     '',
-  ];
-  // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
-  writeAtomic(NEXT_FILE, out.join('\n'));
-  const done = [
+    ...unreadableBlock(kept),
+  ].join('\n');
+}
+function renderDone(done, kept) {
+  return [
     '# Finished tasks (`studio/DONE.md`)',
     '',
     '> Managed by `node harness/task.mjs`. Newest first. Open work is in `studio/NEXT.md`; agents don\'t need to read this file.',
     '',
     '## DONE',
-    ...(tasks.done.length ? tasks.done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
+    ...(done.length ? done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
     '',
-  ];
-  const doneText = done.join('\n');
-  let was = null;
-  try { was = fs.readFileSync(DONE_FILE, 'utf8'); } catch { /* not written yet */ }
-  if (was !== doneText) writeAtomic(DONE_FILE, doneText);
+    ...unreadableBlock(kept),
+  ].join('\n');
+}
+
+function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  const wasNext = read(NEXT_FILE);
+  let wasDone = read(DONE_FILE);
+  const onDisk = { next: parseQueueText(wasNext), done: parseQueueText(wasDone, 'done') };
+  const nextOpen = new Set([...onDisk.next.inProgress, ...onDisk.next.backlog].map((t) => t.id));
+  const inDoneFile = new Set(onDisk.done.done.map((t) => t.id));
+  const open = [...tasks.inProgress, ...tasks.backlog];
+  // 2.58.0 (P-052): the file that gains a task is written first; the one that loses it last. A move both ways in
+  // one write (one task done, another reopened) first writes DONE.md still holding the reopened one.
+  const toDone = tasks.done.filter((t) => !inDoneFile.has(t.id)).map((t) => t.id);
+  const toOpen = open.filter((t) => inDoneFile.has(t.id)).map((t) => t.id);
+  const moves = {};
+  for (const id of toDone) if (nextOpen.has(id)) moves[id] = 'done';
+  for (const id of toOpen) moves[id] = 'open';
+  const moving = Object.keys(moves).length > 0;
+  if (moving) writeAtomic(MOVES_FILE, `${JSON.stringify({ moves, at: new Date().toISOString(), pid: process.pid })}\n`, { fsync: false });
+  if (toDone.length) {
+    const first = renderDone([...tasks.done, ...onDisk.done.done.filter((t) => toOpen.includes(t.id))], kept.done);
+    if (first !== wasDone) writeAtomic(DONE_FILE, first);
+    wasDone = first;
+  }
+  // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
+  writeAtomic(NEXT_FILE, renderNext(tasks, kept.next));
+  const doneText = renderDone(tasks.done, kept.done);
+  if (wasDone !== doneText) writeAtomic(DONE_FILE, doneText);
+  if (moving || fs.existsSync(MOVES_FILE)) try { fs.rmSync(MOVES_FILE, { force: true }); } catch { /* stale notes only matter for a task in both files */ }
+  // 2.58.0 (P-057): say once which lines were set aside (they stay in the file, under UNREADABLE).
+  const fresh = [...kept.next.filter((u) => u.fresh).map((u) => ['studio/NEXT.md', u.line]), ...kept.done.filter((u) => u.fresh).map((u) => ['studio/DONE.md', u.line])];
+  if (fresh.length) {
+    const list = fresh.map(([f, l]) => `${f}: ${l.length > 120 ? `${l.slice(0, 117)}...` : l}`);
+    console.warn(`[board] ${fresh.length} line${fresh.length === 1 ? '' : 's'} on the board ${fresh.length === 1 ? 'isn\'t a task' : 'aren\'t tasks'} the harness can read; kept under "${UNREADABLE_HEADING}" at the end of the file:\n${list.map((l) => `  ${l}`).join('\n')}`);
+    try { emitEvent({ type: 'board.unreadable', agent: actor(), to: 'producer', status: 'warn', target: fresh[0][0], msg: `Kept ${fresh.length} board line(s) the harness can't read under "## UNREADABLE" (fix their format): ${list.join(' | ')}`.slice(0, 600) }); } catch { /* the warning above stands */ }
+  }
 }
 
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
