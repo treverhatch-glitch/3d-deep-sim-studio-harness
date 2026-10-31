@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { busyCode } from './fsafe.mjs';
 
 export const ALWAYS_SHARED = ['harness/**', 'scripts/**', 'studio/gates.json', 'package.json', 'package-lock.json'];
 
@@ -109,7 +110,9 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { 
 /**
  * Run fn while holding <root>/.studio/locks/land.lock: only the final rebase check, the fast-forward and
  * the board write go in here (seconds), never the gates. A lock older than STUDIO_LAND_LOCK_STALE_MS
- * (120 s) or held by a dead process is broken.
+ * (120 s) or held by a dead process is broken. 2.58.0 (P-043): on Windows, creating or removing the lock file
+ * while another process removes or creates it can fail with EPERM/EACCES/EBUSY ("delete pending"); that counts
+ * as busy and is retried with a short backoff (it crashed about 2 Windows CI runs in 5). `busy` is for tests.
  */
 const held = new Map();
 
@@ -163,7 +166,7 @@ export function withGateSlot(root, label, fn, { log = () => {}, env = process.en
   if (told) log(`[gate-slots] got a slot after ${Math.round((Date.now() - t0) / 1000)} s`);
   try { return fn(); } finally { try { fs.rmSync(mine, { force: true }); } catch {} }
 }
-export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND_LOCK_WAIT_MS || 180000), name = 'land' } = {}) {
+export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND_LOCK_WAIT_MS || 180000), name = 'land', busy = busyCode } = {}) {
   // Re-entrant within one process (deliver → board write → writeNextQueue).
   const key = `${path.resolve(root)}|${name}`;
   if (held.get(key)) return fn();
@@ -172,20 +175,32 @@ export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND
   const f = path.join(dir, `${name}.lock`);
   const stale = Number(process.env.STUDIO_LAND_LOCK_STALE_MS || 120000);
   const deadline = Date.now() + waitMs;
+  let backoff = 10;
   for (;;) {
     try {
       fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now() }), { flag: 'wx' });
       break;
     } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      try {
-        const h = JSON.parse(fs.readFileSync(f, 'utf8'));
-        if (Date.now() - h.at > stale || (h.pid && !alive(h.pid))) { fs.rmSync(f, { force: true }); continue; }
-      } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 2000) fs.rmSync(f, { force: true }); } catch {} }
+      if (err.code !== 'EEXIST' && !busy(err.code)) throw err;
+      if (err.code === 'EEXIST') {
+        try {
+          const h = JSON.parse(fs.readFileSync(f, 'utf8'));
+          if (Date.now() - h.at > stale || (h.pid && !alive(h.pid))) { fs.rmSync(f, { force: true }); continue; }
+        } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 2000) fs.rmSync(f, { force: true }); } catch {} }
+      }
       if (Date.now() > deadline) throw Object.assign(new Error(`land lock busy for ${Math.round(waitMs / 1000)} s`), { code: 'LAND_BUSY' });
-      sleep(25);
+      if (err.code === 'EEXIST') sleep(25);
+      else { sleep(backoff); backoff = Math.min(250, backoff * 2); }
     }
   }
   held.set(key, true);
-  try { return fn(); } finally { held.delete(key); try { fs.rmSync(f, { force: true }); } catch {} }
+  try {
+    return fn();
+  } finally {
+    held.delete(key);
+    // Removed with the same short retry: a lock left behind by a live process blocks landings for 120 s.
+    for (let i = 0, wait = 10; i < 6; i++, wait *= 2) {
+      try { fs.rmSync(f, { force: true }); break; } catch (err) { if (!busy(err.code)) break; sleep(wait); }
+    }
+  }
 }

@@ -6,6 +6,7 @@
  *   npm run mode -- set precise|budget|fast|prototype|extreme --by <name> [--why "…"]
  *   npm run mode -- boost on|off --by <name> [--hours 4]   the MAX SPEED lever (also in every War Room view)
  *   npm run mode -- scope lite|full --by <name>  Lite: 6 gates in everyday verify and AGENTS.lite.md for agents
+ *   npm run mode -- autostart on|off --by <name>  may the watcher and the HUB start agents on their own (off by default)
  *
  * The mode (studio/mode.json) sets how many agents may run at once, which work needs a review from
  * another model family, whether the watcher starts agents on its own, how often the Director and the
@@ -101,12 +102,33 @@ function save(m) {
   return m;
 }
 
+/**
+ * 2.58.0 (crew report): auto-start is one explicit switch, off by default, recorded in studio/mode.json like the
+ * pace, MAX SPEED and the scope (who, when). Off, the watcher, the HUB's loops and the Director's flow start no
+ * agent on their own, whatever the pace, MAX SPEED or away mode say: the Producer check-in still pings and logs.
+ * Starting an agent by hand (npm run agent -- start / hire, the War Room's Start agent) and the supervisor
+ * (npm run studio:start, itself started by hand) don't depend on it.
+ */
+export const AUTOSTART_OFF = 'auto-start is off, so nothing starts on its own. Turn it on with npm run mode -- autostart on --by <name>, or start agents by hand (npm run agent -- start, or Start agent in the War Room)';
+export const autostartOn = (m = readMode()) => Boolean(m.autostart?.on);
+
+export function setAutostart(on, by) {
+  if (!by) return { ok: false, message: 'Say who switched it: --by <name>.' };
+  const m = readMode();
+  const at = new Date().toISOString();
+  m.autostart = { on: Boolean(on), by, at };
+  m.history = [...(m.history || []), { autostart: Boolean(on), by, at }].slice(-50);
+  save(m);
+  emitEvent({ type: on ? 'mode.autostart_on' : 'mode.autostart_off', agent: by, to: 'producer', msg: on ? `Auto-start on (${by}): the watcher and the HUB start agents on their own, within the pace's caps` : `Auto-start off (${by}): nothing starts on its own; agents start by hand` });
+  return { ok: true, mode: effectiveMode(m) };
+}
+
 /** The numbers everything else reads: the chosen mode, with the MAX SPEED lever applied. */
 export function effectiveMode(m = readMode(), now = Date.now()) {
   const id = MODES[m.mode] ? m.mode : DEFAULT_MODE;
   const base = MODES[id];
   const boost = m.boost?.on && (!m.boost.until || Date.parse(m.boost.until) > now) ? m.boost : null;
-  const eff = { id, chosen: Boolean(MODES[m.mode]), ...base, perRole: { ...base.perRole }, boost: Boolean(boost), boostUntil: boost?.until || null, boostBy: boost?.by || null };
+  const eff = { id, chosen: Boolean(MODES[m.mode]), ...base, perRole: { ...base.perRole }, boost: Boolean(boost), boostUntil: boost?.until || null, boostBy: boost?.by || null, autostart: autostartOn(m), autostartBy: m.autostart?.by || null };
   if (boost) {
     eff.maxAgents = Math.min(12, Math.max(4, base.maxAgents * 2));
     for (const k of Object.keys(eff.perRole)) eff.perRole[k] = Math.min(6, Math.max(2, eff.perRole[k] * 2));
@@ -166,7 +188,7 @@ export function setScope(id, by) {
 }
 
 export function describeMode(e = effectiveMode()) {
-  return `${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h.`;
+  return `${e.label}${e.chosen ? '' : ' (default; the game dev hasn\'t chosen yet: npm run mode -- set …)'}${e.boost ? `, MAX SPEED on${e.boostUntil ? ` until ${e.boostUntil.slice(11, 16)} UTC` : ''}` : ''}: up to ${e.maxAgents} agents (builders ${e.perRole.builder}), reviews on ${e.review === 'every-build' ? 'every build task' : 'whole systems'}, ${e.autoLaunch && e.autostart ? 'the watcher starts agents' : 'agents started by hand or npm run agent'}, Director every ${e.directorEveryHours} h, Producer every ${e.producerEveryHours} h. ${e.autostart ? `Auto-start is on${e.autostartBy ? ` (${e.autostartBy})` : ''}: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name> stops that).` : `Auto-start is off: nothing starts on its own${e.autoLaunch ? ', although this pace would' : ''} (npm run mode -- autostart on --by <name> turns it on).`}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -182,6 +204,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   };
   if (argv[0] === 'set') done(setMode(argv[1], flag('by'), flag('why') || ''));
   if (argv[0] === 'boost') done(setBoost(argv[1] !== 'off', flag('by'), flag('hours')));
+  if (argv[0] === 'autostart') {
+    if (!['on', 'off'].includes(argv[1])) {
+      console.log(autostartOn() ? 'Auto-start is on: the watcher and the HUB may start agents on their own.' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
+      process.exit(argv[1] && !argv[1].startsWith('--') ? 1 : 0);
+    }
+    done(setAutostart(argv[1] === 'on', flag('by')));
+  }
   if (argv[0] === 'scope') {
     if (!argv[1] || argv[1].startsWith('--')) {
       console.log(SCOPES[scopeOf()]);
@@ -199,5 +228,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Scope: ${SCOPES[scopeOf()]}`);
   console.log('\nModes:');
   for (const [id, m] of Object.entries(MODES)) console.log(`  ${id.padEnd(8)} ${m.label}: ${m.pitch}`);
-  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4]   Scope: npm run mode -- scope lite|full --by <name>');
+  console.log('\nChange: npm run mode -- set <mode> --by <name>   MAX SPEED: npm run mode -- boost on|off --by <name> [--hours 4]   Scope: npm run mode -- scope lite|full --by <name>   Auto-start: npm run mode -- autostart on|off --by <name>');
 }

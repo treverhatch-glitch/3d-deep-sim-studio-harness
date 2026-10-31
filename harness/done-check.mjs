@@ -7,8 +7,8 @@
  *
  *   node harness/done-check.mjs <TASK_ID>    show the type, what is checked and what is missing
  *
- * The type comes from a title prefix (Bug:, Fix, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
- * and otherwise from the role. Each type is described in studio/skills/.
+ * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
+ * and otherwise from the role. Each type is described in studio/skills/ (the table in studio/skills/README.md).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,6 +26,7 @@ import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.m
 import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 import { reachMode, unreached } from './reachability.mjs';
 import { judgeRed, readBaseline } from './baseline.mjs';
+import { inLaneCopy, mainRoot } from './worktree.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -38,14 +39,28 @@ function firstTaggedCommit(taskId) {
   return line ? line.split('\t')[0] : null;
 }
 
+// 2.58.0: build, toolchain, CI and dependency work. "build" alone is the usual start of a game task ("Build the
+// stairwell", "Fix build menu …", a game's build tool or build times), so it counts only as a label (Build: /
+// build(deps)), at the end ("Fix the build"), or with a toolchain word; anything else stays a change or a bug.
+const TOOL_WORD = String.raw`(scripts?|pipeline|config\w*|toolchain|tooling|cache|deps|dependencies|break(s|age)?|broke|broken|errors?|failures?|fail(s|ed|ing)?|warnings?|red|again|(is|was)\s+(broken|red|failing|slow)|on\s+(windows|linux|mac\w*|node|ci|ubuntu|github))\b`;
+const CHORE_START = new RegExp(String.raw`^(chore|toolchain|tooling|infra|ci|deps|dependencies)\b|^build\s*[:([]|^build\s+${TOOL_WORD}`, 'i');
+const CHORE_FIX = new RegExp(String.raw`^fix(es|ed|ing)?\b[\s:]*((the|a)\s+)?((ci|toolchain|tooling|deps|dependencies)\b|build(?=\s*$|\s*[:;,.!()[\]—–-]|\s+${TOOL_WORD}))`, 'i');
+/** A [chore] tag in the title, or "type: chore" in the task's detail (the board keeps none; callers may pass one). */
+const choreTagged = (task) => /\[chore(:[^\]]*)?\]/i.test(String(task?.title || '')) || /(^|\n)\s*type\s*:\s*chore\b/im.test(String(task?.detail || ''));
+
 const PREFIX = [
   // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
   [/^rescue:/i, 'rescue'],
   // 2.37.0: the whole-game check went red after a landing (harness/whole-game.mjs).
   [/^whole-game check red\b/i, 'whole'],
+  [/^check forced done\b/i, 'none'],
   // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
   // (Jed's run: docs-gate bugs could only close with --force).
   [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
+  // 2.58.0: "Fix the build", "Fix CI", "Fix toolchain", "Fix deps" are chores, not bugs: no regression to replay
+  // (a crew report: toolchain tasks titled "Fix …" had to be retitled to close). Other "Fix …" stays a bug.
+  [CHORE_FIX, 'chore'],
+  [CHORE_START, 'chore'],
   [/^(bug|fix)\b/i, 'bug'],
   [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
@@ -54,7 +69,6 @@ const PREFIX = [
   [/^playtest\b/i, 'playtest'],
   [/^review\b/i, 'review'],
   [/^docs?\b/i, 'docs'],
-  [/^check forced done\b/i, 'none'],
   [/^director review\b/i, 'direction'],
   [/^idea\b/i, 'idea'],
   [/^art\b/i, 'art'],
@@ -86,6 +100,7 @@ const BY_ROLE = {
 
 export const TYPES = {
   change: { skill: 'studio/skills/builder.md', means: 'changes exist for the task, and a full `npm run verify` passed after the last of them' },
+  chore: { skill: 'studio/skills/builder.md', means: 'build, toolchain, CI or dependency work: changes exist for the task, and a full `npm run verify` passed after the last of them (no regression, no gameplay checks, no reach check)' },
   bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned SHA-256 that fails on the code before the fix, a lesson naming the bug, the fix committed with the task\'s tag, and a green verify after the last change' },
   balance: { skill: 'studio/skills/balance.md', means: 'a sweep of the current tuning, newer than the last game change; a person picks the number' },
   fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
@@ -105,8 +120,11 @@ export const TYPES = {
 
 export function taskType(task) {
   const title = String(task?.title || '');
-  for (const [re, type] of PREFIX) if (re.test(title)) return type;
-  return BY_ROLE[task?.role] || 'change';
+  // 2.58.0: a [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
+  const tagged = choreTagged(task);
+  for (const [re, type] of PREFIX) if (re.test(title)) return type === 'bug' && tagged ? 'chore' : type;
+  const byRole = BY_ROLE[task?.role] || 'change';
+  return byRole === 'change' && tagged ? 'chore' : byRole;
 }
 
 /**
@@ -246,13 +264,45 @@ export function taskBase(taskId) {
   return base;
 }
 
+const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
+const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: REPO_ROOT }).status === 0;
+/** The studio's main branch as this checkout can name it (a lane copy: the main checkout's branch), never HEAD's own. */
+function studioMainBranches() {
+  const own = (git('symbolic-ref', '-q', '--short', 'HEAD') || '').trim();
+  const names = [];
+  try {
+    if (inLaneCopy()) names.push(spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: mainRoot(), encoding: 'utf8' }).stdout.trim());
+  } catch {
+    // no main checkout to ask
+  }
+  names.push('main', 'origin/main');
+  return [...new Set(names.filter((n) => n && n !== own && n !== `origin/${own}`))];
+}
+/**
+ * 2.58.0: the commit a task's growth is measured from. Its start commit, unless its branch has since taken in the
+ * studio's main branch (a merge or a rebase): then the merge-base of HEAD and main, so what came from main isn't
+ * counted as the task's own growth (a crew report: a merged-in main forced a --force close twice). Only a
+ * merge-base at or after the start counts; on main itself, or with no main, the start commit.
+ */
+export function sizeBase(taskId) {
+  const base = taskBase(taskId);
+  if (!base) return null;
+  let best = base;
+  for (const ref of studioMainBranches()) {
+    const mb = (git('merge-base', 'HEAD', ref) || '').trim();
+    if (isSha(mb) && mb !== best && isAncestor(best, mb)) best = mb;
+  }
+  return best;
+}
+
 /**
  * The size ratchet (2.29): game functions and files over the limit (scripts/check-function-size.mjs) that
  * this task made bigger, or created. Ones that were already that big and didn't grow are left to a split
- * task. Null when the start commit isn't known (a task started before 2.29).
+ * task. Null when the start commit isn't known (a task started before 2.29). 2.58.0: compared with sizeBase
+ * (the merge-base with the studio's main branch once the task took main in), not always the start commit.
  */
 export function sizeGrowth(taskId, files) {
-  const base = taskBase(taskId);
+  const base = sizeBase(taskId);
   if (!base) return null;
   const limits = LIMITS();
   const out = [];
@@ -308,6 +358,14 @@ export function gatesAfter(at, files = null, taskId = null) {
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
   if ((Date.parse(run.at) || 0) < at) return 'no full `npm run verify` after your last change; run it again';
+  // 2.58.0 (PU-34, P-047): only a verify of this very commit on a clean tree counts. The time and the rows alone
+  // could be an older commit's run, or a record written by hand. (Not a git checkout: no commit to compare.)
+  const head = (git('rev-parse', 'HEAD') || '').trim();
+  if (isSha(head)) {
+    if (!run.head) return 'the last verify record names no commit (it is older than 2.43.0, or was written by hand); run `npm run verify` again';
+    if (run.head !== head) return `the last verify ran on commit ${String(run.head).slice(0, 8)}, not on this one (${head.slice(0, 8)}); run \`npm run verify\` again`;
+    if (run.dirty) return 'the last verify ran with uncommitted changes, so it tested something other than this commit; commit your work, then run `npm run verify` again';
+  }
   // 2.31.0: a verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds
   // every file this task changed.
   if (run.scoped && Array.isArray(run.changed) && files?.length) {
@@ -399,7 +457,8 @@ export function checkDone(task, since = startedAt(task.id)) {
     }
   };
 
-  if (type === 'change') workAndVerify();
+  // 2.58.0: a chore closes like a change, without the gameplay, reach and screenshot checks below.
+  if (type === 'change' || type === 'chore') workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
   // 2.38.0: built but not wired. Game code this task changed that nothing in the game reaches from its entry
   // points (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.

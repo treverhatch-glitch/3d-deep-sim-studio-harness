@@ -141,7 +141,7 @@ export async function refillPass({ dryRun = false, min = Number(process.env.STUD
   }
   let woke = null;
   if (!dryRun && process.env.STUDIO_REFILL_WAKE !== 'off') {
-    const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why }));
+    const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why, auto: true }));
     try { woke = await wake(`the queue is low (${open.length} open): plan forward from the next unmet milestone; never re-list done work`); } catch {}
   }
   const msg = `Queue low (${open.length} builder tasks open): ${dryRun ? 'would add' : 'added'} ${picked.length} from unmet goals${refused.length ? `, refused ${refused.length} already covered` : ''}`;

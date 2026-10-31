@@ -744,7 +744,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const brief = fs.readFileSync(path.join(dir, `.studio/briefs/${id}.md`), 'utf8');
   report('a focus brief says who the agent is, from its role card', /## Who you are \(studio\/roles\/builder\.md\)/.test(brief) && /Good work looks like/.test(brief), brief.slice(0, 800));
   report('a focus brief lists where agents in that role get refused most', /## Where `builder` agents get refused most[\s\S]*1x: /.test(brief), brief);
-  report('a focus brief carries lessons filed for the role', /## Lessons filed for `builder`[\s\S]*BUG-ROLE-1/.test(brief), brief);
+  report('a focus brief carries lessons filed for the role', /Lessons filed for `builder`[\s\S]*BUG-ROLE-1/.test(brief), brief);
   report('a focus brief for work players see carries the game\'s voice', /## The game's voice[\s\S]*Tone: Quiet, warm/.test(brief), brief);
   const fun = run(dir, 'node scripts/fun-check.mjs').stdout;
   report('the fun check reads the game through every persona with a lens', /## Through the personas/.test(fun) && /The first-timer: first win after/.test(fun) && /The min-maxer:/.test(fun) && /The calm player:/.test(fun) && /The explorer:/.test(fun), fun);
@@ -797,6 +797,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
+  // 2.58.0: task done runs the secret scan itself; the board and hand-off notes, where the key-shaped title below
+  // lands, stay out of git here.
+  git('rm -q -r --cached --ignore-unmatch studio/NEXT.md studio/DONE.md studio/CURRENT_TASK.md studio/handoffs');
+  fs.mkdirSync(path.join(dir, '.git', 'info'), { recursive: true });
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), '\nstudio/NEXT.md\nstudio/DONE.md\nstudio/CURRENT_TASK.md\nstudio/handoffs/\n');
+  git('commit -q -m "board out of git" --no-verify');
   const a = JSON.parse(run(dir, 'node harness/task.mjs add "Plan: the moss table" --role producer', env).stdout).id;
   run(dir, `node harness/task.mjs start ${a} --agent prod-1 --model model-a`, env);
   fs.writeFileSync(path.join(dir, 'notes.md'), 'plan\n');
@@ -880,7 +886,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
   git('add -A');
   git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  // 2.58.0 (PU-34): a verify counts only for the commit it ran on, with a clean tree.
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), head: git('rev-parse HEAD').stdout.trim(), dirty: false, rows: [{ id: 'golden', required: true, ok: true }] }));
   fs.writeFileSync(path.join(dir, 'studio/reviews/2026-10-20-visitors.md'), `model-family: claude\nimplementer-family: anthropic\n\nReview of ${id}: rates look right. Verdict: approve.\n`);
   const same = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
   report('a system task refuses an approval from the builder\'s own model family', /\[x\] Spec ends with a hand-off/.test(same) && /\[x\] Goldens updated/.test(same) && /\[ \] Approved by a reviewer from another model family: the approving review is from the same model family/.test(same), same);
@@ -993,6 +1000,11 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('an agent that runs out of quota mid-task is cleaned up: task handed back, work saved as a patch, claims freed', died.status !== 0 && /usage limit/.test(died.stdout + ev) && /## BACKLOG[\s\S]*T-003/.test(q) && fs.existsSync(patch) && /docs\/fake\/builder-9\.md/.test(fs.readFileSync(patch, 'utf8')) && !fs.readdirSync(path.join(dir, '.studio/locks')).some((f) => /builder-9/.test(fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'))), died.stdout + died.stderr + q);
   report('the launcher reports session start and end, with the tokens the agent printed', /agent\.session\.start/.test(ev) && /"type":"agent\.session\.end"[^\n]*"tokensIn":1200/.test(ev), ev.split('\n').filter((l) => /agent\.session/.test(l)).join('\n'));
   fs.rmSync(path.join(dir, 'docs/fake'), { recursive: true, force: true });
+  // 2.58.0 (PU-40, P-051): the limit above is now kept for this custom command's program, so a relaunch waits for its
+  // reset; the rest of this block runs as if that reset had passed.
+  const held = run(dir, 'node harness/agent.mjs start --role builder --agent builder-7 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
+  report('2.58.0 (PU-40): right after a custom command hits its usage limit, the next start of that command waits for the reset', held.status !== 0 && /budget stop/.test(held.stdout + held.stderr) && /custom:fake-agent/.test(held.stdout + held.stderr), held.stdout + held.stderr);
+  fs.rmSync(path.join(dir, '.studio/tool-quota.json'), { force: true });
   const ok = run(dir, 'node harness/agent.mjs start --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
   report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8')), ok.stdout + ok.stderr);
   // Caps: Precise allows one builder; MAX SPEED doubles it.
@@ -1082,7 +1094,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
   const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
   const zed = (hud.agents || []).find((a) => a.name === 'zed-1');
-  report('an agent hired into a division sits in that room, and the room opens', hire.status === 0 && zed?.room === 'sound' && (hud.divisions || []).find((d) => d.id === 'sound')?.active === true && /Note from hatch: keep it subtle/.test(fs.readFileSync(path.join(dir, '.studio/kickoff/zed-1.md'), 'utf8')), hire.stdout + hire.stderr + JSON.stringify(zed));
+  report('an agent hired into a division sits in that room, and the room opens', hire.status === 0 && zed?.room === 'sound' && (hud.divisions || []).find((d) => d.id === 'sound')?.active === true && /Note from hatch[^\n]*:\n\| keep it subtle/.test(fs.readFileSync(path.join(dir, '.studio/kickoff/zed-1.md'), 'utf8')), hire.stdout + hire.stderr + JSON.stringify(zed));
   const pz = run(dir, 'node harness/agent.mjs pause zed-1 --note "wrong floor"', env);
   report('pausing an agent hands its task back with the note', pz.status === 0 && new RegExp(`## BACKLOG[\\s\\S]*${tid}`).test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), pz.stdout + pz.stderr);
   report('npm run agent -- logs shows an agent\'s output', run(dir, 'node harness/agent.mjs logs zed-1', env).status === 0);
@@ -1341,6 +1353,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
   // One launcher: the watcher's auto-start does nothing while a supervisor runs, and uses lanes when none does.
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
+  // 2.58.0: the watcher starts agents only with auto-start on (off by default).
+  run(dir, 'node harness/mode.mjs autostart on --by hatch', env);
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder')) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   for (const t of ['Lobby doors', 'Lobby lights']) run(dir, `node harness/task.mjs add "${t}" --role builder --lane docs/lobby`, env);
   const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'ignore' });
@@ -1386,7 +1400,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node harness/notes.mjs add --kind bad "the import was slow today"', env);
   const pits = run(dir, 'node harness/pitfalls.mjs', env).stdout;
   const ko = node('ko.mjs', "import { pitfallsForPrompt } from './harness/pitfalls.mjs';\nconsole.log(pitfallsForPrompt());\n").stdout;
-  report('pitfalls: one line per rule, no repeats, a "didn\'t work" note that reads as a rule is added, and every agent\'s prompt carries them', (pits.match(/hotel ceiling/g) || []).length === 1 && /per-tick timeout/.test(pits) && !/import was slow/.test(pits) && /follow them:\n- never put the hotel/.test(ko), pits + ko);
+  report('pitfalls: one line per rule, no repeats, a "didn\'t work" note that reads as a rule is added, and every agent\'s prompt carries them', (pits.match(/hotel ceiling/g) || []).length === 1 && /per-tick timeout/.test(pits) && !/import was slow/.test(pits) && /Pitfalls seen in this game[^\n]*:\n\| - never put the hotel/.test(ko), pits + ko);
   run(dir, 'node harness/pitfalls.mjs remove 1 --by jed', env);
   report('a pitfall that no longer holds can be removed', !/hotel ceiling/.test(run(dir, 'node harness/pitfalls.mjs', env).stdout));
   // Hand-back notes are kept short.
@@ -1869,7 +1883,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
   git('add -A');
   git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  // 2.58.0 (PU-34): a verify counts only for the commit it ran on, with a clean tree.
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), head: git('rev-parse HEAD').stdout.trim(), dirty: false, rows: [{ id: 'golden', required: true, ok: true }] }));
   const rv = await runAsync(dir, `node harness/review.mjs ${id} --local`, ollama);
   const files = fs.readdirSync(path.join(dir, 'studio/reviews')).filter((f) => f.includes(id));
   const text = files[0] ? fs.readFileSync(path.join(dir, 'studio/reviews', files[0]), 'utf8') : '';
@@ -3504,6 +3519,58 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftestPU17 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu17.mjs')).href);
   await selftestPU17({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 (PU-41): the events log after a roll-over (P-058) and metrics on a long log (P-059) (qa/selftest-258e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258e.mjs')).href);
+  await selftest258E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 (F): verify survives being reaped, runs game checks with CI=true, names files it changed (qa/selftest-258f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258f.mjs')).href);
+  await selftest258F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 part A: size growth from the merge-base, the chore type, PU-34 (P-047), PU-35 (P-048) (qa/selftest-258a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258a.mjs')).href);
+  await selftest258A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 part B (PU-37, PU-38, PU-42, PU-43): killed board writes, leaked and raced claims, live lock holders,
+// hand-edited board lines, temp files, case-blind folder claims: P-052 to P-057, P-060 (qa/selftest-258b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258b.mjs')).href);
+  await selftest258B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 part D: untrusted text marked in briefs and prompts (PU-36), stalled agents freed (PU-39), custom-command
+// limits per program (PU-40), auto-start opt-in (qa/selftest-258d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258d.mjs')).href);
+  await selftest258D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.0 (PU-33, P-046): the hook scans the staged blobs, verify's secrets gate scans the commits since the base
+// (lines added and messages), UTF-16 files are read, the skip list is tied to real paths, scrub() shares the
+// scan's list (qa/selftest-258c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258c.mjs')).href);
+  await selftest258C({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

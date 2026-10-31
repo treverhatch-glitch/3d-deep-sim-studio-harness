@@ -1,42 +1,190 @@
 #!/usr/bin/env node
 /**
- * scripts/secret-scan.mjs [root] [--staged] — fail if a key-shaped string would be committed.
+ * scripts/secret-scan.mjs [root] [--staged | --since <ref> | --no-history] — fail if a key-shaped string would be
+ * published.
  *
- * In a git checkout it scans exactly what git would publish: tracked files plus untracked files
- * that are not ignored. Your own .env (ignored) never trips it, so private clones stay green.
- * --staged scans only staged files (used by the pre-commit hook). Outside git it scans the folder.
- * Pure Node, so it runs the same on Windows, macOS and Linux. Values are never printed: a hit is
- * reported as file:line and the kind of secret (for example discord-bot-token).
+ *   (no flag)       what git would publish: tracked files plus untracked files that are not ignored, AND every
+ *                   commit not on the base branch yet (the `secrets` gate in verify). A key committed and then
+ *                   cleaned from the file is still in a commit; PU-33 (P-046): the gate reads those commits too.
+ *   --staged        what is staged, read from the index (the pre-commit hook), not the file on disk: a token
+ *                   staged and then cleaned only in the file is what the commit would hold.
+ *   --since <ref>   only the commits in <ref>..HEAD: the lines each one adds and its message.
+ *   --no-history    only the files (the scan before 2.58.0).
  *
- * What it looks for:
- *   - the provider key shapes in harness/secrets.mjs (OpenAI, Anthropic, xAI, GitHub, AWS key ids, ...);
- *   - PU-18 (P-040): Discord bot tokens and webhook URLs, Slack webhooks and app/refresh tokens,
- *     Telegram bot tokens, AWS secret access keys and session tokens next to their names;
- *   - a long random-looking value given to a name ending in TOKEN, SECRET, SECRET_KEY, API_KEY, APIKEY,
- *     PRIVATE_KEY, PASSWORD or WEBHOOK(_URL), in env, JSON, YAML, TOML, INI, Dockerfiles or code. Placeholders (empty, <...>, ${...},
- *     $VAR, process.env.X, your-token-here, changeme, xxx, ***, REDACTED, example/dummy/fake/test values,
- *     one character repeated) and word-built values never count;
- *   - any of the token shapes above hidden in base64: a whole quoted or assigned value of 40-400
- *     base64 characters is decoded and scanned again. Longer runs (images, fonts) and data: URIs are not.
+ * The base for the commits: origin/$GITHUB_BASE_REF (CI), origin/HEAD, origin/main, origin/master, then the
+ * studio's branch (a lane's main checkout), main or master when HEAD is on another branch; the commits since the
+ * merge-base with the first one found. With none, the last 50 commits. Outside git it scans the folder. Your own
+ * .env (ignored) never trips it, so private clones stay green.
+ *
+ * Text files in UTF-8, UTF-8 with a BOM, or UTF-16 LE/BE with a BOM (Windows PowerShell 5's `>`) are read;
+ * other files with a NUL byte are binary and skipped. What counts as a secret lives in harness/secrets.mjs,
+ * shared with scrub(). Pure Node plus git, so it runs the same on Windows, macOS and Linux. Values are never
+ * printed: a hit is reported as file:line, the kind (for example discord-bot-token) and the sha256 of the value,
+ * with the commit's short id for one in history.
+ *
+ * A true false alarm (not a key) can be allowed by the owner only: an entry in studio/secrets-allow.json (protected,
+ * so it needs the owner's signed approval) with path, kind, fingerprint (that sha256) and optionally the commit
+ * ("*": the files). It is then listed as "allowed (reason)" and doesn't fail. A real key is rotated, never allowed.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { findSecrets } from '../harness/secrets.mjs';
 
 const args = process.argv.slice(2);
-const STAGED = args.includes('--staged');
-const ROOT = path.resolve(args.find((a) => !a.startsWith('--')) || '.');
+let STAGED = false;
+let NO_HISTORY = false;
+let SINCE = null;
+const rest = [];
+for (let i = 0; i < args.length; i += 1) {
+  const a = args[i];
+  if (a === '--staged') STAGED = true;
+  else if (a === '--no-history') NO_HISTORY = true;
+  else if (a === '--since' || a.startsWith('--since=')) {
+    SINCE = a === '--since' ? args[(i += 1)] : a.slice(8);
+    if (!SINCE) bad('--since needs a ref (a branch, tag or commit)');
+  } else if (a.startsWith('-')) bad(`unknown option ${a}`);
+  else rest.push(a);
+}
+function bad(msg) {
+  console.error(`[secrets] ${msg}\n  usage: node scripts/secret-scan.mjs [root] [--staged | --since <ref> | --no-history]`);
+  process.exit(2);
+}
+const ROOT = path.resolve(rest[0] || '.');
+const FALLBACK_COMMITS = 50;
+const BLOB_CAP = 4 * 1024 * 1024; // history: a file git calls binary is read back only up to this size
 
-import { SECRET_PATTERNS } from '../harness/secrets.mjs';
+const git = (a, opts = {}) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, ...opts });
 
-const SKIP = /(^|\/)(secret-scan\.(mjs|sh)|secrets\.mjs|package-lock\.json|[^/]*\.lock)$/;
+// Where ROOT sits in git: inGit, the path from the repo's top to ROOT ('' at the top, 'sub/dir/' below it), the top.
+const where = git(['rev-parse', '--is-inside-work-tree', '--show-prefix', '--show-toplevel']);
+const whereLines = String(where.stdout || '').split('\n');
+const IN_GIT = where.status === 0 && whereLines[0] === 'true';
+const PREFIX = IN_GIT ? whereLines[1] || '' : '';
+const TOP = IN_GIT && whereLines[2] ? whereLines[2] : ROOT;
 
-function listFiles() {
-  const git = (a) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (git(['rev-parse', '--is-inside-work-tree']).stdout?.trim() === 'true') {
-    const r = STAGED ? git(['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z']) : git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
-    return r.stdout.split('\0').filter(Boolean);
+// PU-33: skips are tied to their real place from the repo's top (before 2.58.0 any secrets.mjs or *.lock
+// anywhere was skipped). harness/secrets.mjs spells out the shapes; the root lockfile is npm's hashes.
+const SKIP_FILES = new Set(['harness/secrets.mjs', 'package-lock.json']);
+const SKIP_DIRS = ['.studio/locks/'];
+const skipped = (repoRel) => SKIP_FILES.has(repoRel) || SKIP_DIRS.some((d) => repoRel.startsWith(d));
+
+/** A file's bytes as text, or null when binary. A BOM says UTF-8 or UTF-16 (LE/BE); no BOM and a NUL is binary. */
+function decodeText(buf) {
+  let text;
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) text = buf.toString('utf8', 3);
+  else if (buf[0] === 0xff && buf[1] === 0xfe) text = buf.toString('utf16le', 2, 2 + ((buf.length - 2) & ~1));
+  else if (buf[0] === 0xfe && buf[1] === 0xff) {
+    const b = Buffer.from(buf.subarray(2, 2 + ((buf.length - 2) & ~1)));
+    text = b.swap16().toString('utf16le');
+  } else return buf.subarray(0, 8000).includes(0) ? null : buf.toString('utf8');
+  return text.slice(0, 8000).includes('\0') ? null : text;
+}
+
+const sha256 = (v) => crypto.createHash('sha256').update(v, 'utf8').digest('hex');
+
+/**
+ * The secrets in `text`: [{ line, kind, fp }], one per kind and value on a line. `fp` is the sha256 of the matched
+ * value (printed, so the owner can allow a false alarm by it; the value never is). `lineOf` maps an index to the
+ * line to report.
+ */
+function findingsIn(text, rel, lineOf) {
+  const lines = new Map();
+  for (const f of findSecrets(text, { path: rel })) {
+    const line = lineOf(f.index);
+    const fp = sha256(text.slice(f.index, f.index + f.length));
+    if (!lines.has(line)) lines.set(line, new Map());
+    lines.get(line).set(`${f.kind}\0${fp}`, { line, kind: f.kind, fp });
   }
+  const out = [];
+  for (const found of lines.values()) {
+    const list = [...found.values()].sort((x, y) => (x.kind < y.kind ? -1 : x.kind > y.kind ? 1 : 0));
+    // A line whose token has a known shape reports that shape, not also "named-secret".
+    const shaped = list.some((x) => !x.kind.startsWith('named-secret'));
+    for (const x of list) if (!(shaped && x.kind.startsWith('named-secret'))) out.push(x);
+  }
+  return out;
+}
+
+/** index → 1-based line number in `text` (a binary search over its newlines, built on first use). */
+function lineIndex(text) {
+  let nl = null;
+  return (i) => {
+    if (!nl) {
+      nl = [];
+      for (let j = text.indexOf('\n'); j >= 0; j = text.indexOf('\n', j + 1)) nl.push(j);
+    }
+    let lo = 0;
+    let hi = nl.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (nl[mid] < i) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo + 1;
+  };
+}
+
+// { sha? (full; none for the files or the index), rel (as shown), at (from the repo's top, for the allowlist), line, kind, fp }
+const hits = [];
+const record = (rel, found, sha, at = rel) => {
+  for (const f of found) hits.push({ sha, rel, at, ...f });
+};
+const scanText = (text, rel, sha, at = rel) => record(rel, findingsIn(text, rel, lineIndex(text)), sha, at);
+
+/** Read blobs from git: Map(oid → Buffer), one cat-file call. */
+function readBlobs(oids) {
+  const out = new Map();
+  const uniq = [...new Set(oids)];
+  if (!uniq.length) return out;
+  const r = spawnSync('git', ['cat-file', '--batch'], { cwd: ROOT, input: `${uniq.join('\n')}\n`, maxBuffer: 2 ** 31 - 1 });
+  if (r.error || r.status !== 0) throw new Error(`git cat-file failed: ${String(r.error?.message || r.stderr || '').trim().slice(0, 200)}`);
+  const buf = r.stdout;
+  for (let at = 0; at < buf.length; ) {
+    const nl = buf.indexOf(10, at);
+    if (nl < 0) break;
+    const m = /^([0-9a-f]+) (\w+) (\d+)$/.exec(buf.toString('latin1', at, nl));
+    if (!m) { at = nl + 1; continue; } // "<oid> missing"
+    const size = Number(m[3]);
+    out.set(m[1], buf.subarray(nl + 1, nl + 1 + size));
+    at = nl + 1 + size + 1;
+  }
+  return out;
+}
+
+function blobSizes(oids) {
+  const out = new Map();
+  const uniq = [...new Set(oids)];
+  if (!uniq.length) return out;
+  const r = git(['cat-file', '--batch-check'], { input: `${uniq.join('\n')}\n` });
+  for (const line of String(r.stdout || '').split('\n')) {
+    const m = /^([0-9a-f]+) \w+ (\d+)$/.exec(line);
+    if (m) out.set(m[1], Number(m[2]));
+  }
+  return out;
+}
+
+/** fn(item, bytes) for each { oid } item up to maxSize bytes, read in batches of about 64 MB (one big asset at a time). */
+function eachBlob(items, fn, maxSize = Infinity) {
+  const sizes = blobSizes(items.map((x) => x.oid));
+  const list = items.filter((x) => sizes.has(x.oid) && sizes.get(x.oid) <= maxSize);
+  for (let i = 0; i < list.length; ) {
+    const batch = [];
+    let total = 0;
+    while (i < list.length && (!batch.length || total + sizes.get(list[i].oid) <= 64 * 1024 * 1024)) {
+      total += sizes.get(list[i].oid);
+      batch.push(list[i]);
+      i += 1;
+    }
+    const blobs = readBlobs(batch.map((x) => x.oid));
+    for (const x of batch) fn(x, blobs.get(x.oid));
+  }
+}
+
+// --- The files: the working tree (or, with --staged, the index) ---------------------------------------------
+function listFiles() {
+  if (IN_GIT) return git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']).stdout.split('\0').filter(Boolean);
   const out = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
@@ -50,259 +198,301 @@ function listFiles() {
   return out;
 }
 
-// The shared shapes (harness/secrets.mjs) with a name for the report. A shape added there later and not
-// named here is reported as "key-shaped-string".
-const SHARED_KIND = new Map([
-  ['sk-[A-Za-z0-9]{20,}', 'openai-style-key'],
-  ['sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}', 'openai-key'],
-  ['sk-ant-[A-Za-z0-9_-]{20,}', 'anthropic-key'],
-  ['sk-or-v1-[A-Za-z0-9]{20,}', 'openrouter-key'],
-  ['sk_live_[A-Za-z0-9]{16,}', 'stripe-key'],
-  ['rk_live_[A-Za-z0-9]{16,}', 'stripe-key'],
-  ['nvapi-[A-Za-z0-9_-]{20,}', 'nvidia-key'],
-  ['gsk_[A-Za-z0-9]{20,}', 'groq-key'],
-  ['xai-[A-Za-z0-9]{20,}', 'xai-key'],
-  ['AIza[0-9A-Za-z_-]{30,}', 'google-api-key'],
-  ['ya29\\.[0-9A-Za-z_-]{20,}', 'google-oauth-token'],
-  ['AKIA[0-9A-Z]{16}', 'aws-access-key-id'],
-  ['gh[pousr]_[A-Za-z0-9]{30,}', 'github-token'],
-  ['github_pat_[A-Za-z0-9_]{20,}', 'github-token'],
-  ['glpat-[A-Za-z0-9_-]{16,}', 'gitlab-token'],
-  ['xox[abposr]-[A-Za-z0-9-]{20,}', 'slack-token'],
-  ['hf_[A-Za-z0-9]{20,}', 'huggingface-token'],
-  ['r8_[A-Za-z0-9]{20,}', 'replicate-token'],
-  ['-----BEGIN [A-Z ]*PRIVATE KEY-----', 'private-key'],
-]);
-const SHARED = SECRET_PATTERNS.map((re) => ({
-  re: new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`),
-  kind: SHARED_KIND.get(re.source) || 'key-shaped-string',
-}));
-
-// 2.43.0: a key-shaped match glued inside a longer run of base64 characters is a piece of encoded data (an
-// image pack, a font), not a key: "AKIA" plus 16 capitals turns up by chance in a few hundred KB of base64.
-// A real key stands on its own (quotes, =, space or a line edge around it).
-const B64 = /[A-Za-z0-9+/]/;
-function gluedInBase64(text, at, len) {
-  const before = text[at - 1] || '';
-  const after = text[at + len] || '';
-  return B64.test(before) && (B64.test(after) || after === '=');
-}
-
-// Filler: one character over and over, or a provider's docs sample ("XXXX…", "0000…", "your-…").
-const FILLER = /(.)\1{7,}|x{4,}|\*{3,}|your|example|sample|dummy|fake|placeholder|redacted|changeme|change[-_]me/i;
-const filler = (s) => FILLER.test(s);
-const mixed = (s) => /[a-z]/.test(s) && /[A-Z]/.test(s) && /\d/.test(s);
-// A Discord bot token's first part is the bot's numeric id in base64.
-const discordId = (s) => /^\d{17,21}$/.test(Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1'));
-
-// PU-18 (P-040): shapes the shared list doesn't know. Each stands on its own (lookarounds), so a lookalike
-// piece of a long base64 run never counts; `ok` throws out docs samples and filler.
-const SHAPES = [
-  {
-    kind: 'discord-bot-token',
-    re: /(?<![A-Za-z0-9_.-])([MNO][A-Za-z0-9_-]{22,27})\.([A-Za-z0-9_-]{6,7})\.([A-Za-z0-9_-]{27,40})(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])/g,
-    ok: (m) => (discordId(m[1]) || mixed(m[0])) && !filler(m[3]),
-  },
-  {
-    kind: 'discord-webhook-url',
-    re: /https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api(?:\/v\d{1,2})?\/webhooks\/\d{15,22}\/([A-Za-z0-9_-]{50,100})/g,
-    ok: (m) => !filler(m[1]),
-  },
-  {
-    kind: 'slack-webhook-url',
-    re: /https?:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/(T[A-Za-z0-9]{6,14})\/([A-Za-z0-9]{6,14})\/([A-Za-z0-9_-]{16,}(?:\/[A-Za-z0-9_-]+)*)/g,
-    ok: (m) => !filler(m[3]) && !(/^T0+$/.test(m[1]) && /^[A-Z]0+$/.test(m[2])),
-  },
-  { kind: 'slack-app-token', re: /(?<![A-Za-z0-9])xapp-\d-[A-Za-z0-9-]{20,}/g, ok: (m) => !filler(m[0]) },
-  { kind: 'slack-token', re: /(?<![A-Za-z0-9])xoxe(?:\.xox[bp])?-\d-[A-Za-z0-9-]{20,}/g, ok: (m) => !filler(m[0]) },
-  {
-    kind: 'telegram-bot-token',
-    // On its own, or in the Bot API address (…/bot<token>/sendMessage).
-    re: /(?:(?<=\/bot)|(?<![A-Za-z0-9_:-]))\d{8,10}:(AA[A-Za-z0-9_-]{33})(?![A-Za-z0-9_-])/g,
-    ok: (m) => !filler(m[1]),
-  },
-  {
-    kind: 'aws-secret-access-key',
-    re: /(?<![A-Za-z0-9])(?:aws[_-]?secret[_-]?(?:access[_-]?)?key|secret[_-]?access[_-]?key)["']?[ \t]*(?::=|=>|[:=])[ \t]*["']?([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+=])/gi,
-    ok: (m) => !filler(m[1]) && /[A-Za-z]/.test(m[1]) && /[0-9/+]/.test(m[1]),
-  },
-  {
-    kind: 'aws-session-token',
-    re: /(?<![A-Za-z0-9])(?:aws[_-]?session[_-]?token|aws[_-]?security[_-]?token|session[_-]?token)["']?[ \t]*(?::=|=>|[:=])[ \t]*["']?([A-Za-z0-9/+=]{100,})/gi,
-    ok: (m) => !filler(m[1]) && mixed(m[1]),
-  },
-];
-
-// --- Named secrets: KEY=value, "key": "value", key: value, key = "value" -----------------------------------
-const NAMED = /(token|secret|secret[_.-]?key|api[_.-]?key|private[_.-]?key|password|passwd|webhook(?:[_.-]?url)?)(["'`]?)[ \t]*(:=|=>|=(?!=)|:(?!:))[ \t]*/gi;
-const NAME_CHAR = /[A-Za-z0-9_.$-]/;
-// Where an unquoted value may stand: an env/YAML/TOML/INI line that starts with the name (commented out too, a
-// YAML list item, a Dockerfile ENV/ARG), or a --flag=value.
-const LINE_LEAD = /^[ \t]*(?:(?:#+|\/\/|;)[ \t]*)?(?:export[ \t]+|set[ \t]+|env[ \t]+|arg[ \t]+|-[ \t]+|\$env:)?$/i;
-// In source code a literal secret is quoted; a bare value there is an identifier (x = module.SomeClass768Key).
-const CODE = /\.(?:py|pyi|js|mjs|cjs|jsx|ts|tsx|mts|cts|rb|go|java|kt|kts|cs|php|rs|swift|c|cc|h|hh|cpp|hpp|m|scala|lua|gd|dart|vue|svelte)$/i;
-const PLACEHOLDER = /^$|<[^>]*>|^\[.*\]$|^\{.*\}$|\$\{|\$\(|^\$|^%[^%]+%$|\{\{|process\.env|import\.meta|os\.environ|getenv|^env[.:(]|secrets\.|^vars\.|your|example|sample|dummy|fake|test|placeholder|changeme|change[-_]me|replace|insert|here|redacted|x{4,}|\*{3,}|todo|^(?:tbd|none|null|undefined)\b/i;
-
-function entropy(s) {
-  const n = {};
-  for (const ch of s) n[ch] = (n[ch] || 0) + 1;
-  let h = 0;
-  for (const k in n) {
-    const p = n[k] / s.length;
-    h -= p * Math.log2(p);
-  }
-  return h;
-}
-
-/** How much of `v` is made of words: kebab/snake/path segments that are words, or lowercase runs. */
-function wordy(v) {
-  const segs = v.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  const total = segs.join('').length || 1;
-  let inWords = 0;
-  if (segs.length > 1) for (const s of segs) if (/^(?:[a-z]{3,}|[A-Z]{3,}|[A-Z][a-z]{2,}|\d{1,4})$/.test(s)) inWords += s.length;
-  let lower = 0;
-  for (const m of v.matchAll(/[a-z]{4,}/g)) lower += m[0].length;
-  return Math.max(inWords / total, lower / v.length);
-}
-
-/** A value a person or a key generator made, not a name, a path, a sentence or a sequence. */
-function looksRandom(v) {
-  if (v.length < 24 || v.length > 1000 || /\s/.test(v)) return false;
-  if (!/[A-Za-z]/.test(v)) return false;
-  if (/^(.{1,8})\1+.{0,8}$/.test(v)) return false; // a short unit repeated
-  let steps = 0;
-  for (let i = 1; i < v.length; i += 1) if (v.charCodeAt(i) - v.charCodeAt(i - 1) === 1) steps += 1;
-  if (steps / v.length > 0.4) return false; // abcdef…, 123456…
-  const h = entropy(v);
-  const w = wordy(v);
-  if (h < 2.8 || w >= 0.6) return false;
-  if (/\d/.test(v)) return true;
-  return /[a-z]/.test(v) && /[A-Z]/.test(v) && h >= 3.8 && w < 0.35;
-}
-
-function namedSecrets(text, add, code) {
-  NAMED.lastIndex = 0;
-  for (let m; (m = NAMED.exec(text)); ) {
-    let start = m.index;
-    while (start > 0 && m.index - start < 120 && NAME_CHAR.test(text[start - 1])) start -= 1;
-    const name = text.slice(start, m.index + m[1].length);
-    const at = m.index + m[0].length;
-    const q = text[at];
-    let value;
-    if (q === '"' || q === "'" || q === '`') {
-      const close = text.indexOf(q, at + 1);
-      const nl = text.indexOf('\n', at + 1);
-      if (close < 0 || (nl >= 0 && nl < close)) continue;
-      value = text.slice(at + 1, close);
-    } else {
-      if (code || m[3] === '=>') continue;
-      const lead = text.slice(text.lastIndexOf('\n', start - 1) + 1, start);
-      if (!LINE_LEAD.test(lead) && !name.startsWith('-')) continue;
-      const v = /^[^\s"'`,;#(){}[\]<>]+/.exec(text.slice(at, at + 1001));
-      if (!v) continue;
-      const next = text[at + v[0].length];
-      if (next !== undefined && !/[\s#,;]/.test(next)) continue; // an expression (a call, an index), not a value
-      value = v[0];
+function scanWorkingTree() {
+  let count = 0;
+  const head = Buffer.alloc(8000);
+  for (const rel of listFiles()) {
+    if (skipped(PREFIX + rel)) continue;
+    const full = path.join(ROOT, rel);
+    let st;
+    try { st = fs.statSync(full); } catch { continue; }
+    if (!st.isFile()) continue;
+    count += 1;
+    // A big file is judged by its first 8000 bytes first, so images and videos are never read whole.
+    if (st.size > 64 * 1024) {
+      let n = 0;
+      const fd = fs.openSync(full, 'r');
+      try { n = fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+      if (decodeText(head.subarray(0, n)) === null) { cleanFiles.add(rel); continue; }
     }
-    if (PLACEHOLDER.test(value)) continue;
-    let secret;
-    if (/:\/\//.test(value)) {
-      // A webhook address carries its secret in the path or query; any other address is just an address.
-      if (!/webhook/i.test(m[1])) continue;
-      secret = value.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '').split(/[/?&=#]/).some(looksRandom);
-    } else secret = looksRandom(value);
-    if (secret) add(start, `named-secret (${name.replace(/^[-$]+/, '').split('.').pop().slice(0, 40)})`);
+    const text = decodeText(fs.readFileSync(full));
+    const before = hits.length;
+    if (text !== null) scanText(text, rel, undefined, PREFIX + rel);
+    if (hits.length === before) cleanFiles.add(rel);
   }
+  return count;
+}
+const cleanFiles = new Set(); // working-tree files scanned with nothing found
+
+/**
+ * `path\0blob` of every file the working-tree scan found clean and that is unchanged against the index: a commit
+ * whose version of that path is this very blob adds only lines the scan has just read, so history skips it
+ * (on a repo with no base branch, its first commit is the whole tree again). A file with a hit is never skipped,
+ * so its commits are still named.
+ */
+function coveredBlobs() {
+  const out = new Set();
+  if (!cleanFiles.size) return out;
+  const changed = new Set(git(['diff', '--name-only', '-z', '--no-renames']).stdout.split('\0'));
+  const parts = git(['ls-files', '-s', '-z']).stdout.split('\0');
+  for (const e of parts) {
+    const m = /^\d+ ([0-9a-f]+) 0\t(.*)$/s.exec(e);
+    if (m && cleanFiles.has(m[2]) && !changed.has(m[2])) out.add(`${m[2]}\0${m[1]}`);
+  }
+  return out;
+}
+let covered = new Set();
+
+/** PU-33 (P-046): the staged blobs, read from the index (`git diff --cached`; GIT_INDEX_FILE is honoured). */
+function scanStaged() {
+  const r = git(['diff', '--cached', '--raw', '-z', '--no-abbrev', '--no-renames', '--diff-filter=ACMT']);
+  if (r.status !== 0) throw new Error(`git diff --cached failed: ${String(r.stderr || '').trim().slice(0, 200)}`);
+  const parts = r.stdout.split('\0');
+  const files = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const m = /^:\d+ (\d+) [0-9a-f]+ ([0-9a-f]+) /.exec(parts[i]);
+    if (!m || !/^100(644|755)$/.test(m[1]) || skipped(parts[i + 1])) continue; // regular files only
+    files.push({ rel: parts[i + 1], oid: m[2] });
+  }
+  eachBlob(files, (f, buf) => {
+    const text = buf ? decodeText(buf) : null;
+    if (text !== null) scanText(text, f.rel);
+  });
+  return files.length;
 }
 
-// --- Tokens wrapped in base64 -------------------------------------------------------------------------------
-// A whole quoted value, or a whole assigned value, of 40-400 base64 characters. A run inside a longer run never
-// matches (the lookarounds), so image packs and fonts are not decoded.
-const WRAPPED = [
-  /(["'`])([A-Za-z0-9+/_-]{40,400}={0,2})\1/g,
-  /[:=][ \t]*()([A-Za-z0-9+/_-]{40,400}={0,2})(?![A-Za-z0-9+/_=-])/g,
-];
-function wrappedSecrets(text, add) {
-  for (const re of WRAPPED) {
-    re.lastIndex = 0;
-    for (let m; (m = re.exec(text)); ) {
-      const at = m.index + m[0].indexOf(m[2]);
-      if (/base64,$/i.test(text.slice(Math.max(0, at - 7), at))) continue; // a data: URI
-      const bytes = Buffer.from(m[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-      if (bytes.length < 20) continue;
-      let printable = 0;
-      for (const b of bytes) if ((b >= 0x20 && b < 0x7f) || b === 9 || b === 10 || b === 13) printable += 1;
-      if (printable / bytes.length < 0.95) continue;
-      const inner = new Set();
-      tokens(bytes.toString('latin1'), (_i, kind) => inner.add(kind));
-      for (const kind of inner) add(at, `${kind} (base64)`);
-    }
+// --- History: the commits not on the base branch yet ---------------------------------------------------------
+function resolveRange() {
+  if (SINCE) {
+    const ok = git(['rev-parse', '--verify', '-q', `${SINCE}^{commit}`]);
+    if (ok.status !== 0) bad(`--since: no commit named ${SINCE}`);
+    return { spec: [`${SINCE}..HEAD`], label: `since ${SINCE}`, base: SINCE };
   }
+  if (git(['rev-parse', '--verify', '-q', 'HEAD^{commit}']).status !== 0) return null; // no commit yet
+  const current = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
+  const tries = [];
+  if (process.env.GITHUB_BASE_REF) tries.push(`refs/remotes/origin/${process.env.GITHUB_BASE_REF}`);
+  tries.push('refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/master');
+  const local = [];
+  if (process.env.STUDIO_MAIN_ROOT) {
+    const b = spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: process.env.STUDIO_MAIN_ROOT, encoding: 'utf8' }).stdout?.trim();
+    if (b) local.push(`refs/heads/${b}`);
+  }
+  local.push('refs/heads/main', 'refs/heads/master');
+  for (const ref of local) if (ref !== `refs/heads/${current}` && !tries.includes(ref)) tries.push(ref);
+  const have = new Set(git(['for-each-ref', '--format=%(refname)', ...tries]).stdout.split('\n').filter(Boolean));
+  for (const ref of tries.filter((t) => have.has(t))) {
+    const mb = git(['merge-base', 'HEAD', ref]).stdout.trim();
+    if (!/^[0-9a-f]{40,64}$/.test(mb)) continue;
+    const name = ref.replace(/^refs\/(remotes|heads)\//, '');
+    return { spec: [`${mb}..HEAD`], label: `since ${name} (${mb.slice(0, 7)})`, base: mb.slice(0, 7) };
+  }
+  return { spec: ['-n', String(FALLBACK_COMMITS), 'HEAD'], label: `in the last ${FALLBACK_COMMITS} (no base branch found)`, base: `HEAD~${FALLBACK_COMMITS}`, fallback: true };
 }
 
-/** Every token-shaped string in `text`: the shared shapes, then the PU-18 ones. Calls add(index, kind). */
-function tokens(text, add) {
-  for (const { re, kind } of SHARED) {
-    re.lastIndex = 0;
-    for (let m; (m = re.exec(text)); ) {
-      if (!m[0]) { re.lastIndex += 1; continue; }
-      if (!gluedInBase64(text, m.index, m[0].length)) add(m.index, kind);
-    }
+/** A path as git prints it: plain, or C-quoted ("a\tb", octal bytes) when it holds special characters. */
+function unquote(p) {
+  if (!p.startsWith('"')) return p;
+  const bytes = [];
+  for (let i = 1; i < p.length; i += 1) {
+    const c = p[i];
+    if (c === '"') break;
+    if (c !== '\\') { bytes.push(...Buffer.from(c)); continue; }
+    const n = p[(i += 1)];
+    if (/[0-7]/.test(n)) { bytes.push(parseInt(p.slice(i, i + 3), 8)); i += 2; }
+    else bytes.push({ a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 }[n] ?? n.charCodeAt(0));
   }
-  for (const { re, kind, ok } of SHAPES) {
-    re.lastIndex = 0;
-    for (let m; (m = re.exec(text)); ) if (ok(m)) add(m.index, kind);
+  return Buffer.from(bytes).toString('utf8');
+}
+// "a/P b/P" (no renames, so both sides are the same path) or two quoted halves.
+function headerPath(s) {
+  if (s.startsWith('"')) {
+    const second = s.lastIndexOf(' "');
+    return unquote(second > 0 ? s.slice(second + 1) : s).replace(/^b\//, '');
   }
+  return s.slice(2, 2 + (s.length - 5) / 2);
 }
 
-/** Scan one file's text. Returns Map(line number → Set of kinds). The whole text at once: one regex pass each. */
-function scanText(text, rel) {
-  const byLine = new Map();
-  let newlines = null;
-  const lineOf = (i) => {
-    if (!newlines) {
-      newlines = [];
-      for (let j = text.indexOf('\n'); j >= 0; j = text.indexOf('\n', j + 1)) newlines.push(j);
-    }
-    let lo = 0;
-    let hi = newlines.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (newlines[mid] < i) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo + 1;
+// Files that are never text. History leaves them out of the diff (git would unpack every image and video just to
+// call it binary: seconds on an art-heavy game) and never reads them back.
+const BINARY_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'icns', 'tif', 'tiff', 'psd', 'kra', 'xcf', 'exr', 'hdr',
+  'ktx', 'ktx2', 'dds', 'basis', 'tga', 'glb', 'fbx', 'blend', 'bin', 'wasm', 'zip', 'gz', 'tgz', '7z', 'rar', 'xz', 'bz2', 'zst', 'jar',
+  'apk', 'aab', 'ipa', 'exe', 'dll', 'so', 'dylib', 'pdb', 'mp3', 'ogg', 'oga', 'opus', 'wav', 'flac', 'm4a', 'aac', 'mp4', 'm4v', 'mov',
+  'webm', 'mkv', 'avi', 'ttf', 'otf', 'woff', 'woff2', 'eot', 'pdf', 'sqlite', 'pck', 'uasset', 'umap', 'unitypackage'];
+const BINARY_EXT = new RegExp(`\\.(?:${BINARY_EXTS.join('|')})$`, 'i');
+const NOT_BINARY = ['.', ...BINARY_EXTS.map((e) => `:(exclude,icase)*.${e}`)];
+
+/**
+ * PU-33 (P-046): every commit in the range: its message, and the lines it adds (a merge: the lines in no parent,
+ * `--cc`). A file git shows as binary (UTF-16, or marked `-diff`/`binary` in .gitattributes) is read back from
+ * the commit and scanned whole when it is text. Returns the number of commits read.
+ */
+function scanHistory(range) {
+  const logOf = (a, input) => {
+    const r = git(['-c', 'core.quotePath=false', 'log', '--no-color', '--no-show-signature', ...a], input === undefined ? {} : { input });
+    if (r.error || r.status !== 0) throw new Error(`git log ${range.spec.join(' ')} failed: ${String(r.error?.message || r.stderr || '').trim().slice(0, 200)}`);
+    return r.stdout;
   };
-  const add = (i, kind) => {
-    const line = lineOf(i);
-    if (!byLine.has(line)) byLine.set(line, new Set());
-    byLine.get(line).add(kind);
+  const HEAD = /(?:^|\n)\x01([0-9a-f]{40,64})\x02([\s\S]*?)\x03/g;
+  const split = (out, fn) => {
+    let last = null;
+    for (let m; (m = HEAD.exec(out)); ) {
+      if (last) fn(last, m.index);
+      last = { sha: m[1], msg: m[2], start: HEAD.lastIndex };
+    }
+    if (last) fn(last, out.length);
   };
-  tokens(text, add);
-  namedSecrets(text, add, CODE.test(rel));
-  wrappedSecrets(text, add);
-  // A line whose token has a known shape reports that shape, not also "named-secret".
-  for (const kinds of byLine.values()) {
-    if ([...kinds].some((k) => !k.startsWith('named-secret'))) for (const k of kinds) if (k.startsWith('named-secret')) kinds.delete(k);
-  }
-  return byLine;
+  // The commits in the range, and every one's message.
+  const shas = [];
+  split(logOf(['--format=%x01%H%x02%B%x03', ...range.spec, '--']), (c) => {
+    shas.push(c.sha);
+    scanText(c.msg, '(commit message)', c.sha);
+  });
+  if (!shas.length) return 0;
+  // Exactly those commits' patches (fed on stdin, no walk: a path-limited walk would simplify away a side branch
+  // that added and removed a key), without the binary types.
+  const out = logOf(['--stdin', '--no-walk=unsorted', '--no-ext-diff', '--no-textconv', '-p', '--cc', '-U0', '--full-index', '--no-renames',
+    '--src-prefix=a/', '--dst-prefix=b/', '--format=%x01%H%x02%x03', '--', ...NOT_BINARY], `${shas.join('\n')}\n`);
+  const binaries = [];
+  split(out, (c, end) => scanDiff(out, c.start, end, c.sha, binaries));
+  const seen = new Set();
+  const wanted = binaries.filter((b) => !BINARY_EXT.test(b.rel) && !seen.has(b.oid) && seen.add(b.oid));
+  eachBlob(wanted, (b, buf) => {
+    const text = buf ? decodeText(buf) : null;
+    if (text !== null) scanText(text, b.rel, b.sha);
+  }, BLOB_CAP);
+  return shas.length;
 }
 
-let count = 0;
-const hits = [];
-for (const rel of listFiles()) {
-  const full = path.join(ROOT, rel);
-  if (SKIP.test(rel) || !fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
-  const buf = fs.readFileSync(full);
-  count += 1;
-  if (buf.subarray(0, 8000).includes(0)) continue; // binary
-  for (const [line, kinds] of scanText(buf.toString('utf8'), rel)) hits.push({ rel, line, kinds: [...kinds].sort().join(', ') });
+/** One commit's patch, out[start, end): scan each file's added lines; files shown as binary go to `binaries`. */
+function scanDiff(out, start, end, sha, binaries) {
+  let file = null;
+  let width = 1; // parents shown in the hunk prefix: 1, or 2+ for a merge's combined diff
+  let inHunk = false;
+  let line = 0;
+  const flush = () => {
+    if (file && file.lines.length && !skipped(file.rel) && !covered.has(`${file.rel}\0${file.oid}`)) {
+      const text = file.lines.join('\n');
+      const pos = lineIndex(text);
+      record(file.rel, findingsIn(text, file.rel, (i) => file.nums[pos(i) - 1]), sha);
+    }
+    file = null;
+  };
+  for (let at = start; at < end; ) {
+    let nl = out.indexOf('\n', at);
+    if (nl < 0 || nl > end) nl = end;
+    const L = out.slice(at, nl);
+    at = nl + 1;
+    if (L.startsWith('diff ')) {
+      flush();
+      inHunk = false;
+      if (L.startsWith('diff --git ')) { file = { rel: headerPath(L.slice(11)), oid: '', lines: [], nums: [] }; width = 1; }
+      else if (L.startsWith('diff --cc ') || L.startsWith('diff --combined ')) file = { rel: unquote(L.slice(L.indexOf(' ', 5) + 1)), oid: '', lines: [], nums: [] };
+      continue;
+    }
+    if (!file) continue;
+    if (L.startsWith('@')) {
+      const m = /^(@+) (?:-\d+(?:,\d+)? )+\+(\d+)(?:,\d+)? \1/.exec(L);
+      if (m) { width = m[1].length - 1; line = Number(m[2]); inHunk = true; }
+      continue;
+    }
+    if (!inHunk) {
+      if (L.startsWith('index ')) file.oid = (/\.\.([0-9a-f]+)/.exec(L) || [])[1] || '';
+      else if (L.startsWith('+++ ') && L !== '+++ /dev/null') file.rel = unquote(L.slice(4).replace(/\t$/, '')).replace(/^b\//, '');
+      else if (L.startsWith('Binary files ') && file.oid && !/^0+$/.test(file.oid) && !skipped(file.rel) && !covered.has(`${file.rel}\0${file.oid}`)) binaries.push({ sha, rel: file.rel, oid: file.oid });
+      continue;
+    }
+    if (L[0] === '\\') continue; // "\ No newline at end of file"
+    const pre = L.slice(0, width);
+    if (pre.includes('-')) continue; // a line the commit removed
+    if (!pre.includes(' ')) { file.lines.push(line === 1 ? L.slice(width).replace(/^\uFEFF/, '') : L.slice(width)); file.nums.push(line); }
+    line += 1;
+  }
+  flush();
 }
-if (hits.length) {
-  hits.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : a.line - b.line));
-  console.log('[secrets] FAIL key-shaped string(s) found (values hidden):');
-  console.log(hits.map((h) => `  ${h.rel}:${h.line}  ${h.kinds}`).join('\n'));
-  console.log('[secrets] Move real keys to .env (gitignored). If one was ever committed, rotate it.');
+
+// --- The owner's allowlist: false alarms, one finding each, by fingerprint -----------------------------------
+// studio/secrets-allow.json is protected (studio/protected.json): an entry lands only with the owner's signed
+// approval, so an agent can't allow its own secret. A real key is rotated, never allowed.
+const ALLOW_REL = 'studio/secrets-allow.json';
+function loadAllow() {
+  const file = path.join(TOP, ALLOW_REL);
+  if (!fs.existsSync(file)) return [];
+  let data;
+  try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (err) { throw new Error(`${ALLOW_REL} is not valid JSON (${err.message})`); }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.allow) ? data.allow : null;
+  if (!list) throw new Error(`${ALLOW_REL} needs an "allow" list`);
+  const out = [];
+  list.forEach((e, i) => {
+    const commit = e?.commit === undefined || e?.commit === null || e?.commit === '' ? null : String(e.commit).toLowerCase();
+    const ok = e && typeof e.path === 'string' && typeof e.kind === 'string' && /^[0-9a-f]{64}$/i.test(String(e.fingerprint || ''))
+      && String(e.reason || '').trim() && String(e.by || '').trim() && (commit === null || commit === '*' || /^[0-9a-f]{7,64}$/.test(commit));
+    if (ok) out.push({ commit, path: e.path, kind: e.kind, fp: e.fingerprint.toLowerCase(), reason: String(e.reason).trim() });
+    else console.log(`[secrets] note: ${ALLOW_REL} entry ${i + 1} allows nothing: it needs path, kind, fingerprint (sha256 hex), reason and by; commit is a sha or "*"`);
+  });
+  return out;
+}
+// Path, kind and fingerprint must match, and the commit when the entry names one ("*": the files, not history).
+const allowedBy = (allow, h) => allow.find((e) => e.path === h.at && e.kind === h.kind && e.fp === h.fp
+  && (e.commit === null || (e.commit === '*' ? !h.sha : Boolean(h.sha) && h.sha.startsWith(e.commit))));
+
+// --- Run ------------------------------------------------------------------------------------------------------
+let fileCount = 0;
+let commitCount = 0;
+let range = null;
+let allow = [];
+try {
+  allow = loadAllow();
+  if (STAGED) fileCount = IN_GIT ? scanStaged() : scanWorkingTree();
+  else {
+    if (!SINCE) fileCount = scanWorkingTree();
+    if (SINCE && !IN_GIT) bad('--since needs a git checkout');
+    if (IN_GIT && !NO_HISTORY && (SINCE || PREFIX === '')) {
+      range = resolveRange();
+      if (range) {
+        if (!SINCE) covered = coveredBlobs();
+        commitCount = scanHistory(range);
+      }
+    }
+  }
+} catch (err) {
+  // Fail closed: a scan that couldn't read what it should is not a pass.
+  console.log(`[secrets] FAIL couldn't finish the scan: ${err.message}`);
   process.exit(1);
 }
-console.log(`[secrets] PASS — ${count} file(s) scanned`);
+const show = (h) => `  ${h.sha ? `${h.sha.slice(0, 7)} ` : ''}${h.rel}:${h.line}  ${h.kind}  sha256:${h.fp}`;
+for (const h of hits) h.allowed = allowedBy(allow, h);
+const failing = hits.filter((h) => !h.allowed);
+const allowed = hits.filter((h) => h.allowed);
+const listAllowed = () => {
+  if (!allowed.length) return;
+  console.log(`[secrets] ${allowed.length} finding(s) allowed by ${ALLOW_REL} (owner-approved false alarms):`);
+  console.log(allowed.map((h) => `${show(h)}  allowed (${h.allowed.reason})`).join('\n'));
+};
+if (failing.length) {
+  const inHistory = failing.filter((h) => h.sha);
+  const order = (a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : a.line - b.line);
+  console.log('[secrets] FAIL key-shaped string(s) found (values hidden; sha256 of each value shown):');
+  const files = failing.filter((h) => !h.sha).sort(order);
+  if (files.length) console.log(files.map(show).join('\n'));
+  if (inHistory.length) {
+    console.log(`  in commits ${range.label}:`);
+    console.log(inHistory.map(show).join('\n'));
+  }
+  listAllowed();
+  console.log('[secrets] Move real keys to .env (gitignored). If one was ever committed, rotate it.');
+  if (inHistory.length) {
+    console.log('[secrets] A key in a commit stays there after the file is cleaned. Rotate it, then take it out of the commit before');
+    const base = range.fallback && commitCount < FALLBACK_COMMITS ? '--root' : range.base;
+    console.log(`  pushing: git commit --amend for the last commit, git rebase -i ${base} for older ones.`);
+  }
+  const h = failing[0];
+  const example = { commit: h.sha ? h.sha.slice(0, 7) : '*', path: h.at, line: h.line, kind: h.kind, fingerprint: h.fp, reason: 'why this is not a key', by: 'owner' };
+  console.log(`[secrets] Only a false alarm (not a key) may be allowed, by the owner: add an entry to ${ALLOW_REL} and sign it (npm run approve -- protected), e.g. ${JSON.stringify(example)}`);
+  process.exit(1);
+}
+listAllowed();
+const what = [];
+if (!SINCE) what.push(`${fileCount} file(s)${STAGED && IN_GIT ? ' staged' : ''}`);
+if (range) what.push(`${commitCount} commit(s) ${range.label}`);
+console.log(`[secrets] PASS — ${what.join(', ')} scanned${allowed.length ? `; ${allowed.length} allowed false alarm(s)` : ''}`);

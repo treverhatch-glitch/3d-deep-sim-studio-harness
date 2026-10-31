@@ -16,6 +16,8 @@
  *
  *   node harness/game-gates.mjs [--paths a,b] [--changed a,b] [--json]   exit 1 when a required check fails
  *
+ * 2.58.0: the game's checks run with CI=true (test runners then never write snapshots during a verify).
+ *
  * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
  * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
@@ -153,7 +155,11 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
     const codeOnly = changedHere.length && changedHere.every((f) => /\.(m?[jt]sx?|cjs|vue|svelte)$/i.test(f)) && !/ is shared/.test(sel.why || '');
     const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
     let cmdLabel = '';
-    const runOnce = (cmd) => slot(cmdLabel, () => spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
+    // 2.58.0 (F2): the game's checks run with CI=true, so test runners (Vitest, Jest, ...) never write or rewrite
+    // snapshots during a verify (on Windows each verify rewrote a snapshot's line endings on main). Updating
+    // snapshots is a deliberate run with -u. STUDIO_GAME_GATE_CI=off leaves CI as it is.
+    const env = /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' };
+    const runOnce = (cmd) => slot(cmdLabel, () => spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
     for (const g of gates) {
       cmdLabel = g.id;
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));

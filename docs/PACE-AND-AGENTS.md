@@ -5,7 +5,7 @@
 The game dev chooses how fast the studio works, at intake, in the War Room's Game plan view, or with
 `npm run mode -- set <mode> --by <name>`. Every change is logged in `studio/mode.json`.
 
-| Pace | Agents at once | Reviews from another model family | Starts agents itself | Director / Producer check-ins |
+| Pace | Agents at once | Reviews from another model family | Starts agents itself (with auto-start on) | Director / Producer check-ins |
 | --- | --- | --- | --- | --- |
 | Precise and slow (default) | 2 (1 builder) | every build task | no | 24 h / 8 h |
 | Budget: cheaper and slower | 1 | whole systems | no | 24 h / 12 h |
@@ -27,7 +27,28 @@ play:
 A lever in every War Room view (and `npm run mode -- boost on|off --by <name> [--hours 4]`). On top
 of any pace: twice the agents (up to 12), agents start automatically, the Director checks in about
 four times as often and the Producer every hour. Going faster without the leads looking more often is
-how studios drift; the lever does both.
+how studios drift; the lever does both. Agents start on their own only with auto-start on (below).
+
+## Auto-start (off by default)
+
+```bash
+npm run mode -- autostart on --by <name>     # the watcher and the HUB may start agents on their own
+npm run mode -- autostart off --by <name>    # back to the default: nothing starts on its own
+npm run mode -- autostart                    # which it is
+```
+
+One switch, recorded in `studio/mode.json` with who flipped it (2.58.0, from a crew report: the HUB kept
+starting Producer sessions nobody asked for). Off, whatever the pace, MAX SPEED or away mode say:
+- the watcher's fill (`npm run agent -- fill`, the Director's flow, the game-dev loop's launch step) starts no agent;
+- the Producer check-in still pings and logs ("No Producer session was started: auto-start is off …"), but
+  starts no Producer, even with `STUDIO_PRODUCER_CMD` or `STUDIO_PRODUCER_TOOL` set;
+- the HUB's own wake-ups (queue refill, development cycle, a closed milestone, the game-dev review) and the
+  routine Director ping start no one;
+- the War Room's Pace chip, `npm run mode` and `npm run agent -- list` say auto-start is off and how to turn it on.
+
+Starting an agent by hand is unaffected: `npm run agent -- start` or `hire`, the War Room's Start agent,
+a person's action in the War Room that wakes a role, and the supervisor (`npm run studio:start`, which you
+start yourself to run the studio unattended).
 
 ## Starting agents
 
@@ -47,7 +68,12 @@ The launcher:
 - passes the kickoff on stdin or as one argument, so the same command works on Windows, macOS and Linux
   (agy gets `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its
   sandbox with `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
-- sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops;
+- sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops. A session whose
+  process is still alive but whose heartbeat is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off)
+  is freed by the watcher: its uncommitted work is saved to `.studio/wip/`, its task goes back to the queue with
+  a note, its claims are released and the session is marked ended ("stalled"), so its slot is free. Nothing is
+  killed (event `agent.stall_released`): end the process by hand if it is stuck. Right after the machine slept
+  (the watcher's own last pass is as old as the threshold) it waits one pass for the heartbeats to come back;
 - when an agent dies (exit code, usage limit, 429, auth), hands its task back with a note, saves its
   uncommitted work under its claims to `.studio/wip/<task>-<agent>.patch`, frees its claims, and with
   `--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5` starts the next tool on the same task;
@@ -60,7 +86,11 @@ The launcher:
   start time can't be read, a recent heartbeat decides as before. A stop while an agent is still starting stops
   its launcher.
 
-In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself.
+In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself, once
+auto-start is on (`npm run mode -- autostart on --by <name>`).
+
+A `--note` reaches the agent's prompt inside the block marked "written by agents or people", labelled with its
+sender (`--by`, or "unknown"); see docs/SECURITY.md.
 
 ## Hiring into departments
 

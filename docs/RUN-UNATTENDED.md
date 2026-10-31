@@ -33,6 +33,14 @@ Scheduler (Windows); `--uninstall` removes it.
   cause, then press "Fixed it: try again".
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
+- **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
+  is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
+  and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
+  or a process id now used by something else, is never killed). End it by hand if it is stuck. A pass right
+  after the machine slept (the watcher's own last pass as old) frees nothing and checks again next pass.
+- **The supervisor doesn't need auto-start.** `studio:start` is you choosing to run the studio, so it starts
+  agents whatever `npm run mode -- autostart` says; the switch is for the watcher and the HUB starting
+  agents on their own (docs/PACE-AND-AGENTS.md).
 - **Launched agents inherit your MCP servers.** Jed's Serena server opened its dashboard tab for every
   `claude -p` session and hid the War Room. Turn that off in the server's own settings
   (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).
@@ -58,7 +66,11 @@ Claude Code's window limits count too ("5-hour limit reached ∙ resets 3pm", "W
 Mon 9am", "Opus weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the
 zone the message names ("(Asia/Bangkok)") or else this machine's; such a stop hands the task back as
 "stopped at its usage limit", which is waiting for the reset, not a failure (no breaker, park or halt). A
-role run by its own `STUDIO_<ROLE>_CMD` is marked `custom` and waits the same way.
+role run by its own `STUDIO_<ROLE>_CMD` (or `STUDIO_AGENT_CMD`) is marked per program, `custom:<program>`
+(the command's program, or the script an interpreter runs: `python -m hermes …` is `custom:hermes`), and
+every start of that command waits the same way: `npm run agent -- start` says "Not started: budget stop
+(custom:hermes is marked out until …)". Another command isn't held by it. Since 2.58.0; marks saved as plain
+`custom` by 2.57.0 run out on their own.
 
 ## Lanes, dependencies and parked work
 

@@ -105,7 +105,7 @@ export async function cyclePass({ now = Date.now(), force = false, events = read
   if (wake && process.env.STUDIO_DEV_CYCLE_WAKE !== 'off') {
     try {
       const { wake: w } = await import('./agent.mjs');
-      for (const role of ['director', 'producer']) { const r = w(role, { why: `development cycle (${why}): read .studio/briefs/dev-cycle.md` }); if (r.started) woke.push(r.agent); }
+      for (const role of ['director', 'producer']) { const r = w(role, { why: `development cycle (${why}): read .studio/briefs/dev-cycle.md`, auto: true }); if (r.started) woke.push(r.agent); }
     } catch {}
   }
   emitEvent({ type: 'dev.cycle', agent: 'watchdog', to: 'director', msg: `Development cycle (${why}): ${landed.length} landing(s), ${unmet.length} unmet criteria, filed ${filed.length}${woke.length ? `, woke ${woke.join(', ')}` : ''}`, meta: { filed, why } });

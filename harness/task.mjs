@@ -36,52 +36,132 @@ export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 export const DONE_FILE = path.join(REPO_ROOT, 'studio', 'DONE.md');
 export const CURRENT_TASK_FILE = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 
-const TASK_LINE_RE = /^-\s+\[([ x>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[(P[0-3])\]\s+\(`([^`]+)`\)\s+—\s+(.+)$/;
+// 2.58.0 (P-057): the line the harness writes, plus the drifts people make by hand, read as the same task and put back
+// in shape by the next write: an ASCII "-" (or "--", "–") for the "—", a role without backticks, "[X]", a "*" bullet,
+// a lower-case priority. Anything else that isn't the harness's own heading or note is kept (see UNREADABLE below).
+const TASK_LINE_RE = /^[-*]\s+\[([ xX>~])\]\s+\*\*([A-Z]+-\d+)\*\*\s+\[([Pp][0-3])\]\s+\((`?)([^`()]+?)\4\)\s+(?:—|–|--?)\s+(.+)$/;
+/** The section kept lines go under, at the end of NEXT.md or DONE.md (2.58.0, P-057). */
+export const UNREADABLE_HEADING = '## UNREADABLE (kept by the harness: fix the format)';
+const UNREADABLE_NOTE = '_The harness couldn\'t read these lines as tasks, so it keeps them here instead of dropping them. Rewrite each like a task line ("- [ ] **T-123** [P1] (`builder`) — Title"; it then counts as waiting work), or delete it._';
+// 2.58.0 (P-052): which way a task was moving when a board write was cut off (see parseNextQueue).
+const MOVES_FILE = path.join(STUDIO_STATE_DIR, 'board-move.json');
 
+/**
+ * The board: studio/NEXT.md (open work) and studio/DONE.md (finished). Non-enumerable extras: readIds (what this
+ * snapshot saw), unreadable ({ next, done }: lines kept, see UNREADABLE_HEADING), duplicates (ids found open and done).
+ *
+ * 2.58.0 (P-052): a task moves between the two files in two writes, and the file that GAINS it is written first
+ * (DONE.md on done, NEXT.md on reopen; writeNextQueueRaw). An agent killed between them leaves the task in both
+ * files, never in neither. Read, it shows once: the copy the cut-off write was moving it to wins, so the move counts
+ * as made (done stays done, and the watcher frees the claim the killed done kept; a reopen stays reopened). Which
+ * way it was moving is in .studio/board-move.json, written before the first of the two writes and removed after the
+ * last. A task in both files with no such note (a hand edit, a merge) counts as done: it stays findable, and
+ * `task reopen` brings it back. The next board write keeps only the winning copy.
+ */
 export function parseNextQueue() {
-  const tasks = parseQueueFile(NEXT_FILE);
+  const files = readBoardFiles();
+  const next = parseQueueText(files.next);
+  const doneFile = parseQueueText(files.done, 'done');
+  const tasks = { inProgress: next.inProgress, backlog: next.backlog, done: next.done };
   // Older studios kept DONE in NEXT.md: those still count, and move to DONE.md on the next write.
   const seen = new Set(tasks.done.map((t) => t.id));
-  for (const t of parseQueueFile(DONE_FILE, 'done').done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  for (const t of doneFile.done) if (!seen.has(t.id)) tasks.done.push(t), seen.add(t.id);
+  const both = [...new Set([...tasks.inProgress, ...tasks.backlog].map((t) => t.id).filter((id) => seen.has(id)))];
+  if (both.length) {
+    const moves = readMoves();
+    for (const id of both) {
+      if (moves[id] === 'open') tasks.done = tasks.done.filter((t) => t.id !== id);
+      else for (const sec of ['inProgress', 'backlog']) tasks[sec] = tasks[sec].filter((t) => t.id !== id);
+    }
+  }
   // 2.30p: remember which tasks this snapshot saw, so a later write can keep tasks added since.
   Object.defineProperty(tasks, 'readIds', { value: new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id)), enumerable: false });
+  Object.defineProperty(tasks, 'unreadable', { value: { next: next.unreadable, done: doneFile.unreadable }, enumerable: false });
+  Object.defineProperty(tasks, 'duplicates', { value: both, enumerable: false });
   return tasks;
 }
 
-function parseQueueFile(file, start = 'backlog') {
-  if (!fs.existsSync(file)) {
-    return { inProgress: [], backlog: [], done: [] };
+/**
+ * Both board files as one consistent snapshot: NEXT.md is read again after DONE.md, and the pair re-read if it
+ * changed meanwhile (a reader without the board lock could otherwise see a task in neither file mid-move).
+ */
+function readBoardFiles() {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  let next = read(NEXT_FILE);
+  let done = null;
+  for (let i = 0; i < 5; i++) {
+    done = read(DONE_FILE);
+    const again = read(NEXT_FILE);
+    if (again === next) break;
+    next = again;
   }
-  const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
+  return { next, done };
+}
+function readMoves() {
+  try {
+    const m = JSON.parse(fs.readFileSync(MOVES_FILE, 'utf8'))?.moves;
+    return m && typeof m === 'object' ? m : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseQueueText(raw, start = 'backlog') {
+  const tasks = { inProgress: [], backlog: [], done: [], unreadable: [] };
+  if (raw === null || raw === undefined) return tasks;
+  const lines = String(raw).replace(/\r\n/g, '\n').split('\n');
   let section = start;
-  const tasks = { inProgress: [], backlog: [], done: [] };
+  let kept = false; // inside the UNREADABLE section: lines already kept (warned about once)
+  const seen = { open: new Set(), done: new Set() };
 
   for (const line of lines) {
     const trimmed = line.trim();
+    if (!trimmed) continue;
     if (/^##\s+IN_PROGRESS/i.test(trimmed)) {
       section = 'inProgress';
+      kept = false;
       continue;
     }
     if (/^##\s+BACKLOG/i.test(trimmed)) {
       section = 'backlog';
+      kept = false;
       continue;
     }
     if (/^##\s+DONE/i.test(trimmed)) {
       section = 'done';
+      kept = false;
       continue;
     }
+    if (/^##\s+UNREADABLE\b/i.test(trimmed)) {
+      // A kept line fixed in place counts as this file's work: waiting in NEXT.md, finished in DONE.md.
+      section = start;
+      kept = true;
+      continue;
+    }
+    // The harness's own title, its "Managed by" note and the _placeholder_ lines are rewritten on every write.
+    if (/^#\s/.test(trimmed) || /^>\s*Managed by\b/i.test(trimmed) || /^_.*_$/.test(trimmed)) continue;
 
     const m = trimmed.match(TASK_LINE_RE);
     if (m) {
-      const [, mark, id, priority, role, title] = m;
-      tasks[section].push({
-        id,
-        priority,
-        role,
-        title: title.trim(),
-        status: section === 'done' || mark === 'x' ? 'done' : section === 'inProgress' || mark === '>' ? 'in_progress' : 'backlog',
-      });
+      const [, rawMark, id, priority, , role, title] = m;
+      const mark = rawMark.toLowerCase();
+      const kind = section === 'done' ? 'done' : 'open';
+      // The same id twice in one file: the first is the task, the second is kept (never two tasks with one id).
+      if (!seen[kind].has(id)) {
+        seen[kind].add(id);
+        tasks[section].push({
+          id,
+          priority: priority.toUpperCase(),
+          role: role.trim(),
+          title: title.trim(),
+          status: section === 'done' || mark === 'x' ? 'done' : section === 'inProgress' || mark === '>' ? 'in_progress' : 'backlog',
+        });
+        continue;
+      }
     }
+    // 2.58.0 (P-057): never dropped. A line the harness can't read (another format, a note, a heading of its own)
+    // used to vanish on the next write; it is kept under UNREADABLE_HEADING and named in a warning.
+    tasks.unreadable.push({ line: line.replace(/\s+$/, ''), fresh: !kept });
   }
   return tasks;
 }
@@ -89,6 +169,9 @@ function parseQueueFile(file, start = 'backlog') {
 function formatTaskLine(t, mark) {
   return `- [${mark}] **${t.id}** [${t.priority}] (\`${t.role}\`) — ${t.title}`;
 }
+
+// After the file's last section (which ends with a blank line).
+const unreadableBlock = (kept) => (kept.length ? [UNREADABLE_HEADING, UNREADABLE_NOTE, ...kept.map((u) => u.line), ''] : []);
 
 /**
  * 2.57.0 (PU-16, P-038): one agent at a time reads, changes and writes the board (NEXT.md and DONE.md), under a
@@ -103,23 +186,31 @@ export function withBoard(fn) {
 /**
  * 2.30p: every board write re-reads the board first. A task on disk that the caller's snapshot never saw (another
  * agent added it meanwhile) is kept, never overwritten. 2.57.0: under the board lock (it was the land lock, which a
- * landing holds for minutes, after which the write went ahead unlocked).
+ * landing holds for minutes, after which the write went ahead unlocked). 2.58.0: lines the harness can't read are
+ * taken from the file as it is now and kept (P-057).
  */
 export function writeNextQueue(tasks) {
   withBoard(() => {
+    const disk = parseNextQueue();
     if (tasks.readIds) {
-      const disk = parseNextQueue();
       const mine = new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id));
       for (const sec of ['inProgress', 'backlog', 'done']) {
         for (const t of disk[sec]) if (!mine.has(t.id) && !tasks.readIds.has(t.id)) { tasks[sec].push(t); mine.add(t.id); }
       }
     }
-    writeNextQueueRaw(tasks);
+    // A task in both files with no move note (a hand edit) is kept as done: say so, once (this write settles it).
+    const moves = disk.duplicates.length ? readMoves() : {};
+    const settled = disk.duplicates.filter((id) => !moves[id] && tasks.done.some((t) => t.id === id));
+    writeNextQueueRaw(tasks, disk.unreadable);
+    if (settled.length) {
+      console.warn(`[board] ${settled.join(', ')} ${settled.length === 1 ? 'was' : 'were'} in both studio/NEXT.md and studio/DONE.md; kept as done (to reopen: npm run task -- reopen <ID> --reason "...")`);
+      try { emitEvent({ type: 'board.settled', agent: actor(), status: 'warn', msg: `${settled.join(', ')}: in both studio/NEXT.md and studio/DONE.md with no record of a move; kept as done` }); } catch { /* the warning above stands */ }
+    }
   });
 }
 
-function writeNextQueueRaw(tasks) {
-  const out = [
+function renderNext(tasks, kept) {
+  return [
     '# Studio Task Queue (`studio/NEXT.md`)',
     '',
     '> Managed by `node harness/task.mjs`. One line per task so agents and the Zero-Token HUB can parse it without context bloat.',
@@ -137,22 +228,56 @@ function writeNextQueueRaw(tasks) {
     '## DONE',
     `_${tasks.done.length ? `${tasks.done.length} finished task${tasks.done.length === 1 ? ' is' : 's are'}` : 'Finished tasks are'} in \`studio/DONE.md\` (newest first). This file keeps only open work._`,
     '',
-  ];
-  // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
-  writeAtomic(NEXT_FILE, out.join('\n'));
-  const done = [
+    ...unreadableBlock(kept),
+  ].join('\n');
+}
+function renderDone(done, kept) {
+  return [
     '# Finished tasks (`studio/DONE.md`)',
     '',
     '> Managed by `node harness/task.mjs`. Newest first. Open work is in `studio/NEXT.md`; agents don\'t need to read this file.',
     '',
     '## DONE',
-    ...(tasks.done.length ? tasks.done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
+    ...(done.length ? done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
     '',
-  ];
-  const doneText = done.join('\n');
-  let was = null;
-  try { was = fs.readFileSync(DONE_FILE, 'utf8'); } catch { /* not written yet */ }
-  if (was !== doneText) writeAtomic(DONE_FILE, doneText);
+    ...unreadableBlock(kept),
+  ].join('\n');
+}
+
+function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  const wasNext = read(NEXT_FILE);
+  let wasDone = read(DONE_FILE);
+  const onDisk = { next: parseQueueText(wasNext), done: parseQueueText(wasDone, 'done') };
+  const nextOpen = new Set([...onDisk.next.inProgress, ...onDisk.next.backlog].map((t) => t.id));
+  const inDoneFile = new Set(onDisk.done.done.map((t) => t.id));
+  const open = [...tasks.inProgress, ...tasks.backlog];
+  // 2.58.0 (P-052): the file that gains a task is written first; the one that loses it last. A move both ways in
+  // one write (one task done, another reopened) first writes DONE.md still holding the reopened one.
+  const toDone = tasks.done.filter((t) => !inDoneFile.has(t.id)).map((t) => t.id);
+  const toOpen = open.filter((t) => inDoneFile.has(t.id)).map((t) => t.id);
+  const moves = {};
+  for (const id of toDone) if (nextOpen.has(id)) moves[id] = 'done';
+  for (const id of toOpen) moves[id] = 'open';
+  const moving = Object.keys(moves).length > 0;
+  if (moving) writeAtomic(MOVES_FILE, `${JSON.stringify({ moves, at: new Date().toISOString(), pid: process.pid })}\n`, { fsync: false });
+  if (toDone.length) {
+    const first = renderDone([...tasks.done, ...onDisk.done.done.filter((t) => toOpen.includes(t.id))], kept.done);
+    if (first !== wasDone) writeAtomic(DONE_FILE, first);
+    wasDone = first;
+  }
+  // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
+  writeAtomic(NEXT_FILE, renderNext(tasks, kept.next));
+  const doneText = renderDone(tasks.done, kept.done);
+  if (wasDone !== doneText) writeAtomic(DONE_FILE, doneText);
+  if (moving || fs.existsSync(MOVES_FILE)) try { fs.rmSync(MOVES_FILE, { force: true }); } catch { /* stale notes only matter for a task in both files */ }
+  // 2.58.0 (P-057): say once which lines were set aside (they stay in the file, under UNREADABLE).
+  const fresh = [...kept.next.filter((u) => u.fresh).map((u) => ['studio/NEXT.md', u.line]), ...kept.done.filter((u) => u.fresh).map((u) => ['studio/DONE.md', u.line])];
+  if (fresh.length) {
+    const list = fresh.map(([f, l]) => `${f}: ${l.length > 120 ? `${l.slice(0, 117)}...` : l}`);
+    console.warn(`[board] ${fresh.length} line${fresh.length === 1 ? '' : 's'} on the board ${fresh.length === 1 ? 'isn\'t a task' : 'aren\'t tasks'} the harness can read; kept under "${UNREADABLE_HEADING}" at the end of the file:\n${list.map((l) => `  ${l}`).join('\n')}`);
+    try { emitEvent({ type: 'board.unreadable', agent: actor(), to: 'producer', status: 'warn', target: fresh[0][0], msg: `Kept ${fresh.length} board line(s) the harness can't read under "## UNREADABLE" (fix their format): ${list.join(' | ')}`.slice(0, 600) }); } catch { /* the warning above stands */ }
+  }
 }
 
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
@@ -274,7 +399,11 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   }
 
   // 2.57.0 (PU-16, P-038): the move to IN_PROGRESS is read, made and written under the board lock.
+  // 2.58.0 (P-055): whatever goes wrong there (the board lock busy, EPERM/EACCES from another program holding a
+  // board file on Windows, a full disk), a claim this call made is released: it used to stay, with the task still
+  // waiting, and `next` skipped the task for an hour. A claim the agent already held (a re-start) is kept.
   let target = null;
+  let moved = false;
   try {
     withBoard(() => {
       const q = parseNextQueue();
@@ -287,14 +416,16 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
         q.inProgress.unshift(target);
       }
       writeNextQueue(q);
+      moved = true;
     });
   } catch (err) {
-    if (err.code !== 'ELOCKBUSY') throw err;
-    release(`task:${taskId}`, agent);
-    return { error: 'busy', message: err.message };
+    if (!lockRes.reused) { try { release(`task:${taskId}`, agent); } catch { /* the watcher frees it (claim on a waiting task) */ } }
+    if (err.code === 'ELOCKBUSY') return { error: 'busy', message: err.message };
+    emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: the board couldn't be updated (${err.code || err.message}); claim released` });
+    return { error: 'board', message: `${taskId} wasn't started: the board (studio/NEXT.md) couldn't be updated (${err.code && !String(err.message || '').startsWith(err.code) ? `${err.code}: ` : ''}${String(err.message || err).slice(0, 200)}). ${lockRes.reused ? 'Your claim is kept.' : 'The claim was released.'} Nothing else changed: run the command again in a moment.` };
   }
-  if (!target) {
-    release(`task:${taskId}`, agent);
+  if (!target || !moved) {
+    release(`task:${taskId}`, agent); // not on the board (or not waiting): no claim on it either
     return null;
   }
   // In a lane copy (2.29): start from the studio's latest work, plus any earlier agent's unmerged work on this task.
@@ -364,7 +495,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
   // (the agent judged the existing code good enough). Zero code changes since the task started are
   // refused unless the task is marked no-op with a reason (task done <ID> --no-op "<why>").
-  if (!force && target.role === 'builder' && ['change', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
+  if (!force && target.role === 'builder' && ['change', 'chore', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
     if (noop && String(noop).trim().length >= 10) {
       emitEvent({ type: 'task.noop', agent: agent || target.role, task: target.id, msg: `${target.id} closed as no-op: ${String(noop).trim().slice(0, 300)}` });
       note = `${note ? `${note}; ` : ''}no-op: ${String(noop).trim().slice(0, 200)}`;
@@ -449,6 +580,24 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (checkOnly) {
     const verifyNeeded = Boolean(check.checks?.some((c) => !c.ok && c.label === VERIFY_LABEL));
     return { checkOnly: true, ok: true, id: target.id, verifyNeeded, message: `${target.id}: every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
+  }
+
+  // 2.58.0 (PU-34, P-047): a verify record is a file anyone can write, so task done runs the two checks that matter
+  // most again itself, forced or not (well under a second each): the protected files (changed only with the owner's
+  // signed approval) and the secret scan (no key or token in what would be committed). The same scripts the
+  // `protected` and `secrets` gates run (studio/gates.json), called directly so a changed gate command can't skip them.
+  {
+    const failed = [];
+    for (const [id, rel] of [['protected', 'qa/protected-check.mjs'], ['secrets', 'scripts/secret-scan.mjs']]) {
+      const file = path.join(REPO_ROOT, rel);
+      if (!fs.existsSync(file)) { failed.push({ id, why: `${rel} is missing` }); continue; }
+      const r = spawnSync(process.execPath, [file], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      if (r.status !== 0) failed.push({ id, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
+    }
+    if (failed.length) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed` });
+      return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.id === 'protected' ? 'qa/protected-check.mjs' : 'scripts/secret-scan.mjs'}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}`).join('\n')}\nThese run at every task done, forced or not. A key or token: take it out of the files (and rotate it). A protected file: only the owner approves it; hand the task back with a note saying which file and why.` };
+    }
   }
 
   // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
@@ -617,8 +766,21 @@ function holderRunning(owner) {
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;
-export function pauseTask(taskId, agent = null, note = '', { force = false } = {}) {
-  const lock = lockStatus(`task:${taskId}`);
+/** Is `lock` (a claim, or null) the claim `expect` describes: 'none', or { owner, claimedAt }? */
+export function sameClaim(lock, expect) {
+  if (expect === 'none' || expect === null) return !lock;
+  return Boolean(lock) && lock.owner === expect.owner && String(lock.claimedAt || '') === String(expect.claimedAt || '');
+}
+
+/**
+ * `expect` (2.58.0, P-054): the claim the caller decided on ('none', or { owner, claimedAt } from listLocks). It is
+ * checked again under the board lock, and the hand-back is skipped ({ error: 'claim-changed' }) if the claim changed
+ * meanwhile. The watcher decides from a read made at the start of its pass; a `git status` later (seconds on a big
+ * repo), it used to hand back a task an agent had just re-claimed, releasing that fresh claim, and a third agent
+ * then started the same task.
+ */
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect } = {}) {
+  let lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
   // claimed for up to an hour, and the Producer had to wait for the claim to expire).
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
@@ -626,17 +788,25 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   }
   let q = null;
   let target = null;
+  let changed;
   withBoard(() => {
     q = parseNextQueue();
     const idx = q.inProgress.findIndex((t) => t.id === taskId);
     if (idx === -1) return;
+    if (expect !== undefined) {
+      const now = lockStatus(`task:${taskId}`);
+      if (!sameClaim(now.lock || null, expect)) { changed = now.lock || null; return; }
+      lock = now;
+    }
     [target] = q.inProgress.splice(idx, 1);
     target.status = 'backlog';
     q.backlog.unshift(target);
     writeNextQueue(q);
+    // Released under the board lock: a start waiting for it then sees the task waiting and no claim.
+    if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   });
+  if (changed !== undefined) return { error: 'claim-changed', lock: changed, message: `${taskId} was not handed back: ${changed ? `${changed.owner} claimed it ${changed.claimedAt ? `at ${String(changed.claimedAt).slice(11, 19)}` : 'just now'}` : 'its claim was released'} after this decision was made.` };
   if (!target) return null;
-  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   const who = agent || lock.lock?.owner || 'unknown';
   // The agent is stopping: free its folder and file claims too, unless it still holds another task.
   const freed = [];
@@ -665,6 +835,41 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
 
 export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
 
+/**
+ * 2.58.0 (P-053): how long a task claim must be old, and the board quiet, before the watcher treats a claim on a
+ * task that isn't in progress as left behind (STUDIO_CLAIM_LEAK_GRACE_SEC, 60). A `task done` or `pause` moves the
+ * task on the board first and frees the claim a moment later; a `task start` claims a moment before the move.
+ */
+export const claimLeakGraceMs = () => {
+  const v = Number(process.env.STUDIO_CLAIM_LEAK_GRACE_SEC);
+  return (process.env.STUDIO_CLAIM_LEAK_GRACE_SEC !== undefined && process.env.STUDIO_CLAIM_LEAK_GRACE_SEC !== '' && Number.isFinite(v) ? Math.max(0, v) : 60) * 1000;
+};
+
+/**
+ * 2.58.0 (P-053): free a `task:` claim nobody can be using: its task is done, waiting, or not on the board (a
+ * `task done` killed after its board write kept it, and heartbeats renewed it; a killed start or pause). Under the
+ * board lock, and only if the claim is still the one the caller saw (`expect`: { owner, claimedAt }) and the task is
+ * still not in progress. Returns { released, where, owner } or { released: false, why }.
+ */
+export function releaseLeakedClaim(taskId, expect) {
+  return withBoard(() => {
+    const q = parseNextQueue();
+    if (q.inProgress.some((t) => t.id === taskId)) return { released: false, why: 'in progress' };
+    const l = lockStatus(`task:${taskId}`).lock || null;
+    if (!l || !sameClaim(l, expect)) return { released: false, why: 'changed' };
+    const where = q.done.some((t) => t.id === taskId) ? 'done' : q.backlog.some((t) => t.id === taskId) ? 'waiting' : 'not on the board';
+    const r = release(`task:${taskId}`, l.owner);
+    return r.released ? { released: true, where, owner: l.owner } : { released: false, why: r.reason || 'not released' };
+  });
+}
+
+/** When either board file last changed (ms), for the watcher's grace. */
+export function boardChangedAt() {
+  let t = 0;
+  for (const f of [NEXT_FILE, DONE_FILE]) { try { t = Math.max(t, fs.statSync(f).mtimeMs); } catch { /* not written yet */ } }
+  return t;
+}
+
 /** meta: { size: 1-5 (how hard), causedBy: 'T-012' (the task whose work caused this bug) } */
 /**
  * Reopen finished work that turned out wrong. Counts as a bug against the model that closed it
@@ -672,6 +877,7 @@ export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer
  */
 export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
   let target = null;
+  let freed = null;
   withBoard(() => {
     const q = parseNextQueue();
     const idx = q.done.findIndex((t) => t.id === taskId);
@@ -681,8 +887,13 @@ export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
     target.status = 'backlog';
     q.backlog.unshift(target);
     writeNextQueue(q);
+    // 2.58.0 (P-053): a claim left on the finished task (its `task done` was killed after the board write) would
+    // keep every agent off the reopened task. A claim younger than the grace is a start in flight: left alone.
+    const l = lockStatus(`task:${taskId}`).lock;
+    if (l && Date.now() - (Date.parse(l.claimedAt || '') || 0) >= claimLeakGraceMs() && release(`task:${taskId}`, l.owner).released) freed = l.owner;
   });
   if (!target) return null;
+  if (freed) reason = `${reason || 'No reason given.'}\n(${freed}'s claim, left from when it was done, was released.)`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
@@ -1294,13 +1505,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
       process.exit(1);
     }
-    // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
+    // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review, docs, idea or system.`);
+    if (type && !['bug', 'chore', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, balance, fun, playtest, review, docs, idea or system.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';

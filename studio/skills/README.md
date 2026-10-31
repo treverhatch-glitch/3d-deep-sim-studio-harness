@@ -11,10 +11,21 @@ what it reviews and give a verdict, a bug needs a pinned regression that fails o
 spec with a hand-off, a scenario, goldens, a playtest and an approval from another model family, a build needs real
 changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
 
+**Which verify counts (2.58.0).** Only a full `npm run verify` of the commit you are on (HEAD), run on a clean
+tree: commit first, then verify, then `task done`. A verify of an older commit, one run with uncommitted changes,
+or a record with no commit in it (older than 2.43.0, or written by hand) is refused with "run npm run verify
+again". `task done` (not `--check`) also runs the `protected` and `secrets` checks again itself, forced or not:
+a key or token in the files, or a protected file changed without the owner's signed approval, stops it.
+
+**The size ratchet** counts only this task's own growth. Once your branch has taken in the studio's main branch
+(a merge or a rebase; in a lane copy, the main checkout's branch), files are compared with the merge-base of HEAD
+and main, not with the commit the task started from, so what came from main isn't yours.
+
 | Type | Picked by | Skill |
 | --- | --- | --- |
 | change | role `builder`, `asset-3d`, or anything unmatched | [builder.md](builder.md) |
 | bug | title starts with `Bug` or `Fix` (the closed loop queues `Fix BUG-…`) | [bug.md](bug.md) |
+| chore | title starts with `Chore`, `Toolchain`, `Tooling`, `Infra`, `CI`, `Deps` or `Dependencies`; `Build:` / `build(…)` or `Build` with a toolchain word (`Build fails on Windows`; `Build the stairwell` stays a change); `Fix the build`, `Fix build: …`, `Fix CI`, `Fix toolchain`, `Fix deps`; a `[chore]` tag anywhere; or `--type chore`. Done: changes and a full verify after the last one, no regression, gameplay or reach checks | [builder.md](builder.md) |
 | system | title `System:`, or `--type system` | [system.md](system.md) |
 | balance | role `designer-calibrator`, `balancer`, or title `Balance:` | [balance.md](balance.md) |
 | playtest / fun | role `qa-playtester`, `playtester`, `fun-tester`, or title `Playtest:` / `Fun:` | [playtest.md](playtest.md) |
@@ -23,7 +34,8 @@ changes and a verify after the last one. The War Room shows the same checklist w
 | docs | title `Docs:` | [docs.md](docs.md) |
 | none | role `producer` or `human` | coordination work, no check |
 
-Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you).
+Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you;
+`--type chore` for build, toolchain, CI or dependency work). Any other `Fix …` is still a bug and needs its regression.
 
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
 hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and
