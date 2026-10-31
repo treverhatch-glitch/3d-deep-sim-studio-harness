@@ -19,6 +19,40 @@ language, assets, TODOs, and every call that makes a run unrepeatable (`Math.ran
 Godot `randi`, Unity `Random` and `Time.deltaTime`). Rerun it any time; it keeps your filled-in fact
 sheet unless you pass `--force`, and it never queues the same task twice.
 
+## Adopt it so the studio can work on it (2.43.0)
+
+The scan alone only describes the game: the studio's checks, lanes, whole-game check and unwired-code check
+don't reach a game that lives elsewhere. Adopting brings it in:
+
+```bash
+npm run onboard -- --path ../my-game --name "My Game" --adopt --dry-run          # what it would do
+npm run onboard -- --path ../my-game --name "My Game" --adopt --ref <branch>     # do it
+cd game/my-game && npm ci                                                         # its packages
+git add game/my-game studio && git commit -m "Adopt My Game" && npm run verify
+```
+
+- It copies the game's tracked files at `--ref` (default: what is checked out) into `game/<slug>/`. If the
+  game's own docs (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, README.md) name a trunk or integration branch other
+  than the one checked out, it says so: a half-built game's `main` is often far behind.
+- It declares the game's own checks in `game/<slug>/studio.gates.json` from its scripts and config:
+  type-check, `test` (required), `lint`, `e2e`, `build` (optional). Edit them freely; the review task asks for it.
+- It makes it the studio's game (`studio/game.json`) and records where it came from (`studio/game/ORIGIN.json`:
+  repo, branch, commit).
+- The Game Bible starts as an existing game. When the game has design docs, the first task drafts the Bible
+  from them (an answers file for `npm run intake -- --answers`, each answer naming its source), and a person
+  checks and signs it; pre-production then asks for a style sheet from the game's existing art and storyboards
+  from its current build, not placeholders.
+
+**Sending the work back.** The game's own repo, review and CI stay in charge of it:
+
+```bash
+npm run onboard -- --export
+```
+
+writes the studio's committed changes to `game/<slug>/` since it was adopted as one patch, relative to the
+game's own repo (without `studio.gates.json`), and prints the commands to apply it on a branch there from the
+adopted commit (`git apply --3way`). Open the PR the way that repo wants.
+
 ## Then fill in what a scan can't know
 
 The top of `GAME.md` is for the person who owns the game: the pitch, the state (prototype, alpha,
@@ -42,8 +76,9 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
 
 ## Advice
 
-- **Keep the game in its own repo.** Point the studio at it with `--path`; don't copy it in. Game
-  code that does land here goes under `cartridges/<game>/`.
+- **The game's repo stays the home of the game.** For a look, scan it with `--path`. To have the studio work
+  on it, adopt it (`--adopt`): it lands under `game/<slug>/`, and `--export` sends the work back as a patch
+  for the game's own review.
 - **Taming randomness is gradual.** The scan's count is a to-do list, not a verdict. Start with the
   systems the first replay touches.
 - **Gates arrive in steps.** Secrets, session and a smoke playtest work on day one. Golden, purity

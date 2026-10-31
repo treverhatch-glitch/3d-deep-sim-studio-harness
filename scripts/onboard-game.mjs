@@ -11,6 +11,10 @@
  *   studio/NEXT.md              onboarding tasks (skipped if they are already queued)
  *   studio/producer/LOG.md      a note saying what was onboarded and from where
  * Guide: docs/ONBOARDING-A-GAME.md. Pass --force to rewrite an existing GAME.md.
+ *
+ * 2.43.0: --adopt [--ref <branch>] brings the game under the studio (game/<slug>/, its own checks declared,
+ * the studio's game, origin recorded: harness/adopt.mjs); --export turns the studio's changes to it back into a
+ * patch for the game's own repo.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,14 +28,43 @@ const opt = (k) => {
   return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
 };
 const flag = (k) => args.includes(`--${k}`);
+if (flag('export')) {
+  const { exportPatch } = await import('../harness/adopt.mjs');
+  const r = exportPatch();
+  if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
+  if (r.empty) { console.log(`[onboard] nothing to export: no committed change to ${r.origin.path} since it was adopted`); process.exit(0); }
+  console.log(`[onboard] ${r.files.length} file(s) changed in ${r.origin.path} since it was adopted (${r.commits.length} commit(s)); patch: ${r.file}`);
+  for (const c of r.commits.slice(0, 20)) console.log(`  ${c}`);
+  console.log(`[onboard] apply it in the game's own repo (its review and CI decide):\n  ${r.apply.join('\n  ')}`);
+  process.exit(0);
+}
 const gamePath = opt('path');
 if (!gamePath || !fs.existsSync(gamePath) || !fs.statSync(gamePath).isDirectory()) {
   console.error('Usage: npm run onboard -- --path <game folder> --name "<Game name>" [--dry-run] [--force]');
   process.exit(1);
 }
-const game = path.resolve(gamePath);
+let game = path.resolve(gamePath);
 const name = opt('name') || path.basename(game);
 const dry = flag('dry-run');
+// 2.43.0: adopt first (copy the game in at the right branch), then scan the copy.
+let adopted = null;
+if (flag('adopt')) {
+  const ad = await import('../harness/adopt.mjs');
+  const hint = ad.trunkHint(game);
+  if (dry) {
+    const slug = ad.slugOf(name);
+    console.log(`[onboard] --adopt would copy ${opt('ref') || 'the checked-out branch'} into game/${slug}/, make it the studio's game and declare these checks:`);
+    for (const g of ad.gatesFor(slug, game).gates) console.log(`  - ${g.id}${g.required === false ? ' (optional)' : ''}: ${g.command}`);
+    if (hint) console.log(`[onboard] its ${hint.file} says work goes to \`${hint.branch}\`${opt('ref') ? '' : ` (pass --ref ${hint.branch} for that branch)`}`);
+  } else {
+    adopted = await ad.adoptGame({ src: game, name, ref: opt('ref') });
+    if (adopted.error) { console.error(`[onboard] ${adopted.error}`); process.exit(1); }
+    console.log(`[onboard] adopted ${name} into ${adopted.dir}/ (${adopted.origin.ref || 'files'}${adopted.origin.sha ? ` @ ${adopted.origin.sha.slice(0, 8)}` : ''}); it is the studio's game now`);
+    console.log(`[onboard] its checks (${adopted.dir}/studio.gates.json${adopted.wroteGates ? ', written from its scripts' : ', its own'}): ${adopted.gates.join(', ') || 'none found: add some'}`);
+    for (const w of adopted.warnings) console.log(`[onboard] note: ${w}`);
+    game = path.join(root, adopted.dir);
+  }
+}
 
 // ---------- scan (read only) ----------
 const SKIP = new Set(['.git', 'node_modules', 'Library', 'Temp', 'obj', 'bin', 'build', 'dist', 'Build', 'Builds', '.godot', '.import', 'target', '.venv', 'venv', '__pycache__', 'DerivedDataCache', 'Intermediate', 'Saved', '.next', 'coverage']);
@@ -179,8 +212,16 @@ ${rows(inv.assets, ([k, v]) => `- ${k}: ${v}`)}
 ${rows(inv.nondeterminism, ([k, v]) => `- ${k}: ${v}`)}
 `;
 
+// 2.43.0: a game with design docs gets its Bible drafted from them (each answer naming its source), then a person
+// checks and signs it; only a game without docs starts from a blank intake.
+const designDocs = inv.docs.filter((d) => !/(^|\/)(assets|art|media|devlog|public|textures|sounds|audio|vendor|third[_-]?party|node_modules)(\/|$)/i.test(d)).slice(0, 6);
 const tasks = [
-  { title: `Answer the game intake for ${name} with its owner: npm run intake (what it is, its play length, its three phases, which layers it has)`, role: 'human', priority: 'P0' },
+  ...(designDocs.length
+    ? [
+      { title: `Docs: draft the Game Bible for ${name} from its own design docs (${designDocs.join(', ')}): answers file for npm run intake -- --answers, each answer naming its source; leave what the docs don't settle for the owner`, role: 'producer', priority: 'P0', meta: { infra: true } },
+      { title: `Check and sign the Game Bible for ${name}, drafted from its docs: npm run bible (fix what reads wrong with npm run intake), then npm run bible -- sign --by <you>`, role: 'human', priority: 'P0' },
+    ]
+    : [{ title: `Answer the game intake for ${name} with its owner: npm run intake (what it is, its play length, its three phases, which layers it has)`, role: 'human', priority: 'P0' }]),
   { title: `Docs: fill in the "Fill in" part of studio/game/GAME.md for ${name}`, role: 'producer', priority: 'P1' },
   { title: `Docs: rewrite studio/PLAN.md for ${name} (goal, phase, milestones)`, role: 'producer', priority: 'P1' },
   { title: `Study: our own build of ${name} (what runs each frame, network calls, dead code)`, role: 'reference-scout', priority: 'P2' },
@@ -188,7 +229,9 @@ const tasks = [
   { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/browser.adapter.mjs)`, role: 'builder', priority: 'P1', meta: { infra: true } },
   { title: `Playtest: first seeded run of ${name}, then record its golden`, role: 'qa-playtester', priority: 'P2' },
   { title: `Docs: import ${name}'s known bugs into qa/reports with steps or a seed`, role: 'qa-playtester', priority: 'P2' },
-  { title: `Review: choose which gates apply to ${name} now and which wait (studio/gates.json)`, role: 'reviewer', priority: 'P2' },
+  adopted
+    ? { title: `Review: the checks ${adopted.dir}/studio.gates.json declares for ${name} (keep, mark optional, add what is missing), then npm run verify`, role: 'reviewer', priority: 'P1' }
+    : { title: `Review: choose which gates apply to ${name} now and which wait (studio/gates.json)`, role: 'reviewer', priority: 'P2' },
 ];
 
 console.log(`[onboard] ${name} at ${shown}`);
@@ -217,13 +260,16 @@ const bibleMod = await import('../harness/bible.mjs');
 if (!bibleMod.hasBible()) {
   const b = bibleMod.emptyBible();
   b.answers.title = name;
+  b.answers.origin = 'existing'; // 2.43.0: onboarding is by definition a game that already exists
   bibleMod.writeBible(b);
   console.log('[onboard] started an unsigned Game Bible (studio/bible/); build work waits for the intake and a person\'s signature');
 }
 const { addLogNote } = await import('../harness/producer-log.mjs');
 const q = parseNextQueue();
 const have = new Set([...q.inProgress, ...q.backlog, ...q.done].map((t) => t.title));
-const queued = tasks.filter((t) => !have.has(t.title)).map((t) => addTask(t)).filter((t) => !t.error);
+const queued = tasks.filter((t) => !have.has(t.title)).map((t) => addTask(t)).filter((t) => !t.error && !t.duplicate);
 console.log(`[onboard] queued ${queued.length} task(s)${queued.length ? `: ${queued.map((t) => t.id).join(', ')}` : ' (already queued)'}`);
 addLogNote(`Onboarded ${name} from ${shown} (${engine.join(', ') || 'engine not recognised'}). Fact sheet: studio/game/GAME.md. ${nondetTotal} unrepeatable calls to tame before goldens. Queued ${queued.length} onboarding task(s).`, process.env.STUDIO_LOCK_OWNER || 'producer');
-console.log('[onboard] next: npm run handoff, then fill in studio/game/GAME.md with the person who owns the game');
+console.log(adopted
+  ? `[onboard] next: ${adopted.warnings.some((w) => /npm ci/.test(w)) ? `cd ${adopted.dir} && npm ci, then ` : ''}git add ${adopted.dir} studio && git commit, npm run verify, then npm run handoff. Send work back with npm run onboard -- --export`
+  : '[onboard] next: npm run handoff, then fill in studio/game/GAME.md with the person who owns the game');

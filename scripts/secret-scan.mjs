@@ -38,6 +38,21 @@ function listFiles() {
   return out;
 }
 
+// 2.43.0: a key-shaped match glued inside a longer run of base64 characters is a piece of encoded data (an
+// image pack, a font), not a key: "AKIA" plus 16 capitals turns up by chance in a few hundred KB of base64.
+// A real key stands on its own (quotes, =, space or a line edge around it).
+const B64 = /[A-Za-z0-9+/]/;
+function keyIn(line, re) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  for (const m of line.matchAll(g)) {
+    const before = line[m.index - 1] || '';
+    const after = line[m.index + m[0].length] || '';
+    if (B64.test(before) && (B64.test(after) || after === '=')) continue;
+    return true;
+  }
+  return false;
+}
+
 let count = 0;
 const hits = new Set();
 for (const rel of listFiles()) {
@@ -47,7 +62,7 @@ for (const rel of listFiles()) {
   count += 1;
   if (buf.subarray(0, 8000).includes(0)) continue; // binary
   buf.toString('utf8').split(/\r?\n/).forEach((line, i) => {
-    if (PATTERNS.some((re) => re.test(line))) hits.add(`  ${rel}:${i + 1}`);
+    if (PATTERNS.some((re) => keyIn(line, re))) hits.add(`  ${rel}:${i + 1}`);
   });
 }
 if (hits.size) {

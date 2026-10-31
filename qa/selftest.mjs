@@ -3360,6 +3360,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.43.0: adopting a game that already exists (qa/selftest-243.mjs).
+{
+  const dir = copyRepo();
+  const { selftest243 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-243.mjs')).href);
+  await selftest243({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
