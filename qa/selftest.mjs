@@ -1348,6 +1348,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, `node harness/task.mjs done ${t4} --agent prod-1 --force --reason "selftest forced" --accepted-by selftest`, env);
   // One launcher: the watcher's auto-start does nothing while a supervisor runs, and uses lanes when none does.
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
+  // 2.58.0: the watcher starts agents only with auto-start on (off by default).
+  run(dir, 'node harness/mode.mjs autostart on --by hatch', env);
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder')) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   for (const t of ['Lobby doors', 'Lobby lights']) run(dir, `node harness/task.mjs add "${t}" --role builder --lane docs/lobby`, env);
   const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'ignore' });
@@ -3548,7 +3550,8 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.58.0 part D (qa/selftest-258d.mjs).
+// 2.58.0 part D: untrusted text marked in briefs and prompts (PU-36), stalled agents freed (PU-39), custom-command
+// limits per program (PU-40), auto-start opt-in (qa/selftest-258d.mjs).
 {
   const dir = copyRepo();
   const { selftest258D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258d.mjs')).href);

@@ -9,6 +9,9 @@
  *          STUDIO_STALL_RELEASE_MIN=0 turns it off; right after the machine slept (the watcher's last pass as old) it waits.
  *   PU-40 (P-051): a usage limit on a custom command is saved per program (custom:<program>), and the next start of
  *          that command is held until the reset; another command still starts.
+ *   Auto-start (crew report): off by default, the watcher's fill, the Producer check-in and the HUB's automatic
+ *          wake-ups start nothing and say how to turn it on; by hand still starts; `npm run mode -- autostart on`
+ *          lets the watcher start agents again.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -100,6 +103,46 @@ console.log('{}');`);
   };
   report('2.58.0 (PU-40, P-051): a usage limit on a custom command (STUDIO_<ROLE>_CMD) is saved as custom:<program>, the next start of that command is held until the reset (and says until when), and a different command still starts',
     lim.marked && lim.held && lim.otherStarts, `${JSON.stringify(lim)} ${JSON.stringify(quota)}\n${out(c1).slice(-300)}\n--- second start ---\n${out(c2).slice(-400)}\n--- other ---\n${out(c3).slice(-300)}`);
+
+  // ---------- Auto-start: off by default, one switch turns it on ----------
+  const aenv = { STUDIO_BUILDER_CMD: 'node -e 0', STUDIO_PRODUCER_CMD: 'node -e 0', STUDIO_HEARTBEAT_SEC: '1' };
+  run(dir, 'node harness/mode.mjs set fast --by tester');
+  addTask('Autostart probe task');
+  const auto = (name) => probe(name, `import { fillAgents, wake, sessions } from ${u('harness/agent.mjs')};
+import { producerCheckinIfDue } from ${u('harness/watch.mjs')};
+import { buildHudState } from ${u('harness/hud.mjs')};
+const fill = await fillAgents();
+const checkin = producerCheckinIfDue(Date.now(), []);
+const w = wake('producer', { why: 'the queue is low', auto: true });
+const hud = buildHudState();
+console.log(JSON.stringify({ fill, checkin, w, live: sessions().filter((s) => s.running).map((s) => s.agent), hudMode: { autostart: hud.mode?.autostart, text: hud.mode?.text }, producer: hud.status?.producer }));`, aenv);
+  const evBefore = events().length;
+  const off = auto('off');
+  const startedWhileOff = events().slice(evBefore).filter((e) => e.type === 'agent.session.start' || e.type === 'agent.auto_start' || e.type === 'agent.wake').length;
+  const list = run(dir, 'node harness/agent.mjs list', aenv);
+  const modeOut = run(dir, 'node harness/mode.mjs').stdout;
+  const hand = run(dir, 'node harness/agent.mjs start --role builder --agent hand-1 --tool custom --model m-1', aenv);
+  const on = run(dir, 'node harness/mode.mjs autostart on --by tester');
+  const modeJson = (() => { try { return JSON.parse(read('studio/mode.json')); } catch { return {}; } })();
+  const fillOn = probe('on', `import { fillAgents } from ${u('harness/agent.mjs')};
+console.log(JSON.stringify(await fillAgents()));`, aenv);
+  // Let the agents it started (node -e 0) finish before the folder is removed.
+  waitFor(() => !JSON.parse(run(dir, 'node -e "import(\'./harness/agent.mjs\').then(m=>console.log(JSON.stringify(m.sessions().filter(s=>s.running).map(s=>s.agent))))"').stdout || '[]').length);
+  const as = {
+    fillOff: off.fill?.started?.length === 0 && /auto-start is off/.test(off.fill?.why || '') && /npm run mode -- autostart on --by <name>/.test(off.fill?.why || ''),
+    checkinPings: off.checkin?.pinged === true && off.checkin?.started === null && /auto-start is off/.test(off.checkin?.why || ''),
+    wakeOff: off.w?.started === false && /auto-start is off/.test(off.w?.next || ''),
+    nothingStarted: startedWhileOff === 0 && (off.live || []).length === 0,
+    hudSays: off.hudMode?.autostart === false && /Auto-start is off/.test(off.hudMode?.text || '') && /autostart on --by/.test(off.hudMode?.text || '') && /auto-start is off/.test(off.producer?.why || ''),
+    cliSays: /Auto-start is off/.test(list.stdout) && /Auto-start is off/.test(modeOut),
+    byHand: hand.status === 0 && events().some((e) => e.type === 'agent.session.start' && e.agent === 'hand-1'),
+    switchOn: on.status === 0 && modeJson.autostart?.on === true && modeJson.autostart?.by === 'tester' && (modeJson.history || []).some((h) => h.autostart === true && h.by === 'tester'),
+    fillOn: (fillOn.started || []).length >= 1,
+  };
+  report('2.58.0 (crew report): auto-start is off by default: the watcher\'s fill, the Producer check-in (which still pings) and an automatic wake-up start nothing and say how to turn it on, as do the HUD, agent list and npm run mode; a start by hand still works; npm run mode -- autostart on --by <name> (recorded in studio/mode.json) lets the watcher start agents',
+    Object.values(as).every(Boolean), `${JSON.stringify(as)}\n${JSON.stringify(off).slice(0, 1500)}\n${JSON.stringify(fillOn).slice(0, 400)}\n${out(hand).slice(-300)}`);
+  // The watcher pass below must not start anything: back to the default.
+  run(dir, 'node harness/mode.mjs autostart off --by tester');
 
   // ---------- PU-39 (P-050): a live but long-silent session frees its task; nothing is killed ----------
   // A git repo so the hand-back can save the uncommitted work as a patch, as a hand-back does.
