@@ -82,7 +82,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround:** Hub → Licenses → **Add** → Get a free personal license, even though one is active. The file appeared.
 - **Harness fix?** Yes, small: say this in docs/UNITY-TRACK.md's licence section.
 
-### P-013 — GameCI refused to build: "Branch is dirty" · open (fix in Unity repo PR #4)
+### P-013 — GameCI refused to build: "Branch is dirty" · fixed in the Unity repo (PR #4, merged 2026-10-31)
 - **What happened:** the first licensed CI build stopped before Unity started.
 - **Why:** the URP starter icon is committed outside Git LFS, so checkout marks it changed, and GameCI's semantic
   versioning refuses a dirty tree.
@@ -93,3 +93,17 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **What happened:** the "no logs folder yet" case found the studio's own studio/logs/.
 - **Workaround / fix:** the test removes the copy's studio/logs/ first.
 - **Harness fix?** Done in 2.53.
+
+### P-015 — A URP sample icon shows as changed in every clone · workaround
+- **What happened:** `Assets/TutorialInfo/Icons/URP.png` is committed as a plain image, but `.gitattributes` sends
+  PNGs to Git LFS, so every checkout shows it as modified (the same cause as P-013).
+- **Workaround:** `git update-index --assume-unchanged` on that file in the local clone. Committing it would turn
+  Unity's sample file into an LFS pointer.
+- **Harness fix?** No. Later, delete the URP sample folder from the Unity repo once nothing uses it (asks Hatch).
+
+### P-016 — Unity wrote Hatch's account IDs into ProjectSettings.asset · kept out of the public repo
+- **What happened:** after the HDRP switch, `ProjectSettings.asset` changed only in `cloudProjectId`,
+  `projectName` and `organizationId` (Hatch's Unity account).
+- **Workaround:** the HDRP PR (Unity repo #6) leaves that file out; it stays changed on Hatch's PC only.
+- **Harness fix?** Maybe: add `organizationId:` / `cloudProjectId:` with a value to the public guard's private
+  markers for Unity repos. Proposal, needs Hatch's OK.
