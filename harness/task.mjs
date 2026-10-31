@@ -751,8 +751,21 @@ function holderRunning(owner) {
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;
-export function pauseTask(taskId, agent = null, note = '', { force = false } = {}) {
-  const lock = lockStatus(`task:${taskId}`);
+/** Is `lock` (a claim, or null) the claim `expect` describes: 'none', or { owner, claimedAt }? */
+export function sameClaim(lock, expect) {
+  if (expect === 'none' || expect === null) return !lock;
+  return Boolean(lock) && lock.owner === expect.owner && String(lock.claimedAt || '') === String(expect.claimedAt || '');
+}
+
+/**
+ * `expect` (2.58.0, P-054): the claim the caller decided on ('none', or { owner, claimedAt } from listLocks). It is
+ * checked again under the board lock, and the hand-back is skipped ({ error: 'claim-changed' }) if the claim changed
+ * meanwhile. The watcher decides from a read made at the start of its pass; a `git status` later (seconds on a big
+ * repo), it used to hand back a task an agent had just re-claimed, releasing that fresh claim, and a third agent
+ * then started the same task.
+ */
+export function pauseTask(taskId, agent = null, note = '', { force = false, expect } = {}) {
+  let lock = lockStatus(`task:${taskId}`);
   // Anyone may hand back a task whose holder's session has ended (test #2: dead agents' tasks sat
   // claimed for up to an hour, and the Producer had to wait for the claim to expire).
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
@@ -760,17 +773,25 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   }
   let q = null;
   let target = null;
+  let changed;
   withBoard(() => {
     q = parseNextQueue();
     const idx = q.inProgress.findIndex((t) => t.id === taskId);
     if (idx === -1) return;
+    if (expect !== undefined) {
+      const now = lockStatus(`task:${taskId}`);
+      if (!sameClaim(now.lock || null, expect)) { changed = now.lock || null; return; }
+      lock = now;
+    }
     [target] = q.inProgress.splice(idx, 1);
     target.status = 'backlog';
     q.backlog.unshift(target);
     writeNextQueue(q);
+    // Released under the board lock: a start waiting for it then sees the task waiting and no claim.
+    if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   });
+  if (changed !== undefined) return { error: 'claim-changed', lock: changed, message: `${taskId} was not handed back: ${changed ? `${changed.owner} claimed it ${changed.claimedAt ? `at ${String(changed.claimedAt).slice(11, 19)}` : 'just now'}` : 'its claim was released'} after this decision was made.` };
   if (!target) return null;
-  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   const who = agent || lock.lock?.owner || 'unknown';
   // The agent is stopping: free its folder and file claims too, unless it still holds another task.
   const freed = [];
