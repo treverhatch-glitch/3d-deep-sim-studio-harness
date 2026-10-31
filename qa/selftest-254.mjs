@@ -64,6 +64,14 @@ const a = wake('director', { why: 'director ping' });
 const b = wake('director', { why: 'development cycle' });
 const live = sessions().filter((s) => s.role === 'director' && s.running).map((s) => s.agent);
 console.log(JSON.stringify({ a: a.started, b: b.started, live, next: b.next }));`, { STUDIO_DIRECTOR_TOOL: 'custom', STUDIO_DIRECTOR_CMD: agentCmd, STUDIO_AGENT_CMD: agentCmd, STUDIO_DIRECTOR_MODEL: 'test-model' });
+  // Stop the stand-in agents it launched (Windows keeps a folder while a process runs in it).
+  try {
+    const agentsDir = path.join(dir, '.studio', 'agents');
+    for (const f of fs.existsSync(agentsDir) ? fs.readdirSync(agentsDir).filter((x) => x.endsWith('.json')) : []) {
+      const rec = JSON.parse(fs.readFileSync(path.join(agentsDir, f), 'utf8'));
+      for (const pid of [rec.pid, rec.supervisor]) if (pid) { try { process.kill(pid); } catch {} }
+    }
+  } catch {}
   report('2.54.0 (P-024): a Director ping and the development cycle waking in the same pass start one Director; the second sees it running at once',
     wake.a === true && wake.b === false && wake.live?.length === 1 && /is running/.test(wake.next || ''), JSON.stringify(wake).slice(0, 900));
 

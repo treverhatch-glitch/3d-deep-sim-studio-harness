@@ -3445,7 +3445,8 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest254 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-254.mjs')).href);
   await selftest254({ dir, run, report, tmpRoot });
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+  // Its stand-in agents may still be exiting on Windows; the temp root is cleaned at the end either way.
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
