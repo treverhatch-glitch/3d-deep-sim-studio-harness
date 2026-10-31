@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.56.0] — 2026-10-31
+2.56.0: PU-15, approved by the owner: a general visual-effect skill (spec, stepped capture, frame checks, review).
+### Added
+- **`npm run vfx`** (`harness/vfx.mjs`): `new <id>` writes a starter effect spec (`studio/vfx/<id>.json`: what it
+  communicates, one-shot or loop, phases adding up to its duration, a small stage, palette, budget, flash limit,
+  seed); `validate`; `check <id> --url <page> [--task T-12]` takes stills at fixed effect times through a page hook
+  (`window.__studioVfx.render(id, { tMs, seed, w, h })` drawing into `#studio-vfx-stage`, playtest mode only),
+  never recording in real time, so it works without a GPU. It writes a contact sheet and runs six checks: draws,
+  ends-empty, loop-seam, stays-inside, flash-rate (at most 3 full-stage flashes a second), same-seed. Results in
+  `.studio/vfx/<id>/`, an event `vfx.checked`, and with `--task` the contact sheet and report go to the task's proof.
+- **The `vfx` skill** (`.claude/skills/vfx/SKILL.md`): spec first, reuse before building, draw from time and seed
+  only, capture and look, fix the worst thing, at least three rounds, then review by another model family or the
+  art director. Taste is left to the review; the checks catch broken effects, not dull ones.
+- `docs/VFX.md`; `qa/selftest-256.mjs` (4 checks, no browser); `scripts/check-vfx.mjs` (a demo page with two clean
+  effects and six planted faults, in CI's browser jobs).
+- Engine capture (Godot, Unity) is a documented contract only (`STUDIO_VFX_CAPTURE_CMD`), not built or tested.
+- The pattern comes from a review of an MIT-licensed effect library's authoring skill
+  (`studio/logs/research/PIXELFX-REVIEW-2026-10-31.md`); ideas only, no code or art taken.
+
 ## [2.55.0] — 2026-10-31
 2.55.0: fixes from the crew's own logs (P-028, P-030, P-031, P-032), approved by the owner.
 ### Fixed
