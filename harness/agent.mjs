@@ -15,6 +15,8 @@
  *   npm run agent -- list          who is running, last heartbeat, task, tool, model
  *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
  *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
+ *   npm run agent -- allow agy [--dry-run] | --by <owner> --scope user   the owner writes agy's headless allow-rules
+ *                                  (the harness list) into agy's settings.json (harness/agy-allow.mjs)
  *
  * What a start does:
  *   1. Refuses if the studio is stopped, the mode's caps are full, or the daily token cap is spent.
@@ -35,6 +37,7 @@
 import fs from 'node:fs';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, launchPlan, spawnPlan, describePlan } from './launch.mjs';
+import { agyAllowHint, noteAgyHint, allowCli } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -1181,7 +1184,7 @@ export function startAgent(opts, { detach = false } = {}) {
     } catch {}
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
   }
-  return { ok: true, agent, run: runAgent({ ...opts, tool, model }) };
+  return { ok: true, agent, tool, model, run: runAgent({ ...opts, tool, model }) };
 }
 
 /**
@@ -1280,6 +1283,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(r.message);
       process.exit(1);
     }
+    // P-067 (crew P-037): agy takes its allowed commands from its own settings file, not the command line; say so
+    // (one line, and an event at most hourly for launches nobody watches) when the harness list isn't there. Never blocks.
+    if (r.tool === 'agy') { const h = agyAllowHint(); if (h) { console.log(h); noteAgyHint(h, { agent: r.agent }); } }
     if (r.detached) {
       console.log(`${r.agent} started in the background (${r.tool}, ${r.model}). Output: .studio/agents/${r.agent}.log. npm run agent -- list`);
       process.exit(0);
@@ -1346,6 +1352,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(r.started.length ? `Started: ${r.started.join(', ')}` : `Nothing started${r.why ? `: ${r.why}` : ''}.`);
     process.exit(0);
   }
+  if (cmd === 'allow') process.exit(allowCli(argv.slice(1))); // P-067: the owner enrols agy's allow-rules (harness/agy-allow.mjs)
   const list = sessions();
   if (!list.length) console.log('No agents started by the launcher yet. npm run agent -- start --role builder --agent builder-1 --tool claude --model claude-sonnet-5-5');
   for (const s of list) console.log(`${s.running ? (s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago` : `  ${s.reason || ''}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
