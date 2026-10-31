@@ -451,6 +451,24 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     return { checkOnly: true, ok: true, id: target.id, verifyNeeded, message: `${target.id}: every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
   }
 
+  // 2.58.0 (PU-34, P-047): a verify record is a file anyone can write, so task done runs the two checks that matter
+  // most again itself, forced or not (well under a second each): the protected files (changed only with the owner's
+  // signed approval) and the secret scan (no key or token in what would be committed). The same scripts the
+  // `protected` and `secrets` gates run (studio/gates.json), called directly so a changed gate command can't skip them.
+  {
+    const failed = [];
+    for (const [id, rel] of [['protected', 'qa/protected-check.mjs'], ['secrets', 'scripts/secret-scan.mjs']]) {
+      const file = path.join(REPO_ROOT, rel);
+      if (!fs.existsSync(file)) { failed.push({ id, why: `${rel} is missing` }); continue; }
+      const r = spawnSync(process.execPath, [file], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      if (r.status !== 0) failed.push({ id, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
+    }
+    if (failed.length) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed` });
+      return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.id === 'protected' ? 'qa/protected-check.mjs' : 'scripts/secret-scan.mjs'}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}`).join('\n')}\nThese run at every task done, forced or not. A key or token: take it out of the files (and rotate it). A protected file: only the owner approves it; hand the task back with a note saying which file and why.` };
+    }
+  }
+
   // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
   // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
   if (!force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
