@@ -21,6 +21,33 @@ agent's task, lock and event commands, and its commits, carry its name and model
 Free tiers change often and sources disagree (for example on Gemini's daily request limits), so check
 your own account's quota page rather than trusting a number in a doc, this one included.
 
+## How agents are launched on Windows
+
+The launcher (`npm run agent -- start`, hires, the supervisor, and the reviewer and quota checks) starts every
+tool without a shell, on every OS, so each argument reaches the tool exactly as built (`harness/launch.mjs`):
+
+- On Windows the tool is looked up on the agent's PATH, each PATHEXT extension in turn, never in the current folder.
+  An `.exe` (Claude Code's own installer) starts directly. An npm shim (`claude.cmd`, `agy.cmd` from
+  `npm install -g`) is read for the `.js` file it runs, and node starts that file (the shim's own `node.exe` if it
+  has one, else the node running the harness): no cmd.exe in between. Any other `.cmd` or `.bat` runs through
+  `cmd.exe /d /s /c` with every argument quoted for cmd.exe by one function (quotes, `& | < > ( ) % ! ^` escaped;
+  delayed expansion is assumed off, as it is by default).
+- Claude Code gets its prompt on stdin and each `--allowedTools` pattern as its own argument; Codex reads stdin.
+  agy, Cursor and Grok take the prompt as one argument. When it can't travel (longer than Windows' 32,767-character
+  command line, a line break through cmd.exe, which can't carry one, or over 120 KB on macOS and Linux), the tool
+  gets one line telling it to read `.studio/kickoff/<agent>.md` instead, and the agent's log says so.
+- The agent's log (`npm run agent -- logs <agent>`) starts with a `[launcher]` line when a Windows tool was started
+  as an npm shim or through cmd.exe, or wasn't found on PATH.
+- A custom command (`STUDIO_<ROLE>_CMD`, `STUDIO_AGENT_CMD`, `STUDIO_TOOL_<TOOL>_CMD`) is your own command line and
+  still runs in the shell (cmd.exe on Windows). The values filled into `{kickoff}`, `{agent}`, `{model}`, `{role}`
+  and `{task}` are quoted for that shell, so a kickoff path with a space stays one argument. Write placeholders bare
+  (`mytool --file {kickoff}`) or inside your own quotes; both work. On Windows a value with a double quote or a line
+  break is refused, and the agent isn't started.
+
+Before this (P-066, crew report P-036), Windows ran the built-in tools with `shell: true`: cmd.exe split every
+argument at its spaces, so Claude Code lost its allowed-tools list (each command waited for a yes and the agent
+quit after a few turns) and agy stopped at `unexpected argument`.
+
 ## Best practices for a run
 
 - **One shared checkout.** Claude Code (`claude -w`), Codex and Cursor can each work in their own git

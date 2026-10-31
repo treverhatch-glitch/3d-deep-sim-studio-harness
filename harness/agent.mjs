@@ -18,10 +18,10 @@
  *
  * What a start does:
  *   1. Refuses if the studio is stopped, the mode's caps are full, or the daily token cap is spent.
- *   2. Writes the agent's kickoff with its real model, and starts the tool with it: no shell quoting,
+ *   2. Writes the agent's kickoff with its real model, and starts the tool with it: no shell (harness/launch.mjs),
  *      the prompt goes in on stdin (or as one argument), so the same line works on Windows, macOS
  *      and Linux. STUDIO_<ROLE>_CMD (or STUDIO_AGENT_CMD) overrides it with your own command;
- *      {kickoff}, {agent}, {model} and {role} are filled in.
+ *      {kickoff}, {agent}, {model} and {role} are filled in, quoted for the shell.
  *   3. Emits agent.session.start, then agent.heartbeat every 2 minutes while it runs, then
  *      agent.session.end with the exit code, a reason and the tokens it reported.
  *   4. When it ends badly (non-zero exit, usage limit, 429, auth error) while holding a task, it hands
@@ -33,7 +33,8 @@
  * or STUDIO_AGENT_TOOL / STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
  */
 import fs from 'node:fs';
-import { allowedTools } from './allowlist.mjs';
+import { allowedToolsList } from './allowlist.mjs';
+import { fillCommand, launchPlan, spawnPlan, describePlan } from './launch.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -129,7 +130,13 @@ export function providerTrouble(log, code) {
 }
 const IS = { win: process.platform === 'win32', mac: process.platform === 'darwin' };
 
-/** How each tool is started: an argv and whether the prompt goes on stdin. */
+/**
+ * How each tool is started: an argv, the prompt on stdin (stdin) or as one argument (promptAt, its index in argv).
+ * P-066 (crew P-036): harness/launch.mjs starts the argv with no shell on every OS, so each element arrives as one
+ * argument. The prompt goes on stdin where the tool reads it there (claude -p with no prompt argument, codex's -);
+ * agy, cursor and grok take it as one argument (agy also needs stdin closed), and a prompt too long for the command
+ * line becomes an instruction to read the kickoff file.
+ */
 export function toolCommand(tool, { model, file, prompt, effort }) {
   const m = model && model !== 'unknown' ? model : null;
   switch (tool) {
@@ -139,10 +146,12 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
       // stream-json (2.26): the log keeps every message and tool call, not only the final result, so a
       // session can be read back (test #2: --output-format json left nothing but the last answer).
       const bypass = process.env.STUDIO_CLAUDE_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
-      const allowed = allowedTools(); // harness/allowlist.mjs: the same list the kickoff prints (2.30c)
+      // harness/allowlist.mjs: the same list the kickoff prints (2.30c). P-066: each pattern is its own argument after
+      // the flag (Claude Code takes a space-separated list), so "Bash(git log *)" never depends on quoting.
+      const allowed = allowedToolsList();
       // 2.29.2: a turn ceiling, so no session runs 126 turns again (the refresh point, 40 turns, is in the kickoff).
       const ceiling = sessionLimits().ceilingTurns;
-      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', allowed]), '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
+      return { argv: ['claude', '-p', ...(bypass ? ['--dangerously-skip-permissions'] : ['--permission-mode', 'acceptEdits', '--allowedTools', ...allowed]), '--output-format', 'stream-json', '--verbose', ...(ceiling > 0 ? ['--max-turns', String(ceiling)] : []), ...(m ? ['--model', m] : []), ...(effort ? ['--effort', effort] : [])], stdin: prompt };
     }
     case 'codex': {
       // In a frozen test clone, Codex's sandbox can't write .git or bind 127.0.0.1 on macOS; the clone itself is the boundary.
@@ -154,12 +163,12 @@ export function toolCommand(tool, { model, file, prompt, effort }) {
       // and stdin is closed; no script(1) wrapper needed. In a frozen test clone it may skip its own
       // permission prompts (STUDIO_AGY_BYPASS=1), since nobody is there to answer them.
       const bypass = process.env.STUDIO_AGY_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
-      return { argv: ['agy', '-p', prompt, '--print-timeout', '900s', ...(bypass ? ['--dangerously-skip-permissions'] : [])] };
+      return { argv: ['agy', '-p', prompt, '--print-timeout', '900s', ...(bypass ? ['--dangerously-skip-permissions'] : [])], promptAt: 2 };
     }
     case 'cursor':
-      return { argv: ['agent', '-p', '--force', '--output-format', 'text', prompt] };
+      return { argv: ['agent', '-p', '--force', '--output-format', 'text', prompt], promptAt: 5 };
     case 'grok':
-      return { argv: ['grok', '-p', prompt, ...(m ? ['-m', m] : []), '--output-format', 'json', '--always-approve'] };
+      return { argv: ['grok', '-p', prompt, ...(m ? ['-m', m] : []), '--output-format', 'json', '--always-approve'], promptAt: 2 };
     case 'aider':
       return { argv: ['aider', '--model', `ollama_chat/${m || process.env.OLLAMA_MODEL || 'qwen2.5-coder:14b'}`, '--message-file', file, '--yes'] };
     default:
@@ -592,15 +601,33 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     env.ENABLE_PROMPT_CACHING_1H ||= '1';
     env.CLAUDE_CODE_PROMPT_CACHE_TTL ||= '1h';
   }
-  const fill = (s) => s.replaceAll('{kickoff}', file).replaceAll('{agent}', agent).replaceAll('{model}', model).replaceAll('{role}', role).replaceAll('{task}', task || '');
   if (copy) env.STUDIO_MAIN_ROOT = REPO_ROOT;
   const cwd = copy ? copy.dir : REPO_ROOT;
+  // P-066 (crew P-036): a built-in tool starts with no shell on every OS and its arguments intact (harness/launch.mjs:
+  // on Windows an npm .cmd shim runs as node on its .js entry, any other .cmd through cmd.exe with each argument quoted
+  // for it). A custom command is the user's own line for the shell; the values filled into it are quoted for that shell.
+  let line = null;
+  let plan = null;
+  try {
+    if (custom) line = fillCommand(custom, { kickoff: file, agent, model, role, task: task || '' });
+    else plan = launchPlan(cmd.argv, { env, cwd, promptAt: cmd.promptAt, promptFile: file });
+  } catch (err) {
+    // Nothing started (a value cmd.exe can't carry, a command line too long): say why, give back the lane and the copy.
+    fs.writeSync(out, `\n[launcher] could not start: ${err.message}\n`);
+    fs.closeSync(out);
+    if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+    for (const p of lanePaths) release(`path:${p}`, agent);
+    emitEvent({ type: 'launch.skipped', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent} not started (${role} on ${custom ? 'a custom command' : tool}): ${err.message}`.slice(0, 400), meta: { role, tool } });
+    return { ok: false, message: `${agent} not started: ${err.message}` };
+  }
+  const said = describePlan(plan);
+  if (said) fs.writeSync(out, `[launcher] ${said}\n`);
   const child = custom
-    ? spawn(fill(custom), { cwd, shell: true, env, stdio: ['ignore', out, out] })
-    : spawn(cmd.argv[0], cmd.argv.slice(1), { cwd, env, shell: IS.win, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
+    ? spawn(line, { cwd, shell: true, env, stdio: ['ignore', out, out] })
+    : spawnPlan(plan, { cwd, env, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
   // PU-17 (P-039, P-045): when the agent's process started, for a later stop to check the number is still the agent.
   // In-process only (no child process, nothing slow): the spawn time and the program's name; /proc ticks on Linux.
-  const identity = { pid: spawnedIdentity(child.pid, custom ? fill(custom).split(/\s+/)[0] : cmd.argv[0]), supervisor: launcherIdentity() };
+  const identity = { pid: spawnedIdentity(child.pid, custom ? line.split(/\s+/)[0] : plan.file), supervisor: launcherIdentity() };
   if (cmd?.stdin && child.stdin) {
     child.stdin.on('error', () => {});
     child.stdin.end(cmd.stdin);
@@ -711,7 +738,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
 }
 
 /**
- * End a process and anything it started (on Windows the agent runs under cmd.exe, so kill the tree). group: the
+ * End a process and anything it started (on Windows a custom command or a plain .cmd tool runs under cmd.exe, and any
+ * agent starts its own tools, so kill the tree). group: the
  * process leads its own process group (a launcher started with --detach), so on macOS and Linux the group goes too.
  */
 function killTree(pid, { group = false } = {}) {

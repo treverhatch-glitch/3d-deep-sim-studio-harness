@@ -61,13 +61,14 @@ npm run agent -- stop builder-1
 Or the War Room's **Start agent**. Set defaults in `.env`: `STUDIO_AGENT_TOOL` and `STUDIO_AGENT_MODEL`,
 or per role (`STUDIO_BUILDER_TOOL`, `STUDIO_DIRECTOR_MODEL`, …). `STUDIO_<ROLE>_CMD` replaces the whole
 command for tools the launcher doesn't know (Hermes, a script); `{kickoff}`, `{agent}`, `{model}` and
-`{role}` are filled in.
+`{role}` are filled in, quoted for your shell.
 
 The launcher:
 - refuses to start past the pace's caps, while the studio is stopped, or when the daily token cap is spent;
-- passes the kickoff on stdin or as one argument, so the same command works on Windows, macOS and Linux
-  (agy gets `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its
-  sandbox with `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
+- passes the kickoff on stdin or as one argument, with no shell in between, so the same command works on Windows,
+  macOS and Linux (see "How agents are launched on Windows" in docs/AGENT-TOOLS.md; agy gets
+  `--print-timeout 900s` and a closed stdin; in a frozen clone Codex can run without its sandbox with
+  `STUDIO_CODEX_BYPASS=1`, and agy without its prompts with `STUDIO_AGY_BYPASS=1`);
 - sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops. A session whose
   process is still alive but whose heartbeat is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off)
   is freed by the watcher: its uncommitted work is saved to `.studio/wip/`, its task goes back to the queue with

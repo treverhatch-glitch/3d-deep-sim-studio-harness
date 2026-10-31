@@ -22,8 +22,11 @@ export const ALLOWED = [
   ['cp', 'cp *'],
   ['mv', 'mv *'],
 ];
-/** Claude Code's --allowedTools value. */
-export const allowedTools = () => ALLOWED.map(([, p]) => `Bash(${p})`).join(',');
+/** Claude Code's --allowedTools patterns, one per argument (P-066: the launcher passes each as its own argument, so no
+ * shell or quoting can split "Bash(git log *)" at its space). */
+export const allowedToolsList = () => ALLOWED.map(([, p]) => `Bash(${p})`);
+/** The same list as one comma-separated value (the printed launch line, for a person's shell). */
+export const allowedTools = () => allowedToolsList().join(',');
 /** The kickoff's paragraph: exactly what runs without a prompt, and what doesn't. */
 export function allowedNote() {
   return `You may run, without asking: ${ALLOWED.map(([n]) => `\`${n}\``).join(', ')}. Anything else (git push, git reset, rm, curl, installing tools) is not on the list: it stops for a person's yes, so don't plan around it; hand back with a note instead.`;

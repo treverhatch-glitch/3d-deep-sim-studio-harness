@@ -24,6 +24,7 @@ import { taggedCommits } from './scorecard.mjs';
 import { modelFamily } from './families.mjs';
 import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
+import { spawnAgentSync } from './launch.mjs';
 
 const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
@@ -171,7 +172,16 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
       : tool === 'codex' ? ['codex', 'exec', '--sandbox', 'read-only', ...(model ? ['-m', model] : []), '-']
       : tool === 'agy' || tool === 'gemini' ? [tool, '-p', text, '--print-timeout', '900s']
       : ['grok', '-p', text, ...(model ? ['-m', model] : [])];
-    const r = run(argv[0], argv.slice(1), { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex'].includes(tool) ? text : undefined, timeout: 15 * 60000, shell: process.platform === 'win32', maxBuffer: 32 * 1024 * 1024 });
+    // P-066: no shell for the tool (harness/launch.mjs), so agy's and grok's review text arrives as one argument on
+    // Windows too; text too long for the command line goes by file.
+    const promptAt = argv.indexOf(text);
+    const promptFile = promptAt > 0 ? path.join(REPO_ROOT, '.studio', 'review-prompt.md') : null;
+    if (promptFile) {
+      fs.mkdirSync(path.dirname(promptFile), { recursive: true });
+      fs.writeFileSync(promptFile, text);
+    }
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex'].includes(tool) ? text : undefined, timeout: 15 * 60000, maxBuffer: 32 * 1024 * 1024 };
+    const r = run === spawnSync ? spawnAgentSync(argv, { ...opts, promptAt, promptFile }) : run(argv[0], argv.slice(1), opts);
     const out = String(r.stdout || '').trim();
     if (r.status === 0 && out) return { ok: true, model: model || TOOL_MODEL_NAME[tool], content: out, tool };
     // A reviewer that says it hit its limit is marked out until it resets, so the owed review knows when to retry.
