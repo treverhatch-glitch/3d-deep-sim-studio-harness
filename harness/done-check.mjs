@@ -25,6 +25,7 @@ import { listLocks, coveringLock } from './lock.mjs';
 import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.mjs';
 import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 import { reachMode, unreached } from './reachability.mjs';
+import { judgeRed, readBaseline } from './baseline.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -294,7 +295,7 @@ export function lastFullRecord() {
   }
 }
 
-export function gatesAfter(at, files = null) {
+export function gatesAfter(at, files = null, taskId = null) {
   let run = null;
   try {
     // The agent's own full run first (2.29: in its own copy, the studio-wide record is someone else's code).
@@ -315,7 +316,21 @@ export function gatesAfter(at, files = null) {
     if (outside.length) return `the last verify was scoped to ${run.changed.length} file(s) and missed ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}; run \`npm run verify\` again (or \`npm run verify -- --all\`)`;
   }
   const red = (run.rows || []).filter((r) => r.required && !r.ok).map((r) => r.id);
-  return red.length ? `the last verify failed: ${red.join(', ')}` : null;
+  if (!red.length) return null;
+  // 2.54.0 (PU-06): checks already red when the task was claimed don't count against it; new failures do.
+  const base = taskId ? readBaseline(taskId) : null;
+  if (!base) return `the last verify failed: ${red.join(', ')}`;
+  const { fresh } = judgeRed(run.rows, base);
+  if (!fresh.length) return null;
+  return `the last verify failed: ${fresh.map((f) => (f.failures?.length ? `${f.id} (new since claim: ${f.failures.slice(0, 3).join('; ')}${f.failures.length > 3 ? ` and ${f.failures.length - 3} more` : ''})` : f.id)).join(', ')}`;
+}
+
+/** 2.54.0 (PU-06): the red checks excused because they were already red when the task was claimed. */
+export function excusedRed(taskId) {
+  const base = taskId ? readBaseline(taskId) : null;
+  const run = lastFullRecord();
+  if (!base || !run?.rows) return [];
+  return judgeRed(run.rows, base).excused;
 }
 const readJson = (rel) => {
   try {
@@ -376,7 +391,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     const ch = taskChanges(task.id, since);
     const relevant = docsOnly ? ch.files.filter((f) => f.endsWith('.md')) : ch.files;
     check(docsOnly ? 'Docs changed for this task' : 'Changes exist for this task', relevant.length, docsOnly ? 'no changed .md file since this task started' : `no changes found for ${task.id}: no commit tagged Studio-Task: ${task.id} and no edits since it started`);
-    const why = gatesAfter(Math.max(since, ch.lastAt), relevant);
+    const why = gatesAfter(Math.max(since, ch.lastAt), relevant, task.id);
     check('Full verify green after the last change', !why, why);
     if (!docsOnly) {
       const grew = sizeGrowth(task.id, ch.files);

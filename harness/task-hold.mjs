@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
+import { isFixTask, trunkState } from './baseline.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -74,6 +75,14 @@ export function parkOver(until, done, now = Date.now()) {
 
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
 export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
+  // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
+  if (q && !q.inProgress?.some((t) => t.id === taskId)) {
+    const t = [...(q.backlog || [])].find((x) => x.id === taskId);
+    if (t && t.role === 'builder' && !isFixTask(t)) {
+      const tr = trunkState();
+      if (tr.red) return `the game's trunk is red (${tr.why}); only fix tasks start until it is green (npm run task -- trunk green --by <name>)`;
+    }
+  }
   const h = holds[taskId];
   if (!h) return null;
   const done = doneIds(q);
@@ -93,6 +102,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
 export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), holders = new Map()) {
   const why = holdReason(taskId, q, now, holds);
   if (!why) return null;
+  if (/trunk is red/.test(why)) return { owner: 'the trunk fix', why };
   const h = holds[taskId] || {};
   if (h.needsYes) return { owner: 'the dev', why };
   if (h.parked && !parkOver(h.parked.until, doneIds(q), now)) return { owner: h.parked.by || 'the Producer', why };
@@ -157,7 +167,32 @@ export function inferPaths(text, folder, files = null) {
   return [...out].sort();
 }
 
-/** A task's lane: `task lane`, else --paths/--lane when added, else files from its title, else --part; null = the whole game. */
+/**
+ * 2.54.0 (P-025): folders a game says no agent may touch, from "Do not touch `src/x`" lines in its own
+ * AGENTS.md or CLAUDE.md (paths relative to the game folder). The lane guess never picks a file inside one.
+ */
+export function noTouchPaths(root) {
+  if (!root) return [];
+  const out = new Set();
+  for (const doc of ['AGENTS.md', 'CLAUDE.md']) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(REPO_ROOT, root, doc), 'utf8'); } catch { continue; }
+    for (const m of text.matchAll(/do\s+not\s+touch\s+[`'"]?([A-Za-z0-9_.\/-]+?)[`'"]?(?=[\s).,;:*_]|$)/gi)) {
+      const p = m[1].replace(/^\.\//, '').replace(/\/+$/, '');
+      if (p && !p.includes('..')) out.add(`${root}/${p}`);
+    }
+  }
+  return [...out];
+}
+
+/** 2.54.0 (P-025): studio paths a task names in its text (studio/bible, docs/x.md): a docs task's own lane. */
+export function namedStudioPaths(text) {
+  const out = new Set();
+  for (const m of String(text || '').matchAll(/(?:^|[\s`'"(])((?:studio|docs)\/[A-Za-z0-9_.\/-]*[A-Za-z0-9_-])/g)) out.add(m[1]);
+  return [...out];
+}
+
+/** A task's lane: `task lane`, else --paths/--lane when added, else studio paths it names, else files from its title, else --part; null = the whole game. */
 export function laneOf(taskId, events = readRecentEvents(20000), holds = readHolds()) {
   const h = holds[taskId];
   if (h && 'lane' in h) return h.lane || null;
@@ -166,10 +201,15 @@ export function laneOf(taskId, events = readRecentEvents(20000), holds = readHol
   if (meta.paths?.length) return laneList(meta.paths).join(',');
   if (meta.lane) return meta.lane;
   const f = gameFolders();
+  const text = added ? `${String(added.msg || '').replace(/^Queued [^:]+:\s*/, '')} ${meta.why || ''} ${meta.asked || ''}` : '';
+  // 2.54.0 (P-025): a task that names studio paths (a docs task: "write the core loop doc in studio/bible") works there.
+  const role = meta.role || (String(added?.msg || '').match(/^Queued T-\d+ \[[^\]]*\] \(([a-z-]+)\)/) || [])[1] || null;
+  const named = role && role !== 'builder' ? namedStudioPaths(text) : [];
+  if (named.length) return laneList(named).join(',');
   // 2.30k: guess the files from the title and brief, so builders on different files run side by side.
   if (process.env.STUDIO_LANE_INFER !== 'off' && f.renderer && added) {
-    const text = `${String(added.msg || '').replace(/^Queued [^:]+:\s*/, '')} ${meta.why || ''} ${meta.asked || ''}`;
-    const guess = meta.part === 'sim' ? [] : inferPaths(text, f.renderer);
+    const banned = noTouchPaths(f.renderer);
+    const guess = (meta.part === 'sim' ? [] : inferPaths(text, f.renderer)).filter((p) => !banned.some((b) => p === b || p.startsWith(`${b}/`)));
     if (guess.length) return guess.join(',');
   }
   if (meta.part === 'sim') return f.sim;

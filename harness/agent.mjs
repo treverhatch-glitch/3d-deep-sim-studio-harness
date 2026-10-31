@@ -891,8 +891,12 @@ export function startAgent(opts, { detach = false } = {}) {
   const agent = opts.agent || (role ? nextAgentName(role) : null);
   opts = { ...opts, agent };
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
+  // 2.54.0: the detached supervisor clears the placeholder its launcher wrote for it, so its own record
+  // doesn't count against its caps; it writes the real record when the agent starts.
+  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
-  const already = sessions().find((s) => s.agent === agent && s.running);
+  // 2.54.0: the placeholder a detached launch writes (below) is this very supervisor, not a second session.
+  const already = sessions().find((s) => s.agent === agent && s.running && !(s.starting && s.supervisor === process.pid));
   if (already) return { ok: false, message: `${agent} is already running (pid ${already.pid}).` };
   // Never two sessions on one task (test #2: T-160 and T-171 each started twice within seconds).
   if (opts.task) {
@@ -992,6 +996,15 @@ export function startAgent(opts, { detach = false } = {}) {
     const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
     const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
+    // 2.54.0 (P-024): register the session at once. The supervisor writes the real record a moment later, and
+    // until then another wake-up in the same pass (a Director ping, the dev cycle, the queue refill) would not
+    // see it and start a second Director or Producer, even under the same name.
+    try {
+      if (!fs.existsSync(sessionFile(agent)) || !sessions().some((x) => x.agent === agent && x.running)) {
+        fs.mkdirSync(AGENTS_DIR, { recursive: true });
+        fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, startedAt: new Date().toISOString() }, null, 2));
+      }
+    } catch {}
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
   }
   return { ok: true, agent, run: runAgent({ ...opts, tool, model }) };

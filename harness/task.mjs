@@ -27,6 +27,7 @@ import { startSummary, carryForward } from './carry.mjs';
 import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
+import { readBaseline, recordBaseline, setTrunk, trunkState } from './baseline.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -277,6 +278,8 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // The commit the work starts from, for the size ratchet (harness/done-check.mjs sizeGrowth).
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
   emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: head ? { head } : {} });
+  // 2.54.0 (PU-06): what was already red at claim (kept from the first claim when a task is picked up again).
+  try { if (!readBaseline(target.id)) recordBaseline(target.id); } catch {}
   // One page for the agent: what done means, the steps, notes, lanes, lessons, commands.
   let brief = null;
   try {
@@ -963,6 +966,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'resume') {
     console.log(clearStop(typeof flags.by === 'string' ? flags.by : 'human') ? 'Studio resumed. Agents can start tasks again.' : 'The studio was not stopped.');
     process.exit(0);
+  }
+  if (cmd === 'trunk') {
+    // 2.54.0 (PU-06): the game's trunk is red (only fix tasks start) or green again.
+    const sub = flags._[1];
+    if (!sub || sub === 'status') {
+      const t = trunkState();
+      console.log(t.red ? `Trunk red (${t.source}${t.by ? `, ${t.by}` : ''}): ${t.why}. Only fix tasks start.` : `Trunk green${t.source === 'manual' && t.by ? ` (marked by ${t.by})` : ''}. All tasks can start.`);
+      process.exit(0);
+    }
+    const r = setTrunk(sub, { by: typeof flags.by === 'string' ? flags.by : null, why: typeof flags.why === 'string' ? flags.why : '' });
+    console.log(r.ok ? (sub === 'red' ? 'Trunk marked red: only fix tasks start until it is green.' : 'Trunk marked green: all tasks can start.') : r.message);
+    process.exit(r.ok ? 0 : 1);
   }
 
   if (cmd === 'start') {

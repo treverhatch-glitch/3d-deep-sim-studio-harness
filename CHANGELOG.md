@@ -4,6 +4,37 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.54.0] — 2026-10-31
+2.54.0: fixes from the first crew run on Hatchfield (P-022 to P-027) and the first three planned updates from the
+research (PU-06, PU-02, PU-03), approved by the owner.
+### Fixed
+- **The watchdog's idle stop** (P-022, P-023, P-027): the window starts no earlier than the studio's first event,
+  the watchdog being switched on, or the last resume (a 44-minute-old studio was stopped for "no task finished in
+  2 h", and stopped again a minute after a resume). Only sessions that held a task count; Producer and Director
+  planning sessions don't. The check runs first, so a pass that stops the studio launches nothing after it.
+- **Two Directors under one name** (P-024): a detached launch registers its session at once, so a Director ping,
+  the development cycle and the queue refill waking in the same pass start one Director and one Producer.
+- **A docs task scoped into a forbidden folder** (P-025): a non-builder task that names studio paths
+  (`studio/bible`) works there; a lane guessed from a title never picks a file in a folder the game's own
+  AGENTS.md or CLAUDE.md says "Do not touch".
+- **Godot tools pre-approved for a web/Unity game** (P-026): cheat-sheet entries tagged with an engine only match
+  a game whose engine track (or a project.godot) uses it.
+- **Log spam** (P-027): a queue refill that adds nothing and wakes nobody is logged once an hour.
+### Added
+- **PU-06, what was already red at claim** (`harness/baseline.mjs`): `task start` records the required checks that
+  were red, with their failing test names (game checks now record them). The done-check fails only on checks
+  that were green at claim or on new failing tests. `npm run task -- trunk red|green|status --by <name>
+  [--why "…"]` marks the game's trunk red (also automatic when the whole-game check last finished red); while it is
+  red only fix tasks start (title Fix/Bug/Hotfix/Repair/Revert, a [fix]/[bug] tag, or a whole-game red task).
+- **PU-02, one metrics row per task attempt** (`npm run metrics`, `harness/metrics.mjs`): minutes split into agent
+  working, waiting on checks, waiting on a person (questions and a stopped studio) and stalled (heartbeat gaps,
+  watchdog stalls); tokens and the CLI's reported cost from the session that held it; retries, hand-backs,
+  not-done refusals, rescues, reopened. `.studio/metrics/attempts.jsonl` and `.csv`, medians and p90 by model.
+- **PU-03, a failure label on every failed attempt**: repetition, premature-stop, no-stop, verify-missing,
+  verify-wrong, spec-ignored (from the MAST failure taxonomy), env-harness, quota, lane-conflict, unknown. By rule,
+  never by a model.
+- `qa/selftest-254.mjs` (11 checks) and `docs/METRICS.md`.
+
 ## [2.53.0] — 2026-10-31
 2.53.0: the public guard learns a repo's own private markers (Hatchfield: the packed web rules must never reach the
 public Unity repo).

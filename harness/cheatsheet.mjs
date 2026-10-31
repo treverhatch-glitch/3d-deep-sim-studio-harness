@@ -57,7 +57,24 @@ const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9.]+/).filter((
 /** The best matching entries (most tags hit; ties keep the sheet's order), at most the cap (3 unless the Director changed it, never over 6). */
 // 2.30j (M9): a trick matches with 2+ tag hits, or one hit on a narrow entry (at least a fifth of its tags),
 // or a tag passed explicitly; one word hitting a broad 9-tag rule (C-65 on a boat-wake task) no longer does.
-export function matchTricks(text, { tags = [], entries = readCheatsheet(), max = trickCap(), forRole = 'agent' } = {}) {
+/**
+ * 2.54.0 (P-026): the engines the game uses: its engine track (engine/<game>/engine.json) and a Godot project
+ * in the game folder. null when there is no game yet (the template), which filters nothing.
+ */
+export const ENGINE_TAGS = ['godot', 'unity', 'unreal'];
+export function gameEngines(root = REPO_ROOT) {
+  let name = process.env.STUDIO_GAME || null;
+  if (!name) try { name = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8')).game || null; } catch {}
+  if (!name) return null;
+  const out = new Set();
+  try { const t = JSON.parse(fs.readFileSync(path.join(root, 'engine', name, 'engine.json'), 'utf8')); if (t.engine) out.add(String(t.engine).toLowerCase()); } catch {}
+  for (const d of [`game/${name}`, `web/${name}`]) if (fs.existsSync(path.join(root, d, 'project.godot'))) out.add('godot');
+  return out;
+}
+
+export function matchTricks(text, { tags = [], entries = readCheatsheet(), max = trickCap(), forRole = 'agent', engines = gameEngines() } = {}) {
+  // An engine's tools only for a game that uses that engine (a web game with a Unity port gets no Godot tools).
+  if (engines) entries = entries.filter((e) => !e.tags.some((t) => ENGINE_TAGS.includes(t) && !engines.has(t)));
   // Director lines are for planning; the rest are for the work itself.
   entries = entries.filter((e) => (forRole === 'director') === e.tags.includes('director'));
   const explicitTags = new Set(tags.map((t) => String(t).toLowerCase()));
