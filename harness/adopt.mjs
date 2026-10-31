@@ -195,10 +195,18 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   const next = { ...readOrigin(root), ref: want, sha: tip, previousSha: o.sha, syncedAt: now.toISOString() };
   fs.writeFileSync(originFile(root), `${JSON.stringify(next, null, 2)}\n`);
   let committed = false;
+  let commitError = '';
   if (commit) {
     git(root, 'add', '-A', '--', o.path, 'studio/game/ORIGIN.json');
-    const c = spawnSync('git', ['commit', '-q', '-m', `Sync ${o.name || o.slug} from ${want} (${o.sha.slice(0, 8)}..${tip.slice(0, 8)}, ${commits.length} commit(s))`], { cwd: root, encoding: 'utf8', env: { ...process.env, STUDIO_MAIN_COMMIT: 'allow' } });
+    // A machine with no git name or email set (a fresh CI runner) refuses the commit: sign it as the studio
+    // only then, so a person's own identity always wins.
+    const id = (k) => git(root, 'config', '--get', k).stdout.trim();
+    const env = { ...process.env, STUDIO_MAIN_COMMIT: 'allow' };
+    if (!id('user.name') && !env.GIT_AUTHOR_NAME) Object.assign(env, { GIT_AUTHOR_NAME: 'studio', GIT_COMMITTER_NAME: 'studio' });
+    if (!id('user.email') && !env.GIT_AUTHOR_EMAIL) Object.assign(env, { GIT_AUTHOR_EMAIL: 'studio@localhost', GIT_COMMITTER_EMAIL: 'studio@localhost' });
+    const c = spawnSync('git', ['commit', '-q', '-m', `Sync ${o.name || o.slug} from ${want} (${o.sha.slice(0, 8)}..${tip.slice(0, 8)}, ${commits.length} commit(s))`], { cwd: root, encoding: 'utf8', env });
     committed = c.status === 0;
+    if (!committed) commitError = `${c.stderr || c.stdout || ''}`.trim().split('\n').slice(-2).join(' | ');
   }
-  return { ok: true, from: o.sha, to: tip, commits, files, committed };
+  return { ok: true, from: o.sha, to: tip, commits, files, committed, commitError };
 }

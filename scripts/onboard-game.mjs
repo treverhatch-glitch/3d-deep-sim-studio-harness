@@ -43,7 +43,7 @@ if (flag('sync')) {
   const r = syncGame({ ref: opt('ref'), force: flag('force'), commit: !flag('no-commit') });
   if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
   if (r.upToDate) { console.log(`[onboard] up to date with ${r.to.slice(0, 8)}`); process.exit(0); }
-  console.log(`[onboard] synced ${r.commits.length} commit(s) (${r.files.length} file(s)) from the game's repo: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}${r.committed ? ', committed' : ' (not committed: git add the game folder and studio/game/ORIGIN.json together)'}`);
+  console.log(`[onboard] synced ${r.commits.length} commit(s) (${r.files.length} file(s)) from the game's repo: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}${r.committed ? ', committed' : ` (not committed${r.commitError ? `: ${r.commitError}` : ''}; the changes are staged: commit the game folder and studio/game/ORIGIN.json together)`}`);
   for (const c of r.commits.slice(0, 15)) console.log(`  ${c}`);
   process.exit(0);
 }
