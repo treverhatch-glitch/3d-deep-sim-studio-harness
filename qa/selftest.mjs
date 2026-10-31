@@ -3432,6 +3432,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.53.0: the public guard's per-repo private markers (qa/selftest-253.mjs).
+{
+  const dir = copyRepo();
+  const { selftest253 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-253.mjs')).href);
+  await selftest253({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

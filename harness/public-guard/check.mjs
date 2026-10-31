@@ -51,14 +51,25 @@ const PRIVATE = [
   [/3D Deep Simulation (?:&|and) AI Game Studio Harness|^ \* harness\/[\w-]+\.mjs —/m, 'text from the private studio harness'],
 ];
 
+// This repo's own private markers (tools/public-guard/private-markers.json): file names and words that only private
+// code contains, such as a game's packed rules file. { "files": ["regex", …], "text": ["regex", …], "why": "…" }
+const MARKERS = 'tools/public-guard/private-markers.json';
+try {
+  const m = JSON.parse(fs.readFileSync(path.join(root, MARKERS), 'utf8'));
+  const why = m.why || 'private code named in tools/public-guard/private-markers.json';
+  for (const r of m.files || []) BAD_NAMES.push([new RegExp(r, 'i'), why]);
+  for (const r of m.text || []) PRIVATE.push([new RegExp(r), why]);
+} catch { /* no markers file: the built-in rules only */ }
+
 const problems = [];
 for (const f of list) {
-  if (f === SELF) continue;
+  if (f === SELF || f === MARKERS) continue;
   for (const [re, why] of BAD_NAMES) if (re.test(f)) problems.push(`${f}: ${why}`);
   const full = path.join(root, f);
   let st;
   try { st = fs.statSync(full); } catch { continue; }
-  if (!st.isFile() || st.size > 2 * 1024 * 1024) continue;
+  // Up to 16 MB is read: a packed code file is a few MB, and big art is binary (or an LFS pointer) anyway.
+  if (!st.isFile() || st.size > 16 * 1024 * 1024) continue;
   const buf = fs.readFileSync(full);
   if (buf.includes(0)) continue; // binary
   const text = buf.toString('utf8');
