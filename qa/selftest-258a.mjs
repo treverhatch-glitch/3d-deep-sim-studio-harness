@@ -4,6 +4,8 @@
  *          ratchet compares with the merge-base of HEAD and main, so main's growth isn't the task's; its own still is.
  *   Chore type (crew report): build, toolchain, CI and dependency work ("Fix the build", "Chore: …", "[chore]") closes
  *          on its changes and a green verify, without a regression; "Fix a bug in …" is still a bug.
+ *   PU-34 (P-047): task done trusts only a verify of this commit on a clean tree, and runs the protected and secrets
+ *          checks again itself.
  * Token-shaped values are put together at run time, so this file never holds one and the repo's scan stays clean.
  */
 import fs from 'node:fs';
@@ -91,4 +93,59 @@ console.log(JSON.stringify({ chore: chores.map((x) => [x, t(x)]).filter(([, y]) 
   const d3 = done(t3, 'bug-1');
   report('2.58.0: a chore ("Fix the build: …") closes with its changes and a green verify after them, no regression; "Fix a bug in …" with the same evidence is refused for its missing regression',
     v2.status === 0 && d2.status === 0 && /"status": "done"/.test(out(d2)) && d3.status !== 0 && /is a "bug" task/.test(out(d3)) && /no regression in qa\/regressions/.test(out(d3)), `${out(v2).slice(-600)}\n---\n${out(d2).slice(-1500)}\n---\n${out(d3).slice(-1500)}`);
+
+  // 3. PU-34: only a verify of this commit on a clean tree counts.
+  const t4 = add('Wire the harbour bell');
+  start(t4, 'v-1');
+  write('game/sg/src/bell.gd', 'var bell = 1\n');
+  commitTask(t4, 'bell', 'game/sg/src/bell.gd');
+  const prev = g('rev-parse', 'HEAD~1').stdout.trim();
+  plant('v-1', { head: prev, dirty: false });
+  const older = doneCheck(t4, 'v-1');
+  plant('v-1', { head: head(), dirty: true });
+  const dirtyRec = doneCheck(t4, 'v-1');
+  plant('v-1', {});
+  const noHead = doneCheck(t4, 'v-1');
+  report('2.58.0 (PU-34): an "all ok" verify record from an older commit, one made on a dirty tree, and one naming no commit are each refused ("run npm run verify again")',
+    older.status !== 0 && /the last verify ran on commit [0-9a-f]{8}, not on this one/.test(out(older)) && dirtyRec.status !== 0 && /ran with uncommitted changes/.test(out(dirtyRec)) && noHead.status !== 0 && /names no commit .*run `npm run verify` again/.test(out(noHead)), `${out(older).slice(-700)}\n---\n${out(dirtyRec).slice(-700)}\n---\n${out(noHead).slice(-700)}`);
+
+  fs.appendFileSync(path.join(dir, 'game/sg/src/bell.gd'), 'var ring = 2\n');
+  const vDirty = verify('v-1');
+  const recDirty = JSON.parse(fs.readFileSync(path.join(dir, '.studio/gates/v-1-full.json'), 'utf8'));
+  const refusedDirty = doneCheck(t4, 'v-1');
+  commitTask(t4, 'ring', 'game/sg/src/bell.gd');
+  fs.appendFileSync(path.join(dir, 'game/sg/art/icon.png.import'), 'valid=true\n'); // an engine cache file a gate rewrites
+  const vClean = verify('v-1');
+  const recClean = JSON.parse(fs.readFileSync(path.join(dir, '.studio/gates/v-1-full.json'), 'utf8'));
+  const okClean = doneCheck(t4, 'v-1');
+  g('checkout', '-q', '--', 'game/sg/art/icon.png.import');
+  report('2.58.0 (PU-34): a real verify with an uncommitted edit records dirty and is refused; committed, a verify of this commit is accepted (an engine cache file like *.import doesn\'t make the tree dirty)',
+    vDirty.status === 0 && recDirty.dirty === true && refusedDirty.status !== 0 && /ran with uncommitted changes/.test(out(refusedDirty)) && vClean.status === 0 && recClean.dirty === false && recClean.head === head() && okClean.status === 0 && /Ready to finish/.test(out(okClean)),
+    `${JSON.stringify({ d: recDirty.dirty, c: recClean.dirty, h: recClean.head })}\n${out(refusedDirty).slice(-700)}\n---\n${out(okClean).slice(-900)}`);
+
+  // A committed token: task done refuses even with a matching "all ok" record.
+  let seed = 25801;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const rand = (n) => { for (;;) { let s = ''; while (s.length < n) s += B62[Math.floor(rnd() * B62.length)]; if (/[a-z]/.test(s) && /[A-Z]/.test(s) && /\d/.test(s) && !/(.)\1\1|x{3}|your|test|fake|here|none|null|todo|tbd/i.test(s)) return s; } };
+  write('toolchain/bell.env', `BELL_KEY=${['sk', 'ant', 'api03', rand(48)].join('-')}\n`);
+  commitTask(t4, 'bell settings', 'toolchain/bell.env');
+  plant('v-1', { head: head(), dirty: false });
+  const tok = done(t4, 'v-1');
+  report('2.58.0 (PU-34): task done runs the secret scan itself: a committed token stops it even with an "all ok" verify of this commit (and the value is never printed)',
+    tok.status !== 0 && /the secrets check fails/.test(out(tok)) && /toolchain\/bell\.env/.test(out(tok)) && !out(tok).includes(fs.readFileSync(path.join(dir, 'toolchain/bell.env'), 'utf8').split('=')[1].trim()), out(tok).slice(-1500));
+  g('reset', '-q', '--keep', 'HEAD~1');
+
+  // An unapproved protected edit: task done refuses even with an "all ok" record. The owner key is made here, in a
+  // throwaway copy, and lives in the test's temp folder only.
+  fs.rmSync(ownerKey, { force: true });
+  const kg = run(dir, 'node harness/approve.mjs keygen', env);
+  g('add', 'studio/keys'); g('commit', '-qm', 'owner key', '--no-verify');
+  fs.appendFileSync(path.join(dir, 'cartridges/example-sim/qa.mjs'), '// expected outcome changed\n');
+  commitTask(t4, 'scenario tweak', 'cartridges/example-sim/qa.mjs');
+  plant('v-1', { head: head(), dirty: false });
+  const prot = done(t4, 'v-1');
+  report('2.58.0 (PU-34): task done runs the protected check itself: a protected file changed without the owner\'s approval stops it even with an "all ok" verify of this commit',
+    kg.status === 0 && prot.status !== 0 && /the protected check fails/.test(out(prot)) && /cartridges\/example-sim\/qa\.mjs/.test(out(prot)), `${out(kg).slice(-300)}\n${out(prot).slice(-1500)}`);
+  g('reset', '-q', '--keep', 'HEAD~1');
 }

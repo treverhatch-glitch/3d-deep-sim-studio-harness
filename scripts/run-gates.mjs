@@ -66,7 +66,7 @@ const scope = argv.includes('--full') || deep ? 'full' : scopeOf(readMode());
 const skipped = [];
 // 2.30n: with a studio game that isn't a cartridge, the cartridge gates (example-sim's goldens, playtest,
 // regressions...) say nothing about it; the "game" gate runs the game's own checks instead.
-const { studioGame, declaredGates } = await import('../harness/game-gates.mjs');
+const { studioGame, declaredGates, isEngineChurn } = await import('../harness/game-gates.mjs');
 const sg = await studioGame();
 const gameOwnsGates = Boolean(sg && declaredGates(sg).length);
 const gates = all.filter((g) => {
@@ -112,6 +112,14 @@ if (changedFiles?.length) {
   console.log(`[gates] scoped to the ${changedFiles.length} file(s) this lane changed${changedBase ? ` since ${changedBase.slice(0, 8)}` : ''}; game checks outside them are skipped (--all runs everything)`);
 }
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
+// 2.58.0 (PU-34): the commit and tree the gates start on are the ones they test, so the record names HEAD from
+// before the first gate, and the tree counts as dirty if it was dirty then or is at the end (an edit made while the
+// gates ran). Engine cache files a gate rewrites (.godot/, *.import, *.uid) don't count. task done trusts a verify
+// only for this commit on a clean tree (harness/done-check.mjs gatesAfter).
+const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
+const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : s.split('\n').filter((l) => l.length > 3).some((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''))); };
+const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
+const dirtyAtStart = treeDirty();
 const rows = [];
 let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
@@ -176,8 +184,9 @@ if (changedByVerify?.length) {
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
   // 2.43.0: the commit this verify ran on, and whether the tree was clean, so task done can trust it on that commit.
-  const headNow = (() => { try { const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } })();
-  const dirtyNow = (() => { try { const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? Boolean(r.stdout.trim()) : null; } catch { return null; } })();
+  const headNow = headAtStart;
+  const dirtyEnd = treeDirty();
+  const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
   const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, dirty: dirtyNow, partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.

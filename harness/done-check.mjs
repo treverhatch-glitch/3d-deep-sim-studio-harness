@@ -358,6 +358,14 @@ export function gatesAfter(at, files = null, taskId = null) {
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
   if ((Date.parse(run.at) || 0) < at) return 'no full `npm run verify` after your last change; run it again';
+  // 2.58.0 (PU-34, P-047): only a verify of this very commit on a clean tree counts. The time and the rows alone
+  // could be an older commit's run, or a record written by hand. (Not a git checkout: no commit to compare.)
+  const head = (git('rev-parse', 'HEAD') || '').trim();
+  if (isSha(head)) {
+    if (!run.head) return 'the last verify record names no commit (it is older than 2.43.0, or was written by hand); run `npm run verify` again';
+    if (run.head !== head) return `the last verify ran on commit ${String(run.head).slice(0, 8)}, not on this one (${head.slice(0, 8)}); run \`npm run verify\` again`;
+    if (run.dirty) return 'the last verify ran with uncommitted changes, so it tested something other than this commit; commit your work, then run `npm run verify` again';
+  }
   // 2.31.0: a verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds
   // every file this task changed.
   if (run.scoped && Array.isArray(run.changed) && files?.length) {

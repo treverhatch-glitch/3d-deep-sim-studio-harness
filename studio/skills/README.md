@@ -11,6 +11,12 @@ what it reviews and give a verdict, a bug needs a pinned regression that fails o
 spec with a hand-off, a scenario, goldens, a playtest and an approval from another model family, a build needs real
 changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
 
+**Which verify counts (2.58.0).** Only a full `npm run verify` of the commit you are on (HEAD), run on a clean
+tree: commit first, then verify, then `task done`. A verify of an older commit, one run with uncommitted changes,
+or a record with no commit in it (older than 2.43.0, or written by hand) is refused with "run npm run verify
+again". `task done` (not `--check`) also runs the `protected` and `secrets` checks again itself, forced or not:
+a key or token in the files, or a protected file changed without the owner's signed approval, stops it.
+
 **The size ratchet** counts only this task's own growth. Once your branch has taken in the studio's main branch
 (a merge or a rebase; in a lane copy, the main checkout's branch), files are compared with the merge-base of HEAD
 and main, not with the commit the task started from, so what came from main isn't yours.
