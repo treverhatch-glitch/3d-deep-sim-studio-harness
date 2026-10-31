@@ -18,10 +18,13 @@ This repository is a **public open-source template**. It must remain **100% free
 
 ## 2. Pre-Push Secret Scan
 
-The real check is `node scripts/secret-scan.mjs`: the `secrets` gate runs it in verify and the pre-commit hook runs it on
-staged files. Besides the provider key shapes it catches Discord bot tokens and webhooks, Slack webhooks and tokens, Telegram
-bot tokens, AWS secret keys and session tokens, long random values under names ending in TOKEN, SECRET, API_KEY, PASSWORD
-or WEBHOOK, and those token shapes wrapped in base64. It prints file, line and kind, never the value; placeholders pass.
+The real check is `node scripts/secret-scan.mjs`: the `secrets` gate runs it in verify over the files and every commit not on
+the base branch yet (lines added and messages), and the pre-commit hook runs it with `--staged` on what is staged (the index,
+not the file on disk). Besides the provider key shapes it catches Discord bot tokens and webhooks, Slack webhooks and tokens,
+Telegram bot tokens, AWS secret keys and session tokens, long random values under names ending in TOKEN, SECRET, API_KEY,
+PASSWORD or WEBHOOK, and those token shapes wrapped in base64, in UTF-8 and UTF-16 (BOM) files. It prints file, line, kind
+and, for history, the commit, never the value; placeholders pass. A key that reached a commit must be rotated and taken out
+of the commit before pushing: cleaning the file is not enough.
 What it catches and what it doesn't: [`docs/SECURITY.md`](SECURITY.md#secrets).
 
 A quick manual check for the most common provider prefixes, before pushing to a public remote:

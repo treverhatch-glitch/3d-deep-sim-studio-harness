@@ -3559,6 +3559,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.0 (PU-33, P-046): the hook scans the staged blobs, verify's secrets gate scans the commits since the base
+// (lines added and messages), UTF-16 files are read, the skip list is tied to real paths, scrub() shares the
+// scan's list (qa/selftest-258c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258c.mjs')).href);
+  await selftest258C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
