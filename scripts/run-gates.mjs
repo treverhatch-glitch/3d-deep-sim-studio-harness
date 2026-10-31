@@ -11,9 +11,12 @@
  * --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks; npm run release and CI do.
  * --full runs every gate a Full studio would.
  * Everyday verify (no tier) skips the deep gates, as before, and never reads the cache.
+ *
+ * 2.58.0: every verify names the tracked files it changed (changedByVerify in the record).
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
@@ -86,6 +89,8 @@ if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : '
 const rows = [];
 let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
+// 2.58.0 (F2): the tracked files as they are before any gate runs, to name the ones this verify changes.
+const trackedBefore = trackedSnapshot();
 for (const gate of gates) {
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
@@ -132,13 +137,22 @@ for (const gate of gates) {
 }
 if (!compact) console.log('\n[gates] summary');
 if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.cached ? ' (cached)' : ''}${r.required ? '' : '  (optional)'}`);
+// 2.58.0 (F2): a verify must not dirty the repo (on Windows each verify rewrote a game test snapshot's line endings
+// on main). Tracked files outside studio/ (the board, which other agents write meanwhile) whose state or content
+// differs from before the gates ran are named here and in the record; the exit code doesn't change.
+const changedByVerify = changedTracked(trackedBefore, trackedSnapshot());
+if (changedByVerify?.length) {
+  const shown = changedByVerify.slice(0, 10).join(', ') + (changedByVerify.length > 10 ? ` (+${changedByVerify.length - 10} more)` : '');
+  console.log(`\n[gates] WARN this verify changed ${changedByVerify.length} tracked file(s): ${shown}`);
+  console.log('[gates]   a check rewrote them (a test snapshot, its line endings, a generated file) or they were edited while it ran; `git diff` shows how. Game checks run with CI=true so test runners never write snapshots: update them on purpose with `-u`, and give generated files `eol=lf` in .gitattributes. Recorded as changedByVerify in the verify record.');
+}
 // The War Room's gate board reads this file; it is runtime state (gitignored under .studio/).
 try {
   fs.mkdirSync(path.join(root, '.studio'), { recursive: true });
   // 2.43.0: the commit this verify ran on, and whether the tree was clean, so task done can trust it on that commit.
   const headNow = (() => { try { const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; } catch { return null; } })();
   const dirtyNow = (() => { try { const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: root, encoding: 'utf8' }); return r.status === 0 ? Boolean(r.stdout.trim()) : null; } catch { return null; } })();
-  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, dirty: dirtyNow, partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}) }, null, 2);
+  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, dirty: dirtyNow, partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;
@@ -158,7 +172,7 @@ try {
 // 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
 try {
   const { emitEvent } = await import('../harness/event.mjs');
-  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null } });
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
 } catch {
   // the event log is a help, never a blocker
 }
@@ -174,3 +188,37 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`[gates] ${rows.filter((r) => r.ok).length}/${rows.length} passed, all required gates green`);
+
+// ---- 2.58.0 (F2): tracked files a verify changed ----
+
+/** Tracked files that differ from HEAD outside studio/: path -> "<status> <content hash>". null without git. */
+function trackedSnapshot() {
+  try {
+    const r = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+    if (r.error || r.status !== 0) return null;
+    const parts = r.stdout.split('\0');
+    const snap = new Map();
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i];
+      if (e.length < 4) continue;
+      if (e[0] === 'R' || e[0] === 'C') i++; // with -z a rename's old path follows as its own entry
+      const file = e.slice(3);
+      let hash = 'gone';
+      // The content too: a file already changed before the run that a check rewrites keeps the same status line.
+      if (snap.size < 5000) try { hash = crypto.createHash('sha1').update(fs.readFileSync(path.join(root, file))).digest('hex'); } catch {}
+      snap.set(file, `${e.slice(0, 2)} ${hash}`);
+    }
+    return snap;
+  } catch {
+    return null;
+  }
+}
+
+function changedTracked(before, after) {
+  if (!before || !after) return null;
+  const out = new Set();
+  for (const [f, v] of after) if (before.get(f) !== v) out.add(f);
+  for (const f of before.keys()) if (!after.has(f)) out.add(f);
+  return [...out].sort();
+}
+
