@@ -3416,6 +3416,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.50.0 (U-006): parity seeds for a Vite game's test runner (qa/selftest-250.mjs).
+{
+  const dir = copyRepo();
+  const { selftest250 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-250.mjs')).href);
+  await selftest250({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
