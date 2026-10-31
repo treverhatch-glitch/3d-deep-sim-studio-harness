@@ -7,8 +7,8 @@
  *
  *   node harness/done-check.mjs <TASK_ID>    show the type, what is checked and what is missing
  *
- * The type comes from a title prefix (Bug:, Fix, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
- * and otherwise from the role. Each type is described in studio/skills/.
+ * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
+ * and otherwise from the role. Each type is described in studio/skills/ (the table in studio/skills/README.md).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,14 +39,28 @@ function firstTaggedCommit(taskId) {
   return line ? line.split('\t')[0] : null;
 }
 
+// 2.58.0: build, toolchain, CI and dependency work. "build" alone is the usual start of a game task ("Build the
+// stairwell", "Fix build menu …", a game's build tool or build times), so it counts only as a label (Build: /
+// build(deps)), at the end ("Fix the build"), or with a toolchain word; anything else stays a change or a bug.
+const TOOL_WORD = String.raw`(scripts?|pipeline|config\w*|toolchain|tooling|cache|deps|dependencies|break(s|age)?|broke|broken|errors?|failures?|fail(s|ed|ing)?|warnings?|red|again|(is|was)\s+(broken|red|failing|slow)|on\s+(windows|linux|mac\w*|node|ci|ubuntu|github))\b`;
+const CHORE_START = new RegExp(String.raw`^(chore|toolchain|tooling|infra|ci|deps|dependencies)\b|^build\s*[:([]|^build\s+${TOOL_WORD}`, 'i');
+const CHORE_FIX = new RegExp(String.raw`^fix(es|ed|ing)?\b[\s:]*((the|a)\s+)?((ci|toolchain|tooling|deps|dependencies)\b|build(?=\s*$|\s*[:;,.!()[\]—–-]|\s+${TOOL_WORD}))`, 'i');
+/** A [chore] tag in the title, or "type: chore" in the task's detail (the board keeps none; callers may pass one). */
+const choreTagged = (task) => /\[chore(:[^\]]*)?\]/i.test(String(task?.title || '')) || /(^|\n)\s*type\s*:\s*chore\b/im.test(String(task?.detail || ''));
+
 const PREFIX = [
   // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
   [/^rescue:/i, 'rescue'],
   // 2.37.0: the whole-game check went red after a landing (harness/whole-game.mjs).
   [/^whole-game check red\b/i, 'whole'],
+  [/^check forced done\b/i, 'none'],
   // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
   // (Jed's run: docs-gate bugs could only close with --force).
   [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
+  // 2.58.0: "Fix the build", "Fix CI", "Fix toolchain", "Fix deps" are chores, not bugs: no regression to replay
+  // (a crew report: toolchain tasks titled "Fix …" had to be retitled to close). Other "Fix …" stays a bug.
+  [CHORE_FIX, 'chore'],
+  [CHORE_START, 'chore'],
   [/^(bug|fix)\b/i, 'bug'],
   [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
@@ -55,7 +69,6 @@ const PREFIX = [
   [/^playtest\b/i, 'playtest'],
   [/^review\b/i, 'review'],
   [/^docs?\b/i, 'docs'],
-  [/^check forced done\b/i, 'none'],
   [/^director review\b/i, 'direction'],
   [/^idea\b/i, 'idea'],
   [/^art\b/i, 'art'],
@@ -87,6 +100,7 @@ const BY_ROLE = {
 
 export const TYPES = {
   change: { skill: 'studio/skills/builder.md', means: 'changes exist for the task, and a full `npm run verify` passed after the last of them' },
+  chore: { skill: 'studio/skills/builder.md', means: 'build, toolchain, CI or dependency work: changes exist for the task, and a full `npm run verify` passed after the last of them (no regression, no gameplay checks, no reach check)' },
   bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned SHA-256 that fails on the code before the fix, a lesson naming the bug, the fix committed with the task\'s tag, and a green verify after the last change' },
   balance: { skill: 'studio/skills/balance.md', means: 'a sweep of the current tuning, newer than the last game change; a person picks the number' },
   fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
@@ -106,8 +120,11 @@ export const TYPES = {
 
 export function taskType(task) {
   const title = String(task?.title || '');
-  for (const [re, type] of PREFIX) if (re.test(title)) return type;
-  return BY_ROLE[task?.role] || 'change';
+  // 2.58.0: a [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
+  const tagged = choreTagged(task);
+  for (const [re, type] of PREFIX) if (re.test(title)) return type === 'bug' && tagged ? 'chore' : type;
+  const byRole = BY_ROLE[task?.role] || 'change';
+  return byRole === 'change' && tagged ? 'chore' : byRole;
 }
 
 /**
@@ -432,7 +449,8 @@ export function checkDone(task, since = startedAt(task.id)) {
     }
   };
 
-  if (type === 'change') workAndVerify();
+  // 2.58.0: a chore closes like a change, without the gameplay, reach and screenshot checks below.
+  if (type === 'change' || type === 'chore') workAndVerify();
   if (type === 'change' || type === 'bug') gameplayChecks(task, part, since, check);
   // 2.38.0: built but not wired. Game code this task changed that nothing in the game reaches from its entry
   // points (harness/reachability.mjs). A note by default; STUDIO_REACHABILITY=fail makes it a failing check.
