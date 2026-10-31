@@ -25,6 +25,8 @@ Someone else checks them against the images and the art reference
 **Done means.** Changes for this task (commits tagged with it, or edits not yet committed), and a
 full `npm run verify` after your last change. If a hash changed, the golden was regenerated in the
 same commit.
+Build, toolchain, CI or dependency work is a chore (`Chore: …`, `Fix the build …`, `Fix CI`, a `[chore]`
+tag; see the table in README.md): it closes the same way, without gameplay, reach or regression checks.
 
 **Never.** Change a hash without its golden. Edit files someone else has claimed. Loop past three
 failed tries.

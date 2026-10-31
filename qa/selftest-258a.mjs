@@ -2,6 +2,8 @@
  * qa/selftest-258a.mjs — 2.58.0 part A: what task done trusts and how a task is typed.
  *   Size growth from the merge-base (crew report): once a task's branch takes in the studio's main branch, the size
  *          ratchet compares with the merge-base of HEAD and main, so main's growth isn't the task's; its own still is.
+ *   Chore type (crew report): build, toolchain, CI and dependency work ("Fix the build", "Chore: …", "[chore]") closes
+ *          on its changes and a green verify, without a regression; "Fix a bug in …" is still a bug.
  * Token-shaped values are put together at run time, so this file never holds one and the repo's scan stays clean.
  */
 import fs from 'node:fs';
@@ -66,4 +68,27 @@ console.log(JSON.stringify({ grew: m.sizeGrowth('${t1}', ['game/sg/src/own.gd', 
   report('2.58.0: once a task\'s branch merges the studio\'s main in, the size ratchet compares with the merge-base (main\'s 40-line file isn\'t the task\'s growth); the task\'s own file grown past the limit is still refused',
     merged.status === 0 && Array.isArray(s1.grew) && s1.grew.some((x) => /game\/sg\/src\/own\.gd is 3\d lines.*over the limit of 20/.test(x)) && !s1.grew.some((x) => /main\.gd/.test(x)) && s1.base === mainTip, `${out(merged)}\n${JSON.stringify(s1).slice(-1500)}`);
   g('switch', '-q', 'main');
+
+  // 2. The chore type.
+  const ty = probe('types', `import { taskType } from ${u('harness/done-check.mjs')};
+const t = (title, extra = {}) => taskType({ title, role: 'builder', ...extra });
+const chores = ['Chore: bump vite', 'chore(deps): bump vite', 'Build: Node 22 for vitest', 'build(deps): bump three', 'Build fails on Windows', 'Toolchain: Node 22', 'Tooling: lint rules', 'Infra: a runner', 'CI: cache npm', 'Deps: bump three', 'Dependencies: refresh the lockfile', 'Fix build', 'Fix the build', 'Fix build: tsc errors', 'Fix build on Windows', 'Fix CI', 'Fix toolchain', 'Fix deps', 'Fix dependencies', 'Bump vite [chore]', 'Fix: vite config [chore]'];
+console.log(JSON.stringify({ chore: chores.map((x) => [x, t(x)]).filter(([, y]) => y !== 'chore'), detail: t('Bump vite', { detail: 'type: chore' }), bug: t('Fix a bug in the fee panel'), menu: t('Fix build menu crash'), build: t('Build the stairwell'), review: t('Review: [chore] the toolchain change') }));`);
+  report('2.58.0: titles starting chore, build (as a label or with a toolchain word), toolchain, tooling, infra, ci, deps, dependencies, "Fix the build/CI/toolchain/deps", a [chore] tag or "type: chore" are chores; "Fix a bug in …" and "Fix build menu …" stay bugs, "Build the stairwell" a change, a review a review',
+    Array.isArray(ty.chore) && ty.chore.length === 0 && ty.detail === 'chore' && ty.bug === 'bug' && ty.menu === 'bug' && ty.build === 'change' && ty.review === 'review', JSON.stringify(ty).slice(-1500));
+
+  const t2 = add('Fix the build: vite config for Node 22');
+  start(t2, 'ch-1');
+  write('toolchain/node-version.txt', '22\n');
+  commitTask(t2, 'node 22', 'toolchain/node-version.txt');
+  const v2 = verify('ch-1');
+  const d2 = done(t2, 'ch-1');
+  const t3 = add('Fix a bug in the fee panel');
+  start(t3, 'bug-1');
+  write('toolchain/fee-note.txt', 'fees\n');
+  commitTask(t3, 'fee panel', 'toolchain/fee-note.txt');
+  verify('bug-1');
+  const d3 = done(t3, 'bug-1');
+  report('2.58.0: a chore ("Fix the build: …") closes with its changes and a green verify after them, no regression; "Fix a bug in …" with the same evidence is refused for its missing regression',
+    v2.status === 0 && d2.status === 0 && /"status": "done"/.test(out(d2)) && d3.status !== 0 && /is a "bug" task/.test(out(d3)) && /no regression in qa\/regressions/.test(out(d3)), `${out(v2).slice(-600)}\n---\n${out(d2).slice(-1500)}\n---\n${out(d3).slice(-1500)}`);
 }

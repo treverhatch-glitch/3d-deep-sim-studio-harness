@@ -19,6 +19,7 @@ and main, not with the commit the task started from, so what came from main isn'
 | --- | --- | --- |
 | change | role `builder`, `asset-3d`, or anything unmatched | [builder.md](builder.md) |
 | bug | title starts with `Bug` or `Fix` (the closed loop queues `Fix BUG-…`) | [bug.md](bug.md) |
+| chore | title starts with `Chore`, `Toolchain`, `Tooling`, `Infra`, `CI`, `Deps` or `Dependencies`; `Build:` / `build(…)` or `Build` with a toolchain word (`Build fails on Windows`; `Build the stairwell` stays a change); `Fix the build`, `Fix build: …`, `Fix CI`, `Fix toolchain`, `Fix deps`; a `[chore]` tag anywhere; or `--type chore`. Done: changes and a full verify after the last one, no regression, gameplay or reach checks | [builder.md](builder.md) |
 | system | title `System:`, or `--type system` | [system.md](system.md) |
 | balance | role `designer-calibrator`, `balancer`, or title `Balance:` | [balance.md](balance.md) |
 | playtest / fun | role `qa-playtester`, `playtester`, `fun-tester`, or title `Playtest:` / `Fun:` | [playtest.md](playtest.md) |
@@ -27,7 +28,8 @@ and main, not with the commit the task started from, so what came from main isn'
 | docs | title `Docs:` | [docs.md](docs.md) |
 | none | role `producer` or `human` | coordination work, no check |
 
-Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you).
+Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you;
+`--type chore` for build, toolchain, CI or dependency work). Any other `Fix …` is still a bug and needs its regression.
 
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
 hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and

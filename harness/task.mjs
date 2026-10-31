@@ -364,7 +364,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
   // (the agent judged the existing code good enough). Zero code changes since the task started are
   // refused unless the task is marked no-op with a reason (task done <ID> --no-op "<why>").
-  if (!force && target.role === 'builder' && ['change', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
+  if (!force && target.role === 'builder' && ['change', 'chore', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
     if (noop && String(noop).trim().length >= 10) {
       emitEvent({ type: 'task.noop', agent: agent || target.role, task: target.id, msg: `${target.id} closed as no-op: ${String(noop).trim().slice(0, 300)}` });
       note = `${note ? `${note}; ` : ''}no-op: ${String(noop).trim().slice(0, 200)}`;
@@ -1294,13 +1294,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'add') {
     const title = flags._.slice(1).join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
       process.exit(1);
     }
-    // --type bug|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
+    // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, study, balance, fun, playtest, review, docs, idea or system.`);
+    if (type && !['bug', 'chore', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, balance, fun, playtest, review, docs, idea or system.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
