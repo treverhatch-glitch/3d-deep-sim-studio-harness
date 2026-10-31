@@ -134,3 +134,17 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
   them too; only the repeatable and replay tests switch to the game's own dice. Every existing test sees the same
   rolls as before.
 - **Harness fix?** No.
+
+### P-020 — Creating a game took one extra Math.random roll, shifting 7 seeded tests · fixed
+- **What happened:** after the seeded-dice rebuild on main, 7 sim tests that pass on main failed (occupancy,
+  runway capacity x2, save round-trip, show-up, starter bottleneck, curb window). Each new Game drew its seed
+  from Math.random, one roll that main never took, so every later roll in tests that seed Math.random shifted.
+- **Fix:** the new-game seed comes from crypto (Math.random only where there is no crypto, such as Jint). The
+  9 affected test files pass (29 tests); the replays didn't change.
+- **Harness fix?** Worth a line in docs/UNITY-TRACK.md step 1: seeding must not take rolls the old code didn't.
+
+### P-021 — hatchfield-game main has been red on GitHub since at least Oct 17 · investigating
+- **What happened:** every push to main fails CI (9 tests: 8 browser screen tests time out, 1 sim test hits its
+  20 s limit). PR #42 (docs and workflow only) failed the same way, so no PR can get a green check.
+- **Status:** an investigation agent is looking for the cause and the fix; report to Hatch first.
+- **Harness fix?** Maybe: the studio should warn when the game's own trunk is red before agents build on it.

@@ -33,3 +33,21 @@ Each proposal points at the problems it comes from. Status: **waiting**, **appro
 ### U-007 — Look into the one-time Windows land-lock stress flake (2.30p test) · waiting
 - **From:** seen once on main. **Change:** investigation; a fix only if it reproduces.
 - **Risk:** none. **Advice:** low priority; only if it shows again.
+
+## Later (ideas to keep, not tasks; nothing starts until Hatch says so)
+
+### L-001 — How fast the Jint rules run in the Unity game, and a native C# port only if needed · LATER
+Logged 2026-10-31 on Hatch's request. The Unity game runs the web game's packed rules (hatchfield-sim.mjs)
+through Jint on a background thread, so slow rules make the game unable to keep up at high speed rather than
+lowering the frame rate. Order:
+1. **The rules running in the Windows .exe.** Not started. The CI .exe has no rules file in it yet.
+2. **Task A: measure.** On a busy airport in the Windows .exe: the fastest game speed it holds, frame time and
+   memory stutters. Plus: profile the same JavaScript rules in Node to find the slowest functions. UNTESTED.
+   Known so far: in plain .NET (not Unity), one 3-second step of a starter airport takes ~0.4 s (about 7x game
+   speed at most). Unity's runtime may be slower; nothing measured inside Unity at speed.
+3. **Task B: a native C# port, only if Task A shows a real limit.** Stable parts only (those that haven't
+   changed for a while; `npm run engine -- drift` shows which), slowest first, Jint kept as the reference. A
+   ported part replaces the Jint version only when all 3 recorded replays give identical numbers. UNTESTED.
+   Risk: the rules are one 28,000-line class, so swapping single parts means C# called from inside Jint.
+Already exists: the replay check against any rules engine (`IReplayPlayer`, `ReplayCheck.Compare` in the
+Unity repo); no port-task template, no speed measurement inside Unity, no native port.
