@@ -16,10 +16,12 @@ export async function selftest243({ dir, run, report, tmpRoot }) {
   // 1. Secrets: "AKIA" + 16 capitals inside a run of base64 is encoded data; the same standing alone is a key.
   const sd = path.join(tmpRoot, `secrets-243-${process.pid}`);
   fs.mkdirSync(sd, { recursive: true });
-  const blob = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' + 'AKIAQWERTYUIOPASDFGH' + 'CAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  // The fake key is put together at run time, so this file never holds a key-shaped string itself.
+  const fakeKey = ['AK', 'IA', 'QWERTYUIOPASDFGH'].join('');
+  const blob = `iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB${fakeKey}CAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==`;
   fs.writeFileSync(path.join(sd, 'pack.json'), JSON.stringify({ png: blob }));
   const s1 = run(dir, `node scripts/secret-scan.mjs "${sd}"`);
-  fs.writeFileSync(path.join(sd, 'keys.txt'), 'aws_access_key_id = "AKIAQWERTYUIOPASDFGH"\n');
+  fs.writeFileSync(path.join(sd, 'keys.txt'), `aws_access_key_id = "${fakeKey}"\n`);
   const s2 = run(dir, `node scripts/secret-scan.mjs "${sd}"`);
   report('2.43.0: the secret scan skips a key-shaped piece of base64 data (a real game\'s image pack tripped it) and still catches the same key standing alone', s1.status === 0 && s2.status !== 0 && /keys\.txt:1/.test(out(s2)) && !/pack\.json/.test(out(s2)), `${out(s1)}\n---\n${out(s2)}`);
 
