@@ -3498,6 +3498,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.0 part A: size growth from the merge-base, the chore type, PU-34 (P-047), PU-35 (P-048) (qa/selftest-258a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258a.mjs')).href);
+  await selftest258A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
