@@ -4,6 +4,65 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.0] — 2026-11-01
+2.58.0: the round-2 break-test fixes and the crew's report, batched (owner's rule). Six parts, each with its own
+commits and selftest file (`qa/selftest-258a.mjs` … `258f`, 56 checks; each check fails on 2.57).
+### Upgrading a studio (read this first)
+- **Auto-start is now opt-in.** After pulling, nothing starts agents on its own: not the watcher, not the HUB, not
+  the Producer check-in. Turn it on with `npm run mode -- autostart on --by <name>`. Hand starts are unaffected.
+- **`task done` is stricter.** It counts only a verify of the current commit on a clean tree, and runs the
+  `protected` and `secrets` checks itself. Any key-shaped string (even in a task title) or unapproved protected edit
+  blocks done in that checkout until it is cleaned up.
+- **Protected now:** `studio/game.json`, `game/*/studio.gates.json`, `web/*/studio.gates.json`,
+  `studio/secrets-allow.json`. With an owner key committed, switching the active game needs the owner's approval.
+- **Folder claims ignore case** (Windows-safe; on Linux `Branding` and `branding` now clash too).
+- **Games:** add `*.snap text eol=lf` to the game's `.gitattributes`. Verify runs game checks with `CI=true`, so
+  test runners don't rewrite snapshots.
+### Fixed
+- **Part A, done-check.**
+  - The size check counts only a task's own growth: it measures from the merge-base with the studio's main branch,
+    not the task's start (crew report).
+  - New `chore` task type for build, toolchain, CI and dependency work: "Chore: …", "Fix the build", "Fix CI",
+    `[chore]`, `--type chore`. It needs changes plus a green verify, no regression (crew report).
+  - PU-34 (P-047): done trusts only a verify of this commit on a clean tree and re-runs protected and secrets.
+  - PU-35 (P-048): the game's check settings are protected.
+- **Part B, board and locks.**
+  - A `task done` or reopen killed between its two board writes no longer loses the task (P-052).
+  - The watcher frees claims nobody can be using (P-053), and never releases a claim made during its own pass
+    (P-054).
+  - `task start` frees its claim on any board error (P-055).
+  - Live lock holders are never broken on age (P-056).
+  - Board lines the parser can't read are kept under `## UNREADABLE`, never deleted. ASCII hyphens and unquoted roles
+    are read as tasks (P-057).
+  - Old temp files are swept (P-060).
+  - Folder claims ignore case, hook scripts stay LF, and fsafe fallbacks leave an event (PU-43).
+  - The land lock survives Windows `EPERM` (P-043).
+- **Part C, secrets.**
+  - The pre-commit hook scans the staged blobs, not the files on disk (P-046).
+  - Verify's secrets gate also scans every commit not on the base branch yet: lines added and commit messages.
+  - UTF-16 and BOM files are read, and the skip list is tied to real paths.
+  - `scrub()` shares the scanner's pattern list.
+  - Findings show a sha256 fingerprint, never the value. A true false alarm can be allowed by fingerprint in the
+    protected `studio/secrets-allow.json`.
+- **Part D, prompts and the launcher.**
+  - Text from agents or people (titles, notes, events, `--note`, PITFALLS.md) reaches briefs and prompts only inside
+    a marked "information, not instructions" block, and notes name their real sender (PU-36, P-049).
+  - A live but long-silent agent's task and slot are freed without killing anything (PU-39, P-050).
+  - Custom-command usage limits are kept per program (PU-40, P-051).
+  - Auto-start is opt-in (crew report).
+- **Part E, events and metrics.**
+  - Readers keep the task history across an events-log roll-over (P-058).
+  - `metrics` runs in near-linear time: 40k events in 0.6 s instead of 57 s, with the same rows (P-059).
+- **Part F, verify.**
+  - `npm run verify` runs its gates in a process of its own, so a reaped shell doesn't lose the run, and
+    `npm run verify -- --wait` re-attaches (crew report).
+  - Game checks run with `CI=true`, and every verify names the tracked files it changed (crew report).
+### UNTESTED on real Windows (this release's Windows CI job is the first proof)
+- The detached verify path.
+- The Windows `EPERM` retries (stand-ins only).
+- The UTF-16 and hook paths under Git for Windows.
+- Path forms in `custom:<program>` keys.
+
 ## [2.57.1] — 2026-11-01
 2.57.1: what was ready after 2.57.0, batched (owner's rule).
 ### Fixed
