@@ -4,6 +4,23 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.55.0] — 2026-10-31
+2.55.0: fixes from the crew's own logs (P-028, P-030, P-031, P-032), approved by the owner.
+### Fixed
+- **A stale session record took a fresh claim away** (P-028): the watcher and the dead-claim cleanup matched a claim
+  to a session by name only. A session that ended before a claim was made no longer hands that claim back or frees
+  it, so a chat bot claiming tasks itself under a name a launcher session once used keeps its task.
+- **`npm run onboard -- --sync --dry-run` applied the sync anyway** (P-030): with `--dry-run` it now lists the
+  commits and files it would bring in and writes nothing.
+- **`npm run hub:build` failed its type check on Windows** (P-031): `tsc … *.tsx` relied on the shell expanding the
+  glob (cmd and PowerShell don't). It now runs `tsc -p hub/tsconfig.check.json`, whose `include` TypeScript expands.
+- **An unchosen pace let the Director start agents** (P-032): with no pace chosen nothing starts on its own any
+  more, the Director included; the game dev gets a "no pace is chosen" note once an hour. This reverses 2.30j's
+  "the Director refills builders when the dev never chose a pace" (the owner's decision after the first crew run);
+  its selftest now checks the new behaviour.
+### Added
+- `qa/selftest-255.mjs` (5 checks).
+
 ## [2.54.0] — 2026-10-31
 2.54.0: fixes from the first crew run on Hatchfield (P-022 to P-027) and the first three planned updates from the
 research (PU-06, PU-02, PU-03), approved by the owner.

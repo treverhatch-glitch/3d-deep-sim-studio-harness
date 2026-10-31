@@ -90,7 +90,10 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     // A launcher session that has ended but still holds the task: hand it back now (test #2: the
     // watcher called agents "silent 34 min" that agent list already showed as ended).
     const session = agentSessions.find((s) => s.agent === lock.owner);
-    if (session && !session.running) {
+    // 2.55.0 (P-028): a session that ended before this claim was made isn't its holder (a chat bot claiming under
+    // the same name later); the claim stays, and the silence check below still applies.
+    const staleRecord = session && !session.running && session.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(session.endedAt);
+    if (session && !session.running && !staleRecord) {
       const note = `${lock.owner}'s session ended (${session.reason || 'no reason recorded'}) while it held ${t.id}.\n${trail(events, lock.owner)}`;
       if (!dryRun) pauseTask(t.id, 'watch', note, { force: true });
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${lock.owner} ended without handing it back`, producer: false });

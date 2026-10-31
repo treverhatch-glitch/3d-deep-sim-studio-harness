@@ -156,7 +156,7 @@ export function release(key, owner) {
 export function releaseDeadOwners(isDead) {
   const freed = [];
   for (const l of listLocks()) {
-    if (!isDead(l.owner)) continue;
+    if (!isDead(l.owner, l)) continue;
     fs.rmSync(lockPath(l.key), { force: true });
     freed.push(`${l.key} (${l.owner})`);
   }

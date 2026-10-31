@@ -62,7 +62,9 @@ console.log(JSON.stringify({ p: buildHudState().playtest }));`, { STUDIO_CARTRID
   const flow = read('harness/director-flow.mjs');
   const html = read('hub/v3/index.html');
   report('2.30j: Needs-you cards are de-duplicated by task and reason', /2\.30j \(M7\)/.test(hud) && /seenNeed/.test(hud));
-  report('2.30j: the Director refills builders when the dev never chose a pace (fillAgents byDirector), and only repeats a flow line when it changes or after 30 min', /byDirector && !mode\.chosen/.test(agent) && /fillAgents\(\{ byDirector: true \}\)/.test(flow) && /prev\.actions\?\.join/.test(flow));
+  // 2.55.0 (P-032, owner's decision): an unchosen pace no longer lets the Director start builders; it still asks the
+  // launcher (fillAgents byDirector), which now refuses with a note to the dev.
+  report('2.30j/2.55.0: the Director asks the launcher to refill builders (fillAgents byDirector), which starts nothing while no pace is chosen; a flow line repeats only when it changes or after 30 min', /2\.55\.0 \(P-032\)/.test(agent) && /pace\.unchosen/.test(agent) && /fillAgents\(\{ byDirector: true \}\)/.test(flow) && /prev\.actions\?\.join/.test(flow));
   report('2.30j: dead routes (404/410) cool for a day; Producer with no tool raises one warning an hour', /statusCode === 404 \|\| statusCode === 410/.test(read('harness/route.mjs')) && /agent\.no_tool/.test(agent));
   report('2.30j: danger buttons sit in their own row away from Sign off; the banner says when the token is loaded', /danger-row[^\n]*o-stopbtn[^\n]*o-restart/.test(html) && !/o-stopbtn[^\n]*data-sign/.test(html) && /2\.30j \(M6\)/.test(html));
   report('2.30j: the launcher runs the browser check after it closes a task (STUDIO_POST_BROWSER_PLAY=off turns it off)', /qa\.browser_play/.test(agent) && /STUDIO_POST_BROWSER_PLAY/.test(agent));

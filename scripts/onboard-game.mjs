@@ -14,7 +14,8 @@
  *
  * 2.43.0: --adopt [--ref <branch>] brings the game under the studio (game/<slug>/, its own checks declared,
  * the studio's game, origin recorded: harness/adopt.mjs); --export turns the studio's changes to it back into a
- * patch for the game's own repo.
+ * patch for the game's own repo. --sync [--ref <branch>] brings the game repo's new commits in; 2.55.0: with
+ * --dry-run it lists them and writes nothing.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,9 +41,16 @@ if (flag('export')) {
 }
 if (flag('sync')) {
   const { syncGame } = await import('../harness/adopt.mjs');
-  const r = syncGame({ ref: opt('ref'), force: flag('force'), commit: !flag('no-commit') });
+  const r = syncGame({ ref: opt('ref'), force: flag('force'), commit: !flag('no-commit'), dryRun: flag('dry-run') });
   if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
   if (r.upToDate) { console.log(`[onboard] up to date with ${r.to.slice(0, 8)}`); process.exit(0); }
+  if (r.dryRun) {
+    console.log(`[onboard] dry run: --sync would bring in ${r.commits.length} commit(s) (${r.files.length} file(s)) from ${r.ref}: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}. Nothing was written or committed.`);
+    for (const c of r.commits.slice(0, 15)) console.log(`  ${c}`);
+    for (const f of r.files.slice(0, 30)) console.log(`  file: ${f}`);
+    if (r.files.length > 30) console.log(`  … and ${r.files.length - 30} more file(s)`);
+    process.exit(0);
+  }
   console.log(`[onboard] synced ${r.commits.length} commit(s) (${r.files.length} file(s)) from the game's repo: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}${r.committed ? ', committed' : ` (not committed${r.commitError ? `: ${r.commitError}` : ''}; the changes are staged: commit the game folder and studio/game/ORIGIN.json together)`}`);
   for (const c of r.commits.slice(0, 15)) console.log(`  ${c}`);
   process.exit(0);
