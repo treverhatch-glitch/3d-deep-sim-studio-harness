@@ -12,6 +12,9 @@ public Unity repo).
   The guard adds them to its built-in rules. `npm run public-guard -- install` never overwrites that file.
 - The guard reads files up to 16 MB (a packed code file is a few MB).
 - `qa/selftest-253.mjs`.
+### Fixed
+- `qa/selftest-249.mjs` starts from no logs folder even when the studio has its own `studio/logs/` (it failed once
+  the real logs were merged).
 
 ## [2.52.0] — 2026-10-31
 2.52.0: U-003 from the studio logs, approved by the owner.

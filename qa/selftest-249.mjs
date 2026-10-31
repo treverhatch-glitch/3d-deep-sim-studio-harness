@@ -6,8 +6,9 @@ import path from 'node:path';
 
 export async function selftest249({ dir, run, report }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const none = run(dir, 'node harness/logs.mjs');
   const d = path.join(dir, 'studio/logs');
+  fs.rmSync(d, { recursive: true, force: true }); // the studio's own logs, if this copy has them: start from none
+  const none = run(dir, 'node harness/logs.mjs');
   fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(d, 'README.md'), '# Studio logs\n\n## Latest summary — today\n- Done: the dice.\n\n## The files\n');
   fs.writeFileSync(path.join(d, 'PROBLEMS.md'), '# Problems\n\n### P-001 — Repo is public · open\n- x\n\n### P-002 — Template copy on Windows · fixed 2026-10-31\n- y\n\n### P-003 — GPU unread · open\n- z\n');
