@@ -49,7 +49,7 @@ import { savePatch } from './wip.mjs';
 import { laneList } from './task-hold.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
-import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR } from './budget.mjs';
+import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
@@ -117,7 +117,8 @@ export function providerTrouble(log, code) {
     // and "usage limit reached", and the tool was marked out while the plan had room.
     if (l.startsWith('{') && /"type"\s*:\s*"(?:user|assistant|system|stream_event|tool_use|tool_result|item\.\w+|message)"/.test(l)) continue;
     // The line has to read as an error from the tool, not text the agent wrote or read.
-    if (!/\berror\b|\bfailed\b|too many requests|\b429\b|\b401\b|usage limit reached|hit your (?:usage )?limit|invalid api key|not logged in/i.test(l)) continue;
+    // PU-19: Claude Code's "5-hour limit reached ∙ resets 3pm" says neither "error" nor "usage limit".
+    if (!/\berror\b|\bfailed\b|too many requests|\b429\b|\b401\b|usage limit reached|hit your (?:usage )?limit|\blimit (?:reached|exceeded|hit)\b|\breached your\b|invalid api key|not logged in/i.test(l)) continue;
     const q = l.match(QUOTA_ERROR);
     if (q) return { kind: 'quota', text: q[0], line: l, named: toolNamed(l) };
     const au = l.match(AUTH_ERROR);
@@ -315,6 +316,24 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   // 2.30h (3): an empty final answer after spending output tokens is a failed hand-off, not a finish.
   const reasoningOnly = !capped && !trouble && code === 0 && sessionReasoningOnly(log);
   const bad = !capped && (code !== 0 || Boolean(trouble) || reasoningOnly);
+  // PU-19 (P-042): the session stopped at a usage limit: its own, or for a custom command (no tool name of its
+  // own) the one its line names. That's waiting for the reset, not a failure: the tool is marked out until
+  // then (below), and the hand-back says "usage limit", so the breaker, the loop park, the model escalation
+  // and the supervisor's halt don't count it.
+  // (Repeated 5xx refusals are a run-out too, but not a usage limit: they keep their old handling.)
+  const limit = !capped && found?.kind === 'quota' && !/^provider refused/.test(found.text) && (!other || (tool === 'custom' && code !== 0)) ? found : null;
+  // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
+  // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
+  // (PU-19: marked before the hand-back, so the note can say until when.)
+  let limitMark = null;
+  const quota = (other ? found : t)?.kind === 'quota' ? (other ? found : t) : null;
+  if (quota && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
+    // 2.30o: generic: the order entry this session ran as (tool:model when the order lists it, else the tool).
+    const order = (() => { try { return readBudget().order || []; } catch { return []; } })();
+    const who = other || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
+    const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
+    limitMark = { on: who, ...markExhausted(who, line) };
+  }
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   const handed = [];
@@ -344,34 +363,26 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
     // for up to an hour). Hand it back now, with what it last said and what it left.
     const note = capped
       ? `${agent} (${tool}, ${model}) refreshed: ${refresh?.endedBy || `it reached the ${sessionLimits().ceilingTurns}-turn ceiling`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} A fresh session continues from this hand-back${s0.now ? `; it last said: "${s0.now}"` : ''}.`
+      : limit
+      ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
       ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
-    if (!capped) parkIfLooping(id);
+    if (!capped && !limit) parkIfLooping(id);
   }
   for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
-  // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
-  // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
-  const quota = (other ? found : t)?.kind === 'quota' ? (other ? found : t) : null;
-  if (quota && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
-    // 2.30o: generic: the order entry this session ran as (tool:model when the order lists it, else the tool).
-    const order = (() => { try { return readBudget().order || []; } catch { return []; } })();
-    const who = other || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
-    const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
-    markExhausted(who, line);
-  }
   const tok = tokensFrom(log);
   // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
-  const reason = capped ? 'refreshed (session cap): a fresh session continues' : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? 'error' : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined } });
+  const reason = capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined } });
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
-  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped };
+  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped, usageLimit: Boolean(limit) };
 }
 
 /**
@@ -425,7 +436,8 @@ export function parkIfLooping(id, now = Date.now()) {
   const evs = readRecentEvents(20000).filter((e) => e.task === id && Date.parse(e.ts) >= now - 2 * 3600000);
   const lastDone = evs.filter((e) => e.type === 'task.done').pop();
   // 2.30q (#6): harness-caused hand-backs (claim ran out during gates, merge refused, land lock) don't count.
-  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts) && !harnessCaused(e));
+  // PU-19: nor a session that stopped at its usage limit (it waits for the reset; it isn't stuck).
+  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts) && !harnessCaused(e) && !LIMIT_STOP.test(e.msg || ''));
   const unparked = evs.filter((e) => e.type === 'task.hold' && /unparked/.test(e.msg || '')).pop();
   const since = unparked ? pauses.filter((e) => e.ts > unparked.ts) : pauses;
   if (since.length < limit) return null;
@@ -669,7 +681,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   // 2.30o: any run-out (quota, 429 loop, spend or token cap, credit refused, 5xx refusals) on any launcher:
   // with no fallback given, the next tool in the budget order that isn't marked out takes the task over.
-  if (result.bad && !fallback.length && result.troubleKind === 'quota' && process.env.STUDIO_TAKEOVER !== 'off') {
+  // PU-19: not for a custom command: the next tool would run that same command, so it waits for the reset.
+  if (result.bad && !fallback.length && result.troubleKind === 'quota' && process.env.STUDIO_TAKEOVER !== 'off' && session.tool !== 'custom') {
     const nxt = pickTool(tool);
     if (nxt && nxt !== tool && nxt !== `${tool}:${model}`) {
       fallback = [nxt];

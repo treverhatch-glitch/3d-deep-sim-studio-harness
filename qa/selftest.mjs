@@ -3481,6 +3481,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// PU-19 (P-042): 5-hour and weekly limit messages count as usage limits, with their reset times (qa/selftest-pu19.mjs).
+{
+  const dir = copyRepo();
+  const { selftestPU19 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu19.mjs')).href);
+  await selftestPU19({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
