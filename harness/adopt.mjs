@@ -80,10 +80,18 @@ export function gatesFor(slug, gameDir) {
     if (deps.vitest || /vitest/.test(s.test)) t.related = `${cd}npx vitest related --run --passWithNoTests {files}`;
     else if (deps.jest || /\bjest\b/.test(s.test)) t.related = `${cd}npx jest --passWithNoTests --findRelatedTests {files}`;
   }
+  // 2.46.0: a Unity project. The sim's checks run anywhere (.NET); the editor's tests need Unity and a licence
+  // on the machine, so they start optional: make them required where every machine running checks has the editor.
+  if (has('ProjectSettings/ProjectVersion.txt')) {
+    if (has('Assets/Sim')) add('sim-purity', `node harness/unity.mjs purity ${root}`);
+    if (has('tools/SimTests')) add('sim', `node harness/unity.mjs sim ${root}`);
+    add('unity-editmode', `node harness/unity.mjs gate ${root} --platform EditMode`, false);
+    add('unity-playmode', `node harness/unity.mjs gate ${root} --platform PlayMode`, false);
+  }
   for (const k of ['e2e', 'test:e2e']) if (s[k]) add('e2e', run(k), false);
   if (s.lint) add('lint', run('lint'), false);
   if (s.build) add('build', run('build'), false);
-  const shared = ['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'vite.config.ts', 'vite.config.js', 'vite.config.mjs'].filter(has).map((f) => `${root}/${f}`);
+  const shared = ['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'Packages/manifest.json', 'ProjectSettings/ProjectVersion.txt', 'ProjectSettings/ProjectSettings.asset'].filter(has).map((f) => `${root}/${f}`);
   return { note: `${slug}'s own checks, run from the studio root (written by npm run onboard -- --adopt; edit freely).`, shared, gates };
 }
 
@@ -134,6 +142,7 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
     if (st) { fs.writeFileSync(bf, `${JSON.stringify(st, null, 2)}\n`); wroteBrowser = true; }
   }
   if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: cd ${rel} && npm ci`);
+  if (fs.existsSync(path.join(dest, 'ProjectSettings', 'ProjectVersion.txt')) && !fs.existsSync(path.join(dest, 'Assets', 'Sim'))) warnings.push(`it is a Unity project with no pure sim assembly (Assets/Sim with noEngineReferences): its rules can't be tested without the editor or kept free of engine time and randomness until they move there (see engine/_unity and docs/UNITY-TRACK.md)`);
   return { ok: true, slug, dir: rel, origin, gates, wroteGates, wroteBrowser, warnings };
 }
 

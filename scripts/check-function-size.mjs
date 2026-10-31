@@ -18,7 +18,7 @@ import { indexFile, codeFiles } from '../harness/codeindex.mjs';
 export const LIMITS = () => ({ fn: Number(process.env.STUDIO_FN_MAX_LINES) || 80, lines: Number(process.env.STUDIO_FILE_MAX_LINES) || 400, kb: Number(process.env.STUDIO_FILE_MAX_KB) || 30 });
 export const GAME_ROOTS = ['cartridges', 'game', 'web', 'src', 'engine'];
 // The templates ship with the harness; they aren't the game's to split.
-const isTemplate = (f) => /^(cartridges\/(_template|example-sim)|engine\/_godot)\//.test(f);
+const isTemplate = (f) => /^(cartridges\/(_template|example-sim)|engine\/_(?:godot|unity))\//.test(f);
 
 /** What's over the limits in one file's text: [{ kind: 'function'|'file', name, size, limit, unit, start? }]. */
 export function overLimits(file, text, limits = LIMITS()) {

@@ -29,7 +29,7 @@ Jed's run: keep it in web until playtests show it plays the way the dev imagined
 | Engine | Usage (vs Godot) | Why | Watch |
 | --- | --- | --- | --- |
 | Godot 4 (recommended) | the baseline | Text scenes and GDScript agents can read and diff; a free headless command line for tests, smoke runs and parity. SendIt went from nothing to a playable game in about 3 hours. | Fewer high-end effects than Unreal. |
-| Unity | about 1.5 to 2 times | C#, batch-mode tests. | YAML scenes with GUIDs agents break easily; much of the work needs the editor; licence terms. |
+| Unity | about 1.5 to 2 times | C#, batch-mode tests; 2.46.0: the sim is a pure C# assembly tested and compared with the web game by .NET, no editor needed (docs/UNITY-TRACK.md). | YAML scenes with GUIDs agents break easily (the template builds its scene in code); the editor gate needs an install and a licence; licence terms. |
 | Unreal 5 | about 3 to 5 times | The best visuals. | Binary Blueprints and assets agents can't read or diff, slow C++ builds, huge installs. SendIt's attempt was slow for about 7 hours. |
 
 The numbers are estimates from one experiment, not measurements. Point the harness at the program with

@@ -4,6 +4,36 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.46.0] — 2026-10-31
+2.46.0: Unity support. Until now the engine track named Unity but had no starter project, no reading of test results, no
+version check, no controls test and no CI. The rules of a Unity game now live in a pure C# assembly that .NET tests and
+compares with the web game without the editor or a licence; the editor runs only what needs it.
+### Added
+- **`engine/_unity/`**: a Unity 6 (6000.3 LTS) template, a worked port of the template game.
+  - `Assets/Sim` is pure C# (`noEngineReferences`): Mulberry32 bit for bit, `JsRound`, one `Step` per tick.
+  - Edit Mode tests run both in Unity and in .NET.
+  - `GameDriver` steps the sim in `FixedUpdate` and builds its scene in code (Input System, uGUI).
+  - A Play Mode controls test presses B and clicks Buy through `InputTestFixture`.
+  - `tools/SimTests` and `tools/SimCli` are .NET projects for the tests and for parity.
+  - Proven on .NET: 7 tests pass, and parity matches the web game on seeds 1–5 and 1337. The editor side is
+    unproven until the editor job runs.
+- **`harness/unity.mjs`**, the checks behind the Unity track:
+  - `purity`: no UnityEngine, Unity time, unseeded or engine random, wall clock, Guid, threads, files or
+    network in the sim; its asmdef must have `noEngineReferences`.
+  - `sim` (`npm run engine:sim`): purity, then `dotnet test`, counted from the .trx file, so an empty run fails.
+  - `gate`: Unity batch-mode Edit Mode and Play Mode runs, read from their NUnit XML. An empty run, a failure,
+    a compile error, a missing licence or an unhandled exception fails it.
+  - `version`: `STUDIO_UNITY_PIN`.
+- **Unity engine track:** `npm run engine -- start unity` copies the template. Its gate is the editor run and its
+  parity is `dotnet run … SimCli -- parity`. Parity waits while the sim is still the template.
+- **Adopting a Unity project** declares `sim-purity` and `sim` (required) plus the editor's tests (optional).
+  A project with no pure sim gets a warning.
+- **CI:**
+  - engine-unity-sim (.NET: `scripts/check-unity-template.mjs` checks purity, tests, parity, a planted
+    engine call and a planted rule break).
+  - engine-unity-editor (GameCI, runs once the `UNITY_LICENSE`, `UNITY_EMAIL` and `UNITY_PASSWORD` secrets exist).
+- `docs/UNITY-TRACK.md`; `qa/selftest-246.mjs`.
+
 ## [2.45.0] — 2026-10-31
 2.45.0: real key presses on an adopted web game. Proven on a private copy of a real three.js tycoon: Space, 2, 1 and H
 pressed in Chromium, each checked against the Game Bible (speed 1 → 0 → 3 → 1, view apron → hall), 4/4 in under a minute; a key

@@ -31,6 +31,11 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   if (!sameGame && tpl && t.folder && /parity\.gd/.test(t.parity?.command || '') && read(path.join(t.folder, 'sim', 'sim.gd')) === tpl) {
     return { ok: true, skipped: `the port in ${t.folder}/ is still the template; parity starts once a porter changes ${t.folder}/sim/sim.gd` };
   }
+  // 2.46.0: the same for a Unity track (engine/_unity's Assets/Sim/Sim.cs).
+  const tplCs = read('engine/_unity/Assets/Sim/Sim.cs');
+  if (!sameGame && tplCs && t.folder && t.engine === 'unity' && read(path.join(t.folder, 'Assets', 'Sim', 'Sim.cs')) === tplCs) {
+    return { ok: true, skipped: `the port in ${t.folder}/ is still the template; parity starts once a porter changes ${t.folder}/Assets/Sim/Sim.cs` };
+  }
   const cart = await loadCartridge(activeCartridge().name);
   const web = Object.fromEntries(seeds.map((seed) => {
     const r = runScenario(cart, 'start-to-win', { seed });
