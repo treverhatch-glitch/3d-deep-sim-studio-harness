@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
+import { isFixTask, trunkState } from './baseline.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -74,6 +75,14 @@ export function parkOver(until, done, now = Date.now()) {
 
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
 export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
+  // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
+  if (q && !q.inProgress?.some((t) => t.id === taskId)) {
+    const t = [...(q.backlog || [])].find((x) => x.id === taskId);
+    if (t && t.role === 'builder' && !isFixTask(t)) {
+      const tr = trunkState();
+      if (tr.red) return `the game's trunk is red (${tr.why}); only fix tasks start until it is green (npm run task -- trunk green --by <name>)`;
+    }
+  }
   const h = holds[taskId];
   if (!h) return null;
   const done = doneIds(q);
@@ -93,6 +102,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
 export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), holders = new Map()) {
   const why = holdReason(taskId, q, now, holds);
   if (!why) return null;
+  if (/trunk is red/.test(why)) return { owner: 'the trunk fix', why };
   const h = holds[taskId] || {};
   if (h.needsYes) return { owner: 'the dev', why };
   if (h.parked && !parkOver(h.parked.until, doneIds(q), now)) return { owner: h.parked.by || 'the Producer', why };

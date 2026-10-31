@@ -180,7 +180,9 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
       // A related run with no related tests is fine: the whole suite runs after landing.
       const sg = r.status === 0 ? (related ? { ok: true, why: '', note: '' } : judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` })) : null;
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
+      // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
+      const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

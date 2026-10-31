@@ -97,4 +97,68 @@ const start = Date.now() - 1;
 for (let i = 0; i < 3; i++) await refillPass({ deps, min: 4 });
 console.log(JSON.stringify({ logged: readRecentEvents(500).filter((e) => e.type === 'producer.refill' && Date.parse(e.ts) >= start).length }));`, { STUDIO_REFILL_WAKE: 'off' });
   report('2.54.0 (P-027): three empty queue refills in a row log one "Queue low … added 0" line, not three', rf.logged === 1, JSON.stringify(rf).slice(0, 900));
+
+  // PU-06: what was red at claim doesn't count against the task; new failures do; a red trunk starts only fixes.
+  const base = probe('baseline', `import fs from 'node:fs';
+import { failingTests, recordBaseline, judgeRed, setTrunk, trunkState } from ${u('harness/baseline.mjs')};
+import { gatesAfter } from ${u('harness/done-check.mjs')};
+import { holdReason } from ${u('harness/task-hold.mjs')};
+const out = ' ✓ src/a.test.ts (3 tests) 20ms\\n FAIL  src/ui/hud.e2e.test.ts > HUD > keeps panels apart\\n \\u001b[31m×\\u001b[39m src/neg/panel.e2e.test.ts > panel > opens 1200ms\\n Test Files  2 failed | 5 passed';
+const parsed = failingTests(out);
+const rec = (failures, extraRed = false) => ({ at: new Date(Date.now() + 1000).toISOString(), partial: false, rows: [{ id: 'test', ok: false, required: true, failures }, { id: 'typecheck', ok: !extraRed, required: true }] });
+fs.mkdirSync('.studio', { recursive: true });
+fs.writeFileSync('.studio/gates-last.json', JSON.stringify(rec(['a > one', 'b > two'])));
+const b = recordBaseline('T-901');
+const write = (r) => fs.writeFileSync('.studio/gates-last.json', JSON.stringify(r));
+write(rec(['a > one', 'b > two']));
+const same = gatesAfter(0, null, 'T-901');
+write(rec(['a > one', 'b > two', 'c > three']));
+const added = gatesAfter(0, null, 'T-901');
+write(rec(['a > one', 'b > two'], true));
+const other = gatesAfter(0, null, 'T-901');
+const noBase = gatesAfter(0, null, 'T-999');
+const q = { backlog: [{ id: 'T-910', title: 'Add the noise panel', role: 'builder' }, { id: 'T-911', title: 'Fix: the HUD layout test times out', role: 'builder' }, { id: 'T-912', title: 'Plan the next milestone', role: 'producer' }], inProgress: [{ id: 'T-913', title: 'Add fees', role: 'builder' }], done: [] };
+setTrunk('red', { by: 'trever', why: 'main red on GitHub since Oct 17' });
+const red = { feature: holdReason('T-910', q, Date.now(), {}), fix: holdReason('T-911', q, Date.now(), {}), plan: holdReason('T-912', q, Date.now(), {}), running: holdReason('T-913', q, Date.now(), {}) };
+setTrunk('green', { by: 'trever' });
+const green = holdReason('T-910', q, Date.now(), {});
+console.log(JSON.stringify({ parsed, baseRed: b?.red?.map((r) => r.id), same, added, other, noBase, red, green, state: trunkState().red }));`);
+  report('2.54.0 (PU-06): the failing test names are read from a check\'s output; a task isn\'t blamed for tests already failing when it was claimed, but a new failing test or a newly red check fails it',
+    base.parsed?.length === 2 && /hud\.e2e/.test(base.parsed[0]) && !/ms$/.test(base.parsed[1]) && base.baseRed?.[0] === 'test' && base.same === null && /c > three/.test(base.added || '') && !/a > one/.test(base.added || '') && /typecheck/.test(base.other || '') && /the last verify failed: test, typecheck|the last verify failed: test/.test(base.noBase || ''), JSON.stringify(base).slice(0, 1500));
+  report('2.54.0 (PU-06): with the trunk marked red only fix tasks start (planning and work in progress carry on); marked green, everything starts again',
+    /trunk is red \(main red on GitHub/.test(base.red?.feature || '') && base.red?.fix === null && base.red?.plan === null && base.red?.running === null && base.green === null && base.state === false, JSON.stringify(base.red));
+  const cli = run(dir, 'node harness/task.mjs trunk red --by trever --why "CI red"');
+  const st = run(dir, 'node harness/task.mjs trunk status');
+  run(dir, 'node harness/task.mjs trunk green --by trever');
+  report('2.54.0 (PU-06): npm run task -- trunk red|green|status', cli.status === 0 && /Trunk red \(manual, trever\): CI red/.test(st.stdout || ''), `${cli.stdout}${cli.stderr}${st.stdout}`);
+
+  // PU-02 / PU-03: one row per attempt, time split into segments, a failure label for every attempt that failed.
+  const met = probe('metrics', `import { attemptRows, summarize, writeMetrics } from ${u('harness/metrics.mjs')};
+import fs from 'node:fs';
+const t0 = Date.parse('2026-10-31T10:00:00Z');
+const at = (m) => new Date(t0 + m * 60000).toISOString();
+const ev = [];
+const e = (m, type, agent, task, extra = {}) => ev.push({ ts: at(m), type, agent, task, ...extra });
+// T-1 done in 20 min: one 1-minute verify, heartbeats every 2 min.
+e(0, 'agent.session.start', 'b-1', null, { model: 'claude-sonnet-5-5' }); e(0, 'task.start', 'b-1', 'T-1');
+for (let m = 2; m < 20; m += 2) e(m, 'agent.heartbeat', 'b-1', null);
+e(15, 'gates.run', 'b-1', null, { meta: { ms: 60000 } }); e(20, 'task.done', 'b-1', 'T-1'); e(21, 'agent.session.end', 'b-1', null, { model: 'claude-sonnet-5-5', tokensIn: 1000, tokensOut: 500, meta: { costUsd: 0.4 } });
+// T-2 waits 10 min on the game dev, then is handed back.
+e(30, 'task.start', 'b-2', 'T-2'); e(35, 'ask.open', 'b-2', null, { msg: 'A-1 for the game dev: which colour?' }); e(45, 'ask.answered', 'hatch', null, { msg: 'A-1 answered by hatch: blue' }); e(50, 'task.paused', 'b-2', 'T-2', { msg: 'Handed back T-2: needs art' });
+// T-3 forced done; T-4 a burn stall; T-5 a usage limit.
+e(60, 'task.start', 'b-3', 'T-3'); e(70, 'task.forced', 'b-3', 'T-3', { msg: 'T-3 forced' });
+e(80, 'task.start', 'b-4', 'T-4'); e(90, 'session.stall', 'watchdog', 'T-4', { msg: 'Ended b-4 (builder, T-4): burning tokens in a loop', meta: { kind: 'burn', target: 'b-4' } }); e(90, 'task.paused', 'watch', 'T-4', { msg: 'Handed back T-4' });
+e(100, 'task.start', 'b-5', 'T-5'); e(105, 'agent.session.end', 'b-5', null, { msg: 'b-5 ended: Claude usage limit reached' }); e(105, 'task.paused', 'watch', 'T-5', { msg: 'Handed back T-5' });
+// T-1 again later (a retry), still open.
+e(110, 'task.start', 'b-1', 'T-1');
+const rows = attemptRows(ev, { now: t0 + 120 * 60000 });
+const f = writeMetrics(rows, '.studio/metrics');
+const by = Object.fromEntries(rows.map((r) => [r.task + '#' + r.attempt, r]));
+console.log(JSON.stringify({ n: rows.length, t1: by['T-1#1'], t2: by['T-2#1'], labels: rows.map((r) => r.failure), retry: by['T-1#2']?.retries, csv: fs.readFileSync(f.csv, 'utf8').split('\\n')[0], s: summarize(rows).failures }));`);
+  const t1 = met.t1 || {};
+  report('2.54.0 (PU-02): one metrics row per task attempt: 20 min split into agent 19 and checks 1, tokens and reported cost from its session, a later claim counts as a retry; written as JSONL and CSV',
+    met.n === 6 && t1.outcome === 'done' && t1.minutes === 20 && t1.checksMin === 1 && t1.agentMin === 19 && t1.tokensIn === 1000 && t1.tokensOut === 500 && t1.costUsdReported === 0.4 && t1.model === 'claude-sonnet-5-5' && met.retry === 1 && /^task,attempt,retries,agent,model/.test(met.csv || '') && met.t2?.personMin === 10, JSON.stringify(met).slice(0, 1500));
+  report('2.54.0 (PU-03): each failed attempt gets one label (MAST-based list): forced done = verify-missing, a burn stall = repetition, a usage limit = quota; a done attempt has none',
+    JSON.stringify(met.labels) === JSON.stringify([null, 'unknown', 'verify-missing', 'repetition', 'quota', null]), JSON.stringify(met.labels));
 }
+
