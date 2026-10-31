@@ -8,7 +8,8 @@
   - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003): all merged, CI green, a backup branch of main before each.
 - **Untested:** everything that needs the Unity editor (HDRP set-up, Edit/Play Mode in Unity, the Windows build).
 - **Open problems:** P-005 (GPU model), P-009 (no Unity on Claude's side). P-001 fixed: the harness and the two old copies are private (confirmed by Hatch, 2026-10-31).
-- **Waiting for your OK:** U-007 (last, only when nothing else waits).
+- **Port finding:** the web rules run unchanged in .NET (Jint): 3/3 replays match at day 3. Waiting for Hatch: option A (one set of rules) or B (full C# port).
+- **Waiting for your OK:** U-007 (last, only when nothing else waits); merging PR #21 on local checks (P-010).
 
 ## The files
 | File | What | Format |

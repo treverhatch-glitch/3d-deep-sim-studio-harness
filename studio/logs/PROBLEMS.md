@@ -61,3 +61,14 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround:** a one-click set-up script that logs DONE/SKIPPED per setting; Hatch (or a bot on his PC) runs it and
   sends the Console text; CI runs the Windows build once the licence secrets exist.
 - **Harness fix?** Later: a bot on Hatch's PC runs `npm run engine:gate` and posts the result.
+
+### P-010 — The private harness's online checks won't start (billing) · open
+- **What happened:** after the harness went private, every GitHub-hosted job failed in 2 seconds: "recent account payments have failed or your spending limit needs to be increased".
+- **Why:** a private repo's free Actions minutes were used up; nothing can be spent (rule: no money).
+- **Workaround:** run the full selftest locally before a merge (777 checks); the self-hosted runner on Hatch's PC (2.47, U-002) fixes it for good.
+- **Harness fix?** Done in 2.47; waits for Hatch to install the runner.
+
+### P-011 — The web rules use structuredClone, which an embedded JS engine (Jint) lacks · fixed with a workaround
+- **What happened:** the packed rules failed in Jint: `structuredClone is not defined`.
+- **Workaround:** a small JSON-based structuredClone before loading the rules. All 3 replays still match exactly.
+- **Harness fix?** Maybe: if shared rules (option A) is chosen, a ready-made host for the packed rules with these globals.
