@@ -26,6 +26,7 @@ import { overLimits, isGameCode, LIMITS } from '../scripts/check-function-size.m
 import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 import { reachMode, unreached } from './reachability.mjs';
 import { judgeRed, readBaseline } from './baseline.mjs';
+import { inLaneCopy, mainRoot } from './worktree.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -246,13 +247,45 @@ export function taskBase(taskId) {
   return base;
 }
 
+const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
+const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: REPO_ROOT }).status === 0;
+/** The studio's main branch as this checkout can name it (a lane copy: the main checkout's branch), never HEAD's own. */
+function studioMainBranches() {
+  const own = (git('symbolic-ref', '-q', '--short', 'HEAD') || '').trim();
+  const names = [];
+  try {
+    if (inLaneCopy()) names.push(spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: mainRoot(), encoding: 'utf8' }).stdout.trim());
+  } catch {
+    // no main checkout to ask
+  }
+  names.push('main', 'origin/main');
+  return [...new Set(names.filter((n) => n && n !== own && n !== `origin/${own}`))];
+}
+/**
+ * 2.58.0: the commit a task's growth is measured from. Its start commit, unless its branch has since taken in the
+ * studio's main branch (a merge or a rebase): then the merge-base of HEAD and main, so what came from main isn't
+ * counted as the task's own growth (a crew report: a merged-in main forced a --force close twice). Only a
+ * merge-base at or after the start counts; on main itself, or with no main, the start commit.
+ */
+export function sizeBase(taskId) {
+  const base = taskBase(taskId);
+  if (!base) return null;
+  let best = base;
+  for (const ref of studioMainBranches()) {
+    const mb = (git('merge-base', 'HEAD', ref) || '').trim();
+    if (isSha(mb) && mb !== best && isAncestor(best, mb)) best = mb;
+  }
+  return best;
+}
+
 /**
  * The size ratchet (2.29): game functions and files over the limit (scripts/check-function-size.mjs) that
  * this task made bigger, or created. Ones that were already that big and didn't grow are left to a split
- * task. Null when the start commit isn't known (a task started before 2.29).
+ * task. Null when the start commit isn't known (a task started before 2.29). 2.58.0: compared with sizeBase
+ * (the merge-base with the studio's main branch once the task took main in), not always the start commit.
  */
 export function sizeGrowth(taskId, files) {
-  const base = taskBase(taskId);
+  const base = sizeBase(taskId);
   if (!base) return null;
   const limits = LIMITS();
   const out = [];

@@ -11,6 +11,10 @@ what it reviews and give a verdict, a bug needs a pinned regression that fails o
 spec with a hand-off, a scenario, goldens, a playtest and an approval from another model family, a build needs real
 changes and a verify after the last one. The War Room shows the same checklist when you click an agent.
 
+**The size ratchet** counts only this task's own growth. Once your branch has taken in the studio's main branch
+(a merge or a rebase; in a lane copy, the main checkout's branch), files are compared with the merge-base of HEAD
+and main, not with the commit the task started from, so what came from main isn't yours.
+
 | Type | Picked by | Skill |
 | --- | --- | --- |
 | change | role `builder`, `asset-3d`, or anything unmatched | [builder.md](builder.md) |
