@@ -28,6 +28,7 @@ import { checkDone } from './done-check.mjs';
 import { DEFAULT_SIZE } from './scorecard.mjs';
 import { readAttached } from './cheatsheet.mjs';
 import { HANDOFF_MAX } from './session-cap.mjs';
+import { untrustedBlock } from './untrusted.mjs';
 
 const read = (rel) => {
   try {
@@ -111,8 +112,23 @@ export function renderVoice(v) {
 export function renderFocus(f) {
   const a = f.agent || '<you>';
   const L = [];
-  L.push(`# Focus: ${f.task.id} ${f.task.title}`, '');
+  // 2.58.0 (PU-36, P-049): what agents or people wrote (the title, hand-off notes, meeting and review notes, lessons,
+  // the game's off-limits line) goes in one marked block (harness/untrusted.mjs), never among this page's steps.
+  const handoff = f.handoff ? f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim() : '';
+  const told = untrustedBlock([
+    { label: `Task title (${f.task.id})`, text: f.task.title },
+    // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
+    { label: `Notes from whoever worked on this before, newest last (${handoff.length > HANDOFF_MAX ? `the newest ${Math.round(HANDOFF_MAX / 1000)}k characters. Older notes in studio/handoffs/${f.task.id}.md` : `studio/handoffs/${f.task.id}.md`})`, text: handoff.length > HANDOFF_MAX ? `…${handoff.slice(-HANDOFF_MAX)}` : handoff },
+    { label: 'Mentioned in a meeting (studio/meetings/)', text: f.meetingNotes.map((t) => `- ${(t.match(/^# (.+)$/m) || [, ''])[1]}`).join('\n') },
+    // 2.30g: the dev's earlier verdicts that touch this task (context, never rules).
+    { label: 'Review notes: earlier verdicts that touch this task', text: f.verdictNotes ? f.verdictNotes.trim() : '' },
+    { label: 'Lessons that look related (studio/memory/failures.md)', text: f.lessons.map((l) => `### ${l.text}`).join('\n') },
+    { label: `Lessons filed for \`${f.task.role}\` (studio/memory/failures.md)`, text: (f.roleLessons || []).map((l) => `### ${l}`).join('\n') },
+    { label: 'Off-limits for agents (studio/game/GAME.md): keep out of these', text: f.offLimits && !/^_.*_$/.test(f.offLimits.trim()) ? f.offLimits : '' },
+  ]);
+  L.push(`# Focus: ${f.task.id}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
+  if (told) L.push('', '## What this task is, and what others left on it', told.trimEnd());
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
   if (f.roleRefusals?.length) L.push('', `## Where \`${f.task.role}\` agents get refused most`, ...f.roleRefusals.map((r) => `- ${r.n}x: ${r.why}`), 'Do these before you run done.');
@@ -124,22 +140,13 @@ export function renderFocus(f) {
   }
   if (f.prepared) L.push('', '## Prepared brief', `A short summary of this task's history is in \`${f.prepared}\`. Read it instead of the event log.`);
   else if (f.historyWords >= Number(process.env.STUDIO_PREPARE_MIN_WORDS || 500)) L.push('', '## Long history', `This task has ${f.historyWords} words of history. Run \`npm run brief -- ${f.task.id}\` for a 300-word summary (a cheap or local model drafts it, a script checks it).`);
-  if (f.handoff) {
-    // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
-    const h = f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim();
-    L.push('', '## Notes from whoever worked on this before', h.length > HANDOFF_MAX ? `(Older notes in studio/handoffs/${f.task.id}.md.)\n…${h.slice(-HANDOFF_MAX)}` : h);
-  }
   if (f.tricks?.length) L.push('', `## Pre-approved tricks for this task (studio/CHEATSHEET.md, approved by ${f.tricksBy || 'the assigner'})`, 'Use these for this task without asking. Anything not listed here follows the normal approval rules.', ...f.tricks.map((t) => `- ${t.id ? `${t.id} ` : ''}${t.text}`));
-  if (f.meetingNotes.length) L.push('', '## Mentioned in a meeting', ...f.meetingNotes.map((t) => `- ${(t.match(/^# (.+)$/m) || [, ''])[1]}`));
-  // 2.30g: the dev's earlier verdicts that touch this task (context, never rules), and the failing Godot unit tests.
-  if (f.verdictNotes) L.push('', f.verdictNotes.trim());
+  // The failing Godot unit tests (the hand-off, meeting and review notes are in the marked block above).
   if (f.godotFailures) L.push('', f.godotFailures.trim());
   L.push('', '## Stay in your lane');
   L.push(f.mine.length ? `- You hold: ${f.mine.map((l) => `\`${l.key}\``).join(', ')}` : `- Claim the files you will touch first: \`node harness/lock.mjs claim path:<folder> --owner ${a}\``);
   L.push(f.others.length ? `- Others hold (don't edit): ${f.others.map((l) => `\`${l.key}\` (${l.owner})`).join(', ')}` : '- Nobody else holds anything right now.');
-  if (f.offLimits && !/^_.*_$/.test(f.offLimits.trim())) L.push(`- Off-limits for agents (studio/game/GAME.md): ${f.offLimits}`);
-  if (f.lessons.length) L.push('', '## Lessons that look related (studio/memory/failures.md)', ...f.lessons.map((l) => `### ${l.text}`));
-  if (f.roleLessons?.length) L.push('', `## Lessons filed for \`${f.task.role}\``, ...f.roleLessons.map((l) => `### ${l}`));
+  if (f.offLimits && !/^_.*_$/.test(f.offLimits.trim())) L.push('- The game\'s off-limits list (studio/game/GAME.md) is in the marked block above.');
   if (f.voice && ['docs', 'change', 'idea'].includes(f.check.type)) L.push('', '## The game\'s voice (anything the player reads or hears)', renderVoice(f.voice));
   L.push('', '## Gates right now');
   L.push(f.gates ? (f.red.length ? `- Last verify had failures: ${f.red.join(', ')}. Don't make them worse; say so if your task can't pass because of them.` : `- Last verify was green (${f.gates.at}).`) : '- No verify recorded yet.');
