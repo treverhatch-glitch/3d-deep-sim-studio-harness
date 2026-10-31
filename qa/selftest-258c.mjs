@@ -8,6 +8,8 @@
  *   4. The skip list is tied to real paths: harness/secrets.mjs and the root package-lock.json are skipped, any
  *      other secrets.mjs or *.lock is scanned.
  *   5. scrub() (trajectory exports, reviews) removes every PU-18 kind: it shares the scan's list.
+ *   6. The owner's allowlist (studio/secrets-allow.json, protected): a finding shows the sha256 of its value, and an
+ *      entry (path, kind, fingerprint, commit) allows that one false alarm and nothing else.
  * Every token is built at run time from random characters, so this file holds none and the scan over the repo
  * stays clean. No output may hold a token's value.
  */
@@ -201,7 +203,65 @@ export async function selftest258C({ dir, run, report, tmpRoot }) {
       left.length === 0 && s.hits >= Object.keys(kinds).length && /aws_secret_access_key = \[removed\]/.test(s.text) && /JWT_SECRET=\[removed\]/.test(s.text), `left: ${left.join(', ')}; hits ${s.hits}`);
   }
 
-  // 7. No output above holds a value.
+  // 7. The owner's allowlist (studio/secrets-allow.json): one false alarm, by path, kind, fingerprint and commit.
+  {
+    const fp = (v) => crypto.createHash('sha256').update(v).digest('hex');
+    const ownerKey = path.join(tmpRoot, `owner-258c-${process.pid}.pem`);
+    const owner = { ...env, STUDIO_OWNER_KEY: ownerKey };
+    const protectedCheck = () => seen(spawnSync(process.execPath, ['qa/protected-check.mjs'], { cwd: g, encoding: 'utf8', env: owner }));
+    git('config', 'core.autocrlf', 'false');
+    fs.rmSync(ownerKey, { force: true });
+    const kg = spawnSync(process.execPath, ['harness/approve.mjs', 'keygen'], { cwd: g, encoding: 'utf8', env: owner });
+    git('add', 'studio/keys');
+    git('commit', '-qm', 'owner key', '--no-verify');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD'); // the base holds the owner key
+    const commitFile = (rel, text, msg) => {
+      w(g, rel, text);
+      git('add', '-A');
+      git('commit', '-qm', msg, '--no-verify');
+      return short();
+    };
+    // A value that only looks like a token, committed and removed again: a history false alarm.
+    const lookalike = github();
+    const c1 = commitFile('game/z/fixture.txt', `id: ${lookalike}\n`, 'fixture');
+    fs.rmSync(path.join(g, 'game/z/fixture.txt'));
+    git('add', '-A');
+    git('commit', '-qm', 'fixture removed', '--no-verify');
+    const before = node(g, 'scripts/secret-scan.mjs');
+    const hint = (/e\.g\. (\{.*\})\s*$/m.exec(out(before)) || [])[1];
+    let entry = null;
+    try { entry = { ...JSON.parse(hint), reason: 'a fixture id that only looks like a token', by: 'owner' }; } catch {}
+    report('PU-33: each finding shows the sha256 of its value (never the value) and a one-line hint with a ready entry for studio/secrets-allow.json',
+      before.status === 1 && new RegExp(`${c1} game/z/fixture\\.txt:1 {2}github-token {2}sha256:${fp(lookalike)}`).test(out(before)) && entry?.fingerprint === fp(lookalike) && entry?.commit === c1
+        && entry?.path === 'game/z/fixture.txt' && !leaks(out(before)), out(before));
+
+    w(g, 'studio/secrets-allow.json', `${JSON.stringify({ allow: [entry] }, null, 2)}\n`);
+    const allowed = node(g, 'scripts/secret-scan.mjs');
+    const unsigned = protectedCheck();
+    const signed = spawnSync(process.execPath, ['harness/approve.mjs', 'protected', '--note', 'the owner allows one fixture false alarm'], { cwd: g, encoding: 'utf8', env: owner });
+    git('add', '-A');
+    git('commit', '-qm', 'allow the fixture false alarm', '--no-verify');
+    const approved = protectedCheck();
+    const after = node(g, 'scripts/secret-scan.mjs');
+    report('PU-33: an entry in studio/secrets-allow.json allows that history false alarm ("allowed (reason)", the scan passes); the file is protected: unsigned it fails the protected check, the owner\'s approval passes it',
+      kg.status === 0 && allowed.status === 0 && /game\/z\/fixture\.txt:1 {2}github-token {2}sha256:[0-9a-f]{64} {2}allowed \(a fixture id that only looks like a token\)/.test(out(allowed))
+        && unsigned.status !== 0 && /studio\/secrets-allow\.json/.test(out(unsigned)) && signed.status === 0 && approved.status === 0 && after.status === 0,
+      `${out(allowed)}\n---\n${out(unsigned)}\n---\n${out(signed)}\n---\n${out(approved)}\n---\n${out(after)}`);
+
+    // The same value at another path is a new finding; a different value at the same path and kind too.
+    const c3 = commitFile('game/z/copy.txt', `id: ${lookalike}\n`, 'copy');
+    const elsewhere = node(g, 'scripts/secret-scan.mjs');
+    git('reset', '-q', '--hard', 'HEAD~1');
+    const real = github();
+    const c4 = commitFile('game/z/fixture.txt', `id: ${real}\n`, 'a real one where the fixture was');
+    const other = node(g, 'scripts/secret-scan.mjs');
+    report('PU-33: an allow entry is that one finding only: the same fingerprint at another path still fails, and a real token at the allowed path and kind (another fingerprint) still fails',
+      elsewhere.status === 1 && new RegExp(`${c3} game/z/copy\\.txt:1 {2}github-token {2}sha256:${fp(lookalike)}\\n`).test(out(elsewhere)) && /allowed \(a fixture id/.test(out(elsewhere))
+        && other.status === 1 && new RegExp(`${c4} game/z/fixture\\.txt:1 {2}github-token {2}sha256:${fp(real)}\\n`).test(out(other)) && !leaks(out(elsewhere) + out(other)),
+      `${out(elsewhere)}\n---\n${out(other)}`);
+  }
+
+  // 8. No output above holds a value.
   {
     const all = outputs.join('\n');
     report('PU-33: no scan, hook or gate output above holds a token value (file, line, kind and commit only)', values.length >= 20 && leaks(all) === 0, `${leaks(all)} of ${values.length} values printed`);

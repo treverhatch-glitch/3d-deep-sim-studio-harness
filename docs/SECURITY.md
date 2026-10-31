@@ -47,9 +47,11 @@
   `--since <ref>` scans only the commits in `<ref>..HEAD`; `--no-history` only the files.
 - `--staged` (the pre-commit hook) reads the staged blobs from the index, not the files on disk: a token staged and then
   cleaned only in the file still blocks the commit.
-- A hit prints the file, the line and the kind (for example `discord-bot-token` or `named-secret (JWT_SECRET)`), never the value;
-  a hit in history also prints the commit's short id, and `(commit message)` for one in a message. To clear it, rotate the key and
-  take it out of the commit before pushing (`git commit --amend`, or `git rebase -i <base>` for older commits).
+- A hit prints the file, the line, the kind (for example `discord-bot-token` or `named-secret (JWT_SECRET)`) and the sha256 of
+  the value, never the value; a hit in history also prints the commit's short id, and `(commit message)` for one in a message.
+  To clear it, rotate the key and take it out of the commit before pushing (`git commit --amend`, or `git rebase -i <base>`).
+  A true false alarm the owner can allow by its fingerprint in `studio/secrets-allow.json` (protected; see
+  [`docs/SECRETS.md`](SECRETS.md#a-false-alarm-the-owners-allowlist-studiosecrets-allowjson)); a real key is never allowed.
 - Text is read as UTF-8, UTF-8 with a BOM, or UTF-16 LE/BE with a BOM (what Windows PowerShell 5's `>` writes); a file with a
   NUL byte and no BOM is binary. Skips are tied to their real paths: `harness/secrets.mjs` (the shapes), the root
   `package-lock.json` and `.studio/locks/`; a `secrets.mjs` or `*.lock` anywhere else is scanned.

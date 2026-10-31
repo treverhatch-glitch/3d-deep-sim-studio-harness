@@ -19,11 +19,16 @@
  * Text files in UTF-8, UTF-8 with a BOM, or UTF-16 LE/BE with a BOM (Windows PowerShell 5's `>`) are read;
  * other files with a NUL byte are binary and skipped. What counts as a secret lives in harness/secrets.mjs,
  * shared with scrub(). Pure Node plus git, so it runs the same on Windows, macOS and Linux. Values are never
- * printed: a hit is reported as file:line and the kind (for example discord-bot-token), with the commit's
- * short id for one in history.
+ * printed: a hit is reported as file:line, the kind (for example discord-bot-token) and the sha256 of the value,
+ * with the commit's short id for one in history.
+ *
+ * A true false alarm (not a key) can be allowed by the owner only: an entry in studio/secrets-allow.json (protected,
+ * so it needs the owner's signed approval) with path, kind, fingerprint (that sha256) and optionally the commit
+ * ("*": the files). It is then listed as "allowed (reason)" and doesn't fail. A real key is rotated, never allowed.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { findSecrets } from '../harness/secrets.mjs';
 
@@ -52,11 +57,12 @@ const BLOB_CAP = 4 * 1024 * 1024; // history: a file git calls binary is read ba
 
 const git = (a, opts = {}) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, ...opts });
 
-// Where ROOT sits in git: inGit, and the path from the repo's top to ROOT ('' at the top, 'sub/dir/' below it).
-const where = git(['rev-parse', '--is-inside-work-tree', '--show-prefix']);
+// Where ROOT sits in git: inGit, the path from the repo's top to ROOT ('' at the top, 'sub/dir/' below it), the top.
+const where = git(['rev-parse', '--is-inside-work-tree', '--show-prefix', '--show-toplevel']);
 const whereLines = String(where.stdout || '').split('\n');
 const IN_GIT = where.status === 0 && whereLines[0] === 'true';
 const PREFIX = IN_GIT ? whereLines[1] || '' : '';
+const TOP = IN_GIT && whereLines[2] ? whereLines[2] : ROOT;
 
 // PU-33: skips are tied to their real place from the repo's top (before 2.58.0 any secrets.mjs or *.lock
 // anywhere was skipped). harness/secrets.mjs spells out the shapes; the root lockfile is npm's hashes.
@@ -76,17 +82,27 @@ function decodeText(buf) {
   return text.slice(0, 8000).includes('\0') ? null : text;
 }
 
-/** Secrets in `text` grouped by line: Map(line → Set(kind)). `lineOf` maps an index to the line to report. */
-function byLine(text, rel, lineOf) {
-  const out = new Map();
+const sha256 = (v) => crypto.createHash('sha256').update(v, 'utf8').digest('hex');
+
+/**
+ * The secrets in `text`: [{ line, kind, fp }], one per kind and value on a line. `fp` is the sha256 of the matched
+ * value (printed, so the owner can allow a false alarm by it; the value never is). `lineOf` maps an index to the
+ * line to report.
+ */
+function findingsIn(text, rel, lineOf) {
+  const lines = new Map();
   for (const f of findSecrets(text, { path: rel })) {
     const line = lineOf(f.index);
-    if (!out.has(line)) out.set(line, new Set());
-    out.get(line).add(f.kind);
+    const fp = sha256(text.slice(f.index, f.index + f.length));
+    if (!lines.has(line)) lines.set(line, new Map());
+    lines.get(line).set(`${f.kind}\0${fp}`, { line, kind: f.kind, fp });
   }
-  // A line whose token has a known shape reports that shape, not also "named-secret".
-  for (const kinds of out.values()) {
-    if ([...kinds].some((k) => !k.startsWith('named-secret'))) for (const k of kinds) if (k.startsWith('named-secret')) kinds.delete(k);
+  const out = [];
+  for (const found of lines.values()) {
+    const list = [...found.values()].sort((x, y) => (x.kind < y.kind ? -1 : x.kind > y.kind ? 1 : 0));
+    // A line whose token has a known shape reports that shape, not also "named-secret".
+    const shaped = list.some((x) => !x.kind.startsWith('named-secret'));
+    for (const x of list) if (!(shaped && x.kind.startsWith('named-secret'))) out.push(x);
   }
   return out;
 }
@@ -110,11 +126,12 @@ function lineIndex(text) {
   };
 }
 
-const hits = []; // { sha?, rel, line, kinds }
-const record = (rel, map, sha) => {
-  for (const [line, kinds] of map) hits.push({ sha, rel, line, kinds: [...kinds].sort().join(', ') });
+// { sha? (full; none for the files or the index), rel (as shown), at (from the repo's top, for the allowlist), line, kind, fp }
+const hits = [];
+const record = (rel, found, sha, at = rel) => {
+  for (const f of found) hits.push({ sha, rel, at, ...f });
 };
-const scanText = (text, rel, sha) => record(rel, byLine(text, rel, lineIndex(text)), sha);
+const scanText = (text, rel, sha, at = rel) => record(rel, findingsIn(text, rel, lineIndex(text)), sha, at);
 
 /** Read blobs from git: Map(oid → Buffer), one cat-file call. */
 function readBlobs(oids) {
@@ -200,7 +217,7 @@ function scanWorkingTree() {
     }
     const text = decodeText(fs.readFileSync(full));
     const before = hits.length;
-    if (text !== null) scanText(text, rel);
+    if (text !== null) scanText(text, rel, undefined, PREFIX + rel);
     if (hits.length === before) cleanFiles.add(rel);
   }
   return count;
@@ -329,7 +346,7 @@ function scanHistory(range) {
   const shas = [];
   split(logOf(['--format=%x01%H%x02%B%x03', ...range.spec, '--']), (c) => {
     shas.push(c.sha);
-    scanText(c.msg, '(commit message)', c.sha.slice(0, 7));
+    scanText(c.msg, '(commit message)', c.sha);
   });
   if (!shas.length) return 0;
   // Exactly those commits' patches (fed on stdin, no walk: a path-limited walk would simplify away a side branch
@@ -337,7 +354,7 @@ function scanHistory(range) {
   const out = logOf(['--stdin', '--no-walk=unsorted', '--no-ext-diff', '--no-textconv', '-p', '--cc', '-U0', '--full-index', '--no-renames',
     '--src-prefix=a/', '--dst-prefix=b/', '--format=%x01%H%x02%x03', '--', ...NOT_BINARY], `${shas.join('\n')}\n`);
   const binaries = [];
-  split(out, (c, end) => scanDiff(out, c.start, end, c.sha.slice(0, 7), binaries));
+  split(out, (c, end) => scanDiff(out, c.start, end, c.sha, binaries));
   const seen = new Set();
   const wanted = binaries.filter((b) => !BINARY_EXT.test(b.rel) && !seen.has(b.oid) && seen.add(b.oid));
   eachBlob(wanted, (b, buf) => {
@@ -357,7 +374,7 @@ function scanDiff(out, start, end, sha, binaries) {
     if (file && file.lines.length && !skipped(file.rel) && !covered.has(`${file.rel}\0${file.oid}`)) {
       const text = file.lines.join('\n');
       const pos = lineIndex(text);
-      record(file.rel, byLine(text, file.rel, (i) => file.nums[pos(i) - 1]), sha);
+      record(file.rel, findingsIn(text, file.rel, (i) => file.nums[pos(i) - 1]), sha);
     }
     file = null;
   };
@@ -394,11 +411,38 @@ function scanDiff(out, start, end, sha, binaries) {
   flush();
 }
 
+// --- The owner's allowlist: false alarms, one finding each, by fingerprint -----------------------------------
+// studio/secrets-allow.json is protected (studio/protected.json): an entry lands only with the owner's signed
+// approval, so an agent can't allow its own secret. A real key is rotated, never allowed.
+const ALLOW_REL = 'studio/secrets-allow.json';
+function loadAllow() {
+  const file = path.join(TOP, ALLOW_REL);
+  if (!fs.existsSync(file)) return [];
+  let data;
+  try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (err) { throw new Error(`${ALLOW_REL} is not valid JSON (${err.message})`); }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.allow) ? data.allow : null;
+  if (!list) throw new Error(`${ALLOW_REL} needs an "allow" list`);
+  const out = [];
+  list.forEach((e, i) => {
+    const commit = e?.commit === undefined || e?.commit === null || e?.commit === '' ? null : String(e.commit).toLowerCase();
+    const ok = e && typeof e.path === 'string' && typeof e.kind === 'string' && /^[0-9a-f]{64}$/i.test(String(e.fingerprint || ''))
+      && String(e.reason || '').trim() && String(e.by || '').trim() && (commit === null || commit === '*' || /^[0-9a-f]{7,64}$/.test(commit));
+    if (ok) out.push({ commit, path: e.path, kind: e.kind, fp: e.fingerprint.toLowerCase(), reason: String(e.reason).trim() });
+    else console.log(`[secrets] note: ${ALLOW_REL} entry ${i + 1} allows nothing: it needs path, kind, fingerprint (sha256 hex), reason and by; commit is a sha or "*"`);
+  });
+  return out;
+}
+// Path, kind and fingerprint must match, and the commit when the entry names one ("*": the files, not history).
+const allowedBy = (allow, h) => allow.find((e) => e.path === h.at && e.kind === h.kind && e.fp === h.fp
+  && (e.commit === null || (e.commit === '*' ? !h.sha : Boolean(h.sha) && h.sha.startsWith(e.commit))));
+
 // --- Run ------------------------------------------------------------------------------------------------------
 let fileCount = 0;
 let commitCount = 0;
 let range = null;
+let allow = [];
 try {
+  allow = loadAllow();
   if (STAGED) fileCount = IN_GIT ? scanStaged() : scanWorkingTree();
   else {
     if (!SINCE) fileCount = scanWorkingTree();
@@ -416,25 +460,39 @@ try {
   console.log(`[secrets] FAIL couldn't finish the scan: ${err.message}`);
   process.exit(1);
 }
-if (hits.length) {
-  const inHistory = hits.filter((h) => h.sha);
+const show = (h) => `  ${h.sha ? `${h.sha.slice(0, 7)} ` : ''}${h.rel}:${h.line}  ${h.kind}  sha256:${h.fp}`;
+for (const h of hits) h.allowed = allowedBy(allow, h);
+const failing = hits.filter((h) => !h.allowed);
+const allowed = hits.filter((h) => h.allowed);
+const listAllowed = () => {
+  if (!allowed.length) return;
+  console.log(`[secrets] ${allowed.length} finding(s) allowed by ${ALLOW_REL} (owner-approved false alarms):`);
+  console.log(allowed.map((h) => `${show(h)}  allowed (${h.allowed.reason})`).join('\n'));
+};
+if (failing.length) {
+  const inHistory = failing.filter((h) => h.sha);
   const order = (a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : a.line - b.line);
-  console.log('[secrets] FAIL key-shaped string(s) found (values hidden):');
-  const files = hits.filter((h) => !h.sha).sort(order);
-  if (files.length) console.log(files.map((h) => `  ${h.rel}:${h.line}  ${h.kinds}`).join('\n'));
+  console.log('[secrets] FAIL key-shaped string(s) found (values hidden; sha256 of each value shown):');
+  const files = failing.filter((h) => !h.sha).sort(order);
+  if (files.length) console.log(files.map(show).join('\n'));
   if (inHistory.length) {
     console.log(`  in commits ${range.label}:`);
-    console.log(inHistory.map((h) => `  ${h.sha} ${h.rel}:${h.line}  ${h.kinds}`).join('\n'));
+    console.log(inHistory.map(show).join('\n'));
   }
+  listAllowed();
   console.log('[secrets] Move real keys to .env (gitignored). If one was ever committed, rotate it.');
   if (inHistory.length) {
     console.log('[secrets] A key in a commit stays there after the file is cleaned. Rotate it, then take it out of the commit before');
     const base = range.fallback && commitCount < FALLBACK_COMMITS ? '--root' : range.base;
     console.log(`  pushing: git commit --amend for the last commit, git rebase -i ${base} for older ones.`);
   }
+  const h = failing[0];
+  const example = { commit: h.sha ? h.sha.slice(0, 7) : '*', path: h.at, line: h.line, kind: h.kind, fingerprint: h.fp, reason: 'why this is not a key', by: 'owner' };
+  console.log(`[secrets] Only a false alarm (not a key) may be allowed, by the owner: add an entry to ${ALLOW_REL} and sign it (npm run approve -- protected), e.g. ${JSON.stringify(example)}`);
   process.exit(1);
 }
+listAllowed();
 const what = [];
 if (!SINCE) what.push(`${fileCount} file(s)${STAGED && IN_GIT ? ' staged' : ''}`);
 if (range) what.push(`${commitCount} commit(s) ${range.label}`);
-console.log(`[secrets] PASS — ${what.join(', ')} scanned`);
+console.log(`[secrets] PASS — ${what.join(', ')} scanned${allowed.length ? `; ${allowed.length} allowed false alarm(s)` : ''}`);

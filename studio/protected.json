@@ -12,6 +12,7 @@
     "web/*/sim/qa.mjs",
     "game/*/sim/qa.mjs",
     "qa/regressions/**",
+    "studio/secrets-allow.json",
     "qa/controls-check.mjs",
     "qa/protected-check.mjs",
     "harness/approve.mjs",
