@@ -63,7 +63,11 @@ Claude Code's window limits count too ("5-hour limit reached ∙ resets 3pm", "W
 Mon 9am", "Opus weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the
 zone the message names ("(Asia/Bangkok)") or else this machine's; such a stop hands the task back as
 "stopped at its usage limit", which is waiting for the reset, not a failure (no breaker, park or halt). A
-role run by its own `STUDIO_<ROLE>_CMD` is marked `custom` and waits the same way.
+role run by its own `STUDIO_<ROLE>_CMD` (or `STUDIO_AGENT_CMD`) is marked per program, `custom:<program>`
+(the command's program, or the script an interpreter runs: `python -m hermes …` is `custom:hermes`), and
+every start of that command waits the same way: `npm run agent -- start` says "Not started: budget stop
+(custom:hermes is marked out until …)". Another command isn't held by it. Since 2.58.0; marks saved as plain
+`custom` by 2.57.0 run out on their own.
 
 ## Lanes, dependencies and parked work
 

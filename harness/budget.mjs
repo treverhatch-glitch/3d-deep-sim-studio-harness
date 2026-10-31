@@ -323,6 +323,43 @@ export function pickTool(preferred, now = Date.now()) {
 }
 
 /**
+ * 2.58.0 (PU-40, P-051): the key a usage limit on a custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is saved
+ * under: `custom:<program>`, the program's base name without its extension, lower case. For an interpreter
+ * (node, python, bash, cmd /c, powershell -File, npx …) the script it runs names it. Quotes, Windows paths and
+ * leading NAME=value settings are handled. Saved as plain `custom` (2.57.0), no launch check could match it, so
+ * the next launch hit the same limit at once; per program, two different custom commands don't hold each other.
+ * Null for an empty command.
+ */
+const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'py', 'bash', 'sh', 'zsh', 'dash', 'pwsh', 'powershell', 'cmd', 'npx', 'pnpx', 'bunx', 'env', 'call', 'start', 'exec', 'uv', 'uvx', 'ruby', 'perl']);
+export function customKey(cmd = '') {
+  const words = (String(cmd).match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) => w.replace(/^["']|["']$/g, ''));
+  const base = (w) => String(w).split(/[\\/]/).pop().toLowerCase().replace(/\.(exe|cmd|bat|ps1|sh|mjs|cjs|js|ts|py|rb|pl)$/i, '').replace(/^\.+/, '');
+  const setting = (w) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
+  // A flag: -x, --x, or cmd.exe's /c (a word starting with / is a path when it has another / or a dot).
+  const flag = (w) => /^-/.test(w) || /^\/[^/\\.]*$/.test(w);
+  let i = 0;
+  while (i < words.length && setting(words[i])) i++;
+  let prog = words[i] ? base(words[i]) : '';
+  // An interpreter runs the program: skip its flags to the script it runs. -c/-e/--eval/-Command run inline code
+  // (no script: the interpreter names it); -m and -File name the module or script next.
+  for (let hops = 0; INTERPRETERS.has(prog) && hops < 3; hops++) {
+    let j = i + 1;
+    let inline = false;
+    while (j < words.length && (flag(words[j]) || setting(words[j]))) {
+      const w = words[j];
+      if (/^(-c|-e|--eval|-Command)$/i.test(w)) { inline = true; break; }
+      j++;
+      if (/^(-m|-File)$/i.test(w)) break; // the module or the script is the next word
+    }
+    if (inline || j >= words.length || /^\{/.test(words[j])) break;
+    i = j;
+    prog = base(words[i]);
+  }
+  prog = prog.replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return prog ? `custom:${prog}` : null;
+}
+
+/**
  * 2.30q (#7): is this launch stopped by a budget mark? In the Marina run gemini was marked out by its spend
  * guard at 20:27 UTC, yet 69 Gemini sessions started afterwards: they ran as tool "custom" (the role's
  * STUDIO_<ROLE>_CMD wraps gemini), so the mark on "gemini" never matched, and with every tool marked out
@@ -337,6 +374,8 @@ export function budgetStopFor({ tool = '', model = '', cmd = '' } = {}, now = Da
   const add = (x) => { const v = String(x || '').toLowerCase().trim(); if (v && v !== 'unknown' && v !== 'custom') names.add(v); };
   add(tool); add(model); if (tool && model) add(`${tool}:${model}`);
   const fam = String(model || '').toLowerCase().match(/^[a-z]+/); if (fam) add(fam[0]);
+  // PU-40 (P-051): a launch through a command honours a usage limit saved for that program (custom:<program>).
+  const ck = cmd ? customKey(cmd) : null; if (ck) add(ck);
   const words = String(cmd || '').toLowerCase().split(/[^a-z0-9.:_-]+/).filter(Boolean);
   const hit = (key) => {
     const k = String(key).toLowerCase();
