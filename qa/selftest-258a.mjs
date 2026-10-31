@@ -6,6 +6,7 @@
  *          on its changes and a green verify, without a regression; "Fix a bug in …" is still a bug.
  *   PU-34 (P-047): task done trusts only a verify of this commit on a clean tree, and runs the protected and secrets
  *          checks again itself.
+ *   PU-35 (P-048): the game's check settings (studio/game.json, game|web/<name>/studio.gates.json) are protected.
  * Token-shaped values are put together at run time, so this file never holds one and the repo's scan stays clean.
  */
 import fs from 'node:fs';
@@ -148,4 +149,27 @@ console.log(JSON.stringify({ chore: chores.map((x) => [x, t(x)]).filter(([, y]) 
   report('2.58.0 (PU-34): task done runs the protected check itself: a protected file changed without the owner\'s approval stops it even with an "all ok" verify of this commit',
     kg.status === 0 && prot.status !== 0 && /the protected check fails/.test(out(prot)) && /cartridges\/example-sim\/qa\.mjs/.test(out(prot)), `${out(kg).slice(-300)}\n${out(prot).slice(-1500)}`);
   g('reset', '-q', '--keep', 'HEAD~1');
+
+  // 4. PU-35: the game's check settings are protected (the list is read from the base, so shrinking it doesn't help).
+  const check = () => run(dir, 'node qa/protected-check.mjs', env);
+  const clean = check();
+  const gatesRel = 'game/pier/studio.gates.json';
+  write(gatesRel, `${JSON.stringify({ gates: [{ id: 'test', command: 'node tools/test.mjs', required: false }] }, null, 2)}\n`);
+  const optional = check();
+  const ok = run(dir, 'node harness/approve.mjs protected --note "the owner makes the test optional"', env);
+  const approved = check();
+  g('checkout', '-q', '--', gatesRel);
+  fs.rmSync(path.join(dir, 'studio/approvals'), { recursive: true, force: true });
+  report('2.58.0 (PU-35): setting "required": false on a game\'s own check (game/<name>/studio.gates.json) fails the protected check without the owner\'s approval, and passes with it',
+    clean.status === 0 && optional.status !== 0 && /\[protected\] FAIL/.test(optional.stderr) && optional.stderr.includes(gatesRel) && ok.status === 0 && approved.status === 0, `${out(clean)}\n---\n${out(optional)}\n---\n${out(ok).slice(-400)}\n---\n${out(approved)}`);
+
+  write('studio/game.json', '{}\n');
+  const emptied = check();
+  const pj = JSON.parse(fs.readFileSync(path.join(dir, 'studio/protected.json'), 'utf8'));
+  pj.globs = pj.globs.filter((x) => !/game\.json|studio\.gates\.json/.test(x));
+  write('studio/protected.json', JSON.stringify(pj, null, 2));
+  const shrunk = check();
+  g('checkout', '-q', '--', 'studio/game.json', 'studio/protected.json');
+  report('2.58.0 (PU-35): writing {} into studio/game.json fails the protected check without the owner\'s approval, also when the branch drops it from its own protected list (the base\'s list counts)',
+    emptied.status !== 0 && emptied.stderr.includes('studio/game.json') && shrunk.status !== 0 && shrunk.stderr.includes('studio/game.json'), `${out(emptied)}\n---\n${out(shrunk)}`);
 }

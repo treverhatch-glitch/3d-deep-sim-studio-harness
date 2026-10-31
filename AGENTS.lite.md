@@ -29,6 +29,6 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 ## Never
 
 - Never edit `harness/`, `hub/`, `scripts/`, `tools/` or `qa/*.mjs` to make a check pass. Game tools go in `game/<name>/tools/`.
-- Protected files (`studio/protected.json`: scenarios' expected outcomes, regressions, the Bible's controls list, gates) change only with the owner's signed approval. If your task needs one changed, hand it back with a note saying which and why; never sign, force or work around it.
+- Protected files (`studio/protected.json`: scenarios' expected outcomes, regressions, the Bible's controls list, gates, the game's check settings in `studio/game.json` and `game|web/*/studio.gates.json`) change only with the owner's signed approval. If your task needs one changed, hand it back with a note saying which and why; never sign, force or work around it.
 - Never print, paste or commit keys or tokens.
 - Ask a person before pulling outside assets, a large refactor, or changing core sim rules.
