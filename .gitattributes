@@ -1,5 +1,7 @@
 * text=auto
 *.sh text eol=lf
+# Git hooks run under bash on Windows too: with CRLF, "bash\r" isn't found and every commit fails (2.58.0, PU-43)
+scripts/hooks/* text eol=lf
 *.mjs text eol=lf
 *.ts text eol=lf
 *.md text eol=lf
