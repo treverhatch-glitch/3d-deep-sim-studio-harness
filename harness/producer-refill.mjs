@@ -144,7 +144,17 @@ export async function refillPass({ dryRun = false, min = Number(process.env.STUD
     const wake = deps.wake || (async (why) => (await import('./agent.mjs')).wake('producer', { why }));
     try { woke = await wake(`the queue is low (${open.length} open): plan forward from the next unmet milestone; never re-list done work`); } catch {}
   }
-  emitEvent({ type: 'producer.refill', agent: 'watchdog', to: 'producer', msg: `Queue low (${open.length} builder tasks open): ${dryRun ? 'would add' : 'added'} ${picked.length} from unmet goals${refused.length ? `, refused ${refused.length} already covered` : ''}`, meta: { picked: picked.map((p) => p.key), refused: refused.map((r) => r.key) } });
+  const msg = `Queue low (${open.length} builder tasks open): ${dryRun ? 'would add' : 'added'} ${picked.length} from unmet goals${refused.length ? `, refused ${refused.length} already covered` : ''}`;
+  // 2.54.0 (P-027): a pass that adds nothing and wakes nobody is logged once an hour, not every minute.
+  let quiet = false;
+  if (!picked.length && !woke?.started) {
+    try {
+      const { readRecentEvents } = await import('./event.mjs');
+      const last = readRecentEvents(2000).filter((e) => e.type === 'producer.refill' && e.msg === msg).pop();
+      quiet = Boolean(last && Date.now() - Date.parse(last.ts) < 3600000);
+    } catch {}
+  }
+  if (!quiet) emitEvent({ type: 'producer.refill', agent: 'watchdog', to: 'producer', msg, meta: { picked: picked.map((p) => p.key), refused: refused.map((r) => r.key) } });
   return { refilled: picked, added, refused, woke, why: `${open.length} open < ${min}` };
 }
 
