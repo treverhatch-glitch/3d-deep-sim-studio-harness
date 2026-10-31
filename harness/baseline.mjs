@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 const BASE_DIR = () => path.join(STUDIO_STATE_DIR, 'baseline');
 const TRUNK_FILE = () => path.join(STUDIO_STATE_DIR, 'trunk.json');
@@ -49,8 +50,7 @@ export function recordBaseline(taskId, rec = lastRecord(null)) {
   if (!/^T-\d+$/.test(String(taskId || '')) || !rec?.rows) return null;
   const red = rec.rows.filter((r) => r.required && !r.ok).map((r) => ({ id: r.id, failures: Array.isArray(r.failures) ? r.failures : null }));
   const b = { task: taskId, at: new Date().toISOString(), from: { at: rec.at || null, head: rec.head || null, partial: Boolean(rec.partial) }, red };
-  fs.mkdirSync(BASE_DIR(), { recursive: true });
-  fs.writeFileSync(path.join(BASE_DIR(), `${taskId}.json`), `${JSON.stringify(b, null, 2)}\n`);
+  writeAtomic(path.join(BASE_DIR(), `${taskId}.json`), `${JSON.stringify(b, null, 2)}\n`, { fsync: false });
   if (red.length) emitEvent({ type: 'task.baseline', agent: 'gates', task: taskId, msg: `${taskId}: ${red.length} check(s) already red at claim (${red.map((r) => r.id).join(', ')}); the done-check won't blame the task for those`, meta: { red: red.map((r) => r.id) } });
   return b;
 }
@@ -94,8 +94,7 @@ export function setTrunk(state, { by, why = '' } = {}) {
   if (!['red', 'green'].includes(state)) return { ok: false, message: 'npm run task -- trunk red|green --by <name> [--why "<why>"]' };
   if (!by) return { ok: false, message: 'Say who: --by <name>.' };
   const rec = { state, by, why, at: new Date().toISOString() };
-  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
-  fs.writeFileSync(TRUNK_FILE(), `${JSON.stringify(rec, null, 2)}\n`);
+  writeAtomic(TRUNK_FILE(), `${JSON.stringify(rec, null, 2)}\n`);
   emitEvent({ type: `trunk.${state}`, agent: by, to: 'producer', status: state === 'red' ? 'blocked' : 'ok', msg: state === 'red' ? `Trunk marked red by ${by}${why ? `: ${why}` : ''}. Only fix tasks start until it is green.` : `Trunk marked green by ${by}. All tasks can start again.` });
   return { ok: true, trunk: rec };
 }

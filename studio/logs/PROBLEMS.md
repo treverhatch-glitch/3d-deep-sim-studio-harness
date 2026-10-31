@@ -296,7 +296,7 @@ subscription or API billing).
 - **Harness fix?** No (desktop tool limit).
 
 
-### P-036 — Unity's replay tests don't play the rules · open (fix proposed, needs Hatch's OK)
+### P-036 — Unity's replay tests don't play the rules · fixed (Unity repo PR #11, PU-21); in-editor run UNTESTED
 - **What happened:** the 4 Edit Mode tests passed in Hatch's editor (2026-10-31, screenshot of the green Test Runner), but they only read the replay files, check the dice bit for bit and check how a mismatch is reported. No Unity test plays the packed rules through Jint (`RulesHost`) and compares with the replays; that is proven only in .NET (`tools/SimCli`, 3/3).
 - **Why:** the replay test was written before the rules ran in Unity (it still has a "not ported yet" case); the Jint run was added to the .NET tools, not to the Edit Mode tests.
 - **Effect:** "the replays match inside the editor" was untested even though the Unity tests were green. I had described this check as "the replay tests: 3/3 must match at day 3" before reading the test file.
@@ -307,45 +307,63 @@ Two helpers ran about 13 minutes each before they were stopped by accident (a st
 reached them too). Each finding below was re-run by hand before logging; the command is in the entry.
 Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 
-### P-037 — An empty lock file makes a task unclaimable · open (fix PU-16)
+### P-037 — An empty lock file makes a task unclaimable · fixed in 2.57.0 (PU-16)
 - **What happened:** with a task's lock file present but empty (an agent killed between creating and writing it), `npm run task -- start T-102` and `node harness/lock.mjs claim task:T-102` both crash with `RangeError: Maximum call stack size exceeded`, every time, until a person deletes the file.
 - **Why:** `claimUnlocked` (harness/lock.mjs ~line 132) creates the file with `wx`; on `EEXIST` it reads it, and when the read fails it calls itself again, which hits `EEXIST` again, forever.
 - **Repro:** `node harness/lock.mjs claim task:T-102 --owner a1`, empty the file under `.studio/locks/`, then `npm run task -- start T-102 --agent a2`.
 - **Severity:** high (one badly timed crash blocks a task for good).
 
-### P-038 — Ten starts at once leave the board wrong · open (fix PU-16)
+### P-038 — Ten starts at once leave the board wrong · fixed in 2.57.0 (PU-16; re-run by hand: 10 started, 10 locks, 10 on the board, 5 rounds)
 - **What happened:** 10 agents starting 10 different tasks at the same moment, 3 rounds: 6–7 starts succeed and hold their locks, but the board (studio/NEXT.md) shows only 4–5 in progress; the others still read as waiting. The remaining starts fail outright.
 - **Why:** each start reads, changes and rewrites NEXT.md with no lock around it, so concurrent rewrites overwrite each other; a reader can also see a half-written file.
 - **Effect:** the Producer and the HUB see the wrong state; the launcher starting several agents in one pass (P-024) can hit it. Lower risk at the slow pace (2 agents).
 - **Severity:** medium-high.
 
-### P-039 — `agent stop` can kill an unrelated program · open (fix PU-17)
+### P-039 — `agent stop` can kill an unrelated program · open: the PU-17 fix failed on Windows CI and was taken out of 2.57.0 (see P-045)
 - **What happened:** a stale session record whose process number had been reused by another program: `npm run agent -- stop builder-7` killed that other program (a test `sleep`; exit 143).
 - **Why:** `stopAgent(pid)` (harness/agent.mjs ~line 688) kills by number only. On Windows it runs `taskkill /pid N /T /F`, which force-kills that program and everything under it.
 - **When it can happen:** after a crash or reboot, when the old record is still "running" and Windows has handed the number to something else (Discord, Unity, a terminal).
 - **Severity:** high on Windows.
 
-### P-040 — The secret scan misses the crew's own kind of token · open (fix PU-18)
+### P-040 — The secret scan misses the crew's own kind of token · fixed in 2.57.0 (PU-18; re-run by hand with random values)
 - **What happened:** fake-shaped tokens in single files, `node scripts/secret-scan.mjs <dir>`: PASS (not caught) for a Discord bot token (plain and in JSON), a Discord webhook URL, a Slack webhook, a Telegram bot token and an AWS secret key. Caught: GitHub, Anthropic and xAI keys.
 - **Why:** the scanner's pattern list doesn't cover these shapes or named `*_TOKEN=` assignments.
 - **Severity:** high for a crew driven by Discord bots on public repos.
 - **Baseline (same evening):** all three public repos scan clean (harness 524 files, game 3,843, Unity 126); one false alarm in an embedded airline-logo image (a base64 run that happens to look like an AWS key ID).
 
-### P-041 — Lost writes and a stop that fails open (leads, partly re-checked) · open (fix PU-16)
+### P-041 — Lost writes and a stop that fails open (leads, partly re-checked) · fixed in 2.57.0 (PU-16)
 - 10 parks at the same moment kept 1 in `studio/task-holds.json` (lost updates); not re-run by hand.
 - A half-written STOP file reads as "not stopped": a start went through. Not re-run by hand.
 - A half-written last line in `.studio/events.jsonl` hid the next event (a `task.start`), so `metrics` saw 0 attempts. Not re-run by hand.
 
-### P-042 — Some usage-limit messages aren't recognised · open (fix PU-19)
+### P-042 — Some usage-limit messages aren't recognised · fixed in 2.57.0 (PU-19; wording UNTESTED against a live limit)
 - **What happened:** the harness's own check (`providerTrouble` in harness/agent.mjs, `QUOTA_ERROR` in harness/budget.mjs) classes these as ordinary failures: "5-hour limit reached ∙ resets 3pm", "Weekly limit reached ∙ resets Mon 9am", "Opus weekly limit reached ∙ resets Nov 3, 9am". "Claude AI usage limit reached|<epoch>" is recognised but its reset time is ignored (1 h assumed); "resets Mon 9am" and "Nov 3, 9am" aren't parsed.
 - **Effect (likely, not run end to end):** a crew agent that hits its 5-hour or weekly window is handed back or failed over as if it broke, instead of waiting for the reset.
 - **Caveat:** the wording is how Claude Code shows its limits as far as I know; UNTESTED against a live limit hit. The first real limit line in the crew's logs should be added to the test.
 
 ### Leads not re-checked yet
-- The protected-files gate passed an uncommitted protected edit, and one already pushed (`[protected] note: no base branch to compare with`, exit 0). Planned as PU-20 after a re-check.
+- The protected-files gate passed an uncommitted protected edit, and one already pushed: re-checked, real (with no remote even a committed edit passed); fixed in 2.56.1 (PU-20, PR #34).
 - A stalled agent (no heartbeat for 40 min) keeps its slot: the launcher says "1 builder agent(s) already running" and another agent can't hand the task back.
 
 ### Held up fine
 - Two agents racing for the same task: only one ever wins (5 rounds).
 - 200,000 events (119 MB): `task next` 0.23 s, `task list` 0.12 s, `status` 0.46 s, watcher 0.49 s.
 - Fresh clone, as a newcomer: `npm run setup` without prompts, `npm run help`, `npm run verify` 10/10 (about 3 s) and `--full` 30/30, `new-game`, its playtest and the hub all worked. (The walkthrough stopped before the crew docs.)
+
+### P-043 — A Windows land-lock selftest flakes with EPERM · open (watch after 2.57.0)
+- **What happened:** PR #34's Windows job failed once on `2.30p: 4 processes x 5 read-modify-writes under the land lock lose no update` with `EPERM` on `open` (harness/merge-lane.mjs); a re-run of the same commit passed.
+- **Why (likely):** Windows refuses to open a file another process is replacing at that instant.
+- **Workaround:** re-run the failed job once (the release flow already does this for known timing checks).
+- **Fix?** 2.57.0 moves board writes off the land lock and adds a Windows rename retry (PU-16); `merge-lane.mjs`'s own land lock is unchanged. Watch whether it recurs.
+
+### P-044 — The HUD "Stop ends it and hands its task back" check flakes on main · open
+- **What happened:** main's `war-room-browser` job failed on 2 of 4 pushes (7f4a736, 3eb0cf2) on `[hud] FAIL Stop ends it and hands its task back` (and once on Pause), while the same code passed on its PR.
+- **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
+- **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
+
+### P-045 — The first PU-17 fix regressed agent sessions on Windows · open (rework)
+- **What happened:** 2.57.0's Windows CI job (PR #35, attempt 1) failed 5 selftests, all about agent sessions: PU-17's own launch check (`identity.pid` recorded as null, `alive=false`), "after agent stop, its task can't restart straight away" (`stop-1: it is still starting (no agent process yet)`: nothing was stopped, the task stayed claimed), "task lane gives each builder its own folder", "--lanes auto", "agent names never repeat". Linux passed all of them (865/0).
+- **Why (from the log):** (1) a stop while the agent is still starting no longer stops its launcher (the old code did); on the slower Windows runner the stop lands in that window. (2) Each launch and each session listing adds a PowerShell call (about 1 s or more), which pushes the supervisor tests past their time windows. (3) The agent's own identity could not be read right after start (null).
+- **Done:** PU-17 reverted from 2.57.0 before merge (auto-merge stopped first); the other three fixes ship.
+- **Rework plan:** read identities only when about to kill (not on every listing); a stop during start-up kills the launcher after checking the launcher's identity; compare Windows start times with a tolerance; prove it on Windows CI before merging.
+

@@ -263,17 +263,26 @@ ensureEventsFile();
 const currentTaskFile = path.join(REPO_ROOT, 'studio', 'CURRENT_TASK.md');
 const visionLockFile = path.join(REPO_ROOT, 'studio', 'VISION_LOCK.md');
 
-for (const watchTarget of [eventsFile, NEXT_FILE, currentTaskFile, visionLockFile, USAGE_FILE, WAR_ROOM_CONFIG_FILE]) {
+// 2.57.0 (PU-16): the harness replaces state files whole (a temp file renamed over them, harness/fsafe.mjs), which
+// ends a watch on the old file after its first replacement: on 'rename', watch the new file.
+function watchState(watchTarget, tries = 0) {
   try {
-    if (fs.existsSync(watchTarget)) {
-      fs.watch(watchTarget, { persistent: false }, () => {
-        broadcastSnapshot();
-      });
+    if (!fs.existsSync(watchTarget)) {
+      if (tries > 0 && tries < 30) setTimeout(() => watchState(watchTarget, tries + 1), 1000).unref?.();
+      return;
     }
+    const w = fs.watch(watchTarget, { persistent: false }, (ev) => {
+      broadcastSnapshot();
+      if (ev !== 'rename') return;
+      try { w.close(); } catch {}
+      setTimeout(() => watchState(watchTarget, 1), 50).unref?.();
+    });
+    w.on('error', () => {});
   } catch {
     // Non-fatal
   }
 }
+for (const watchTarget of [eventsFile, NEXT_FILE, currentTaskFile, visionLockFile, USAGE_FILE, WAR_ROOM_CONFIG_FILE]) watchState(watchTarget);
 
 function readBody(req, limit = 8e6) {
   return new Promise((resolve) => {

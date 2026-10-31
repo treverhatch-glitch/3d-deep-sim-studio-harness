@@ -13,6 +13,8 @@ hub/dist/
 
 # runtime state written by the harness (keep README.md, usage.json, and war-room.config.json templates)
 .studio/*
+# A state file mid-replace (harness/fsafe.mjs writes .<name>.<pid>-<id>.tmp beside it, then renames it over)
+.*.tmp
 # One working copy per lane (harness/worktree.mjs)
 .lanes/
 !.studio/README.md

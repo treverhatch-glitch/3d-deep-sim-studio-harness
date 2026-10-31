@@ -4,6 +4,43 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.57.0] — 2026-11-01
+2.57.0: three fixes from the 2026-10-31 break tests, batched into one release (owner-approved). Each has its own commit
+and its own selftest file. PU-17 (safe agent stop) was taken out before merge: Windows CI showed it regressed agent
+sessions there; it is being reworked.
+### Fixed
+- **PU-19 (P-042): Claude Code's 5-hour, session and weekly limit messages count as usage limits, with their reset
+  times.** Recognised forms include "5-hour limit reached ∙ resets 3pm", "Opus weekly limit reached ∙ resets Nov 3,
+  9am" and "usage limit reached|<unix time>". Reset times can be weekdays, dates or epochs, with a bracketed zone like
+  "(Asia/Bangkok)". A session that stops at its limit marks its tool out until the reset and hands its task back as
+  "stopped at its usage limit". The breaker, the loop park, the model escalation and the supervisor's halt don't count
+  it. A role run by its own command waits for its reset too. The exact wording is UNTESTED against a live limit.
+  `qa/selftest-pu19.mjs` (8 checks).
+- **PU-18 (P-040): the secret scan catches the crew's kind of token.** It now catches:
+  - Discord bot tokens and webhook URLs;
+  - Slack webhooks and app/refresh tokens;
+  - Telegram bot tokens;
+  - AWS secret keys and session tokens next to their names;
+  - long random values under names ending in TOKEN, SECRET, SECRET_KEY, API_KEY, PRIVATE_KEY, PASSWORD or WEBHOOK;
+  - tokens inside short whole base64 values.
+
+  Placeholders, docs samples and word-built values pass. Hits name the file, line and kind, never the value. One
+  regex pass per file makes it about 3× faster on a large repo. `qa/selftest-pu18.mjs` (33 checks).
+- **PU-16 (P-037, P-038, P-041): crash-safe studio state.**
+  - The board, holds, STOP, trunk and claim files are replaced whole (a temp file, then a rename; new
+    `harness/fsafe.mjs`), and every board or holds change runs under a short lock.
+  - Ten agents starting ten tasks at once all land on the board, and ten parks keep ten holds.
+  - An empty or unreadable claim file no longer crashes claims with a stack overflow: it reads "claimed (lock being
+    written)" for 10 s, then moves to `.studio/locks/broken/`.
+  - A STOP file that can't be read counts as stopped.
+  - A torn last line in `events.jsonl` no longer swallows the next event.
+  - Folder claims no longer crash while the land lock is held.
+  - The hub keeps watching files that are replaced whole.
+  - A lock file's age is never negative, so a zero grace always sets a broken lock aside (a flake found in the
+    combined run).
+  - The Windows rename retry is UNTESTED on real Windows. `qa/selftest-pu16.mjs` (13 checks).
+- docs/RELEASE.md: the batching rule.
+
 ## [2.56.1] — 2026-11-01
 2.56.1: PU-20, from the 2026-10-31 break tests (owner-approved fix).
 ### Fixed

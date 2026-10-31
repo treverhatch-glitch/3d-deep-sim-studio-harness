@@ -18,9 +18,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
+import { withFileLock, writeAtomic } from './fsafe.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -33,20 +34,44 @@ export function readHolds() {
   }
 }
 function writeHolds(tasks) {
-  fs.mkdirSync(path.dirname(HOLDS_FILE), { recursive: true });
-  fs.writeFileSync(HOLDS_FILE, `${JSON.stringify({ tasks }, null, 2)}\n`);
+  // 2.57.0 (PU-16): replaced whole, so a reader never sees half of it.
+  writeAtomic(HOLDS_FILE, `${JSON.stringify({ tasks }, null, 2)}\n`);
+}
+/**
+ * 2.57.0 (PU-16, P-041): read, change and write the holds under one lock (.studio/locks/holds.mutex): ten parks at
+ * the same moment used to keep one. `fn(all)` changes the map in place; its return value is returned. A holds file
+ * that is there but unreadable is copied aside (studio/task-holds.json.unreadable-<time>) before it is replaced.
+ */
+export function updateHolds(fn) {
+  return withFileLock('holds', () => {
+    let all = {};
+    let raw = null;
+    try { raw = fs.readFileSync(HOLDS_FILE, 'utf8'); } catch { /* none yet */ }
+    if (raw !== null) {
+      try {
+        all = JSON.parse(raw).tasks || {};
+      } catch {
+        try { fs.writeFileSync(`${HOLDS_FILE}.unreadable-${new Date().toISOString().replace(/[-:.]/g, '')}`, raw); } catch { /* best effort */ }
+        console.warn('[holds] studio/task-holds.json was unreadable; a copy was kept beside it and it starts empty');
+      }
+    }
+    const out = fn(all);
+    writeHolds(all);
+    return out;
+  }, { dir: path.join(STUDIO_STATE_DIR, 'locks'), what: 'The task holds (studio/task-holds.json)' });
 }
 /** Merge fields into one task's hold; a null value removes that field. */
 export function setHold(id, patch, { by = 'producer', msg = '' } = {}) {
-  const all = readHolds();
-  const h = { ...(all[id] || {}) };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === null || v === undefined || (Array.isArray(v) && !v.length)) delete h[k];
-    else h[k] = v;
-  }
-  if (Object.keys(h).length) all[id] = h;
-  else delete all[id];
-  writeHolds(all);
+  const h = updateHolds((all) => {
+    const one = { ...(all[id] || {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === undefined || (Array.isArray(v) && !v.length)) delete one[k];
+      else one[k] = v;
+    }
+    if (Object.keys(one).length) all[id] = one;
+    else delete all[id];
+    return one;
+  });
   if (msg) emitEvent({ type: 'task.hold', agent: by, task: id, msg });
   return h;
 }

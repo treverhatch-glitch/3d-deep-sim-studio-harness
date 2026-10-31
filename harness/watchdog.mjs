@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
+import { writeAtomic } from './fsafe.mjs';
 
 export const WATCHDOG_FILE = path.join(STUDIO_STATE_DIR, 'watchdog.json');
 export function readWatchdog() {
@@ -35,8 +36,7 @@ export function watchdogLimits(env = process.env) {
 export function setWatchdog(on, by) {
   if (!by) return { ok: false, message: 'Say who: --by <name>.' };
   const w = { ...readWatchdog(), on: Boolean(on), by, at: new Date().toISOString() };
-  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
-  fs.writeFileSync(WATCHDOG_FILE, `${JSON.stringify(w, null, 2)}\n`);
+  writeAtomic(WATCHDOG_FILE, `${JSON.stringify(w, null, 2)}\n`);
   emitEvent({ type: 'watchdog.switch', agent: by, to: 'producer', msg: `Watchdog ${on ? 'on' : 'off'} (${by})${on ? ': unanswered refresh checks hand off, looping tasks park, an idle studio stops' : ''}` });
   return { ok: true, watchdog: w };
 }
@@ -177,7 +177,7 @@ export function logActions(actions, { now = Date.now(), env = process.env, file 
   }
   if (quietMs > 0) {
     for (const [k, v] of Object.entries(seen)) if (now - v.at > Math.max(quietMs * 4, 86400000)) delete seen[k];
-    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(seen)}\n`); } catch {}
+    try { writeAtomic(file, `${JSON.stringify(seen)}\n`, { fsync: false }); } catch {}
   }
   return logged;
 

@@ -54,6 +54,11 @@ don't publish token counts, so `--weekly` is your own estimate of a week on that
 supervisor paces: under the target for this point in the week it allows up to two more agents; over
 it, it starts nothing new. A tool that hits its limit is skipped until its reset ("try again at 6:12")
 and its lanes move to the next tool in the order, instead of stalling.
+Claude Code's window limits count too ("5-hour limit reached ∙ resets 3pm", "Weekly limit reached ∙ resets
+Mon 9am", "Opus weekly limit reached ∙ resets Nov 3, 9am", "usage limit reached|<unix time>"), read in the
+zone the message names ("(Asia/Bangkok)") or else this machine's; such a stop hands the task back as
+"stopped at its usage limit", which is waiting for the reset, not a failure (no breaker, park or halt). A
+role run by its own `STUDIO_<ROLE>_CMD` is marked `custom` and waits the same way.
 
 ## Lanes, dependencies and parked work
 

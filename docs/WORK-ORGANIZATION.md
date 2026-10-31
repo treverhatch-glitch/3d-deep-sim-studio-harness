@@ -26,6 +26,21 @@ Agents must keep durable work in files, never trapped in chat history.
    - Update `studio/CURRENT_TASK.md` and mark the item done in `studio/NEXT.md` (`node harness/task.mjs done <ID>`).
 6. At the end of a day or major session, fill `studio/daily/YYYY-MM-DD.md` (copied from `studio/daily/TEMPLATE.md`), including the task checklist and any before/after gameplay videos.
 
+## Many Agents, One Board (crash-safe state, 2.57.0)
+
+Several agents change the board at once, and any of them can be killed mid-command. So the harness never
+writes shared state in place: `studio/NEXT.md`, `studio/DONE.md`, `studio/task-holds.json`, `.studio/STOP.json`,
+the trunk state and the claim files in `.studio/locks/` are written to a temp file and renamed over the old one
+(`harness/fsafe.mjs`), so a reader sees the old file or the new one, never half of one. Every change to the board
+(start, done, pause, add, drop, reorder, reopen, the watcher's requeue) and to the holds (park, block, lane) is
+read, made and written under a short lock (`.studio/locks/board.mutex`, `holds.mutex`; a dead agent's lock is
+broken at once, a stuck one after 10 s), so ten agents starting ten tasks together all land on the board. A claim
+file that can't be read (an agent killed while making it under an older harness) is reported as "claimed (lock
+being written)" for its first 10 s (`STUDIO_BROKEN_LOCK_GRACE_SEC`), then moved to `.studio/locks/broken/`
+(kept, never deleted) by the next claim or `npm run watch`. A `STOP.json` that exists but can't be read counts as
+stopped; `npm run task -- resume --by <name>` clears it. Don't hand-edit these files while agents run; use the
+`npm run task` commands.
+
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 
 ```markdown

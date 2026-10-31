@@ -88,15 +88,68 @@ export function cacheSince(tool, since, events = readRecentEvents(50000)) {
   return { cacheRead: ends.reduce((n, e) => n + (Number(e.meta?.cacheRead) || 0), 0), models: [...new Set(ends.map((e) => e.model).filter((m) => m && m !== 'unknown'))] };
 }
 
+// PU-19: wall-clock times in a named time zone, with Intl only (no dependency). An empty zone is this machine's.
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const WALL_FMT = new Map();
+function wallParts(ms, zone) {
+  const k = zone || '';
+  if (!WALL_FMT.has(k)) WALL_FMT.set(k, new Intl.DateTimeFormat('en-US', { timeZone: zone || undefined, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'short' }));
+  const p = Object.fromEntries(WALL_FMT.get(k).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return { y: Number(p.year), mo: Number(p.month) - 1, d: Number(p.day), h: Number(p.hour) % 24, mi: Number(p.minute), s: Number(p.second), wd: WEEKDAYS.indexOf(String(p.weekday).toLowerCase().slice(0, 3)) };
+}
+/** The instant a wall-clock time names in a zone; day overflow (the 32nd) rolls on, as Date.UTC does. */
+function fromWall(y, mo, d, h, mi, zone) {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  const offset = (ms) => {
+    const w = wallParts(ms, zone);
+    return Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000;
+  };
+  const first = guess - offset(guess);
+  return guess - offset(first); // a second look, in case a DST change lies between the guess and the answer
+}
+/** An IANA zone in brackets, "(Asia/Bangkok)", that this Node knows; null otherwise. */
+function zoneIn(t) {
+  const m = String(t).match(/\(\s*((?:[A-Za-z_]+\/)+[A-Za-z0-9_+-]+|UTC|GMT)\s*\)/);
+  if (!m) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: m[1] });
+    return m[1];
+  } catch {
+    return null;
+  }
+}
+/** Hours and minutes from "9am", "9:30 pm", "14:00"; null for an impossible time. */
+function clock(hs, ms, ap) {
+  let h = Number(hs);
+  const mi = Number(ms || 0);
+  if (ap && (h < 1 || h > 12)) return null;
+  if (h > 23 || mi > 59) return null;
+  if (ap && /p/i.test(ap) && h < 12) h += 12;
+  if (ap && /a/i.test(ap) && h === 12) h = 0;
+  return [h, mi];
+}
+
 /**
  * When a provider's limit resets, from its own words: "Resets in 80h54m54s", "resets in 3 days",
  * "try again in 45 minutes", "resets 06:12", "try again at 3pm", or an ISO time. Null when it doesn't say.
  * Test #2: agy's "Resets in 80h54m" (three days) was read as one hour.
+ * PU-19 (P-042) adds Claude Code's forms: "usage limit reached|1761962400" (the reset in unix seconds, or
+ * milliseconds with 13 digits), a weekday ("resets Mon 9am", "resets Tuesday 14:00": the next one after now),
+ * a date ("resets Nov 3, 9am", "Nov 3 at 9:00", "3 Nov 9am"; a date more than 45 days off is not believed),
+ * and a zone in brackets ("resets 3pm (Asia/Bangkok)") for any clock time. Without a zone a clock time is
+ * read in this machine's local time, as before. A reset time already past is no reset time (null).
+ * The exact wording of Claude Code's limit lines is not verified against a live run.
  */
 export function parseReset(text = '', now = Date.now()) {
   const t = String(text);
   const iso = t.match(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))/);
   if (iso && /reset|until|try again|available/i.test(t) && Date.parse(iso[1]) > now) return Date.parse(iso[1]);
+  const epoch = t.match(/\blimit\b[^|\n]{0,40}\|\s*(\d{13}|\d{10})(?!\d)/i);
+  if (epoch) {
+    const at = epoch[1].length === 13 ? Number(epoch[1]) : Number(epoch[1]) * 1000;
+    return at > now ? at : null;
+  }
   const rel = t.match(/(?:resets?|try again|retry|available)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])[\s,]*(?:and\s+)?)+)/i);
   if (rel) {
     const unit = { d: 86400000, h: 3600000, m: 60000, s: 1000 };
@@ -104,15 +157,41 @@ export function parseReset(text = '', now = Date.now()) {
     for (const m of rel[1].matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(m[1]) * unit[m[2].toLowerCase()];
     if (ms > 0) return now + ms;
   }
+  const zone = zoneIn(t);
+  const w = wallParts(now, zone);
+  const KEY = String.raw`(?:resets?|try again|available(?: again)?)(?:\s+(?:on|at))?\s+`;
+  const TIME = String.raw`(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\.?`;
+  const WD = String.raw`(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?`;
+  const MON = String.raw`(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?`;
+  const wd = t.match(new RegExp(`${KEY}${WD},?\\s+(?:at\\s+)?${TIME}(?![\\w:])`, 'i'));
+  if (wd && (wd[3] || wd[4])) {
+    const hm = clock(wd[2], wd[3], wd[4]);
+    if (hm) {
+      const ahead = (WEEKDAYS.indexOf(wd[1].toLowerCase()) - w.wd + 7) % 7;
+      let at = fromWall(w.y, w.mo, w.d + ahead, hm[0], hm[1], zone);
+      if (at <= now) at = fromWall(w.y, w.mo, w.d + ahead + 7, hm[0], hm[1], zone);
+      return at;
+    }
+  }
+  const md = t.match(new RegExp(`${KEY}${MON}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(?:at\\s+)?${TIME}(?![\\w:]))?`, 'i'));
+  const dm = md ? null : t.match(new RegExp(`${KEY}(\\d{1,2})(?:st|nd|rd|th)?\\s+${MON}(?![a-z])(?:,?\\s+(?:at\\s+)?${TIME}(?![\\w:]))?`, 'i'));
+  if (md || dm) {
+    const [mon, day, hs, ms, ap] = md ? [md[1], md[2], md[3], md[4], md[5]] : [dm[2], dm[1], dm[3], dm[4], dm[5]];
+    const hm = hs ? clock(hs, ms, ap) : [0, 0];
+    const mo = MONTHS.indexOf(mon.toLowerCase());
+    if (hm && Number(day) >= 1 && Number(day) <= 31) {
+      for (const y of [w.y, w.y + 1]) {
+        const at = fromWall(y, mo, Number(day), hm[0], hm[1], zone);
+        if (at > now) return at - now <= 45 * 86400000 ? at : null;
+      }
+    }
+  }
   const m = t.match(/(?:resets?|try again)(?: at| after)?\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\b/i);
   if (m && (m[2] || m[3])) {
-    const d = new Date(now);
-    let h = Number(m[1]) % 24;
-    if (m[3] && /pm/i.test(m[3]) && h < 12) h += 12;
-    if (m[3] && /am/i.test(m[3]) && h === 12) h = 0;
-    d.setHours(h, Number(m[2] || 0), 0, 0);
-    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-    return d.getTime();
+    const hm = clock(m[1], m[2], m[3]) || [Number(m[1]) % 24, Number(m[2] || 0)];
+    let at = fromWall(w.y, w.mo, w.d, hm[0], hm[1], zone);
+    if (at <= now) at = fromWall(w.y, w.mo, w.d + 1, hm[0], hm[1], zone);
+    return at;
   }
   return null;
 }
@@ -133,7 +212,22 @@ const harnessVersion = () => {
  * line is kept word for word, so whoever reads "out of quota" sees what the provider actually said.
  */
 // Only a real limit message from a provider (shared with the launcher, the probe and the reviewer).
-export const QUOTA_ERROR = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)|credits? (?:refused|exhausted|depleted)|payment required|\b402\b|spend(?:ing)? (?:limit|cap|guard) (?:reached|exceeded|hit)|budget (?:exceeded|exhausted)|token (?:cap|limit|budget) (?:reached|exceeded|hit)/i;
+// PU-19 (P-042): Claude Code's window limits, "5-hour limit reached ∙ resets 3pm", "Weekly limit reached",
+// "Opus weekly limit reached", "session limit reached", "You've reached your weekly limit", and any
+// "… limit reached" followed by a reset time or "|<unix time>". A usage-window word (5-hour, session, daily,
+// weekly, monthly, usage, plan, Opus, Sonnet, model) or a reset time is required, so "recursion limit reached"
+// or "file size limit reached" in a stack trace is not a usage limit. These wordings are taken from what
+// users report; they are not verified against a live Claude Code run.
+const LIMIT_WINDOW = String.raw`(?:(?:\d+|five)[- ]?hours?|hourly|hours?|session|daily|weekly|monthly|usage|plan|opus|sonnet|model)`;
+const LIMIT_RESET = String.raw`resets?\s+(?:(?:in|at|on)\s+)?(?:\d|(?:sun|mon|tue|wed|thu|fri|sat|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|today|tomorrow)`;
+const WINDOW_LIMIT = String.raw`\b${LIMIT_WINDOW}(?:[ -](?:${LIMIT_WINDOW}|\d+(?:\.\d+)?))*[ -]limit (?:reached|exceeded|hit)\b|(?:hit|reached) (?:your|the) (?:(?:${LIMIT_WINDOW}|rate|\d+(?:\.\d+)?)[ -])*limit\b|\blimit (?:reached|exceeded|hit)(?:\|\d{10,13}\b|\b[^\w\n]{0,6}(?:(?:it|and|which|will) )?${LIMIT_RESET})`;
+const PROVIDER_LIMIT = /usage limit (?:reached|exceeded|hit)|(?:hit|reached) (?:your|the) (?:usage |rate )?limit|\b429\b|too many requests|rate[ _-]?limit(?:ed| exceeded| reached| error)|quota (?:exceeded|exhausted)|insufficient[_ ]quota|credit balance is too low|insufficient[_ ]credits?|out of (?:credits|quota)|credits? (?:refused|exhausted|depleted)|payment required|\b402\b|spend(?:ing)? (?:limit|cap|guard) (?:reached|exceeded|hit)|budget (?:exceeded|exhausted)|token (?:cap|limit|budget) (?:reached|exceeded|hit)/i;
+export const QUOTA_ERROR = new RegExp(`${PROVIDER_LIMIT.source}|${WINDOW_LIMIT}`, 'i');
+/**
+ * PU-19: the hand-back note of a session that stopped at its usage limit. It is not a failure: the circuit
+ * breaker (its "usage limit" words), the loop park, the model escalation and the supervisor's halt skip it.
+ */
+export const LIMIT_STOP = /\bstopped at its usage limit\b/i;
 /** The provider's limit line in a failed command's stderr (or stdout when it printed nothing else), or null. */
 export function limitLine(stderr = '', stdout = '', code = 1) {
   if (code === 0) return null;

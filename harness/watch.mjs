@@ -22,9 +22,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
-import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff } from './task.mjs';
+import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, withBoard } from './task.mjs';
 import { holdReason } from './task-hold.mjs';
-import { listLocks, release } from './lock.mjs';
+import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
+import { writeAtomic } from './fsafe.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
 import { listDivisions } from './divisions.mjs';
@@ -60,6 +61,10 @@ function trail(events, agent) {
 
 export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) {
   const now = Date.now();
+  const findings = [];
+  // 2.57.0 (PU-16, P-037): lock files nobody can read (an agent killed while writing one) are set aside to
+  // .studio/locks/broken/ once they are older than STUDIO_BROKEN_LOCK_GRACE_SEC (10), so no claim trips on them.
+  for (const f of sweepBrokenLocks({ dryRun })) findings.push({ kind: 'lock', msg: `${dryRun ? 'Would set aside' : 'Set aside'} the unreadable lock file .studio/locks/${f} (in .studio/locks/broken/)`, producer: false });
   const q = parseNextQueue();
   const locks = listLocks();
   const events = readRecentEvents(2000);
@@ -71,7 +76,6 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     if (e.task) lastOnTask.set(e.task, { agent: e.agent, at, type: e.type });
   }
   const holder = new Map(locks.filter((l) => l.key.startsWith('task:')).map((l) => [l.key.slice(5), l]));
-  const findings = [];
   if (!dryRun) for (const a of markGone()) findings.push({ kind: 'gone', agent: a, msg: `${a}'s process is gone; its session is marked ended`, producer: false });
   const agentSessions = sessions();
   for (const s of agentSessions.filter((x) => x.stalled)) findings.push({ kind: 'stalled', agent: s.agent, msg: `${s.agent} (${s.role}) is running but its heartbeat stopped ${s.beatAgeMin} min ago`, producer: true });
@@ -155,15 +159,17 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   // A Watch task nobody has started, whose findings have all cleared: close it, so no Producer session
   // is spent confirming "all quiet" (test #2, T-197).
   if (open && !forProducer.length && !dryRun && q.backlog.some((t) => t.id === open.id)) {
-    const q2 = parseNextQueue();
-    const i = q2.backlog.findIndex((t) => t.id === open.id);
-    if (i >= 0) {
+    const closed = withBoard(() => {
+      const q2 = parseNextQueue();
+      const i = q2.backlog.findIndex((t) => t.id === open.id);
+      if (i < 0) return null;
       const [t] = q2.backlog.splice(i, 1);
       t.status = 'done';
       q2.done.unshift(t);
       writeNextQueue(q2);
-      emitEvent({ type: 'task.done', agent: 'watch', task: t.id, msg: `${t.id} closed by the watcher: what it reported (Watch:) has cleared` });
-    }
+      return t;
+    });
+    if (closed) emitEvent({ type: 'task.done', agent: 'watch', task: closed.id, msg: `${closed.id} closed by the watcher: what it reported (Watch:) has cleared` });
   }
   // New ideas from the Idea Board: one "Ideas:" task for the Producer, never one per idea.
   const ideas = dryRun ? null : collectIdeas();
@@ -195,7 +201,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
         if (r.started.length) console.log(`[watch] started ${r.started.join(', ')}`);
         try {
           const f = path.join(STUDIO_STATE_DIR, 'watch-last.json');
-          fs.writeFileSync(f, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), launched: r.started, launchWhy: r.why || null }, null, 2)}\n`);
+          writeAtomic(f, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), launched: r.started, launchWhy: r.why || null }, null, 2)}\n`, { fsync: false });
         } catch {
           // the pass hasn't written yet
         }
@@ -209,8 +215,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const checkin = dryRun ? null : producerCheckinIfDue(now, events);
   const report = { at: new Date(now).toISOString(), findings, pinged: pinged?.id || null, openWatchTask: open?.id || null, ideas, launched: launched?.started || [], checkin, decided };
   if (!dryRun) {
-    fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
-    fs.writeFileSync(path.join(STUDIO_STATE_DIR, 'watch-last.json'), JSON.stringify(report, null, 2) + '\n');
+    writeAtomic(path.join(STUDIO_STATE_DIR, 'watch-last.json'), JSON.stringify(report, null, 2) + '\n', { fsync: false });
   }
   return report;
 }
