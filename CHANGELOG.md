@@ -4,6 +4,26 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.45.0] — 2026-10-31
+2.45.0: real key presses on an adopted web game. Proven on a private copy of a real three.js tycoon: Space, 2, 1 and H
+pressed in Chromium, each checked against the Game Bible (speed 1 → 0 → 3 → 1, view apron → hall), 4/4 in under a minute; a key
+bound to nothing failed; the dev server was gone afterwards.
+### Added
+- **`npm run play:controls`** (`qa/controls-play.mjs`): for a studio game that isn't a cartridge. Reads
+  `game/<slug>/studio.browser.json` (serve command on a free port, or a running url; `init` before the page's
+  scripts; `start` steps from the title screen to play; `ready`; `state`; per-control `key`/`keys`/`click`/`before`),
+  presses every web control in the Game Bible, polls up to `settleMs` for its effects, writes
+  `qa/reports/controls-web-<time>.json`, and stops the server and its children. A control with no Bible effect is
+  "not checked" (not a pass). Exit 1 on any control that failed or wasn't checked.
+- **`to` in a Bible effect**: `{ "path": "speed", "to": 0 }` passes when the value ends there; a value already there
+  before the press fails, since the press proved nothing.
+- **Onboarding writes a starter `studio.browser.json`** for a Vite, Next or `npm run dev` game, and the controls-list
+  task names it. Export and sync leave it out, like `studio.gates.json`.
+- `scripts/check-controls-play.mjs`: the real-browser proof on a small fixture game, in CI's war-room-browser job.
+  `qa/selftest-245.mjs`: the parts without a browser.
+### Changed
+- `qa/controls-check.mjs`'s web track reads `controls-web-*.json` as well as `browser_*.json` (newest wins).
+
 ## [2.44.0] — 2026-10-31
 2.44.0: what a long build on an adopted game needs, measured on the same real game (a private 2,244-test three.js tycoon): keeping the studio's copy and the game's own repo in step, verify times a builder can live with, and flaky checks that don't block every task.
 ### Added
