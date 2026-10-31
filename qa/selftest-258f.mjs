@@ -36,7 +36,8 @@ export async function selftest258F({ dir, run, report }) {
   const sync = (owner, args, extra = {}) => spawnSync(process.execPath, ['scripts/run-gates.mjs', ...args], { cwd: dir, env: envFor(owner, extra), encoding: 'utf8', timeout: 60000 });
   // What a reaper does (tree-kill): every process under the foreground, found by parent pid, killed at once.
   const killTree = (pid) => {
-    if (process.platform === 'win32') return spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    // Same shape on every OS: the pids it killed (Windows CI crashed on `.includes` of taskkill's result object).
+    if (process.platform === 'win32') return spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).status === 0 ? [pid] : [];
     const kids = new Map();
     for (const l of (spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout || '').split('\n')) {
       const [c, pp] = l.trim().split(/\s+/).map(Number);
