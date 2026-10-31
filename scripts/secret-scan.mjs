@@ -59,6 +59,21 @@ function listFiles() {
   return out;
 }
 
+/**
+ * PU-33: a file's bytes as text, or null when binary. A BOM says UTF-8 or UTF-16 LE/BE (Windows PowerShell 5's `>`
+ * writes UTF-16LE with a BOM; before 2.58.0 its NUL bytes made it "binary"); no BOM and a NUL is binary.
+ */
+function decodeText(buf) {
+  let text;
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) text = buf.toString('utf8', 3);
+  else if (buf[0] === 0xff && buf[1] === 0xfe) text = buf.toString('utf16le', 2, 2 + ((buf.length - 2) & ~1));
+  else if (buf[0] === 0xfe && buf[1] === 0xff) {
+    const b = Buffer.from(buf.subarray(2, 2 + ((buf.length - 2) & ~1)));
+    text = b.swap16().toString('utf16le');
+  } else return buf.subarray(0, 8000).includes(0) ? null : buf.toString('utf8');
+  return text.slice(0, 8000).includes('\0') ? null : text;
+}
+
 /** Secrets in `text` grouped by line: Map(line → Set(kind)). The list lives in harness/secrets.mjs (PU-33: shared with scrub()). */
 function scanText(text, rel) {
   const byLine = new Map();
@@ -95,10 +110,10 @@ for (const rel of listFiles()) {
   const full = path.join(ROOT, rel);
   // --staged lists paths from the repo's top; the folder scan lists them from ROOT.
   if (skipped(STAGED ? rel : PREFIX + rel) || !fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
-  const buf = fs.readFileSync(full);
+  const text = decodeText(fs.readFileSync(full));
   count += 1;
-  if (buf.subarray(0, 8000).includes(0)) continue; // binary
-  for (const [line, kinds] of scanText(buf.toString('utf8'), rel)) hits.push({ rel, line, kinds: [...kinds].sort().join(', ') });
+  if (text === null) continue; // binary
+  for (const [line, kinds] of scanText(text, rel)) hits.push({ rel, line, kinds: [...kinds].sort().join(', ') });
 }
 if (hits.length) {
   hits.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : a.line - b.line));
