@@ -34,6 +34,27 @@ console.log(JSON.stringify(c || null));`);
     const r = run(dir, `node "${f}"`, { STUDIO_VISUAL_GATE: 'off', ...env });
     try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { error: out(r) }; }
   };
+  // U-003 (2.52.0): one run of the check before any play. CI once saw a play counted as older than "the last
+  // change", meaning a file in the work folders changed between the plays; a one-time write on the first run of
+  // the harness (a cache, a rollup) fits that. Running the check once first lets any such write happen before
+  // the plays, so the order of the plays and "the last change" no longer depends on timing.
+  probe();
+  const changedAfter = (t0) => {
+    const found = [];
+    const walk = (rel) => {
+      const abs = path.join(dir, rel);
+      if (!fs.existsSync(abs)) return;
+      for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+        if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+        const r = path.posix.join(rel, e.name);
+        if (e.isDirectory()) walk(r);
+        else if (!r.startsWith('qa/reports/') && fs.statSync(path.join(dir, r)).mtimeMs >= t0) found.push(r);
+      }
+    };
+    for (const d of ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio']) walk(d);
+    return found;
+  };
+  const playsStart = Date.now();
   play(true);
   const off = probe();
   const once = probe({ STUDIO_TWO_GREENS: 'on' });
@@ -41,5 +62,5 @@ console.log(JSON.stringify(c || null));`);
   const twice = probe({ STUDIO_TWO_GREENS: 'on' });
   play(false);
   const flaky = probe({ STUDIO_TWO_GREENS: 'on' });
-  report('2.41.0: with STUDIO_TWO_GREENS=on a new browser regression closes a renderer bug only after two passing plays since the last change and no failing one (a flaky test is named, not protected); off by default', off === null && once?.ok === false && /passed once since your last change/.test(once.why || '') && twice?.ok === true && flaky?.ok === false && /failed in 1 of 3 browser plays .*the HUD overlapped the end screen/.test(flaky.why || ''), JSON.stringify({ off, once, twice, flaky }));
+  report('2.41.0: with STUDIO_TWO_GREENS=on a new browser regression closes a renderer bug only after two passing plays since the last change and no failing one (a flaky test is named, not protected); off by default', off === null && once?.ok === false && /passed once since your last change/.test(once.why || '') && twice?.ok === true && flaky?.ok === false && /failed in 1 of 3 browser plays .*the HUD overlapped the end screen/.test(flaky.why || ''), `${JSON.stringify({ off, once, twice, flaky })}\nfiles in the work folders changed since the plays began (they move "the last change"): ${changedAfter(playsStart).join(', ') || 'none'}`);
 }
