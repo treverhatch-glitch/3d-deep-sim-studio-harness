@@ -175,7 +175,9 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   const since = o.exportedThrough && git(root, 'merge-base', '--is-ancestor', base, o.exportedThrough).status === 0 ? o.exportedThrough : base;
   const pending = git(root, 'log', '--format=%h %s', `${since}..HEAD`, '--', o.path, `:(exclude)${o.path}/studio.gates.json`).stdout.trim().split('\n').filter(Boolean);
   if (pending.length && !force) return { error: `${pending.length} commit(s) to ${o.path} since it was last synced haven't been sent back yet (${pending.slice(0, 3).join('; ')}): npm run onboard -- --export first, or --force to sync anyway`, pending };
-  if (git(root, 'status', '--porcelain', '--', o.path).stdout.trim()) return { error: `${o.path} has uncommitted changes: commit or set them aside first` };
+  // Tracked changes only: an untracked file (a build output, a cache) isn't touched by the patch.
+  const dirty = git(root, 'status', '--porcelain', '--untracked-files=no', '--', o.path).stdout.trim().split('\n').filter(Boolean);
+  if (dirty.length) return { error: `${o.path} has uncommitted changes (${dirty.slice(0, 3).map((l) => l.trim()).join('; ')}${dirty.length > 3 ? ' …' : ''}): commit or set them aside first` };
   const want = ref || o.ref || 'HEAD';
   if (git(o.source, 'remote').stdout.trim()) git(o.source, 'fetch', '-q', 'origin', want);
   // --verify --quiet: a plain rev-parse prints an unknown name back instead of nothing.
