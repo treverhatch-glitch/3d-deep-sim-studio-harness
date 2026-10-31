@@ -2,14 +2,13 @@
 
 **2-minute read for Hatch: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-10-31 afternoon
+## Latest summary — 2026-10-31 evening
 - **Done:**
-  - Hand-off merged in the Unity repo (PR #1).
-  - hatchfield-game history scanned (no keys; old private-doc links and your emails are in the history).
-  - Unity port steps 1–3: the rules roll seeded dice, saves keep them, and replay files exist for seeds 1–3.
-  - Harness 2.47 (U-001, U-002) in PR #15.
-- **Open problems:** P-001 (harness still public), P-004 (timing flake), P-005 (GPU model unread).
-- **Proposals waiting for your OK:** U-003 to U-007 (PROPOSALS.md).
+  - HDRP switch and the Unity side of the replay check (Unity repo PR #2).
+  - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003), each in its own PR.
+- **Untested:** everything that needs the Unity editor (HDRP set-up, Edit/Play Mode in Unity, the Windows build).
+- **Open problems:** P-001 (harness public), P-005 (GPU model), P-009 (no Unity on Claude's side).
+- **Waiting for your OK:** U-007 (last, only when nothing else waits).
 
 ## The files
 | File | What | Format |

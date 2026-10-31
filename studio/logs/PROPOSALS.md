@@ -14,19 +14,19 @@ Each proposal points at the problems it comes from. Status: **waiting**, **appro
   it to the essentials per push with the full set nightly.
 - **Size:** an hour once Hatch has added the runner. **Risk:** the checks run only while the PC is on.
 
-### U-003 — Make the 2.41 "two greens" selftest independent of timing · waiting
+### U-003 — Make the 2.41 "two greens" selftest independent of timing · approved 2026-10-31, done in 2.52
 - **From:** P-004. **Change:** the test stops depending on file and report times landing in a set order.
 - **Risk:** low (a test only). **Advice:** yes; it costs a re-run now and then.
 
-### U-004 — `npm run logs`: the 2-minute read from the command line · waiting
+### U-004 — `npm run logs`: the 2-minute read from the command line · approved 2026-10-31, done in 2.49
 - **From:** the logs set-up. **Change:** prints the latest summary, open problems and waiting proposals from studio/logs/.
 - **Risk:** none. **Advice:** yes, small; useful for the Ops bot's hourly post.
 
-### U-005 — The public-repo guard as a harness feature · waiting
+### U-005 — The public-repo guard as a harness feature · approved 2026-10-31, done in 2.51
 - **From:** the hand-off (the guard lives only in hatchfield-unity-harness today). **Change:** `npm run public-guard -- install <repo>` copies the guard, hook and CI check into any public game repo, and keeps them up to date.
 - **Risk:** low. **Advice:** yes, before a second public game repo exists.
 
-### U-006 — Parity for a Vite game through Vitest · waiting
+### U-006 — Parity for a Vite game through Vitest · approved 2026-10-31, done in 2.50
 - **From:** P-006. **Change:** docs plus a ready-made `--web` command shape for Vite/Vitest games (`REPLAY_PARITY={seeds} npx vitest run …`).
 - **Risk:** none. **Advice:** yes, with the Hatchfield link.
 

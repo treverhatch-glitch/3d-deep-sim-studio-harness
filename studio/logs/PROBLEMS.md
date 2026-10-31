@@ -24,7 +24,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround / fix:** match only the path inside the template (2.46).
 - **Harness fix?** Done.
 
-### P-004 — The 2.41 "two greens" selftest failed once on CI timing · open
+### P-004 — The 2.41 "two greens" selftest failed once on CI timing · fixed 2026-10-31 (2.52, U-003; root cause unproven)
 - **What happened:** release-gate (Node 24) failed once. It passed on the re-run and on Node 22 with the same code.
 - **Why:** not found yet. It's a timing-sensitive test of report times against file times; it doesn't reproduce locally.
 - **Workaround:** re-run the failed job.
@@ -47,3 +47,17 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Why:** the rules don't read Math.random any more.
 - **Workaround / fix:** `forceSimRandom(fn)` in src/game/simRng.ts; the tests use it.
 - **Harness fix?** No (game code).
+
+### P-008 — The public guard's hooks folder switched off Git LFS's hooks · fixed 2026-10-31
+- **What happened:** the Unity repo uses Git LFS for art; `core.hooksPath .githooks` (for the guard) made Git skip LFS's
+  own pre-push hook, so LFS files could be pushed as bare pointers.
+- **Why:** Git runs hooks from one folder only.
+- **Workaround / fix:** the guard's pre-push runs the guard, then `git lfs pre-push`; the other LFS hooks live in
+  `.githooks/` too (Unity repo PR #2, and `npm run public-guard -- install` in 2.51).
+- **Harness fix?** Done (2.51).
+
+### P-009 — HDRP and its setup can't be run or tested from Claude's side · open
+- **What happened:** the HDRP switch and every Unity editor step need Unity with a licence; Claude's machine has neither.
+- **Workaround:** a one-click set-up script that logs DONE/SKIPPED per setting; Hatch (or a bot on his PC) runs it and
+  sends the Console text; CI runs the Windows build once the licence secrets exist.
+- **Harness fix?** Later: a bot on Hatch's PC runs `npm run engine:gate` and posts the result.
