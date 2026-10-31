@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.53.0] — 2026-10-31
+2.53.0: the public guard learns a repo's own private markers (Hatchfield: the packed web rules must never reach the
+public Unity repo).
+### Added
+- `tools/public-guard/private-markers.json` in a game repo: `{ "files": [regex], "text": [regex], "why": "…" }`.
+  The guard adds them to its built-in rules. `npm run public-guard -- install` never overwrites that file.
+- The guard reads files up to 16 MB (a packed code file is a few MB).
+- `qa/selftest-253.mjs`.
+
 ## [2.52.0] — 2026-10-31
 2.52.0: U-003 from the studio logs, approved by the owner.
 ### Fixed
