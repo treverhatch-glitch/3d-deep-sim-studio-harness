@@ -80,6 +80,24 @@ needs Hatch's OK before it is built. Size: S under half a day, M 1–2 days, L m
 
 PU-15 review: `studio/logs/research/PIXELFX-REVIEW-2026-10-31.md` (licence MIT; mechanics only; risks: taste can't be auto-checked, GPU particle systems need a per-engine capture hook, scope creep into an effects library). It builds on PU-07 and is measured on the PU-01 bench.
 
+## Planned updates from the break tests (2026-10-31 evening) · PLANNED, nothing built
+Found by two break-test helpers on throwaway copies (stopped after ~13 minutes by accident; leads in PROBLEMS.md
+P-037 to P-041) and re-run by hand before logging. Each needs Hatch's OK. Same size scale as above.
+
+| # | Update | Verdict | Priority | Size | How we test it |
+| --- | --- | --- | --- | --- | --- |
+| PU-16 | **Crash-safe studio state:** every state file (board, done list, holds, STOP, locks) written to a temp file and renamed into place; a short file lock around each read-modify-write of the board and holds; a lock file that can't be read is set aside after a grace period instead of blocking the task; an unreadable STOP file counts as stopped (fail closed) | ADOPT | P1 | M | Selftest: 10 parallel starts × 20 rounds, the board's in-progress list equals the locks held every round; an empty lock file recovers; a torn STOP keeps the studio stopped; 10 parallel parks keep 10 (P-037, P-038, P-041) |
+| PU-17 | **Safe agent stop:** record each agent's process start time (and command) at launch; `agent stop` and the watchdog kill only if the process number still belongs to that program, otherwise mark the session dead and release its work. Windows: no `taskkill /T` on a number that has been reused | ADOPT | P1 | S | Selftest: a stale session whose number now belongs to an unrelated process; `agent stop` leaves it running and hands the task back (P-039) |
+| PU-18 | **Secret scan for the crew's real tokens:** Discord bot tokens and webhooks, Slack webhooks and tokens, Telegram bot tokens, AWS secret keys, named assignments (`*_TOKEN=`, `*_SECRET=`, `*_KEY=`) with long random values, and tokens hidden in base64 | ADOPT | P1 | S | Fixture set of fake-shaped tokens: each one fails the scan; the three public repos stay clean (the 2026-10-31 baseline, one known false alarm in an image pack) (P-040) |
+| PU-19 | **Usage-limit messages:** recognise "5-hour limit reached", "Weekly limit reached", "Opus weekly limit reached" and "usage limit reached\|<time>"; read the reset from "resets Mon 9am", "resets Nov 3, 9am" and the epoch number; a hit makes the agent wait for the reset instead of counting as a failure | ADOPT | P1 | S | The probe table from the break test as a selftest (every line classed as a limit, the reset time right); one real limit line from the crew's logs added when it appears (wording UNTESTED against a live run) (P-042) |
+| PU-20 | **Protected files: check the working tree too**, not only commits since `origin/main` (an uncommitted edit, or one already pushed, passed) | ADOPT | P2 | S | LEAD, re-check first: selftest with an uncommitted protected edit and with HEAD equal to origin/main; both refused without the owner's approval |
+| PU-21 | **Unity: play the replays through the rules in Edit Mode** and print the rules file's fingerprint at load and in the test name | ADOPT | P1 | S | Unity repo PR; the 3 replays "match" in CI's Unity job and in Hatch's editor; a stale rules file shows its fingerprint in the first line (P-034, P-036) |
+
+**Suggested order for these:** PU-17 and PU-18 first (one can kill an unrelated program on Hatch's PC, the other can
+let the crew's Discord token reach a public repo), then PU-19 (the crew runs on subscriptions), then PU-16, then
+PU-21; PU-20 after its lead is re-checked. Research update (better approaches for agent-led game development): not
+done this round; the research helper was stopped before it reported.
+
 **Suggested order:** PU-06 and the watchdog fixes (P-022 to P-027) first, because the crew is running into them
 today; then PU-02 and PU-03, so the crew's data is collected in a usable form from the start; then PU-01 and PU-04;
 the rest after there is data.
