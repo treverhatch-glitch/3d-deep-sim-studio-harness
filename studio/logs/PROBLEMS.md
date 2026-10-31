@@ -319,7 +319,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Effect:** the Producer and the HUB see the wrong state; the launcher starting several agents in one pass (P-024) can hit it. Lower risk at the slow pace (2 agents).
 - **Severity:** medium-high.
 
-### P-039 — `agent stop` can kill an unrelated program · open: the PU-17 fix failed on Windows CI and was taken out of 2.57.0 (see P-045)
+### P-039 — `agent stop` can kill an unrelated program · fixed in 2.57.1 (PU-17 rework; real-Windows PowerShell path proven only by Windows CI)
 - **What happened:** a stale session record whose process number had been reused by another program: `npm run agent -- stop builder-7` killed that other program (a test `sleep`; exit 143).
 - **Why:** `stopAgent(pid)` (harness/agent.mjs ~line 688) kills by number only. On Windows it runs `taskkill /pid N /T /F`, which force-kills that program and everything under it.
 - **When it can happen:** after a crash or reboot, when the old record is still "running" and Windows has handed the number to something else (Discord, Unity, a terminal).
@@ -361,7 +361,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
 - **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
 
-### P-045 — The first PU-17 fix regressed agent sessions on Windows · open (rework)
+### P-045 — The first PU-17 fix regressed agent sessions on Windows · fixed in 2.57.1 (rework: no process call at launch or in listings; a stop during start-up stops the launcher)
 - **What happened:** 2.57.0's Windows CI job (PR #35, attempt 1) failed 5 selftests, all about agent sessions: PU-17's own launch check (`identity.pid` recorded as null, `alive=false`), "after agent stop, its task can't restart straight away" (`stop-1: it is still starting (no agent process yet)`: nothing was stopped, the task stayed claimed), "task lane gives each builder its own folder", "--lanes auto", "agent names never repeat". Linux passed all of them (865/0).
 - **Why (from the log):** (1) a stop while the agent is still starting no longer stops its launcher (the old code did); on the slower Windows runner the stop lands in that window. (2) Each launch and each session listing adds a PowerShell call (about 1 s or more), which pushes the supervisor tests past their time windows. (3) The agent's own identity could not be read right after start (null).
 - **Done:** PU-17 reverted from 2.57.0 before merge (auto-merge stopped first); the other three fixes ship.
@@ -435,3 +435,32 @@ reproduced it myself; the rest is the helper's repro, with the command in its re
 - 2,000 tasks, 100 sessions, 300k events (roll-over off): `task next` 0.28 s, `task start` 3.1 s, `done --check` 2.6 s, watcher 1.4 s.
 - CRLF in NEXT.md parses; IDs with `../` or case-only differences can't reach the board (the ID format is `[A-Z]+-\d+`).
 - `npm run verify` 2.0 s and `task done --check` 0.31 s on a fresh copy.
+
+## From the crew, 2026-11-01 (studio-hatchfield, harness 2.53 to 2.55; Hatch relayed grokbot's notes)
+The crew's log numbers these P-034 and P-035; here they get new numbers, since P-034 and P-035 are already used above.
+
+### P-061 — The size-growth done-check measures from the task's start, so merges from main count as the task's growth · open (2.58.0)
+- Forced a `--force` close on T-026 and would hit T-028. Fix: measure from the merge-base with the studio's main.
+
+### P-062 — On Windows, `verify` rewrote the line endings of a game test snapshot (`*.snap`), dirtying main · open (2.58.0)
+- Fix: game checks run with `CI=true` (snapshots never written in verify); verify names any tracked file it changed;
+  games add `*.snap text eol=lf` to their `.gitattributes` (a crew task in the game repo).
+
+### P-063 — Build, toolchain and chore tasks are asked for a regression that fails on the old code · open (2.58.0)
+- Titles starting "fix" are typed `bug`; the crew retitled tasks "Toolchain" to get past it. Fix: a `chore` type.
+
+### P-064 — Claude Code's low-memory guard killed background verify runs four times · open (2.58.0)
+- Fix: `npm run verify` runs the gates in a detached process; a reaped session doesn't lose the run; `--wait` re-attaches.
+
+### P-065 — The hub's watcher started an unwanted Producer session · open (2.58.0)
+- 2.55.0 stopped an unchosen pace from starting agents, but the watcher's Producer check-in still starts one when a
+  Producer tool is set or the pace auto-launches. Fix: starting agents from the watcher becomes opt-in.
+
+### Answered without code (crew report)
+- Watchdog "6 sessions, no task finished in 2 h": fixed in 2.54.0 (P-022, P-023); studio-hatchfield runs 2.56.0+.
+  `STUDIO_WATCHDOG_IDLE_HOURS=4` can go back to the default; keeping 4 while tasks take half a day is reasonable.
+- `task done --force`: `--reason` and `--accepted-by` already existed; the owner-typed path is now written down
+  (`docs/FORCED-CLOSE.md`, 2.57.1).
+- Bots wake only on a person's @ping: written into `docs/DISCORD-CREW.md` (2.57.1) and the Unity repo's
+  `docs/crew/BOT-RULES.md` rule 17 (Unity PR #12); the 👀/✅ rule was already rule 13 there.
+

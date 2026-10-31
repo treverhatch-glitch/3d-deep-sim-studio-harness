@@ -4,6 +4,26 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.57.1] — 2026-11-01
+2.57.1: what was ready after 2.57.0, batched (owner's rule).
+### Fixed
+- **PU-17 (P-039, P-045): `agent stop` no longer kills a program the OS gave a stale session's process number.**
+  - The launcher writes down when each process started, with no extra process call at launch or in listings.
+  - Five places read the start time from the OS once, at the moment of the kill: Stop, Pause, Stop all, the stall and
+    refresh checks, and `studio:stop`. PowerShell does it on Windows, `ps` on macOS and `/proc` on Linux.
+  - They kill only if the start time matches within 3 s. A reused number is left alone: the session ends, its task
+    goes back and its claims are freed (event `agent.pid_reused`).
+  - An unreadable start time falls back to the heartbeat rule.
+  - A stop during start-up stops the launcher.
+  - The first version, taken out of 2.57.0, slowed Windows launches. This one adds no process call there.
+  - `qa/selftest-pu17.mjs` (10 checks).
+### Docs
+- `docs/FORCED-CLOSE.md`: the owner types a forced close (`--force --reason … --accepted-by <name>`); agents ask,
+  and never work around Claude Code's block (crew report).
+- `docs/DISCORD-CREW.md`: chat bots wake only on a person's @ping, so hand-offs go through a person or the task
+  queue. Every bot reacts 👀 on a task and ✅ when it finishes (crew report).
+- Logs: break tests round 2 (P-046 to P-060), planned updates PU-33 to PU-43, and the crew's report of 2026-11-01.
+
 ## [2.57.0] — 2026-11-01
 2.57.0: three fixes from the 2026-10-31 break tests, batched into one release (owner-approved). Each has its own commit
 and its own selftest file. PU-17 (safe agent stop) was taken out before merge: Windows CI showed it regressed agent
