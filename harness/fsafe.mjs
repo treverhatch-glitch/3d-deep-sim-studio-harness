@@ -6,12 +6,15 @@
  *   createExclusive(file, text)    make a file only if none exists, already holding all of its text (a hard link
  *                                  from a temp file; where links aren't supported: exclusive create, one write).
  *   withFileLock(name, fn)         a short cross-process lock (<dir>/<name>.mutex: pid, host, time) around a
- *                                  synchronous read-modify-write. Re-entrant in one process. A dead holder's or a
- *                                  stale lock is broken; after timeoutMs it throws (code ELOCKBUSY), never loops.
+ *                                  synchronous read-modify-write. Re-entrant in one process. A dead holder's lock is
+ *                                  broken at once; a live holder on this machine is waited for, never broken on age
+ *                                  (2.58.0, P-056); after timeoutMs it throws (code ELOCKBUSY), never loops.
  *   appendLine(file, line)         append one line; a torn last line (a writer killed mid-line) is closed first, so
  *                                  it can't swallow this one.
  *   moveAside(file, dest, raw)     rename a file away only if it still holds `raw` (put back if another agent
  *                                  replaced it meanwhile).
+ *   sweepTempsDeep(roots)          remove temp files killed writers left (2.58.0, P-060; the watcher runs it).
+ *   onFsafeWarning(fn)             also send fsafe's warnings to `fn` (harness/lock.mjs logs them as events).
  *
  * Why: P-037 (an empty lock file made every claim recurse forever), P-038 (ten agents starting at once lost each
  * other's board moves), P-041 (ten parks kept one hold; a half-written STOP read as "not stopped"; a torn events
@@ -19,7 +22,8 @@
  *
  * Windows: renaming over a file another program holds open (an antivirus scan, an editor) can fail with
  * EPERM/EBUSY/EACCES. writeAtomic retries briefly with backoff (about 1 s, STUDIO_ATOMIC_RETRIES), then writes the
- * file in place with a warning rather than lose the update.
+ * file in place with a warning (and, 2.58.0, a warning event) rather than lose the update. createExclusive retries
+ * the same errors (a lock file that was just deleted stays "delete pending" while another program has it open).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -79,18 +83,50 @@ export function renameWithRetry(from, to, { rename = fs.renameSync, retryable = 
   }
 }
 
+// 2.58.0 (PU-43): a warning only on the console reaches nobody when the agent's output isn't read. Whoever imports
+// the event log registers a sink (harness/lock.mjs: a `fsafe.warning` event); fsafe itself stays free of it.
+let warnSink = null;
+let warning = false;
+export function onFsafeWarning(fn) { warnSink = typeof fn === 'function' ? fn : null; }
+export function fsafeWarn(msg, info = {}) {
+  try { console.warn(msg); } catch { /* no console */ }
+  if (!warnSink || warning) return;
+  warning = true; // a sink that itself warns doesn't loop
+  try { warnSink(msg, info); } catch { /* the console line is there */ } finally { warning = false; }
+}
+
+/**
+ * 2.58.0 (P-056): a writer holding a withFileLock checks, right before it replaces a file, that every lock it holds
+ * is still its own. A lock broken from under it (its process looked gone, or it was paused past the limit) throws
+ * ELOCKLOST here instead of overwriting what the new holder wrote. Unreadable for another reason: assumed still ours.
+ */
+export function assertLocksHeld() {
+  for (const [file, token] of held) {
+    let now;
+    try { now = fs.readFileSync(file, 'utf8'); } catch (err) { if (err.code !== 'ENOENT') continue; now = null; }
+    if (now !== token) throw lostError(file, token);
+  }
+}
+function lostError(file, token) {
+  let at = null;
+  try { at = JSON.parse(token).at; } catch { /* ours is always JSON */ }
+  const s = Number.isFinite(at) ? ` after ${Math.round((Date.now() - at) / 1000)} s` : '';
+  return Object.assign(new Error(`This process lost the lock ${path.basename(file)}${s} (another agent took it over, judging this one gone or stuck), so it stopped before writing over that agent's change. Check the result, then run the command again.`), { code: 'ELOCKLOST', file });
+}
+
 /**
  * Replace `file` with `text` so no reader ever sees it half-written, and a writer killed mid-way leaves the old
  * file whole. Returns 'renamed', or 'direct' when Windows kept refusing the rename and the file was written in place.
  */
-export function writeAtomic(file, text, { fsync, rename, retryable, delays, warn = (m) => console.warn(m) } = {}) {
+export function writeAtomic(file, text, { fsync, rename, retryable, delays, warn = fsafeWarn } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = tempPath(file);
   try {
     writeTemp(tmp, text, fsync === undefined ? {} : { fsync });
+    assertLocksHeld();
     if (renameWithRetry(tmp, file, { ...(rename ? { rename } : {}), ...(retryable ? { retryable } : {}), ...(delays ? { delays } : {}) })) return 'renamed';
     // Still locked by another program after about a second: write in place rather than lose the update.
-    warn(`[fsafe] couldn't replace ${path.basename(file)} atomically (another program has it open); wrote it in place`);
+    warn(`[fsafe] couldn't replace ${path.basename(file)} atomically (another program has it open); wrote it in place`, { file, kind: 'in-place' });
     fs.writeFileSync(file, text);
     return 'direct';
   } finally {
@@ -98,43 +134,75 @@ export function writeAtomic(file, text, { fsync, rename, retryable, delays, warn
   }
 }
 
-// Hard links: NTFS, ext4, APFS have them; FAT/exFAT and some network or synced folders don't.
-const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EINVAL', 'EMLINK', 'EACCES']);
-let linksWork = null;
+// Hard links: NTFS, ext4, APFS have them; FAT/exFAT and some network or synced folders don't. These codes mean "no
+// hard links in this folder"; EPERM/EACCES don't (2.58.0, P-055: on Windows they are what a file another program
+// holds open, or one deleted a moment ago and still "delete pending", gives).
+const NO_LINK = new Set(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EINVAL', 'EMLINK']);
+const noLinkDirs = new Set();
+// EPERM/EACCES on Windows that outlast the retries, though an exclusive create then works: a folder without hard
+// links (FAT). After this many, the folder skips links (one failure used to turn links off for the whole process).
+const NO_LINK_AFTER = 3;
+const permFallbacks = new Map();
+/** The errors that mean "busy right now, try again": Windows' sharing errors; elsewhere only EBUSY. */
+export const busyCode = (code) => (process.platform === 'win32' ? RETRY_CODES.has(code) : code === 'EBUSY');
 
 /**
- * Create `file` holding `text`, only if it doesn't exist yet. Returns true when created, false when it exists. The
- * file never appears empty: the text is written to a temp file first and hard-linked into place (link fails with
- * EEXIST, like exclusive create). Without hard links: exclusive create and the whole text in one write.
+ * Create `file` holding `text`, only if it doesn't exist yet. Returns true when created, false when it exists (or,
+ * 2.58.0, is still held busy after the retries: the caller treats that as taken and tries again later). The file
+ * never appears empty: the text is written to a temp file first and hard-linked into place (link fails with EEXIST,
+ * like exclusive create). Without hard links: exclusive create and the whole text in one write.
+ * `link`, `open`, `busy`, `delays` and `platform` are for tests.
  */
-export function createExclusive(file, text) {
+export function createExclusive(file, text, { link = fs.linkSync, open = fs.openSync, busy = busyCode, delays = retryDelays(), platform = process.platform } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (linksWork !== false) {
+  const dir = path.resolve(path.dirname(file));
+  let permDenied = false;
+  if (!noLinkDirs.has(dir)) {
     const tmp = tempPath(file);
     writeTemp(tmp, text, { fsync: false });
     try {
-      fs.linkSync(tmp, file);
-      linksWork = true;
-      return true;
-    } catch (err) {
-      if (err.code === 'EEXIST') return false;
-      if (!NO_LINK.has(err.code) || linksWork === true) throw err;
-      linksWork = false;
+      for (let i = 0; ; i++) {
+        try {
+          link(tmp, file);
+          permFallbacks.delete(dir);
+          return true;
+        } catch (err) {
+          if (err.code === 'EEXIST') return false;
+          if (busy(err.code) && i < delays.length) { sleepMs(delays[i]); continue; }
+          if (NO_LINK.has(err.code)) { noLinkDirs.add(dir); break; }
+          // EPERM/EACCES: this one call falls back to an exclusive create; links stay on.
+          if (err.code === 'EPERM' || err.code === 'EACCES') { permDenied = true; break; }
+          if (busy(err.code)) return false;
+          throw err;
+        }
+      }
     } finally {
       try { fs.rmSync(tmp, { force: true }); } catch { /* removed on the next sweep */ }
     }
   }
   let fd;
-  try {
-    fd = fs.openSync(file, 'wx');
-  } catch (err) {
-    if (err.code === 'EEXIST') return false;
-    throw err;
+  for (let i = 0; ; i++) {
+    try {
+      fd = open(file, 'wx');
+      break;
+    } catch (err) {
+      if (err.code === 'EEXIST') return false;
+      if (busy(err.code)) {
+        if (i < delays.length) { sleepMs(delays[i]); continue; }
+        return false; // still held (delete pending, a scanner): taken for now
+      }
+      throw err;
+    }
   }
   try {
     writeAll(fd, text);
   } finally {
     fs.closeSync(fd);
+  }
+  if (permDenied && platform === 'win32') {
+    const n = (permFallbacks.get(dir) || 0) + 1;
+    permFallbacks.set(dir, n);
+    if (n >= NO_LINK_AFTER) noLinkDirs.add(dir);
   }
   return true;
 }
@@ -178,50 +246,77 @@ const held = new Map();
 
 /**
  * Run `fn` (synchronous) holding the lock `<dir>/<name>.mutex`. Other processes wait (polling, 2 → 50 ms) up to
- * timeoutMs (STUDIO_STATE_LOCK_WAIT_MS, 15 s), then get an error with code ELOCKBUSY. A lock whose holder process is
- * gone (same machine) or older than staleMs (STUDIO_STATE_LOCK_STALE_MS, 10 s) is broken; an unreadable one after 2 s.
- * The sections it guards are a read and a write of one small file: milliseconds.
+ * timeoutMs (STUDIO_STATE_LOCK_WAIT_MS, 15 s), then get an error with code ELOCKBUSY. The sections it guards are a
+ * read and a write of one small file: milliseconds. When a lock is broken:
+ *   - its holder is on this machine and its process is gone: at once;
+ *   - its holder is on this machine and alive: never on age (2.58.0, P-056: a holder paused 12 s, by a click in its
+ *     Windows console, a sleeping laptop or a clock jump, lost the lock at 10 s and its update was lost). Only past
+ *     liveMaxMs (STUDIO_STATE_LOCK_LIVE_MAX_MS, 10 min), when the pid most likely belongs to another program now;
+ *   - its holder is on another machine (a shared folder): when older than staleMs (STUDIO_STATE_LOCK_STALE_MS, 10 s);
+ *   - it can't be read as a lock: after 2 s.
+ * A holder whose lock was broken anyway finds out before it writes (assertLocksHeld in writeAtomic) and when it lets
+ * go: it throws ELOCKLOST rather than pass silently.
  */
-export function withFileLock(name, fn, { dir = DEFAULT_LOCK_DIR, timeoutMs = num(process.env.STUDIO_STATE_LOCK_WAIT_MS, 15000), staleMs = num(process.env.STUDIO_STATE_LOCK_STALE_MS, 10000), what = name } = {}) {
+export function withFileLock(name, fn, { dir = DEFAULT_LOCK_DIR, timeoutMs = num(process.env.STUDIO_STATE_LOCK_WAIT_MS, 15000), staleMs = num(process.env.STUDIO_STATE_LOCK_STALE_MS, 10000), liveMaxMs = num(process.env.STUDIO_STATE_LOCK_LIVE_MAX_MS, 600000), what = name } = {}) {
   const file = path.join(dir, `${name}.mutex`);
   const key = path.resolve(file);
   if (held.has(key)) return fn();
-  const token = acquire(file, { timeoutMs, staleMs, what });
+  const token = acquire(key, { timeoutMs, staleMs, liveMaxMs, what });
   held.set(key, token);
+  let out;
+  let lost = false;
   try {
-    return fn();
+    out = fn();
   } finally {
     held.delete(key);
-    // Remove it only while it is still ours (a holder judged stale may have lost it to another agent).
-    try { if (fs.readFileSync(file, 'utf8') === token) fs.rmSync(file, { force: true }); } catch { /* gone already */ }
+    // Remove it only while it is still ours (a holder judged gone may have lost it to another agent).
+    let now;
+    for (let i = 0; i < 3; i++) {
+      try { now = fs.readFileSync(key, 'utf8'); break; } catch (err) { if (err.code === 'ENOENT') { now = null; break; } sleepMs(20); }
+    }
+    if (now === token) { try { fs.rmSync(key, { force: true }); } catch { /* the next taker breaks it: our pid is gone by then */ } }
+    else if (now !== undefined) lost = true; // undefined: still unreadable, so unknown; leave it
   }
+  if (lost) throw lostError(key, token);
+  return out;
 }
 
-function acquire(file, { timeoutMs, staleMs, what }) {
+function acquire(file, { timeoutMs, staleMs, liveMaxMs, what }) {
   const deadline = Date.now() + timeoutMs;
   let wait = 2;
   let last = null;
+  let age = 0;
   for (;;) {
     const token = JSON.stringify({ pid: process.pid, host: HOST, at: Date.now(), n: seq++ });
     if (createExclusive(file, token)) return token;
     let raw = null;
     let mtime = Date.now();
+    let gone = false;
     try {
       raw = fs.readFileSync(file, 'utf8');
       mtime = fs.statSync(file).mtimeMs;
     } catch (err) {
-      if (err.code === 'ENOENT') continue; // released between our create and read
+      gone = err.code === 'ENOENT'; // released between our create and read: try again at once (within the deadline)
     }
-    let h = null;
-    try { h = JSON.parse(raw); } catch { /* being written, or torn */ }
-    last = h;
-    const age = Date.now() - (Number.isFinite(h?.at) ? h.at : mtime);
-    const dead = h && Number.isInteger(h.pid) && (!h.host || h.host === HOST) && !pidAlive(h.pid);
-    if ((dead || age > staleMs || (!h && age > 2000)) && raw !== null && moveAside(file, null, raw)) continue;
+    if (!gone) {
+      let h = null;
+      try { h = JSON.parse(raw); } catch { /* being written, or torn */ }
+      if (!h || typeof h !== 'object') h = null;
+      last = h;
+      age = Math.max(0, Date.now() - (Number.isFinite(h?.at) ? h.at : mtime));
+      const here = h && Number.isInteger(h.pid) && (!h.host || h.host === HOST);
+      let breakIt;
+      if (!h) breakIt = age > 2000;
+      // Our own pid: a leftover of this process (its removal failed), as it holds nothing re-entrant here.
+      else if (here) breakIt = h.pid === process.pid || !pidAlive(h.pid) || age > liveMaxMs;
+      else breakIt = age > staleMs;
+      if (breakIt && raw !== null && moveAside(file, null, raw)) continue;
+    }
     if (Date.now() > deadline) {
       const by = last?.pid ? ` (held by process ${last.pid}${last.host && last.host !== HOST ? ` on ${last.host}` : ''} for ${Math.round(age / 1000)} s)` : '';
       throw Object.assign(new Error(`${what} is being changed by another agent${by}; waited ${Math.round(timeoutMs / 1000)} s. Nothing was changed: run the command again.`), { code: 'ELOCKBUSY', holder: last });
     }
+    if (gone) continue;
     sleepMs(wait);
     wait = Math.min(50, wait * 2);
   }
@@ -261,5 +356,37 @@ export function sweepTemps(dir, maxAgeMs = 60000) {
       out.push(n);
     } catch { /* gone already */ }
   }
+  return out;
+}
+
+const SKIP_DIRS = new Set(['node_modules', '.git', '.lanes']);
+/**
+ * 2.58.0 (P-060): the same sweep through whole folders (studio/ and .studio/ for the watcher): writeAtomic leaves a
+ * full-size `.<name>.<pid>-<time>-<n>.tmp` beside its target when killed between writing and renaming (17 of 20
+ * kills in round 2), and they piled up outside .studio/locks. Only files with fsafe's own temp names, older than
+ * maxAgeMs (a live write takes milliseconds), at most `depth` folders down. Returns what it removed (or would, with
+ * dryRun) as posix paths from each root's parent folder (studio/.NEXT.md.<…>.tmp).
+ */
+export function sweepTempsDeep(roots, { maxAgeMs = 5 * 60000, depth = 4, dryRun = false } = {}) {
+  const out = [];
+  const now = Date.now();
+  const walk = (root, dir, left) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (left > 0 && !SKIP_DIRS.has(e.name)) walk(root, f, left - 1);
+        continue;
+      }
+      if (!e.isFile() || (!isTempName(e.name) && !/\.\d+-[0-9a-z]+\.gone$/.test(e.name))) continue;
+      try {
+        if (now - fs.statSync(f).mtimeMs < maxAgeMs) continue;
+        if (!dryRun) fs.rmSync(f, { force: true });
+        out.push(path.relative(path.dirname(root), f).split(path.sep).join('/'));
+      } catch { /* gone already */ }
+    }
+  };
+  for (const root of roots) walk(root, root, depth);
   return out;
 }
