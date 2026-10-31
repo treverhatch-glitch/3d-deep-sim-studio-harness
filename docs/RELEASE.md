@@ -19,6 +19,10 @@ Any red step before the push undoes the commit and leaves the work uncommitted; 
 
 `npm run release` with no version is the read-only check CI runs (syntax, required gates, closed loop, changelog).
 
+**Batching (owner's rule, 2026-11-01):** approved upgrades can and should ship together in one release and one PR,
+each with its own commit and its own selftest file. Still required: a backup branch of `main` first, the full
+selftest, and green online checks before the merge.
+
 ## What 2.30c changed for agents
 
 - **Short output.** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) instead of the whole history (`studio/handoffs/<ID>.md` keeps it). `npm run handoff` prints at most 3k characters; `npm run handoff -- --full` prints all of it (always saved to `.studio/briefs/producer.md`).
