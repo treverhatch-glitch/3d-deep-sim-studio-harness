@@ -195,6 +195,23 @@ const SABOTAGE = {
   },
   docs: (d) => fs.writeFileSync(path.join(d, 'docs/STALE.md'), 'Run `npm run no-such-script` first.\n'),
   secrets: (d) => fs.writeFileSync(path.join(d, 'leak.txt'), `OPENAI_API_KEY=${'sk-'}${'a'.repeat(24)}\n`),
+  // 2.58.2 (PU-29): with the hooks installed, a branch commit made with --no-verify (no Studio-Hooks stamp).
+  hooks: (d) => {
+    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    sh('git init -q -b main && git config core.hooksPath scripts/hooks && git add -A && git commit -qm base --no-verify && git checkout -q -b sab');
+    fs.writeFileSync(path.join(d, 'sab.txt'), 'sab\n');
+    sh('git add sab.txt && git commit -qm "sab skipped the hooks" --no-verify');
+    return { STUDIO_PROTECT_BASE: 'main' };
+  },
+  // 2.58.2 (PU-29): a branch skips a test that runs on main (the word is put together here, so this file has none).
+  'weakened-tests': (d) => {
+    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'tests/sab.test.mjs'), "test('sab', () => {\n  expect(1).toBe(1);\n});\n");
+    sh('git init -q -b main && git add -A && git commit -qm base --no-verify && git checkout -q -b sab');
+    edit(d, 'tests/sab.test.mjs', (t) => t.replace("test('sab'", `test${['.', 'skip'].join('')}('sab'`));
+    return { STUDIO_PROTECT_BASE: 'main', STUDIO_WEAKENED_TESTS: 'on' };
+  },
   // A real game (not the template) with a browser build, and no browser to play it in: that must fail, not skip.
   'browser-play': (d) => {
     fs.cpSync(path.join(d, 'cartridges/example-sim'), path.join(d, 'cartridges/moss-game'), { recursive: true });
@@ -224,6 +241,8 @@ const EXPECT = {
   game: /FAIL game:qa/,
   controls: /web: "buy-button" did nothing \(planted/,
   protected: /protected file\(s\) changed since main with no owner approval/,
+  hooks: /skipped the git hooks[\s\S]*sab skipped the hooks/,
+  'weakened-tests': /tests\/sab\.test\.mjs:1 {2}skip-added/,
 };
 const CANNOT = { selftest: 'this file' };
 
@@ -3600,6 +3619,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest2582L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582l.mjs')).href);
   await selftest2582L({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// PU-29: the hooks stamp each commit they pass and a gate lists commits without a valid stamp (--no-verify); a second
+// gate flags weakened tests (removed asserts, skip/only, raised timeouts, wider tolerances, seed special cases, deleted
+// tests, goldens without a reason) unless the owner signed them; both run at task done (qa/selftest-2582k.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2582K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582k.mjs')).href);
+  await selftest2582K({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

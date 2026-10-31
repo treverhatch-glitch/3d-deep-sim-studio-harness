@@ -125,7 +125,8 @@ export function dropExperiment(id, { by, only = null }) {
     undone[c.hash] = [...new Set([...(undone[c.hash] || []), ...mine])];
   }
   git(['add', '-A', '--', ...files]);
-  const msg = `Drop ${id}${paths ? ` (only ${paths.join(', ')})` : ''}: ${x.title}\n\nStudio-Experiment-Drop: ${id}`;
+  // 2.58.2 (PU-29): committed without the hooks, so it says so (Studio-Harness), and the hooks gate lets it through.
+  const msg = `Drop ${id}${paths ? ` (only ${paths.join(', ')})` : ''}: ${x.title}\n\nStudio-Experiment-Drop: ${id}\nStudio-Harness: experiment-drop`;
   const commit = spawnSync('git', ['-c', `user.name=${by}`, '-c', 'user.email=studio@localhost', 'commit', '-q', '--no-verify', '-m', msg, '--', ...files], { cwd: REPO_ROOT, encoding: 'utf8' });
   if (commit.status !== 0) return { ok: false, message: commit.stderr || 'git commit failed' };
   x.undone = undone;

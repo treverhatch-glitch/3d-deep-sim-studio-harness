@@ -586,17 +586,31 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // most again itself, forced or not (well under a second each): the protected files (changed only with the owner's
   // signed approval) and the secret scan (no key or token in what would be committed). The same scripts the
   // `protected` and `secrets` gates run (studio/gates.json), called directly so a changed gate command can't skip them.
+  // 2.58.2 (PU-29): and the two that catch a check being dodged: commits that skipped the git hooks (--no-verify) and
+  // tests weakened without the owner's approval. With no base branch they judge from the task's start commit.
   {
     const failed = [];
-    for (const [id, rel] of [['protected', 'qa/protected-check.mjs'], ['secrets', 'scripts/secret-scan.mjs']]) {
+    const SAFETY = [
+      ['protected', 'qa/protected-check.mjs', [], 'only the owner approves it; hand the task back with a note saying which file and why'],
+      ['secrets', 'scripts/secret-scan.mjs', [], 'take it out of the files (and rotate it)'],
+      ['hooks', 'harness/hook-stamp.mjs', ['check'], 're-commit those commits with the hooks (the output says how); never --no-verify'],
+      ['weakened-tests', 'harness/test-weakening.mjs', [], 'put the test back, or hand the task back with a note saying which test and why; only the owner approves weakening a test'],
+    ];
+    const start = taskBase(target.id);
+    const safetyEnv = { ...process.env, ...(start ? { STUDIO_TASK_BASE: start } : {}) };
+    for (const [id, rel, args] of SAFETY) {
       const file = path.join(REPO_ROOT, rel);
-      if (!fs.existsSync(file)) { failed.push({ id, why: `${rel} is missing` }); continue; }
-      const r = spawnSync(process.execPath, [file], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-      if (r.status !== 0) failed.push({ id, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
+      if (!fs.existsSync(file)) { failed.push({ id, rel, why: `${rel} is missing` }); continue; }
+      const r = spawnSync(process.execPath, [file, ...args], { cwd: REPO_ROOT, encoding: 'utf8', env: safetyEnv, maxBuffer: 32 * 1024 * 1024 });
+      if (r.status !== 0) failed.push({ id, rel, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
+    }
+    for (const [id, name] of [['hooks', 'STUDIO_HOOKS_CHECK'], ['weakened-tests', 'STUDIO_WEAKENED_TESTS']]) {
+      if (/^(off|0|false|no)$/i.test(String(process.env[name] || ''))) emitEvent({ type: 'safety.off', agent: agent || target.role, task: target.id, msg: `${target.id} closed with the ${id} check off (${name}=off)` });
     }
     if (failed.length) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the ${failed.map((f) => f.id).join(' and ')} check failed` });
-      return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.id === 'protected' ? 'qa/protected-check.mjs' : 'scripts/secret-scan.mjs'}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}`).join('\n')}\nThese run at every task done, forced or not. A key or token: take it out of the files (and rotate it). A protected file: only the owner approves it; hand the task back with a note saying which file and why.` };
+      const how = Object.fromEntries(SAFETY.map(([id, , , h]) => [id, h]));
+      return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.rel}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}\n  Fix: ${how[f.id]}.`).join('\n')}\nThese run at every task done, forced or not.` };
     }
   }
 
