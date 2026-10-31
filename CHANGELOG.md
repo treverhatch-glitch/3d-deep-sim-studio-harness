@@ -4,6 +4,14 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.49.0] — 2026-10-31
+2.49.0: U-004 from the studio logs, approved by the owner.
+### Added
+- **`npm run logs`** (`harness/logs.mjs`): the studio logs' 2-minute read. The latest summary, the open problems
+  and the proposals waiting for the owner, from `studio/logs/`. `--brief` gives three lines for the Ops bot's
+  hourly post (`docs/DISCORD-CREW.md`). It only reads.
+- `qa/selftest-249.mjs`.
+
 ## [2.48.0] — 2026-10-31
 2.48.0: the Unity track's default is a Windows game (Hatchfield's decision: HDRP at max quality, played as an .exe; the
 web version stays the browser game).

@@ -35,7 +35,8 @@ the proposed list. Four planners would mean four plans.
 ## Chat rules (so the bots don't talk each other into loops)
 
 1. A bot answers the owner, or a message that @mentions it. Never another bot's message on its own.
-2. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines).
+2. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines), plus
+   `npm run logs -- --brief` (three lines: tasks logged, open problems, proposals waiting for the owner).
 3. No logs or diffs in the chat: a task id, a file path or a link.
 4. "Needs you" items go to the owner once, as one message each, with the command that settles it.
 5. A bot that is asked something outside its role passes it to the bot that owns it, by mention.
