@@ -10,7 +10,8 @@
  *   node harness/lock.mjs check-staged [--owner me]  (pre-commit: refuse staged files locked by someone else)
  *
  * Owners must be unique per running agent: tool and role names that several agents share are refused.
- * `file:` is accepted as an alias of `path:`.
+ * `file:` is accepted as an alias of `path:`. Paths are compared without regard to case (2.58.0, PU-43): on Windows
+ * `game/Branding` and `game/branding` are one folder, so two agents can't hold it under two spellings.
  */
 
 import crypto from 'node:crypto';
@@ -19,7 +20,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
-import { createExclusive, moveAside, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
+import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
+
+// 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
+// as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
+onFsafeWarning((msg, info) => emitEvent({ type: 'fsafe.warning', agent: process.env.STUDIO_LOCK_OWNER || 'harness', status: 'warn', target: info?.file ? path.relative(REPO_ROOT, info.file).replace(/\\/g, '/') : null, msg: String(msg).replace(/^\[fsafe\]\s*/, '') }));
 
 const LOCK_DIR = path.join(REPO_ROOT, '.studio', 'locks');
 /** 2.57.0 (PU-16, P-037): unreadable lock files are moved here (renamed, never deleted) once they are this old. */
@@ -34,7 +39,7 @@ export const SHARED_OWNERS = new Set([
   'producer', 'builder', 'qa', 'qa-playtester', 'playtester', 'reviewer', 'designer', 'designer-calibrator', 'balancer',
 ]);
 
-/** task:T-001 stays as is; path:/file: keys become path:<repo-relative posix path>. */
+/** task:T-001 stays as is; path:/file: keys become path:<repo-relative posix path> (case kept as typed). */
 export function normalizeKey(key) {
   const raw = String(key || '').trim();
   const m = /^(path|file):(.*)$/.exec(raw);
@@ -43,6 +48,9 @@ export function normalizeKey(key) {
   if (path.isAbsolute(p)) p = path.relative(REPO_ROOT, p).replace(/\\/g, '/');
   return `path:${p}`;
 }
+
+/** A path as compared between claims: lower case (Windows and macOS folders ignore case). */
+export const foldPath = (p) => String(p || '').toLowerCase();
 
 function lockPath(key) {
   const k = normalizeKey(key);
@@ -156,11 +164,13 @@ export function claim(key, owner, ttlSec = 3600, { wide = null } = {}) {
 function claimUnlocked(k, owner, ttlSec, again = false) {
   const check = { ok: true, owner };
   if (k.startsWith('path:')) {
-    // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps.
-    const at = k.slice(5);
+    // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps. 2.58.0 (PU-43):
+    // compared without regard to case (game/Branding and game/branding were both granted; on Windows that is one
+    // folder held by two agents).
+    const at = foldPath(k.slice(5));
     const overlap = listLocks().find((l) => {
       if (!l.key.startsWith('path:') || l.owner === check.owner) return false;
-      const other = l.key.slice(5);
+      const other = foldPath(l.key.slice(5));
       return other === '' || at === '' || at === other || at.startsWith(`${other}/`) || other.startsWith(`${at}/`);
     });
     if (overlap) return { ok: false, reason: 'claimed', lock: overlap };
@@ -189,8 +199,14 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
 export function release(key, owner) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
-  const file = lockPath(key);
-  const existing = fs.existsSync(file) ? readLock(file) : null;
+  let file = lockPath(key);
+  let existing = fs.existsSync(file) ? readLock(file) : null;
+  // 2.58.0 (PU-43): a folder claimed as game/Branding can be released as game/branding (the owner's own claim).
+  if (!existing && normalizeKey(key).startsWith('path:')) {
+    const want = foldPath(normalizeKey(key).slice(5));
+    const mine = listLocks().find((l) => l.owner === check.owner && l.key.startsWith('path:') && foldPath(l.key.slice(5)) === want);
+    if (mine) { file = lockPath(mine.key); existing = readLock(file); }
+  }
   if (!existing) return { ok: true, released: false };
   if (existing.owner !== check.owner) return { ok: false, reason: 'not-owner', lock: existing };
   fs.rmSync(file, { force: true });
@@ -252,12 +268,12 @@ export function listLocks() {
     .filter((l) => l && typeof l.key === 'string' && typeof l.owner === 'string');
 }
 
-/** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. */
+/** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. Case-blind (PU-43). */
 export function coveringLock(relFile, locks = listLocks()) {
-  const p = normalizeKey(`path:${relFile}`).slice(5);
+  const p = foldPath(normalizeKey(`path:${relFile}`).slice(5));
   return locks
     .filter((l) => l.key.startsWith('path:'))
-    .map((l) => ({ lock: l, at: l.key.slice(5) }))
+    .map((l) => ({ lock: l, at: foldPath(l.key.slice(5)) }))
     .filter(({ at }) => at === '' || p === at || p.startsWith(`${at}/`))
     .sort((a, b) => b.at.length - a.at.length)[0]?.lock || null;
 }
