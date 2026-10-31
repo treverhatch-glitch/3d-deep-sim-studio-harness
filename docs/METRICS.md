@@ -9,6 +9,11 @@ npm run metrics -- --since 2026-10-31T10:00:00Z   # only attempts started after 
 npm run metrics -- --json                         # rows and summary as JSON
 ```
 
+It reads the last 200,000 events, going on into the rolled log files when the current one is short (see
+`docs/TELEMETRY.md`). Since 2.58.0 the log is sorted once and each attempt's events are found by binary search
+on time (it used to rescan the whole log per attempt: 40,000 events took 53 s, now under a second; 200,000 take
+a few seconds). The rows are the same as before.
+
 ## A row
 
 | Field | Meaning |

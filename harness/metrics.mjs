@@ -61,22 +61,75 @@ function stoppedSpans(events, end) {
   return spans;
 }
 
-/** Spans an agent waited on a person: its ask.open until the matching ask.answered. */
-function askSpans(events, agent, end) {
-  const spans = [];
-  const open = new Map();
+/**
+ * Spans each agent waited on a person: its ask.open until the matching ask.answered (an answer closes that ID for
+ * every agent that has it open). One pass for all agents: agent -> spans.
+ */
+function askSpansByAgent(events, end) {
+  const spans = new Map();
+  const open = new Map(); // agent -> Map(ask id or #n -> opened at)
+  const holders = new Map(); // ask id -> agents that have it open
   for (const e of events) {
+    if (e.type !== 'ask.open' && e.type !== 'ask.answered') continue;
     const id = (String(e.msg || '').match(/^(A-\d+|ask-[\w-]+|Q-\d+)/) || [])[1] || null;
-    if (e.type === 'ask.open' && e.agent === agent) open.set(id || `#${open.size}`, ts(e));
-    if (e.type === 'ask.answered' && id && open.has(id)) { spans.push([open.get(id), ts(e)]); open.delete(id); }
+    if (e.type === 'ask.open') {
+      if (!open.has(e.agent)) open.set(e.agent, new Map());
+      const mine = open.get(e.agent);
+      mine.set(id || `#${mine.size}`, ts(e));
+      if (id) { if (!holders.has(id)) holders.set(id, new Set()); holders.get(id).add(e.agent); }
+    } else if (id && holders.has(id)) {
+      for (const agent of holders.get(id)) {
+        const mine = open.get(agent);
+        if (!mine.has(id)) continue;
+        if (!spans.has(agent)) spans.set(agent, []);
+        spans.get(agent).push([mine.get(id), ts(e)]);
+        mine.delete(id);
+      }
+      holders.delete(id);
+    }
   }
-  for (const t of open.values()) spans.push([t, end]);
+  for (const [agent, mine] of open) {
+    if (!spans.has(agent)) spans.set(agent, []);
+    for (const t of mine.values()) spans.get(agent).push([t, end]);
+  }
   return spans;
 }
 
+/** Events sorted by time once (stable: equal times keep log order), with each event's time read once. */
+function byTime(events) {
+  const keyed = events.map((e) => [ts(e), e]).sort((x, y) => x[0] - y[0]);
+  return { sorted: keyed.map((k) => k[1]), times: keyed.map((k) => k[0]) };
+}
+
+/** First position in `times` (ascending) holding a value >= x, or > x with `after`. */
+function bound(times, x, after = false) {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (times[mid] < x || (after && times[mid] === x)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Sorted events of one type grouped by a key (agent or task), each group with its times, for binary search. */
+function groupBy(sorted, times, type, key) {
+  const m = new Map();
+  sorted.forEach((e, i) => {
+    if (e.type !== type) return;
+    if (!m.has(e[key])) m.set(e[key], { ev: [], t: [] });
+    m.get(e[key]).ev.push(e);
+    m.get(e[key]).t.push(times[i]);
+  });
+  return m;
+}
+const lastAtOrBefore = (g, x) => { const p = g ? bound(g.t, x, true) : 0; return p > 0 ? g.ev[p - 1] : undefined; };
+const firstAtOrAfter = (g, x) => { const p = g ? bound(g.t, x) : 0; return g && p < g.ev.length ? g.ev[p] : undefined; };
+
 /** Every attempt in the log, oldest first. */
 export function buildAttempts(events, { now = Date.now() } = {}) {
-  events = [...events].sort((a, b) => ts(a) - ts(b));
+  events = byTime(events).sorted;
   const attempts = [];
   const open = new Map(); // task -> attempt
   const close = (a, end, outcome, endEvent = null) => {
@@ -107,8 +160,11 @@ export function buildAttempts(events, { now = Date.now() } = {}) {
   return attempts.sort((x, y) => x.start - y.start);
 }
 
-/** PU-03: one failure label for an attempt that didn't end done. */
-export function labelFailure(a, inWin, all) {
+/**
+ * PU-03: one failure label for an attempt that didn't end done. `inWin`: the events inside the attempt; `all`: the
+ * whole log sorted by time; `index` (optional, from attemptRows): the same log's session ends by agent.
+ */
+export function labelFailure(a, inWin, all, index = null) {
   if (a.outcome === 'done' || a.outcome === 'open') return null;
   const txt = (e) => `${e?.msg || ''} ${JSON.stringify(e?.meta || {})}`;
   const mine = inWin.filter((e) => e.task === a.task || e.agent === a.agent || e.meta?.target === a.agent);
@@ -123,25 +179,37 @@ export function labelFailure(a, inWin, all) {
   if (a.outcome === 'session-ended' || /ended without task done|without task done or a hand-back|finished without task done|session ended .* while it held/i.test(txt(a.endEvent))) {
     // A hand-back for a session that had already ended before this claim began is the harness's mistake (an old
     // record under the same agent name), not the agent stopping early.
-    const lastEnd = all.filter((e) => e.type === 'agent.session.end' && e.agent === a.agent && ts(e) <= a.end).pop();
+    const lastEnd = index ? lastAtOrBefore(index.sessionEnds.get(a.agent), a.end) : all.filter((e) => e.type === 'agent.session.end' && e.agent === a.agent && ts(e) <= a.end).pop();
     if (lastEnd && ts(lastEnd) < a.start && a.endEvent?.agent !== a.agent) return 'env-harness';
     return 'premature-stop';
   }
   return 'unknown';
 }
 
-/** One metrics row per attempt. */
+/**
+ * One metrics row per attempt.
+ * 2.58.0 (PU-41, P-059): this filtered the whole log once per attempt (20k events 14 s, 40k 53 s). Now the log is
+ * sorted once, an attempt's events are found by binary search on time, and session starts/ends, reopenings and
+ * questions are indexed by agent or task. The rows are the same as before.
+ */
 export function attemptRows(events = readRecentEvents(200000), { now = Date.now(), since = 0 } = {}) {
-  events = [...events].sort((a, b) => ts(a) - ts(b));
+  const { sorted, times } = byTime(events);
+  events = sorted;
   const end = now;
   const stops = stoppedSpans(events, end);
+  const asks = askSpansByAgent(events, end);
+  const index = {
+    sessionEnds: groupBy(events, times, 'agent.session.end', 'agent'),
+    sessionStarts: groupBy(events, times, 'agent.session.start', 'agent'),
+    reopens: groupBy(events, times, 'task.reopened', 'task'),
+  };
   const rows = [];
   for (const a of buildAttempts(events, { now })) {
     if (a.start < since) continue;
-    const inWin = events.filter((e) => ts(e) >= a.start && ts(e) <= a.end);
+    const inWin = events.slice(bound(times, a.start), bound(times, a.end, true)); // start <= time <= end, in log order
     const wall = Math.max(0, a.end - a.start);
     const checks = inWin.filter((e) => e.type === 'gates.run' && e.agent === a.agent).reduce((s, e) => s + (Number(e.meta?.ms) || 0), 0);
-    const person = [...askSpans(events, a.agent, end), ...stops].reduce((s, [x, y]) => s + overlap(a.start, a.end, x, y), 0);
+    const person = [...(asks.get(a.agent) || []), ...stops].reduce((s, [x, y]) => s + overlap(a.start, a.end, x, y), 0);
     // Stalls: gaps over 5 min between heartbeats (every 2 min while a launched agent runs). An agent working
     // outside the launcher (a chat bot claiming tasks itself) sends none, so its quiet time isn't called a stall;
     // only stalls the watchdog ended count for it.
@@ -160,10 +228,12 @@ export function attemptRows(events = readRecentEvents(200000), { now = Date.now(
     const agentMs = Math.max(0, wall - checks - person - stalled);
     // The session that held this attempt reports its tokens when it ends, often after the task is done: the
     // first session end of this agent at or after the attempt began (shared by time with its other attempts below).
-    const sessions = events.filter((e) => e.type === 'agent.session.end' && e.agent === a.agent && ts(e) >= a.start).slice(0, 1);
-    const reopened = events.some((e) => e.type === 'task.reopened' && e.task === a.task && ts(e) > a.start);
+    const firstEnd = firstAtOrAfter(index.sessionEnds.get(a.agent), a.start);
+    const sessions = firstEnd ? [firstEnd] : [];
+    const reopens = index.reopens.get(a.task);
+    const reopened = !!reopens && reopens.t[reopens.t.length - 1] > a.start;
     // The model from the agent's own session record first (an event's model can be the studio default).
-    const sess = events.filter((e) => e.type === 'agent.session.start' && e.agent === a.agent && ts(e) <= a.end).pop();
+    const sess = lastAtOrBefore(index.sessionStarts.get(a.agent), a.end);
     const model = sessions.find((e) => e.model)?.model || (sess && ts(sess) >= a.start - 6 * 3600000 ? sess.model : null) || a.model || null;
     const row = {
       task: a.task, attempt: a.attempt, retries: a.attempt - 1, agent: a.agent, model, family: family(model),
@@ -176,7 +246,7 @@ export function attemptRows(events = readRecentEvents(200000), { now = Date.now(
       rescues: inWin.filter((e) => /^task\.rescue/.test(e.type) && e.task === a.task).length,
       reopened,
     };
-    row.failure = labelFailure(a, inWin, events);
+    row.failure = labelFailure(a, inWin, events, index);
     if (reopened && row.outcome === 'done') row.failure = 'verify-wrong';
     row._session = sessions[0] || null;
     row._wall = wall;

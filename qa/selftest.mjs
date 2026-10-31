@@ -3498,6 +3498,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.0 (PU-41): the events log after a roll-over (P-058) and metrics on a long log (P-059) (qa/selftest-258e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258e.mjs')).href);
+  await selftest258E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
