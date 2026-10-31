@@ -76,6 +76,9 @@ needs Hatch's OK before it is built. Size: S under half a day, M 1–2 days, L m
 | PU-12 | **Efficiency by pace:** landed points per hour and per token, rework and conflicts for each pace | ADAPT | P2 | S | The same bench batch at two paces; default to the better points per token |
 | PU-13 | **Phase exit list in JSON** whose pass flags only checks can set | ADAPT | P3 | S | Selftest: an agent flipping a flag without evidence is refused |
 | PU-14 | **Per-model context profiles:** trimmed tool output and narrow commands for small local models; large models unchanged | ADAPT | P3 | S | Rejection rate of local-model drafts before and after |
+| PU-15 | **Visual-effect skill: spec, stepped capture, review loop** for particles, VFX and UI feedback in any genre: a one-screen spec per effect, a contact sheet of stills at fixed effect times (small, never real-time, so it works without a GPU), automatic frame checks (never ends, loop seam, off-screen spill, fast full-screen flash, seeded randomness), then the art review. Pattern from patch-gg/pixelfx (MIT; ideas only). Needs Hatch's OK | ADAPT | P2 | M | Plant 4 faults (a one-shot that never ends, a loop seam, an off-screen spill, a fast full-screen flash): the checks flag all 4. Then 4 bench effect tasks (hit flash, button press, one-shot burst, loop) with and without the skill: proof-wrong verdicts, rounds to approval, reopens, tokens |
+
+PU-15 review: `studio/logs/research/PIXELFX-REVIEW-2026-10-31.md` (licence MIT; mechanics only; risks: taste can't be auto-checked, GPU particle systems need a per-engine capture hook, scope creep into an effects library). It builds on PU-07 and is measured on the PU-01 bench.
 
 **Suggested order:** PU-06 and the watchdog fixes (P-022 to P-027) first, because the crew is running into them
 today; then PU-02 and PU-03, so the crew's data is collected in a usable form from the start; then PU-01 and PU-04;
