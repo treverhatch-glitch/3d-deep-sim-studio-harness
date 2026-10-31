@@ -13,8 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-export async function selftest2582K({ dir, run, report, tmpRoot }) {
+export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
@@ -230,6 +231,13 @@ export async function selftest2582K({ dir, run, report, tmpRoot }) {
   report('2.58.2 (PU-29): STUDIO_WEAKENED_TESTS=off turns the weakened-test gate off (it says so)', off.status === 0 && off.off && /STUDIO_WEAKENED_TESTS=off/.test(off.why), off._out);
 
   // Task done runs both: an unhooked commit and a weakened test each stop it, even with an "all ok" verify record.
+  // The size check before them reads JavaScript with the harness's typescript; the selftest copy has no node_modules
+  // of its own, so link the harness's (as the map-find check does) or task done stops on that check first.
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
   const as = { ...env, STUDIO_LOCK_OWNER: 'k-1' };
   const tid = (out(run(dir, 'node harness/task.mjs add "Tune the demo bounds" --role builder --priority P1', env)).match(/"id": "(T-\d+)"/) || [])[1];
   run(dir, `node harness/task.mjs start ${tid} --agent k-1`, as);

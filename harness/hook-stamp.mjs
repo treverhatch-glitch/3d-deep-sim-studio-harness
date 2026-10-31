@@ -22,12 +22,18 @@
  * Enforced when the hooks are installed in this checkout (core.hooksPath=scripts/hooks), or the base branch's recent
  * history carries stamps (the studio uses them), or STUDIO_HOOKS_CHECK=on. STUDIO_HOOKS_CHECK=off turns it off.
  *
+ * Upgrading: commits a checkout already had when it took the stamping hooks (lane branches, local work not yet
+ * pushed) are listed once, by patch-id, in <git common dir>/studio-hooks-grandfather.json. The first stamping hook run
+ * writes it (the upgrade's own merge commit), and `node harness/hook-stamp.mjs grandfather` adds to it by hand. Those
+ * commits stay exempt after a clean rebase onto the upgrade (P-068); a commit made after the list was written is not in it.
+ *
  * Limits: a stamp is plain text, so a deliberate forger who computes one by hand passes (the weakened-test and
  * protected-file gates still judge the content); `git revert`, `git rebase` with conflicts or squashes, and an amend
  * with `-m` that is later rebased onto a moved base are flagged until re-committed with the hooks.
  *
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
+ *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -114,6 +120,44 @@ const singlePid = (cwd) => (sha, mode) => {
 };
 const emptyTree = (cwd) => git(['hash-object', '-t', 'tree', '--stdin'], { cwd, input: '' }).stdout.trim();
 const hookStamps = (blob, cwd) => isSha(blob) && git(['cat-file', 'blob', blob], { cwd }).stdout.includes(MARKER);
+
+// 2.58.2 (P-068): the commits a checkout already had when it took the stamping hooks. They were never stamped, and once a
+// lane rebases them onto the upgrade their parent's hook stamps, so without this list every in-flight lane task would
+// fail the hooks gate at task done. Kept by patch-id (a clean rebase keeps it) in the git common dir, shared by every
+// worktree (lanes) of the checkout and never committed.
+export const GRANDFATHER_FILE = 'studio-hooks-grandfather.json';
+export function grandfatherPath(cwd = ROOT) {
+  const r = git(['rev-parse', '--git-common-dir'], { cwd });
+  return r.status === 0 && r.stdout.trim() ? path.join(path.resolve(cwd, r.stdout.trim()), GRANDFATHER_FILE) : null;
+}
+export function readGrandfather(cwd = ROOT) {
+  const f = grandfatherPath(cwd);
+  try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return { file: f, exists: true, shas: new Set(j.shas || []), pids: new Set(j.pids || []), at: j.at || null }; } catch {}
+  return { file: f, exists: false, shas: new Set(), pids: new Set(), at: null };
+}
+/**
+ * List every commit on a local branch that no remote branch has (lane work, unpushed local commits) and that carries no
+ * stamp, by sha and verbatim patch-id. Adds to an existing list. With no remote, the last 5000 commits of local branches.
+ */
+export function writeGrandfather(cwd = ROOT) {
+  const f = grandfatherPath(cwd);
+  if (!f) return { ok: false, why: 'not a git checkout' };
+  const remotes = git(['for-each-ref', '--format=%(refname)', 'refs/remotes'], { cwd }).stdout.trim();
+  const range = ['--branches', ...(remotes ? ['--not', '--remotes'] : ['-n', '5000'])];
+  const list = git(['log', '--no-merges', '--format=%x1e%H%x1f%B', ...range], { cwd });
+  const unstamped = new Set(list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, msg]) => !parseStamps(msg).length).map(([sha]) => sha.trim()));
+  const old = readGrandfather(cwd);
+  const pids = new Set(old.pids);
+  if (unstamped.size) {
+    const log = git(['log', '-p', '--no-merges', '--format=commit %H', ...DIFF_OPTS, ...range], { cwd });
+    const r = git(['patch-id', '--verbatim'], { cwd, input: log.stdout });
+    for (const l of (r.status === 0 ? r.stdout : '').split('\n')) { const [pid, sha] = l.trim().split(/\s+/); if (sha && unstamped.has(sha)) pids.add(pid.slice(0, 12)); }
+  }
+  const shas = new Set([...old.shas, ...unstamped]);
+  fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
+  return { ok: true, file: f, added: unstamped.size - [...unstamped].filter((x) => old.shas.has(x)).length, total: shas.size };
+}
+const grandfathered = (g, sha, pid) => g.shas.has(sha) || Boolean(pid && g.pids.has(pid));
 /** Was HEAD checked? A valid stamp, a commit other branches hold (already shared), or one exempt from stamping. */
 async function headChecked(cwd) {
   const h = commitInfo('HEAD', cwd);
@@ -123,6 +167,8 @@ async function headChecked(cwd) {
   const kind = (h.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
   if (kind && HARNESS_KINDS[kind]?.test(h.msg)) return { ok: true };
   if (!h.parents[0] || !hookStamps(git(['rev-parse', '-q', '--verify', `${h.parents[0]}:${HOOK_REL}`], { cwd }).stdout.trim(), cwd)) return { ok: true };
+  const g = readGrandfather(cwd);
+  if ((g.shas.size || g.pids.size) && grandfathered(g, h.sha, singlePid(cwd)(h.sha, 'p'))) return { ok: true };
   const own = git(['symbolic-ref', '-q', 'HEAD'], { cwd }).stdout.trim();
   const holders = git(['for-each-ref', '--contains', h.sha, '--format=%(refname)', 'refs/heads', 'refs/remotes'], { cwd }).stdout.split('\n').map((s) => s.trim()).filter((s) => s && s !== own);
   if (holders.length) return { ok: true };
@@ -143,6 +189,8 @@ export async function stampMessage(msgFile, { cwd = process.cwd() } = {}) {
   const take = (p) => { const f = gitPath(p); let t = ''; try { t = fs.readFileSync(f, 'utf8').trim(); fs.rmSync(f, { force: true }); } catch {} return t; };
   const passed = take(PASS_FILE);
   const amend = take(AMEND_FILE);
+  // The first stamping hook run in this checkout (normally the upgrade's own merge commit): list what it already has.
+  try { if (!readGrandfather(cwd).exists) writeGrandfather(cwd); } catch {}
   const file = path.resolve(cwd, msgFile);
   const original = fs.readFileSync(file, 'utf8');
   // A message with no final newline (git merge's) makes interpret-trailers glue the trailer to the subject line.
@@ -252,8 +300,10 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   const pidOf = (sha, mode) => { const m = mode || 'p'; if (!pidMaps[m]) pidMaps[m] = rangePids(range, m); return pidMaps[m].get(sha) || null; };
   const open = [];
   let exempt = 0;
+  const g = readGrandfather(ROOT);
   for (const c of commits) {
     if (!c.parents[0] || !stamping.get(blobOf.get(c.parents[0]))) { exempt++; continue; }
+    if ((g.shas.size || g.pids.size) && !parseStamps(c.msg).length && c.parents.length < 2 && grandfathered(g, c.sha, pidOf(c.sha, 'p'))) { exempt++; continue; }
     const kind = (c.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
     if (kind && HARNESS_KINDS[kind]?.test(c.msg)) { exempt++; continue; }
     const v = stampValid(c, pidOf, parentTree(c));
@@ -277,7 +327,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   }
   const why = left.length
     ? `${left.length} commit(s) since ${b.ref} skipped the git hooks (no valid ${TRAILER} stamp)${enforced ? '' : '; not enforced here: the hooks aren\'t installed in this checkout and the base has no stamped commits (npm run hooks:install; STUDIO_HOOKS_CHECK=on enforces)'}`
-    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}`;
+    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}`;
   return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, why };
 }
 
@@ -319,6 +369,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (r.open.length) console.log(list.join('\n'));
     process.exit(0);
   }
-  console.log('Usage: node harness/hook-stamp.mjs check [--json] | stamp <message-file>');
+  if (cmd === 'grandfather') {
+    const r = writeGrandfather();
+    if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
+    if (!r.ok) { console.error(`[hooks] FAIL ${r.why}`); process.exit(1); }
+    console.log(`[hooks] PASS ${r.added} unstamped commit(s) on local branches added to the exempt list (${r.total} in all): ${r.file}`);
+    process.exit(0);
+  }
+  console.log('Usage: node harness/hook-stamp.mjs check [--json] | stamp <message-file> | grandfather [--json]');
   process.exit(1);
 }
