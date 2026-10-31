@@ -36,6 +36,11 @@ git add game/my-game studio && git commit -m "Adopt My Game" && npm run verify
   than the one checked out, it says so: a half-built game's `main` is often far behind.
 - It declares the game's own checks in `game/<slug>/studio.gates.json` from its scripts and config:
   type-check, `test` (required), `lint`, `e2e`, `build` (optional). Edit them freely; the review task asks for it.
+- **A verify must not change the game's files (2.58.0).** The checks run with `CI=true`, so Vitest and Jest never
+  write or rewrite snapshots during a verify: updating snapshots is a deliberate run with `-u`, committed with the
+  change (`STUDIO_GAME_GATE_CI=off` leaves `CI` alone). Give generated test files fixed line endings in the game's
+  `.gitattributes`, or a Windows checkout rewrites them on every run: `*.snap text eol=lf` (and the same for other
+  generated files, such as `__snapshots__/**` or golden JSON). A verify that changes tracked files names them.
 - It makes it the studio's game (`studio/game.json`) and records where it came from (`studio/game/ORIGIN.json`:
   repo, branch, commit).
 - The Game Bible starts as an existing game. When the game has design docs, the first task drafts the Bible
