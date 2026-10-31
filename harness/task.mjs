@@ -399,7 +399,11 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   }
 
   // 2.57.0 (PU-16, P-038): the move to IN_PROGRESS is read, made and written under the board lock.
+  // 2.58.0 (P-055): whatever goes wrong there (the board lock busy, EPERM/EACCES from another program holding a
+  // board file on Windows, a full disk), a claim this call made is released: it used to stay, with the task still
+  // waiting, and `next` skipped the task for an hour. A claim the agent already held (a re-start) is kept.
   let target = null;
+  let moved = false;
   try {
     withBoard(() => {
       const q = parseNextQueue();
@@ -412,14 +416,16 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
         q.inProgress.unshift(target);
       }
       writeNextQueue(q);
+      moved = true;
     });
   } catch (err) {
-    if (err.code !== 'ELOCKBUSY') throw err;
-    release(`task:${taskId}`, agent);
-    return { error: 'busy', message: err.message };
+    if (!lockRes.reused) { try { release(`task:${taskId}`, agent); } catch { /* the watcher frees it (claim on a waiting task) */ } }
+    if (err.code === 'ELOCKBUSY') return { error: 'busy', message: err.message };
+    emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: the board couldn't be updated (${err.code || err.message}); claim released` });
+    return { error: 'board', message: `${taskId} wasn't started: the board (studio/NEXT.md) couldn't be updated (${err.code && !String(err.message || '').startsWith(err.code) ? `${err.code}: ` : ''}${String(err.message || err).slice(0, 200)}). ${lockRes.reused ? 'Your claim is kept.' : 'The claim was released.'} Nothing else changed: run the command again in a moment.` };
   }
-  if (!target) {
-    release(`task:${taskId}`, agent);
+  if (!target || !moved) {
+    release(`task:${taskId}`, agent); // not on the board (or not waiting): no claim on it either
     return null;
   }
   // In a lane copy (2.29): start from the studio's latest work, plus any earlier agent's unmerged work on this task.
