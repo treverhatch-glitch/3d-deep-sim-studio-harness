@@ -55,7 +55,8 @@ default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. 
    parked tasks (breaker parks included) and minus failing tasks: a task whose last hand-back was a failure is
    never re-fed by the flow; the circuit breaker or a person decides what happens to it;
 3. refills idle slots through the launcher (`fillAgents`), with the same caps, lanes and pace as always. A
-   pace that doesn't start agents on its own (Precise, Budget) gets an alert instead;
+   pace that doesn't start agents on its own (Precise, Budget) gets an alert instead, and nothing starts while
+   auto-start is off (the default; `npm run mode -- autostart on --by <name>`, docs/PACE-AND-AGENTS.md);
 4. sends back missing design-fidelity mechanics;
 5. writes `.studio/director-flow.json`, which feeds the War Room's **Director** card (Ops). The card shows the
    state (flowing, refilling, starved, full or empty), builders in use against slots, how many tasks are ready

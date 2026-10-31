@@ -97,7 +97,7 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
     for (const m of milestones().filter((x) => x.ready)) {
       const next = closeMilestone(m.id, 'director (watchdog)');
       actions.push({ kind: 'milestone', msg: `${m.id} met every exit criterion: closed${next ? `, ${next.id} ${next.title} is next` : ''}` });
-      if (process.env.STUDIO_GAMEDEV_WAKE_DIRECTOR !== 'off') { try { (await import('./agent.mjs')).wake('director', { why: `${m.id} closed; confirm and push ${next?.id || 'the next milestone'}` }); } catch {} }
+      if (process.env.STUDIO_GAMEDEV_WAKE_DIRECTOR !== 'off') { try { (await import('./agent.mjs')).wake('director', { why: `${m.id} closed; confirm and push ${next?.id || 'the next milestone'}`, auto: true }); } catch {} }
     }
   }
 
@@ -173,7 +173,7 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
       const r = await fileTask(`review:unchanged:${Math.floor(now / 86400000)}`, `Game-dev review: ${unchanged.join(', ')} unchanged since the last review; make a visible improvement from the next unmet charter goal`);
       if (r.id && !r.skipped) actions.push({ kind: 'review', msg: `filed ${r.id}: ${unchanged.length} view(s) unchanged (${unchanged.join(', ')})` });
     }
-    if (process.env.STUDIO_REVIEWER_TOOL) { try { (await import('./agent.mjs')).wake('reviewer', { why: 'game-dev review: compare the newest captures in .studio/proof/*/visual/after and .studio/review with studio/bible/CHARTER.md and file quality tasks' }); } catch {} }
+    if (process.env.STUDIO_REVIEWER_TOOL) { try { (await import('./agent.mjs')).wake('reviewer', { why: 'game-dev review: compare the newest captures in .studio/proof/*/visual/after and .studio/review with studio/bible/CHARTER.md and file quality tasks', auto: true }); } catch {} }
     st.lastReview = now;
     actions.push({ kind: 'review-pass', msg: `game-dev review of ${Object.keys(shots).length} camera(s)` });
   }

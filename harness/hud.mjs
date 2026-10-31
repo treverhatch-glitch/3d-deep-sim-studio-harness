@@ -25,7 +25,7 @@ import { activeMeeting } from './meeting.mjs';
 import { buildScorecard } from './scorecard.mjs';
 import { taskType, checkDone } from './done-check.mjs';
 import { readTaskHandoff } from './task.mjs';
-import { effectiveMode, describeMode, MODES } from './mode.mjs';
+import { effectiveMode, describeMode, MODES, AUTOSTART_OFF } from './mode.mjs';
 import { sessions as agentSessionsList } from './agent.mjs';
 import { openAsks, allAsks } from './ask.mjs';
 import { readDesigns, latestRounds, readArtRefs, numberOf } from './art.mjs';
@@ -651,7 +651,8 @@ export function buildHudState() {
   // 2.30c: when the Producer starts next (#11), and the last overnight summary (G6).
   try {
     const w = producerWake({ now, events: readRecentEvents(5000), queue: { backlog: st.queue.backlog } });
-    st.status.producer = { wake: w.wake, why: w.why };
+    // 2.58.0: with auto-start off the watcher starts no Producer, whatever the wake rule says.
+    st.status.producer = effectiveMode().autostart ? { wake: w.wake, why: w.why } : { wake: false, why: AUTOSTART_OFF };
   } catch {}
   const ovDir = path.join(REPO_ROOT, 'studio', 'daily');
   const ov = fs.existsSync(ovDir) ? fs.readdirSync(ovDir).filter((f) => /^overnight-.*\.md$/.test(f)).sort().pop() : null;

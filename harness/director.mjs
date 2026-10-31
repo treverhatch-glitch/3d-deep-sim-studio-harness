@@ -30,7 +30,7 @@ import { parseNextQueue, addTask } from './task.mjs';
 import { taskType } from './done-check.mjs';
 import { readBible, checkBible, latestReview, crossedLayersIn, readIdeas, LAYERS, REVIEWS_DIR } from './bible.mjs';
 import { spendToday } from './route.mjs';
-import { effectiveMode } from './mode.mjs';
+import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { startAgent } from './agent.mjs';
 import { flowBrief, flowPass } from './director-flow.mjs';
 import { limitsBrief } from './model-limits.mjs';
@@ -136,7 +136,8 @@ export function pingDirector({ reason = 'Routine check', from = process.env.STUD
   const reasons = [...new Set([...earlier, reason])];
   const brief = writeDirectorBrief(reasons);
   emitEvent({ type: 'director.ping', agent: from, to: 'director', task: task.id, msg: `Director pinged by ${from}: ${reason}`, meta: { reason, daily } });
-  const start = maybeStartDirector();
+  // 2.58.0: the routine (daily) ping comes from the watcher or the HUB: it starts a Director only with auto-start on.
+  const start = daily && !effectiveMode().autostart ? { started: false, why: AUTOSTART_OFF } : maybeStartDirector();
   if (!start.started && start.why === 'STUDIO_DIRECTOR_CMD is not set') emitEvent({ type: 'director.needed', agent: 'director', to: 'producer', task: task.id, msg: `A Director is needed for ${task.id}. Start one: npm run kickoff -- --role director --agent director-1 --tool <tool>, or set STUDIO_DIRECTOR_CMD so pings start it.` });
   return { ok: true, task: task.id, brief, start };
 }

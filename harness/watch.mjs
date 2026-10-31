@@ -14,6 +14,8 @@
  *     with a handoff note naming the last agent and when it was last heard from.
  *   - 2.58.0 (PU-39): a launcher session whose process is alive but whose heartbeat is older than
  *     STUDIO_STALL_RELEASE_MIN (30; 0 = off) hands its task back, frees its claims and its slot. Nothing is killed.
+ *   - Starting agents (the Producer check-in, filling idle slots) only with auto-start on
+ *     (npm run mode -- autostart on --by <name>; off by default since 2.58.0).
  * What it hands to the Producer (one "Watch:" task at a time, never one per finding):
  *   - agents holding a task but silent past --stall, handed-back work nobody picked up past --wait,
  *     and providers that ran out (route.exhausted) in the last hour.
@@ -32,7 +34,7 @@ import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
 import { listDivisions } from './divisions.mjs';
 import { sessions, fillAgents, startAgent, markGone, saveWorkOf, AGENTS_DIR } from './agent.mjs';
-import { effectiveMode } from './mode.mjs';
+import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
 
@@ -302,17 +304,24 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   return report;
 }
 
-/** Every mode.producerEveryHours: tell the Producer to check in, and start a Producer agent if one can start on its own. */
+/**
+ * Every mode.producerEveryHours: tell the Producer to check in, and start a Producer agent if one can start on its own
+ * and auto-start is on (npm run mode -- autostart on --by <name>; off by default since 2.58.0).
+ */
 export function producerCheckinIfDue(now = Date.now(), events = readRecentEvents(3000)) {
   const mode = effectiveMode();
   const last = events.filter((e) => e.type === 'producer.checkin').at(-1);
   if (last && now - Date.parse(last.ts) < mode.producerEveryHours * 3600000) return null;
-  emitEvent({ type: 'producer.checkin', agent: 'watch', to: 'producer', msg: `Producer check-in (${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, every ${mode.producerEveryHours} h): read the handoff, accept or reopen forced work, unblock stalled agents, keep the queue fed` });
   const running = sessions().some((s) => s.running && s.role === 'producer');
+  const could = !running && (process.env.STUDIO_PRODUCER_CMD || process.env.STUDIO_PRODUCER_TOOL || (mode.autoLaunch && process.env.STUDIO_AGENT_TOOL));
+  // 2.58.0 (crew report): with auto-start off (the default) the check-in still pings and logs, and starts nothing.
+  const off = could && !mode.autostart;
+  emitEvent({ type: 'producer.checkin', agent: 'watch', to: 'producer', msg: `Producer check-in (${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, every ${mode.producerEveryHours} h): read the handoff, accept or reopen forced work, unblock stalled agents, keep the queue fed${off ? `. No Producer session was started: ${AUTOSTART_OFF}` : ''}`, ...(off ? { meta: { autostart: false } } : {}) });
+  if (off) return { pinged: true, started: null, autostartOff: true, why: `not started: ${AUTOSTART_OFF}` };
   // 2.30c (#11): the check-in is logged on its clock, but a Producer session starts only when something happened.
   const wake = !running ? producerWake({ now, events: readRecentEvents(5000), queue: parseNextQueue(), commit: true }) : null;
   if (wake && !wake.wake) return { pinged: true, started: null, why: `not started: ${wake.why}` };
-  if (!running && (process.env.STUDIO_PRODUCER_CMD || process.env.STUDIO_PRODUCER_TOOL || (mode.autoLaunch && process.env.STUDIO_AGENT_TOOL))) {
+  if (could) {
     producerLaunched(now);
     const r = startAgent({ role: 'producer', agent: process.env.STUDIO_PRODUCER_NAME || 'producer-1' }, { detach: true });
     return { pinged: true, started: r.ok ? r.agent : null, why: r.ok ? null : r.message };
@@ -326,7 +335,7 @@ function print(r) {
   if (r.pinged) console.log(`[watch] Producer pinged: ${r.pinged}`);
   else if (r.openWatchTask && r.findings.some((f) => f.producer)) console.log(`[watch] Producer already has ${r.openWatchTask} open; not pinging again`);
   if (r.launched?.length) console.log(`[watch] started ${r.launched.join(', ')}`);
-  if (r.checkin) console.log(`[watch] Producer check-in${r.checkin.started ? `: started ${r.checkin.started}` : ''}`);
+  if (r.checkin) console.log(`[watch] Producer check-in${r.checkin.started ? `: started ${r.checkin.started}` : r.checkin.autostartOff ? ` (${r.checkin.why})` : ''}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

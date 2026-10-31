@@ -38,6 +38,9 @@ Scheduler (Windows); `--uninstall` removes it.
   and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
   or a process id now used by something else, is never killed). End it by hand if it is stuck. A pass right
   after the machine slept (the watcher's own last pass as old) frees nothing and checks again next pass.
+- **The supervisor doesn't need auto-start.** `studio:start` is you choosing to run the studio, so it starts
+  agents whatever `npm run mode -- autostart` says; the switch is for the watcher and the HUB starting
+  agents on their own (docs/PACE-AND-AGENTS.md).
 - **Launched agents inherit your MCP servers.** Jed's Serena server opened its dashboard tab for every
   `claude -p` session and hid the War Room. Turn that off in the server's own settings
   (Serena: `web_dashboard_open_on_launch: false` in `~/.serena/serena_config.yml`).
