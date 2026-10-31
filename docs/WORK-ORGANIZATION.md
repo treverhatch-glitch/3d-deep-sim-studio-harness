@@ -41,6 +41,21 @@ being written)" for its first 10 s (`STUDIO_BROKEN_LOCK_GRACE_SEC`), then moved 
 stopped; `npm run task -- resume --by <name>` clears it. Don't hand-edit these files while agents run; use the
 `npm run task` commands.
 
+## Verify runs on its own (2.58.0)
+
+`npm run verify` runs the gates in a process of its own and shows its output; it exits with the run's code, as
+before. If the shell running it is killed (Claude Code's low-memory guard reaps idle background commands), the run
+still finishes and writes its record. `npm run verify -- --wait` (or `npm run verify:wait`) re-attaches: it shows a
+running verify until it ends, or the last one's output, commit and exit code. One verify per agent at a time: a
+second call with the same options attaches to the running one; other options wait for it to end. Ctrl+C at a
+terminal stops the run too. State and logs: `.studio/verify-running/<owner>.json` (pid, start, log, options) and
+`<owner>.result.json`. `--no-detach` (or `STUDIO_VERIFY_DETACH=off`) runs in the shell itself; harness commands and
+CI that call `node scripts/run-gates.mjs` always do.
+
+Every verify compares the tracked files (outside `studio/`) before and after its gates. Any it changed (a test
+rewriting a snapshot's line endings, a generated file) are named in a warning and listed as `changedByVerify` in
+the verify record; the exit code is unchanged. Game checks run with `CI=true` so test runners don't write snapshots.
+
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 
 ```markdown
