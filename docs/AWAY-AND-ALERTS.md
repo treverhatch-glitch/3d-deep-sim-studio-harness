@@ -17,7 +17,7 @@ Everything here is opt-in and costs no tokens: scripts and files, no model.
 
 ## Forced work is "done (pending)"
 
-`task done <ID> --force --reason "…"` still closes the task so the lane moves on, and opens a card.
+`task done <ID> --force --reason "…"` still closes the task so the lane moves on, and opens a card. The owner types it, never an agent (docs/FORCED-CLOSE.md).
 A person, or a reviewer whose model family differs from the model that forced it, closes or reopens it:
 `npm run task -- pending` · `npm run task -- review <ID> --close|--reopen --by <name> [--model <reviewer model>]`.
 The War Room shows the card under "Your call" with Accept and Reopen.

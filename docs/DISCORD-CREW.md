@@ -34,12 +34,16 @@ the proposed list. Four planners would mean four plans.
 
 ## Chat rules (so the bots don't talk each other into loops)
 
-1. A bot answers the owner, or a message that @mentions it. Never another bot's message on its own.
-2. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines), plus
+1. A bot answers the owner, or a message that @mentions it. Never another bot's message on its own. In practice
+   most chat bots ignore other bots entirely: an @mention from a bot does not wake them, only a person's @ping
+   does. So a hand-off from one bot to another goes through a person (or the task queue), never bot-to-bot.
+2. Every bot reacts 👀 the moment it sees a task meant for it, and ✅ on the same message when it is finished, then
+   posts its result (what changed, the link, the proof, anything UNTESTED).
+3. Status goes out once an hour, from Ops only: `npm run harness-health -- --brief` (five lines), plus
    `npm run logs -- --brief` (three lines: tasks logged, open problems, proposals waiting for the owner).
-3. No logs or diffs in the chat: a task id, a file path or a link.
-4. "Needs you" items go to the owner once, as one message each, with the command that settles it.
-5. A bot that is asked something outside its role passes it to the bot that owns it, by mention.
+4. No logs or diffs in the chat: a task id, a file path or a link.
+5. "Needs you" items go to the owner once, as one message each, with the command that settles it.
+6. A bot that is asked something outside its role passes it to the bot that owns it, by mention.
 
 ## One machine, one studio
 
