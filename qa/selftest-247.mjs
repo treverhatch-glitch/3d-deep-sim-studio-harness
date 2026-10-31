@@ -43,7 +43,8 @@ export async function selftest247({ dir, run, report, tmpRoot }) {
   report('2.47.0: with the track\'s build target set to windows, npm run engine:build makes the Windows build by default (here: no editor, so it says so for Windows)', b.status !== 0 && /Windows build also needs that platform's module/.test(out(b)), out(b));
 
   // CI: every GitHub-hosted job is skipped when HARNESS_RUNNER is self-hosted, and one self-hosted job runs instead.
-  const ci = fs.readFileSync(path.join(dir, '.github/workflows/ci.yml'), 'utf8').split(/^jobs:\n/m)[1] || '';
+  // Windows checks out with CRLF line endings: compare on plain newlines.
+  const ci = fs.readFileSync(path.join(dir, '.github/workflows/ci.yml'), 'utf8').replace(/\r\n/g, '\n').split(/^jobs:\n/m)[1] || '';
   const jobs = [...ci.matchAll(/^ {2}([a-z0-9-]+):\n((?: {4}.*\n|\n)*)/gm)].map((m) => ({ name: m[1], body: m[2] }));
   const hosted = jobs.filter((j) => j.name !== 'self-hosted');
   const self = jobs.find((j) => j.name === 'self-hosted');
