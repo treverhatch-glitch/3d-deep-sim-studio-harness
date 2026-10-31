@@ -1,0 +1,23 @@
+# Studio logs (private: Hatchfield detail lives here, never in a public game repo)
+
+**2-minute read for Hatch: the latest summary is first. Then open problems, then proposals waiting for you.**
+
+## Latest summary — 2026-10-31 evening
+- **Done:**
+  - HDRP switch and the Unity side of the replay check (Unity repo PR #2).
+  - Harness 2.47 (U-001, U-002), 2.48 (Windows by default), 2.49 (U-004), 2.50 (U-006), 2.51 (U-005) and 2.52 (U-003): all merged, CI green, a backup branch of main before each.
+- **Untested:** everything that needs the Unity editor (HDRP set-up, Edit/Play Mode in Unity, the Windows build).
+- **Open problems:** P-005 (GPU model), P-009 (no Unity on Claude's side). P-001 fixed: the harness and the two old copies are private (confirmed by Hatch, 2026-10-31).
+- **Port finding:** the web rules run unchanged in .NET (Jint): 3/3 replays match at day 3. Waiting for Hatch: option A (one set of rules) or B (full C# port).
+- **Waiting for your OK:** U-007 (last, only when nothing else waits); merging PR #21 on local checks (P-010).
+
+## The files
+| File | What | Format |
+| --- | --- | --- |
+| WORK-LOG.md | every task: what, how long, which tool or engine step, proof | one row per task, newest last |
+| PROBLEMS.md | what happened, why, the workaround, harness fix candidate?, open or fixed | one block per problem |
+| CREW-LOG.md | the Discord workflow: claims, owners, hand-offs, stalls, mistakes | one row per event, from the channel |
+| PROPOSALS.md | repeated problems turned into harness upgrades, for Hatch to approve | one block per proposal |
+
+Rules: no keys, tokens, passwords or licence files in any log. Link proof (a screenshot path, a recording, a
+test result line); don't paste long output. The harness changes only when Hatch approves a proposal.
