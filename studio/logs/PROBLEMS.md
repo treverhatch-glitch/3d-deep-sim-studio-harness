@@ -10,7 +10,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround:** none in code. Hatch flips visibility (OWNER-STEPS.md 1) and decides what happens to the copies.
 - **Harness fix?** Yes: U-002 (keep the checks free once private).
 
-### P-002 — The harness works with one adopted game repo; Hatchfield has two (web + Unity) · open
+### P-002 — The harness works with one adopted game repo; Hatchfield has two (web + Unity) · fixed 2026-10-31 (2.47, U-001)
 - **What happened:** adopt, export and sync track one origin (`studio/game/ORIGIN.json`). The Unity port lives in its
   own public repo, outside the studio folder.
 - **Why:** the engine track assumed the port lives inside the studio at `engine/<game>/`.
@@ -29,3 +29,21 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Why:** not found yet. It's a timing-sensitive test of report times against file times; it doesn't reproduce locally.
 - **Workaround:** re-run the failed job.
 - **Harness fix?** Maybe: if it happens again, make the test independent of timing.
+
+### P-005 — Couldn't read the GPU model through Task Manager · open
+- **What happened:** computer use opened Task Manager, but clicks on the GPU page didn't register. The visible label reads "NVIDIA GeForce R…" (cut off).
+- **Why:** Task Manager is a protected Windows app, granted at "click" level; it likely ignored clicks from a non-elevated process.
+- **Workaround:** ask Hatch for the model, or read it in the NVIDIA app or Settings → System → Display → Advanced display.
+- **Harness fix?** No.
+
+### P-006 — The game's code can't run outside Vite (import.meta.glob) · fixed with a workaround
+- **What happened:** a plain Node/tsx replay tool failed: `import.meta.glob is not a function`.
+- **Why:** the game uses Vite-only module features.
+- **Workaround:** replays run inside Vitest (`tests/sim/replay.test.ts` with REPLAY_RECORD / REPLAY_PARITY).
+- **Harness fix?** Maybe: the harness's parity `--web` command for a Vite game is a Vitest run (note it in docs).
+
+### P-007 — Tests that force random rolls by replacing Math.random stopped working · fixed
+- **What happened:** after the rules moved to seeded dice, 4 tests that set `Math.random = () => 0` no longer controlled the rules.
+- **Why:** the rules don't read Math.random any more.
+- **Workaround / fix:** `forceSimRandom(fn)` in src/game/simRng.ts; the tests use it.
+- **Harness fix?** No (game code).

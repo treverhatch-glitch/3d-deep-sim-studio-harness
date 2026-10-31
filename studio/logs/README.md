@@ -2,14 +2,14 @@
 
 **2-minute read for Hatch: the latest summary is first. Then open problems, then proposals waiting for you.**
 
-## Latest summary — 2026-10-31 (harness 2.46, hand-off ready)
+## Latest summary — 2026-10-31 afternoon
 - **Done:**
-  - Unity support merged (2.46, all checks green).
-  - Crew hand-off written in hatchfield-unity-harness `docs/crew/` (not pushed yet: waits for your OK).
-  - Public-repo guard built and tried (blocks 6 of 6 planted leaks).
-- **Open problems:** 4 (PROBLEMS.md P-001 to P-004). Biggest: the harness is public today, and two old public
-  copies exist.
-- **Proposals waiting for your OK:** 2 (PROPOSALS.md U-001, U-002).
+  - Hand-off merged in the Unity repo (PR #1).
+  - hatchfield-game history scanned (no keys; old private-doc links and your emails are in the history).
+  - Unity port steps 1–3: the rules roll seeded dice, saves keep them, and replay files exist for seeds 1–3.
+  - Harness 2.47 (U-001, U-002) in PR #15.
+- **Open problems:** P-001 (harness still public), P-004 (timing flake), P-005 (GPU model unread).
+- **Proposals waiting for your OK:** U-003 to U-007 (PROPOSALS.md).
 
 ## The files
 | File | What | Format |
