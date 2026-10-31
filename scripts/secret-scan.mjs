@@ -29,7 +29,16 @@ const ROOT = path.resolve(args.find((a) => !a.startsWith('--')) || '.');
 
 import { findSecrets } from '../harness/secrets.mjs';
 
-const SKIP = /(^|\/)(secret-scan\.(mjs|sh)|secrets\.mjs|package-lock\.json|[^/]*\.lock)$/;
+// Where ROOT sits in git: the path from the repo's top to ROOT ('' at the top, 'sub/dir/' below it).
+const where = spawnSync('git', ['rev-parse', '--is-inside-work-tree', '--show-prefix'], { cwd: ROOT, encoding: 'utf8' });
+const whereLines = String(where.stdout || '').split('\n');
+const PREFIX = where.status === 0 && whereLines[0] === 'true' ? whereLines[1] || '' : '';
+
+// PU-33: skips are tied to their real place from the repo's top (before 2.58.0 any secrets.mjs or *.lock
+// anywhere was skipped). harness/secrets.mjs spells out the shapes; the root lockfile is npm's hashes.
+const SKIP_FILES = new Set(['harness/secrets.mjs', 'package-lock.json']);
+const SKIP_DIRS = ['.studio/locks/'];
+const skipped = (repoRel) => SKIP_FILES.has(repoRel) || SKIP_DIRS.some((d) => repoRel.startsWith(d));
 
 function listFiles() {
   const git = (a) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -84,7 +93,8 @@ let count = 0;
 const hits = [];
 for (const rel of listFiles()) {
   const full = path.join(ROOT, rel);
-  if (SKIP.test(rel) || !fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
+  // --staged lists paths from the repo's top; the folder scan lists them from ROOT.
+  if (skipped(STAGED ? rel : PREFIX + rel) || !fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
   const buf = fs.readFileSync(full);
   count += 1;
   if (buf.subarray(0, 8000).includes(0)) continue; // binary
