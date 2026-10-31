@@ -3,7 +3,7 @@
 Sometimes a task's done-check refuses for a reason that doesn't apply to it: a check that can't run on this
 machine, or a rule written for another kind of task. The right fixes, in order:
 
-1. **Use the right task type.** Build, toolchain, CI and dependency work is a `chore` task (2.58.0): title it
+1. **Use the right task type.** From 2.58.0, build, toolchain, CI and dependency work is a `chore` task: title it
    `Chore: …`, `Build: …`, `Toolchain: …`, `CI: …` or `Deps: …`. It needs changes and a green `npm run verify`, but
    no regression test. Don't retitle a task to slip past a check.
 2. **Fix or run the check** the done-check names (`node harness/done-check.mjs <ID>` says what is missing).
