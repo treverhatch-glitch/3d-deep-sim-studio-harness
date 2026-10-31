@@ -835,6 +835,41 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
 
 export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer';
 
+/**
+ * 2.58.0 (P-053): how long a task claim must be old, and the board quiet, before the watcher treats a claim on a
+ * task that isn't in progress as left behind (STUDIO_CLAIM_LEAK_GRACE_SEC, 60). A `task done` or `pause` moves the
+ * task on the board first and frees the claim a moment later; a `task start` claims a moment before the move.
+ */
+export const claimLeakGraceMs = () => {
+  const v = Number(process.env.STUDIO_CLAIM_LEAK_GRACE_SEC);
+  return (process.env.STUDIO_CLAIM_LEAK_GRACE_SEC !== undefined && process.env.STUDIO_CLAIM_LEAK_GRACE_SEC !== '' && Number.isFinite(v) ? Math.max(0, v) : 60) * 1000;
+};
+
+/**
+ * 2.58.0 (P-053): free a `task:` claim nobody can be using: its task is done, waiting, or not on the board (a
+ * `task done` killed after its board write kept it, and heartbeats renewed it; a killed start or pause). Under the
+ * board lock, and only if the claim is still the one the caller saw (`expect`: { owner, claimedAt }) and the task is
+ * still not in progress. Returns { released, where, owner } or { released: false, why }.
+ */
+export function releaseLeakedClaim(taskId, expect) {
+  return withBoard(() => {
+    const q = parseNextQueue();
+    if (q.inProgress.some((t) => t.id === taskId)) return { released: false, why: 'in progress' };
+    const l = lockStatus(`task:${taskId}`).lock || null;
+    if (!l || !sameClaim(l, expect)) return { released: false, why: 'changed' };
+    const where = q.done.some((t) => t.id === taskId) ? 'done' : q.backlog.some((t) => t.id === taskId) ? 'waiting' : 'not on the board';
+    const r = release(`task:${taskId}`, l.owner);
+    return r.released ? { released: true, where, owner: l.owner } : { released: false, why: r.reason || 'not released' };
+  });
+}
+
+/** When either board file last changed (ms), for the watcher's grace. */
+export function boardChangedAt() {
+  let t = 0;
+  for (const f of [NEXT_FILE, DONE_FILE]) { try { t = Math.max(t, fs.statSync(f).mtimeMs); } catch { /* not written yet */ } }
+  return t;
+}
+
 /** meta: { size: 1-5 (how hard), causedBy: 'T-012' (the task whose work caused this bug) } */
 /**
  * Reopen finished work that turned out wrong. Counts as a bug against the model that closed it
@@ -842,6 +877,7 @@ export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer
  */
 export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
   let target = null;
+  let freed = null;
   withBoard(() => {
     const q = parseNextQueue();
     const idx = q.done.findIndex((t) => t.id === taskId);
@@ -851,8 +887,13 @@ export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
     target.status = 'backlog';
     q.backlog.unshift(target);
     writeNextQueue(q);
+    // 2.58.0 (P-053): a claim left on the finished task (its `task done` was killed after the board write) would
+    // keep every agent off the reopened task. A claim younger than the grace is a start in flight: left alone.
+    const l = lockStatus(`task:${taskId}`).lock;
+    if (l && Date.now() - (Date.parse(l.claimedAt || '') || 0) >= claimLeakGraceMs() && release(`task:${taskId}`, l.owner).released) freed = l.owner;
   });
   if (!target) return null;
+  if (freed) reason = `${reason || 'No reason given.'}\n(${freed}'s claim, left from when it was done, was released.)`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;

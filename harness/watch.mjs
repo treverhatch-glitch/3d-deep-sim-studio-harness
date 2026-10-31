@@ -11,7 +11,13 @@
  *
  * What it does on its own (safe, mechanical):
  *   - A task in progress whose claim expired or was never made goes back to the top of the queue,
- *     with a handoff note naming the last agent and when it was last heard from.
+ *     with a handoff note naming the last agent and when it was last heard from. 2.58.0 (P-054): only if the claim
+ *     is still what the pass saw when it decided (checked again under the board lock).
+ *   - 2.58.0 (P-053): a task claim on a task that is done, waiting or gone from the board (a killed `task done`,
+ *     start or pause left it) is released after STUDIO_CLAIM_LEAK_GRACE_SEC (60) with the board quiet that long.
+ *   - 2.58.0 (P-052): a task found in both NEXT.md and DONE.md (a board write cut off) is settled to one copy.
+ *   - 2.58.0 (P-060): temp files killed writers left in studio/ and .studio/ (older than STUDIO_TEMP_SWEEP_MIN, 5)
+ *     are removed.
  * What it hands to the Producer (one "Watch:" task at a time, never one per finding):
  *   - agents holding a task but silent past --stall, handed-back work nobody picked up past --wait,
  *     and providers that ran out (route.exhausted) in the last hour.
@@ -22,10 +28,12 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
-import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, withBoard } from './task.mjs';
+import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, withBoard, releaseLeakedClaim, claimLeakGraceMs, boardChangedAt } from './task.mjs';
 import { holdReason } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
-import { writeAtomic } from './fsafe.mjs';
+import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
+import { doneRunning } from './busy.mjs';
+import { mainRoot } from './worktree.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
 import { listDivisions } from './divisions.mjs';
@@ -65,7 +73,24 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   // 2.57.0 (PU-16, P-037): lock files nobody can read (an agent killed while writing one) are set aside to
   // .studio/locks/broken/ once they are older than STUDIO_BROKEN_LOCK_GRACE_SEC (10), so no claim trips on them.
   for (const f of sweepBrokenLocks({ dryRun })) findings.push({ kind: 'lock', msg: `${dryRun ? 'Would set aside' : 'Set aside'} the unreadable lock file .studio/locks/${f} (in .studio/locks/broken/)`, producer: false });
-  const q = parseNextQueue();
+  // 2.58.0 (P-060): temp files from writes killed between writing and renaming (gitignored, full size each).
+  const tempAge = Number(process.env.STUDIO_TEMP_SWEEP_MIN ?? 5);
+  const temps = sweepTempsDeep([path.join(REPO_ROOT, 'studio'), STUDIO_STATE_DIR], { maxAgeMs: (Number.isFinite(tempAge) ? Math.max(0, tempAge) : 5) * 60000, dryRun });
+  if (temps.length) findings.push({ kind: 'temps', msg: `${dryRun ? 'Would remove' : 'Removed'} ${temps.length} temp file(s) left by killed writes: ${temps.slice(0, 5).join(', ')}${temps.length > 5 ? ` and ${temps.length - 5} more` : ''}`, producer: false });
+  // When the board last changed before this pass touched it (the claim-leak grace below).
+  const boardAt = boardChangedAt();
+  let q = parseNextQueue();
+  // 2.58.0 (P-052): a task in both board files (a `task done` or reopen killed between its two writes) reads once
+  // already; one write under the board lock keeps only that copy.
+  if (q.duplicates.length) {
+    const ids = q.duplicates;
+    if (!dryRun) {
+      withBoard(() => writeNextQueue(parseNextQueue()));
+      q = parseNextQueue();
+    }
+    const now2 = new Set(q.done.map((t) => t.id));
+    findings.push({ kind: 'board', msg: `${dryRun ? 'Would settle' : 'Settled'} ${ids.join(', ')}: in both studio/NEXT.md and studio/DONE.md (a board write was cut off); ${ids.map((id) => `${id} ${now2.has(id) ? 'done' : 'open'}`).join(', ')}`, producer: false });
+  }
   const locks = listLocks();
   const events = readRecentEvents(2000);
   const heard = new Map(); // agent -> last event time
@@ -87,7 +112,9 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
       // Nobody holds it any more: put it back where any agent can take it.
       if (/^Check forced done|^Watch:/i.test(t.title) || t.role === 'producer' || t.role === 'human') continue;
       const note = last ? `The claim ran out. Last heard from ${last.agent} ${ago(last.at)} ago (${last.type}).\n${trail(events, last.agent)}` : 'In progress with no claim and no activity on record.';
-      if (!dryRun) pauseTask(t.id, 'watch', note, { force: true });
+      // 2.58.0 (P-054): handed back only if it is still unclaimed (an agent may have re-claimed it during trail()).
+      const r = dryRun ? null : pauseTask(t.id, 'watch', note, { force: true, expect: 'none' });
+      if (r?.error === 'claim-changed') { findings.push({ kind: 'kept', task: t.id, msg: `${t.id} not requeued: ${r.lock ? `${r.lock.owner} claimed it` : 'its claim changed'} while this pass was deciding`, producer: false }); continue; }
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${note}`, producer: false });
       continue;
     }
@@ -99,7 +126,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     const staleRecord = session && !session.running && session.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(session.endedAt);
     if (session && !session.running && !staleRecord) {
       const note = `${lock.owner}'s session ended (${session.reason || 'no reason recorded'}) while it held ${t.id}.\n${trail(events, lock.owner)}`;
-      if (!dryRun) pauseTask(t.id, 'watch', note, { force: true });
+      const r = dryRun ? null : pauseTask(t.id, 'watch', note, { force: true, expect: { owner: lock.owner, claimedAt: lock.claimedAt } });
+      if (r?.error === 'claim-changed') { findings.push({ kind: 'kept', task: t.id, msg: `${t.id} not requeued: its claim changed while this pass was deciding`, producer: false }); continue; }
       findings.push({ kind: 'requeued', task: t.id, msg: `${t.id} requeued: ${lock.owner} ended without handing it back`, producer: false });
       continue;
     }
@@ -107,6 +135,34 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
     const lastHeard = Math.max(heard.get(lock.owner) || 0, session?.running && session.lastBeat ? Date.parse(session.lastBeat) : 0);
     if (now - lastHeard > stallMin * 60000) {
       findings.push({ kind: 'stalled', task: t.id, agent: lock.owner, msg: `${lock.owner} holds ${t.id} but has been silent ${lastHeard ? `for ${ago(lastHeard)}` : 'since it claimed it'}`, producer: true });
+    }
+  }
+
+  // 2.58.0 (P-053): task claims nobody can be using: the task is done (a `task done` killed after its board write;
+  // the heartbeat kept renewing the claim, and after a reopen nobody could start it), waiting (a start or pause
+  // killed between claim and board), or gone from the board. Not while a `task done` for it is running, not for a
+  // claim younger than the grace, and not while the board changed within it; checked again under the board lock.
+  {
+    const grace = claimLeakGraceMs();
+    const open = new Set(q.inProgress.map((t) => t.id));
+    const doneIds = new Set(q.done.map((t) => t.id));
+    const waiting = new Set(q.backlog.map((t) => t.id));
+    const quiet = Date.now() - boardAt >= grace;
+    let stateDir = STUDIO_STATE_DIR;
+    try { stateDir = path.join(mainRoot(), '.studio'); } catch { /* this checkout's own */ }
+    for (const l of locks) {
+      if (!l.key.startsWith('task:')) continue;
+      const id = l.key.slice(5);
+      if (open.has(id) || !quiet || now - (Date.parse(l.claimedAt || '') || 0) < grace) continue;
+      if (doneRunning(id, { dir: stateDir })) continue;
+      const where = doneIds.has(id) ? 'done' : waiting.has(id) ? 'waiting' : 'not on the board';
+      if (dryRun) { findings.push({ kind: 'released', task: id, agent: l.owner, msg: `Would release task:${id} (${l.owner}): the task is ${where}`, producer: false }); continue; }
+      let r = null;
+      try { r = releaseLeakedClaim(id, { owner: l.owner, claimedAt: l.claimedAt }); } catch { r = null; }
+      if (!r?.released) continue;
+      const msg = `Released ${l.owner}'s claim on ${id}: the task is ${r.where}${r.where === 'done' ? ' (its task done was probably cut off after the board write)' : ''}`;
+      findings.push({ kind: 'released', task: id, agent: l.owner, msg, producer: false });
+      try { emitEvent({ type: 'lock.released', agent: 'watch', task: id, status: 'warn', msg, meta: { owner: l.owner, claimedAt: l.claimedAt, where: r.where } }); } catch { /* the finding is in watch-last.json */ }
     }
   }
 
