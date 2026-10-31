@@ -181,7 +181,7 @@ export function exportPatch({ root = REPO_ROOT, now = new Date() } = {}) {
  * them back first: npm run onboard -- --export), or uncommitted ones. Returns { ok, upToDate?, from, to,
  * commits, files, committed } or { error }.
  */
-export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit = true, now = new Date() } = {}) {
+export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit = true, now = new Date(), dryRun = false } = {}) {
   const o = readOrigin(root);
   if (!o?.path) return { error: 'no adopted game (studio/game/ORIGIN.json): adopt one first with npm run onboard -- --adopt' };
   if (!o.source || !fs.existsSync(o.source)) return { error: `the game's own repo isn't at ${o.source || '(unknown)'} any more: clone it there, or fix "source" in studio/game/ORIGIN.json` };
@@ -203,6 +203,8 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   if (tip === o.sha) return { ok: true, upToDate: true, from: o.sha, to: tip, commits: [], files: [] };
   const commits = git(o.source, 'log', '--format=%h %s', `${o.sha}..${tip}`).stdout.trim().split('\n').filter(Boolean);
   const files = git(o.source, 'diff', '--name-only', o.sha, tip).stdout.trim().split('\n').filter(Boolean);
+  // 2.55.0 (P-030): --dry-run lists what would come in and writes nothing (no patch, no ORIGIN.json, no commit).
+  if (dryRun) return { ok: true, dryRun: true, from: o.sha, to: tip, ref: want, commits, files };
   const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json', ':(exclude)studio.browser.json');
   if (diff.status !== 0) return { error: `git diff in ${o.source} failed: ${(diff.stderr || '').trim()}` };
   if (diff.stdout.trim()) {

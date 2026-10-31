@@ -200,8 +200,11 @@ export function sessions() {
 export async function releaseDeadLocks(list = sessions()) {
   const known = new Map();
   for (const s of list) known.set(s.agent, (known.get(s.agent) || false) || s.running);
+  const endedAt = new Map(list.filter((s) => !s.running && s.endedAt).map((s) => [s.agent, Date.parse(s.endedAt) || 0]));
   const { releaseDeadOwners } = await import('./lock.mjs');
-  const freed = releaseDeadOwners((owner) => known.has(owner) && !known.get(owner));
+  // 2.55.0 (P-028): only claims made before that session ended are its own. A chat bot claiming tasks itself under
+  // the same name after the session ended keeps its claim.
+  const freed = releaseDeadOwners((owner, l) => known.has(owner) && !known.get(owner) && !(endedAt.get(owner) && Date.parse(l?.claimedAt || '') > endedAt.get(owner)));
   if (freed.length) emitEvent({ type: 'lock.dead_released', agent: 'watch', msg: `Freed ${freed.length} lock(s) held by agents whose process is gone: ${freed.join(', ')}`.slice(0, 300), meta: { freed } });
   return freed;
 }
@@ -1019,7 +1022,16 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
   const mode = effectiveMode();
   // 2.30o: away mode (or the game-dev loop asking for it) means the studio starts agents on its own.
   if (!mode.autoLaunch && !autonomous) {
-    if (!(byDirector && !mode.chosen)) return { started: [], why: `${mode.label} doesn't start agents on its own` };
+    // 2.55.0 (P-032): with no pace chosen nothing starts on its own, the Director included (2.30j let it start
+    // builders here; in the first Hatchfield crew run that kept starting Opus sessions nobody asked for). A note
+    // goes to the dev once an hour instead.
+    if (!mode.chosen) {
+      const msg = 'No pace is chosen, so the studio starts no agents on its own: npm run mode -- set <pace> --by <name> (precise, budget, fast, prototype or extreme), or start agents by hand';
+      const last = readRecentEvents(2000).filter((e) => e.type === 'pace.unchosen').pop();
+      if (!last || Date.now() - Date.parse(last.ts) > 3600000) emitEvent({ type: 'pace.unchosen', agent: 'watch', to: 'human', status: 'warn', msg });
+      return { started: [], why: 'no pace chosen yet: nothing starts on its own' };
+    }
+    return { started: [], why: `${mode.label} doesn't start agents on its own` };
   }
   if (readStop()) return { started: [], why: 'the studio is stopped' };
   const { readStatus, supervise } = await import('./supervisor.mjs');
@@ -1027,7 +1039,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
   if (sup?.status === 'running' && alive(sup.pid)) return { started: [], why: `the supervisor (pid ${sup.pid}) starts agents` };
   const r = await supervise({ watcher: true, prefix: 'auto-', deps: { sessions, startAgent, launchableRoles, nextAgentName } }, { startedAt: Date.now(), names: [] });
   if (r.started.length) {
-    const msg = byDirector && !mode.chosen ? `Started ${r.started.join(', ')} (pace not chosen yet: the Director started it)` : `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})`;
+    const msg = byDirector && !mode.chosen ? `Started ${r.started.join(', ')} (away mode or auto-launch, no pace chosen)` : `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})`;
     emitEvent({ type: 'agent.auto_start', agent: 'watch', to: 'producer', msg });
   }
   return { started: r.started, why: r.why.join('; ') };

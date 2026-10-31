@@ -3449,6 +3449,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.55.0: fixes from the crew's own logs, P-028, P-030, P-031, P-032 (qa/selftest-255.mjs).
+{
+  const dir = copyRepo();
+  const { selftest255 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-255.mjs')).href);
+  await selftest255({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

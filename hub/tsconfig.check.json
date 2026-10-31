@@ -1,0 +1,13 @@
+{
+  "//": "2.55.0 (P-031): the War Room's type check. TypeScript expands \"*.tsx\" itself, so it works in cmd and PowerShell (npm runs scripts through cmd on Windows, which doesn't expand globs).",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "es2022"
+  },
+  "include": ["*.tsx"]
+}
