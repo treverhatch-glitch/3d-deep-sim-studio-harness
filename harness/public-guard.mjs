@@ -11,6 +11,8 @@
  * as a pre-push hook (.githooks/pre-push; Git LFS's hooks are kept working beside it) and in the repo's CI
  * (.github/workflows/public-guard.yml), so a skipped hook is still caught before a merge. Installing again
  * updates the copies to this harness's version. Never copies anything else from the harness.
+ * 2.53.0: a repo adds its own private markers in tools/public-guard/private-markers.json (file-name and text
+ * patterns only its private code has, such as a game's packed rules file); install never overwrites that file.
  */
 import fs from 'node:fs';
 import path from 'node:path';
