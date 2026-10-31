@@ -3465,6 +3465,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.57.0 (PU-16): crash-safe studio state, P-037, P-038, P-041 (qa/selftest-pu16.mjs).
+{
+  const dir = copyRepo();
+  const { selftestPU16 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu16.mjs')).href);
+  await selftestPU16({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -14,7 +14,7 @@ import { summarize as summarizeVerdict } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { holdReason, setHold, readHolds, laneList, gameFolders } from './task-hold.mjs';
+import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -28,6 +28,7 @@ import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState } from './baseline.mjs';
+import { withFileLock, writeAtomic } from './fsafe.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -89,11 +90,22 @@ function formatTaskLine(t, mark) {
 }
 
 /**
- * 2.30p: every board write takes the short land lock and re-reads the board first. A task on disk that
- * the caller's snapshot never saw (another agent added it meanwhile) is kept, never overwritten.
+ * 2.57.0 (PU-16, P-038): one agent at a time reads, changes and writes the board (NEXT.md and DONE.md), under a
+ * short lock of its own (.studio/locks/board.mutex). Ten agents starting ten tasks at once used to overwrite each
+ * other's moves: 7 held their claims while the board showed 4 in progress. Re-entrant; synchronous `fn` only.
+ * Every change to the board goes through here: read inside `fn`, change, writeNextQueue.
+ */
+export function withBoard(fn) {
+  return withFileLock('board', fn, { dir: path.join(STUDIO_STATE_DIR, 'locks'), timeoutMs: Number(process.env.STUDIO_BOARD_LOCK_WAIT_MS || 15000), what: 'The board (studio/NEXT.md)' });
+}
+
+/**
+ * 2.30p: every board write re-reads the board first. A task on disk that the caller's snapshot never saw (another
+ * agent added it meanwhile) is kept, never overwritten. 2.57.0: under the board lock (it was the land lock, which a
+ * landing holds for minutes, after which the write went ahead unlocked).
  */
 export function writeNextQueue(tasks) {
-  const doWrite = () => {
+  withBoard(() => {
     if (tasks.readIds) {
       const disk = parseNextQueue();
       const mine = new Set([...tasks.inProgress, ...tasks.backlog, ...tasks.done].map((t) => t.id));
@@ -102,13 +114,7 @@ export function writeNextQueue(tasks) {
       }
     }
     writeNextQueueRaw(tasks);
-  };
-  try {
-    withLandLock(mainRoot(), doWrite, { waitMs: Number(process.env.STUDIO_BOARD_LOCK_WAIT_MS || 30000) });
-  } catch (err) {
-    if (err.code !== 'LAND_BUSY') throw err;
-    doWrite();
-  }
+  });
 }
 
 function writeNextQueueRaw(tasks) {
@@ -131,8 +137,8 @@ function writeNextQueueRaw(tasks) {
     `_${tasks.done.length ? `${tasks.done.length} finished task${tasks.done.length === 1 ? ' is' : 's are'}` : 'Finished tasks are'} in \`studio/DONE.md\` (newest first). This file keeps only open work._`,
     '',
   ];
-  fs.mkdirSync(path.dirname(NEXT_FILE), { recursive: true });
-  fs.writeFileSync(NEXT_FILE, out.join('\n'), 'utf8');
+  // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
+  writeAtomic(NEXT_FILE, out.join('\n'));
   const done = [
     '# Finished tasks (`studio/DONE.md`)',
     '',
@@ -142,7 +148,10 @@ function writeNextQueueRaw(tasks) {
     ...(tasks.done.length ? tasks.done.map((t) => formatTaskLine(t, 'x')) : ['_No completed tasks yet._']),
     '',
   ];
-  fs.writeFileSync(DONE_FILE, done.join('\n'), 'utf8');
+  const doneText = done.join('\n');
+  let was = null;
+  try { was = fs.readFileSync(DONE_FILE, 'utf8'); } catch { /* not written yet */ }
+  if (was !== doneText) writeAtomic(DONE_FILE, doneText);
 }
 
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
@@ -160,8 +169,7 @@ export function syncCurrentTaskCheckpoint(activeTask, note = '') {
 - **Phase**: ${activeTask ? 'IN_PROGRESS' : 'READY'}
 - **Last Note**: ${note || (activeTask ? 'Task started via harness/task.mjs' : 'Ready to pull from studio/NEXT.md')}
 `;
-  fs.mkdirSync(path.dirname(CURRENT_TASK_FILE), { recursive: true });
-  fs.writeFileSync(CURRENT_TASK_FILE, content, 'utf8');
+  writeAtomic(CURRENT_TASK_FILE, content, { fsync: false });
 }
 
 export const HANDOFF_DIR = path.join(REPO_ROOT, 'studio', 'handoffs');
@@ -178,17 +186,27 @@ export function readTaskHandoff(taskId) {
 
 /** The studio-wide stop: while it is on, no task can be started. Agents finish their step, hand back and wait. */
 export const STOP_FILE = path.join(STUDIO_STATE_DIR, 'STOP.json');
+/**
+ * The stop, or null when the studio runs. 2.57.0 (PU-16, P-041): a STOP file that exists but can't be read (half
+ * written, or held by another program) counts as stopped: failing open let tasks start during a stop.
+ */
 export function readStop() {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(STOP_FILE, 'utf8'));
-  } catch {
-    return null;
+    raw = fs.readFileSync(STOP_FILE, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    raw = null;
   }
+  try {
+    const s = JSON.parse(raw);
+    if (s && typeof s === 'object') return s;
+  } catch { /* torn or empty */ }
+  return { by: 'unknown', reason: 'the stop file .studio/STOP.json is there but unreadable (half-written?), so the studio counts as stopped', at: null, unreadable: true };
 }
 export function setStop(by = 'war-room-human', reason = '') {
   const s = { by, reason: String(reason || '').slice(0, 300), at: new Date().toISOString() };
-  fs.mkdirSync(path.dirname(STOP_FILE), { recursive: true });
-  fs.writeFileSync(STOP_FILE, `${JSON.stringify(s, null, 2)}\n`);
+  writeAtomic(STOP_FILE, `${JSON.stringify(s, null, 2)}\n`);
   emitEvent({ type: 'studio.stopped', agent: by, to: 'producer', status: 'blocked', msg: `Studio stopped by ${by}${s.reason ? `: ${s.reason}` : ''}. No new tasks start until it resumes.` });
   return s;
 }
@@ -250,23 +268,34 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
     if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };
-    emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId} already claimed by ${lockRes.lock?.owner}` });
-    return { error: 'locked', lock: lockRes.lock || null };
+    emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: lockRes.lock?.owner ? `Task ${taskId} already claimed by ${lockRes.lock.owner}` : `Task ${taskId}: ${lockRes.message || 'claim refused'}` });
+    return { error: 'locked', lock: lockRes.lock || null, ...(lockRes.message ? { message: lockRes.message } : {}) };
   }
 
-  const q = parseNextQueue();
-  let target = q.inProgress.find((t) => t.id === taskId);
-  if (!target) {
-    const idx = q.backlog.findIndex((t) => t.id === taskId);
-    if (idx === -1) {
-      release(`task:${taskId}`, agent);
-      return null;
-    }
-    [target] = q.backlog.splice(idx, 1);
-    target.status = 'in_progress';
-    q.inProgress.unshift(target);
+  // 2.57.0 (PU-16, P-038): the move to IN_PROGRESS is read, made and written under the board lock.
+  let target = null;
+  try {
+    withBoard(() => {
+      const q = parseNextQueue();
+      target = q.inProgress.find((t) => t.id === taskId) || null;
+      if (!target) {
+        const idx = q.backlog.findIndex((t) => t.id === taskId);
+        if (idx === -1) return;
+        [target] = q.backlog.splice(idx, 1);
+        target.status = 'in_progress';
+        q.inProgress.unshift(target);
+      }
+      writeNextQueue(q);
+    });
+  } catch (err) {
+    if (err.code !== 'ELOCKBUSY') throw err;
+    release(`task:${taskId}`, agent);
+    return { error: 'busy', message: err.message };
   }
-  writeNextQueue(q);
+  if (!target) {
+    release(`task:${taskId}`, agent);
+    return null;
+  }
   // In a lane copy (2.29): start from the studio's latest work, plus any earlier agent's unmerged work on this task.
   let carried = null;
   if (inLaneCopy()) {
@@ -486,7 +515,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30p: the board is re-read right before it is written (under the land lock) and only this task's
   // move to DONE is applied, so tasks other agents queued while the gates ran are never overwritten.
   let landed = false;
-  const writeBoard = () => {
+  const writeBoard = () => withBoard(() => {
     const fresh = parseNextQueue();
     fresh.inProgress = fresh.inProgress.filter((t) => t.id !== target.id);
     fresh.backlog = fresh.backlog.filter((t) => t.id !== target.id);
@@ -497,7 +526,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     writeNextQueue(fresh);
     q = fresh;
     landed = true;
-  };
+  });
 
   // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
   // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
@@ -551,12 +580,15 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     // The same cause already has an open check task: this task joins it instead of adding another.
     const open = [...q.inProgress, ...q.backlog].find((t) => /^Check forced done /.test(t.title) && causeOf(t.title.replace(/^[^:]*\): /, '')) === cause);
     if (open) {
-      const q2 = parseNextQueue();
-      const same = [...q2.inProgress, ...q2.backlog].find((t) => t.id === open.id);
-      const m = same.title.match(/^Check forced done (.+?) \(([^)]+)\): (.+)$/);
-      const ids = m[1].split(/,\s*/);
-      if (!ids.includes(target.id)) same.title = `Check forced done ${[...ids, target.id].join(', ')} (${m[2]}): ${m[3]}`;
-      writeNextQueue(q2);
+      withBoard(() => {
+        const q2 = parseNextQueue();
+        const same = [...q2.inProgress, ...q2.backlog].find((t) => t.id === open.id);
+        const m = same?.title.match(/^Check forced done (.+?) \(([^)]+)\): (.+)$/);
+        if (!m) return;
+        const ids = m[1].split(/,\s*/);
+        if (!ids.includes(target.id)) same.title = `Check forced done ${[...ids, target.id].join(', ')} (${m[2]}): ${m[3]}`;
+        writeNextQueue(q2);
+      });
       return { ...target, forced: true, check, followUp: open.id, joined: true };
     }
     const followUp = addTask({ title: `Check forced done ${target.id} (${check.type}): ${check.missing[0]}`, role: 'producer', priority: 'P1' });
@@ -595,13 +627,18 @@ export function pauseTask(taskId, agent = null, note = '', { force = false } = {
   if (lock.locked && lock.lock.owner !== agent && !force && holderRunning(lock.lock.owner)) {
     return { error: 'locked', message: `Task ${taskId} is claimed by ${lock.lock.owner}, which is still running. Only that owner can hand it back (or stop it: npm run agent -- stop ${lock.lock.owner}).` };
   }
-  const q = parseNextQueue();
-  const idx = q.inProgress.findIndex((t) => t.id === taskId);
-  if (idx === -1) return null;
-  const [target] = q.inProgress.splice(idx, 1);
-  target.status = 'backlog';
-  q.backlog.unshift(target);
-  writeNextQueue(q);
+  let q = null;
+  let target = null;
+  withBoard(() => {
+    q = parseNextQueue();
+    const idx = q.inProgress.findIndex((t) => t.id === taskId);
+    if (idx === -1) return;
+    [target] = q.inProgress.splice(idx, 1);
+    target.status = 'backlog';
+    q.backlog.unshift(target);
+    writeNextQueue(q);
+  });
+  if (!target) return null;
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   const who = agent || lock.lock?.owner || 'unknown';
   // The agent is stopping: free its folder and file claims too, unless it still holds another task.
@@ -637,14 +674,18 @@ export const PRODUCER_NAME = () => process.env.STUDIO_PRODUCER_NAME || 'producer
  * (harness/scorecard.mjs). The reason goes into the task's handoff notes.
  */
 export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
-  const q = parseNextQueue();
-  const idx = q.done.findIndex((t) => t.id === taskId);
-  if (idx === -1) return null;
-  const [target] = q.done.splice(idx, 1);
-  target.title = target.title.replace(/\s*_\(✓ .*\)_$/, '');
-  target.status = 'backlog';
-  q.backlog.unshift(target);
-  writeNextQueue(q);
+  let target = null;
+  withBoard(() => {
+    const q = parseNextQueue();
+    const idx = q.done.findIndex((t) => t.id === taskId);
+    if (idx === -1) return;
+    [target] = q.done.splice(idx, 1);
+    target.title = target.title.replace(/\s*_\(✓ .*\)_$/, '');
+    target.status = 'backlog';
+    q.backlog.unshift(target);
+    writeNextQueue(q);
+  });
+  if (!target) return null;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
@@ -716,8 +757,7 @@ export function allocateTaskId(q = parseNextQueue()) {
     for (const e of readRecentEvents(0)) if (e.type === 'task.added') max = Math.max(max, num(e.task));
     try { max = Math.max(max, Number(fs.readFileSync(counter, 'utf8').trim()) || 0); } catch {}
     const next = max + 1;
-    fs.mkdirSync(path.dirname(counter), { recursive: true });
-    fs.writeFileSync(counter, `${next}\n`);
+    writeAtomic(counter, `${next}\n`, { fsync: false });
     return `T-${String(next).padStart(3, '0')}`;
   };
   try {
@@ -759,9 +799,8 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
     return { error: 'gated', message: gate.message };
   }
   if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
-  const q = parseNextQueue();
   const newTask = {
-    id: allocateTaskId(q),
+    id: allocateTaskId(parseNextQueue()),
     priority: priority.toUpperCase(),
     role,
     title,
@@ -771,8 +810,11 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
   // A rescue's split pieces are parts of a task already in the plan, not new mechanics: no dev "yes" needed.
   const fromRescue = meta.origin === 'rescue';
   meta = { ...meta, origin: originOf({ origin: meta.origin, agent, asked: meta.asked }), ...(fromRescue ? { rescueSplit: true } : {}) };
-  q.backlog.push(newTask);
-  writeNextQueue(q);
+  withBoard(() => {
+    const q = parseNextQueue();
+    q.backlog.push(newTask);
+    writeNextQueue(q);
+  });
   if (meta.after?.length) setHold(newTask.id, { after: meta.after });
   if (meta.origin === 'agent-proposed' && !fromRescue && isMechanic(title, meta)) {
     setHold(newTask.id, { needsYes: { by: agent, at: new Date().toISOString() } });
@@ -815,12 +857,17 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
 /** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
 export function dropTask(id, { by = actor(), why } = {}) {
   if (typeof why !== 'string' || !why.trim()) return { ok: false, message: 'Say why it is dropped: --why "…" (kept in the event log and the task\'s notes).' };
-  const q = parseNextQueue();
-  if (q.inProgress.some((t) => t.id === id)) return { ok: false, message: `${id} is in progress. Pause it first (npm run task -- pause ${id} --note "…"), then drop it.` };
-  const i = q.backlog.findIndex((t) => t.id === id);
-  if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue.` };
-  const [t] = q.backlog.splice(i, 1);
-  writeNextQueue(q);
+  let t = null;
+  const refused = withBoard(() => {
+    const q = parseNextQueue();
+    if (q.inProgress.some((x) => x.id === id)) return { ok: false, message: `${id} is in progress. Pause it first (npm run task -- pause ${id} --note "…"), then drop it.` };
+    const i = q.backlog.findIndex((x) => x.id === id);
+    if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue.` };
+    [t] = q.backlog.splice(i, 1);
+    writeNextQueue(q);
+    return null;
+  });
+  if (refused) return refused;
   setHold(id, { needsYes: null, parked: null, after: null });
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   fs.appendFileSync(handoffFile(id), `\n## ${new Date().toISOString()} · ${by} (dropped)\n${why}\nTitle was: ${t.title}\n`);
@@ -830,18 +877,23 @@ export function dropTask(id, { by = actor(), why } = {}) {
 
 /** Move a waiting task: --to top|bottom|<position from 1>, or --before <T-ID> (2.30, J11). */
 export function reorderTask(id, { to, before, by = actor() } = {}) {
-  const q = parseNextQueue();
-  const i = q.backlog.findIndex((t) => t.id === id);
-  if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue (only waiting tasks move).` };
-  const [t] = q.backlog.splice(i, 1);
+  let q = null;
   let at;
-  if (typeof before === 'string') at = q.backlog.findIndex((x) => x.id === before);
-  else if (to === 'top') at = 0;
-  else if (to === 'bottom') at = q.backlog.length;
-  else if (Number(to) >= 1) at = Math.min(q.backlog.length, Number(to) - 1);
-  if (at === undefined || at < 0) return { ok: false, message: 'Usage: npm run task -- reorder <TASK_ID> --to top|bottom|<position> | --before <TASK_ID> --by <name>' };
-  q.backlog.splice(at, 0, t);
-  writeNextQueue(q);
+  const refused = withBoard(() => {
+    q = parseNextQueue();
+    const i = q.backlog.findIndex((t) => t.id === id);
+    if (i === -1) return { ok: false, message: `${id} isn't waiting in the queue (only waiting tasks move).` };
+    const [t] = q.backlog.splice(i, 1);
+    if (typeof before === 'string') at = q.backlog.findIndex((x) => x.id === before);
+    else if (to === 'top') at = 0;
+    else if (to === 'bottom') at = q.backlog.length;
+    else if (Number(to) >= 1) at = Math.min(q.backlog.length, Number(to) - 1);
+    if (at === undefined || at < 0) return { ok: false, message: 'Usage: npm run task -- reorder <TASK_ID> --to top|bottom|<position> | --before <TASK_ID> --by <name>' };
+    q.backlog.splice(at, 0, t);
+    writeNextQueue(q);
+    return null;
+  });
+  if (refused) return refused;
   emitEvent({ type: 'task.reordered', agent: by, task: id, msg: `${by} moved ${id} to position ${at + 1} of ${q.backlog.length}` });
   return { ok: true, message: `${id} is now number ${at + 1} of ${q.backlog.length} waiting.` };
 }
@@ -992,7 +1044,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     if (started.error) {
-      console.error(started.error === 'locked' ? `Task "${targetId}" is claimed by ${started.lock?.owner}. Pick another task.` : started.message);
+      console.error(started.error === 'locked' && started.lock?.owner ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
       process.exit(1);
     }
     // 2.30c (#4): short output. The brief's path and a 10-line summary; the carry-forward note (newest
@@ -1171,9 +1223,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
         process.exit(1);
       }
-      const all2 = readHolds();
-      all2[arg1] = { ...(all2[arg1] || {}), lane };
-      fs.writeFileSync(path.join(REPO_ROOT, 'studio', 'task-holds.json'), `${JSON.stringify({ tasks: all2 }, null, 2)}\n`);
+      updateHolds((all2) => { all2[arg1] = { ...(all2[arg1] || {}), lane }; });
       emitEvent({ type: 'task.lane', agent: by, task: arg1, msg: `${by}: ${arg1} works in ${lane || 'the whole game'}` });
       console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.`);
     }

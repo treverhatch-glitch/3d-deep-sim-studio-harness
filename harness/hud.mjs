@@ -472,7 +472,8 @@ export function buildHudState() {
   const total = queue.inProgress.length + queue.backlog.length + queue.done.length;
   const out = {
     generatedAt: new Date(now).toISOString(),
-    stopped: readJson('.studio/STOP.json', null),
+    // 2.57.0 (PU-16): a stop file that is there but unreadable still counts as stopped (as task start reads it).
+    stopped: fs.existsSync(path.join(REPO_ROOT, '.studio', 'STOP.json')) ? readJson('.studio/STOP.json', null) || { by: 'unknown', reason: 'the stop file is unreadable (half-written?)', unreadable: true } : null,
     mode: { ...effectiveMode(), text: describeMode() },
     modes: Object.fromEntries(Object.entries(MODES).map(([id, m]) => [id, { label: m.label, pitch: m.pitch }])),
     art: (() => {
