@@ -148,3 +148,54 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
   20 s limit). PR #42 (docs and workflow only) failed the same way, so no PR can get a green check.
 - **Status:** an investigation agent is looking for the cause and the fix; report to Hatch first.
 - **Harness fix?** Maybe: the studio should warn when the game's own trunk is red before agents build on it.
+
+## First crew run on Hatch's PC (studio-hatchfield, harness 2.53.0, 2026-10-31 10:20–11:24 UTC)
+Read from `.studio/events.jsonl` and `.studio/STOP.json` on Hatch's PC (read-only). 110 events, 21 tasks added,
+6 agent sessions, 0 tasks done, reported session cost $3.74 (costUsd from the CLI; check whether that's
+subscription or API billing).
+
+### P-022 — The watchdog stopped a 44-minute-old studio for "no task finished in 2 h" · open (harness bug)
+- **What happened:** STOP.json at 11:04:45Z: "no task finished in 2 h while 5 sessions ran". The studio started at
+  10:20Z (setup.init), 44 minutes earlier.
+- **Why:** harness/watchdog.mjs step 3 sets `turnedOnAt = 0` when the watchdog runs in auto mode, so the check
+  "sessions ran for the whole window" passes even when the studio is younger than the window.
+- **Workaround:** `npm run task -- resume --by hatch`. It can stop again until 2 h after the studio began
+  (~12:20Z), or raise STUDIO_WATCHDOG_IDLE_HOURS for now.
+- **Harness fix (proposal, needs Hatch's OK):** in auto mode, count the window from the studio's first event or the
+  watchdog's first run. Test: a selftest with a studio 30 minutes old and 5 ended sessions must not stop. Size S.
+
+### P-023 — Planning sessions count as "sessions that ran" for the idle stop · open (harness design)
+- **What happened:** of the 5 sessions counted, 4 were Producer/Director planning sessions (producer-1,
+  producer-2, director-1 twice) that never finish tasks by design. Only opus-1 held a task (T-006).
+- **Harness fix (proposal):** count only sessions that held a task (builder-type, or any session with a task id).
+  Test: selftest with 4 planning sessions + 0 task sessions must not stop. Size S.
+
+### P-024 — Two "director-1" sessions started at the same moment · open (harness bug)
+- **What happened:** at 11:02:44Z two sessions named director-1 started (pids 38060 and 35500), both from one
+  low-queue wake-up (the war-room started director-1 and a dev-cycle Director in the same pass).
+- **Harness fix (proposal):** one Director per pass; names unique per running session. Test: a selftest that wakes
+  for "queue low" and "dev cycle" together must start one Director. Size S–M.
+
+### P-025 — A docs task was started with a file scope in a folder the game forbids · open (harness bug)
+- **What happened:** T-023 ("Write the core loop doc in studio/bible…") was auto-started "in
+  game/hatchfield/src/diplomacy/core.ts". The game's AGENTS.md says "Do not touch src/diplomacy". The scope was
+  matched from the word "core".
+- **Harness fix (proposal):** a docs task's scope comes from the paths it names (studio/bible); a game's "do not
+  touch" folders (from its AGENTS.md or studio.json) are never picked. Test: selftest with T-023's text. Size M.
+
+### P-026 — The Producer pre-approved Godot tools for a web/Unity game · open (harness setting)
+- **What happened:** cheat-sheet pre-approvals C-24 ("Run the Godot project…") and C-27 ("Godot 4.x APIs") were
+  attached to Hatchfield tasks T-006/T-007/T-008. Hatchfield is a web game with a Unity port.
+- **Harness fix (proposal):** filter cheat-sheet items by the game's engine tracks (engine.json / adopt
+  settings). Test: an adopted Vite game with a Unity track gets no Godot items. Size S.
+
+### P-027 — The launcher started one more agent in the same pass that stopped the studio · open (minor)
+- **What happened:** director-auto-7 started at 11:04:45.261Z; the stop was written at 11:04:45.267Z. The watchdog
+  launches before it runs the idle check.
+- **Also:** "Queue low … added 0" was logged every 1–3 minutes while stopped (19 refill events): noise in the HUD.
+- **Harness fix (proposal):** run the idle check before launching; log a refill that adds nothing once per hour.
+  Size S.
+
+### Found by the crew (game bug, not harness): Windows case clash in src/branding
+- T-026 (queued by opus-1): `Finance.tsx` and `finance.ts` in game/hatchfield/src/branding clash on Windows, which
+  breaks the type check and build there. A real hatchfield-game bug; the crew has it queued.
