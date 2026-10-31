@@ -5,7 +5,7 @@ enforcedBy: scripts/check-sim-purity.mjs
 
 # Path-Scoped Rule: Simulation Purity & Determinism (`studio/rules/sim-purity.md`)
 
-All code inside `src/sim/**` (or `cartridges/*/sim/**`) is governed by four strict invariants verified by `node scripts/check-sim-purity.mjs`:
+All code inside `src/sim/**` (or `cartridges/*/sim/**`) is governed by five strict invariants verified by `node scripts/check-sim-purity.mjs`:
 
 ## 1. Zero Browser, DOM, or Renderer Imports
 - **Forbidden**: `three`, `@react-three/*`, `window`, `document`, `localStorage`, `sessionStorage`, `requestAnimationFrame`, `AudioContext`, WebGL contexts.
@@ -22,3 +22,7 @@ All code inside `src/sim/**` (or `cartridges/*/sim/**`) is governed by four stri
 ## 4. Plain JSON State Only (Zero Lost Entities on Save/Load)
 - **Forbidden**: Class instances (`new MyEntity()`), `Map`, `Set`, `Date`, functions, or object reference pointers inside `SimState`.
 - **Required**: Plain JSON objects, arrays, numbers, strings, and booleans (`id` integer references instead of object pointers). `JSON.parse(JSON.stringify(state))` must be a lossless identity operation.
+
+## 5. Deterministic Math
+- **Forbidden** (reported; fails when the game's mode is `required`): `Math.sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot`, `cbrt`, and `**`. Their last bits differ between engines.
+- **Required**: call the game's `detMath` module (the only place allowed to use `Math` for these). `Math.sqrt`, `floor`, `round`, `abs`, `min`, `max`, `imul` and plain arithmetic are exact and fine. Modes and settings: `docs/3D-DEEP-SIM.md`, "Deterministic math".

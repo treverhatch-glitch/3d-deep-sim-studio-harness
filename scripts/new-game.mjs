@@ -41,6 +41,14 @@ fs.writeFileSync(readme, fs.readFileSync(readme, 'utf8').replaceAll('__GAME_NAME
 // Its own game ID, made now (harness/game-id.mjs): goldens, results and builds carry it.
 const { ensureGameId } = await import('../harness/game-id.mjs');
 const ident = ensureGameId(name, { by: process.env.STUDIO_LOCK_OWNER || 'producer' });
+// 2.58.2 (PU-22): a new game starts with deterministic math required (harness/det-math.mjs): the purity gate
+// fails on Math.sin, atan2, hypot and the other engine-dependent functions in its sim, so a port replays the same.
+{
+  const metaPath = path.join(dest, 'cartridge.json');
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { /* none yet */ }
+  if (meta.detMath === undefined) fs.writeFileSync(metaPath, `${JSON.stringify({ ...meta, detMath: 'required' }, null, 2)}\n`);
+}
 const cart = await loadCartridge(name);
 const slice = runScenario(cart, 'start-to-win');
 if (slice.outcome !== 'won' || slice.findings.length) {
