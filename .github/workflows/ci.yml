@@ -176,6 +176,9 @@ jobs:
       # 2.45.0: a web game that isn't a cartridge, driven by its studio.browser.json: live controls pass, dead ones fail.
       - name: Real-input controls for a studio web game (npm run play:controls)
         run: node scripts/check-controls-play.mjs
+      # 2.56.0 (PU-15): effect stills at fixed times; clean effects pass, six planted faults are named.
+      - name: Visual-effect checks (npm run vfx)
+        run: node scripts/check-vfx.mjs
 
   war-room-build:
     if: vars.HARNESS_RUNNER != 'self-hosted'
@@ -222,6 +225,7 @@ jobs:
           node qa/browser-play.mjs
           node scripts/check-control-effects.mjs
           node scripts/check-controls-play.mjs
+          node scripts/check-vfx.mjs
       - name: Unity template on .NET (skips without the .NET 8 SDK)
         run: node scripts/check-unity-template.mjs
 
