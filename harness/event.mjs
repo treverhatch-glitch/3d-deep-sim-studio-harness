@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { appendLine } from './fsafe.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -129,13 +130,15 @@ export function emitEvent(partial = {}) {
   } catch {
     // no log yet
   }
-  fs.appendFileSync(primary, line, 'utf8');
+  // 2.57.0 (PU-16, P-041): a torn last line (a writer killed mid-line) is closed with a newline first, so it can't
+  // glue onto this event and make both unreadable (a task.start was lost that way and metrics saw 0 attempts).
+  appendLine(primary, line);
 
   for (const mirror of mirrors) {
     try {
       const dir = path.dirname(mirror);
       if (fs.existsSync(dir)) {
-        fs.appendFileSync(mirror, line, 'utf8');
+        appendLine(mirror, line);
       }
     } catch {
       // Non-fatal if /tmp does not exist on raw Windows without Git Bash
@@ -157,7 +160,9 @@ export function readRecentEvents(limit = 100) {
   const out = [];
   for (const line of slice) {
     try {
-      out.push(JSON.parse(line));
+      const e = JSON.parse(line);
+      // A torn line can still parse as a bare number or string: only event objects count.
+      if (e && typeof e === 'object' && !Array.isArray(e)) out.push(e);
     } catch {
       // Skip malformed line
     }

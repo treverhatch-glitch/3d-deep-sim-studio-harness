@@ -18,9 +18,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT } from './event.mjs';
+import { REPO_ROOT, emitEvent } from './event.mjs';
+import { createExclusive, moveAside, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
 
 const LOCK_DIR = path.join(REPO_ROOT, '.studio', 'locks');
+/** 2.57.0 (PU-16, P-037): unreadable lock files are moved here (renamed, never deleted) once they are this old. */
+export const BROKEN_DIR = path.join(LOCK_DIR, 'broken');
+export const brokenGraceMs = () => {
+  const v = Number(process.env.STUDIO_BROKEN_LOCK_GRACE_SEC);
+  return (process.env.STUDIO_BROKEN_LOCK_GRACE_SEC !== undefined && process.env.STUDIO_BROKEN_LOCK_GRACE_SEC !== '' && Number.isFinite(v) ? v : 10) * 1000;
+};
 export const SHARED_OWNERS = new Set([
   '', 'unknown', 'agent', 'default', 'ai', 'bot', 'me', 'user', 'human',
   'cursor', 'claude', 'codex', 'gemini', 'grok', 'copilot', 'aider', 'windsurf', 'cline',
@@ -52,47 +59,81 @@ function assertOwner(owner) {
   return { ok: true, owner: value };
 }
 
-function readLock(file) {
+/**
+ * What a lock file holds: { lock, raw } (a claim), { expired, raw }, { broken, raw, ageMs } (empty, torn, or not a
+ * claim), or { missing }. Never throws.
+ */
+function inspectLock(file) {
+  let raw;
   try {
-    const lock = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (lock.expiresAt && Date.parse(lock.expiresAt) < Date.now()) {
-      fs.rmSync(file, { force: true });
-      return null;
-    }
-    return lock;
-  } catch {
-    return null;
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return { missing: true };
+    return { broken: true, raw: null, ageMs: ageOf(file) };
   }
+  let lock = null;
+  try { lock = JSON.parse(raw); } catch { /* empty or half-written */ }
+  if (!lock || typeof lock !== 'object' || typeof lock.key !== 'string') return { broken: true, raw, ageMs: ageOf(file), parsed: lock };
+  if (lock.expiresAt && Date.parse(lock.expiresAt) < Date.now()) return { expired: true, raw, lock };
+  return { lock, raw };
+}
+function ageOf(file) {
+  try { return Date.now() - fs.statSync(file).mtimeMs; } catch { return 0; }
+}
+
+function readLock(file) {
+  const seen = inspectLock(file);
+  // An expired claim is removed, but only if it is still the one we read (another agent may have just re-claimed it).
+  if (seen.expired) moveAside(file, null, seen.raw);
+  return seen.lock && !seen.expired ? seen.lock : null;
+}
+
+/**
+ * 2.57.0 (PU-16, P-037): move an unreadable lock file to .studio/locks/broken/<name>.<time> (kept for a look, never
+ * deleted), only if it still holds what was read. Returns the new path, or null when it changed or couldn't move.
+ */
+function setAside(file, raw, why) {
+  const dest = path.join(BROKEN_DIR, `${path.basename(file)}.${new Date().toISOString().replace(/[-:]/g, '').replace('.', '')}`);
+  if (!moveAside(file, dest, raw === null ? undefined : raw)) return null;
+  try {
+    emitEvent({ type: 'lock.broken', agent: 'locks', status: 'warn', msg: `Set aside an unreadable lock file (${why}): .studio/locks/${path.basename(file)} → .studio/locks/broken/${path.basename(dest)}` });
+  } catch { /* the move is what matters */ }
+  return dest;
+}
+
+/**
+ * 2.57.0 (PU-16): the watcher's sweep. Lock files that can't be read as JSON and are older than the grace
+ * (STUDIO_BROKEN_LOCK_GRACE_SEC, 10) go to .studio/locks/broken/; temp files a killed writer left are removed.
+ * Lock files that parse but aren't claims (the land lock's) are left alone. Returns the names set aside.
+ */
+export function sweepBrokenLocks({ graceMs = brokenGraceMs(), dryRun = false } = {}) {
+  const out = [];
+  if (!fs.existsSync(LOCK_DIR)) return out;
+  for (const f of fs.readdirSync(LOCK_DIR).filter((x) => x.endsWith('.lock'))) {
+    const file = path.join(LOCK_DIR, f);
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    let ok = true;
+    try { ok = Boolean(JSON.parse(raw)) && typeof JSON.parse(raw) === 'object'; } catch { ok = false; }
+    if (ok || ageOf(file) < graceMs) continue;
+    if (dryRun || setAside(file, raw, raw.trim() ? 'half-written' : 'empty')) out.push(f);
+  }
+  if (!dryRun) sweepTemps(LOCK_DIR);
+  return out;
 }
 
 /**
  * A short studio-wide mutex around "check for overlapping folder locks, then write". Each lock file
  * is created atomically, but two agents claiming a folder and a file inside it at the same moment
- * could both pass the overlap check before either writes. Stale after 10 s (a crashed claimer).
+ * could both pass the overlap check before either writes. 2.57.0 (PU-16): harness/fsafe.mjs's lock (a dead
+ * holder's is broken at once, a stale one after 10 s).
  */
 function withMutex(fn) {
-  fs.mkdirSync(LOCK_DIR, { recursive: true });
-  const mutex = path.join(LOCK_DIR, '.mutex');
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    try {
-      fs.closeSync(fs.openSync(mutex, 'wx'));
-      break;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      try {
-        if (Date.now() - fs.statSync(mutex).mtimeMs > 10000) fs.rmSync(mutex, { force: true });
-      } catch {
-        /* gone already */
-      }
-      if (Date.now() > deadline) return { ok: false, reason: 'busy', message: 'Another agent is claiming right now; try again.' };
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
-    }
-  }
   try {
-    return fn();
-  } finally {
-    fs.rmSync(mutex, { force: true });
+    return withFileLock('claims', fn, { dir: LOCK_DIR, timeoutMs: 5000, what: 'Another agent claiming a folder' });
+  } catch (err) {
+    if (err.code !== 'ELOCKBUSY') throw err;
+    return { ok: false, reason: 'busy', message: 'Another agent is claiming right now; try again.' };
   }
 }
 
@@ -110,7 +151,7 @@ export function claim(key, owner, ttlSec = 3600, { wide = null } = {}) {
   return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec);
 }
 
-function claimUnlocked(k, owner, ttlSec) {
+function claimUnlocked(k, owner, ttlSec, again = false) {
   const check = { ok: true, owner };
   if (k.startsWith('path:')) {
     // A folder lock covers its files, and a file lock blocks locking its folder: refuse overlaps.
@@ -122,20 +163,25 @@ function claimUnlocked(k, owner, ttlSec) {
     });
     if (overlap) return { ok: false, reason: 'claimed', lock: overlap };
   }
-  fs.mkdirSync(LOCK_DIR, { recursive: true });
   const file = lockPath(k);
   const now = Date.now();
   const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString() };
-  try {
-    fs.writeFileSync(file, JSON.stringify(payload, null, 2), { flag: 'wx' });
-    return { ok: true, lock: payload };
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    const existing = readLock(file);
-    if (!existing) return claimUnlocked(k, check.owner, ttlSec);
-    if (existing.owner === check.owner) return { ok: true, lock: existing, reused: true };
-    return { ok: false, reason: 'claimed', lock: existing };
+  // 2.57.0 (PU-16): the lock file appears already holding its payload (never empty, even if this process is killed).
+  if (createExclusive(file, JSON.stringify(payload, null, 2))) return { ok: true, lock: payload };
+  const seen = inspectLock(file);
+  if (seen.lock && !seen.expired) {
+    if (seen.lock.owner === check.owner) return { ok: true, lock: seen.lock, reused: true };
+    return { ok: false, reason: 'claimed', lock: seen.lock };
   }
+  // P-037: an unreadable lock file (an agent killed between creating and writing it, under an older harness) used
+  // to make this recurse until the stack overflowed. Young: someone is writing it right now. Old: set it aside and
+  // claim once more. Never more than one retry.
+  if (seen.broken) {
+    if (seen.ageMs < brokenGraceMs()) return { ok: false, reason: 'claimed', writing: true, lock: null, message: `${k} is claimed (lock being written): its lock file is still being written. Pick another task, or try again in a few seconds.` };
+    setAside(file, seen.raw, seen.raw === null ? 'unreadable' : seen.raw.trim() ? 'half-written' : 'empty');
+  } else if (seen.expired) moveAside(file, null, seen.raw);
+  if (again) return { ok: false, reason: 'busy', lock: null, message: `${k} is changing hands right now; try again in a moment.` };
+  return claimUnlocked(k, owner, ttlSec, true);
 }
 
 export function release(key, owner) {
@@ -174,10 +220,14 @@ export function renewOwner(owner, ttlSec = 3600) {
   let n = 0;
   for (const f of fs.readdirSync(LOCK_DIR).filter((x) => x.endsWith('.lock'))) {
     const file = path.join(LOCK_DIR, f);
-    const lock = readLock(file);
+    const seen = inspectLock(file);
+    const lock = seen.lock && !seen.expired ? seen.lock : null;
     if (!lock || lock.owner !== owner || Date.parse(lock.expiresAt) >= until - 60000) continue;
     try {
-      fs.writeFileSync(file, JSON.stringify({ ...lock, expiresAt: new Date(until).toISOString(), renewedAt: new Date().toISOString() }, null, 2));
+      // 2.57.0 (PU-16): renewed by replacing the file whole (a reader polling during a renew saw "unlocked" in
+      // about 29% of reads when it was truncated and rewritten in place). Skipped if it was released meanwhile.
+      if (fs.readFileSync(file, 'utf8') !== seen.raw) continue;
+      writeAtomic(file, JSON.stringify({ ...lock, expiresAt: new Date(until).toISOString(), renewedAt: new Date().toISOString() }, null, 2), { fsync: false });
       n += 1;
     } catch {}
   }
@@ -196,7 +246,8 @@ export function listLocks() {
     .readdirSync(LOCK_DIR)
     .filter((f) => f.endsWith('.lock'))
     .map((f) => readLock(path.join(LOCK_DIR, f)))
-    .filter(Boolean);
+    // Only claims: the land lock's files share the folder and the .lock ending, but have no key.
+    .filter((l) => l && typeof l.key === 'string' && typeof l.owner === 'string');
 }
 
 /** The path lock that covers a repo-relative file (the file itself or any parent folder), if any. */
