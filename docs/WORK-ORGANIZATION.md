@@ -56,6 +56,37 @@ Every verify compares the tracked files (outside `studio/`) before and after its
 rewriting a snapshot's line endings, a generated file) are named in a warning and listed as `changedByVerify` in
 the verify record; the exit code is unchanged. Game checks run with `CI=true` so test runners don't write snapshots.
 
+### When a command is killed halfway (2.58.0)
+
+- **Moving a task between NEXT.md and DONE.md** takes two writes. The file that gains the task is written first
+  (DONE.md on `task done`, NEXT.md on `task reopen`), so a kill between them leaves the task in both files, never in
+  neither. It still shows once: the move that was cut off counts as made (done stays done; a reopened task waits).
+  Which way it was moving is noted in `.studio/board-move.json` during the write. A task in both files with no such
+  note (a hand edit, a merge) counts as done; `task reopen` brings it back. `npm run watch` keeps one copy.
+- **Claims nobody can be using** are released by `npm run watch`: a `task:` claim on a task that is done, waiting
+  or gone from the board (a `task done` killed after its board write kept it, and heartbeats renewed it; a killed
+  start or pause). Only once the claim and the board have both been quiet for `STUDIO_CLAIM_LEAK_GRACE_SEC` (60),
+  never while a `task done` for it is running; logged as `lock.released`. `task reopen` also frees an old claim left
+  on the task it reopens. `task start` releases its claim if anything goes wrong while it updates the board.
+- **The watcher's own hand-backs** (a claim ran out, a session ended) go ahead only if the claim is still what the
+  pass saw; an agent that re-claimed the task meanwhile keeps it.
+- **Board locks** (`board.mutex` and the others) are never broken on age while their holder's process is alive on
+  this machine (a console paused by a click, a sleeping laptop): others wait, or give up after 15 s with "run the
+  command again". A dead holder's lock is broken at once; one held by another machine after 10 s; a live holder's
+  only after 10 min (`STUDIO_STATE_LOCK_LIVE_MAX_MS`: by then the pid most likely belongs to another program). A
+  holder whose lock was broken anyway stops before writing (`ELOCKLOST`).
+- **Temp files** a killed write left (`.<name>.<pid>-….tmp`) are removed from `studio/` and `.studio/` by
+  `npm run watch` once older than `STUDIO_TEMP_SWEEP_MIN` (5).
+- **Lines the board can't read** are never dropped. A task line with an ASCII `-` instead of `—`, or a role without
+  backticks, is read as a task and rewritten in the board's format. Anything else (another format, a note, the same
+  id twice) is moved under `## UNREADABLE (kept by the harness: fix the format)` at the end of the file, with one
+  warning and a `board.unreadable` event; fix the line there (it then counts as waiting work) or delete it.
+- **Folder claims** are compared without regard to case: `path:game/Branding` and `path:game/branding` are one
+  claim (on Windows they are one folder).
+- A state file written in place because another program kept it open (Windows) leaves a `fsafe.warning` event.
+- The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
+  EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
+
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 
 ```markdown

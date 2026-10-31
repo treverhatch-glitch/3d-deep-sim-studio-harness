@@ -3539,6 +3539,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.0 part B (PU-37, PU-38, PU-42, PU-43): killed board writes, leaked and raced claims, live lock holders,
+// hand-edited board lines, temp files, case-blind folder claims: P-052 to P-057, P-060 (qa/selftest-258b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest258B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258b.mjs')).href);
+  await selftest258B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
