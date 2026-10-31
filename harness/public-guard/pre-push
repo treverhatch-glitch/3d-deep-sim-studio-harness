@@ -1,0 +1,6 @@
+#!/bin/sh
+# This repo is public: block secrets, licence files and private harness files before they leave this computer.
+# Turn it on once per clone: git config core.hooksPath .githooks
+node tools/public-guard/check.mjs || exit 1
+# Git LFS (Unity art) needs its own pre-push step; hooksPath would otherwise skip it.
+if command -v git-lfs >/dev/null 2>&1; then git lfs pre-push "$@"; fi

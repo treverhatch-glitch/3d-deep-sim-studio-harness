@@ -3424,6 +3424,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.51.0 (U-005): the public-repo guard as a harness feature (qa/selftest-251.mjs).
+{
+  const dir = copyRepo();
+  const { selftest251 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-251.mjs')).href);
+  await selftest251({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

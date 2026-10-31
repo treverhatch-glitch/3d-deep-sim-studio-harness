@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.51.0] — 2026-10-31
+2.51.0: U-005 from the studio logs, approved by the owner (before a second public game repo exists).
+### Added
+- **`npm run public-guard -- install|check|status <game repo>`** (`harness/public-guard.mjs`, files in
+  `harness/public-guard/`): the guard that keeps a public game repo free of keys and tokens, licence files
+  (Unity_lic.ulf), files and text from this private harness, and files marked private.
+  - `install` copies the check, the pre-push hook (keeping Git LFS's hooks working beside it) and the CI check,
+    turns the hooks on and adds licence and key files to `.gitignore`.
+  - `status` spots an out-of-date copy or hooks that are off. Installing again updates it.
+  - It refuses to install into the harness itself.
+- `qa/selftest-251.mjs`.
+
 ## [2.50.0] — 2026-10-31
 2.50.0: U-006 from the studio logs, approved by the owner.
 ### Added
