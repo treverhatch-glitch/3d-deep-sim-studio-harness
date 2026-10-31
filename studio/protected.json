@@ -1,10 +1,13 @@
 {
-  "note": "Files that change only with the owner's signed approval (npm run approve -- protected). The list is read from the base branch, so a branch can't shrink its own. Goldens are not here: a behaviour change re-records them with a Golden-Reason trailer, and the scenarios' expected outcomes (qa.mjs), which are, keep a re-recorded loss from passing as a win. A new file under addOnly (a new regression replay) needs no approval; editing or deleting one does.",
+  "note": "Files that change only with the owner's signed approval (npm run approve -- protected). The list is read from the base branch, so a branch can't shrink its own. Goldens are not here: a behaviour change re-records them with a Golden-Reason trailer, and the scenarios' expected outcomes (qa.mjs), which are, keep a re-recorded loss from passing as a win. A new file under addOnly (a new regression replay) needs no approval; editing or deleting one does. 2.58.0 (PU-35): the game's own check settings (studio/game.json, which game the gates test, and each game's studio.gates.json, which checks it runs and whether they are required) are protected too.",
   "globs": [
     "studio/protected.json",
     "studio/keys/**",
     "studio/gates.json",
     "studio/bible/controls.json",
+    "studio/game.json",
+    "game/*/studio.gates.json",
+    "web/*/studio.gates.json",
     "cartridges/*/qa.mjs",
     "web/*/sim/qa.mjs",
     "game/*/sim/qa.mjs",
