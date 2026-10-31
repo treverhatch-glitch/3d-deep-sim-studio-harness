@@ -88,7 +88,7 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
           let log = ''; try { log = fs.readFileSync(path.join(REPO_ROOT, s.log || ''), 'utf8').slice(-2000000); } catch {}
           v = observe(s, { tokens: logTokens(log), cwd: s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : REPO_ROOT, now, events });
         }
-        if (v?.stalled && !s.stalled) { logStall(s, v); stopAgent(s.pid); actions.push({ kind: 'stall', msg: `ended ${s.agent}: ${v.why}` }); }
+        if (v?.stalled && !s.stalled) { logStall(s, v); stopAgent(s, { by: 'watchdog' }); actions.push({ kind: 'stall', msg: `ended ${s.agent}: ${v.why}` }); }
       }
     } catch (e) { actions.push({ kind: 'error', msg: `stall step: ${e.message}` }); }
   }
