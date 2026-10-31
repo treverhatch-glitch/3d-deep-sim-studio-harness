@@ -150,8 +150,10 @@ const r = await got;
 for (let i = 0; i < 30; i++) { createExclusive('.studio/locks/x' + i + '.probe', 'x'); withFileLock('probe', () => writeAtomic('studio/atomic-probe.json', JSON.stringify({ i })), { dir: '.studio/locks' }); }
 const temps = [...fs.readdirSync('studio'), ...fs.readdirSync('.studio/locks')].filter((n) => isTempName(n) || n.endsWith('.tmp') || n.endsWith('.mutex'));
 console.log(JSON.stringify({ writes, renews, ...r, temps }));`);
-  report('2.57.0 (PU-16): writeAtomic: a reader polling while a file is replaced hundreds of times never sees half of it, and no temp file is left behind',
-    atomic.writes > 50 && atomic.reads > 100 && atomic.bad === 0 && Array.isArray(atomic.temps) && atomic.temps.length === 0, JSON.stringify(atomic).slice(0, 1200));
+  // At least 20 replacements: Windows CI managed 49 in the 1.6 s window (renames are slower there) with 6,728 reads and
+  // none torn; the point is contention, not speed.
+  report('2.57.0 (PU-16): writeAtomic: a reader polling while a file is replaced dozens of times never sees half of it, and no temp file is left behind',
+    atomic.writes > 20 && atomic.reads > 100 && atomic.bad === 0 && Array.isArray(atomic.temps) && atomic.temps.length === 0, JSON.stringify(atomic).slice(0, 1200));
   report('2.57.0 (PU-16): a reader polling a task lock while its owner renews it never sees it unlocked (was about 29% of reads)',
     atomic.renews > 10 && atomic.reads > 100 && atomic.unlocked === 0, JSON.stringify(atomic).slice(0, 1200));
 
