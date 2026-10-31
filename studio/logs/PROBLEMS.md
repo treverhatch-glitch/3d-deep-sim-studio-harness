@@ -154,7 +154,7 @@ Read from `.studio/events.jsonl` and `.studio/STOP.json` on Hatch's PC (read-onl
 6 agent sessions, 0 tasks done, reported session cost $3.74 (costUsd from the CLI; check whether that's
 subscription or API billing).
 
-### P-022 — The watchdog stopped a 44-minute-old studio for "no task finished in 2 h" · open (harness bug)
+### P-022 — The watchdog stopped a 44-minute-old studio for "no task finished in 2 h" · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** STOP.json at 11:04:45Z: "no task finished in 2 h while 5 sessions ran". The studio started at
   10:20Z (setup.init), 44 minutes earlier.
 - **Why:** harness/watchdog.mjs step 3 sets `turnedOnAt = 0` when the watchdog runs in auto mode, so the check
@@ -164,32 +164,32 @@ subscription or API billing).
 - **Harness fix (proposal, needs Hatch's OK):** in auto mode, count the window from the studio's first event or the
   watchdog's first run. Test: a selftest with a studio 30 minutes old and 5 ended sessions must not stop. Size S.
 
-### P-023 — Planning sessions count as "sessions that ran" for the idle stop · open (harness design)
+### P-023 — Planning sessions count as "sessions that ran" for the idle stop · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** of the 5 sessions counted, 4 were Producer/Director planning sessions (producer-1,
   producer-2, director-1 twice) that never finish tasks by design. Only opus-1 held a task (T-006).
 - **Harness fix (proposal):** count only sessions that held a task (builder-type, or any session with a task id).
   Test: selftest with 4 planning sessions + 0 task sessions must not stop. Size S.
 
-### P-024 — Two "director-1" sessions started at the same moment · open (harness bug)
+### P-024 — Two "director-1" sessions started at the same moment · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** at 11:02:44Z two sessions named director-1 started (pids 38060 and 35500), both from one
   low-queue wake-up (the war-room started director-1 and a dev-cycle Director in the same pass).
 - **Harness fix (proposal):** one Director per pass; names unique per running session. Test: a selftest that wakes
   for "queue low" and "dev cycle" together must start one Director. Size S–M.
 
-### P-025 — A docs task was started with a file scope in a folder the game forbids · open (harness bug)
+### P-025 — A docs task was started with a file scope in a folder the game forbids · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** T-023 ("Write the core loop doc in studio/bible…") was auto-started "in
   game/hatchfield/src/diplomacy/core.ts". The game's AGENTS.md says "Do not touch src/diplomacy". The scope was
   matched from the word "core".
 - **Harness fix (proposal):** a docs task's scope comes from the paths it names (studio/bible); a game's "do not
   touch" folders (from its AGENTS.md or studio.json) are never picked. Test: selftest with T-023's text. Size M.
 
-### P-026 — The Producer pre-approved Godot tools for a web/Unity game · open (harness setting)
+### P-026 — The Producer pre-approved Godot tools for a web/Unity game · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** cheat-sheet pre-approvals C-24 ("Run the Godot project…") and C-27 ("Godot 4.x APIs") were
   attached to Hatchfield tasks T-006/T-007/T-008. Hatchfield is a web game with a Unity port.
 - **Harness fix (proposal):** filter cheat-sheet items by the game's engine tracks (engine.json / adopt
   settings). Test: an adopted Vite game with a Unity track gets no Godot items. Size S.
 
-### P-027 — The launcher started one more agent in the same pass that stopped the studio · open (minor)
+### P-027 — The launcher started one more agent in the same pass that stopped the studio · fixed in 2.54.0 (PR #27, pending merge)
 - **What happened:** director-auto-7 started at 11:04:45.261Z; the stop was written at 11:04:45.267Z. The watchdog
   launches before it runs the idle check.
 - **Also:** "Queue low … added 0" was logged every 1–3 minutes while stopped (19 refill events): noise in the HUD.
@@ -199,3 +199,53 @@ subscription or API billing).
 ### Found by the crew (game bug, not harness): Windows case clash in src/branding
 - T-026 (queued by opus-1): `Finance.tsx` and `finance.ts` in game/hatchfield/src/branding clash on Windows, which
   breaks the type check and build there. A real hatchfield-game bug; the crew has it queued.
+
+### P-028 — A stale session record under the same name took a fresh claim away · open (harness bug)
+- **What happened:** at 11:30:42Z the Opus bot claimed T-026 as `opus-1`; 6 seconds later the watcher handed it back:
+  "opus-1's session ended (finished without task done) while it held T-026". That session (a launcher session also
+  named opus-1) had ended at 11:03, before the claim.
+- **Why:** the watcher matches a claim's owner to a session record by name only. A chat bot claiming tasks itself
+  and a launcher session can share a name.
+- **Workaround:** chat bots claim with names the launcher never uses (`opus-bot`, `sonnet-bot`), not `opus-1`.
+- **Harness fix (proposal, needs Hatch's OK):** a session that ended before a claim began never releases that claim;
+  launcher names and claim names are checked for clashes at claim time. Test: a selftest with an ended `opus-1`
+  record and a fresh claim by `opus-1` keeps the claim. Size S.
+- **Found by:** the 2.54.0 metrics command on the crew's real log; the attempt is labelled env-harness.
+
+### P-029 — I wrote a force-push into a background merge command · caught before it ran
+- **What happened:** the watcher I started to merge 2.54.0 on green checks included `git push -f` to refresh the
+  backup branch `backup/pre-2.54.0`. Hatch's rules forbid force-pushes.
+- **Caught:** I stopped it while it was still waiting for the checks; nothing was pushed (the backup branch is still
+  at 60e59bf). The restarted watcher pushes a new branch, `backup/pre-2.54.0-merge`, with no force.
+- **Lesson:** background commands get the same rule check as foreground ones; a backup is always a new branch name.
+
+## From the crew (logged in studio-hatchfield by opus-1, copied here so the harness keeps one list)
+
+### P-030 — `npm run onboard -- --sync --dry-run` applies and commits anyway · open (2026-10-31, opus-1)
+- **What happened:** in `studio-hatchfield`, `npm run onboard -- --sync --ref main --dry-run` synced the game
+  (5ffd051a..ff88183b, 31 files) and committed it straight away, before Hatch could review it.
+- **Why:** `scripts/onboard-game.mjs` reads `--dry-run` only on the scan and adopt paths, not on `--sync`.
+- **Workaround:** none. Review what `--sync` would bring in with `git log <adopted>..<ref>` in the game repo first.
+  This time Hatch kept the commit.
+- **Harness fix?** Yes: `--sync --dry-run` should print the commits and files and write nothing.
+
+### P-031 — `npm run hub:build` type check fails on Windows (`*.tsx` not expanded) · open (2026-10-31, opus-1)
+- **What happened:** `tsc ... *.tsx` → `error TS6053: File '*.tsx' not found` on Windows. The Vite build itself
+  succeeds.
+- **Why:** cmd and PowerShell don't expand globs; npm runs the script through cmd on Windows.
+- **Workaround:** run tsc with the file names listed out. It passes (exit 0, 6 files).
+- **Harness fix?** Yes: list the files in a small node script, or use a tsconfig in `hub/`.
+
+### P-032 — An unchosen pace lets the Director auto-start agents · open (2026-10-31, opus-1)
+- **What happened:** after `task resume`, the watcher auto-started `producer-auto-6` (claude, Opus) on T-006.
+  The watchdog then stopped the studio again ("6 sessions, no task finished in 2 h").
+- **Why:** `harness/agent.mjs` `fillAgents` lets the Director start agents while the pace is unchosen, even in the
+  default "Precise and slow" mode.
+- **Workaround:** set the pace explicitly (`npm run mode -- set precise --by hatch`). Done.
+- **Harness fix?** Yes: an unchosen pace should never start agents, or `setup` should ask for one.
+
+### P-033 — Game: `src/branding/Finance.tsx` and `finance.ts` clash on Windows · fix in T-026 (2026-10-31, opus-1)
+- **What happened:** the game's typecheck and build fail on Windows with TS2305 and TS1149, because `./Finance`
+  resolves to `finance.ts`. They pass on Linux.
+- **Fix:** rename it to `FinanceCards.tsx` (T-026, lane `opus-1`).
+- **Harness fix?** Maybe: the adopt scan could flag paths that differ only in case.
