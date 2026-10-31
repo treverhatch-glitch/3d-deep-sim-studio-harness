@@ -109,7 +109,7 @@ The models: `STUDIO_RESCUE_MODEL`, then `STUDIO_RESCUE_MODELS` (comma-separated)
 
 ## Bring a game that already exists (2.43.0)
 
-`npm run onboard -- --path ../my-game --name "My Game" --adopt --ref <its working branch>` brings a half-built game under the studio: its files at that branch under `game/<slug>/`, its own checks declared from its scripts, the Bible drafted from its design docs for you to check and sign. `npm run onboard -- --export` sends the studio's work back as a patch for the game's own repo, where its own review and CI decide. Guide: docs/ONBOARDING-A-GAME.md.
+`npm run onboard -- --path ../my-game --name "My Game" --adopt --ref <its working branch>` brings a half-built game under the studio: its files at that branch under `game/<slug>/`, its own checks declared from its scripts, the Bible drafted from its design docs for you to check and sign. `npm run onboard -- --export` sends the studio's work back as a patch for the game's own repo, where its own review and CI decide, and `npm run onboard -- --sync` brings that repo's own new work in (2.44.0). Guide: docs/ONBOARDING-A-GAME.md. Running the build from a chat crew of bots: docs/DISCORD-CREW.md.
 
 ## The Game Bible says what each control must change (2.39.0)
 

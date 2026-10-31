@@ -27,7 +27,7 @@ import { spawnSync } from 'node:child_process';
 import { judgePass } from './silent-green.mjs';
 import { pinMode, checkGodotVersions } from './godot-version.mjs';
 import { pathToFileURL } from 'node:url';
-import { REPO_ROOT } from './event.mjs';
+import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
@@ -52,7 +52,7 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    return (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}) }));
+    return (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}) }));
   }
   const out = [];
   if (game.sim) {
@@ -142,14 +142,45 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
     scope = all.length ? scopeOf(gates, shared) : null;
     if (sel.why) log(`[game-gates] ${sel.why}`);
     if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
+    // 2.44.0: related tests only. A gate may declare `related` (a command with {files}, such as
+    // "cd game/x && npx vitest related --run --passWithNoTests {files}"): when the change is known and is only
+    // code files under the game, that runs instead of the whole suite. Only when the whole suite still runs
+    // after landing (STUDIO_WHOLE_GAME=on) or STUDIO_GATE_RELATED=on says so. A real 2,244-test game: a leaf
+    // module's tests took 2.5 s instead of 5 min 40 s.
+    const relatedOn = /^(on|1|true|yes)$/i.test(process.env.STUDIO_GATE_RELATED || '') || /^(on|1|true|yes)$/i.test(process.env.STUDIO_WHOLE_GAME || '');
+    const prefix = `${game.root}/`;
+    const changedHere = (changed || []).map((f) => String(f).replace(/\\/g, '/')).filter((f) => f.startsWith(prefix));
+    const codeOnly = changedHere.length && changedHere.every((f) => /\.(m?[jt]sx?|cjs|vue|svelte)$/i.test(f)) && !/ is shared/.test(sel.why || '');
+    const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
+    let cmdLabel = '';
+    const runOnce = (cmd) => slot(cmdLabel, () => spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
     for (const g of gates) {
-      const r = slot(g.id, () => spawnSync(g.command, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
+      cmdLabel = g.id;
+      const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
+      const related = Boolean(g.related && relatedOn && codeOnly && existing.length);
+      const cmd = related ? g.related.replace('{files}', existing.map(q).join(' ')) : g.command;
+      if (related) log(`[game-gates] ${g.id}: only the tests related to the ${existing.length} changed file(s) (the whole suite runs in the whole-game check after landing)`);
+      let r = runOnce(cmd);
       if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS)`;
+      // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
+      // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.
+      let flaky = null;
+      if (r.status !== 0 && /^(on|1|true|yes)$/i.test(process.env.STUDIO_GAME_GATE_RETRY || '')) {
+        const first = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 2).join(' | ');
+        const again = runOnce(cmd);
+        if (again.status === 0) {
+          flaky = first.slice(0, 200) || `exit ${r.status}`;
+          emitEvent({ type: 'gate.flaky', agent: 'gates', to: 'producer', status: 'warn', msg: `${g.id} failed, then passed when run again: ${flaky}`, meta: { gate: g.id } });
+          log(`[game-gates] WARN ${g.id} failed, then passed when run again (flaky: ${flaky})`);
+          r = again;
+        } else r = again;
+      }
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
       // 2.36.0: exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
-      const sg = r.status === 0 ? judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` }) : null;
+      // A related run with no related tests is fine: the whole suite runs after landing.
+      const sg = r.status === 0 ? (related ? { ok: true, why: '', note: '' } : judgePass(g.id, { output: `${r.stdout || ''}${r.stderr || ''}` })) : null;
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

@@ -32,10 +32,19 @@ if (flag('export')) {
   const { exportPatch } = await import('../harness/adopt.mjs');
   const r = exportPatch();
   if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
-  if (r.empty) { console.log(`[onboard] nothing to export: no committed change to ${r.origin.path} since it was adopted`); process.exit(0); }
-  console.log(`[onboard] ${r.files.length} file(s) changed in ${r.origin.path} since it was adopted (${r.commits.length} commit(s)); patch: ${r.file}`);
+  if (r.empty) { console.log(`[onboard] nothing to export: no committed change to ${r.origin.path} since it was adopted or last synced (or exported)`); process.exit(0); }
+  console.log(`[onboard] ${r.files.length} file(s) changed in ${r.origin.path} since it was adopted or last synced (${r.commits.length} commit(s)); patch: ${r.file}`);
   for (const c of r.commits.slice(0, 20)) console.log(`  ${c}`);
   console.log(`[onboard] apply it in the game's own repo (its review and CI decide):\n  ${r.apply.join('\n  ')}`);
+  process.exit(0);
+}
+if (flag('sync')) {
+  const { syncGame } = await import('../harness/adopt.mjs');
+  const r = syncGame({ ref: opt('ref'), force: flag('force'), commit: !flag('no-commit') });
+  if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
+  if (r.upToDate) { console.log(`[onboard] up to date with ${r.to.slice(0, 8)}`); process.exit(0); }
+  console.log(`[onboard] synced ${r.commits.length} commit(s) (${r.files.length} file(s)) from the game's repo: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}${r.committed ? ', committed' : ' (not committed: git add the game folder and studio/game/ORIGIN.json together)'}`);
+  for (const c of r.commits.slice(0, 15)) console.log(`  ${c}`);
   process.exit(0);
 }
 const gamePath = opt('path');
