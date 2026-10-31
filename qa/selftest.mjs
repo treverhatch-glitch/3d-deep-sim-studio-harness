@@ -1000,6 +1000,11 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('an agent that runs out of quota mid-task is cleaned up: task handed back, work saved as a patch, claims freed', died.status !== 0 && /usage limit/.test(died.stdout + ev) && /## BACKLOG[\s\S]*T-003/.test(q) && fs.existsSync(patch) && /docs\/fake\/builder-9\.md/.test(fs.readFileSync(patch, 'utf8')) && !fs.readdirSync(path.join(dir, '.studio/locks')).some((f) => /builder-9/.test(fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8'))), died.stdout + died.stderr + q);
   report('the launcher reports session start and end, with the tokens the agent printed', /agent\.session\.start/.test(ev) && /"type":"agent\.session\.end"[^\n]*"tokensIn":1200/.test(ev), ev.split('\n').filter((l) => /agent\.session/.test(l)).join('\n'));
   fs.rmSync(path.join(dir, 'docs/fake'), { recursive: true, force: true });
+  // 2.58.0 (PU-40, P-051): the limit above is now kept for this custom command's program, so a relaunch waits for its
+  // reset; the rest of this block runs as if that reset had passed.
+  const held = run(dir, 'node harness/agent.mjs start --role builder --agent builder-7 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
+  report('2.58.0 (PU-40): right after a custom command hits its usage limit, the next start of that command waits for the reset', held.status !== 0 && /budget stop/.test(held.stdout + held.stderr) && /custom:fake-agent/.test(held.stdout + held.stderr), held.stdout + held.stderr);
+  fs.rmSync(path.join(dir, '.studio/tool-quota.json'), { force: true });
   const ok = run(dir, 'node harness/agent.mjs start --role builder --agent builder-8 --model fake-1', { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 ok' });
   report('an agent that finishes ends cleanly and keeps its work', ok.status === 0 && /## DONE[\s\S]*T-003/.test(fs.readFileSync(path.join(dir, 'studio/DONE.md'), 'utf8')), ok.stdout + ok.stderr);
   // Caps: Precise allows one builder; MAX SPEED doubles it.
