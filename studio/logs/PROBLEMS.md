@@ -488,3 +488,7 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
   logged, never skip-all). Research links in docs/AGENT-TOOLS.md.
 - **UNTESTED:** real agy accepting the rules (on Windows, the `regex:` form) until the owner's first run.
 
+### P-068 — PU-29's hooks gate would have failed every in-flight lane task after the upgrade · fixed in 2.58.2 before release
+- **What happened (found while assembling 2.58.2):** a checkout on 2.58.1 with lane work takes 2.58.2; the lane's commits were never stamped, and once the lane rebases onto the upgrade their parent's commit-msg hook stamps, so `task done` refused each of them as "skipped the hooks". Reproduced in a throwaway clone (2.58.1 + a lane commit, merge, rebase, `hook-stamp.mjs check` FAIL).
+- **Fix:** the first stamping hook run in a checkout (normally the upgrade's own merge commit) lists the unstamped commits on local branches that no remote has, by sha and patch-id, in `<git common dir>/studio-hooks-grandfather.json` (shared by every lane worktree, never committed). Those stay exempt after a clean rebase; a commit made after the list was written is still caught. `node harness/hook-stamp.mjs grandfather` adds to the list by hand. Two checks in `qa/selftest-2582k.mjs`, both failing on the old code.
+

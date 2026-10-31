@@ -249,4 +249,40 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const d1 = run(dir, `node harness/task.mjs done ${tid} --agent k-1`, as);
   report('2.58.2 (PU-29): task done runs the hooks check itself: a commit made with --no-verify and a removed assert each stop it, even with an "all ok" verify of this commit',
     Boolean(tid) && d1.status !== 0 && /the hooks check fails/.test(out(d1)) && /re-commit/.test(out(d1)) && /the weakened-tests check fails/.test(out(d1)) && /assert-removed/.test(out(d1)), out(d1).slice(-1800));
+
+  // P-068: upgrading a checkout that has lane work. Its lane commits were never stamped; once rebased onto the upgrade
+  // their parent's hook stamps. The first stamping hook run lists them (by patch-id), so they stay exempt, while a new
+  // unhooked commit after the upgrade is still caught.
+  {
+    const up = path.join(tmpRoot, 'p068');
+    fs.cpSync(dir, up, { recursive: true, filter: (src) => !/[\\/](node_modules|\.git|\.studio)$/.test(src) });
+    const ug = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: up, encoding: 'utf8', env: { ...process.env, ...env } });
+    const realMsgHook = fs.readFileSync(path.join(up, 'scripts', 'hooks', 'commit-msg'));
+    fs.writeFileSync(path.join(up, 'scripts', 'hooks', 'commit-msg'), '#!/bin/sh\nexit 0\n'); // the hooks before stamping
+    ug('init', '-q', '-b', 'main'); ug('add', '-A'); ug('commit', '-q', '--no-verify', '-m', 'studio on the old harness');
+    ug('checkout', '-q', '-b', 'lane/k'); fs.mkdirSync(path.join(up, 'game', 'demo', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(up, 'game', 'demo', 'src', 'lane.mjs'), 'export const lane = 1;\n'); ug('add', '-A'); ug('commit', '-q', '--no-verify', '-m', 'lane work before the upgrade');
+    ug('checkout', '-q', 'main'); ug('config', 'core.hooksPath', 'scripts/hooks');
+    fs.writeFileSync(path.join(up, 'scripts', 'hooks', 'commit-msg'), realMsgHook); ug('add', '-A');
+    const upc = ug('commit', '-q', '-m', 'upgrade to the stamping hooks');
+    const gfile = path.join(up, '.git', 'studio-hooks-grandfather.json');
+    const listed = fs.existsSync(gfile) ? JSON.parse(fs.readFileSync(gfile, 'utf8')) : {};
+    ug('checkout', '-q', 'lane/k'); const rb = ug('rebase', '-q', 'main');
+    const ck = run(up, 'node harness/hook-stamp.mjs check --json', { ...env, STUDIO_HOOKS_CHECK: 'on', STUDIO_PROTECT_BASE: 'main', GITHUB_EVENT_NAME: '' });
+    const after = json(ck);
+    fs.writeFileSync(path.join(up, 'game', 'demo', 'src', 'sneak.mjs'), 'export const s = 1;\n'); ug('add', '-A'); ug('commit', '-q', '--no-verify', '-m', 'sneak after the upgrade');
+    const ck2 = run(up, 'node harness/hook-stamp.mjs check --json', { ...env, STUDIO_HOOKS_CHECK: 'on', STUDIO_PROTECT_BASE: 'main', GITHUB_EVENT_NAME: '' });
+    const caught = json(ck2);
+    report('2.58.2 (P-068): upgrading a checkout with lane work: the first stamping hook run lists the lane\'s unstamped commit; after the lane rebases onto the upgrade the hooks gate passes (exempt), and a --no-verify commit made after the upgrade is still caught',
+      upc.status === 0 && rb.status === 0 && (listed.pids || []).length >= 1 && ck.status === 0 && after.ok === true && after.exempt >= 1
+        && ck2.status !== 0 && caught.ok === false && (caught.open || []).length === 1 && /sneak/.test(caught.open[0].subject),
+      JSON.stringify({ upc: out(upc).slice(-300), rb: out(rb).slice(-300), listed: (listed.pids || []).length, after, caught }).slice(0, 1800));
+    // By hand: `grandfather` adds what a checkout has (here the sneak commit) and says so.
+    const gf = run(up, 'node harness/hook-stamp.mjs grandfather --json', env);
+    const gj = json(gf);
+    const ck3 = run(up, 'node harness/hook-stamp.mjs check --json', { ...env, STUDIO_HOOKS_CHECK: 'on', STUDIO_PROTECT_BASE: 'main', GITHUB_EVENT_NAME: '' });
+    report('2.58.2 (P-068): node harness/hook-stamp.mjs grandfather adds a checkout\'s unstamped local commits to the exempt list by hand (for a checkout that took the hooks without a commit)',
+      gf.status === 0 && gj.ok === true && gj.added >= 1 && ck3.status === 0, `${out(gf)}\n${out(ck3)}`.slice(-1200));
+  }
 }
+

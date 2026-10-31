@@ -19,10 +19,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
     A clean rebase keeps stamps valid, and an amend can't launder an unhooked commit.
   - The `weakened-tests` gate flags removed asserts, skip/only, raised timeouts, wider tolerances, seed special cases,
     deleted tests and goldens without a `Golden-Reason`, by file:line.
+  - Upgrading with lane work (P-068, found before release): the first stamping hook run lists the checkout's unstamped
+    local commits by patch-id (`<git common dir>/studio-hooks-grandfather.json`), so lane work started before the
+    upgrade still lands after its rebase; `node harness/hook-stamp.mjs grandfather` adds to the list by hand.
   - Only the owner's signed approval (`npm run approve -- tests|hooks`) lets an intended change through. Both run at
     `task done`. `STUDIO_HOOKS_CHECK` and `STUDIO_WEAKENED_TESTS` switch them.
   - The protected list, the gates and `approve.mjs` changed: a studio with an owner key needs the owner's approval to
-    take this upgrade. `qa/selftest-2582k.mjs` (23 checks).
+    take this upgrade. `qa/selftest-2582k.mjs` (25 checks).
 - **PU-22: deterministic maths in the sim-purity gate.** `Math.sin`, `cos`, `atan2`, `hypot`, `pow`, `exp`, `log` and
   the other inexact functions (and `**`) give different last bits in different engines, so a replay can drift in a
   Unity or C# port. The purity gate now reports each use in sim code (file, line, function), including `Math['sin']`,
