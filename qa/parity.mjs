@@ -36,7 +36,16 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   if (!sameGame && tplCs && t.folder && t.engine === 'unity' && read(path.join(t.folder, 'Assets', 'Sim', 'Sim.cs')) === tplCs) {
     return { ok: true, skipped: `the port in ${t.folder}/ is still the template; parity starts once a porter changes ${t.folder}/Assets/Sim/Sim.cs` };
   }
-  const cart = await loadCartridge(activeCartridge().name);
+  // 2.46.0: a pinned port is compared with the web rules it follows (port-src/, npm run engine -- port --from),
+  // not the live ones: the web game keeps changing while it is ported, and a web commit the port hasn't taken
+  // yet is drift to queue (npm run engine -- drift --queue), not a parity failure in every porter's verify.
+  let cart = null;
+  let against = 'the live web rules';
+  const pinned = t.portFrom?.sha && t.folder ? path.join(REPO_ROOT, t.folder, 'port-src') : null;
+  if (pinned && fs.existsSync(path.join(pinned, 'index.mjs'))) {
+    try { cart = await loadCartridge(activeCartridge().name, { dir: pinned }); against = `the web rules pinned at ${t.portFrom.sha.slice(0, 7)}`; } catch {}
+  }
+  cart ??= await loadCartridge(activeCartridge().name);
   const web = Object.fromEntries(seeds.map((seed) => {
     const r = runScenario(cart, 'start-to-win', { seed });
     return [seed, { seed, outcome: r.outcome, tick: r.ticksRun, state: r.state }];
@@ -67,7 +76,7 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
     }
   }
   for (const v of Object.values(web)) delete v.state;
-  return { ok: problems.length === 0, problems, web, engine: eng, compared: t.parity.compare };
+  return { ok: problems.length === 0, problems, web, engine: eng, compared: t.parity.compare, against };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -79,7 +88,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   for (const p of r.problems) console.error(`[parity] FAIL ${p}`);
-  if (r.ok) console.log(`[parity] PASS ${seeds.length} seeds agree on ${r.compared.join(' and ')}`);
+  if (r.ok) console.log(`[parity] PASS ${seeds.length} seeds agree on ${r.compared.join(' and ')} (against ${r.against})`);
   logEngine(`parity ${r.ok ? 'PASS' : 'FAIL'} on seeds ${seeds.join(',')}${r.ok ? '' : `: ${r.problems[0]}`}`, process.env.STUDIO_LOCK_OWNER || 'qa');
   emitEvent({ type: r.ok ? 'qa.parity.pass' : 'qa.parity.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', msg: r.ok ? `Web and engine agree on ${seeds.length} seeds` : `Web and engine disagree: ${r.problems[0]}` });
   process.exit(r.ok ? 0 : 1);

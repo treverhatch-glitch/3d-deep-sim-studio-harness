@@ -138,10 +138,11 @@ export function groupActions(actions = []) {
   return byTick;
 }
 
-export async function loadCartridge(name = defaultCartridgeName()) {
+export async function loadCartridge(name = defaultCartridgeName(), { dir: fromDir = null } = {}) {
   if (!name) throw new Error('No cartridge found. Create one with: npm run new-game <name>');
   if (!NAME_RE.test(name)) throw new Error(`Bad cartridge name "${name}"`);
-  const dir = path.join(CARTRIDGES_DIR, name);
+  // 2.46.0: fromDir loads a copy of the cartridge elsewhere (an engine port's pinned web rules, port-src/).
+  const dir = fromDir || path.join(CARTRIDGES_DIR, name);
   const indexFile = path.join(dir, 'index.mjs');
   if (!fs.existsSync(indexFile)) throw new Error(`cartridges/${name}/index.mjs not found`);
   const mod = await import(pathToFileURL(indexFile).href);

@@ -32,6 +32,12 @@ compares with the web game without the editor or a licence; the editor runs only
   - engine-unity-sim (.NET: `scripts/check-unity-template.mjs` checks purity, tests, parity, a planted
     engine call and a planted rule break).
   - engine-unity-editor (GameCI, runs once the `UNITY_LICENSE`, `UNITY_EMAIL` and `UNITY_PASSWORD` secrets exist).
+- **Web and engine at the same time** (any engine track):
+  - `npm run engine -- port --from <sha> [--source <paths>]` pins the web rules the port follows.
+  - `npm run parity` compares with that pin (`port-src/`), not the live rules.
+  - `npm run engine -- drift [--queue]` lists the web commits since the pin and queues one port task each.
+  - The five-line status shows the port's lag.
+  - `loadCartridge(name, { dir })` loads a copy.
 - `docs/UNITY-TRACK.md`; `qa/selftest-246.mjs`.
 
 ## [2.45.0] — 2026-10-31

@@ -63,6 +63,31 @@ export async function selftest246({ dir, run, report, tmpRoot }) {
   const purity = run(dir, 'node harness/unity.mjs purity', env);
   report('2.46.0: npm run engine -- start unity copies engine/_unity (pure sim, .NET test and parity projects, no build folders), records the editor gate and the editor-free parity command, queues the port into Assets/Sim, and parity waits while the sim is still the template', st.status === 0 && track.engine === 'unity' && track.gate === 'node harness/unity.mjs gate engine/tin-moon' && /dotnet run --project engine\/tin-moon\/tools\/SimCli -- parity \{seeds\}/.test(track.parity?.command || '') && fs.existsSync(path.join(dir, 'engine/tin-moon/Assets/Sim/Sim.cs')) && fs.existsSync(path.join(dir, 'engine/tin-moon/tools/SimTests/SimTests.csproj')) && !fs.existsSync(path.join(dir, 'engine/tin-moon/Library')) && tasks.some((t) => /Assets\/Sim\/ \(pure C#: npm run engine:sim must pass\)/.test(t.title)) && /SKIP the port in engine\/tin-moon\/ is still the template/.test(out(par)) && purity.status === 0 && /PASS sim purity/.test(out(purity)), `${out(st)}\n${JSON.stringify(track)}\n${JSON.stringify(tasks.map((t) => t.title))}\n${out(par)}\n${out(purity)}`);
 
+  // 4b. The web game keeps growing while it is ported: the port follows a pinned commit, parity compares with that
+  // pin (not the live rules), the web changes since it are listed and queued as port tasks, and the brief shows the lag.
+  const { spawnSync: sp } = await import('node:child_process');
+  const git = (...a) => sp('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main'); git('add', '-A'); git('commit', '-qm', 'studio', '--no-verify');
+  const pin = run(dir, 'node harness/engine.mjs port --from HEAD --by prod-1', env);
+  git('add', '-A'); git('commit', '-qm', 'pin the port', '--no-verify');
+  const idx = path.join(dir, 'cartridges/tin-moon/index.mjs');
+  fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace(/winCredits: \d+/, 'winCredits: 1200'));
+  git('commit', '-qam', 'web: a bigger win target', '--no-verify');
+  fs.writeFileSync(path.join(dir, 'fake-parity-246.mjs'), `import { loadCartridge, runScenario } from './harness/cartridge.mjs';\nconst c = await loadCartridge('tin-moon', { dir: ${JSON.stringify(path.join(dir, 'engine/tin-moon/port-src'))} });\nfor (const s of process.argv[2].split(',')) { const r = runScenario(c, 'start-to-win', { seed: Number(s) }); console.log(JSON.stringify({ seed: Number(s), outcome: r.outcome, tick: r.ticksRun })); }\n`);
+  const tf = path.join(dir, 'engine/tin-moon/engine.json');
+  const tj = JSON.parse(fs.readFileSync(tf, 'utf8'));
+  fs.writeFileSync(tf, JSON.stringify({ ...tj, parity: { command: 'node fake-parity-246.mjs {seeds}', compare: ['outcome', 'tick'] } }, null, 2));
+  fs.appendFileSync(path.join(dir, 'engine/tin-moon/Assets/Sim/Sim.cs'), '// ported: tin-moon\n');
+  const parPinned = run(dir, 'node qa/parity.mjs', env);
+  const drift = run(dir, 'node harness/engine.mjs drift', env);
+  const q1 = run(dir, 'node harness/engine.mjs drift --queue --by prod-1', env);
+  const q2 = run(dir, 'node harness/engine.mjs drift --queue --by prod-1', env);
+  const portTasks = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout || '{"backlog":[]}').backlog.filter((t) => /^Port web change /.test(t.title));
+  const brief = run(dir, 'node harness/health.mjs --brief', env);
+  const evs = (() => { try { return fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } })();
+  const laneOf = (id) => evs.find((e) => e.type === 'task.added' && e.task === id)?.meta?.lane;
+  report('2.46.0: while the web game keeps changing, a pinned port is compared with the web rules it follows (parity passes against the pin), npm run engine -- drift lists the web commits since the pin, --queue adds one port task each (not twice), and the five-line brief shows the port\'s lag', pin.status === 0 && parPinned.status === 0 && /against the web rules pinned at/.test(out(parPinned)) && /1 web change\(s\) to cartridges\/tin-moon since the port's pin/.test(out(drift)) && /web: a bigger win target/.test(out(drift)) && /queued T-\d+/.test(out(q1)) && /already queued/.test(out(q2)) && portTasks.length === 1 && laneOf(portTasks[0].id) === 'engine/tin-moon' && /Unity port 1 web change\(s\) behind/.test(out(brief)), [pin, parPinned, drift, q1, q2, brief].map(out).join('\n---\n') + JSON.stringify(portTasks.map((t) => t.title)));
+
   // 5. Adopting an existing Unity project: its sim checks are required, the editor's are optional; no Assets/Sim warns.
   const { gatesFor } = await imp('harness/adopt.mjs');
   const withSim = path.join(tmpRoot, `unity-game-246-${process.pid}`);

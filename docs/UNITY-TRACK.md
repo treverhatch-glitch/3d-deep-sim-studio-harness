@@ -64,6 +64,28 @@ leaking in.
 5. **Controls.** The Game Bible's controls list gets `unity` in its tracks; each control gets a Play Mode
    test that presses it through the Input System and checks the sim value it must change.
 
+## Web and Unity at the same time
+
+The web game can keep growing while it's ported. Both land side by side:
+
+- **Separate folders, separate lanes.** Web work lands in its own folder (`cartridges/<game>` or
+  `game/<slug>`), Unity work in `engine/<game>`. Each lane runs only its own checks, so they never conflict
+  and never wait for each other.
+- **Web lanes never wait for Unity.** The engine gate and parity are optional checks: a web change the port
+  hasn't caught up with doesn't fail a web lane.
+- **The port follows a pin.** `npm run engine -- port --from <sha>` pins the web rules the port matches (an
+  adopted game names its rule folders once: `--source game/hatchfield/src/game`). Parity compares the
+  Unity sim with that pin, not the live web rules, so porters aren't failed by web work still in flight.
+- **The lag is work, not a failure.** `npm run engine -- drift` lists the web commits since the pin.
+  `--queue` adds one port task per commit to the porters' lane. Each task ends by moving the pin forward, and
+  the five-line status shows "Unity port N web change(s) behind".
+
+**When to stop growing the web version.** Keep both while the web build is where you find the fun: a new
+mechanic is quickest to try in the browser, and parity turns it into a precise port task. Freeze new web
+features once the Unity port is caught up (drift at 0) and the Unity build is the one people play. From then
+on the web build gets fixes only, or becomes a lightweight demo. The cost of running both is the port lag: if
+drift keeps growing week on week, the porters can't keep up, and it's time to move feature work to Unity.
+
 ## Settings
 
 In `.env`:
