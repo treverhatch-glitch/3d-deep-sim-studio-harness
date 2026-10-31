@@ -4,6 +4,33 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.2] — 2026-11-01
+2.58.2: the flaky HUD check, a gate against dodged checks, and deterministic maths in the purity gate.
+### Fixed
+- **P-044: the War Room browser check waits instead of reading the page once.** `qa/hud-check.mjs` waits for each state
+  it checks (15 s, 30 s on Windows, `HUD_WAIT_MS`) and on time-out says what the page showed. Stop and Pause need an
+  empty list that holds through a refresh. Presses wait for the HUB's answer, and the ledger check waits past the HUB's
+  30 s cache. `--only stop-pause --repeat 30` runs the agent checks alone; `HUD_TRACE=1` shows each press and wait. A
+  full run takes about a minute less. `qa/selftest-2582j.mjs` (7 checks).
+### Added
+- **PU-29: two new required gates catch a check being dodged.**
+  - The git hooks now stamp each commit they pass (`Studio-Hooks` trailer). The `hooks` gate lists commits since the
+    base branch that skipped them (`--no-verify`, an amend without hooks), names them and says how to re-commit them.
+    A clean rebase keeps stamps valid, and an amend can't launder an unhooked commit.
+  - The `weakened-tests` gate flags removed asserts, skip/only, raised timeouts, wider tolerances, seed special cases,
+    deleted tests and goldens without a `Golden-Reason`, by file:line.
+  - Only the owner's signed approval (`npm run approve -- tests|hooks`) lets an intended change through. Both run at
+    `task done`. `STUDIO_HOOKS_CHECK` and `STUDIO_WEAKENED_TESTS` switch them.
+  - The protected list, the gates and `approve.mjs` changed: a studio with an owner key needs the owner's approval to
+    take this upgrade. `qa/selftest-2582k.mjs` (23 checks).
+- **PU-22: deterministic maths in the sim-purity gate.** `Math.sin`, `cos`, `atan2`, `hypot`, `pow`, `exp`, `log` and
+  the other inexact functions (and `**`) give different last bits in different engines, so a replay can drift in a
+  Unity or C# port. The purity gate now reports each use in sim code (file, line, function), including `Math['sin']`,
+  `const { sin } = Math`, aliases and imported wrappers, and the runtime probe names the line that called them. Each
+  game picks a mode: `warn` (the default, so no existing game turns red), `required` (new games from
+  `npm run new-game`) or `off`, in `cartridge.json` or the game's `studio.gates.json`. The game's `detMath` module is
+  exempt. `qa/selftest-2582l.mjs` (9 checks).
+
 ## [2.58.1] — 2026-11-01
 2.58.1: the crew's Windows launch bug and agy's headless permissions (crew report, 2026-11-01).
 ### Fixed

@@ -356,7 +356,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Workaround:** re-run the failed job once (the release flow already does this for known timing checks).
 - **Fix?** 2.57.0 moves board writes off the land lock and adds a Windows rename retry (PU-16); `merge-lane.mjs`'s own land lock is unchanged. Watch whether it recurs.
 
-### P-044 — The HUD "Stop ends it and hands its task back" check flakes on main · open
+### P-044 — The HUD "Stop ends it and hands its task back" check flakes on main · fixed in 2.58.2 (the check waits for the page state; `--only stop-pause --repeat 30` passed 30/30 under load and with refreshes 4.5 s late, where the old logic got 0/10)
 - **What happened:** main's `war-room-browser` job failed on 2 of 4 pushes (7f4a736, 3eb0cf2) on `[hud] FAIL Stop ends it and hands its task back` (and once on Pause), while the same code passed on its PR.
 - **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
 - **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
