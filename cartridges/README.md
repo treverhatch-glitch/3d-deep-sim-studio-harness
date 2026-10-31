@@ -45,6 +45,9 @@ Policies are pure functions of `(state, tick)`; they run inside replays and gold
 - No DOM, Three.js/React/other renderers, `Math.random`, `Date`, `performance`, timers, `eval` or
   `globalThis` inside a cartridge. `scripts/check-sim-purity.mjs` scans the source **and** plays every
   cartridge with those globals trapped, so aliases like `const r = Math.random` are caught too.
+- Engine-dependent maths (`Math.sin`, `atan2`, `hypot`, `pow`, `exp`, `log`, `**` and the rest) is reported by the
+  same check: a warning by default, a failure when `cartridge.json` says `"detMath": "required"` (new games start
+  that way). Use a `detMath` module instead (docs/3D-DEEP-SIM.md, "Deterministic math").
 - Every game cartridge has golden files in `qa/golden/` and a `start-to-win` scenario that wins.
 - Changing sim behaviour changes hashes: run `npm run golden -- --update` and commit the new hashes
   in the same commit as the change.

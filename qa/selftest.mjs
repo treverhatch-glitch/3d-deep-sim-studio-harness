@@ -3594,6 +3594,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// PU-22: the sim-purity gate flags engine-dependent Math calls (sin, atan2, hypot, pow, ...) in sim code: warn by
+// default, required for new games, the detMath module exempt (qa/selftest-2582l.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2582L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582l.mjs')).href);
+  await selftest2582L({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
