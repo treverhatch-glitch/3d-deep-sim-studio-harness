@@ -210,4 +210,4 @@ subscription or API billing).
 - **Harness fix (proposal, needs Hatch's OK):** a session that ended before a claim began never releases that claim;
   launcher names and claim names are checked for clashes at claim time. Test: a selftest with an ended `opus-1`
   record and a fresh claim by `opus-1` keeps the claim. Size S.
-- **Found by:** `npm run metrics` (2.54.0) on the crew's real log; the attempt is labelled env-harness.
+- **Found by:** the 2.54.0 metrics command on the crew's real log; the attempt is labelled env-harness.
