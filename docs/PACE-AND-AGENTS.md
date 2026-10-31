@@ -62,6 +62,9 @@ The launcher:
 
 In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself.
 
+A `--note` reaches the agent's prompt inside the block marked "written by agents or people", labelled with its
+sender (`--by`, or "unknown"); see docs/SECURITY.md.
+
 ## Hiring into departments
 
 The Producer runs the studio. It opens departments, writes tasks, and hires agents into them. The game dev
