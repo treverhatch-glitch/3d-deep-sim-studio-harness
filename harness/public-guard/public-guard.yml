@@ -1,0 +1,17 @@
+name: public-guard
+# This repo is public. The same check as the pre-push hook, on every push and pull request, so a skipped hook
+# is still caught before anything merges. Public repos get these minutes free.
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/public-guard/check.mjs
