@@ -98,6 +98,28 @@ let the crew's Discord token reach a public repo), then PU-19 (the crew runs on 
 PU-21; PU-20 after its lead is re-checked. Research update (better approaches for agent-led game development): not
 done this round; the research helper was stopped before it reported.
 
+## Planned updates from research part 2 (2026-10-31, late) · PLANNED, nothing built
+Report and sources: `studio/logs/research/HARNESS-RESEARCH-2026-10-31-PART2.md`. The maths divergence was re-run by
+hand: Node vs the C maths library differ in 3–35% of results. Every other claim is as the research helper reported it.
+Each item needs Hatch's OK. Items marked "game repo" are crew tasks in hatchfield-game, not harness changes.
+
+| # | Update | Verdict | Priority | Size | How we test it |
+| --- | --- | --- | --- | --- | --- |
+| PU-22 | **Deterministic maths for the rules** (game repo + a harness lint): a small `detMath` module (sin, cos, atan2, hypot, pow, exp, log written from the published fdlibm algorithms, ideas only) used by the sim instead of `Math.*`; a lint that refuses raw trig in sim code | ADOPT | P1 | M | One shared input file gives identical results in Node 20/22/24, Chrome, Jint on Linux and Windows; the replays still match 3/3; the lint fails on a planted `Math.sin` |
+| PU-23 | **Green 3D tests without a GPU** (game repo, joins the P-021 crew task): Mesa llvmpipe instead of SwiftShader (check the renderer name in the log), the test clock steps exact frames with render off, screenshot tests in their own job; try free macOS runners for screenshots | ADAPT | P1 | S | One CI job prints renderer and fps for each option; switch only if ≥3× faster; e2e gives the same asserts on 1 and 4 cores, 0 flakes in 10 runs |
+| PU-24 | **Read Claude's structured rate-limit events** (`rate_limit_event`): pause with a note on a warning, start no large task above ~80% use, wait until the stated reset | ADAPT | P1 | S | Capture one live event first (field names UNVERIFIED); replay a warning-then-rejected stream: the agent hands back before the rejection and the supervisor waits until the reset |
+| PU-25 | **Fencing tokens on claims:** every claim gets a rising number; release, requeue and landing must quote the current number; session names carry a launch nonce | ADOPT | P1 | S | Selftest: an ended `opus-1` record plus a fresh `opus-1` claim; the claim survives, a requeue quoting the old number is refused (P-024, P-028) |
+| PU-26 | **Change notices between lanes:** when a lane lands, the harness writes what changed (exports, signatures, tuning keys, state fields) to the lanes that use them | ADAPT | P2 | M | 5 planted rename pairs: post-land test failures with and without notices |
+| PU-27 | **Measure cheap Unity speed-ups** (joins L-001): Jint strict mode and prepared scripts, and Puerts (V8 in Unity) on the same rules file | ADAPT | P2 | M | Ticks per second for each option with 3/3 replays identical; nothing switched without Hatch's OK |
+| PU-28 | **Impossible-task canaries and a "spec conflict" exit:** 6–10 tasks whose test contradicts the spec; `hand back --reason spec-conflict` doesn't count against the agent | ADOPT | P1 | S–M | Cheat rate per model family before and after the exit; no rise in false hand-backs on normal tasks |
+| PU-29 | **A gate for weakened tests:** removed asserts, `skip` or `only`, raised timeouts, wider tolerances, seed or tick special cases need the owner's OK with a reason | ADAPT | P2 | S | 5 planted weakening diffs all flagged; at most 2 false flags on the last 20 landed tasks |
+| PU-30 | **Secrets, second layer:** `.env` moved outside every checkout; 2–3 free honeytokens; GitHub push protection on the public repos (a repo setting: Hatch's call) | ADOPT | P1 | S | A launched agent can't read the file; push protection blocks a fake-shaped token on a private test fork only |
+| PU-31 | **Exploration bots that shrink failures** (feeds PU-10): random action sequences with invariants (cash change = ledger sum, no negative stock, no stuck passengers), shrunk to a minimal seed+path replay; a Go-Explore style archive of unique states | ADOPT | P1 | M | 3 planted sim bugs, each found and shrunk to ≤10 actions |
+| PU-32 | **Performance as an A/B against the base commit:** alternating runs, fail only when the 95% interval says >10% slower (tick time; frame time with render off) | ADAPT | P2 | S–M | A planted 15% slowdown is flagged; 10 runs of unchanged code give 0 false flags |
+
+**Suggested order for these:** PU-22 first (the Unity port's replay checks rest on it), then PU-23 with the P-021
+crew fix, then PU-25 and PU-24, then PU-31 and PU-28; the rest after there is data.
+
 **Suggested order:** PU-06 and the watchdog fixes (P-022 to P-027) first, because the crew is running into them
 today; then PU-02 and PU-03, so the crew's data is collected in a usable form from the start; then PU-01 and PU-04;
 the rest after there is data.
