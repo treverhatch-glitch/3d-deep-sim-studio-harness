@@ -107,3 +107,30 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **Workaround:** the HDRP PR (Unity repo #6) leaves that file out; it stays changed on Hatch's PC only.
 - **Harness fix?** Maybe: add `organizationId:` / `cloudProjectId:` with a value to the public guard's private
   markers for Unity repos. Proposal, needs Hatch's OK.
+
+### P-017 — Unity CI build killed at start-up (exit 137) after restoring a cached Library · fix in review
+- **What happened:** Unity repo PR #7 (docs only) failed its Windows build twice: Unity was killed right after it
+  loaded (exit 137). It had restored the Library cache saved by PR #6's build, made before the Jint plugin was on
+  main. PR #6 itself started with no cache and passed.
+- **Workaround:** deleting the cache through the API is blocked by the proxy, so Unity repo PR #8 changes the cache
+  key (asmdefs, plugins, graphics settings) and drops the fallback to older keys.
+- **Proven?** Not yet: PR #8's own clean build is the test.
+- **Harness fix?** Yes if PR #8 passes: the same key in the Unity template's CI (engine/_unity), via a proposal.
+
+### P-018 — The Unity-port branch was 657 commits behind hatchfield-game main · rebuilt on main
+- **What happened:** claude/seeded-rng split from the old trunk (cursor/audit-playtest-562d, still at 8e2278c) on
+  Oct 14; main had moved 657 commits on, with 10 files changed on both sides. A rebase stopped on 18 conflicts in
+  sim.ts.
+- **Workaround:** rebuilt the seeded-dice change by hand on main (branch claude/unity-port), then carried the
+  replay, parity, host and pack commits over.
+- **Note:** the game repo's CLAUDE.md still says PRs target cursor/audit-playtest-562d, but that branch is stale;
+  Hatch said to rebase onto main. Ask Hatch whether CLAUDE.md should say main.
+- **Harness fix?** Maybe: `npm run engine -- drift` could also warn when a port branch falls behind the game's main.
+
+### P-019 — main's tests steer Math.random (withSeed, spies), which the rules no longer read · fixed
+- **What happened:** 22 test files on main steer Math.random directly; with the rules on their own dice those
+  tests would stop steering the game.
+- **Fix:** under Vitest the rules' dice follow Math.random by default (src/test/setup.ts), and withSeed forces
+  them too; only the repeatable and replay tests switch to the game's own dice. Every existing test sees the same
+  rolls as before.
+- **Harness fix?** No.
