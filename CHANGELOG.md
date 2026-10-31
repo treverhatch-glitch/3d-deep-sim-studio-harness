@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.56.1] — 2026-11-01
+2.56.1: PU-20, from the 2026-10-31 break tests (owner-approved fix).
+### Fixed
+- **The protected-files check also sees uncommitted and already-pushed edits.** It used to pass, saying "no base
+  branch to compare with", whenever the base was at HEAD. That covered three cases: an uncommitted edit with no remote;
+  an uncommitted edit with `origin/main` at HEAD (also right after a push); and, with no remote, even a committed edit
+  on main. Now a base at HEAD is still used, so staged, unstaged and new protected files are judged. With no base
+  branch at all, the check compares with the commit that set the owner key, and accepts only contents an owner
+  approval recorded. The approval flow is unchanged. In a studio with no remote, protected files committed since
+  the key without an approval now fail until the owner runs `npm run approve -- protected` once.
+  `qa/selftest-pu20.mjs` (7 checks).
+
 ## [2.56.0] — 2026-10-31
 2.56.0: PU-15, approved by the owner: a general visual-effect skill (spec, stepped capture, frame checks, review).
 ### Added

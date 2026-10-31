@@ -95,7 +95,7 @@ In a lane copy, `npm run verify` and `task done` check only what the lane change
 ## Every control is pressed, and only the owner changes the judges (2.32.0)
 
 - **Controls.** The Game Bible lists every control a player has (`studio/bible/controls.json`). Each track's input test presses them for real (the browser check for web, `tools/controls.gd` in the Godot gate) and the `controls` gate fails when one was never pressed or did nothing.
-- **Protected files.** Scenarios' expected outcomes, regressions, the controls list, the gates and the checks themselves (`studio/protected.json`) change only with the owner's signed approval: `npm run approve -- keygen` once on your own machine, then `npm run approve -- protected --note "why"` for a change you want. CI checks it with the main branch's copy of the checker, so a branch can't weaken it. A forced `task done` needs `npm run approve -- force <ID>`.
+- **Protected files.** Scenarios' expected outcomes, regressions, the controls list, the gates and the checks themselves (`studio/protected.json`) change only with the owner's signed approval: `npm run approve -- keygen` once on your own machine, then `npm run approve -- protected --note "why"` for a change you want. CI checks it with the main branch's copy of the checker, so a branch can't weaken it. The check judges the working tree too (committed, staged, unstaged and new files), also right after a push; with no remote it compares with the commit that set the owner key and accepts only contents an approval recorded. A forced `task done` needs `npm run approve -- force <ID>`.
 
 ## A stuck task climbs a ladder, not a wall (2.35.0)
 
