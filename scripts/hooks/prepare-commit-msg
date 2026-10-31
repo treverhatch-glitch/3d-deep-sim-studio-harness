@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Git prepare-commit-msg hook (2.58.2, PU-29). Installed by `npm run hooks:install` (core.hooksPath=scripts/hooks).
+# Runs even with --no-verify. It only notes whether this commit amends HEAD (git commit --amend without -m), so the
+# commit-msg hook stamps the amended commit's whole change, not just what changed since HEAD (harness/hook-stamp.mjs).
+NOTE="$(git rev-parse --git-path studio-hooks-amend 2>/dev/null)" || exit 0
+if [ "${2:-}" = "commit" ] && [ -n "${3:-}" ] && [ "$(git rev-parse -q --verify "${3}^{commit}" 2>/dev/null)" = "$(git rev-parse -q --verify HEAD 2>/dev/null)" ]; then
+  echo amend > "$NOTE" 2>/dev/null || true
+else
+  rm -f "$NOTE" 2>/dev/null || true
+fi
+exit 0

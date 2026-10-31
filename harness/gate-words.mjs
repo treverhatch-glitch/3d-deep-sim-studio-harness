@@ -22,6 +22,8 @@ export const PLAIN = {
   assets: 'an asset has no licence, a bad licence, or stale credits',
   docs: 'a doc points at something that does not exist',
   secrets: 'a key or secret-shaped string is in the repo',
+  hooks: 'a commit skipped the git hooks (--no-verify)',
+  'weakened-tests': 'a test was weakened (assert removed, skipped, looser) without the owner\'s OK',
   selftest: 'the harness self-test found a check that no longer bites',
   balance: 'the balance sweep is out of range',
   fun: 'the fun check is below its bar',

@@ -21,6 +21,9 @@ if [ -n "$GOLDEN_CHANGED" ]; then
   DIFF="$(cd "$ROOT" && node scripts/golden-diff.mjs --staged 2>/dev/null || true)"
   [ -n "$DIFF" ] && add "Golden-Diff" "$DIFF"
 fi
+# 2.58.2 (PU-29): stamp the commit the hooks passed (Studio-Hooks: version, tree, patch-id), so a commit that skipped
+# them (--no-verify) is found afterwards by the hooks gate. Never blocks the commit.
+node "$ROOT/harness/hook-stamp.mjs" stamp "$MSG_FILE" || true
 [ -n "${STUDIO_LOCK_OWNER:-}" ] || exit 0
 TASKS="$(cd "$ROOT" && node -e "
 import('./harness/lock.mjs').then(({ listLocks }) => {
