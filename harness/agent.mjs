@@ -48,7 +48,7 @@ import { listLocks, release, claim, renewOwner } from './lock.mjs';
 import { savePatch } from './wip.mjs';
 import { laneList } from './task-hold.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
-import { effectiveMode } from './mode.mjs';
+import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
@@ -1176,6 +1176,9 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
     }
     return { started: [], why: `${mode.label} doesn't start agents on its own` };
   }
+  // 2.58.0 (crew report): starting agents from the watcher, the HUB's loops and the Director's flow is opt-in, one
+  // switch off by default (npm run mode -- autostart on --by <name>); away mode and MAX SPEED don't override it.
+  if (!mode.autostart) return { started: [], autostartOff: true, why: AUTOSTART_OFF };
   if (readStop()) return { started: [], why: 'the studio is stopped' };
   const { readStatus, supervise } = await import('./supervisor.mjs');
   const sup = readStatus();
@@ -1193,11 +1196,14 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
  * confirmed brief, a design to change). Start that role's agent if none is running and the caps
  * allow it, even in paces that don't start agents on their own: a person asked. Returns `next`,
  * one plain sentence saying what happens now.
+ * 2.58.0: `auto: true` is a wake-up nobody asked for (the HUB's game-dev loop, the queue refill, the development
+ * cycle): it starts nothing while auto-start is off (npm run mode -- autostart on --by <name>).
  */
-export function wake(role, { task = null, why = '' } = {}) {
+export function wake(role, { task = null, why = '', auto = false } = {}) {
   const label = { rnd: 'R&D', producer: 'the Producer', director: 'the Director', art: 'the art department', builder: 'a builder', liaison: 'the Liaison' }[role] || role;
   const busy = sessions().find((s) => s.role === role && s.running);
   if (busy) return { started: false, next: `${label} (${busy.agent}) is running and picks ${task || 'it'} up from the queue${busy.task ? ` after ${busy.task}` : ''}.` };
+  if (auto && !effectiveMode().autostart) return { started: false, autostartOff: true, next: `${task ? `Queued as ${task} for ${label}. ` : ''}${label} wasn't started: ${AUTOSTART_OFF}.` };
   if (!launchableRoles([role]).length) {
     const msg = `No tool is set to start ${label}: set STUDIO_AGENT_TOOL (or STUDIO_${roleKey(role)}_TOOL) in .env, or start it in Ops`;
     const lastAlert = readRecentEvents(2000).filter((e) => e.type === 'agent.no_tool' && e.msg === msg).pop();
@@ -1320,4 +1326,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');
   const mode = effectiveMode();
   console.log(`\nMode: ${mode.label}${mode.boost ? ' + MAX SPEED' : ''}, up to ${mode.maxAgents} agents. Roles that can start on their own: ${launchableRoles().join(', ') || 'none (set STUDIO_AGENT_TOOL or STUDIO_<ROLE>_TOOL in .env)'}.`);
+  console.log(mode.autostart ? 'Auto-start is on: the watcher and the HUB may start agents on their own (npm run mode -- autostart off --by <name>).' : `Auto-start is off: ${AUTOSTART_OFF.replace(/^auto-start is off, so /, '')}.`);
 }

@@ -1035,7 +1035,7 @@
       $('o-cause').value = '';
       const on = ((state && state.launched) || []).find((x) => x.running && x.role === body.role);
       const m = (state && state.mode) || {};
-      return `Queued ${r.id}: ${r.title}. ${on ? `${on.agent} picks it up after its current task.` : m.autoLaunch ? `The watcher starts a ${body.role} agent for it on its next pass (within ${m.label}'s caps).` : `It waits until a ${body.role} agent starts: Start agent below, or choose a faster pace.`}`;
+      return `Queued ${r.id}: ${r.title}. ${on ? `${on.agent} picks it up after its current task.` : m.autoLaunch && m.autostart ? `The watcher starts a ${body.role} agent for it on its next pass (within ${m.label}'s caps).` : `It waits until a ${body.role} agent starts: Start agent below${m.autoLaunch ? ' (auto-start is off: npm run mode -- autostart on)' : ', or choose a faster pace'}.`}`;
     });
   });
   $('o-watch').addEventListener('click', () => act('Watcher', async () => {
@@ -2288,7 +2288,7 @@
     const sig = s.signals || { needsYou: [], red: [], stalled: [] };
     const chip = (cls, label, items, empty) => `<span class="sig ${cls}" title="${esc(items.join('\n') || empty)}"><b>${label}</b>${items.length ? `${esc(items[0]).slice(0, 110)}${items.length > 1 ? ` (+${items.length - 1})` : ''}` : esc(empty)}</span>`;
     const html = [
-      `<span class="sig pace" title="${esc(m.text || '')}"><b>Pace</b>${esc(m.label || '')}${m.boost ? ' + MAX SPEED' : ''}${m.chosen === false ? ' (not chosen yet)' : ''}</span>`,
+      `<span class="sig pace" title="${esc(m.text || '')}"><b>Pace</b>${esc(m.label || '')}${m.boost ? ' + MAX SPEED' : ''}${m.chosen === false ? ' (not chosen yet)' : ''}${m.autostart === false ? ' · auto-start off (npm run mode -- autostart on --by &lt;name&gt;)' : ''}</span>`,
       sig.needsYou.length ? chip('you', `Needs you (${sig.needsYou.length})`, sig.needsYou, '') : '',
       sig.red.length ? chip('red', 'A check is red:', sig.red.map((g) => `${g} (npm run verify -- --only ${g})`), '') : '',
       sig.stalled.length ? chip('stall', `Agent stalled (${sig.stalled.length})`, sig.stalled, '') : '',
