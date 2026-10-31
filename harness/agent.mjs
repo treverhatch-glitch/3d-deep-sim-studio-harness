@@ -49,7 +49,7 @@ import { savePatch } from './wip.mjs';
 import { laneList } from './task-hold.mjs';
 import { laneWantsCopy, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
 import { effectiveMode } from './mode.mjs';
-import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP } from './budget.mjs';
+import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { setHold } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
@@ -301,7 +301,7 @@ export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommi
 }
 
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
-export function cleanUp(agent, { code, log = '', role, tool, model }) {
+export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }) {
   const found = providerTrouble(log, code);
   // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
   // never this session's (test #2: claude was marked out of quota for agy's limit).
@@ -329,9 +329,14 @@ export function cleanUp(agent, { code, log = '', role, tool, model }) {
   if (quota && !/^(off|0|false|no)$/i.test(process.env.STUDIO_QUOTA_SKIP || '')) {
     // 2.30o: generic: the order entry this session ran as (tool:model when the order lists it, else the tool).
     const order = (() => { try { return readBudget().order || []; } catch { return []; } })();
-    const who = other || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
+    // 2.58.0 (PU-40, P-051): a custom command's limit is saved per program (custom:<program>), the key the launch
+    // check (budgetStopFor) matches; as plain "custom" nothing matched it and the next launch hit the limit again.
+    const ck = tool === 'custom' ? customKey(cmd ?? (process.env[`STUDIO_${roleKey(role)}_CMD`] || process.env.STUDIO_AGENT_CMD || '')) || 'custom' : null;
+    const who = other || ck || (order.includes(`${tool}:${model}`) ? `${tool}:${model}` : tool);
     const line = log.split('\n').slice(-30).reverse().find((l) => /reset|try again/i.test(l) && QUOTA_ERROR.test(l) && (toolNamed(l) || who) === who) || quota.line;
     limitMark = { on: who, ...markExhausted(who, line) };
+    // The command stopped at a limit its line names another tool for (a wrapper around that tool): hold the command too.
+    if (limit && other && ck) markExhausted(ck, line);
   }
   const mine = listLocks().filter((l) => l.owner === agent);
   const tasks = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
@@ -670,7 +675,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   clearInterval(beat);
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
-  const result = cleanUp(agent, { code, log, role, tool: session.tool, model });
+  const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null });
   if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
