@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.52.0] — 2026-10-31
+2.52.0: U-003 from the studio logs, approved by the owner.
+### Fixed
+- **The 2.41 "two greens" selftest no longer depends on timing.** CI once counted a play as older than "the last
+  change", so a file in the work folders had changed between the plays. The test now runs the check once before
+  any play, so a one-time write on the harness's first run happens first. A failure now also lists every work file
+  changed since the plays began. The root cause isn't proven, because it never failed locally; if it recurs, that
+  list names the file.
+
 ## [2.51.0] — 2026-10-31
 2.51.0: U-005 from the studio logs, approved by the owner (before a second public game repo exists).
 ### Added
