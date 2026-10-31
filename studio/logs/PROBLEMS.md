@@ -295,3 +295,9 @@ subscription or API billing).
 - **Workaround:** Hatch opens the project in the Hub; screen control takes over in the editor.
 - **Harness fix?** No (desktop tool limit).
 
+
+### P-036 — Unity's replay tests don't play the rules · open (fix proposed, needs Hatch's OK)
+- **What happened:** the 4 Edit Mode tests passed in Hatch's editor (2026-10-31, screenshot of the green Test Runner), but they only read the replay files, check the dice bit for bit and check how a mismatch is reported. No Unity test plays the packed rules through Jint (`RulesHost`) and compares with the replays; that is proven only in .NET (`tools/SimCli`, 3/3).
+- **Why:** the replay test was written before the rules ran in Unity (it still has a "not ported yet" case); the Jint run was added to the .NET tools, not to the Edit Mode tests.
+- **Effect:** "the replays match inside the editor" was untested even though the Unity tests were green. I had described this check as "the replay tests: 3/3 must match at day 3" before reading the test file.
+- **Fix (proposed):** one Edit Mode test per seed: `ReplayCheck.Compare(Load(seed), new RulesHost(<Rules~ file>))` must be "match"; it names the rules file's fingerprint (P-034). About 3–5 minutes a run. Unity repo PR, merged on green checks, then re-run in the editor.
