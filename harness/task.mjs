@@ -28,6 +28,7 @@ import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState } from './baseline.mjs';
+import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -611,12 +612,8 @@ function holderRunning(owner) {
     return true; // not a launcher session: it may be running by hand
   }
   if (s.status !== 'running') return false;
-  try {
-    process.kill(s.supervisor || s.pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
+  // PU-17 (P-039): no OS query here; on Linux a /proc start that differs from the one recorded at launch means dead.
+  return recordAlive(s);
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;

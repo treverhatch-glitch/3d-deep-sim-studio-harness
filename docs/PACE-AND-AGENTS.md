@@ -50,7 +50,15 @@ The launcher:
 - sends a heartbeat every 2 minutes; the War Room shows "Agent stalled" when it stops;
 - when an agent dies (exit code, usage limit, 429, auth), hands its task back with a note, saves its
   uncommitted work under its claims to `.studio/wip/<task>-<agent>.patch`, frees its claims, and with
-  `--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5` starts the next tool on the same task.
+  `--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5` starts the next tool on the same task;
+- writes down when each process started (the spawn time, in `.studio/agents/<agent>.json`), with no extra
+  process call at launch or in listings. `agent stop`, Pause, Stop all, the stall and refresh checks and
+  `studio:stop` read the process's start time from the OS once, at the kill (PowerShell on Windows, `ps` on
+  macOS, `/proc` on Linux), and kill only if it matches within 3 s (`STUDIO_PROC_START_TOLERANCE_SEC`). After
+  a crash or a reboot the OS may have given the number to another program: then nothing is killed, the session
+  is marked ended, its task goes back to the queue and its claims are freed (event `agent.pid_reused`). If the
+  start time can't be read, a recent heartbeat decides as before. A stop while an agent is still starting stops
+  its launcher.
 
 In fast paces and with MAX SPEED, the watcher (run by the HUB) starts agents for waiting tasks itself.
 
