@@ -9,6 +9,9 @@
  *                                        runner in batch mode for Edit Mode and Play Mode; results read from
  *                                        its NUnit XML (a run where no test ran fails), Play Mode's controls
  *                                        test writes qa/reports/controls-unity.json for the controls check
+ *   npm run engine:build [-- <folder>] [--target web|windows]
+ *                                        a playable build: WebGL (the Arcade's engine tab, any browser) or a
+ *                                        Windows .exe (Assets/Editor/StudioBuild.cs)
  *   node harness/unity.mjs purity <folder>
  *   node harness/unity.mjs version <folder>
  *
@@ -182,6 +185,25 @@ export function runUnityTests(dir, platform, { controlsOut = null } = {}) {
   return { ok: problems.length === 0, platform, results: res, problems, log };
 }
 
+/**
+ * A playable build (Assets/Editor/StudioBuild.cs): web (WebGL, played in a browser and on the Arcade's engine
+ * tab) or windows (Build/Windows/Game.exe). Returns { ok, target, out, problems }.
+ */
+export function build(dir, target = 'web', { out = null } = {}) {
+  const t = { web: ['WebGL', 'Build/WebGL'], webgl: ['WebGL', 'Build/WebGL'], windows: ['Windows', 'Build/Windows'] }[String(target).toLowerCase()];
+  if (!t) return { ok: false, problems: [`unknown build target "${target}" (web or windows)`] };
+  if (!fs.existsSync(path.join(dir, 'Assets', 'Editor', 'StudioBuild.cs'))) return { ok: false, problems: [`${rel(dir)}/Assets/Editor/StudioBuild.cs is missing (copy it from engine/_unity)`] };
+  if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): set STUDIO_UNITY to the editor's full path. A ${t[0]} build also needs that platform's module installed in Unity Hub.`] };
+  const dest = path.resolve(dir, out || t[1]);
+  const r = spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, '-logFile', '-'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 });
+  const log = `${r.stdout || ''}${r.stderr || ''}`;
+  const line = (log.match(/\[build\] (?:PASS|FAIL)[^\n]*/) || [])[0];
+  const problems = [];
+  if (/No valid Unity Editor license|License is not active/i.test(log)) problems.push('the editor has no active licence on this machine');
+  if (r.status !== 0 || !/\[build\] PASS/.test(log)) problems.push(`the ${t[0]} build failed (exit ${r.status})${line ? `: ${line}` : ''}${/error CS\d+/.test(log) ? `; compile errors: ${[...new Set(log.match(/[^\s]+\.cs\(\d+,\d+\): error CS\d+:[^\n]*/g) || [])].slice(0, 3).join(' | ')}` : ''}`);
+  return { ok: problems.length === 0, target: t[0], out: rel(dest), problems, line };
+}
+
 /** The editor's gate: purity, pin, Edit Mode and Play Mode tests. */
 export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log } = {}) {
   const problems = [];
@@ -234,8 +256,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = gate(dir, { platforms: pf ? [pf] : undefined });
     if (!r.ok) fail(r.problems);
     console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
+  } else if (cmd === 'build') {
+    const r = build(dir, flag('target') || 'web', { out: flag('out') });
+    if (!r.ok) fail(r.problems);
+    console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else {
-    console.error('usage: node harness/unity.mjs sim|gate|purity|version [<folder>] [--platform EditMode|PlayMode]');
+    console.error('usage: node harness/unity.mjs sim|gate|build|purity|version [<folder>] [--platform EditMode|PlayMode] [--target web|windows]');
     process.exit(2);
   }
 }

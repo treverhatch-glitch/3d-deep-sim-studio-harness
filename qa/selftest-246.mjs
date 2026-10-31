@@ -51,6 +51,11 @@ export async function selftest246({ dir, run, report, tmpRoot }) {
   const pinNone = u.checkPin(tpl, '');
   report('2.46.0: STUDIO_UNITY_PIN accepts the project\'s version or its prefix (6000.3), refuses another (6000.0) with why an upgrade is a decision, and notes when no pin is set', pinOk.ok && !pinBad.ok && /STUDIO_UNITY_PIN is 6000\.0/.test(pinBad.why) && pinNone.ok && /no STUDIO_UNITY_PIN/.test(pinNone.note), JSON.stringify({ pinOk, pinBad, pinNone }));
 
+  // 3b. Playable builds: the targets it knows, and a clear message without the editor.
+  const b1 = run(dir, 'node harness/unity.mjs build engine/_unity --target ps5', env);
+  const b2 = run(dir, 'node harness/unity.mjs build engine/_unity --target web', { ...env, STUDIO_UNITY: path.join(tmpRoot, 'no-unity-246') });
+  report('2.46.0: npm run engine:build knows web and windows, refuses another target, and without the editor says to set STUDIO_UNITY and install the platform module', b1.status !== 0 && /unknown build target "ps5"/.test(out(b1)) && b2.status !== 0 && /STUDIO_UNITY/.test(out(b2)) && /WebGL build also needs that platform's module/.test(out(b2)) && fs.existsSync(path.join(tpl, 'Assets/Editor/StudioBuild.cs')), `${out(b1)}\n${out(b2)}`);
+
   // 4. A Unity engine track starts from engine/_unity: the pure sim, the .NET tools, the editor-free parity.
   run(dir, 'node scripts/new-game.mjs tin-moon', env);
   const bj = path.join(dir, 'studio/bible/bible.json');

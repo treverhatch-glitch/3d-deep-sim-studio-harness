@@ -201,7 +201,9 @@ export async function startEngine(engine, { by = actor() } = {}) {
   fs.mkdirSync(path.join(REPO_ROOT, folder), { recursive: true });
   // Start from the worked template: project, sim port, gate, parity, capture, a scene built in code.
   if (e.template && fs.existsSync(path.join(REPO_ROOT, e.template))) {
-    fs.cpSync(path.join(REPO_ROOT, e.template), path.join(REPO_ROOT, folder), { recursive: true, filter: (src) => !/[\\/]\.godot([\\/]|$)|[\\/](captures|export|Library|Temp|Logs|UserSettings|bin|obj|TestResults)([\\/]|$)/.test(src) });
+    // Judged on the path inside the template: the machine's own temp folder (Windows: ...\\AppData\\Local\\Temp\\) is not Unity's Temp.
+    const tplRoot = path.join(REPO_ROOT, e.template);
+    fs.cpSync(tplRoot, path.join(REPO_ROOT, folder), { recursive: true, filter: (src) => !/(^|[\\/])\.godot([\\/]|$)|(^|[\\/])(captures|export|Library|Temp|Logs|UserSettings|bin|obj|TestResults)([\\/]|$)/.test(path.relative(tplRoot, src)) });
     fs.rmSync(path.join(REPO_ROOT, folder, 'README.md'), { force: true });
   }
   fs.writeFileSync(trackFile(game), `${JSON.stringify(track, null, 2)}\n`);

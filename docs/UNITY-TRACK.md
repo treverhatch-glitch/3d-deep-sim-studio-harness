@@ -30,6 +30,7 @@ npm run engine -- propose unity --by <producer> --why "…"   # a question for t
 npm run engine:sim        # the sim: purity and tests with .NET (no editor)
 npm run parity            # the C# sim against the web game, seed by seed (no editor)
 npm run engine:gate       # the editor: Edit Mode and Play Mode tests, the controls test
+npm run engine:build      # a playable WebGL build (--target windows for an .exe)
 ```
 
 The template is a worked port of the template game, proven on .NET. Purity is clean and its 7 tests pass. Parity
@@ -63,6 +64,18 @@ leaking in.
    and licence checks (docs/ART-PIPELINE.md) apply unchanged.
 5. **Controls.** The Game Bible's controls list gets `unity` in its tracks; each control gets a Play Mode
    test that presses it through the Input System and checks the sim value it must change.
+
+## Playing it while it's built
+
+- **In the editor:** open `engine/<game>` in Unity Hub and press Play. The game boots itself in any scene.
+- **A Windows build:** `npm run engine:build -- --target windows` makes `Build/Windows/Game.exe`.
+- **In a browser:** `npm run engine:build` (WebGL) makes `Build/WebGL`. That is the track's web export, so the
+  Arcade's engine tab plays it beside the web version. It is compressed with the browser-side fallback, so
+  any static host (Cloudflare Pages, say) can serve it.
+- **From CI:** once the licence secrets exist, every push to main builds WebGL and attaches it to the run as
+  the `unity-webgl` artifact.
+
+The web build stays playable the whole time. Once the Unity build catches up, it's the one to play.
 
 ## Web and Unity at the same time
 

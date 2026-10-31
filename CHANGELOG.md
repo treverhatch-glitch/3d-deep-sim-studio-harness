@@ -32,6 +32,10 @@ compares with the web game without the editor or a licence; the editor runs only
   - engine-unity-sim (.NET: `scripts/check-unity-template.mjs` checks purity, tests, parity, a planted
     engine call and a planted rule break).
   - engine-unity-editor (GameCI, runs once the `UNITY_LICENSE`, `UNITY_EMAIL` and `UNITY_PASSWORD` secrets exist).
+- **Playable Unity builds:**
+  - `npm run engine:build [-- --target web|windows]` (`Assets/Editor/StudioBuild.cs`) makes WebGL in
+    `Build/WebGL` (the track's web export for the Arcade) or a Windows `.exe`.
+  - CI job engine-unity-build attaches a WebGL artifact on every push to main once the licence secrets exist.
 - **Web and engine at the same time** (any engine track):
   - `npm run engine -- port --from <sha> [--source <paths>]` pins the web rules the port follows.
   - `npm run parity` compares with that pin (`port-src/`), not the live rules.

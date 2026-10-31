@@ -92,6 +92,7 @@
     "engine": "node harness/engine.mjs",
     "engine:gate": "node scripts/check-engine.mjs",
     "engine:sim": "node harness/unity.mjs sim",
+    "engine:build": "node harness/unity.mjs build",
     "parity": "node qa/parity.mjs",
     "playtest": "node qa/playtest.mjs",
     "playtest:stage1": "node qa/playtest.mjs --stage 1",

@@ -59,7 +59,7 @@ fs.rmSync(broken, { recursive: true, force: true });
 // A copy whose sim breaks a rule its tests check must fail the sim run, counted from .NET's own results.
 {
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'unity-failing-'));
-  fs.cpSync(tpl, copy, { recursive: true, filter: (s) => !/[\\/](bin|obj|TestResults|Library|Temp)([\\/]|$)/.test(s) });
+  fs.cpSync(tpl, copy, { recursive: true, filter: (s) => !/(^|[\\/])(bin|obj|TestResults|Library|Temp)([\\/]|$)/.test(path.relative(tpl, s)) });
   const f = path.join(copy, 'Assets', 'Sim', 'Sim.cs');
   fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('state.Credits -= cost;', 'state.Credits -= 0; // planted: buying is free'));
   const r = runSim(copy, { log: () => {} });
