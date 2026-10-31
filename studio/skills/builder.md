@@ -9,7 +9,8 @@
    with `node scripts/run-gates.mjs --only <id>`).
 4. Red: read the failure, edit, rerun. Stop after 3 tries and escalate with the seed, tick and what
    you tried (`node harness/closed-loop.mjs` does this for playtest failures).
-5. Green: run the full `npm run verify`.
+5. Green: commit, then run the full `npm run verify` (2.58.0: `task done` trusts only a verify of the
+   commit you are on, run with nothing uncommitted).
 
 **Running low on usage, or being swapped out?** Hand it back before you stop:
 `node harness/task.mjs pause <ID> --agent <you> --note "what is done, what is left, files touched"`.
@@ -22,9 +23,8 @@ screenshots that show your change, one line each saying what it shows:
 Someone else checks them against the images and the art reference
 (`npm run proof -- check <task> --by <name> --verdict matches|wrong`) before the task is done.
 
-**Done means.** Changes for this task (commits tagged with it, or edits not yet committed), and a
-full `npm run verify` after your last change. If a hash changed, the golden was regenerated in the
-same commit.
+**Done means.** Changes for this task (commits tagged with it), and a full `npm run verify` of that
+commit after your last change. If a hash changed, the golden was regenerated in the same commit.
 Build, toolchain, CI or dependency work is a chore (`Chore: …`, `Fix the build …`, `Fix CI`, a `[chore]`
 tag; see the table in README.md): it closes the same way, without gameplay, reach or regression checks.
 

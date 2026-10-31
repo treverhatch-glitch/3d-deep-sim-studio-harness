@@ -797,6 +797,12 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
+  // 2.58.0: task done runs the secret scan itself; the board and hand-off notes, where the key-shaped title below
+  // lands, stay out of git here.
+  git('rm -q -r --cached --ignore-unmatch studio/NEXT.md studio/DONE.md studio/CURRENT_TASK.md studio/handoffs');
+  fs.mkdirSync(path.join(dir, '.git', 'info'), { recursive: true });
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), '\nstudio/NEXT.md\nstudio/DONE.md\nstudio/CURRENT_TASK.md\nstudio/handoffs/\n');
+  git('commit -q -m "board out of git" --no-verify');
   const a = JSON.parse(run(dir, 'node harness/task.mjs add "Plan: the moss table" --role producer', env).stdout).id;
   run(dir, `node harness/task.mjs start ${a} --agent prod-1 --model model-a`, env);
   fs.writeFileSync(path.join(dir, 'notes.md'), 'plan\n');
@@ -880,7 +886,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
   git('add -A');
   git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  // 2.58.0 (PU-34): a verify counts only for the commit it ran on, with a clean tree.
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), head: git('rev-parse HEAD').stdout.trim(), dirty: false, rows: [{ id: 'golden', required: true, ok: true }] }));
   fs.writeFileSync(path.join(dir, 'studio/reviews/2026-10-20-visitors.md'), `model-family: claude\nimplementer-family: anthropic\n\nReview of ${id}: rates look right. Verdict: approve.\n`);
   const same = run(dir, `node harness/done-check.mjs ${id}`, env).stdout;
   report('a system task refuses an approval from the builder\'s own model family', /\[x\] Spec ends with a hand-off/.test(same) && /\[x\] Goldens updated/.test(same) && /\[ \] Approved by a reviewer from another model family: the approving review is from the same model family/.test(same), same);
@@ -1869,7 +1876,8 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   run(dir, 'node qa/playtest.mjs --stage 1 --quiet');
   git('add -A');
   git(`commit -q -m visitors --no-verify --trailer "Studio-Task: ${id}"`);
-  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), rows: [{ id: 'golden', required: true, ok: true }] }));
+  // 2.58.0 (PU-34): a verify counts only for the commit it ran on, with a clean tree.
+  fs.writeFileSync(path.join(dir, '.studio/gates-last.json'), JSON.stringify({ at: new Date(Date.now() + 5000).toISOString(), head: git('rev-parse HEAD').stdout.trim(), dirty: false, rows: [{ id: 'golden', required: true, ok: true }] }));
   const rv = await runAsync(dir, `node harness/review.mjs ${id} --local`, ollama);
   const files = fs.readdirSync(path.join(dir, 'studio/reviews')).filter((f) => f.includes(id));
   const text = files[0] ? fs.readFileSync(path.join(dir, 'studio/reviews', files[0]), 'utf8') : '';
