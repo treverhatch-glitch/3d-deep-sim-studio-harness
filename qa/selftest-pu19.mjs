@@ -177,12 +177,13 @@ console.log(JSON.stringify({ limPauses: ev.filter((e) => e.type === 'task.paused
   const sup2 = run(dir, `node harness/supervisor.mjs --no-hub --until ${Math.ceil(8 * SLOW)}s --foreground`, { ...base, STUDIO_RND_CMD: customCmd });
   waitFor(() => events().some((e) => e.ts >= t1 && e.type === 'agent.session.end'));
   const ev2 = events().filter((e) => e.ts >= t1);
-  const cm = quota().custom;
+  // 2.58.0 (PU-40): saved per program, custom:<program>, so the launch check can honour it.
+  const cm = quota()['custom:probe-pu19-custom'];
   const bkkNow = new Date(Date.now() + 7 * 3600000);
   const exp = Date.UTC(bkkNow.getUTCFullYear(), bkkNow.getUTCMonth(), bkkNow.getUTCDate(), 23, 30) - 7 * 3600000;
   const expIso = new Date(exp > Date.parse(t1) ? exp : exp + 86400000).toISOString();
-  report('PU-19 (P-042) end to end through a role\'s own command: the limit is marked "custom" until its reset (11:30pm Bangkok), the supervisor starts one session and then waits, nothing is parked or halted',
-    ev2.filter((e) => e.type === 'agent.session.start').length === 1 && cm?.until === expIso && ev2.some((e) => e.type === 'agent.session.end' && e.status === 'warn' && e.meta?.usageLimit?.on === 'custom') && !ev2.some((e) => e.type === 'task.breaker' || e.type === 'supervisor.halted' || (e.type === 'task.hold' && /Parked/.test(e.msg || ''))),
+  report('PU-19 (P-042) end to end through a role\'s own command: the limit is marked "custom:<program>" until its reset (11:30pm Bangkok), the supervisor starts one session and then waits, nothing is parked or halted',
+    ev2.filter((e) => e.type === 'agent.session.start').length === 1 && cm?.until === expIso && ev2.some((e) => e.type === 'agent.session.end' && e.status === 'warn' && e.meta?.usageLimit?.on === 'custom:probe-pu19-custom') && !ev2.some((e) => e.type === 'task.breaker' || e.type === 'supervisor.halted' || (e.type === 'task.hold' && /Parked/.test(e.msg || ''))),
     `${expIso} ${JSON.stringify(cm)}\n${out(sup2).slice(-400)}\n${ev2.map((e) => `${e.type} ${e.status || ''} ${e.msg || ''}`).join('\n').slice(0, 2000)}`);
   for (const f of fs.readdirSync(dir)) if (f.startsWith('.probe-pu19-')) fs.rmSync(path.join(dir, f), { force: true });
 }

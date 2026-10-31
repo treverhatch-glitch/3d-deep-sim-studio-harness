@@ -88,7 +88,7 @@ export async function supervise(opts, state, now = Date.now()) {
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
   const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
   const { effectiveMode } = await import('./mode.mjs');
-  const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil } = await import('./budget.mjs');
+  const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil, customKey } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
@@ -236,8 +236,9 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`asked ${preferred} whether it is really out: ${probeTool(preferred).why}`);
     }
     const tool = custom ? undefined : pickTool(preferred, now);
-    // PU-19: a role run by its own command (STUDIO_<ROLE>_CMD) whose limit line named no tool is marked "custom": wait for that reset too.
-    const customOut = custom ? exhaustedUntil('custom', now) : null;
+    // PU-19: a role run by its own command (STUDIO_<ROLE>_CMD) whose limit line named no tool is marked for that command: wait
+    // for that reset too. 2.58.0 (PU-40): the mark is per program (custom:<program>), so another command isn't held by it.
+    const customOut = custom ? exhaustedUntil(customKey(custom) || 'custom', now) : null;
     if (customOut) {
       why.push(`${g.role}: its command is out of quota until ${customOut} (npm run budget)`);
       continue;
