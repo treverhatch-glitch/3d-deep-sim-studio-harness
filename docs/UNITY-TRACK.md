@@ -56,6 +56,24 @@ npm run engine -- link unity ../my-unity-port --build windows --web "<web runs c
   seed, like the port's (`{"seed":1,"outcome":"won","tick":300,"cash":…}`). Both are compared field by field.
 - `--source` names the web folders whose changes count as drift (`npm run engine -- drift`).
 
+## The web side of parity for a Vite game (2.50.0)
+
+A Vite game (three.js, React) can't run its code in plain Node: Vite-only features such as `import.meta.glob` need
+Vite. Its test runner, Vitest, has them, so the web side of parity is a Vitest run that prints one JSON line per
+seed. The harness passes the seeds in `STUDIO_PARITY_SEEDS` (and in `{seeds}`), so the same command works in
+Windows' shell and in bash:
+
+```bash
+npm run engine -- link unity ../my-unity-port --build windows \
+  --web "cd game/<slug> && npx vitest run tests/sim/replay.test.ts --silent=false"
+```
+
+In the game, the test prints the lines when the variable is set, for example
+`const seeds = process.env.STUDIO_PARITY_SEEDS` → for each seed
+`console.log(JSON.stringify({ seed, outcome, tick, cash, pax, flights }))`. Vitest's own output lines are
+ignored; only lines that parse as JSON with a `seed` count. Hatchfield's `tests/sim/replay.test.ts` does
+this.
+
 ## Windows by default (2.48.0)
 
 A Unity track builds a Windows `.exe` by default (`npm run engine:build`, CI's engine-unity-build), with no

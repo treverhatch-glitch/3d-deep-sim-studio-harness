@@ -4,6 +4,15 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.50.0] — 2026-10-31
+2.50.0: U-006 from the studio logs, approved by the owner.
+### Added
+- **Parity for a Vite game:** `npm run parity` passes the seeds to both sides' commands in `STUDIO_PARITY_SEEDS`
+  as well as `{seeds}`. A Vitest run (which has Vite's features, such as `import.meta.glob`, that plain Node lacks)
+  can read them without bash-only `VAR=x cmd` syntax.
+- `docs/UNITY-TRACK.md`: the ready-made `--web` command shape for Vite/Vitest games.
+- `qa/selftest-250.mjs`.
+
 ## [2.49.0] — 2026-10-31
 2.49.0: U-004 from the studio logs, approved by the owner.
 ### Added

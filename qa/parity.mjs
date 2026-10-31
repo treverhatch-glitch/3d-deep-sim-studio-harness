@@ -50,7 +50,9 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   };
   let webCmdResults = null;
   if (t.parity?.web) {
-    const wr = spawnSync(t.parity.web.replaceAll('{seeds}', seeds.join(',')), { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 64 * 1024 * 1024 });
+    // 2.50.0 (U-006): the seeds also go in STUDIO_PARITY_SEEDS, so a test runner (a Vite game's Vitest) can read
+    // them without shell-specific "VAR=x cmd" syntax, which Windows' shell doesn't have.
+    const wr = spawnSync(t.parity.web.replaceAll('{seeds}', seeds.join(',')), { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, STUDIO_PARITY_SEEDS: seeds.join(',') } });
     if (wr.status !== 0) return { ok: false, problems: [`the web side's parity command failed (exit ${wr.status}): ${(wr.stderr || wr.stdout || '').trim().split('\n').slice(-2).join(' ')}`], web: {} };
     webCmdResults = parseLines(wr.stdout);
   }
@@ -66,7 +68,7 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
     return [seed, { seed, outcome: r.outcome, tick: r.ticksRun, state: r.state }];
   }));
   const cmd = engineCommand(t, 'parity', { seeds });
-  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 10 * 60000, maxBuffer: 32 * 1024 * 1024 });
+  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 10 * 60000, maxBuffer: 32 * 1024 * 1024, env: { ...process.env, STUDIO_PARITY_SEEDS: seeds.join(',') } });
   if (r.status !== 0) return { ok: false, problems: [`the engine's parity command failed (exit ${r.status}): ${(r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' ')}`], web };
   const eng = {};
   for (const line of String(r.stdout).split('\n')) {
