@@ -64,6 +64,7 @@ import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
 import { harnessCaused } from './busy.mjs';
+import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -174,23 +175,20 @@ const readJson = (f) => {
     return null;
   }
 };
-const alive = (pid) => {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
-};
+// A heartbeat older than this many minutes is a stalled session (agent list and the watcher say so).
+const STALL_BEAT_MIN = Math.max(5, (HEARTBEAT_MS / 60000) * 3);
 
-/** Every agent session the launcher knows, with whether it is still running. */
+/**
+ * Every agent session the launcher knows, with whether it is still running. PU-17 (P-045): a cheap check with no
+ * child process (harness/proc-identity.mjs pidAlive): a number in use is alive, as before; on Linux a /proc start
+ * that differs from the one recorded at launch means the number is another program's now.
+ */
 export function sessions() {
   if (!fs.existsSync(AGENTS_DIR)) return [];
   return fs.readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(AGENTS_DIR, f))).filter(Boolean).map((s) => {
-    const running = s.status === 'running' && alive(s.supervisor || s.pid);
+    const running = s.status === 'running' && recordAlive(s);
     const beatAge = s.lastBeat ? Math.round((Date.now() - Date.parse(s.lastBeat)) / 60000) : null;
-    return { ...s, running, beatAgeMin: beatAge, stalled: running && beatAge !== null && beatAge > Math.max(5, (HEARTBEAT_MS / 60000) * 3) };
+    return { ...s, running, beatAgeMin: beatAge, stalled: running && beatAge !== null && beatAge > STALL_BEAT_MIN };
   });
 }
 
@@ -588,13 +586,16 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const child = custom
     ? spawn(fill(custom), { cwd, shell: true, env, stdio: ['ignore', out, out] })
     : spawn(cmd.argv[0], cmd.argv.slice(1), { cwd, env, shell: IS.win, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
+  // PU-17 (P-039, P-045): when the agent's process started, for a later stop to check the number is still the agent.
+  // In-process only (no child process, nothing slow): the spawn time and the program's name; /proc ticks on Linux.
+  const identity = { pid: spawnedIdentity(child.pid, custom ? fill(custom).split(/\s+/)[0] : cmd.argv[0]), supervisor: launcherIdentity() };
   if (cmd?.stdin && child.stdin) {
     child.stdin.on('error', () => {});
     child.stdin.end(cmd.stdin);
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   const beat = setInterval(() => {
@@ -630,11 +631,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (idle?.exit && !s.idleExit) {
       fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleExit: idle.why }, null, 2));
       emitEvent({ type: 'agent.idle_exit', agent, to: 'producer', msg: `${agent} ended: ${idle.why}; its slot is free (a new session starts only when a task is ready)` });
-      stopAgent(child.pid);
+      stopChild(child);
     }
     if (stall?.stalled && !s.stalled) {
       logStall({ ...session, ...s }, stall);
-      stopAgent(child.pid);
+      stopChild(child);
     }
     // 2.31.0: the task this session holds used its budget across sessions: end the session, the task stays parked.
     try {
@@ -644,7 +645,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
         if (over) {
           fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), budgetStop: over }, null, 2));
           emitEvent({ type: 'agent.budget_stop', agent, task: heldTask, to: 'producer', msg: `${agent} ended: ${over.split('. ')[0]}` });
-          stopAgent(child.pid);
+          stopChild(child);
         }
       }
     } catch {
@@ -697,15 +698,121 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   return { ok: true, code, ...result };
 }
 
-/** End an agent and anything it started (on Windows the agent runs under cmd.exe, so kill the tree). */
-export function stopAgent(pid) {
+/**
+ * End a process and anything it started (on Windows the agent runs under cmd.exe, so kill the tree). group: the
+ * process leads its own process group (a launcher started with --detach), so on macOS and Linux the group goes too.
+ */
+function killTree(pid, { group = false } = {}) {
   try {
     if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
-    else process.kill(pid);
+    else if (group) {
+      try {
+        process.kill(-pid);
+      } catch {
+        process.kill(pid);
+      }
+    } else process.kill(pid);
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * The launcher's own child: until Node has seen it exit, the OS can't give its number to anyone else (the launcher
+ * still holds it), so the ChildProcess itself is the identity check and no OS query is needed.
+ */
+function stopChild(child) {
+  return child && child.exitCode === null && child.signalCode === null && child.pid ? killTree(child.pid) : false;
+}
+
+// This launcher's start: the spawn time its parent wrote in the placeholder (startAgent --detach), else its own
+// clock (Date.now() - process.uptime()). Never an OS query.
+let LAUNCHER_ID = null;
+const launcherIdentity = () => LAUNCHER_ID || (LAUNCHER_ID = selfIdentity());
+
+/**
+ * PU-17 (P-039, P-045): what a stop does with a session's process, decided at kill time. `cur` is what the OS says
+ * about the target now (harness/proc-identity.mjs readStarts, read once by the caller): { start, proc?, cmd? },
+ * { error } when it couldn't be read, or null when the number is free. The target is the agent's process, or, while
+ * the session is still starting (a launcher, no agent yet), the launcher.
+ *   kill: kill the target and its tree. end: mark the session ended and hand its work back here, because no live
+ *   launcher is left to do it.
+ *   same start (within the tolerance): kill. Clearly different: the number is another program's; nothing is killed.
+ *   Nothing to compare (unreadable, or a record from before PU-17): the old rule. A heartbeat within the stall
+ *   threshold means the launcher wrote it minutes ago, so the number is still the agent's: kill. An older one means
+ *   it may be anyone's by now: nothing is killed and the session is treated as dead. Wrongly sparing a dead record
+ *   costs nothing; wrongly killing costs a stranger's program.
+ */
+export function killVerdict(s, cur, now = Date.now()) {
+  const beat = Date.parse(s.lastBeat || s.startedAt || '');
+  const beatMin = Number.isFinite(beat) ? Math.max(0, Math.round((now - beat) / 60000)) : null;
+  const fresh = beatMin !== null && beatMin <= STALL_BEAT_MIN;
+  const starting = !s.pid;
+  const pid = s.pid || s.supervisor || null;
+  const recorded = starting ? s.identity?.supervisor : s.identity?.pid;
+  const who = starting ? 'its launcher (the agent was still starting)' : 'the agent';
+  // While the agent runs, its launcher hands the work back when the agent ends (listing check: no OS query).
+  const launcherLive = !starting && Boolean(s.supervisor) && s.supervisor !== s.pid && fresh && pidAlive(s.supervisor, s.identity?.supervisor);
+  const base = { pid, target: starting ? 'launcher' : 'agent', beatMin, cmd: cur?.cmd || null, end: starting || !launcherLive };
+  if (!pid) return { ...base, kill: false, end: true, kind: 'gone', why: 'it has no process on record' };
+  if (!cur) return { ...base, kill: false, kind: 'gone', why: `${starting ? 'its launcher' : 'its process'} (pid ${pid}) is gone` };
+  const same = sameProcess(recorded, cur);
+  if (same === true) return { ...base, kill: true, kind: 'same', why: `pid ${pid} is still ${who} (same start time)` };
+  if (same === false) {
+    const secs = Number.isFinite(cur.start) && Number.isFinite(recorded?.start) ? Math.round(Math.abs(cur.start - recorded.start) / 1000) : null;
+    return { ...base, kill: false, kind: 'reused', why: `pid ${pid} now belongs to another program${cur.cmd ? ` (${cur.cmd})` : ''}${secs !== null ? `, started ${secs} s ${cur.start > recorded.start ? 'after' : 'before'} ${who}` : ''}: nothing was killed` };
+  }
+  const what = cur.error ? `its start time couldn't be read (${cur.error})` : 'the record has no start time';
+  if (fresh) return { ...base, kill: true, kind: 'unverified', why: `${what}, but its heartbeat is ${beatMin} min old, so pid ${pid} is still ${who}` };
+  return { ...base, kill: false, kind: 'stale', why: `pid ${pid} is in use but ${what} and the last heartbeat was ${beatMin ?? '?'} min ago (over ${STALL_BEAT_MIN}), so the number may belong to another program now: nothing was killed` };
+}
+
+/**
+ * A session whose process is gone, isn't the agent any more, or whose launcher was just killed ends here, the way
+ * the watcher ends a dead one (markGone, then the hand-back and releaseDeadLocks): the record is marked ended,
+ * uncommitted work is saved, its tasks go back to the queue with a note, and its claims are freed.
+ */
+function endAsDead(s, v, by) {
+  const cur = readJson(sessionFile(s.agent));
+  if (!cur || cur.status !== 'running') return false; // already ended (its launcher got there first)
+  // A new session has taken the name since; unless it is the launcher just killed, which wrote its real record.
+  if (cur.startedAt && s.startedAt && cur.startedAt !== s.startedAt && !(v.kill && v.target === 'launcher' && cur.supervisor === s.supervisor)) return false;
+  const what = v.kill ? (v.target === 'launcher' ? `stopped by ${by} while it was starting; its launcher was stopped, so the stop handed its work back` : `stopped by ${by}; its launcher was gone, so the stop handed its work back`) : v.why;
+  const reason = v.kill ? what : `ended by ${by}: ${v.why}`;
+  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: new Date().toISOString(), reason }, null, 2));
+  const mine = listLocks().filter((l) => l.owner === s.agent);
+  const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
+  for (const t of held) {
+    const patch = saveWorkOf(s.agent, t, mine, cur);
+    pauseTask(t, s.agent, `${s.agent}'s session ended without a hand-back (${what}).${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Check its commits (git log --grep ${t}) before redoing anything.`, { force: true });
+  }
+  for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
+  if (cur.copy) removeLaneCopy(s.agent, { keepBranch: unmerged(cur.copy.branch) > 0, ifIdle: true });
+  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held } });
+  if (v.kind === 'reused' || v.kind === 'stale') {
+    emitEvent({ type: 'agent.pid_reused', agent: by, status: 'warn', msg: `${s.agent}: ${v.why}; its session is marked ended${held.length ? ` and ${held.join(', ')} handed back` : ''}`, meta: { session: s.agent, pid: v.pid, target: v.target, verified: v.kind === 'reused', now: v.cmd || undefined } });
+  }
+  return true;
+}
+
+/**
+ * Stop a launcher session (agent stop, pause, stop all, the stall and refresh checks). PU-17 (P-039, P-045): it takes
+ * the session record, reads the target's start time from the OS once (`starts`: already read by the caller, as stop
+ * all does for every session in one query) and kills only after killVerdict says the number is still the agent's,
+ * or still its launcher's while it starts; otherwise the session is ended as dead and the other program is left
+ * alone. A bare pid is looked up among the sessions; a number no session owns is never killed.
+ */
+export function stopAgent(target, { by = 'launcher', starts = null } = {}) {
+  const s = target && typeof target === 'object' ? target : sessions().find((x) => x.status === 'running' && x.pid === Number(target));
+  if (!s) return { killed: false, ended: false, why: `pid ${target} is not a launcher session: not killed` };
+  const pid = Number(s.pid || s.supervisor) || null;
+  const cur = pid && pidExists(pid) ? (starts || readStarts([pid])).get(pid) || null : null;
+  const v = killVerdict(s, cur);
+  // A launcher stopped while it starts leads its own process group (--detach), so its agent goes with it.
+  const killed = v.kill ? killTree(v.pid, { group: v.target === 'launcher' && Boolean(s.starting) }) : false;
+  const ended = v.end ? endAsDead(s, v, by) : false;
+  return { killed, ended, kind: v.kind, target: v.target, why: v.why };
 }
 
 /**
@@ -798,33 +905,41 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
   }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
   for (const t of tasksOf(agent, s)) cooldown(t, by);
-  stopAgent(s.pid);
+  stopAgent(s, { by });
   emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, handed: held };
 }
 
-/** Stop one agent by name: its task can't restart for the cooldown; the launcher hands the work back. */
+/**
+ * Stop one agent by name: its task can't restart for the cooldown; the launcher hands the work back. PU-17: a record
+ * still marked running whose process is gone, or whose number another program has now, is ended here (work handed
+ * back, claims freed) without killing anything, instead of "isn't running".
+ */
 export function stopAgentNamed(agent, by = 'war-room-human') {
-  const s = sessions().find((x) => x.agent === agent && x.running);
+  const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
   const until = tasks.map((t) => cooldown(t, by)).filter(Boolean)[0] || null;
-  stopAgent(s.pid);
-  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}` });
-  return { ok: true, agent, tasks, until };
+  const r = stopAgent(s, { by });
+  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
+  return { ok: true, agent, tasks, until, killed: r.killed, ended: r.ended, kind: r.kind, target: r.target, why: r.why };
 }
 
 /** "Stop all": every running launcher session hands its task back with a note and ends. */
 export function stopAllAgents(by = 'war-room-human', reason = '') {
   const stopped = [];
-  for (const s of sessions().filter((x) => x.running)) {
+  const list = sessions().filter((x) => x.running);
+  // PU-17: one OS query for every session's start time, not one per session.
+  const live = list.map((s) => Number(s.pid || s.supervisor)).filter((p) => p && pidExists(p));
+  const starts = live.length ? readStarts(live) : new Map();
+  for (const s of list) {
     const mine = listLocks().filter((l) => l.owner === s.agent);
     const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
     for (const t of held) {
       const patch = saveWorkOf(s.agent, t, mine, s);
       pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}${patch ? ` and saved to ${patch}` : ''}.`, { force: true });
     }
-    stopAgent(s.pid);
+    stopAgent(s, { by, starts });
     stopped.push(s.agent);
   }
   if (stopped.length) emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `Stop all: ${stopped.join(', ')} handed back their work` });
@@ -909,7 +1024,8 @@ export function startAgent(opts, { detach = false } = {}) {
   if (!role || !agent) return { ok: false, message: 'Usage: npm run agent -- start --role <role> --agent <unique-name> --tool <tool> --model <model>' };
   // 2.54.0: the detached supervisor clears the placeholder its launcher wrote for it, so its own record
   // doesn't count against its caps; it writes the real record when the agent starts.
-  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
+  // PU-17: the placeholder holds this launcher's spawn time (written by its parent); its real record keeps it.
+  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) { if (p.identity?.supervisor?.start) LAUNCHER_ID = p.identity.supervisor; fs.rmSync(sessionFile(agent), { force: true }); } } catch {}
   if (readStop()) return { ok: false, message: 'The studio is stopped; resume it first (npm run task -- resume --by <name>).' };
   // 2.54.0: the placeholder a detached launch writes (below) is this very supervisor, not a second session.
   const already = sessions().find((s) => s.agent === agent && s.running && !(s.starting && s.supervisor === process.pid));
@@ -1012,13 +1128,15 @@ export function startAgent(opts, { detach = false } = {}) {
     const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
     const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
+    // PU-17: the launcher's spawn time (in-process, no OS query), for a stop that comes while it is still starting.
+    const supId = spawnedIdentity(sup.pid, process.execPath);
     // 2.54.0 (P-024): register the session at once. The supervisor writes the real record a moment later, and
     // until then another wake-up in the same pass (a Director ping, the dev cycle, the queue refill) would not
     // see it and start a second Director or Producer, even under the same name.
     try {
       if (!fs.existsSync(sessionFile(agent)) || !sessions().some((x) => x.agent === agent && x.running)) {
         fs.mkdirSync(AGENTS_DIR, { recursive: true });
-        fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, startedAt: new Date().toISOString() }, null, 2));
+        fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: opts.task || null, lane: opts.lane || null, status: 'running', starting: true, supervisor: sup.pid, ...(supId ? { identity: { supervisor: supId } } : {}), startedAt: new Date().toISOString() }, null, 2));
       }
     } catch {}
     return { ok: true, detached: true, agent, role, tool, model, supervisor: sup.pid };
@@ -1049,7 +1167,7 @@ export async function fillAgents({ byDirector = false, autonomous = false } = {}
   if (readStop()) return { started: [], why: 'the studio is stopped' };
   const { readStatus, supervise } = await import('./supervisor.mjs');
   const sup = readStatus();
-  if (sup?.status === 'running' && alive(sup.pid)) return { started: [], why: `the supervisor (pid ${sup.pid}) starts agents` };
+  if (sup?.status === 'running' && pidAlive(sup.pid, sup.identity)) return { started: [], why: `the supervisor (pid ${sup.pid}) starts agents` };
   const r = await supervise({ watcher: true, prefix: 'auto-', deps: { sessions, startAgent, launchableRoles, nextAgentName } }, { startedAt: Date.now(), names: [] });
   if (r.started.length) {
     const msg = byDirector && !mode.chosen ? `Started ${r.started.join(', ')} (away mode or auto-launch, no pace chosen)` : `Started ${r.started.join(', ')} (${mode.label}${mode.boost ? ' + MAX SPEED' : ''})`;
@@ -1165,7 +1283,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(r.message);
       process.exit(1);
     }
-    console.log(`Stopping ${r.agent}; the launcher hands its work back.${r.tasks.length ? ` ${r.tasks.join(', ')} won't restart before ${r.until ? r.until.slice(11, 16) : 'now'} (STUDIO_STOP_COOLDOWN_MIN).` : ''}`);
+    const after = r.tasks.length ? ` ${r.tasks.join(', ')} won't restart before ${r.until ? r.until.slice(11, 16) : 'now'} (STUDIO_STOP_COOLDOWN_MIN).` : '';
+    if (r.killed && r.target === 'launcher') console.log(`Stopping ${r.agent}: it was still starting, so its launcher was stopped${r.ended ? ' and its work handed back' : ''}.${after}`);
+    else if (r.killed) console.log(`Stopping ${r.agent}; ${r.ended ? 'its launcher was gone, so its work was handed back here' : 'the launcher hands its work back'}.${after}`);
+    else if (r.ended) console.log(`${r.agent} wasn't running any more: ${r.why}. Its session is marked ended, its work handed back and its claims freed.${after}`);
+    else console.log(`${r.agent}: ${r.why}; its launcher is still running and hands its work back.${after}`);
     process.exit(0);
   }
   if (cmd === 'stop-all') {

@@ -319,7 +319,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Effect:** the Producer and the HUB see the wrong state; the launcher starting several agents in one pass (P-024) can hit it. Lower risk at the slow pace (2 agents).
 - **Severity:** medium-high.
 
-### P-039 — `agent stop` can kill an unrelated program · open: the PU-17 fix failed on Windows CI and was taken out of 2.57.0 (see P-045)
+### P-039 — `agent stop` can kill an unrelated program · fixed in 2.57.1 (PU-17 rework; real-Windows PowerShell path proven only by Windows CI)
 - **What happened:** a stale session record whose process number had been reused by another program: `npm run agent -- stop builder-7` killed that other program (a test `sleep`; exit 143).
 - **Why:** `stopAgent(pid)` (harness/agent.mjs ~line 688) kills by number only. On Windows it runs `taskkill /pid N /T /F`, which force-kills that program and everything under it.
 - **When it can happen:** after a crash or reboot, when the old record is still "running" and Windows has handed the number to something else (Discord, Unity, a terminal).
@@ -361,9 +361,106 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
 - **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
 
-### P-045 — The first PU-17 fix regressed agent sessions on Windows · open (rework)
+### P-045 — The first PU-17 fix regressed agent sessions on Windows · fixed in 2.57.1 (rework: no process call at launch or in listings; a stop during start-up stops the launcher)
 - **What happened:** 2.57.0's Windows CI job (PR #35, attempt 1) failed 5 selftests, all about agent sessions: PU-17's own launch check (`identity.pid` recorded as null, `alive=false`), "after agent stop, its task can't restart straight away" (`stop-1: it is still starting (no agent process yet)`: nothing was stopped, the task stayed claimed), "task lane gives each builder its own folder", "--lanes auto", "agent names never repeat". Linux passed all of them (865/0).
 - **Why (from the log):** (1) a stop while the agent is still starting no longer stops its launcher (the old code did); on the slower Windows runner the stop lands in that window. (2) Each launch and each session listing adds a PowerShell call (about 1 s or more), which pushes the supervisor tests past their time windows. (3) The agent's own identity could not be read right after start (null).
 - **Done:** PU-17 reverted from 2.57.0 before merge (auto-merge stopped first); the other three fixes ship.
 - **Rework plan:** read identities only when about to kill (not on every listing); a stop during start-up kills the launcher after checking the launcher's identity; compare Windows start times with a tolerance; prove it on Windows CI before merging.
+
+
+## Break tests round 2, 2026-11-01 (harness 2.57.0 as merged, throwaway copies, nothing real touched)
+Two helpers, about 8 and 40 minutes. The round-1 fixes hold: an empty lock file recovers; 10 parallel starts and
+parks are kept (10 rounds); a torn STOP counts as stopped; a torn events line loses nothing; the fsafe lock had no
+lost update with 40 processes and with holders killed; all 8 token kinds are caught; the limit messages and resets
+are right; protected-file edits (uncommitted, staged, committed, deleted) fail. "Re-run by hand" below means I
+reproduced it myself; the rest is the helper's repro, with the command in its report.
+
+### P-046 — A token can still be committed: the commit hook scans the file on disk, not what is staged · open (PU-33)
+- **Re-run by hand:** a Discord-shaped token in `game/x/cfg.json`, `git add`, then the file cleaned without re-staging: `git commit` → `[secrets] PASS`, `[pre-commit] PASS`, and `git show HEAD:game/x/cfg.json` has the token; `scripts/secret-scan.mjs .` afterwards → `PASS — 531 file(s)` (it reads the working tree, never history).
+- Same family (helper): a UTF-16 file (what Windows PowerShell 5's `>` writes) is skipped as binary; the skip list isn't tied to the repo root, so any `secrets.mjs` or `*.lock` anywhere is never scanned; tokens split across lines, concatenated, hex or URL-encoded, in commit messages, `.png`/`.zip` or file names get through.
+- **Severity:** high.
+
+### P-047 — A stale or hand-edited verify record can close a task · open (PU-34)
+- **Read by hand:** `gatesAfter` (harness/done-check.mjs ~298–320) checks only the record's time and rows; the `head` and `dirty` fields run-gates has written since 2.43.0 are never compared. Helper: a record edited to "all ok" closed a task whose `secrets` and `protected` checks had failed.
+- **Severity:** high (an agent gaming the checks), medium by accident.
+
+### P-048 — A game's own check settings aren't protected · open (PU-35)
+- **Read by hand:** `studio/protected.json` protects `studio/gates.json` but not `game/*/studio.gates.json`, `web/*/studio.gates.json` or `studio/game.json`. Helper: `"required": false` on a failing game check → `[gates] PASS game`; `{}` in `studio/game.json` → verify tests the example game, `10/10 passed`; both with `[protected] PASS`.
+- **Severity:** high.
+
+### P-049 — Text planted in tasks, notes and pitfalls reaches agents' prompts unmarked · open (PU-36)
+- Helper: planted lines appear word for word in `npm run brief` (task title, events, hand-off notes) and in the launch prompt (a line in `studio/PITFALLS.md`, inside the fixed rules part; a `--note`, labelled "Note from the Producer" whoever sent it, harness/agent.mjs ~537). Not re-run by hand.
+- **Severity:** high for public repos and a Discord-driven crew.
+
+### P-050 — A silent agent whose process is alive holds its slot and task forever · open (PU-39)
+- Helper: a session with a live process and a 45-minute-old heartbeat: the launcher starts no builder, another agent can't hand the task back, the watcher only reports "stalled"; only `agent stop` frees it (the P-039 kill path). Not re-run by hand. **Severity:** medium.
+
+### P-051 — A usage limit on a custom-command agent doesn't stop the next launch · open (PU-40)
+- Helper: the limit is saved as `custom`, which the budget check skips (harness/budget.mjs ~337); a second `--tool custom` start launched at once and hit the limit again. **Severity:** medium-high (a launch loop).
+
+### P-052 — `task done` killed between its two board writes makes the task vanish · open (PU-37)
+- **Re-run by hand:** SIGKILL at the rename of the new DONE.md → `T-102 in NEXT: 0, in DONE: 0`, `No task T-102.`; the watcher says all quiet. **Cause:** two separate atomic writes (NEXT.md first, then DONE.md). **Severity:** high.
+
+### P-053 — `task done` killed after the board write leaks the claim; nothing recovers it · open (PU-37)
+- Helper: the board says done, the lock stays held (and heartbeat renewals keep it alive), no `task.done` event; after a reopen, another agent can't start it. The watcher skips `task:` locks of tasks not in progress. **Severity:** high.
+
+### P-054 — A watcher requeue can release a claim made a moment earlier: two agents on one task · open (PU-37)
+- Helper: with a slow `git status` in the watcher's pass, b1 re-claims, the watcher then requeues and releases b1's fresh claim, b3 starts the same task. **Cause:** the decision is made from the pass's first read; `pauseTask(force)` releases whatever claim exists then. **Severity:** high.
+
+### P-055 — An error in `task start`'s board step leaks the claim (EPERM on Windows) · open (PU-37)
+- Helper: an injected EPERM on the board mutex → the claim stays held, the task stays in the backlog, `next` skips it for an hour. On Windows one EPERM/EACCES (antivirus, a delete-pending file) is enough. **Severity:** medium-high.
+
+### P-056 — A slow but live lock holder loses the lock after 10 s, and an update is lost · open (PU-38)
+- **Re-run by hand:** a holder that works 12 s inside the lock, 5 quick increments meanwhile → `final counter=1 expected=6`. **Real triggers:** on Windows, clicking into a console window pauses the process writing to it (QuickEdit); a sleeping laptop; a clock jump. **Cause:** harness/fsafe.mjs breaks a lock on age even when its holder is alive on the same machine. **Severity:** high.
+
+### P-057 — Hand-added board lines in a slightly different format are deleted without a word · open (PU-37)
+- **Re-run by hand:** two lines added to NEXT.md, one with an ASCII `-` instead of `—`, one without backticks around the role; after one `task start`: `0 hand-added lines`. No backup, no warning. **Severity:** high (a person or the Producer editing the board loses tasks).
+
+### P-058 — When the events log rolls over (25 MB), readers lose the task history · open (PU-41)
+- Helper: after roll-over `task show` gives `"history": []`; `taskBase`, `laneOf`, the watcher's "last heard" times read only the new file. **Severity:** medium.
+
+### P-059 — `metrics` slows down with the square of the event count · open (PU-41)
+- Helper: 20k events 14 s, 40k 53 s, 80k over 100 s. **Severity:** medium (the crew's log grows daily).
+
+### P-060 — Temp files left by a killed write pile up outside `.studio/locks` · open (PU-42)
+- Helper: 17 of 20 kills left a full-size `.NEXT.md.<pid>….tmp` (gitignored). **Severity:** low.
+
+### Suspected, round 2 (read in code or simulated, not seen live)
+- Case-only folder claims: `path:game/Branding` and `path:game/branding` are both granted (seen on Linux); on Windows that is one folder held by two agents (PU-43).
+- Hook scripts have no line-ending rule; with Windows line endings `bash\r` isn't found and every commit fails, pushing agents toward `--no-verify` (simulated on Linux) (PU-43).
+- `git commit --no-verify` skips everything the hooks enforce; weakened tests (`.skip`, removed asserts, wider tolerances) are forbidden only by the rules text (PU-29).
+- fsafe's in-place fallback after about 1 s of EPERM writes the board exactly when another program has it open; it should at least leave a warning event.
+
+### Held up fine (round 2)
+- 2,000 tasks, 100 sessions, 300k events (roll-over off): `task next` 0.28 s, `task start` 3.1 s, `done --check` 2.6 s, watcher 1.4 s.
+- CRLF in NEXT.md parses; IDs with `../` or case-only differences can't reach the board (the ID format is `[A-Z]+-\d+`).
+- `npm run verify` 2.0 s and `task done --check` 0.31 s on a fresh copy.
+
+## From the crew, 2026-11-01 (studio-hatchfield, harness 2.53 to 2.55; Hatch relayed grokbot's notes)
+The crew's log numbers these P-034 and P-035; here they get new numbers, since P-034 and P-035 are already used above.
+
+### P-061 — The size-growth done-check measures from the task's start, so merges from main count as the task's growth · open (2.58.0)
+- Forced a `--force` close on T-026 and would hit T-028. Fix: measure from the merge-base with the studio's main.
+
+### P-062 — On Windows, `verify` rewrote the line endings of a game test snapshot (`*.snap`), dirtying main · open (2.58.0)
+- Fix: game checks run with `CI=true` (snapshots never written in verify); verify names any tracked file it changed;
+  games add `*.snap text eol=lf` to their `.gitattributes` (a crew task in the game repo).
+
+### P-063 — Build, toolchain and chore tasks are asked for a regression that fails on the old code · open (2.58.0)
+- Titles starting "fix" are typed `bug`; the crew retitled tasks "Toolchain" to get past it. Fix: a `chore` type.
+
+### P-064 — Claude Code's low-memory guard killed background verify runs four times · open (2.58.0)
+- Fix: `npm run verify` runs the gates in a detached process; a reaped session doesn't lose the run; `--wait` re-attaches.
+
+### P-065 — The hub's watcher started an unwanted Producer session · open (2.58.0)
+- 2.55.0 stopped an unchosen pace from starting agents, but the watcher's Producer check-in still starts one when a
+  Producer tool is set or the pace auto-launches. Fix: starting agents from the watcher becomes opt-in.
+
+### Answered without code (crew report)
+- Watchdog "6 sessions, no task finished in 2 h": fixed in 2.54.0 (P-022, P-023); studio-hatchfield runs 2.56.0+.
+  `STUDIO_WATCHDOG_IDLE_HOURS=4` can go back to the default; keeping 4 while tasks take half a day is reasonable.
+- `task done --force`: `--reason` and `--accepted-by` already existed; the owner-typed path is now written down
+  (`docs/FORCED-CLOSE.md`, 2.57.1).
+- Bots wake only on a person's @ping: written into `docs/DISCORD-CREW.md` (2.57.1) and the Unity repo's
+  `docs/crew/BOT-RULES.md` rule 17 (Unity PR #12); the 👀/✅ rule was already rule 13 there.
 

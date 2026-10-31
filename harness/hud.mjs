@@ -62,6 +62,7 @@ import { listProposed } from './proposed.mjs';
 import { listWaves, wavesOn } from './waves.mjs';
 import { readAlerts } from './alerts.mjs';
 import { readPhone } from './phone.mjs';
+import { pidAlive } from './proc-identity.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -515,13 +516,8 @@ export function buildHudState() {
     supervisor: (() => {
       const s = supervisorStatus();
       if (!s) return null;
-      let up = false;
-      try {
-        process.kill(s.pid, 0);
-        up = s.status === 'running';
-      } catch {
-        up = false;
-      }
+      // PU-17: no OS query; on Linux the start written at launch tells a reused number from the supervisor.
+      const up = s.status === 'running' && pidAlive(s.pid, s.identity, { eperm: false });
       return { ...s, running: up };
     })(),
     budget: budgetStatus(now, events),
