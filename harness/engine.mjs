@@ -52,15 +52,17 @@ export const ENGINES = {
   unity: {
     label: 'Unity',
     cost: 'about 1.5 to 2 times Godot',
-    why: 'C# is easy for agents and batch-mode tests work.',
-    watch: 'Scenes and prefabs are YAML with GUIDs that agents break easily; a lot of the work needs the editor; check the licence and seat terms.',
-    gate: '{bin} -batchmode -projectPath {folder} -runTests -testPlatform PlayMode -logFile -',
-    parity: '{bin} -batchmode -projectPath {folder} -executeMethod Parity.Run -seeds {seeds} -logFile -',
+    why: 'C# is easy for agents and batch-mode tests work. 2.46.0: the sim is a pure C# assembly that .NET tests and compares with the web game without the editor or a licence (npm run engine:sim, npm run parity), so most changes never wait for Unity.',
+    watch: 'Scenes and prefabs are YAML with GUIDs that agents break easily (the template builds its scene in code); the editor gate needs an install and an active licence on each machine that runs it; check the licence and seat terms.',
+    // The editor's run: purity, version pin, Edit Mode and Play Mode tests with their NUnit results read (harness/unity.mjs).
+    gate: 'node harness/unity.mjs gate {folder}',
+    // Parity needs no editor: the same sim source, built with .NET (engine/_unity/tools/SimCli).
+    parity: 'dotnet run --project {folder}/tools/SimCli -- parity {seeds}',
     capture: null,
     webExport: '{folder}/Build/WebGL',
     bin: 'unity',
     env: 'STUDIO_UNITY',
-    template: null,
+    template: 'engine/_unity',
   },
   unreal: {
     label: 'Unreal 5',
@@ -145,6 +147,40 @@ export async function proposeEngine(engine, { by = actor(), why = '' } = {}) {
   return { ok: true, ask: q.ask };
 }
 
+/**
+ * 2.46.0: how far the web rules have moved past what the port follows. The web game keeps growing while it is
+ * ported; the port follows a pinned commit (npm run engine -- port --from <sha>), and every web commit since
+ * that touches the rules (`portSource`, default cartridges/<game>) is work for the port. Returns
+ * { pinned, base, commits: ['sha subject'], files } or { pinned: false }.
+ */
+export function portDrift(t = readTrack()) {
+  if (!t?.portFrom?.sha) return { pinned: false, commits: [], files: [] };
+  const src = portSources(t);
+  const g = (...a) => spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '';
+  const commits = g('log', '--reverse', '--format=%h %s', `${t.portFrom.sha}..HEAD`, '--', ...src).split('\n').filter(Boolean);
+  const files = g('diff', '--name-only', t.portFrom.sha, 'HEAD', '--', ...src).split('\n').filter(Boolean);
+  return { pinned: true, base: t.portFrom.sha, sources: src, commits, files };
+}
+
+/** The web paths the port follows: engine.json portSource, else cartridges/<game>. */
+export const portSources = (t) => (Array.isArray(t?.portSource) && t.portSource.length ? t.portSource : [`cartridges/${t?.game || activeCartridge().name}`]);
+
+/** One port task per web commit not yet ported (duplicates are skipped by the queue). */
+export async function queueDrift({ by = actor() } = {}) {
+  const t = readTrack();
+  const d = portDrift(t);
+  if (!d.pinned) return { ok: false, message: 'The port is not pinned yet: npm run engine -- port --from <sha> (the web commit the port matches now).' };
+  const { addTask } = await import('./task.mjs');
+  const meta = { track: t.track, lane: t.folder, infra: true };
+  const ids = [];
+  for (const c of d.commits) {
+    const [sha, ...subj] = c.split(' ');
+    const r = addTask({ title: `Port web change ${sha} (${subj.join(' ').slice(0, 80)}) into ${t.folder}: match it, add a parity field if it adds a number, npm run parity, then npm run engine -- port --from ${sha}`, role: 'engine-porter', priority: 'P2', agent: by, meta });
+    if (r?.id && !r.duplicate) ids.push(r.id);
+  }
+  return { ok: true, drift: d, tasks: ids };
+}
+
 /** A yes: the folder, the track file, the department, the first tasks and the parity board. */
 export async function startEngine(engine, { by = actor() } = {}) {
   const e = ENGINES[engine];
@@ -165,11 +201,13 @@ export async function startEngine(engine, { by = actor() } = {}) {
   fs.mkdirSync(path.join(REPO_ROOT, folder), { recursive: true });
   // Start from the worked template: project, sim port, gate, parity, capture, a scene built in code.
   if (e.template && fs.existsSync(path.join(REPO_ROOT, e.template))) {
-    fs.cpSync(path.join(REPO_ROOT, e.template), path.join(REPO_ROOT, folder), { recursive: true, filter: (src) => !/[\\/]\.godot([\\/]|$)|[\\/](captures|export)([\\/]|$)/.test(src) });
+    // Judged on the path inside the template: the machine's own temp folder (Windows: ...\\AppData\\Local\\Temp\\) is not Unity's Temp.
+    const tplRoot = path.join(REPO_ROOT, e.template);
+    fs.cpSync(tplRoot, path.join(REPO_ROOT, folder), { recursive: true, filter: (src) => !/(^|[\\/])\.godot([\\/]|$)|(^|[\\/])(captures|export|Library|Temp|Logs|UserSettings|bin|obj|TestResults)([\\/]|$)/.test(path.relative(tplRoot, src)) });
     fs.rmSync(path.join(REPO_ROOT, folder, 'README.md'), { force: true });
   }
   fs.writeFileSync(trackFile(game), `${JSON.stringify(track, null, 2)}\n`);
-  fs.writeFileSync(path.join(REPO_ROOT, folder, 'README.md'), `# ${game}: the ${e.label} version\n\nThe engine track (docs/ENGINE-TRACK.md). Its own folder, team and gate; linked to the web version only by \`npm run parity\`.\n\n- Gate: \`npm run engine:gate\` runs \`${track.gate}\`. It must import the project, run the tests, and play a headless smoke run that fails on any script error.\n- Parity: \`npm run parity\` runs \`${track.parity.command}\` and compares ${track.parity.compare.join(' and ')} with the web cartridge for the same seeds. The command prints one JSON line per seed: {"seed":1,"outcome":"won","tick":300}.\n${track.capture ? `- Frames: \`npm run engine -- capture\` writes engine/${game}/captures/frame*.png (a display is needed; xvfb-run on a Linux server).\n` : ''}${e.template ? `- Started from ${e.template}/, a worked port of the template game: replace sim/sim.gd with ${game}'s rules (cartridges/${game}/index.mjs), keep the u32/i32/imul helpers for 32-bit maths, and port qa.mjs's start-to-win policy into run_scenario.\n` : ''}${track.webExport ? `- Web export for the Arcade's engine tab: \`${track.webExport}/index.html\`.\n` : '- Native builds only: the Arcade lists them; there is no web export.\n'}- Scenes built in code where the engine allows it, so every change is a readable diff.\n`);
+  fs.writeFileSync(path.join(REPO_ROOT, folder, 'README.md'), `# ${game}: the ${e.label} version\n\nThe engine track (docs/ENGINE-TRACK.md). Its own folder, team and gate; linked to the web version only by \`npm run parity\`.\n\n- Gate: \`npm run engine:gate\` runs \`${track.gate}\`. It must import the project, run the tests, and play a headless smoke run that fails on any script error.\n- Parity: \`npm run parity\` runs \`${track.parity.command}\` and compares ${track.parity.compare.join(' and ')} with the web cartridge for the same seeds. The command prints one JSON line per seed: {"seed":1,"outcome":"won","tick":300}.\n${track.capture ? `- Frames: \`npm run engine -- capture\` writes engine/${game}/captures/frame*.png (a display is needed; xvfb-run on a Linux server).\n` : ''}${e.template && engine === 'unity' ? `- Started from ${e.template}/, a worked port of the template game: replace Assets/Sim/Sim.cs with ${game}'s rules (cartridges/${game}/index.mjs), keep uint maths for 32-bit values and JsRound for Math.round, and port qa.mjs's start-to-win policy into RunScenario. \`npm run engine:sim\` runs the sim's purity check and tests with .NET (no editor); \`npm run engine:gate\` runs the editor's Edit Mode and Play Mode tests.\n` : e.template ? `- Started from ${e.template}/, a worked port of the template game: replace sim/sim.gd with ${game}'s rules (cartridges/${game}/index.mjs), keep the u32/i32/imul helpers for 32-bit maths, and port qa.mjs's start-to-win policy into run_scenario.\n` : ''}${track.webExport ? `- Web export for the Arcade's engine tab: \`${track.webExport}/index.html\`.\n` : '- Native builds only: the Arcade lists them; there is no web export.\n'}- Scenes built in code where the engine allows it, so every change is a readable diff.\n`);
   const parity = path.join(REPO_ROOT, 'studio', 'engine', 'PARITY.md');
   fs.mkdirSync(path.dirname(parity), { recursive: true });
   if (!fs.existsSync(parity)) fs.writeFileSync(parity, `# Feature parity: web and ${e.label}\n\n> One row per mechanic. A mechanic is proven in web first, then ported. Mark each: web only, ported, engine only.\n\n| Mechanic | Web | ${e.label} | Notes |\n| --- | --- | --- | --- |\n| Start to win (the vertical slice) | yes | not yet | parity: npm run parity |\n`);
@@ -179,7 +217,7 @@ export async function startEngine(engine, { by = actor() } = {}) {
   const meta = { track: track.track, lane: folder, infra: true };
   const tasks = [
     `Set up the ${e.label} project in ${folder} and its headless gate (import, tests, a smoke run that fails on any script error); npm run engine:gate must pass`,
-    `Port the sim rules 1:1 from cartridges/${game} into ${folder}/sim/ and make npm run parity pass for seeds 1-5`,
+    `Port the sim rules 1:1 from cartridges/${game} into ${folder}/${engine === 'unity' ? 'Assets/Sim/ (pure C#: npm run engine:sim must pass)' : 'sim/'} and make npm run parity pass for seeds 1-5`,
     ...(track.webExport ? [`Web export of the ${e.label} build to ${track.webExport} for the Arcade's engine tab`] : []),
   ].map((title) => addTask({ title, role: 'engine-porter', priority: 'P2', agent: by, meta }).id).filter(Boolean);
   logEngine(`track started: ${e.label} in ${folder}; ${tasks.join(', ')} queued`, by);
@@ -217,18 +255,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const game = t.game || activeCartridge().name;
-    const src = `cartridges/${game}`;
-    const ls = spawnSync('git', ['ls-tree', '-r', '--name-only', sha, '--', src], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    // 2.46.0: --source a,b sets the web paths the port follows (an adopted game's rules, e.g. game/hatchfield/src/game).
+    if (flag('source')) t.portSource = flag('source').split(',').map((x) => x.trim()).filter(Boolean);
+    const srcs = portSources(t);
+    const src = srcs[0];
+    const ls = spawnSync('git', ['ls-tree', '-r', '--name-only', sha, '--', ...srcs], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const files = String(ls.stdout).split('\n').filter(Boolean);
     if (!files.length) {
-      console.error(`${src}/ doesn't exist at ${sha.slice(0, 7)}.`);
+      console.error(`${srcs.join(', ')} doesn't exist at ${sha.slice(0, 7)}.`);
       process.exit(1);
     }
     const out = path.join(REPO_ROOT, t.folder, 'port-src');
     fs.rmSync(out, { recursive: true, force: true }); // the harness's own previous pin copy
     for (const f of files) {
       const b = spawnSync('git', ['show', `${sha}:${f}`], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
-      const dest = path.join(out, path.relative(src, f));
+      const dest = path.join(out, srcs.length > 1 ? f : path.relative(src, f));
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, b.stdout);
     }
@@ -237,7 +278,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     fs.writeFileSync(trackFile(game), `${JSON.stringify(t, null, 2)}\n`);
     logEngine(`port pinned to ${sha.slice(0, 7)} (${files.length} files)`, by);
     emitEvent({ type: 'engine.port_pinned', agent: by, track: t.track, msg: `${t.label} port pinned to the web rules at ${sha.slice(0, 7)} (${files.length} files in ${t.folder}/port-src/)`, meta: { sha } });
-    console.log(`Pinned: the port follows ${src}/ at ${sha.slice(0, 7)}; ${files.length} file(s) in ${t.folder}/port-src/.`);
+    console.log(`Pinned: the port follows ${srcs.join(', ')} at ${sha.slice(0, 7)}; ${files.length} file(s) in ${t.folder}/port-src/.`);
+    process.exit(0);
+  }
+  if (argv[0] === 'drift') {
+    const t = readTrack();
+    if (!t) { console.error('No engine track.'); process.exit(1); }
+    if (argv.includes('--queue')) {
+      const r = await queueDrift({ by: flag('by') || actor() });
+      if (!r.ok) { console.error(r.message); process.exit(1); }
+      console.log(r.drift.commits.length ? `${r.drift.commits.length} web change(s) to port since ${r.drift.base.slice(0, 7)}; ${r.tasks.length ? `queued ${r.tasks.join(', ')}` : 'already queued'}.` : `The port is up to date with the web rules (${r.drift.base.slice(0, 7)}).`);
+      process.exit(0);
+    }
+    const d = portDrift(t);
+    if (!d.pinned) { console.log('The port is not pinned yet: npm run engine -- port --from <sha> (the web commit the port matches now).'); process.exit(0); }
+    console.log(d.commits.length ? `${d.commits.length} web change(s) to ${d.sources.join(', ')} since the port's pin ${d.base.slice(0, 7)} (${d.files.length} file(s)):\n${d.commits.map((c) => `  ${c}`).join('\n')}\nQueue them for the porters: npm run engine -- drift --queue` : `The port is up to date with the web rules (${d.base.slice(0, 7)}).`);
     process.exit(0);
   }
   if (argv[0] === 'capture') {

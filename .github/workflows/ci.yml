@@ -63,6 +63,70 @@ jobs:
       - name: Godot template parity and gate
         run: node scripts/check-engine-template.mjs
 
+  # 2.46.0: the Unity template's sim with plain .NET (no editor, no licence): purity, its tests, parity with the web game.
+  engine-unity-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Unity template sim, purity and parity
+        run: node scripts/check-unity-template.mjs
+
+  # 2.46.0: the Unity editor's own run (Edit Mode and Play Mode, the controls test) on the template. It needs a
+  # Unity licence: add the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets (docs/UNITY-TRACK.md). Until
+  # then it says so and passes.
+  engine-unity-editor:
+    runs-on: ubuntu-latest
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+    steps:
+      - name: No Unity licence yet
+        if: env.UNITY_LICENSE == ''
+        run: echo "::notice::No UNITY_LICENSE secret, so the Unity editor tests were skipped (docs/UNITY-TRACK.md)"
+      - uses: actions/checkout@v7
+        if: env.UNITY_LICENSE != ''
+      - uses: game-ci/unity-test-runner@v4
+        if: env.UNITY_LICENSE != ''
+        with:
+          projectPath: engine/_unity
+          testMode: all
+
+  # 2.46.0: a playable WebGL build of the Unity template on every change to main, as a downloadable artifact
+  # (open index.html from a local server, or drop it on any static host). Needs the same licence secrets.
+  engine-unity-build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+    steps:
+      - name: No Unity licence yet
+        if: env.UNITY_LICENSE == ''
+        run: echo "::notice::No UNITY_LICENSE secret, so no Unity build was made (docs/UNITY-TRACK.md)"
+      - uses: actions/checkout@v7
+        if: env.UNITY_LICENSE != ''
+      - uses: game-ci/unity-builder@v4
+        if: env.UNITY_LICENSE != ''
+        with:
+          projectPath: engine/_unity
+          targetPlatform: WebGL
+          buildMethod: StudioBuild.WebGL
+          customParameters: -out Build/WebGL
+      - uses: actions/upload-artifact@v4
+        if: env.UNITY_LICENSE != ''
+        with:
+          name: unity-webgl
+          path: engine/_unity/Build/WebGL
+          if-no-files-found: warn
+
   # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).
   windows:
     runs-on: windows-latest

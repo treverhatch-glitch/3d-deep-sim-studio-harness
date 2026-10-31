@@ -173,7 +173,10 @@ export async function briefLines(h, n, { since = '24h' } = {}) {
   lines.push(running.length ? `Running: ${running.slice(0, 6).map((s) => `${s.agent}${s.task ? ` on ${s.task}` : ''}${s.stalled ? ' (stalled)' : ''}`).join(', ')}${running.length > 6 ? ` +${running.length - 6}` : ''}` : 'Running: nobody');
   const ci = n.ci ? (n.ci.status === 'completed' ? `CI ${n.ci.conclusion}` : `CI ${n.ci.status}`) : null;
   const v = h.verifyMedianSec || {};
-  lines.push(`Checks: ${[ci, n.whole ? 'whole-game RED' : null, `verify ${v.scoped != null ? `${Math.round(v.scoped)} s scoped` : 'n/a'}`, h.silentGreens ? `${h.silentGreens} ran nothing` : null].filter(Boolean).join(' · ')}`);
+  // 2.46.0: an engine port's lag behind the web rules it follows.
+  let port = null;
+  try { const e = await import('./engine.mjs'); const t = e.readTrack(); const d = t ? e.portDrift(t) : null; if (d?.pinned) port = d.commits.length ? `${t.label} port ${d.commits.length} web change(s) behind` : `${t.label} port up to date`; } catch {}
+  lines.push(`Checks: ${[ci, n.whole ? 'whole-game RED' : null, port, `verify ${v.scoped != null ? `${Math.round(v.scoped)} s scoped` : 'n/a'}`, h.silentGreens ? `${h.silentGreens} ran nothing` : null].filter(Boolean).join(' · ')}`);
   const needs = [n.stopped ? `studio stopped (${n.stopped})` : null, n.whole || null, ...(n.parked || []).map((p) => `${p.id} ${p.shelved ? 'shelved' : 'parked'}`), ...(n.pending || []).map((p) => `${p.id} forced, needs review`), n.protectedChanges?.length ? 'protected files changed' : null].filter(Boolean);
   lines.push(needs.length ? `Needs you (${needs.length}): ${needs.slice(0, 3).join('; ')}${needs.length > 3 ? ' …' : ''}` : 'Needs you: nothing');
   lines.push(h.misses.length ? `Off target: ${h.misses.join('; ')}` : `On target (refusals ${h.refusalsPerLanding ?? 'n/a'}/landing, tokens ${h.tokensPerLanding != null ? `${(h.tokensPerLanding / 1e6).toFixed(1)}M` : 'n/a'}/landing)`);

@@ -3384,6 +3384,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.46.0: the Unity track's checks without .NET or Unity (qa/selftest-246.mjs).
+{
+  const dir = copyRepo();
+  const { selftest246 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-246.mjs')).href);
+  await selftest246({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

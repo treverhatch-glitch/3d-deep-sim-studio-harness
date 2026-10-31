@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Parity without the editor: dotnet run (project engine/GAME/tools/SimCli) parity 1,2,3,4,5
+       prints one JSON line per seed for qa/parity.mjs. Same sim source as the Unity build. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Assets/Sim/**/*.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

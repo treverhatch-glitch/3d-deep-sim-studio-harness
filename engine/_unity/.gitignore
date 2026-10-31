@@ -1,0 +1,20 @@
+# Unity's own caches and outputs: rebuilt on open.
+/Library/
+/Temp/
+/Obj/
+/Logs/
+/UserSettings/
+/Build/
+/Builds/
+/MemoryCaptures/
+*.csproj
+*.sln
+*.pidb
+*.userprefs
+# The .NET test and parity projects (tools/) keep their own build output out of the repo.
+/tools/**/bin/
+/tools/**/obj/
+/tools/**/TestResults/
+/captures/
+/TestResults*.xml
+!/tools/**/*.csproj
