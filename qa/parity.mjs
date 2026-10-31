@@ -39,14 +39,29 @@ export async function parity({ seeds = [1, 2, 3, 4, 5] } = {}) {
   // 2.46.0: a pinned port is compared with the web rules it follows (port-src/, npm run engine -- port --from),
   // not the live ones: the web game keeps changing while it is ported, and a web commit the port hasn't taken
   // yet is drift to queue (npm run engine -- drift --queue), not a parity failure in every porter's verify.
+  // 2.47.0: a game that isn't a cartridge (an adopted game) names its web side as a command that prints one
+  // JSON line per seed, like the engine's (engine.json parity.web, set by npm run engine -- link --web).
+  const parseLines = (stdout) => {
+    const o = {};
+    for (const line of String(stdout).split('\n')) {
+      try { const j = JSON.parse(line.trim()); if (j && j.seed != null) o[Number(j.seed)] = j; } catch {}
+    }
+    return o;
+  };
+  let webCmdResults = null;
+  if (t.parity?.web) {
+    const wr = spawnSync(t.parity.web.replaceAll('{seeds}', seeds.join(',')), { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 64 * 1024 * 1024 });
+    if (wr.status !== 0) return { ok: false, problems: [`the web side's parity command failed (exit ${wr.status}): ${(wr.stderr || wr.stdout || '').trim().split('\n').slice(-2).join(' ')}`], web: {} };
+    webCmdResults = parseLines(wr.stdout);
+  }
   let cart = null;
-  let against = 'the live web rules';
+  let against = webCmdResults ? `the web game's own runs (${t.parity.web.split(' ').slice(0, 3).join(' ')} …)` : 'the live web rules';
   const pinned = t.portFrom?.sha && t.folder ? path.join(REPO_ROOT, t.folder, 'port-src') : null;
   if (pinned && fs.existsSync(path.join(pinned, 'index.mjs'))) {
     try { cart = await loadCartridge(activeCartridge().name, { dir: pinned }); against = `the web rules pinned at ${t.portFrom.sha.slice(0, 7)}`; } catch {}
   }
-  cart ??= await loadCartridge(activeCartridge().name);
-  const web = Object.fromEntries(seeds.map((seed) => {
+  if (!webCmdResults) cart ??= await loadCartridge(activeCartridge().name);
+  const web = webCmdResults ? Object.fromEntries(seeds.map((seed) => [seed, { seed, ...(webCmdResults[seed] || {}), state: webCmdResults[seed] || {} }])) : Object.fromEntries(seeds.map((seed) => {
     const r = runScenario(cart, 'start-to-win', { seed });
     return [seed, { seed, outcome: r.outcome, tick: r.ticksRun, state: r.state }];
   }));

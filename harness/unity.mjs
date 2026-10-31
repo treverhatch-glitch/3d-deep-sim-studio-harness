@@ -227,11 +227,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const [cmd, folderArg] = process.argv.slice(2);
   const flag = (k) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : null; };
   let folder = folderArg && !folderArg.startsWith('--') ? folderArg : null;
-  if (!folder) {
-    const { readTrack } = await import('./engine.mjs');
-    const t = readTrack();
-    folder = t?.engine === 'unity' ? t.folder : null;
-  }
+  let track = null;
+  try { const { readTrack } = await import('./engine.mjs'); track = readTrack(); } catch {}
+  if (!folder) folder = track?.engine === 'unity' ? track.folder : null;
   if (!folder) {
     console.log('[unity] no Unity project given and no Unity engine track: nothing to check');
     process.exit(0);
@@ -257,7 +255,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!r.ok) fail(r.problems);
     console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
   } else if (cmd === 'build') {
-    const r = build(dir, flag('target') || 'web', { out: flag('out') });
+    // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
+    const r = build(dir, flag('target') || track?.buildTarget || 'web', { out: flag('out') });
     if (!r.ok) fail(r.problems);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else {

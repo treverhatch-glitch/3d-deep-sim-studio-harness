@@ -8,8 +8,13 @@ on:
 permissions:
   contents: read
 
+# 2.47.0: with the repository variable HARNESS_RUNNER set to self-hosted (Settings > Secrets and variables >
+# Actions > Variables), every GitHub-hosted job below is skipped and the self-hosted job at the end runs the
+# checks on the owner's own Windows PC instead: free for a private repo. Only ever for a PRIVATE repo: on a public
+# one, anyone's pull request could run code on that PC. docs/SELF-HOSTED-RUNNER.md.
 jobs:
   release-gate:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -49,6 +54,7 @@ jobs:
   # The engine track's Godot template, with a real Godot: its port matches the web game seed by seed,
   # and its headless gate passes.
   engine-godot:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,6 +71,7 @@ jobs:
 
   # 2.46.0: the Unity template's sim with plain .NET (no editor, no licence): purity, its tests, parity with the web game.
   engine-unity-sim:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -81,6 +88,7 @@ jobs:
   # Unity licence: add the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets (docs/UNITY-TRACK.md). Until
   # then it says so and passes.
   engine-unity-editor:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     env:
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -101,7 +109,7 @@ jobs:
   # 2.46.0: a playable WebGL build of the Unity template on every change to main, as a downloadable artifact
   # (open index.html from a local server, or drop it on any static host). Needs the same licence secrets.
   engine-unity-build:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     env:
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -129,6 +137,7 @@ jobs:
 
   # The stress test runs on Windows: prove every required gate passes there too (no bash, python via py/python).
   windows:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -144,6 +153,7 @@ jobs:
 
   # Drives the War Room in Chromium: all three views, desktop and phone, every button.
   war-room-browser:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -168,6 +178,7 @@ jobs:
         run: node scripts/check-controls-play.mjs
 
   war-room-build:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -177,3 +188,40 @@ jobs:
       # Builds the War Room with its pinned deps and type-checks the React components.
       - name: npm run hub:build
         run: npm run hub:build
+
+  # 2.47.0: the checks on the owner's PC (a self-hosted Windows runner), when HARNESS_RUNNER is self-hosted.
+  # One job, in order: protected files, every required gate and the release checks, the War Room and controls in
+  # Chromium, the Unity template on .NET. Node 24, Python, .NET 8 and Git must be installed on the PC.
+  self-hosted:
+    if: vars.HARNESS_RUNNER == 'self-hosted'
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Protected files need the owner's approval
+        if: github.event_name == 'pull_request'
+        env:
+          STUDIO_PROTECT_BASE: origin/${{ github.base_ref }}
+          STUDIO_PROTECT_ROOT: ${{ github.workspace }}
+        run: |
+          git worktree remove --force "${{ runner.temp }}/base" 2>$null
+          git worktree add --detach "${{ runner.temp }}/base" "origin/${{ github.base_ref }}"
+          node "${{ runner.temp }}/base/qa/protected-check.mjs"
+      - run: npm ci --no-audit --no-fund
+      - name: npm run release (every required gate, the self-test, the release checks)
+        run: node scripts/release.mjs
+      - name: War Room and controls in Chromium
+        run: |
+          npx playwright install chromium
+          node qa/hud-check.mjs
+          node qa/browser-play.mjs
+          node scripts/check-control-effects.mjs
+          node scripts/check-controls-play.mjs
+      - name: Unity template on .NET (skips without the .NET 8 SDK)
+        run: node scripts/check-unity-template.mjs
+
