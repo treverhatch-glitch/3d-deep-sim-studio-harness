@@ -62,7 +62,6 @@ import { listProposed } from './proposed.mjs';
 import { listWaves, wavesOn } from './waves.mjs';
 import { readAlerts } from './alerts.mjs';
 import { readPhone } from './phone.mjs';
-import { pidAlive } from './proc-identity.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -516,8 +515,13 @@ export function buildHudState() {
     supervisor: (() => {
       const s = supervisorStatus();
       if (!s) return null;
-      // 2.57.0 (PU-17): the identity it wrote at start, so a reused pid doesn't show a dead supervisor as running.
-      const up = s.status === 'running' && Boolean(s.pid) && pidAlive(s.pid, s.identity);
+      let up = false;
+      try {
+        process.kill(s.pid, 0);
+        up = s.status === 'running';
+      } catch {
+        up = false;
+      }
       return { ...s, running: up };
     })(),
     budget: budgetStatus(now, events),

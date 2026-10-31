@@ -3473,14 +3473,6 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.57.0 (PU-17, P-039): agent stop checks the process is still the agent before killing it (qa/selftest-pu17.mjs).
-{
-  const dir = copyRepo();
-  const { selftestPU17 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu17.mjs')).href);
-  await selftestPU17({ dir, run, report, tmpRoot });
-  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
-}
-
 // PU-19 (P-042): 5-hour and weekly limit messages count as usage limits, with their reset times (qa/selftest-pu19.mjs).
 {
   const dir = copyRepo();

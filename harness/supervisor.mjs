@@ -27,7 +27,6 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { pidState, pidAlive, readIdentity } from './proc-identity.mjs';
 
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
 const STOP_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-stop');
@@ -40,9 +39,14 @@ const readJson = (f, d = null) => {
   }
 };
 export const readStatus = () => readJson(STATUS_FILE);
-// 2.57.0 (PU-17, P-039): a status record's supervisor is alive only while its pid is still that supervisor (the
-// identity written at start); a status file left "running" by a crash or reboot can name a reused number.
-const alive = (st) => Boolean(st?.pid) && pidAlive(st.pid, st.identity);
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /** "23:00" (today, or tomorrow if past), "8h", "90m", or an ISO time. */
 export function parseUntil(s, now = Date.now()) {
@@ -286,15 +290,13 @@ async function main(argv) {
   };
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   const prev = readStatus();
-  if (prev?.pid && prev.pid !== process.pid && alive(prev) && prev.status === 'running') {
+  if (prev?.pid && prev.pid !== process.pid && alive(prev.pid) && prev.status === 'running') {
     console.error(`A supervisor is already running (pid ${prev.pid}). npm run studio:stop first.`);
     process.exit(1);
   }
   fs.rmSync(STOP_FILE, { force: true });
   const { parseNextQueue } = await import('./task.mjs');
-  let identity = null;
-  try { identity = readIdentity(process.pid); } catch {} // best effort: null never blocks the start
-  const state = { pid: process.pid, identity, status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
+  const state = { pid: process.pid, status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
   const port = Number(process.env.HUB_PORT || 3847);
   let hub = null;
   let downSince = null;
@@ -424,24 +426,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(STOP_FILE, new Date().toISOString());
     const s = readStatus();
-    // 2.57.0 (PU-17, P-039): signal the pid only while it is still the supervisor. A status file without an
-    // identity (older) is trusted only if its last loop is recent; otherwise the number may be another
-    // program's by now. Either way the stop file above stops a real supervisor at its next loop.
-    const st = s?.pid ? pidState(s.pid, s.identity) : { state: 'gone' };
-    const loopAge = Date.now() - Date.parse(s?.lastLoop || s?.startedAt || '');
-    const fresh = Number.isFinite(loopAge) && loopAge <= Math.max(5 * 60000, 3 * LOOP_MS);
-    if (st.state === 'same' || (st.state === 'unknown' && fresh)) {
+    if (s?.pid && alive(s.pid)) {
       try {
         process.kill(s.pid, 'SIGTERM');
       } catch {
         // it will see the stop file
-      }
-    } else if (st.state !== 'gone' && s.status === 'running') {
-      const why = st.state === 'other' ? `pid ${s.pid} now belongs to another program${st.now?.cmd ? ` (${st.now.cmd.slice(0, 80)})` : ''}` : `pid ${s.pid} is in use but supervisor.json has no process identity and its last loop was ${Math.round(loopAge / 60000)} min ago, so the number may be another program's`;
-      console.log(`Not signalled: ${why}. ${st.state === 'other' ? 'The supervisor that wrote supervisor.json is gone.' : 'A supervisor that is still running stops at its next loop.'}`);
-      emitEvent({ type: 'agent.pid_reused', agent: 'supervisor', status: 'warn', msg: `studio:stop: ${why}: nothing was killed`, meta: { pid: s.pid, verified: st.state === 'other' } });
-      if (st.state === 'other') {
-        try { fs.writeFileSync(STATUS_FILE, `${JSON.stringify({ ...s, status: 'stopped', stopReason: `its process is gone (${why})` }, null, 2)}\n`); } catch {}
       }
     }
     console.log('Supervisor stopping. Agents that are running finish their task; nothing new starts.');
@@ -449,7 +438,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv[0] === 'status') {
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
+    console.log(s ? `${s.status === 'running' && alive(s.pid) ? 'Running' : 'Not running'} since ${s.startedAt}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {
@@ -460,7 +449,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // (run #1: every agent died when the host shell restarted). --foreground keeps it attached.
   if (!argv.includes('--foreground')) {
     const prev = readStatus();
-    if (prev?.pid && alive(prev) && prev.status === 'running') {
+    if (prev?.pid && alive(prev.pid) && prev.status === 'running') {
       console.error(`A supervisor is already running (pid ${prev.pid}). npm run studio:stop first.`);
       process.exit(1);
     }

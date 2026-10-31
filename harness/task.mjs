@@ -28,7 +28,6 @@ import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState } from './baseline.mjs';
-import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
@@ -612,8 +611,12 @@ function holderRunning(owner) {
     return true; // not a launcher session: it may be running by hand
   }
   if (s.status !== 'running') return false;
-  // 2.57.0 (PU-17, P-039): compares the identity recorded at launch, so a reused process number isn't "running".
-  return recordAlive(s);
+  try {
+    process.kill(s.supervisor || s.pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;
