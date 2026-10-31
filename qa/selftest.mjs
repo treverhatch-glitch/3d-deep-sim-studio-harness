@@ -3368,6 +3368,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
 }
 
+// 2.44.0: sync, related tests, retry once (qa/selftest-244.mjs).
+{
+  const dir = copyRepo();
+  const { selftest244 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-244.mjs')).href);
+  await selftest244({ dir, run, report, tmpRoot });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 });
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

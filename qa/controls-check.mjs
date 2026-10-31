@@ -56,6 +56,17 @@ export async function controlsCheck({ bibleFile = BIBLE, reportsDir = REPORTS, t
   const list = Array.isArray(bible?.controls) ? bible.controls.filter((c) => c && c.id) : [];
   if (!list.length) {
     if (template) return { ok: true, problems, notes: ['no controls list (template studio)'], checked: 0 };
+    // 2.44.0: a game brought in with npm run onboard -- --adopt has no controls list on its first day, and no
+    // input test to fill one; failing here kept a real game's whole-game check red for good. Until a person
+    // writes the list (onboarding queues it), it is a note. Once the list exists, every rule applies.
+    try {
+      const { readOrigin } = await import('../harness/adopt.mjs');
+      const { activeGame } = await import('../harness/cartridge.mjs');
+      const o = readOrigin();
+      if (o?.slug && activeGame().name === o.slug && process.env.STUDIO_CONTROLS_ADOPTED !== 'fail') {
+        return { ok: true, problems, notes: [`${o.name || o.slug} was adopted and its Game Bible has no controls list yet: write every key, button and click with what it must change (studio/bible/controls.json, the owner signs it) and an input test that reports them; until then this is a note (STUDIO_CONTROLS_ADOPTED=fail makes it fail)`], checked: 0 };
+      }
+    } catch {}
     problems.push(`the Game Bible lists no controls (${path.relative(REPO_ROOT, bibleFile)}): write every button, key and click a player has, with what it must do, so the build can be checked by real input`);
     return { ok: false, problems, notes, checked: 0 };
   }

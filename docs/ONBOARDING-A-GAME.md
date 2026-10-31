@@ -49,9 +49,22 @@ git add game/my-game studio && git commit -m "Adopt My Game" && npm run verify
 npm run onboard -- --export
 ```
 
-writes the studio's committed changes to `game/<slug>/` since it was adopted as one patch, relative to the
+writes the studio's committed changes to `game/<slug>/` since it was adopted (or last synced) as one patch, relative to the
 game's own repo (without `studio.gates.json`), and prints the commands to apply it on a branch there from the
 adopted commit (`git apply --3way`). Open the PR the way that repo wants.
+
+**Keeping both in step (2.44.0).** When work also lands in the game's own repo:
+
+```bash
+npm run onboard -- --sync [--ref <branch>]
+```
+
+brings its newer commits into `game/<slug>/` as one commit. It refuses while the studio has changes it
+hasn't exported yet (export first), so nothing is lost or sent twice.
+
+**Faster verifies for a big test suite.** With `STUDIO_WHOLE_GAME=on`, a lane's verify runs only the tests
+related to the change (an adopted Vitest or Jest game's test check declares `related`), and the whole suite
+runs after landing.
 
 ## Then fill in what a scan can't know
 

@@ -157,6 +157,29 @@ export async function needsYou(events, { since = 0 } = {}) {
   return out;
 }
 
+/**
+ * 2.44.0: five plain lines for a chat (a Discord ops bot posts them; npm run harness-health -- --brief):
+ * what landed and what's queued, who is running, the checks, what needs the owner, on or off target.
+ */
+export async function briefLines(h, n, { since = '24h' } = {}) {
+  const lines = [];
+  let board = { inProgress: [], backlog: [] };
+  let running = [];
+  let game = '';
+  try { board = (await import('./task.mjs')).parseNextQueue(); } catch {}
+  try { running = (await import('./agent.mjs')).sessions().filter((s) => s.running); } catch {}
+  try { game = (await import('./cartridge.mjs')).activeGame().name || ''; } catch {}
+  lines.push(`${game ? `${game}: ` : ''}${n.landed.length} landed in ${since}${n.landed.length ? ` (${n.landed.slice(-5).join(', ')})` : ''} · ${board.inProgress.length} in progress · ${board.backlog.length} queued`);
+  lines.push(running.length ? `Running: ${running.slice(0, 6).map((s) => `${s.agent}${s.task ? ` on ${s.task}` : ''}${s.stalled ? ' (stalled)' : ''}`).join(', ')}${running.length > 6 ? ` +${running.length - 6}` : ''}` : 'Running: nobody');
+  const ci = n.ci ? (n.ci.status === 'completed' ? `CI ${n.ci.conclusion}` : `CI ${n.ci.status}`) : null;
+  const v = h.verifyMedianSec || {};
+  lines.push(`Checks: ${[ci, n.whole ? 'whole-game RED' : null, `verify ${v.scoped != null ? `${Math.round(v.scoped)} s scoped` : 'n/a'}`, h.silentGreens ? `${h.silentGreens} ran nothing` : null].filter(Boolean).join(' · ')}`);
+  const needs = [n.stopped ? `studio stopped (${n.stopped})` : null, n.whole || null, ...(n.parked || []).map((p) => `${p.id} ${p.shelved ? 'shelved' : 'parked'}`), ...(n.pending || []).map((p) => `${p.id} forced, needs review`), n.protectedChanges?.length ? 'protected files changed' : null].filter(Boolean);
+  lines.push(needs.length ? `Needs you (${needs.length}): ${needs.slice(0, 3).join('; ')}${needs.length > 3 ? ' …' : ''}` : 'Needs you: nothing');
+  lines.push(h.misses.length ? `Off target: ${h.misses.join('; ')}` : `On target (refusals ${h.refusalsPerLanding ?? 'n/a'}/landing, tokens ${h.tokensPerLanding != null ? `${(h.tokensPerLanding / 1e6).toFixed(1)}M` : 'n/a'}/landing)`);
+  return lines.map((l) => l.slice(0, 300));
+}
+
 export function renderNeeds(n) {
   const lines = ['', '## Landed', n.landed.length ? n.landed.join(', ') : 'nothing', '', '## Needs you'];
   if (n.stopped) lines.push(`- The studio is stopped (${n.stopped}).`);
@@ -176,6 +199,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const events = readRecentEvents(0);
   const since = parseSince(flag('--since') || '24h');
   const h = health(events, { since });
+  if (a.includes('--brief')) {
+    process.stdout.write(`${(await briefLines(h, await needsYou(events, { since }), { since: flag('--since') || '24h' })).join('\n')}\n`);
+    process.exit(0);
+  }
   const n = a.includes('--morning') ? await needsYou(events, { since }) : null;
   const text = renderHealth(h) + (n ? renderNeeds(n) : '');
   if (a.includes('--json')) console.log(JSON.stringify(n ? { ...h, ...n } : h));

@@ -47,7 +47,7 @@ export function copyGame(src, dest, { ref = null } = {}) {
   const isGit = git(src, 'rev-parse', '--is-inside-work-tree').stdout.trim() === 'true';
   if (isGit) {
     const r = ref || 'HEAD';
-    const sha = git(src, 'rev-parse', `${r}^{commit}`).stdout.trim();
+    const sha = git(src, 'rev-parse', '--verify', '--quiet', `${r}^{commit}`).stdout.trim();
     if (!sha) return { error: `${r} is not a commit in ${src} (fetch it first: git -C "${src}" fetch origin ${r})` };
     const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
     const p = spawnSync(`git -C ${q(src)} archive --format=tar ${sha} | tar -x -C ${q(dest)}`, { shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -72,7 +72,14 @@ export function gatesFor(slug, gameDir) {
   const add = (id, command, required = true) => gates.push({ id, command, paths: [`${root}/**`], ...(required ? {} : { required: false }) });
   if (s.typecheck) add('typecheck', run('typecheck'));
   else if (has('tsconfig.json')) add('typecheck', `${cd}npx tsc ${/"references"\s*:/.test(fs.readFileSync(path.join(gameDir, 'tsconfig.json'), 'utf8')) ? '-b' : '--noEmit'}`);
-  if (s.test && !/no test specified/.test(s.test)) add('test', run('test'));
+  if (s.test && !/no test specified/.test(s.test)) {
+    add('test', run('test'));
+    // 2.44.0: the tests related to a change, for a lane's verify (used when the whole suite runs after landing).
+    const deps = { ...pkg?.dependencies, ...pkg?.devDependencies };
+    const t = gates[gates.length - 1];
+    if (deps.vitest || /vitest/.test(s.test)) t.related = `${cd}npx vitest related --run --passWithNoTests {files}`;
+    else if (deps.jest || /\bjest\b/.test(s.test)) t.related = `${cd}npx jest --passWithNoTests --findRelatedTests {files}`;
+  }
   for (const k of ['e2e', 'test:e2e']) if (s[k]) add('e2e', run(k), false);
   if (s.lint) add('lint', run('lint'), false);
   if (s.build) add('build', run('build'), false);
@@ -106,6 +113,18 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
   fs.writeFileSync(originFile(root), `${JSON.stringify(origin, null, 2)}\n`);
   const { setActiveGame } = await import('./cartridge.mjs');
   setActiveGame(slug);
+  // 2.44.0: the template's example controls list (the example game's B key and Buy button) is not this game's:
+  // clear it, so the controls check waits for the real list instead of testing the wrong game. A list someone
+  // wrote is kept, with a note.
+  const cf = path.join(root, 'studio', 'bible', 'controls.json');
+  try {
+    const cj = JSON.parse(fs.readFileSync(cf, 'utf8'));
+    const ids = (cj.controls || []).map((c) => c.id).sort().join(',');
+    if (ids === 'buy-button,buy-unit') {
+      fs.writeFileSync(cf, `${JSON.stringify({ note: `Every control a player has in ${name}, in the Game Bible: id, name, input, expect, and the sim value it must change (effect). The controls check fails the build when a listed control has no passing real-input result. Only a person changes this list (a protected file).`, tracks: ['web'], controls: [] }, null, 2)}\n`);
+      warnings.push(`cleared the template's example controls list (studio/bible/controls.json): write ${name}'s own (a task is queued)`);
+    } else if (ids) warnings.push(`studio/bible/controls.json already lists ${cj.controls.length} control(s): check they are ${name}'s`);
+  } catch {}
   if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: cd ${rel} && npm ci`);
   return { ok: true, slug, dir: rel, origin, gates, wroteGates, warnings };
 }
@@ -117,9 +136,9 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
 export function exportPatch({ root = REPO_ROOT, now = new Date() } = {}) {
   const o = readOrigin(root);
   if (!o?.path) return { error: 'no adopted game (studio/game/ORIGIN.json): adopt one with npm run onboard -- --path <game> --name "<name>" --adopt' };
-  // The adoption commit: the newest one that added ORIGIN.json, found walking back from HEAD and stopping there
-  // (a whole-history walk breaks in a shallow clone, which many people use).
-  const first = git(root, 'log', '-n', '1', '--diff-filter=A', '--format=%H', '--', 'studio/game/ORIGIN.json').stdout.trim();
+  // The base: the newest commit that changed ORIGIN.json (the adoption, or the last sync), found walking back
+  // from HEAD and stopping there (a whole-history walk breaks in a shallow clone, which many people use).
+  const first = git(root, 'log', '-n', '1', '--format=%H', '--', 'studio/game/ORIGIN.json').stdout.trim();
   if (!first) return { error: `${o.path} has no commits yet: commit the adopted game first (git add ${o.path})` };
   const spec = ['--', o.path, `:(exclude)${o.path}/studio.gates.json`];
   const names = git(root, 'diff', '--name-only', first, 'HEAD', `--relative=${o.path}`, ...spec).stdout.trim().split('\n').filter(Boolean);
@@ -131,7 +150,63 @@ export function exportPatch({ root = REPO_ROOT, now = new Date() } = {}) {
   const file = path.join(root, 'studio', 'game', `export-${stamp}.patch`);
   fs.writeFileSync(file, diff.stdout);
   const relFile = path.relative(root, file).split(path.sep).join('/');
+  // 2.44.0: remember how far the studio's work was sent back, so a sync after an export isn't refused.
+  const head = git(root, 'rev-parse', 'HEAD').stdout.trim();
+  fs.writeFileSync(originFile(root), `${JSON.stringify({ ...o, exportedThrough: head, exportedAt: now.toISOString(), lastExport: relFile }, null, 2)}\n`);
   const where = o.source && fs.existsSync(o.source) ? o.source : o.remote || '<the game repo>';
   const apply = [`cd "${where}"`, `git fetch origin${o.ref ? ` ${o.ref}` : ''}`, `git switch -c studio/export-${stamp} ${o.sha || o.ref || 'HEAD'}`, `git apply --3way "${path.resolve(file)}"`, 'then run its own checks and open a PR the usual way'];
   return { ok: true, file: relFile, files: names, commits, origin: o, apply };
+}
+
+/**
+ * 2.44.0: bring the game's own repo's newer commits into the studio's copy (game/<slug>/), as one commit, so
+ * work can carry on in both places. Refuses while the studio has changes to the game it hasn't exported (send
+ * them back first: npm run onboard -- --export), or uncommitted ones. Returns { ok, upToDate?, from, to,
+ * commits, files, committed } or { error }.
+ */
+export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit = true, now = new Date() } = {}) {
+  const o = readOrigin(root);
+  if (!o?.path) return { error: 'no adopted game (studio/game/ORIGIN.json): adopt one first with npm run onboard -- --adopt' };
+  if (!o.source || !fs.existsSync(o.source)) return { error: `the game's own repo isn't at ${o.source || '(unknown)'} any more: clone it there, or fix "source" in studio/game/ORIGIN.json` };
+  if (!o.sha) return { error: 'the game was adopted from a folder, not a git repo: there is nothing to sync from' };
+  const base = git(root, 'log', '-n', '1', '--format=%H', '--', 'studio/game/ORIGIN.json').stdout.trim();
+  if (!base) return { error: 'commit the adopted game first (studio/game/ORIGIN.json has no commit yet)' };
+  // Studio work since the last sync that hasn't been exported (an export records how far it went).
+  const since = o.exportedThrough && git(root, 'merge-base', '--is-ancestor', base, o.exportedThrough).status === 0 ? o.exportedThrough : base;
+  const pending = git(root, 'log', '--format=%h %s', `${since}..HEAD`, '--', o.path, `:(exclude)${o.path}/studio.gates.json`).stdout.trim().split('\n').filter(Boolean);
+  if (pending.length && !force) return { error: `${pending.length} commit(s) to ${o.path} since it was last synced haven't been sent back yet (${pending.slice(0, 3).join('; ')}): npm run onboard -- --export first, or --force to sync anyway`, pending };
+  // Tracked changes only: an untracked file (a build output, a cache) isn't touched by the patch.
+  const dirty = git(root, 'status', '--porcelain', '--untracked-files=no', '--', o.path).stdout.trim().split('\n').filter(Boolean);
+  if (dirty.length) return { error: `${o.path} has uncommitted changes (${dirty.slice(0, 3).map((l) => l.trim()).join('; ')}${dirty.length > 3 ? ' …' : ''}): commit or set them aside first` };
+  const want = ref || o.ref || 'HEAD';
+  if (git(o.source, 'remote').stdout.trim()) git(o.source, 'fetch', '-q', 'origin', want);
+  // --verify --quiet: a plain rev-parse prints an unknown name back instead of nothing.
+  const tip = git(o.source, 'rev-parse', '--verify', '--quiet', `origin/${want}^{commit}`).stdout.trim() || git(o.source, 'rev-parse', '--verify', '--quiet', `${want}^{commit}`).stdout.trim();
+  if (!tip) return { error: `${want} isn't a branch or commit in ${o.source}` };
+  if (tip === o.sha) return { ok: true, upToDate: true, from: o.sha, to: tip, commits: [], files: [] };
+  const commits = git(o.source, 'log', '--format=%h %s', `${o.sha}..${tip}`).stdout.trim().split('\n').filter(Boolean);
+  const files = git(o.source, 'diff', '--name-only', o.sha, tip).stdout.trim().split('\n').filter(Boolean);
+  const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json');
+  if (diff.status !== 0) return { error: `git diff in ${o.source} failed: ${(diff.stderr || '').trim()}` };
+  if (diff.stdout.trim()) {
+    const ap = spawnSync('git', ['apply', '--3way', '--whitespace=nowarn', `--directory=${o.path}`], { cwd: root, input: diff.stdout, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+    if (ap.status !== 0) return { error: `the game's changes didn't apply cleanly to ${o.path}: ${(ap.stderr || '').trim().split('\n').slice(-4).join(' | ')} (fix the conflicts, then commit)`, conflicts: true };
+  }
+  const next = { ...readOrigin(root), ref: want, sha: tip, previousSha: o.sha, syncedAt: now.toISOString() };
+  fs.writeFileSync(originFile(root), `${JSON.stringify(next, null, 2)}\n`);
+  let committed = false;
+  let commitError = '';
+  if (commit) {
+    git(root, 'add', '-A', '--', o.path, 'studio/game/ORIGIN.json');
+    // A machine with no git name or email set (a fresh CI runner) refuses the commit: sign it as the studio
+    // only then, so a person's own identity always wins.
+    const id = (k) => git(root, 'config', '--get', k).stdout.trim();
+    const env = { ...process.env, STUDIO_MAIN_COMMIT: 'allow' };
+    if (!id('user.name') && !env.GIT_AUTHOR_NAME) Object.assign(env, { GIT_AUTHOR_NAME: 'studio', GIT_COMMITTER_NAME: 'studio' });
+    if (!id('user.email') && !env.GIT_AUTHOR_EMAIL) Object.assign(env, { GIT_AUTHOR_EMAIL: 'studio@localhost', GIT_COMMITTER_EMAIL: 'studio@localhost' });
+    const c = spawnSync('git', ['commit', '-q', '-m', `Sync ${o.name || o.slug} from ${want} (${o.sha.slice(0, 8)}..${tip.slice(0, 8)}, ${commits.length} commit(s))`], { cwd: root, encoding: 'utf8', env });
+    committed = c.status === 0;
+    if (!committed) commitError = `${c.stderr || c.stdout || ''}`.trim().split('\n').slice(-2).join(' | ');
+  }
+  return { ok: true, from: o.sha, to: tip, commits, files, committed, commitError };
 }
