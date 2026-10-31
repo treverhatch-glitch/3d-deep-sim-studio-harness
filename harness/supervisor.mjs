@@ -88,7 +88,7 @@ export async function supervise(opts, state, now = Date.now()) {
   const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
   const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
   const { effectiveMode } = await import('./mode.mjs');
-  const { budgetStatus, pickTool, quotaMark, probeTool } = await import('./budget.mjs');
+  const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil } = await import('./budget.mjs');
   const { status: lockStatus } = await import('./lock.mjs');
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
@@ -106,7 +106,8 @@ export async function supervise(opts, state, now = Date.now()) {
     state.haltCheckFrom = now;
   }
   if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
-  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent));
+  // PU-19: a session that stopped at its usage limit waits for the reset (its tool is marked out); it isn't a bad end.
+  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit);
   const last2 = mine.slice(-2);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
@@ -235,6 +236,12 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`asked ${preferred} whether it is really out: ${probeTool(preferred).why}`);
     }
     const tool = custom ? undefined : pickTool(preferred, now);
+    // PU-19: a role run by its own command (STUDIO_<ROLE>_CMD) whose limit line named no tool is marked "custom": wait for that reset too.
+    const customOut = custom ? exhaustedUntil('custom', now) : null;
+    if (customOut) {
+      why.push(`${g.role}: its command is out of quota until ${customOut} (npm run budget)`);
+      continue;
+    }
     if (!custom && !tool) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
