@@ -77,8 +77,10 @@ function inspectLock(file) {
   if (lock.expiresAt && Date.parse(lock.expiresAt) < Date.now()) return { expired: true, raw, lock };
   return { lock, raw };
 }
+// Never negative: a file's mtime can be a fraction of a millisecond ahead of Date.now() (finer timestamp
+// resolution), which made a grace of 0 skip a file written just before (seen in the 2.57.0 combined selftest).
 function ageOf(file) {
-  try { return Date.now() - fs.statSync(file).mtimeMs; } catch { return 0; }
+  try { return Math.max(0, Date.now() - fs.statSync(file).mtimeMs); } catch { return 0; }
 }
 
 function readLock(file) {
@@ -115,7 +117,7 @@ export function sweepBrokenLocks({ graceMs = brokenGraceMs(), dryRun = false } =
     try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
     let ok = true;
     try { ok = Boolean(JSON.parse(raw)) && typeof JSON.parse(raw) === 'object'; } catch { ok = false; }
-    if (ok || ageOf(file) < graceMs) continue;
+    if (ok || (graceMs > 0 && ageOf(file) < graceMs)) continue;
     if (dryRun || setAside(file, raw, raw.trim() ? 'half-written' : 'empty')) out.push(f);
   }
   if (!dryRun) sweepTemps(LOCK_DIR);
@@ -177,7 +179,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   // to make this recurse until the stack overflowed. Young: someone is writing it right now. Old: set it aside and
   // claim once more. Never more than one retry.
   if (seen.broken) {
-    if (seen.ageMs < brokenGraceMs()) return { ok: false, reason: 'claimed', writing: true, lock: null, message: `${k} is claimed (lock being written): its lock file is still being written. Pick another task, or try again in a few seconds.` };
+    if (brokenGraceMs() > 0 && seen.ageMs < brokenGraceMs()) return { ok: false, reason: 'claimed', writing: true, lock: null, message: `${k} is claimed (lock being written): its lock file is still being written. Pick another task, or try again in a few seconds.` };
     setAside(file, seen.raw, seen.raw === null ? 'unreadable' : seen.raw.trim() ? 'half-written' : 'empty');
   } else if (seen.expired) moveAside(file, null, seen.raw);
   if (again) return { ok: false, reason: 'busy', lock: null, message: `${k} is changing hands right now; try again in a moment.` };
