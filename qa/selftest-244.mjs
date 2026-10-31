@@ -46,6 +46,19 @@ export async function selftest244({ dir, run, report, tmpRoot }) {
   report('2.44.0: onboard --adopt gives a Vitest game\'s test check a related-tests command', /vitest related --run --passWithNoTests \{files\}/.test(man.gates?.find((x) => x.id === 'test')?.related || ''), `${out(ad)}\n${JSON.stringify(man)}`);
   report('2.44.0: onboard --sync refuses while the studio has unexported changes to the game; after an export it brings the game repo\'s new commits in as one commit, keeping the studio\'s change; then nothing to export and up to date', refused.status !== 0 && /haven't been sent back yet .*studio work/.test(out(refused)) && synced.status === 0 && /synced 1 commit\(s\)/.test(out(synced)) && /, committed/.test(out(synced)) && /boats = 3; \/\/ upstream/.test(fs.readFileSync(path.join(dir, 'game/harbour/src/boats.ts'), 'utf8')) && /piers = 2; \/\/ studio/.test(fs.readFileSync(path.join(dir, 'game/harbour/src/docks.ts'), 'utf8')) && origin.sha === upstreamSha && /nothing to export/.test(out(after)) && /up to date/.test(out(again)), `${out(refused)}\n---\n${out(synced)}\n---\n${out(after)}\n---\n${out(again)}`);
 
+  // 1b. Adopting cleared the template's example controls list, and the controls check waits with a note.
+  const cl = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/bible/controls.json'), 'utf8')); } catch { return {}; } })();
+  const cc = run(dir, 'node qa/controls-check.mjs', env);
+  report('2.44.0: adopting clears the template\'s example controls list (it was testing the wrong game); until the real list is written, the controls check is a note for an adopted game, not a permanent red', Array.isArray(cl.controls) && cl.controls.length === 0 && /cleared the template's example controls list/.test(out(ad)) && cc.status === 0 && /Harbour was adopted and its Game Bible has no controls list yet/.test(out(cc)) && /write the Game Bible's controls list for Harbour/.test(fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8')), `${out(ad)}\n${out(cc)}\n${JSON.stringify(cl)}`);
+
+  // 1c. Docs inside the game name the game's own scripts; what is missing there is a note, not a failure.
+  fs.writeFileSync(path.join(dir, 'game/harbour/HOWTO.md'), 'Run `npm run test` before a PR. Old: `npm run nope-gone`.\n');
+  const d1 = run(dir, 'node scripts/check-docs.mjs', env);
+  fs.writeFileSync(path.join(dir, 'docs/ZZ-244.md'), 'Run `npm run nope-studio`.\n');
+  const d2 = run(dir, 'node scripts/check-docs.mjs', env);
+  fs.rmSync(path.join(dir, 'docs/ZZ-244.md'));
+  report('2.44.0: the docs check reads a game\'s own Markdown against the game\'s own package.json (its `npm run test` passes); a command missing there is a note, while one missing from the studio\'s docs still fails', d1.status === 0 && /note: 1 command\(s\) in a game's own docs/.test(out(d1)) && /nope-gone/.test(out(d1)) && !/HOWTO\.md:1 npm run test /.test(out(d1)) && d2.status !== 0 && /ZZ-244\.md:1 npm run nope-studio/.test(out(d2)), `${out(d1)}\n---\n${out(d2)}`);
+
   // 2. Related tests: a gate whose full command fails and whose related command passes, so a pass means related ran.
   fs.writeFileSync(path.join(dir, 'game/harbour/studio.gates.json'), JSON.stringify({
     shared: ['game/harbour/package.json'],

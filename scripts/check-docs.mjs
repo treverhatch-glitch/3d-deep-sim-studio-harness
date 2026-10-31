@@ -28,19 +28,43 @@ const files = [];
 })(root);
 
 const problems = [];
+// 2.44.0: a Markdown file inside a folder with its own package.json (an adopted game under game/<slug>/) names
+// that package's scripts and files, not the studio's: a real game's docs failed here for `npm run lint`, which
+// its own package.json has. What is still missing there is the game's own doc rot: a note, not a failure.
+const notes = [];
+const pkgDirCache = new Map();
+const pkgDirFor = (rel) => {
+  let d = path.posix.dirname(rel);
+  while (d && d !== '.') {
+    if (pkgDirCache.has(d)) return pkgDirCache.get(d);
+    if (fs.existsSync(path.join(root, d, 'package.json'))) { pkgDirCache.set(d, d); return d; }
+    d = path.posix.dirname(d);
+  }
+  return '';
+};
+const scriptCache = new Map();
+const scriptsIn = (dir) => {
+  if (!scriptCache.has(dir)) { try { scriptCache.set(dir, new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, dir, 'package.json'), 'utf8')).scripts || {}))); } catch { scriptCache.set(dir, new Set()); } }
+  return scriptCache.get(dir);
+};
 for (const rel of files.filter((f) => !SKIP_FILES.has(f))) {
   const text = fs.readFileSync(path.join(root, rel), 'utf8');
+  const pkg = pkgDirFor(rel);
+  const own = pkg && pkg !== 'hub';
+  const sink = own ? notes : problems;
   text.split(/\r?\n/).forEach((line, i) => {
     for (const m0 of line.matchAll(/\bnpm run ([a-z][\w:.-]*)/g)) {
       // "npm run asset." at the end of a sentence names the asset script (run #1: a Producer log line broke preflight).
       const m = [m0[0], m0[1].replace(/[.:-]+$/, '')];
-      if (!scripts.has(m[1]) && !hubScripts.has(m[1])) problems.push(`${rel}:${i + 1} npm run ${m[1]} (no such script in package.json)`);
+      const known = own ? scriptsIn(pkg).has(m[1]) : scripts.has(m[1]) || hubScripts.has(m[1]);
+      if (!known) sink.push(`${rel}:${i + 1} npm run ${m[1]} (no such script in ${own ? `${pkg}/` : ''}package.json)`);
     }
     for (const m of line.matchAll(/\b(?:node|bash)\s+((?:\.\/)?(?:harness|scripts|qa|hub|tools|cartridges)\/[\w./-]+\.(?:mjs|js|sh|py))/g)) {
-      if (!fs.existsSync(path.join(root, m[1]))) problems.push(`${rel}:${i + 1} ${m[0]} (no such file)`);
+      if (!fs.existsSync(path.join(root, own ? pkg : '', m[1]))) sink.push(`${rel}:${i + 1} ${m[0]} (no such file${own ? ` in ${pkg}/` : ''})`);
     }
   });
 }
+if (notes.length) console.log(`[docs] note: ${notes.length} command(s) in a game's own docs that its package.json or folder doesn't have (its doc rot, not the studio's):\n${notes.slice(0, 10).map((n) => `  ${n}`).join('\n')}${notes.length > 10 ? `\n  … and ${notes.length - 10} more` : ''}`);
 if (problems.length) {
   console.log(`[docs] FAIL ${problems.length} command(s) in the docs don't exist:`);
   console.log(problems.map((p) => `  ${p}`).join('\n'));

@@ -113,6 +113,18 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
   fs.writeFileSync(originFile(root), `${JSON.stringify(origin, null, 2)}\n`);
   const { setActiveGame } = await import('./cartridge.mjs');
   setActiveGame(slug);
+  // 2.44.0: the template's example controls list (the example game's B key and Buy button) is not this game's:
+  // clear it, so the controls check waits for the real list instead of testing the wrong game. A list someone
+  // wrote is kept, with a note.
+  const cf = path.join(root, 'studio', 'bible', 'controls.json');
+  try {
+    const cj = JSON.parse(fs.readFileSync(cf, 'utf8'));
+    const ids = (cj.controls || []).map((c) => c.id).sort().join(',');
+    if (ids === 'buy-button,buy-unit') {
+      fs.writeFileSync(cf, `${JSON.stringify({ note: `Every control a player has in ${name}, in the Game Bible: id, name, input, expect, and the sim value it must change (effect). The controls check fails the build when a listed control has no passing real-input result. Only a person changes this list (a protected file).`, tracks: ['web'], controls: [] }, null, 2)}\n`);
+      warnings.push(`cleared the template's example controls list (studio/bible/controls.json): write ${name}'s own (a task is queued)`);
+    } else if (ids) warnings.push(`studio/bible/controls.json already lists ${cj.controls.length} control(s): check they are ${name}'s`);
+  } catch {}
   if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: cd ${rel} && npm ci`);
   return { ok: true, slug, dir: rel, origin, gates, wroteGates, warnings };
 }

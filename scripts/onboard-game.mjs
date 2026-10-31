@@ -238,6 +238,7 @@ const tasks = [
   { title: `Wrap ${name} in a cartridge adapter: seeded RNG, fixed tick, getState, hash (see qa/browser.adapter.mjs)`, role: 'builder', priority: 'P1', meta: { infra: true } },
   { title: `Playtest: first seeded run of ${name}, then record its golden`, role: 'qa-playtester', priority: 'P2' },
   { title: `Docs: import ${name}'s known bugs into qa/reports with steps or a seed`, role: 'qa-playtester', priority: 'P2' },
+  ...(adopted ? [{ title: `Docs: write the Game Bible's controls list for ${name} (every key, button and click, each with the sim value it must change: studio/bible/controls.json, the owner signs it) and an input test that reports them (qa/reports/controls-web.json)`, role: 'producer', priority: 'P1', meta: { infra: true } }] : []),
   adopted
     ? { title: `Review: the checks ${adopted.dir}/studio.gates.json declares for ${name} (keep, mark optional, add what is missing), then npm run verify`, role: 'reviewer', priority: 'P1' }
     : { title: `Review: choose which gates apply to ${name} now and which wait (studio/gates.json)`, role: 'reviewer', priority: 'P2' },
