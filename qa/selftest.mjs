@@ -3465,6 +3465,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// PU-20: the protected-files check also sees uncommitted and already-pushed edits (qa/selftest-pu20.mjs).
+{
+  const dir = copyRepo();
+  const { selftestPU20 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu20.mjs')).href);
+  await selftestPU20({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

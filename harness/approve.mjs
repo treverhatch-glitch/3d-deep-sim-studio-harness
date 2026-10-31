@@ -21,6 +21,11 @@
  * from the branch under review, so an agent can't swap in its own key; and the signed hashes must match
  * the files exactly, so an approval can't be reused for a different edit. Until the base branch has an
  * owner key, nothing is enforced (the check says so).
+ *
+ * PU-20: the check judges the working tree (committed, staged, unstaged and untracked protected files), also
+ * when the base is at HEAD (nothing committed yet, or just pushed). With no base branch at all (no remote, on
+ * the studio's own branch) it judges every change since the commit that set the owner key, file by file,
+ * against the hashes the owner's approvals recorded, instead of passing.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,7 +66,12 @@ export function ownerPublicKey(base = null) {
   return /BEGIN PUBLIC KEY/.test(pem || '') ? pem : null;
 }
 
-/** Which branch to compare with: STUDIO_PROTECT_BASE, the PR's base in CI, the lane's studio branch, else origin/main. */
+/**
+ * Which branch to compare with: STUDIO_PROTECT_BASE, the PR's base in CI, the lane's studio branch, else origin/main.
+ * PU-20: a base at HEAD itself (nothing committed since, or just pushed) is still used, so uncommitted edits are
+ * judged; with no other branch at all (no remote, on the studio's own branch) the base is the last commit that
+ * set the owner key, and changes since then are judged by the approvals' recorded hashes ({ byHash: true }).
+ */
 export function resolveBase(env = process.env) {
   const tries = [];
   if (env.STUDIO_PROTECT_BASE) tries.push(env.STUDIO_PROTECT_BASE);
@@ -69,10 +79,18 @@ export function resolveBase(env = process.env) {
   if (env.STUDIO_MAIN_ROOT) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) tries.push(b); }
   tries.push('origin/main', 'main');
   const head = git(['rev-parse', 'HEAD']).stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(head)) return null;
+  const own = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
+  let atHead = null;
   for (const t of tries) {
     const mb = git(['merge-base', 'HEAD', t]).stdout.trim();
-    if (/^[0-9a-f]{40}$/.test(mb) && (mb !== head || t === env.STUDIO_PROTECT_BASE)) return { ref: t, base: mb };
+    if (!/^[0-9a-f]{40}$/.test(mb)) continue;
+    if (mb !== head || t === env.STUDIO_PROTECT_BASE) return { ref: t, base: mb };
+    if (!atHead && t !== own) atHead = { ref: t, base: mb };
   }
+  if (atHead) return atHead;
+  const keyCommit = git(['log', '-1', '--format=%H', '--diff-filter=AM', 'HEAD', '--', OWNER_PUB_REL]).stdout.trim();
+  if (/^[0-9a-f]{40}$/.test(keyCommit)) return { ref: `${keyCommit.slice(0, 8)} (the commit that set the owner key; no base branch)`, base: keyCommit, byHash: true };
   return null;
 }
 
@@ -120,11 +138,20 @@ export function verifyApproval(doc, publicPem) {
 /** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
 export function checkProtected({ env = process.env } = {}) {
   const b = resolveBase(env);
-  if (!b) return { enforced: false, ok: true, changes: [], why: 'no base branch to compare with' };
+  if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet` };
   const pub = ownerPublicKey(b.base);
   const changes = protectedChanges(b.base);
   if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: run npm run approve -- keygen on the owner's machine and commit the public key` };
-  if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: 'no protected file changed' };
+  if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: `no protected file changed since ${b.ref}, committed or not` };
+  if (b.byHash) {
+    // PU-20, no base branch: each changed file's content must be one an owner approval recorded (path + hash).
+    const signed = readApprovals().filter((a) => a.approval?.kind === 'protected' && verifyApproval(a, pub));
+    const ok = new Set(signed.flatMap((a) => (a.approval.files || []).map((f) => `${f.path}\n${f.sha256}`)));
+    const open = changes.filter((c) => !ok.has(`${c.path}\n${c.sha256}`));
+    if (!open.length) return { enforced: true, ok: true, changes, base: b.ref, why: `every protected file changed since ${b.ref} has contents an owner approval recorded` };
+    const stale = open.some((c) => signed.some((a) => (a.approval.files || []).some((f) => f.path === c.path)));
+    return { enforced: true, ok: false, changes: open, base: b.ref, change: changeId(changes), why: `${open.length} protected file(s) changed since ${b.ref} with no owner approval for exactly these contents${stale ? ' (an approval exists, but for different contents: the files changed after it was signed)' : ''}` };
+  }
   const id = changeId(changes);
   const approved = readApprovals().filter((a) => a.approval?.kind === 'protected' && a.approval.change === id && verifyApproval(a, pub));
   if (approved.length) return { enforced: true, ok: true, changes, base: b.ref, why: `approved by ${approved[0].approval.by} (${approved[0].file})`, change: id };
