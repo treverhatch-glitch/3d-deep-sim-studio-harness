@@ -72,3 +72,6 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **What happened:** the packed rules failed in Jint: `structuredClone is not defined`.
 - **Workaround:** a small JSON-based structuredClone before loading the rules. All 3 replays still match exactly.
 - **Harness fix?** Maybe: if shared rules (option A) is chosen, a ready-made host for the packed rules with these globals.
+- **2026-10-31:** PR #21 (these logs, documents only) was merged **without online checks**, on Hatch's OK. GitHub
+  wouldn't start them (P-010), and no payment method or spending limit is added (Hatch's rule). Local checks
+  instead: the docs check and the secret scan on this branch, and the full selftest on main's code (777 pass).
