@@ -218,3 +218,34 @@ subscription or API billing).
 - **Caught:** I stopped it while it was still waiting for the checks; nothing was pushed (the backup branch is still
   at 60e59bf). The restarted watcher pushes a new branch, `backup/pre-2.54.0-merge`, with no force.
 - **Lesson:** background commands get the same rule check as foreground ones; a backup is always a new branch name.
+
+## From the crew (logged in studio-hatchfield by opus-1, copied here so the harness keeps one list)
+
+### P-030 — `npm run onboard -- --sync --dry-run` applies and commits anyway · open (2026-10-31, opus-1)
+- **What happened:** in `studio-hatchfield`, `npm run onboard -- --sync --ref main --dry-run` synced the game
+  (5ffd051a..ff88183b, 31 files) and committed it straight away, before Hatch could review it.
+- **Why:** `scripts/onboard-game.mjs` reads `--dry-run` only on the scan and adopt paths, not on `--sync`.
+- **Workaround:** none. Review what `--sync` would bring in with `git log <adopted>..<ref>` in the game repo first.
+  This time Hatch kept the commit.
+- **Harness fix?** Yes: `--sync --dry-run` should print the commits and files and write nothing.
+
+### P-031 — `npm run hub:build` type check fails on Windows (`*.tsx` not expanded) · open (2026-10-31, opus-1)
+- **What happened:** `tsc ... *.tsx` → `error TS6053: File '*.tsx' not found` on Windows. The Vite build itself
+  succeeds.
+- **Why:** cmd and PowerShell don't expand globs; npm runs the script through cmd on Windows.
+- **Workaround:** run tsc with the file names listed out. It passes (exit 0, 6 files).
+- **Harness fix?** Yes: list the files in a small node script, or use a tsconfig in `hub/`.
+
+### P-032 — An unchosen pace lets the Director auto-start agents · open (2026-10-31, opus-1)
+- **What happened:** after `task resume`, the watcher auto-started `producer-auto-6` (claude, Opus) on T-006.
+  The watchdog then stopped the studio again ("6 sessions, no task finished in 2 h").
+- **Why:** `harness/agent.mjs` `fillAgents` lets the Director start agents while the pace is unchosen, even in the
+  default "Precise and slow" mode.
+- **Workaround:** set the pace explicitly (`npm run mode -- set precise --by hatch`). Done.
+- **Harness fix?** Yes: an unchosen pace should never start agents, or `setup` should ask for one.
+
+### P-033 — Game: `src/branding/Finance.tsx` and `finance.ts` clash on Windows · fix in T-026 (2026-10-31, opus-1)
+- **What happened:** the game's typecheck and build fail on Windows with TS2305 and TS1149, because `./Finance`
+  resolves to `finance.ts`. They pass on Linux.
+- **Fix:** rename it to `FinanceCards.tsx` (T-026, lane `opus-1`).
+- **Harness fix?** Maybe: the adopt scan could flag paths that differ only in case.
