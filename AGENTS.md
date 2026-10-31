@@ -80,7 +80,7 @@ Logging `editing` is not enough. Use the lock helper.
 - `node harness/lock.mjs release <key> --owner cursor-win2`
 - `node harness/task.mjs done <ID> --agent cursor-win2` (only the owner can finish a claimed task, and only once its
   done-check passes: `node harness/done-check.mjs <ID>` shows what is missing; how each kind of task finishes is in `studio/skills/`)
-- `--force` finishes anyway, but it is logged and the Producer gets a P1 `Check forced done` task
+- `--force` finishes anyway, but it is logged and the Producer gets a P1 `Check forced done` task. Agents don't force: ask the owner, who types it (docs/FORCED-CLOSE.md)
 - Out of usage or being swapped? `node harness/task.mjs pause <ID> --agent <you> --note "where you stopped"` hands it back with a note for the next agent
 - `npm run verify` before calling it done; `npm run release` before a merge
 - Update `CURRENT_TASK.md`
