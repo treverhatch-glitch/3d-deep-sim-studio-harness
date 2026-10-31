@@ -123,10 +123,15 @@ export function emitEvent(partial = {}) {
   const { primary, mirrors } = getEventPaths();
 
   fs.mkdirSync(path.dirname(primary), { recursive: true });
-  // Rotate before the log gets heavy: readers only need the recent end (STUDIO_EVENTS_MAX_MB, default 25).
+  // Rotate before the log gets heavy (STUDIO_EVENTS_MAX_MB, default 25). Readers go on into the rolled files when the
+  // new one is short (readRecentEvents). Two writers rolling in the same millisecond: the second one leaves the
+  // first one's rolled file alone instead of replacing it with the new, nearly empty log.
   try {
     const maxBytes = Number(process.env.STUDIO_EVENTS_MAX_MB || 25) * 1024 * 1024;
-    if (fs.statSync(primary).size > maxBytes) fs.renameSync(primary, primary.replace(/\.jsonl$/, `-${now.replace(/[:.]/g, '-')}.jsonl`));
+    if (fs.statSync(primary).size > maxBytes) {
+      const rolled = primary.replace(/\.jsonl$/, `-${now.replace(/[:.]/g, '-')}.jsonl`);
+      if (!fs.existsSync(rolled)) fs.renameSync(primary, rolled);
+    }
   } catch {
     // no log yet
   }
@@ -149,14 +154,100 @@ export function emitEvent(partial = {}) {
 }
 
 /**
- * Read the last `limit` events from `.studio/events.jsonl`.
+ * The files the log rolled over into (`events-<time>.jsonl` beside it), newest first. The time in the name is
+ * fixed-width, so name order is time order.
+ */
+export function rolledEventFiles(primary = getEventPaths().primary) {
+  if (!/\.jsonl$/.test(primary)) return [];
+  const dir = path.dirname(primary);
+  const base = path.basename(primary, '.jsonl').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${base}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z\\.jsonl$`);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((n) => re.test(n));
+  } catch {
+    return [];
+  }
+  return names.sort().reverse().map((n) => path.join(dir, n));
+}
+
+/**
+ * The last `need` non-empty lines of a file (all of them when `need` <= 0), oldest first. Reads backwards in
+ * growing chunks, so a few recent lines of a 25 MB file cost a few hundred KB, and stops after `maxBytes`.
+ * Lines are cut on the newline byte before decoding, so a character split across chunks can't be garbled.
+ */
+function tailLines(file, need, maxBytes = Infinity) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+  } catch {
+    return [];
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const chunks = [];
+    let pos = size;
+    let newlines = 0;
+    let step = 256 * 1024;
+    const lines = () => {
+      const buf = Buffer.concat(chunks);
+      const nl = buf.indexOf(10);
+      const from = pos === 0 ? 0 : nl === -1 ? buf.length : nl + 1; // the first line may be cut: drop it unless at the start
+      return buf.toString('utf8', from).split('\n').filter((l) => l.trim().length > 0);
+    };
+    while (pos > 0 && size - pos < maxBytes) {
+      const len = Math.min(step, pos, maxBytes - (size - pos));
+      const buf = Buffer.allocUnsafe(len);
+      let got = 0;
+      while (got < len) {
+        const n = fs.readSync(fd, buf, got, len - got, pos - len + got);
+        if (n <= 0) break;
+        got += n;
+      }
+      if (got < len) break; // the file shrank under us: keep what was read
+      pos -= len;
+      chunks.unshift(buf);
+      for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) newlines++;
+      if (need > 0 && newlines > need) {
+        const got2 = lines();
+        if (got2.length >= need) return got2.slice(-need);
+      }
+      step = Math.min(step * 2, 16 * 1024 * 1024);
+    }
+    const all = lines();
+    return need > 0 ? all.slice(-need) : all;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Read the last `limit` events from `.studio/events.jsonl` (`limit` <= 0: the whole current file).
+ *
+ * 2.58.0 (PU-41, P-058): when the log has rolled over (STUDIO_EVENTS_MAX_MB), the current file can hold only a few
+ * events, and `task show`, the start commit for "no code changed", a task's lane and the watcher's "last heard"
+ * lost everything before the roll-over. A reader asking for N events now goes on into the rolled files, newest
+ * first and read from the end, until it has N; it reads at most twice STUDIO_EVENTS_MAX_MB of them, so asking for a
+ * huge N can't pull the whole history into memory. Appends are unchanged (no copying at roll-over).
  */
 export function readRecentEvents(limit = 100) {
   const { primary } = getEventPaths();
-  if (!fs.existsSync(primary)) return [];
-  const raw = fs.readFileSync(primary, 'utf8');
-  const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-  const slice = limit > 0 ? lines.slice(-limit) : lines;
+  const want = Number(limit) > 0 ? Number(limit) : 0;
+  let slice = tailLines(primary, want);
+  if (want && slice.length < want) {
+    let budget = 2 * Number(process.env.STUDIO_EVENTS_MAX_MB || 25) * 1024 * 1024;
+    for (const f of rolledEventFiles(primary)) {
+      if (slice.length >= want || !(budget > 0)) break;
+      let size = 0;
+      try {
+        size = fs.statSync(f).size;
+      } catch {
+        continue;
+      }
+      slice = tailLines(f, want - slice.length, budget).concat(slice);
+      budget -= size;
+    }
+  }
   const out = [];
   for (const line of slice) {
     try {
