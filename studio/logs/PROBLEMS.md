@@ -143,7 +143,7 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
   9 affected test files pass (29 tests); the replays didn't change.
 - **Harness fix?** Worth a line in docs/UNITY-TRACK.md step 1: seeding must not take rolls the old code didn't.
 
-### P-021 — hatchfield-game main has been red on GitHub since at least Oct 17 · investigating
+### P-021 — hatchfield-game main has been red on GitHub since at least Oct 17 · investigated, fix is a crew task
 - **What happened:** every push to main fails CI (9 tests: 8 browser screen tests time out, 1 sim test hits its
   20 s limit). PR #42 (docs and workflow only) failed the same way, so no PR can get a green check.
 - **Status:** an investigation agent is looking for the cause and the fix; report to Hatch first.
@@ -249,3 +249,33 @@ subscription or API billing).
   resolves to `finance.ts`. They pass on Linux.
 - **Fix:** rename it to `FinanceCards.tsx` (T-026, lane `opus-1`).
 - **Harness fix?** Maybe: the adopt scan could flag paths that differ only in case.
+
+### P-021 findings (2026-10-31, investigated by hand; the investigation agent was stopped)
+- **No green CI run on any branch since 2026-10-16 22:26 UTC.** All 9 failures are timeouts; none is a wrong value.
+- **The 8 browser tests: the game draws one frame every ~5 s in a headless browser** (software 3D, no GPU).
+  Measured on a 2-core box with Playwright's Chromium (SwiftShader): title screen 0.2 fps, in game 0.2 fps; the
+  game clock moved 0.1 game-seconds in 10 real seconds (game time advances per frame). A blank page runs at 52 fps
+  and a plain WebGL page at 43 fps, so the browser is fine. A CPU profile shows the page's main thread 93% idle:
+  it waits on the software renderer. The game's own "low" graphics setting and a small window barely help (0.2 to
+  0.6 fps). **Skipping only the 3D draw call** (a scratch edit, never committed) gave 48 fps on the title screen,
+  15 fps in game, and 9.4 game-seconds per 10 s: about 90 times faster. Run one at a time with nothing else
+  running, 6 of the 7 that could start still timed out, so this is not mainly CPU contention.
+- **The sim tests (security.serve in CI; occupancy, contractPacing and the hub-meltdown tests on Hatch's PC): a
+  different cause, sharing the CPU.** They pass alone, but use much of their time limit: security.serve 10.7 s
+  (limit 20 s), occupancy ~16 s, contractPacing at 3x 16.8 s (limit 60 s). In a full parallel run, alongside
+  browser tests rendering in software for minutes, they cross the limits. Fixing the browser tests frees CPU.
+- **One more:** infoViews.e2e finds Chrome only at /usr/bin/google-chrome; elsewhere it can't start.
+- **Effect while red:** no PR in the game repo can show a green check, and a real regression would hide behind the
+  red. With 2.54.0 the studio's done-check excuses exactly these failing test names (PU-06), so crew work isn't
+  blocked. Players aren't affected: the tests are slow, not wrong (UNPROVEN on a machine with a real GPU).
+- **The fix is one crew task (hatchfield-game, not the harness):**
+
+  > Fix: main's red CI. (1) Add a test-only page switch (`?noRender=1`) that skips `renderer.render` in
+  > src/render/world.ts and src/render/interior/InteriorView.ts (2 lines; never on in a normal page). (2) The 8
+  > *.e2e.test.ts files open the page with it through one shared helper; the tests that save screenshots keep
+  > drawing and move to a separate `npm run test:visual` that CI doesn't run by default. (3) infoViews.e2e uses
+  > PLAYWRIGHT_CHROME and Playwright's own Chromium like the others. (4) Heavy sim tests (security.serve,
+  > atc/occupancy, contractPacing, hub live.edge) get time limits of at least 3x their measured time alone, and CI
+  > runs `vitest run --maxWorkers=2`. Proof: `npm test` green 3 runs in a row locally and on GitHub, with a
+  > before/after table of the browser tests' times. Size: half a day to a day. Files: 2 render lines, 8 e2e tests
+  > (+1 helper), 4 sim tests, the CI workflow.
