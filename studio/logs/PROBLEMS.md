@@ -211,3 +211,10 @@ subscription or API billing).
   launcher names and claim names are checked for clashes at claim time. Test: a selftest with an ended `opus-1`
   record and a fresh claim by `opus-1` keeps the claim. Size S.
 - **Found by:** the 2.54.0 metrics command on the crew's real log; the attempt is labelled env-harness.
+
+### P-029 — I wrote a force-push into a background merge command · caught before it ran
+- **What happened:** the watcher I started to merge 2.54.0 on green checks included `git push -f` to refresh the
+  backup branch `backup/pre-2.54.0`. Hatch's rules forbid force-pushes.
+- **Caught:** I stopped it while it was still waiting for the checks; nothing was pushed (the backup branch is still
+  at 60e59bf). The restarted watcher pushes a new branch, `backup/pre-2.54.0-merge`, with no force.
+- **Lesson:** background commands get the same rule check as foreground ones; a backup is always a new branch name.
