@@ -30,7 +30,7 @@ npm run engine -- propose unity --by <producer> --why "…"   # a question for t
 npm run engine:sim        # the sim: purity and tests with .NET (no editor)
 npm run parity            # the C# sim against the web game, seed by seed (no editor)
 npm run engine:gate       # the editor: Edit Mode and Play Mode tests, the controls test
-npm run engine:build      # a playable WebGL build (--target windows for an .exe)
+npm run engine:build      # the playable Windows .exe (--target web for WebGL)
 ```
 
 The template is a worked port of the template game, proven on .NET. Purity is clean and its 7 tests pass. Parity
@@ -56,11 +56,20 @@ npm run engine -- link unity ../my-unity-port --build windows --web "<web runs c
   seed, like the port's (`{"seed":1,"outcome":"won","tick":300,"cash":…}`). Both are compared field by field.
 - `--source` names the web folders whose changes count as drift (`npm run engine -- drift`).
 
-## Render pipeline: URP now, HDRP later
+## Windows by default (2.48.0)
 
-The template and Hatchfield use **URP** at maximum quality. Unity's 2026 plan puts new lighting work into URP,
-and HDRP gets no new features. HDRP stays an option for the best lighting on PC; it can't build for the
-browser. To switch later:
+A Unity track builds a Windows `.exe` by default (`npm run engine:build`, CI's engine-unity-build), with no
+browser export: the web version is the browser game, and the Arcade lists the Unity build as native.
+`--target web` (or `npm run engine -- link unity <repo> --build web`) makes a WebGL build when a game wants one.
+
+## Render pipeline: URP or HDRP
+
+The template uses no particular pipeline. **Hatchfield uses HDRP at maximum quality** (decided 2026-10-31): a
+Windows game, so HDRP's lack of a browser build doesn't matter. Its Unity repo has a one-click set-up
+(`Assets/Editor/HdrpSetup.cs`, menu Hatchfield > Switch to HDRP). Know before choosing: Unity's 2026 plan puts
+new lighting work into URP, and HDRP gets stability fixes but no new features. HDRP's first build compiles
+thousands of shaders, so expect 30–60 minutes on CI. Ray tracing needs DirectX 12 and an RTX-class card. To
+switch a project by hand:
 
 1. In Unity, Package Manager → install **High Definition RP** (the same 17.x line as URP).
 2. **Window → Rendering → HDRP Wizard → Fix All**: it creates the HDRP asset and global settings and makes
@@ -102,12 +111,11 @@ leaking in.
 ## Playing it while it's built
 
 - **In the editor:** open `engine/<game>` in Unity Hub and press Play. The game boots itself in any scene.
-- **A Windows build:** `npm run engine:build -- --target windows` makes `Build/Windows/Game.exe`.
-- **In a browser:** `npm run engine:build` (WebGL) makes `Build/WebGL`. That is the track's web export, so the
-  Arcade's engine tab plays it beside the web version. It is compressed with the browser-side fallback, so
-  any static host (Cloudflare Pages, say) can serve it.
-- **From CI:** once the licence secrets exist, every push to main builds WebGL and attaches it to the run as
-  the `unity-webgl` artifact.
+- **A Windows build** (the default): `npm run engine:build` makes `Build/Windows/Game.exe`.
+- **In a browser** (only if the game wants it): `npm run engine:build -- --target web` makes `Build/WebGL`,
+  compressed with the browser-side fallback so any static host can serve it.
+- **From CI:** once the licence secrets exist, every push to main builds the Windows game and attaches it to the
+  run as the `unity-windows` artifact.
 
 The web build stays playable the whole time. Once the Unity build catches up, it's the one to play.
 

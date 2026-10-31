@@ -4,6 +4,18 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.48.0] — 2026-10-31
+2.48.0: the Unity track's default is a Windows game (Hatchfield's decision: HDRP at max quality, played as an .exe; the
+web version stays the browser game).
+### Changed
+- A Unity track builds a Windows `.exe` by default (`npm run engine:build`, `harness/unity.mjs build`), with no
+  browser export: `webExport` is null and `buildTarget` is `windows`. `--target web` (or `link … --build web`)
+  still makes WebGL.
+- CI's engine-unity-build makes the template's Windows build (`unity-windows` artifact).
+- `docs/UNITY-TRACK.md`: Windows by default; URP or HDRP (Hatchfield: HDRP; first HDRP build 30–60 minutes;
+  ray tracing needs DirectX 12 and an RTX-class card; HDRP gets no new features in Unity's 2026 plan).
+- `qa/selftest-248.mjs`.
+
 ## [2.47.0] — 2026-10-31
 2.47.0: the owner-approved upgrades U-001 and U-002 from the studio logs, for a game whose web version is adopted and whose
 Unity port is its own repo, with the harness checks free on a private repo.
