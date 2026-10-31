@@ -3574,6 +3574,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// P-067 (crew P-037): an owner-approved step writes agy's headless allow-rules from the harness allowlist, and the
+// launcher says when they're missing (qa/selftest-259i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259i.mjs')).href);
+  await selftest259I({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

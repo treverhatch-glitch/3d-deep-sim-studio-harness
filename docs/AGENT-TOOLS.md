@@ -15,11 +15,46 @@ agent's task, lock and event commands, and its commits, carry its name and model
 | Codex CLI | `codex exec - < prompt.md` | `--sandbox workspace-write` (read-only by default) | `CODEX_API_KEY`, for that one command | `--json` gives JSON Lines. Must run inside a git repo. `--full-auto` is gone |
 | Cursor CLI | `agent -p "<prompt>"` | `--force` (or `--yolo`) | `CURSOR_API_KEY` | `--output-format text\|json\|stream-json` |
 | Grok Build CLI | `grok -p "<prompt>"` | `--always-approve` | `XAI_API_KEY` or `grok login` | Early beta (SuperGrok, X Premium+). `-m` picks the model; `--output-format plain\|json\|streaming-json` |
-| Antigravity CLI | `agy -p "<prompt>"` | — | Antigravity key (`AV_API_KEY` in the migration guides) | Replaced Gemini CLI for personal Google accounts on June 18, 2026. Paid Gemini API keys and Code Assist Standard/Enterprise can still use `gemini`. agy exits early unless it has `--print-timeout` and a closed stdin, so the kickoff line adds both |
+| Antigravity CLI | `agy -p "<prompt>"` | workspace files: always; shell commands: only those its `settings.json` allows (see [agy's allow-rules](#agys-allow-rules-the-owner-enrols-them-once)) | Antigravity key (`AV_API_KEY` in the migration guides) | Replaced Gemini CLI for personal Google accounts on June 18, 2026. Paid Gemini API keys and Code Assist Standard/Enterprise can still use `gemini`. agy exits early unless it has `--print-timeout` and a closed stdin, so the kickoff line adds both |
 | Aider + Ollama | `aider --model ollama_chat/<model> --message-file prompt.md` | `--yes` | none (local) | One instruction, then exits: give it one small task. Ollama's default 2k context silently drops text: start it with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` |
 
 Free tiers change often and sources disagree (for example on Gemini's daily request limits), so check
 your own account's quota page rather than trusting a number in a doc, this one included.
+
+## agy's allow-rules: the owner enrols them once
+
+Claude agents get the harness's command list (`harness/allowlist.mjs`: node, npm, npx, ffmpeg, blender, read-only
+git plus add and commit, ls, mkdir, cp, mv) on their command line. agy has no such flag: in headless mode a shell
+command is "Ask", nobody is there to answer, so it is skipped ("a tool required the `command` permission that
+headless mode cannot prompt for, so it was auto-denied") and the run still exits 0. agy reads what it may run from
+one file, `~/.gemini/antigravity-cli/settings.json` (`%USERPROFILE%\.gemini\antigravity-cli\settings.json` on
+Windows). It is the owner's own file, for every agy run on that machine, so the owner writes the rules, not an
+agent:
+
+```bash
+npm run agent -- allow agy --dry-run                        # the file and the rules; writes nothing
+npm run agent -- allow agy --by <your name> --scope user    # merge them in
+```
+
+- It adds the harness list under `permissions.allow`, two rules per entry: `command(npm)` (agy matches a command's
+  leading words) and `command(regex:^npm(?: …)?$)` (on Windows, PowerShell or cmd lines that can't be split into
+  words need `regex:`, per Google's docs; the pattern refuses `;`, `&&`, `|` and `$(…)`, so a chained second command
+  still asks).
+- It only adds: your other settings and your own allow, ask and deny rules stay (deny still beats allow). The file
+  is copied to `settings.json.bak-<time>` first and written atomically. A second run adds nothing. A file that isn't
+  plain JSON is left alone and the rules are printed to paste by hand.
+- `--scope user` is required: agy documents no project-level settings file, so the default (`--scope project`)
+  writes nothing and says so. `--by` names who approved it (event `agy.allow_enrolled`); it refuses an agent's name
+  or a launched session.
+- It never turns on a skip-all mode (`always-proceed`, `--dangerously-skip-permissions`); that stays for a frozen
+  test clone (`STUDIO_AGY_BYPASS=1`).
+- Until it's done, `npm run agent -- start … --tool agy` prints `agy has no allow-rules: run npm run agent -- allow
+  agy --by <owner> (dry-run first)` and starts anyway (event `agy.allow_missing`, at most hourly). It also covers
+  agy reviews, which use the same file. node and npm can execute any code, for agy as for Claude: these rules
+  spare prompts, they are not a sandbox.
+- Not confirmed from Google's docs: whether a CLI `regex:` rule is anchored, and against which text exactly (the
+  rules carry their own `^…$`). If agy's format changes, `agyRulesFor()` in `harness/agy-allow.mjs` is the one
+  place to change.
 
 ## Best practices for a run
 
@@ -47,5 +82,8 @@ your own account's quota page rather than trusting a number in a doc, this one i
 - Cursor CLI headless: https://cursor.com/docs/cli/headless
 - Grok Build CLI headless scripting: https://docs.x.ai/build/cli/headless-scripting
 - Gemini CLI to Antigravity CLI migration: https://agentpedia.codes/blog/gemini-cli-to-antigravity-cli-migration
+- Antigravity CLI permissions (rule syntax, `regex:` on Windows): https://antigravity.google/docs/permissions?tab=cli
+- Antigravity CLI headless mode (soft-denied tools, `permissions.allow`): https://antigravity.google/docs/cli/headless
+- Antigravity CLI settings (the one settings file): https://antigravity.google/docs/settings?app=cli
 - Aider with Ollama: https://aider.chat/docs/llms/ollama.html
 - Aider scripting flags: https://aider.chat/docs/scripting.html
