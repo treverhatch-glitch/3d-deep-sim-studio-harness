@@ -3632,6 +3632,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// P-044: the War Room browser checks wait for the page state instead of reading it once, and the Stop/Pause
+// checks can be repeated on their own (qa/selftest-2582j.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2582J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582j.mjs')).href);
+  await selftest2582J({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
