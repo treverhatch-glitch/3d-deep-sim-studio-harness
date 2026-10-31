@@ -53,6 +53,15 @@ for (const [d, re] of SIGNOFFS) {
   if (fs.existsSync(full)) for (const f of fs.readdirSync(full)) if (re.test(f)) toRemove.push(path.join(full, f));
 }
 const events = path.join(root, '.studio', 'events.jsonl');
+// 2.58.0 (PU-41): the files the log rolled over into go to the archive too. Readers go on into them when the log is
+// short, so left behind they would show the last project's tasks in the new one.
+const rolledEvents = (() => {
+  try {
+    return fs.readdirSync(path.join(root, '.studio')).filter((f) => /^events-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.jsonl$/.test(f)).map((f) => path.join(root, '.studio', f));
+  } catch {
+    return [];
+  }
+})();
 
 console.log(`[reset] fresh studio for "${name}"`);
 console.log(`[reset] rewrite: ${REWRITE.join(', ')}`);
@@ -72,6 +81,20 @@ for (const f of [...toRemove, ...REWRITE.map((r) => path.join(root, r)), events]
 }
 for (const f of toRemove) fs.rmSync(f, { force: true });
 if (fs.existsSync(events)) fs.rmSync(events);
+for (const f of rolledEvents) {
+  const dest = path.join(archive, rel(f));
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try {
+    fs.renameSync(f, dest); // moved, not copied: these can be 25 MB each
+  } catch {
+    try {
+      fs.copyFileSync(f, dest);
+      fs.rmSync(f, { force: true });
+    } catch (err) {
+      console.warn(`[reset] could not move ${rel(f)} to the archive (${err.code || err.message}); delete it by hand`);
+    }
+  }
+}
 fs.rmSync(path.join(root, '.studio', 'locks'), { recursive: true, force: true });
 for (const f of ['meeting.json', 'watch-last.json', 'gates-last.json', 'gates-last-full.json', 'last-seed-failure.json', 'closed-loop-state.json']) fs.rmSync(path.join(root, '.studio', f), { force: true });
 

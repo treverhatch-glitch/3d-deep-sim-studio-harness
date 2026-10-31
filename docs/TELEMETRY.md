@@ -12,5 +12,12 @@ Every token number the harness shows is one a tool reported. Nothing is estimate
   isn't billed it. It is shown only as the tool reported it.
 - **Savings:** only what rtk itself measured on the shell output it filtered. A total of "tokens saved" can't
   be measured honestly (nobody knows what an agent would have read otherwise), so none is shown.
+- **The log:** `.studio/events.jsonl` (or `AGENT_EVENTS_FILE`), one JSON event per line. Past
+  `STUDIO_EVENTS_MAX_MB` (25) it rolls over: the file is renamed to `events-<time>.jsonl` beside it and a new one
+  starts. Nothing is copied, so appends stay cheap. Since 2.58.0 a reader asking for the last N events (`task
+  show`, the "no code changed" guard, lanes, the watcher, `metrics`) goes on into the rolled files, newest first
+  and read from the end, until it has N; it reads at most twice `STUDIO_EVENTS_MAX_MB` of them. A reader of the
+  whole log (N = 0: `health`, new task IDs) still reads only the current file. Rolled files are never deleted by
+  the harness; remove old ones by hand if disk space matters.
 - `npm run seed:events` adds a few demo events to an empty log so a fresh War Room isn't blank. They are
   marked `[demo]` and carry no token numbers; it refuses to run on a log that already has events.

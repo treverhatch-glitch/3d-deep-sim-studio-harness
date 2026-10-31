@@ -1,5 +1,10 @@
 /**
- * qa/selftest-258e.mjs — 2.58.0 (PU-41): `metrics` on a long log.
+ * qa/selftest-258e.mjs — 2.58.0 (PU-41): the events log after a roll-over, and `metrics` on a long log.
+ *   P-058: past STUDIO_EVENTS_MAX_MB the log rolls over to events-<time>.jsonl, and readers saw only the new, nearly
+ *          empty file: `task show` gave "history": [], the start commit ("no code changed"), a task's lane and the
+ *          watcher's "last heard" were lost. Readers asking for N events now go on into the rolled files (from
+ *          the end, at most twice STUDIO_EVENTS_MAX_MB of them). Two writers rolling in the same millisecond no
+ *          longer replace the first rolled file with the new one.
  *   P-059: `metrics` filtered the whole log once per attempt (20k events 14 s, 40k 53 s). Now sorted once with
  *          binary search and indexes: the same rows as the 2.57.0 code (kept below for the comparison), 40k fast.
  */
@@ -219,6 +224,104 @@ export async function selftest258E({ dir, run, report }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return { ...JSON.parse(line), _err: String(r.stderr || '').slice(-1500) }; } catch { return { _raw: out(r).slice(-2500) }; }
   };
+  // One full-shape log line, as emitEvent writes it.
+  const lineFn = `const line = (agent, msg, extra = {}) => { const ts = new Date().toISOString(); return JSON.stringify({ id: 'evt_' + Math.random().toString(36).slice(2), ts, startedAt: ts, durationMs: null, type: 'agent.info', agent, provider: null, model: null, task: null, to: null, target: null, status: 'ok', tokensIn: 0, tokensOut: 0, tokensSaved: 0, latencyMs: null, msg, meta: {}, ...extra }) + '\\n'; };`;
+
+  // P-058: a task added and started, then just over 1 MB of other agents' events, then one event rolls the log.
+  const rolled = probe('rollover', `import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+${lineFn}
+const ev = '.studio/events-258e.jsonl';
+process.env.AGENT_EVENTS_FILE = ev;
+process.env.STUDIO_EVENTS_MAX_MB = '1';
+fs.mkdirSync('.studio', { recursive: true });
+fs.rmSync(ev, { force: true });
+const cli = (...a) => spawnSync(process.execPath, a, { encoding: 'utf8', env: process.env });
+const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+g('init', '-q', '-b', 'main'); g('config', 'core.autocrlf', 'false'); g('add', '-A'); g('commit', '-qm', 'studio', '--no-verify');
+const head = g('rev-parse', 'HEAD').stdout.trim();
+const added = cli('harness/task.mjs', 'add', 'Docs: write the notes for the menu', '--role', 'builder', '--paths', 'studio/notes/menu.md');
+const id = (added.stdout.match(/"id": "(T-\\d+)"/) || [])[1];
+const started = cli('harness/task.mjs', 'start', id, '--agent', 'claude-r1');
+let fill = '';
+let n = 0;
+while (fs.statSync(ev).size + fill.length < 1024 * 1024 + 2048) fill += line('filler-bot', 'filler ' + n++ + ' ' + 'x'.repeat(200));
+fill += line('claude-r1', 'still writing the notes');
+fs.appendFileSync(ev, fill);
+cli('harness/event.mjs', '--type', 'agent.info', '--agent', 'filler-bot', '--msg', 'the event that rolls the log over', '--quiet');
+const files = fs.readdirSync('.studio').filter((f) => /^events-258e/.test(f)).sort();
+const current = fs.readFileSync(ev, 'utf8').split('\\n').filter(Boolean).length;
+const show = cli('harness/task.mjs', 'show', id);
+let shown = {};
+try { shown = JSON.parse(show.stdout); } catch {}
+const { readRecentEvents } = await import(${u('harness/event.mjs')});
+const { taskBase } = await import(${u('harness/done-check.mjs')});
+const { laneOf } = await import(${u('harness/task-hold.mjs')});
+const { watchPass } = await import(${u('harness/watch.mjs')});
+const recent = readRecentEvents(5).map((e) => e.msg);
+const w = watchPass({ dryRun: true });
+console.log(JSON.stringify({ id, startOk: started.status === 0, head, files, current, filler: n,
+  history: shown.history || null, meta: shown.meta || null, recent, base: taskBase(id), lane: laneOf(id),
+  stalled: (w.findings || []).filter((f) => f.kind === 'stalled').map((f) => f.msg) }));`);
+  report('2.58.0 (PU-41, P-058): after the events log rolls over, a reader asking for N events gets N, the newest ones from the rolled file first and in order',
+    rolled.files?.length === 2 && rolled.current === 1 && rolled.recent?.length === 5 && rolled.recent[4] === 'the event that rolls the log over' && rolled.recent[3] === 'still writing the notes' && rolled.recent[2] === `filler ${rolled.filler - 1} ${'x'.repeat(200)}`,
+    JSON.stringify({ ...rolled, history: undefined }).slice(0, 1500));
+  report('2.58.0 (PU-41, P-058): after a roll-over `task show` still has the task\'s history (added, started) and the meta it was added with',
+    rolled.startOk && rolled.history?.some((h) => / task\.added /.test(h)) && rolled.history?.some((h) => / task\.start claude-r1: /.test(h)) && rolled.meta?.paths?.[0] === 'studio/notes/menu.md',
+    JSON.stringify({ history: rolled.history, meta: rolled.meta, _raw: rolled._raw, _err: rolled._err }).slice(0, 1500));
+  report('2.58.0 (PU-41, P-058): after a roll-over the "no code changed" guard still finds the commit the task started from (taskBase) and the task keeps its lane',
+    !!rolled.head && rolled.base === rolled.head && rolled.lane === 'studio/notes/menu.md', JSON.stringify({ head: rolled.head, base: rolled.base, lane: rolled.lane }));
+  report('2.58.0 (PU-41, P-058): after a roll-over the watcher still hears the agent\'s last event (not "silent since it claimed it")',
+    Array.isArray(rolled.stalled) && rolled.stalled.length === 0, JSON.stringify({ stalled: rolled.stalled, _raw: rolled._raw }));
+
+  // P-058: three rolled files of about 1.2 MB each; a reader asking for a million events stops after 2 MB of them.
+  const budget = probe('budget', `import fs from 'node:fs';
+${lineFn}
+process.env.AGENT_EVENTS_FILE = '.studio/events-258b.jsonl';
+process.env.STUDIO_EVENTS_MAX_MB = '1';
+fs.mkdirSync('.studio', { recursive: true });
+const rolledName = (day) => '.studio/events-258b-2026-10-0' + day + 'T00-00-00-000Z.jsonl';
+const counts = {};
+for (const [day, tag] of [[1, 'r1'], [2, 'r2'], [3, 'r3']]) {
+  let s = ''; let i = 0;
+  while (s.length < 1.2 * 1024 * 1024) s += line('a', tag + ' ' + i++ + ' ' + 'y'.repeat(300));
+  counts[tag] = i;
+  fs.writeFileSync(rolledName(day), s);
+}
+fs.writeFileSync('.studio/events-258b.jsonl', line('a', 'cur 0') + line('a', 'cur 1') + line('a', 'cur 2'));
+const { readRecentEvents } = await import(${u('harness/event.mjs')});
+const all = readRecentEvents(1000000).map((e) => e.msg.split(' ').slice(0, 2).join(' '));
+const by = (tag) => all.filter((m) => m.startsWith(tag + ' ')).length;
+const few = readRecentEvents(10).map((e) => e.msg.split(' ').slice(0, 2).join(' '));
+const order = all.map((m) => m.split(' ')[0]).filter((t, i, a) => i === 0 || a[i - 1] !== t);
+console.log(JSON.stringify({ counts, r1: by('r1'), r2: by('r2'), r3: by('r3'), cur: by('cur'), order, first: all[0], few }));`);
+  report('2.58.0 (PU-41, P-058): a reader goes back through several rolled files, newest first and in time order, but reads at most twice STUDIO_EVENTS_MAX_MB of them (a huge N doesn\'t load the whole history)',
+    budget.cur === 3 && budget.r3 === budget.counts?.r3 && budget.r2 > 0 && budget.r2 < budget.counts?.r2 && budget.r1 === 0 && JSON.stringify(budget.order) === '["r2","r3","cur"]' && budget.few?.length === 10 && budget.few[0] === `r3 ${budget.counts.r3 - 7}` && budget.few[9] === 'cur 2',
+    JSON.stringify(budget).slice(0, 1500));
+
+  // Two writers rolling the log in the same millisecond: the second must not replace the first one's rolled file.
+  const sameMs = probe('same-ms', `import fs from 'node:fs';
+const FIXED = Date.parse('2026-11-01T12:00:00.000Z');
+const Real = Date;
+globalThis.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(FIXED); } static now() { return FIXED; } };
+${lineFn}
+const ev = '.studio/events-258c.jsonl';
+process.env.AGENT_EVENTS_FILE = ev;
+process.env.STUDIO_EVENTS_MAX_MB = '0.01';
+fs.mkdirSync('.studio', { recursive: true });
+fs.writeFileSync(ev, line('a', 'first log ' + 'z'.repeat(300)).repeat(40));
+const { emitEvent } = await import(${u('harness/event.mjs')});
+emitEvent({ type: 'agent.info', msg: 'one' });
+fs.appendFileSync(ev, line('a', 'second log ' + 'z'.repeat(300)).repeat(40));
+emitEvent({ type: 'agent.info', msg: 'two' });
+const rolled = fs.readdirSync('.studio').filter((f) => /^events-258c-/.test(f));
+const r = rolled.length ? fs.readFileSync('.studio/' + rolled[0], 'utf8') : '';
+const cur = fs.readFileSync(ev, 'utf8');
+console.log(JSON.stringify({ rolled, rolledHasFirst: r.includes('first log'), curHasTwo: cur.includes('"two"'), curHasSecond: cur.includes('second log') }));`);
+  report('2.58.0 (PU-41): two roll-overs in the same millisecond keep the first rolled file (the second writer doesn\'t replace it with the new, nearly empty log)',
+    sameMs.rolled?.length === 1 && sameMs.rolledHasFirst === true && sameMs.curHasTwo === true && sameMs.curHasSecond === true, JSON.stringify(sameMs).slice(0, 1200));
+
   // P-059: the same rows as the 2.57.0 code, and fast on a long log.
   const met = probe('metrics', `import { attemptRows } from ${u('harness/metrics.mjs')};
 ${genEvents.toString()}
@@ -245,4 +348,23 @@ console.log(JSON.stringify({ same, ms, rows: rows.length }));`);
   report('2.58.0 (PU-41, P-059): metrics on 40,000 events takes seconds, not a minute (sorted once, binary search per attempt; was 53 s)',
     met.rows > 1000 && met.ms < 5000, JSON.stringify({ ms: met.ms, rows: met.rows, _raw: met._raw }));
 
+  // Last (it rewrites the board): studio:reset archives the rolled files with the log, so a fresh studio's readers
+  // don't go on into the last project's history.
+  const reset = probe('reset', `import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+${lineFn}
+delete process.env.AGENT_EVENTS_FILE;
+fs.mkdirSync('.studio', { recursive: true });
+fs.writeFileSync('.studio/events-2026-10-01T00-00-00-000Z.jsonl', line('a', 'old project 1'));
+fs.writeFileSync('.studio/events-2026-10-02T00-00-00-000Z.jsonl', line('a', 'old project 2'));
+fs.writeFileSync('.studio/events.jsonl', line('a', 'old project 3'));
+const r = spawnSync(process.execPath, ['scripts/studio-reset.mjs', '--name', 'Next Game', '--yes'], { encoding: 'utf8' });
+const left = fs.readdirSync('.studio').filter((f) => /^events/.test(f));
+const archived = [];
+const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) walk(d + '/' + e.name); else if (/^events/.test(e.name)) archived.push(e.name); } };
+if (fs.existsSync('.studio/archive')) walk('.studio/archive');
+const { readRecentEvents } = await import(${u('harness/event.mjs')});
+console.log(JSON.stringify({ status: r.status, left, archived: archived.sort(), oldSeen: readRecentEvents(100).filter((e) => /old project/.test(e.msg)).map((e) => e.msg) }));`, { AGENT_EVENTS_FILE: '' });
+  report('2.58.0 (PU-41): studio:reset moves the rolled event files to the archive with the log, so a fresh studio doesn\'t read the last project\'s events',
+    reset.status === 0 && Array.isArray(reset.left) && !reset.left.some((f) => /^events-\d{4}-/.test(f)) && reset.archived?.length === 3 && reset.oldSeen?.length === 0, JSON.stringify(reset).slice(0, 1500));
 }
