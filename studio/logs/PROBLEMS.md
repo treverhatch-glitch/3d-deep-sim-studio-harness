@@ -75,3 +75,21 @@ PROPOSALS.md for Hatch). Mark **open** or **fixed**, with the date.
 - **2026-10-31:** PR #21 (these logs, documents only) was merged **without online checks**, on Hatch's OK. GitHub
   wouldn't start them (P-010), and no payment method or spending limit is added (Hatch's rule). Local checks
   instead: the docs check and the secret scan on this branch, and the full selftest on main's code (777 pass).
+
+### P-012 — Unity Hub showed an active Personal licence but no Unity_lic.ulf existed · fixed 2026-10-31
+- **What happened:** CI needs the licence file; `C:\ProgramData\Unity` didn't exist on Hatch's PC.
+- **Why:** newer Hubs store an entitlement and only write the .ulf when a Personal licence is added (GameCI docs warn of this).
+- **Workaround:** Hub → Licenses → **Add** → Get a free personal license, even though one is active. The file appeared.
+- **Harness fix?** Yes, small: say this in docs/UNITY-TRACK.md's licence section.
+
+### P-013 — GameCI refused to build: "Branch is dirty" · open (fix in Unity repo PR #4)
+- **What happened:** the first licensed CI build stopped before Unity started.
+- **Why:** the URP starter icon is committed outside Git LFS, so checkout marks it changed, and GameCI's semantic
+  versioning refuses a dirty tree.
+- **Workaround:** `versioning: None` and `allowDirtyBuild: true` in the build step.
+- **Harness fix?** Yes, small: the same two lines in the template's engine-unity-build job.
+
+### P-014 — Selftest 249 failed once the real logs were merged · fixed (in 2.53, PR #22)
+- **What happened:** the "no logs folder yet" case found the studio's own studio/logs/.
+- **Workaround / fix:** the test removes the copy's studio/logs/ first.
+- **Harness fix?** Done in 2.53.
