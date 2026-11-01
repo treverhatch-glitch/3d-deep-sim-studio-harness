@@ -1,0 +1,23 @@
+name: debug-win
+on:
+  push:
+    branches: [claude/win-debug2]
+permissions:
+  contents: read
+jobs:
+  win:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        only: ['2601m,2601n', '2601o,2601q', '261e,261f,262g', '262h,263i,263j', '264k,264l,260c,260d']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: node qa/debug-win.mjs
+        env:
+          DEBUG_ONLY: ${{ matrix.only }}
