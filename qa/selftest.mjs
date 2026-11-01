@@ -4051,6 +4051,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (b): npm run fuzz: generated play, invariants, save/load, determinism, ddmin shrinking, findings deduped by id,
+// suggest vs file (the shadow week), the ignore list, the digest line (qa/selftest-266b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266b.mjs')).href);
+  await selftest266B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
