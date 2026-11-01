@@ -40,7 +40,15 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : path.resolve(HERE, '..');
-const git = (args, input) => spawnSync('git', ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', ...args], { cwd: ROOT, encoding: 'utf8', input, maxBuffer: 512 * 1024 * 1024 });
+// 2.58.5 (H-7): STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the read limit, for tests; an output over it is an error, never a
+// silently cut diff (spawnSync stops at maxBuffer and returns what it had).
+const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
+const git = (args, input) => {
+  let r;
+  try { r = spawnSync('git', ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', ...args], { cwd: ROOT, encoding: 'utf8', input, maxBuffer: MAX_BUFFER }); } catch (e) { throw new Error(`could not read git ${args[0]}: output too big (${e.code || e.message})`); }
+  if (r.error) throw new Error(`could not read git ${args[0]}: ${r.error.code === 'ENOBUFS' ? `output over ${MAX_BUFFER} bytes` : r.error.message}`);
+  return r;
+};
 
 const CODE_EXT = /\.(m?[jt]sx?|cjs|cts|mts|py|gd|cs|java|kt|kts|go|rs|rb|lua|c|cc|cpp|h|hpp|swift|php|scala|dart)$/i;
 export function isGoldenPath(f) {
@@ -210,12 +218,17 @@ export async function findWeakenings({ env = process.env } = {}) {
   const b = await changeBase(env);
   if (!b) return { base: null, findings: [] };
   const names = git(['diff', '--name-status', '-M', '-z', b.base]).stdout.split('\0');
-  const files = [];
+  const pairs = [];
   for (let i = 0; i < names.length; i++) {
     const st = names[i];
     if (!st) continue;
-    if (/^[RC]/.test(st)) { files.push(names[i + 1], names[i + 2]); i += 2; } else { files.push(names[i + 1]); i += 1; }
+    if (/^[RC]/.test(st)) { pairs.push([names[i + 1], names[i + 2]]); i += 2; } else { pairs.push([names[i + 1]]); i += 1; }
   }
+  // 2.58.5 (H-7): read only the files the rules look at (test code and test-runner configs; both names of a rename), not
+  // every file under a test folder: fixtures, recordings and binary data there can be huge and are never judged.
+  const judged = (f) => (isTestPath(f) && CODE_EXT.test(f)) || isTestConfig(f);
+  const files = [];
+  for (const pair of pairs) if (pair.some((f) => f && judged(f))) files.push(...pair);
   const wanted = [...new Set(files.filter(Boolean))].filter((f) => isTestPath(f) || isTestConfig(f));
   let parsed = [];
   for (const part of chunks(wanted, 100)) parsed = parsed.concat(parseDiff(git(['diff', '-U0', '-M', '--no-color', '--no-ext-diff', '--no-textconv', b.base, '--', ...part.map((f) => `:(literal)${f}`)]).stdout));
@@ -250,7 +263,12 @@ export async function checkWeakening({ env = process.env } = {}) {
 export const formatFinding = (x) => `  ${x.file}:${x.line}  ${x.kind}  ${x.text}${x.detail ? `  (${x.detail})` : ''}`;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  const r = await checkWeakening();
+  let r;
+  try { r = await checkWeakening(); } catch (e) {
+    if (process.argv.includes('--json')) console.log(JSON.stringify({ ok: false, error: e.message, findings: [], why: e.message }));
+    else console.error(`[tests] FAIL ${e.message}`);
+    process.exit(1);
+  }
   if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
   if (r.off) { console.log(`[tests] ${r.why}`); process.exit(0); }
   if (!r.ok) {
