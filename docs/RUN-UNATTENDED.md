@@ -30,7 +30,11 @@ Scheduler (Windows); `--uninstall` removes it.
   Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
 - **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
   found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then press "Fixed it: try again".
+  cause, then press "Fixed it: try again". A session someone stopped or paused (`agent stop`, Pause, Stop all)
+  never counts: the stop is written down before the kill, so its end reads "stopped by <name>"
+  (`meta.stoppedBy`), not "exit 1", and its hand-back says "a stop, not a failure" (no park, breaker or tier-up).
+  While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
+  (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
 - **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
@@ -87,6 +91,10 @@ npm run task -- park T-100 --by director-1 --why "after the Bible change"
 npm run task -- unpark T-100 --by producer-1
 npm run task -- holds                                         # everything that can't start yet, and why
 ```
+
+A park is undone by an unpark: the launcher's loop park and the watchdog's "handed back 3 times in 2 h" both
+count only hand-backs since the last done, unblock or unpark, and a park is written once however many passes
+reach it at the same moment (2.58.3).
 
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back.

@@ -36,7 +36,7 @@ import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, wi
 import { holdReason } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
 import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
-import { doneRunning } from './busy.mjs';
+import { doneRunning, claimActive } from './busy.mjs';
 import { mainRoot } from './worktree.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
@@ -189,12 +189,23 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
   const agentSessions = sessions();
   for (const s of agentSessions.filter((x) => x.stalled)) findings.push({ kind: 'stalled', agent: s.agent, msg: `${s.agent} (${s.role}) is running but its heartbeat stopped ${s.beatAgeMin} min ago`, producer: true });
 
+  let bigEvents = null; // read once, only when a claim ran out (N2)
   for (const t of q.inProgress) {
     const lock = holder.get(t.id);
     const last = lastOnTask.get(t.id);
     if (!lock) {
       // Nobody holds it any more: put it back where any agent can take it.
       if (/^Check forced done|^Watch:/i.test(t.title) || t.role === 'producer' || t.role === 'human') continue;
+      // 2.58.3 (N2): the claim ran out, but its owner (an agent working outside the launcher) is still active, or a
+      // task done for it is running: it isn't abandoned, so it isn't handed to a new agent (harness/busy.mjs).
+      {
+        let sd = STUDIO_STATE_DIR;
+        let root = REPO_ROOT;
+        try { root = mainRoot(); sd = path.join(root, '.studio'); } catch { /* this checkout's own */ }
+        const d = doneRunning(t.id, { dir: sd });
+        const a = d ? null : claimActive(t.id, { root, now, events: (bigEvents ||= readRecentEvents(20000)) });
+        if (d || a?.busy) { findings.push({ kind: 'kept', task: t.id, msg: `${t.id} not requeued: ${d ? `task done is running for it (${d.agent || `pid ${d.pid}`})` : a.why}`, producer: false }); continue; }
+      }
       const note = last ? `The claim ran out. Last heard from ${last.agent} ${ago(last.at)} ago (${last.type}).\n${trail(events, last.agent)}` : 'In progress with no claim and no activity on record.';
       // 2.58.0 (P-054): handed back only if it is still unclaimed (an agent may have re-claimed it during trail()).
       const r = dryRun ? null : pauseTask(t.id, 'watch', note, { force: true, expect: 'none' });

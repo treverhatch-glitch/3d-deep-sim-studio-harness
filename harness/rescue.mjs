@@ -56,7 +56,7 @@ export function rescueModelFor(taskId, { events = readRecentEvents(20000), env =
  * Returns { id, level, model } when a rescue was queued, { shelved: why } when shelved, { person: why } when
  * rescues are off.
  */
-export async function fileRescue(taskId, why, { now = Date.now(), env = process.env } = {}) {
+export async function fileRescue(taskId, why, { now = Date.now(), env = process.env, waiting = null } = {}) {
   if (off(env)) return { person: 'rescues are off (STUDIO_RESCUE=off)' };
   const events = readRecentEvents(20000);
   const done = rescueLevel(taskId, events, now);
@@ -69,7 +69,7 @@ export async function fileRescue(taskId, why, { now = Date.now(), env = process.
   const title = level === 1 ? `Rescue: ${taskId} stuck (${short})` : `Rescue: ${taskId} split it into small pieces (step ${level}: ${short})`;
   const res = addTask({ title, role: 'builder', priority: 'P0', agent: 'budget', meta: { promoted: true, rescueOf: taskId, rescueLevel: level, rescueModel: m.model, origin: 'harness' } });
   if (!res || res.error) return shelve(taskId, `the rescue couldn't be queued (${res?.message || 'unknown'})`, { now });
-  emitEvent({ type: 'task.rescue', agent: 'budget', to: 'producer', task: taskId, msg: `${taskId}: rescue step ${level} ${res.id} queued${m.model ? ` on ${m.model}${m.differentFamily ? ' (a different model family)' : ''}` : ' (no rescue model available: the launcher picks)'}${m.skipped.length ? `; skipped ${m.skipped.join(', ')} (out of quota or budget)` : ''}`, meta: { rescue: res.id, level, model: m.model, usedFamilies: m.usedFamilies } });
+  emitEvent({ type: 'task.rescue', agent: 'budget', to: 'producer', task: taskId, msg: `${taskId}: rescue step ${level} ${res.id} queued${m.model ? ` on ${m.model}${m.differentFamily ? ' (a different model family)' : ''}` : ' (no rescue model available: the launcher picks)'}${m.skipped.length ? `; skipped ${m.skipped.join(', ')} (out of quota or budget)` : ''}${waiting ? `; waiting: ${waiting}` : ''}`, meta: { rescue: res.id, level, model: m.model, usedFamilies: m.usedFamilies } });
   return { id: res.id, level, model: m.model };
 }
 
@@ -116,7 +116,7 @@ export function applyRescue(rescueTask, { by = 'rescue' } = {}) {
  * a rescue that is itself stuck (its own budget, or unclaimed past STUDIO_RESCUE_WAIT_MIN) moves its
  * task to the next step. Returns the actions taken.
  */
-export async function rescuePass({ now = Date.now(), env = process.env } = {}) {
+export async function rescuePass({ now = Date.now(), env = process.env, launcher = null, clockFrom = 0 } = {}) {
   const { readHolds } = await import('./task-hold.mjs');
   const { parseNextQueue } = await import('./task.mjs');
   const q = parseNextQueue();
@@ -132,7 +132,12 @@ export async function rescuePass({ now = Date.now(), env = process.env } = {}) {
     const h = holds[t.id]?.parked;
     const added = Date.parse(events.filter((e) => e.type === 'task.added' && e.task === t.id).pop()?.ts || '') || now;
     const claimed = events.some((e) => e.type === 'task.start' && e.task === t.id);
-    const why = h?.budget ? 'the rescue ran out of its own budget' : !claimed && now - added > waitMs ? `nobody picked the rescue up in ${Math.round(waitMs / 60000)} min` : null;
+    // 2.58.3 (N4): `launcher` (from the watchdog): while nothing can pick a rescue up (no launcher running, the
+    // supervisor halted, the studio stopped) its pick-up clock doesn't run; it runs again from `clockFrom`, the
+    // last time that was so, never from when the rescue was queued.
+    if (!h?.budget && !claimed && launcher && !launcher.picking) continue;
+    const from = Math.max(added, Number(clockFrom) || 0);
+    const why = h?.budget ? 'the rescue ran out of its own budget' : !claimed && now - from > waitMs ? `nobody picked the rescue up in ${Math.round(waitMs / 60000)} min` : null;
     if (!why || h?.superseded) continue;
     setHold(t.id, { parked: { by: 'rescue', why: `${why}; the next step takes over`, superseded: true, at: new Date(now).toISOString() } }, { by: 'watchdog', msg: `${t.id} superseded: ${why}` });
     const r = await fileRescue(stuck, why, { now, env });
@@ -143,7 +148,7 @@ export async function rescuePass({ now = Date.now(), env = process.env } = {}) {
     if (!h?.parked?.budget || h.parked.rescue) continue;
     const task = open.find((t) => t.id === id);
     if (!task || rescueOf(task.title)) continue;
-    const r = await fileRescue(id, h.parked.why, { now, env });
+    const r = await fileRescue(id, h.parked.why, { now, env, waiting: launcher && !launcher.picking ? launcher.why : null });
     if (!r.shelved) setHold(id, { parked: { ...h.parked, rescue: r.id || 'person' } }, { by: 'watchdog', msg: r.id ? `rescue ${r.id} queued for ${id}` : `${id}: a person is needed (${r.person})` });
     if (r.id) actions.push({ kind: 'rescue', task: id, msg: `queued rescue step ${r.level} ${r.id} for ${id}${r.model ? ` on ${r.model}` : ''}` });
     else if (r.shelved) actions.push({ kind: 'shelve', task: id, msg: `${id} ${r.shelved}` });

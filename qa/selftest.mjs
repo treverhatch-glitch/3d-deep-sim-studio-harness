@@ -3641,6 +3641,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.3 (N1-N4): a person's stop is a stop, not a crash; a live owner's expired claim isn't handed back; the watchdog
+// honours an unpark and parks once; rescues nobody can pick up don't escalate (qa/selftest-2583n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583n.mjs')).href);
+  await selftest2583N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

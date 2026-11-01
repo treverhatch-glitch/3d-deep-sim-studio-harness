@@ -74,6 +74,55 @@ async function idleStop(now, { events, lim, w, auto }) {
   return { kind: 'stop', msg: `stopped the studio: ${r.ran} task sessions, no task finished in ${r.hours} h` };
 }
 
+/**
+ * 2.58.3 (N4): can anything pick a queued task up right now? The supervisor running and not halted, or (with no
+ * supervisor) the watcher starting agents (a pace that auto-launches, auto-start on). Not while the studio is stopped.
+ * Returns { picking, why }.
+ */
+export async function launcherState() {
+  const { readStop } = await import('./task.mjs');
+  const stop = readStop();
+  if (stop) return { picking: false, why: `the studio is stopped (by ${stop.by})` };
+  const { readStatus } = await import('./supervisor.mjs');
+  const { pidAlive } = await import('./proc-identity.mjs');
+  const sup = readStatus();
+  if (sup?.status === 'running' && sup.pid && pidAlive(sup.pid, sup.identity, { eperm: false })) {
+    if (sup.halted) return { picking: false, why: `the supervisor is halted (${String(sup.halted.why || 'see npm run studio:status').slice(0, 160)})` };
+    return { picking: true, why: `the supervisor (pid ${sup.pid}) starts agents` };
+  }
+  const { effectiveMode } = await import('./mode.mjs');
+  const m = effectiveMode();
+  if (m.autoLaunch && m.autostart) return { picking: true, why: 'the watcher starts agents' };
+  return { picking: false, why: 'no launcher is running (no supervisor, and the watcher doesn\'t start agents)' };
+}
+
+/**
+ * 2.58.3 (N4): the rescue pick-up clock. While nothing can pick a rescue up, the clock is stopped (rescue.mjs skips
+ * the "nobody picked it up" step) and the Producer is told once per stretch, naming the rescues that wait. The last
+ * time it was stopped is kept in .studio/rescue-clock.json; once agents can start again the wait counts from then.
+ */
+export async function rescueClock(now = Date.now(), { file = path.join(STUDIO_STATE_DIR, 'rescue-clock.json') } = {}) {
+  let st = {};
+  try { st = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const launcher = await launcherState();
+  const actions = [];
+  if (!launcher.picking) {
+    const { rescueOf } = await import('./rescue.mjs');
+    const { parseNextQueue } = await import('./task.mjs');
+    const q = parseNextQueue();
+    const started = new Set(readRecentEvents(20000).filter((e) => e.type === 'task.start').map((e) => e.task));
+    const waiting = q.backlog.filter((t) => rescueOf(t.title) && !started.has(t.id)).map((t) => `${t.id} (for ${rescueOf(t.title)})`);
+    const told = st.told && st.why === launcher.why;
+    st = { ...st, pausedAt: new Date(now).toISOString(), why: launcher.why, told: told || waiting.length > 0 };
+    if (waiting.length && !told) {
+      emitEvent({ type: 'agent.ask', agent: 'watchdog', to: 'producer', status: 'warn', msg: `Rescue ${waiting.join(', ')} waiting: ${launcher.why}. Its pick-up clock is stopped until agents can start again (npm run studio:start, or the War Room's "Fixed it: try again").`.slice(0, 400), meta: { rescues: waiting, why: launcher.why } });
+      actions.push({ kind: 'rescue-wait', msg: `rescues waiting (${launcher.why}): ${waiting.join(', ')}; their pick-up clock is stopped` });
+    }
+  } else if (st.told) st = { ...st, told: false };
+  try { writeAtomic(file, `${JSON.stringify(st)}\n`, { fsync: false }); } catch {}
+  return { launcher, from: Date.parse(st.pausedAt || '') || 0, actions };
+}
+
 /** One pass. Returns what it did. Does nothing while off. */
 export async function watchdogPass(now = Date.now(), { events = readRecentEvents(5000), lim = watchdogLimits() } = {}) {
   const w = readWatchdog();
@@ -104,18 +153,20 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
     if (res.ok) actions.push({ kind: 'handoff', agent: r.agent, msg: `${r.agent}'s refresh check went unanswered for ${lim.checkMin} min (${r.turns} turns, ${r.model}): handed off` });
   }
   // 2. Looping tasks.
-  const { setHold, readHolds } = await import('./task-hold.mjs');
+  const { readHolds } = await import('./task-hold.mjs');
   const since = now - 2 * 3600000;
-  const counts = new Map();
   // 2.30q (#6): hand-backs the harness caused (claim ran out during gates, merge refused by the main checkout,
   // land lock) are not the task looping, so they never count toward parking.
-  const { harnessCaused, taskBusy } = await import('./busy.mjs');
-  for (const e of events) if (e.type === 'task.paused' && e.task && Date.parse(e.ts) >= since && !harnessCaused(e)) counts.set(e.task, (counts.get(e.task) || 0) + 1);
-  const holds = readHolds();
-  for (const [task, n] of counts) {
-    if (n < lim.handBacks || holds[task]?.parked) continue;
-    if ((await taskBusy(task, { now })).busy) continue;
-    setHold(task, { parked: { by: 'watchdog', why: `handed back ${n} times in 2 h; a person or the Producer looks before it runs again`, at: new Date(now).toISOString() } }, { by: 'watchdog', msg: `watchdog parked ${task}: handed back ${n} times in 2 h` });
+  // 2.58.3 (N3): counted with the launcher's rule (busy.mjs loopHandBacks): since the last done, unblock or unpark
+  // (an unpark used to be parked again 10 s later), and not a person's stop (N1). The park is written once
+  // (parkOnce: the holds are read again under their lock), so passes running at the same moment park it once.
+  const { taskBusy, loopHandBacks, parkOnce } = await import('./busy.mjs');
+  const looped = [...new Set(events.filter((e) => e.type === 'task.paused' && e.task && Date.parse(e.ts) >= since).map((e) => e.task))];
+  for (const task of looped) {
+    const n = loopHandBacks(task, events, { since }).length;
+    if (n < lim.handBacks || readHolds()[task]?.parked) continue;
+    if ((await taskBusy(task, { now, events })).busy) continue;
+    if (!parkOnce(task, { by: 'watchdog', why: `handed back ${n} times in 2 h; a person or the Producer looks before it runs again`, at: new Date(now).toISOString() }, { by: 'watchdog', msg: `watchdog parked ${task}: handed back ${n} times in 2 h` })) continue;
     actions.push({ kind: 'park', task, msg: `parked ${task} (handed back ${n} times in 2 h)` });
   }
   // 2b. 2.31.0: tasks over their own budget (sessions, claimed minutes, tokens). This also covers builders
@@ -137,7 +188,9 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   // rescue on the next model; after that it is shelved for the morning report. Nothing waits on it.
   try {
     const { rescuePass } = await import('./rescue.mjs');
-    actions.push(...(await rescuePass({ now })));
+    const clock = await rescueClock(now);
+    actions.push(...clock.actions);
+    actions.push(...(await rescuePass({ now, launcher: clock.launcher, clockFrom: clock.from })));
   } catch (e) {
     actions.push({ kind: 'error', msg: `rescues: ${e.message}` });
   }

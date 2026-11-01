@@ -104,7 +104,9 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
   // PU-19: a session that stopped at its usage limit waits for the reset (its tool is marked out); it isn't a bad end.
-  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit);
+  // 2.58.3 (N1): nor is a session a person (or the Producer) stopped or paused: killing it ends it with exit 1 on
+  // Windows (taskkill /F) and by a signal elsewhere; the launcher records who stopped it (meta.stoppedBy).
+  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy);
   const last2 = mine.slice(-2);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
@@ -138,9 +140,18 @@ export async function supervise(opts, state, now = Date.now()) {
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
   const held = [];
+  // 2.58.3 (N2): a task handed back because its claim ran out while its owner (an agent working outside the
+  // launcher) is still active is that owner's, not a new agent's (harness/busy.mjs claimActive).
+  const { claimActive } = await import('./busy.mjs');
+  const { mainRoot } = await import('./worktree.mjs');
+  let claimEvents = null;
   const waiting = q.backlog.filter((t) => {
     if (!t.role || t.role === 'human' || lockStatus(`task:${t.id}`).locked) return false;
-    const h = holdReason(t.id, q, now);
+    let h = holdReason(t.id, q, now);
+    if (!h) {
+      const a = claimActive(t.id, { root: mainRoot(), now, events: (claimEvents ||= readRecentEvents(20000)), orphaned: true });
+      if (a.busy) h = `waits for ${a.owner}: ${a.why}`;
+    }
     if (h) held.push(`${t.id} ${h}`);
     return !h;
   });
