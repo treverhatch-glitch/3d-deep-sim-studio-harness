@@ -3951,6 +3951,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.1 (helper o, B-29 to B-33): a board-only commit on main keeps the train's verify; one base for the hooks check,
+// restamp and the protected gate (local main in a lane, printed); goldens that arrive unchanged in a merge need no
+// Golden-Reason; task done --train names the check that blocks (qa/selftest-2601o.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601o.mjs')).href);
+  await selftest2601O({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

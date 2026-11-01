@@ -95,6 +95,17 @@
   a merge commit (rebase first), and never writes a stamp itself: a commit the hooks refuse stops it and the lane goes
   back. `task done` does the same after its own rebase, but only for commits whose stamps were valid before it
   (`STUDIO_HOOKS_RESTAMP=off` turns that off); if the hooks refuse, nothing lands.
+- One base (2.60.1, B-30/B-32): the hooks gate, restamp, the protected and weakened-tests gates and `task done` judge
+  "since the base" from the same base (`harness/approve.mjs resolveBase`). In a lane copy it is the main checkout's own
+  branch, local (from `STUDIO_MAIN_ROOT`, or found from the copy's place in `<main>/.lanes/<x>` when a sub-agent
+  started without it), even at the lane's tip; elsewhere local `main` comes before `origin/main` when `origin/main` is
+  an ancestor of it (only stale), except on `main` itself, where `origin/main` still names what isn't pushed. A stale
+  `origin/main` made the check fail a lane on main's own commits while restamp, on local main, said "nothing to do".
+  The check and restamp print `base <ref> <sha>`. What counts as stamped is unchanged.
+- Goldens in a merge (2.60.1, B-31): `commit-msg` asks for a `Golden-Reason:` when the commit changes `qa/golden/`.
+  During a merge (`MERGE_HEAD`), a golden staged exactly as the merged branch has it (same blob and mode, or deleted on
+  both) arrived unchanged, with its own commit's reason, and is exempt (`git merge main` in a lane no longer asks);
+  a golden resolved to anything else still needs the trailer.
 - Studio-Task (2.59.0, crew H-12): `commit-msg` tags a commit with one task, not every task the agent holds: the lane
   copy's own task (`.studio/lane-branches.json`, or the launcher's session record for the lane), else the subject's
   leading id (`T-012: …`) when the agent holds it, else its only task lock; with several and nothing saying which, no
