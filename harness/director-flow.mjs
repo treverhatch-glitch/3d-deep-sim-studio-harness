@@ -6,7 +6,8 @@
  *
  * The Director owns the flow: every pass (the supervisor's loop and the War Room's hub, at most once a
  * minute) it looks at the whole board and the running sessions and
- *   1. hands back claims that ran out (in progress, nobody holds it, no running session on it),
+ *   1. hands back claims that ran out (in progress, nobody holds it, no running session on it); a task whose owner
+ *      is still at work (harness/busy.mjs) is kept and its claim made again in the owner's name (2.58.5, H-5),
  *   2. counts idle builder slots against ready work across the whole backlog (every role, not one lane),
  *   3. refills idle slots through the launcher (the same caps, lanes and pace as always; a pace that
  *      doesn't start agents on its own gets a "starved" alert instead),
@@ -92,10 +93,16 @@ export async function flowPass({ fill = true, dryRun = false, launcherWhy = null
   const actions = freedLocks.length ? [`freed ${freedLocks.length} lock(s) of agents whose process is gone`] : [];
   // 2.30q (#6): a task whose done is running or whose lane is queued to land is busy, not abandoned.
   // 2.58.3 (N2): so is one whose claim's owner (an agent working outside the launcher) is still active.
-  const { taskBusy } = await import('./busy.mjs');
+  // 2.58.5 (H-5): and its claim is made again in the owner's name, so no crew builder's `task start` takes it meanwhile.
+  const { taskBusy, keepClaim } = await import('./busy.mjs');
   const busyNow = [];
   const evs = r.expired.length ? readRecentEvents(20000) : [];
-  for (const id of r.expired) { const b = await taskBusy(id, { now, events: evs }); if (b.busy) busyNow.push({ id, why: b.why, short: b.short }); }
+  for (const id of r.expired) {
+    const b = await taskBusy(id, { now, events: evs });
+    if (!b.busy) continue;
+    busyNow.push({ id, why: b.why, short: b.short });
+    if (b.owner && !dryRun) keepClaim(id, b.owner, { by: 'director', why: b.short || b.why });
+  }
   if (busyNow.length) {
     r.expired = r.expired.filter((id) => !busyNow.some((b) => b.id === id));
     r.busy = busyNow;

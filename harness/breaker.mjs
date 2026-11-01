@@ -7,14 +7,17 @@
  * card. Nothing else waits: other tasks and lanes keep starting. `npm run task -- unblock <ID>`
  * (or Unblock on the card) clears it.
  *
- * Not failures, so never counted: refreshes (session cap, context), a person's stop or pause.
+ * Not failures, so never counted: refreshes (session cap, context), a person's stop or pause, and (2.58.5, H-5) a
+ * hand-back the harness caused (the claim ran out, the land lock, a merge the main checkout refused: busy.mjs
+ * harnessCaused). On 2.58.3 two "claim ran out" hand-backs by the Director's flow pass parked T-060, T-061 and T-064.
  * STUDIO_BREAKER=off turns it off.
  */
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { setHold, readHolds } from './task-hold.mjs';
+import { harnessCaused, personCaused } from './busy.mjs';
 
 const NOT_A_FAILURE = /\brefresh|session cap|turn ceiling|context (?:is |reached|at)|studio was stopped|paused from the war room|stopped by|out of (?:quota|usage)|usage limit|running low/i;
-export const isFailureNote = (note) => Boolean(String(note || '').trim()) && !NOT_A_FAILURE.test(String(note));
+export const isFailureNote = (note) => Boolean(String(note || '').trim()) && !NOT_A_FAILURE.test(String(note)) && !harnessCaused({ msg: note }) && !personCaused({ msg: note });
 
 /**
  * The reason, as a comparable key: the first line that says what failed, with numbers, ids, paths,
@@ -44,7 +47,8 @@ export function checkBreaker(taskId, note, who = 'launcher', now = Date.now()) {
   const evs = readRecentEvents(20000).filter((e) => e.task === taskId);
   // Count only hand-backs since the task was last done, unblocked or unparked.
   const reset = evs.filter((e) => e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))).pop();
-  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && (!reset || e.ts > reset.ts));
+  // 2.58.5 (H-5): hand-backs logged with a reason before this fix but caused by the harness don't count either.
+  const prior = evs.filter((e) => e.type === 'task.paused' && e.meta?.reasonKey && !harnessCaused(e) && !personCaused(e) && (!reset || e.ts > reset.ts));
   const last = prior.at(-2); // the newest is this hand-back itself (emitted just before)
   if (!last || last.meta.reasonKey !== key) return null;
   if (readHolds()[taskId]?.parked) return null;
@@ -65,7 +69,7 @@ export function failingTasks(evs = readRecentEvents(20000)) {
   for (const e of evs) {
     if (!e.task) continue;
     if (e.type === 'task.done' || e.type === 'task.unblocked' || (e.type === 'task.hold' && /unparked/.test(e.msg || ''))) last.set(e.task, false);
-    else if (e.type === 'task.paused') last.set(e.task, Boolean(e.meta?.reasonKey));
+    else if (e.type === 'task.paused' && !harnessCaused(e) && !personCaused(e)) last.set(e.task, Boolean(e.meta?.reasonKey));
   }
   return new Set([...last].filter(([, f]) => f).map(([id]) => id));
 }

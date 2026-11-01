@@ -36,7 +36,7 @@ import { parseNextQueue, writeNextQueue, pauseTask, addTask, readTaskHandoff, wi
 import { holdReason } from './task-hold.mjs';
 import { listLocks, release, sweepBrokenLocks } from './lock.mjs';
 import { writeAtomic, sweepTempsDeep } from './fsafe.mjs';
-import { doneRunning, claimActive } from './busy.mjs';
+import { doneRunning, claimActive, keepClaim } from './busy.mjs';
 import { mainRoot } from './worktree.mjs';
 import { collectIdeas } from './ideas.mjs';
 import { trickPass } from './tricks.mjs';
@@ -204,6 +204,8 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
         try { root = mainRoot(); sd = path.join(root, '.studio'); } catch { /* this checkout's own */ }
         const d = doneRunning(t.id, { dir: sd });
         const a = d ? null : claimActive(t.id, { root, now, events: (bigEvents ||= readRecentEvents(20000)) });
+        // 2.58.5 (H-5): kept, and its claim made again in the owner's name (a crew builder's `task start` took it otherwise).
+        if (a?.busy && a.owner && !dryRun) keepClaim(t.id, a.owner, { by: 'watch', why: a.short || a.why });
         if (d || a?.busy) { findings.push({ kind: 'kept', task: t.id, msg: `${t.id} not requeued: ${d ? `task done is running for it (${d.agent || `pid ${d.pid}`})` : a.why}`, producer: false }); continue; }
       }
       const note = last ? `The claim ran out. Last heard from ${last.agent} ${ago(last.at)} ago (${last.type}).\n${trail(events, last.agent)}` : 'In progress with no claim and no activity on record.';
