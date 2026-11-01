@@ -54,7 +54,8 @@ export async function selftest2653A({ dir, run, report, tmpRoot }) {
     "let bad = 0;",
     "for (const f of list) {",
     "  if (process.env.RAN_LOG) fs.appendFileSync(process.env.RAN_LOG, `${process.env.STUDIO_LOCK_OWNER || '-'}\\t${as}\\t${f}\\n`);",
-    "  if (notes.includes(`BREAKS ${path.basename(f)}`)) { console.log(` FAIL  ${f} > adds up`); bad += 1; } else console.log(` \\u2713 ${f} (1 test)`);",
+    "  const together = notes.includes(`BREAKS-WITH-OTHERS ${path.basename(f)}`) && list.length > 1;",
+    "  if (notes.includes(`BREAKS ${path.basename(f)}`) || together) { console.log(` FAIL  ${f} > adds up`); bad += 1; } else console.log(` \\u2713 ${f} (1 test)`);",
     "}",
     "console.log(`Test Files  ${bad ? `${bad} failed | ` : ''}${list.length - bad} passed (${list.length})`);",
     "process.exit(bad ? 1 : 0);", ''].join('\n'));
@@ -130,6 +131,17 @@ export async function selftest2653A({ dir, run, report, tmpRoot }) {
     R.every((l) => l.ok) && t5.status === 0 && dropped(R[1].id) && isDone(R[0].id) && isDone(R[2].id) && !ev5.some((e) => e.type === 'task.train.prefix_landed' || e.type === 'task.train.deferred')
       && ev5.filter((e) => e.type === 'task.train.landed').length === 1 && new RegExp(`round 2: 2 lane\\(s\\) left without ${R[1].id} \\(${R[0].id}, ${R[2].id}\\); verify, then bisect again if red`).test(out(t5)) && queue().length === 0,
     out(t5).slice(-2500));
+
+  // ---- 5b. a test file that fails only together with others: the focused search can't see it, so it searches again whole ----
+  const Q = [1, 2, 3].map((k) => lane(`fx-q${k}`, `Docs: note q${k}`, { [`game/demo/notes/q${k}.md`]: k === 2 ? 'BREAKS-WITH-OTHERS d.test.mjs\n' : `# q${k}\n` }));
+  for (const l of Q) queueIt(l);
+  const before5b = evs().length;
+  const t5b = train();
+  const ev5b = evs().slice(before5b);
+  report('2.65.3 (B-43, a): a test file that fails only when run together with the others (d.test.mjs here) passes in a focused re-check on the train\'s own tree; instead of calling the train flaky, the train says so and searches again with the whole failing gate: lane 2 is handed back, lanes 1 and 3 land (fails on 2.65.2: no such search; without it the focused search called the red train flaky and handed nobody back)',
+    Q.every((l) => l.ok) && t5b.status === 0 && /the failing test files pass when run on their own on the train's tree \(they fail only together with other tests\): searching again with the whole failing gate/.test(out(t5b))
+      && dropped(Q[1].id) && !isDone(Q[1].id) && isDone(Q[0].id) && isDone(Q[2].id) && !ev5b.some((e) => e.type === 'task.train.flaky') && queue().length === 0,
+    out(t5b).slice(-3000));
 
   // ---- 6-7. game-gates with STUDIO_GATE_FOCUS: template, node --test appended, fallbacks; never in a verify ----
   write(dir, 'game/demo/nt/a.test.mjs', "import test from 'node:test'; import fs from 'node:fs';\ntest('a', () => { if (process.env.RAN_LOG) fs.appendFileSync(process.env.RAN_LOG, `${process.env.STUDIO_LOCK_OWNER || '-'}\\tnt\\ta.test.mjs\\n`); });\n");

@@ -569,7 +569,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   const label = (k) => (k ? `${main} + ${set.slice(0, k).map((l) => l.task).join(' + ')}` : main);
   const prefix = (k) => { const b = buildIntegration(sc, tip, set.slice(0, k), { id, unionFiles }); return b.included.length === k ? b : null; };
   // 2.65.3 (B-43): focused re-checks (only the failing test files) and each re-check's question and ETA, in words.
-  const fx = focusPlan(ctx, failGates);
+  let fx = focusPlan(ctx, failGates);
   const n = set.length;
   const about = (res.rechecks || 0) + 1 + stepsLeft(0, n);
   const ask = recheckWords(ctx, n);
@@ -593,20 +593,34 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   let lo = 0;
   let hi = set.length;
   let red = null;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    const c = check(mid, { question: ask.mid(lo, hi, mid, Boolean(red)), left: stepsLeft(lo, hi, Boolean(red)) });
-    if (!c) return { kind: 'alone', why: `${label(mid)} doesn't build` };
-    steps.push({ prefix: set.slice(0, mid).map((l) => l.task), ok: c.ok });
-    if (c.ok) lo = mid; else { hi = mid; red = c; }
-  }
-  if (!red) {
+  for (;;) {
+    lo = 0; hi = set.length; red = null;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      const c = check(mid, { question: ask.mid(lo, hi, mid, Boolean(red)), left: stepsLeft(lo, hi, Boolean(red)) });
+      if (!c) return { kind: 'alone', why: `${label(mid)} doesn't build` };
+      steps.push({ prefix: set.slice(0, mid).map((l) => l.task), ok: c.ok });
+      if (c.ok) lo = mid; else { hi = mid; red = c; }
+    }
+    if (red) break;
     // Only the full verify said the whole train is red: confirm it before anyone is handed back.
     const c = check(hi, { question: ask.confirm(lo, hi), left: 1 });
     if (!c) return { kind: 'alone', why: `${label(hi)} doesn't build` };
     steps.push({ prefix: set.slice(0, hi).map((l) => l.task), ok: c.ok });
-    if (c.ok) return { kind: 'flaky', steps, why: `${failGates.join(', ')} failed in the train's verify but passed when run again on the same tree` };
-    red = c;
+    if (!c.ok) { red = c; break; }
+    // 2.65.3 (B-43): the failing test files pass when run on their own on the very tree the verify failed: they fail
+    // only together with other tests, so a focused re-check can't see the break (and would call it flaky). Search
+    // again with the whole failing gate(s), as in 2.65.2; main's re-check is redone the same way first.
+    if (fx) {
+      log(`[train] ${id}: the failing test files pass when run on their own on the train's tree (they fail only together with other tests): searching again with the whole failing gate(s) (${failGates.join(', ')})`);
+      fx = null;
+      const w0 = check(0, { question: `${ask.main()} (the whole failing gate(s) this time)`, left: 1 + stepsLeft(0, n) });
+      if (!w0) return { kind: 'alone', why: `${main} alone doesn't build` };
+      steps.push({ prefix: [], ok: w0.ok, whole: true });
+      if (!w0.ok) return { kind: 'redMain', gates: failGates, log: w0.log, why: `${failGates.join(', ')} fail on ${main} itself` };
+      continue;
+    }
+    return { kind: 'flaky', steps, why: `${failGates.join(', ')} failed in the train's verify but passed when run again on the same tree` };
   }
   const lane = set[hi - 1];
   const before = set.slice(0, hi - 1).map((l) => l.task);
