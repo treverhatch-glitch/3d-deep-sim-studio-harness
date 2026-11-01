@@ -16,9 +16,9 @@ import { summarize as summarizeVerdict, renderDecision } from './verdict-split.m
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds } from './task-hold.mjs';
+import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
-import { applyRescue, rescueOf } from './rescue.mjs';
+import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -836,6 +836,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
   // 2.35.0: a finished rescue acts on its decision (retry unparks the stuck task, split keeps it parked, needs-person asks).
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
+  else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);
 
   if (!check.ok) {
@@ -916,6 +917,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
+  else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);
   return target;
 }
@@ -1706,12 +1708,40 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`Game: ${g.name || 'none'} (from ${g.from || 'nothing'}); renderer ${f.renderer || 'none'}, sim ${f.sim || 'none'}.`);
     process.exit(0);
   }
+  // 2.60.1 (B-39): a lane held for landing on purpose (a conductor's hand-built merge chain): no claim clock, no rescue.
+  if (cmd === 'hold' || cmd === 'unhold') {
+    const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
+    const by = typeof flags.by === 'string' ? flags.by.trim() : '';
+    if (!t || (cmd === 'hold' && typeof flags.why !== 'string')) {
+      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> --by <name>${cmd === 'hold' ? ' --why "<what it waits for: the merge chain, the next train …>"' : ''}`);
+      process.exit(1);
+    }
+    const refused = holdRefusal(by);
+    if (refused) { console.error(refused); process.exit(1); }
+    if (cmd === 'unhold') {
+      if (!readHolds()[t.id]?.held) { console.log(`${t.id} isn't held.`); process.exit(0); }
+      setHold(t.id, { held: null });
+      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again` });
+      console.log(`${t.id} is no longer held: its claim clock runs again.`);
+      process.exit(0);
+    }
+    const why = String(flags.why).trim();
+    const was = readHolds()[t.id]?.parked;
+    setHold(t.id, { held: { by, why, at: new Date().toISOString() } });
+    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing: ${why}`.slice(0, 400), meta: { why } });
+    // A stop by the claim clock while it waited to land wasn't a stuck lane: the park is lifted (and the budget count
+    // starts again), and its waiting rescues are closed.
+    if (was?.budget) setHold(t.id, { parked: null }, { by, msg: `${by} unparked ${t.id}: held for landing, not stuck (${why})`.slice(0, 400) });
+    const closed = closeRescuesFor(t.id, { by, why: `is held for landing by ${by} (${why})`, board: { parseNextQueue, dropTask } });
+    console.log(`${t.id} is held for landing by ${by}: its claim clock is stopped and no rescue is filed for it until it lands or someone runs npm run task -- unhold ${t.id} --by <name>.${was?.budget ? ' Its budget park is lifted.' : ''}${closed.length ? ` Rescues: ${closed.map((c) => `${c.id} ${c.action === 'closed' ? 'closed' : '(claimed: its claimant was told)'}`).join(', ')}.` : ''}`);
+    process.exit(0);
+  }
   if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const all = [...q.inProgress, ...q.backlog, ...q.done];
     if (cmd === 'holds') {
       const h = readHolds();
-      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
+      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.held ? `held for landing (${x.held.by}: ${x.held.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
       console.log(rows.length ? rows.join('\n') : 'No holds: every waiting task can start.');
       process.exit(0);
     }

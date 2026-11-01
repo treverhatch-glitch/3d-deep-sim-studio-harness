@@ -108,6 +108,13 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `.pin_refresh`, `.pin_refresh_red`, `.done`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
+- Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
+  session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
+  land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run, no rescue is filed or escalated for it,
+  its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
+  (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
+  `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.
 
 ### When a command is killed halfway (2.58.0)
 

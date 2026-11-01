@@ -15,6 +15,11 @@
  *   tokens    STUDIO_TASK_MAX_TOKENS     10M   weighted tokens (cache reads at STUDIO_CACHE_READ_WEIGHT),
  *                                              from launched sessions and `task done --usage` reports
  *
+ * 2.60.1 (B-39): the claim clock (minutes) doesn't run while the lane waits to land on purpose: from `task hold`
+ * (task.held) or `task done --train` (task.train.queued) until `task unhold` (task.unheld) or the train hands it back
+ * (task.train.dropped); and a task held or queued right now is never stopped for its minutes. Sessions and tokens
+ * still count, and a lane that is neither held nor queued is clocked as before.
+ *
  * 0 turns one limit off; STUDIO_TASK_BUDGET=off turns the whole check off. A task over budget is parked
  * (by "budget") with the numbers, the Producer and the War Room get "needs you", and it never starts
  * again until someone unparks it (`npm run task -- unpark <ID> --by <name>`), which also resets the count.
@@ -25,7 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens } from './budget.mjs';
-import { readHolds, setHold } from './task-hold.mjs';
+import { readHolds, setHold, heldForLanding, heldWords } from './task-hold.mjs';
 
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const off = (env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_TASK_BUDGET || ''));
@@ -41,6 +46,8 @@ export function taskBudgetLimits(env = process.env) {
 /** Events that start the count again: the task finished, was reopened, or a person unparked it. */
 const isReset = (e) => ['task.done', 'task.forced', 'task.reopened', 'task.budget.reset'].includes(e.type) || (e.type === 'task.hold' && /unparked/.test(e.msg || ''));
 const ENDS_CLAIM = new Set(['task.paused', 'task.done', 'task.forced', 'task.reopened']);
+const PAUSES_CLOCK = new Set(['task.held', 'task.train.queued']);
+const RESUMES_CLOCK = new Set(['task.unheld', 'task.train.dropped']);
 
 /**
  * What a task has spent since its last reset: { sessions, minutes, tokens, since }.
@@ -53,7 +60,8 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
   // Which task each launched agent is on, so a session's tokens land on the right task (session.end
   // events don't carry the task). Built over every event, counted only after the reset.
   const onTask = new Map();
-  const open = new Map(); // claimant -> claim start (ms)
+  const open = new Map(); // claimant -> claim start (ms), or null while the clock is paused (held / queued to land)
+  let paused = false;
   const countedFor = new Map(); // launched agent -> its current session already counted for this task
   let sessions = 0;
   let tokens = 0;
@@ -74,17 +82,27 @@ export function taskSpend(taskId, events = readRecentEvents(20000), now = Date.n
         // builder (never launched by the harness) counts each claim as a session.
         if (!launched.has(e.agent)) sessions += 1;
         else if (!countedFor.get(e.agent)) { sessions += 1; countedFor.set(e.agent, true); }
-        if (!open.has(e.agent)) open.set(e.agent, at);
+        if (!open.has(e.agent)) open.set(e.agent, paused ? null : at);
       }
+    }
+    if (e.task === taskId && PAUSES_CLOCK.has(e.type) && !paused) {
+      if (counted) for (const t of open.values()) if (t !== null) ms += Math.max(0, at - t);
+      for (const k of open.keys()) open.set(k, null);
+      paused = true;
+    }
+    if (e.task === taskId && RESUMES_CLOCK.has(e.type) && paused) {
+      for (const k of open.keys()) open.set(k, at);
+      paused = false;
     }
     if (counted && e.type === 'agent.session.end' && onTask.get(e.agent) === taskId) tokens += weightedTokens(e);
     if (counted && e.type === 'usage.reported' && e.task === taskId) tokens += (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0);
     if (e.task === taskId && ENDS_CLAIM.has(e.type)) {
-      if (counted) for (const t of open.values()) ms += Math.max(0, at - t);
+      if (counted) for (const t of open.values()) if (t !== null) ms += Math.max(0, at - t);
       open.clear();
+      if (e.type !== 'task.paused') paused = false; // a hand-back doesn't end a hold
     }
   }
-  for (const t of open.values()) ms += Math.max(0, now - t);
+  for (const t of open.values()) if (t !== null) ms += Math.max(0, now - t);
   return { sessions, minutes: Math.round(ms / 60000), tokens: Math.round(tokens), since: start > 0 ? events[start - 1]?.ts || null : null };
 }
 
@@ -95,9 +113,11 @@ export function overBudget(taskId, { events, now = Date.now(), env = process.env
   const spend = taskSpend(taskId, events || readRecentEvents(20000), now);
   const hits = [];
   if (limits.sessions > 0 && spend.sessions >= limits.sessions) hits.push(`${spend.sessions} sessions (limit ${limits.sessions})`);
-  if (limits.minutes > 0 && spend.minutes >= limits.minutes) hits.push(`${spend.minutes} min claimed (limit ${limits.minutes})`);
+  let held = null;
+  try { held = heldForLanding(taskId); } catch { held = null; }
+  if (limits.minutes > 0 && spend.minutes >= limits.minutes && !held) hits.push(`${spend.minutes} min claimed (limit ${limits.minutes})`);
   if (limits.tokens > 0 && spend.tokens >= limits.tokens) hits.push(`${(spend.tokens / 1e6).toFixed(1)}M tokens (limit ${(limits.tokens / 1e6).toFixed(1)}M)`);
-  return { over: hits.length > 0, why: hits.length ? `${taskId} has used its budget: ${hits.join(', ')}` : null, spend, limits };
+  return { over: hits.length > 0, why: hits.length ? `${taskId} has used its budget: ${hits.join(', ')}` : null, spend, limits, ...(held ? { held: heldWords(held) } : {}) };
 }
 
 /**
