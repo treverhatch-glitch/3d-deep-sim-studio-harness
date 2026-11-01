@@ -131,8 +131,8 @@ record keeps the permission and who recorded it. Builders and other worker agent
    use, in order).
 6. **Lessons:** lessons reach planning prompts only once accepted (`npm run lessons`, then
    `npm run lessons -- accept <id> --by <name> --why "…"`; a Producer session may accept on its own review).
-7. **New protected files:** studio/autonomy.json (the autonomy level and L3 bar) and studio/triggers.json (which sources
-   may route work; `"mode": "shadow"` by default). `npm run autonomy` shows the scorecard; `npm run thread -- shadow-report`
+7. **New protected file:** studio/triggers.json (which sources may route work; `"mode": "shadow"` by default). The
+   autonomy level (studio/autonomy.json) is set by a person, the Producer or an outside agent, not workers. `npm run autonomy` shows the scorecard; `npm run thread -- shadow-report`
    what threads would have routed.
 
 ## What 2.30c changed for agents

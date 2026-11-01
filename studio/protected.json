@@ -1,5 +1,5 @@
 {
-  "note": "Files that change only with the owner's signed approval (npm run approve -- protected). The list is read from the base branch, so a branch can't shrink its own. Goldens are not here: a behaviour change re-records them with a Golden-Reason trailer, and the scenarios' expected outcomes (qa.mjs), which are, keep a re-recorded loss from passing as a win. A new file under addOnly (a new regression replay) needs no approval; editing or deleting one does. 2.58.0 (PU-35): the game's own check settings (studio/game.json, which game the gates test, and each game's studio.gates.json, which checks it runs and whether they are required) are protected too. 2.58.2 (PU-29): the git hooks and the two checks that read what they leave (commits that skipped the hooks, weakened tests) are protected, so a branch can't switch them off by editing them. 2.62.0: the replay bench (studio/bench/: its cases and graders) is protected, so an agent can't change what measures it. 2.64.0: the autonomy level and its bars (studio/autonomy.json) and which sources may route work (studio/triggers.json) are protected, so agents can't raise their own autonomy or open a trigger source; the owner sets them once.",
+  "note": "Files that change only with the owner's signed approval (npm run approve -- protected). The list is read from the base branch, so a branch can't shrink its own. Goldens are not here: a behaviour change re-records them with a Golden-Reason trailer, and the scenarios' expected outcomes (qa.mjs), which are, keep a re-recorded loss from passing as a win. A new file under addOnly (a new regression replay) needs no approval; editing or deleting one does. 2.58.0 (PU-35): the game's own check settings (studio/game.json, which game the gates test, and each game's studio.gates.json, which checks it runs and whether they are required) are protected too. 2.58.2 (PU-29): the git hooks and the two checks that read what they leave (commits that skipped the hooks, weakened tests) are protected, so a branch can't switch them off by editing them. 2.62.0: the replay bench (studio/bench/: its cases and graders) is protected, so an agent can't change what measures it. 2.64.0: which sources may route work (studio/triggers.json) is protected, so an agent can't open a trigger source. The autonomy level (studio/autonomy.json) is not: the owner's rule is that a person, a Producer or Director session or an agent outside the harness may change it (workers never: they can't edit studio/ from a lane).",
   "globs": [
     "studio/protected.json",
     "studio/keys/**",
@@ -23,7 +23,6 @@
     "harness/hook-stamp.mjs",
     "harness/test-weakening.mjs",
     "studio/bench/**",
-    "studio/autonomy.json",
     "studio/triggers.json"
   ],
   "addOnly": [

@@ -1,5 +1,5 @@
 {
-  "note": "The autonomy level the owner set and the bar for L3 (npm run autonomy; docs/AUTONOMY.md). Only the owner changes this file, with a signed approval once it is in studio/protected.json. The scorecard only ever SUGGESTS a move: promotion when every L3 bar held for the window, demotion when the studio is at L3 and a bar fails. Rates are fractions (0.8 = 80%).",
+  "note": "The autonomy level and the bar for L3 (npm run autonomy; docs/AUTONOMY.md). A person, a Producer or Director session or an outside agent (on the owner's word) sets the level; never a worker. The scorecard only ever SUGGESTS a move: promotion when every L3 bar held for the window, demotion when the studio is at L3 and a bar fails. Rates are fractions (0.8 = 80%).",
   "level": "L2",
   "days": 7,
   "l3": {

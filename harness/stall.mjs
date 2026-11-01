@@ -297,9 +297,9 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
   return raised;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  const { sessions } = await import('./agent.mjs');
+// The CLI loads agent.mjs (which imports this file) without a top-level await, so the import cycle can settle.
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) import('./agent.mjs').then(({ sessions }) => {
   const rows = sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, ...(readStall(s.agent)?.verdict || { stalled: false, why: 'not observed yet' }), checks: Object.keys(readDrift(s.agent)?.startedAt === s.startedAt ? readDrift(s.agent).raised || {} : {}) }));
   if (process.argv.includes('--json')) console.log(JSON.stringify(rows));
   else console.log(rows.length ? rows.map((r) => `${r.agent} (${r.role}): ${r.stalled ? `STALLED ${r.why}` : `ok${r.quietMin != null ? `, quiet ${r.quietMin} min` : ''}`}${r.checks.length ? `; Check raised: ${r.checks.join(', ')}` : ''}`).join('\n') : 'No running sessions.');
-}
+});

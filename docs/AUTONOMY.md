@@ -52,11 +52,10 @@ The file holds the level the owner set (`"level": "L2"`) and the bar for L3. Def
   "suggest L3 (your call)". Nothing moves until the owner sets `"level": "L3"` in the file.
 - **Demotion is suggested on its own.** When the level is L3 and any bar fails, the card names the failing bars
   and suggests going back to L2. The owner changes the file.
-- **The file is the owner's.** It belongs in the protected list (`studio/protected.json` and `harness/approve.mjs`
-  `DEFAULT_PROTECTED`, the way 2.62.0 protected the replay bench) so a change needs the owner's signed approval.
-  This release doesn't edit those two files (they are protected themselves, and 2.62.0's entry is not on this
-  release's base): the owner adds `studio/autonomy.json` there when the releases are combined. Until then
-  `npm run autonomy` says the file isn't protected yet.
+- **Who sets the level.** The owner's rule (2026-11-01): a person, a Producer or Director session, or an agent
+  outside the harness (on the owner's word) may change `"level"` and the bar; workers never (in a lane copy studio/ is
+  main's and a hook refuses edits to studio config). The file is deliberately not in the protected list; a studio
+  that wants owner-signed changes only adds `studio/autonomy.json` to `studio/protected.json`.
 
 ## Drift checks (Check cards to the Producer)
 

@@ -67,7 +67,8 @@ threads in shadow mode (2.64). The plan: docs/AUTONOMY.md. Upgrade note: docs/RE
 ### Added (2.64, toward L3)
 - **Autonomy scorecard (`npm run autonomy`, War Room card, docs/AUTONOMY.md):** hours between interventions, who
   stepped in, hands-free landing rate, reopens, redos, unsigned tier C, against the L3 bar in `studio/autonomy.json`
-  (protected); it only suggests a level change.
+  (a person, a Producer/Director session or an outside agent sets the level; not protected); it only suggests a
+  level change.
 - **Drift checks:** the same gate failing the same way 3 times, verify with no new diff, edits outside the lane: Check
   events to the Producer; never stops anything.
 - **Threads and triggers (`npm run thread`, docs/THREADS.md), shadow mode by default:** exact-key thread index, a
