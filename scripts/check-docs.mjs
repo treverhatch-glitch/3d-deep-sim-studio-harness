@@ -5,6 +5,8 @@
  * Scans the Markdown that agents read for `npm run <script>`, `node <file>` and `bash <file>`, and
  * fails when the script isn't in package.json or the file isn't in the repo. Plans for future
  * commands (docs/ROADMAP.md), the changelog and dated notes are skipped.
+ * 2.66.0 (d): also fails when a STUDIO_* setting used in the code is neither documented in docs/ nor in the frozen
+ * baseline (scripts/settings-map.mjs --check).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,9 +67,14 @@ for (const rel of files.filter((f) => !SKIP_FILES.has(f))) {
   });
 }
 if (notes.length) console.log(`[docs] note: ${notes.length} command(s) in a game's own docs that its package.json or folder doesn't have (its doc rot, not the studio's):\n${notes.slice(0, 10).map((n) => `  ${n}`).join('\n')}${notes.length > 10 ? `\n  … and ${notes.length - 10} more` : ''}`);
+// 2.66.0 (d): every STUDIO_* setting the code reads is documented in docs/ or frozen in docs/settings-baseline.json
+// (scripts/settings-map.mjs --check), so the old debt stays put and a new undocumented setting fails here.
+const settings = (await import('./settings-map.mjs')).checkSettings(root);
+if (!settings.ok) for (const l of (await import('./settings-map.mjs')).checkLines(settings)) console.log(l);
 if (problems.length) {
   console.log(`[docs] FAIL ${problems.length} command(s) in the docs don't exist:`);
   console.log(problems.map((p) => `  ${p}`).join('\n'));
   process.exit(1);
 }
-console.log(`[docs] PASS — ${files.filter((f) => !SKIP_FILES.has(f)).length} Markdown file(s), every command exists`);
+if (!settings.ok) process.exit(1);
+console.log(`[docs] PASS — ${files.filter((f) => !SKIP_FILES.has(f)).length} Markdown file(s), every command exists; ${settings.names} STUDIO_* settings each documented or in the frozen baseline${settings.stale ? ' (note: docs/SETTINGS.md is out of date: node scripts/settings-map.mjs)' : ''}`);
