@@ -16,12 +16,23 @@
  *
  *   "engines": { "unity": { "land": "<command>", "cwd": "<folder>", "timeoutMin": 120 } }
  *
- * The command may use {branch} (--branch, else the Unity folder's current branch), {task} (--task) and {folder}
- * (the Unity track's folder, engine/<game>/engine.json "folder"). It runs in "cwd" (relative to the studio), else
- * the Unity track's folder, else the studio. No land command: the gate is skipped with a note.
+ * The command may use {branch}, {task} (--task) and {folder}. It runs in "cwd" (relative to the studio), else the
+ * folder, else the studio. No land command: the gate is skipped with a note.
+ *
+ * 2.60.1 (B-41), from the crew's first Unity landings:
+ *   - {branch} is --branch, else the task's Unity branch (task add --track engine:unity --branch <b>, or
+ *     `node harness/unity-gate.mjs branch <ID> <b>` later). With neither the gate refuses: it no longer falls back
+ *     to the Unity folder's checked-out branch (main), which would land main into itself. A branch name is checked
+ *     (letters, digits, . _ / -) before it goes into the command.
+ *   - {folder} is "folder" in the same settings (relative to the studio, or absolute) when set, else the Unity
+ *     track's folder (engine/<game>/engine.json "folder"); one that doesn't exist is an error, not a guess.
+ *   - "exits": { "<code>": { "status": "pass|red|conflict|refused|error", "why": "<what it means>" } } (or just
+ *     "<why>", status error) is the land script's own contract. Without it the contract above applies. With it, a
+ *     code it doesn't list is an error that names the code; the output's last lines always come with a non-pass.
  *
  *   node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]
  *      exit 0 pass or skipped, 3 refused (try again later), 1 red, conflict or error
+ *   node harness/unity-gate.mjs branch <T-ID> <branch>     record the task's Unity branch (task.unity_branch)
  *
  * `task done` runs it for a task on the Unity track (task add --track engine:unity) once the task's other checks
  * pass; the task closes only on a pass, and a refusal leaves it in progress with "try again later".
@@ -67,12 +78,48 @@ export function taskTrack(taskId) {
   return readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === taskId).pop()?.meta?.track || null;
 }
 
-/** Map a land command's exit to a result. */
-export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin = null } = {}) {
+// 2.60.1 (B-41): a task's Unity branch, and the names allowed into the land command.
+const BRANCH_RE = /^(?!-)(?!.*\.\.)[A-Za-z0-9._\/-]{1,200}$/;
+export const validBranch = (b) => typeof b === 'string' && BRANCH_RE.test(b) && !b.endsWith('/') && !b.endsWith('.lock');
+
+/** The task's Unity branch: the last `unity-gate branch` record, else task add --branch. null when none. */
+export function taskBranch(taskId) {
+  if (!taskId) return null;
+  const evs = readRecentEvents(20000).filter((e) => e.task === taskId && (e.type === 'task.unity_branch' || e.type === 'task.added'));
+  const set = evs.filter((e) => e.type === 'task.unity_branch').pop()?.meta?.branch;
+  return set || evs.filter((e) => e.type === 'task.added').pop()?.meta?.branch || null;
+}
+
+/** Record the Unity branch a task lands from (a task.unity_branch event). { ok, why }. */
+export function setTaskBranch(taskId, branch, { agent = process.env.STUDIO_LOCK_OWNER || 'unity-gate' } = {}) {
+  if (!/^[A-Z]+-\d+$/.test(String(taskId || ''))) return { ok: false, why: `"${taskId}" is not a task id (T-012)` };
+  if (!validBranch(branch)) return { ok: false, why: `"${branch}" is not a branch name the land command can take (letters, digits, . _ / -)` };
+  emitEvent({ type: 'task.unity_branch', agent, task: taskId, track: 'engine:unity', msg: `${taskId} lands from the Unity branch ${branch}`, meta: { branch } });
+  return { ok: true, why: `${taskId} lands from the Unity branch ${branch}` };
+}
+
+const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error']);
+
+/**
+ * Map a land command's exit to a result. 2.60.1 (B-41): `exits` (studio/game.json engines.unity.exits) is the land
+ * script's own contract and replaces the default one; a code it doesn't list is an error naming the code.
+ */
+export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin = null, exits = null } = {}) {
   if (timedOut) return { status: 'error', why: `timed out after ${timeoutMin} min (engines.unity.timeoutMin or STUDIO_UNITY_GATE_TIMEOUT_MIN)` };
   if (code === null || code === undefined) return { status: 'error', why: `stopped${signal ? ` by ${signal}` : ''} before it ended` };
+  if (exits && typeof exits === 'object') {
+    const e = exits[String(code)];
+    if (typeof e === 'string' && e.trim()) return { status: code === 0 ? 'pass' : 'error', why: `exited ${code}: ${e.trim()} (studio/game.json engines.unity.exits)` };
+    if (e && typeof e === 'object') {
+      const status = STATUSES.has(e.status) ? e.status : 'error';
+      return { status, why: `exited ${code}: ${String(e.why || WORDS[status] || status).trim()} (studio/game.json engines.unity.exits)` };
+    }
+    if (code === 0) return { status: 'pass', why: WORDS.pass };
+    return { status: 'error', why: `exited ${code}, which the land script's contract (studio/game.json engines.unity.exits: ${Object.keys(exits).join(', ') || 'none'}) doesn't name: see its last lines` };
+  }
   const status = UNITY_EXIT[code] || 'error';
-  return { status, why: UNITY_EXIT[code] ? WORDS[status] : `exited ${code}, which the land contract doesn't define (0 pass, 1 red, 2 conflict, 3 refused, 4 error)` };
+  if (!UNITY_EXIT[code]) return { status, why: `exited ${code}, which the land contract doesn't define (0 pass, 1 red, 2 conflict, 3 refused, 4 error): see its last lines` };
+  return { status, why: code === 0 ? WORDS[status] : `exited ${code}: ${WORDS[status]} (the default land contract; if the script means something else by ${code}, set studio/game.json engines.unity.exits)` };
 }
 
 /**
@@ -88,13 +135,20 @@ export async function runUnityGate({ task = null, branch = null, env = process.e
   const cfg = unityConfig();
   const track = unityTrack();
   if (!cfg) return { status: 'skipped', ok: true, why: `no Unity land command is configured (studio/game.json "engines": { "unity": { "land": "<command>" } })${track ? '' : ' and there is no Unity track'}: nothing to run` };
-  const folder = track?.folder ? path.resolve(REPO_ROOT, track.folder) : null;
+  // 2.60.1 (B-41): --branch, else the task's Unity branch; never the folder's checked-out branch (checked below).
+  let br = branch || (task ? taskBranch(task) : null);
+  // 2.60.1 (B-41): engines.unity.folder, else the track's folder; a missing one is an error, never a guess.
+  const folderSet = typeof cfg.folder === 'string' && cfg.folder.trim() ? cfg.folder.trim() : null;
+  const folder = folderSet ? path.resolve(REPO_ROOT, folderSet) : track?.folder ? path.resolve(REPO_ROOT, track.folder) : null;
+  const folderFrom = folderSet ? 'studio/game.json engines.unity.folder' : 'the Unity track\'s folder (engine.json "folder")';
+  if (folder && !fs.existsSync(folder) && (folderSet || /\{folder\}/.test(cfg.land))) return finish({ status: 'error', ok: false, code: null, why: `the Unity folder ${folder} (${folderFrom}) doesn't exist: set "folder" in studio/game.json engines.unity to the Unity checkout that has the land script` });
+  if (!folder && /\{folder\}/.test(cfg.land)) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {folder} and none is known: set "folder" in studio/game.json engines.unity' });
   const cwd = cfg.cwd ? path.resolve(REPO_ROOT, cfg.cwd) : folder && fs.existsSync(folder) ? folder : REPO_ROOT;
-  let br = branch;
+  if (br && !validBranch(br)) return finish({ status: 'error', ok: false, code: null, why: `"${br}" is not a branch name the land command can take (letters, digits, . _ / -)` });
   if (!br && /\{branch\}/.test(cfg.land)) {
     const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder && fs.existsSync(folder) ? folder : cwd, encoding: 'utf8' });
-    br = r.status === 0 && r.stdout.trim() !== 'HEAD' ? r.stdout.trim() : null;
-    if (!br) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {branch} and none is known: pass --branch <name>' });
+    const here = r.status === 0 ? r.stdout.trim() : '';
+    return finish({ status: 'error', ok: false, code: null, why: `the land command needs {branch} and no Unity branch is known${task ? ` for ${task}` : ''}: ${task ? `node harness/unity-gate.mjs branch ${task} <branch> records it (or add the task with --branch <branch>)` : 'pass --branch <name>'}. The Unity folder's checked-out branch${here && here !== 'HEAD' ? ` (${here})` : ''} is not used: landing it could merge the target into itself` });
   }
   if (/\{task\}/.test(cfg.land) && !task) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {task}: pass --task <ID>' });
   const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
@@ -118,7 +172,7 @@ export async function runUnityGate({ task = null, branch = null, env = process.e
   const out = path.join(REPO_ROOT, '.studio', 'gates', 'out', 'unity.log');
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text); } catch {}
   const timedOut = r.error?.code === 'ETIMEDOUT';
-  const m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin });
+  const m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null });
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
   return finish({ ...m, ok: m.status === 'pass', code: r.status, log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
@@ -138,6 +192,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   const json = argv.includes('--json');
+  if (argv[0] === 'branch') {
+    const r = setTaskBranch(argv[1], argv[2]);
+    (r.ok ? console.log : console.error)(`[unity-gate] ${r.why}`);
+    process.exit(r.ok ? 0 : 2);
+  }
   const res = await runUnityGate({ task: flag('task'), branch: flag('branch'), log: (m) => console.error(m), onlyUnityTask: argv.includes('--if-unity-task') });
   if (json) console.log(JSON.stringify(res));
   else {

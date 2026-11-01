@@ -3852,9 +3852,9 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
-// 2.60.1 (B-17, B-35): a game check's timeout scales on Windows (a CPU probe, a Unity editor outside the lock, a
-// floor from the last quiet run); the Unity editor's runs take machine:heavy and a heavy take checks free memory
-// (qa/selftest-2601m.mjs).
+// 2.60.1 (B-17, B-35, B-41): a game check's timeout scales on Windows (a CPU probe, a Unity editor outside the lock,
+// a floor from the last quiet run); the Unity editor's runs take machine:heavy and a heavy take checks free memory;
+// the Unity land gate's branch, folder and exit meanings (qa/selftest-2601m.mjs).
 {
   const dir = copyRepo();
   const { selftest2601M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601m.mjs')).href);
