@@ -582,14 +582,22 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const TRAIN_VERIFIED = new Set([VERIFY_LABEL, 'The verify ran on the whole game (--all), not scoped to your files']);
   const blocking = check.checks?.length ? check.checks.filter((c) => !c.ok && !(checkOnly && c.label === VERIFY_LABEL) && !(trainCheck && TRAIN_VERIFIED.has(c.label))) : check.ok ? [] : [{ why: check.missing[0] }];
   if (!check.ok && !force && blocking.length) {
-    emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${check.missing[0]}` });
+    // 2.60.1 (B-33): name the check that blocks. check.missing[0] can be a row this run doesn't require (the verify, which
+    // the train's own verify covers under --train): T-059 was refused "full verify ran on another commit" while another
+    // check was what failed. Exempt rows are listed as covered, not as open.
+    const first = blocking[0];
+    const blocker = first.label ? `${first.label}: ${first.why}` : first.why;
+    const exempt = (c) => !c.ok && trainCheck && TRAIN_VERIFIED.has(c.label);
+    emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${blocker}`.slice(0, 600) });
     return {
       error: 'not-done',
       check,
+      blocking,
       message: [
+        `${target.id} is not done: ${blocker}`,
         `${target.id} is a "${check.type}" task (${check.typeSource}). Done means: ${check.means}.`,
         check.typeIgnored ? `  note: ${check.typeIgnored}` : '',
-        ...(check.checks?.length ? check.checks.map((c) => `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : check.missing.map((m) => `  missing: ${m}`)),
+        ...(check.checks?.length ? check.checks.map((c) => (exempt(c) ? `  (the train's verify covers this) ${c.label}` : `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`)) : check.missing.map((m) => `  missing: ${m}`)),
         check.skill ? `How: ${check.skill}` : '',
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
       ].filter(Boolean).join('\n'),
