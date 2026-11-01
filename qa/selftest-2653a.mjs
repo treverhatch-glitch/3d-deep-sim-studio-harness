@@ -176,8 +176,12 @@ export async function selftest2653A({ dir, run, report, tmpRoot }) {
   let f7 = [];
   try { f7 = JSON.parse(m7[1]); } catch {}
   report('2.65.3 (B-43, a): a failing `node --test` check (TAP) names its failing test file, absolute and with forward slashes, in "[game-gates] failing test files in game:nt: [...]" (fails on 2.65.2: no such line)',
-    o7.status === 1 && f7.length === 1 && f7[0] === ntB,
-    out(o7).slice(-1500));
+    // On Windows the runner's temp folder can be named two ways (C:/Users/RUNNER~1/... and C:/Users/runneradmin/...):
+    // node --test reports the long one. The file is the same; compare from the game folder on, and require an absolute,
+    // forward-slash path.
+    o7.status === 1 && f7.length === 1 && f7[0].endsWith('/game/demo/nt/b.test.mjs') && !f7[0].includes('\\') && /^([A-Za-z]:)?\//.test(f7[0])
+      && (f7[0] === ntB || process.platform === 'win32'),
+    `${m7 ? m7[0] : '(no "failing test files in game:nt" line)'}\nexpected ${ntB}\n${out(o7).slice(-1200)}`);
 
   // ---- 8. the pure pieces: parsing (Windows paths too), the focus command, the ETA ----
   const probe = path.join(tmpRoot, `pure-2653a-${process.pid}.mjs`);
