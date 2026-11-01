@@ -164,5 +164,6 @@ Recommended habits for GitHub, model providers and multi-agent teams: [docs/BEST
 Plugging in Claude Code, Codex, Cursor, Grok, Antigravity or Aider: [docs/AGENT-TOOLS.md](docs/AGENT-TOOLS.md).
 How a game starts (intake, phases, layers) and stays on course (Director, Idea Board): [docs/GAME-BIBLE.md](docs/GAME-BIBLE.md).
 What's next for the harness, and how each known gap gets fixed: [docs/ROADMAP.md](docs/ROADMAP.md).
+Measuring whether a harness change (or a guardrail) helps, with real agents on past tasks: [docs/BENCH.md](docs/BENCH.md) (`npm run bench`, owner-run).
 
 Proprietary. Copyright (c) 2026 Trever Max Hatch, all rights reserved. See LICENSE.

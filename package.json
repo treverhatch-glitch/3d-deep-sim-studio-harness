@@ -46,6 +46,7 @@
     "scout": "node harness/asset-scout.mjs",
     "adapt": "node harness/art-adapt.mjs",
     "rehearse": "node harness/rehearsal.mjs",
+    "bench": "node harness/bench.mjs",
     "vision": "node qa/vision-check.mjs",
     "ledger": "node harness/ledger.mjs",
     "learn": "node harness/learn.mjs",
