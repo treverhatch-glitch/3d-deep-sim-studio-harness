@@ -737,6 +737,17 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.59.0 (#16): a task on the Unity track (task add --track engine:unity) lands through the studio's Unity gate
+  // (harness/unity-gate.mjs: its configured land command, under the machine:heavy lock); it closes only on a pass.
+  if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track === 'engine:unity') {
+    const ug = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-gate.mjs'), '--json', '--task', target.id], { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
+    let u = null;
+    try { u = JSON.parse((ug.stdout || '').trim().split('\n').pop()); } catch {}
+    if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
+    if (u.status === 'skipped' && !u.notUnity) console.log(`[task done] skipped the Unity gate: ${u.why}`);
+    if (!u.ok) return { error: u.status === 'refused' ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\n${u.status === 'refused' ? 'Run task done again later; nothing is wrong with the work.' : `Fix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
+  }
+
   // Forced past a failing check: the owner's uncommitted work in its claimed folders is saved as a patch
   // first, so it isn't lost or committed later under another task (test #3: 12 forced, several with work
   // left uncommitted that later tasks committed).

@@ -50,6 +50,10 @@ The numbers are estimates from one experiment, not measurements. Point the harne
 Both `engine` and `parity` are optional gates in `studio/gates.json`: they report, and a game with a
 track can make them required.
 
+A Unity port in its own repo can also land through its own landing script: the Unity gate
+(`node harness/unity-gate.mjs`, run by `task done` for tasks on the Unity track) runs the command the studio
+configured, under the `machine:heavy` lock, and reads its exit code. See docs/UNITY-TRACK.md, "Landing Unity work".
+
 ## What stays shared, and what doesn't
 
 Shared: the Game Bible, the phase exits, the sim's numbers (`TUNING`), the game ID. Separate: the code,

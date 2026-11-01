@@ -159,6 +159,30 @@ features once the Unity port is caught up (drift at 0) and the Unity build is th
 on the web build gets fixes only, or becomes a lightweight demo. The cost of running both is the port lag: if
 drift keeps growing week on week, the porters can't keep up, and it's time to move feature work to Unity.
 
+## Landing Unity work: the Unity gate (2.59.0)
+
+The Unity repo keeps its own landing script (its tests in batch mode, a build, a merge into its main branch).
+The harness only runs it: set the command once in `studio/game.json` (a protected file, so only the owner
+changes it and a branch can't swap it for one that always passes):
+
+```json
+{ "engines": { "unity": { "land": "<the Unity repo's land command> {branch}", "cwd": "<folder>", "timeoutMin": 120 } } }
+```
+
+`{branch}` is `--branch`, else the Unity folder's current branch; `{task}` the task ID; `{folder}` the Unity
+track's folder. It runs in `cwd` (relative to the studio), else the Unity track's folder.
+
+- `node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]` runs it under the `machine:heavy`
+  lock (a Unity editor run never overlaps a full verify or a browser playtest; it waits, naming the holder).
+- The exit code decides: 0 pass (landed), 1 red, 2 conflict, 3 refused (busy: not a failure of the work), 4 error;
+  anything else, a signal or a timeout (`timeoutMin`, `STUDIO_UNITY_GATE_TIMEOUT_MIN`, 120) is an error.
+- `task done` runs it for a task added with `--track engine:unity`, after the task's other checks; the task closes
+  only on a pass, and a refusal leaves it in progress ("run task done again later"). `STUDIO_DONE_UNITY_GATE=skip`
+  turns that off. With no land command it is skipped with a note.
+- Each run is kept: `.studio/gates/unity-last.json`, its output in `.studio/gates/out/unity.log`, an `engine.land`
+  event and a line in `studio/engine/LOG.md`.
+- It is not part of `npm run verify`: a verify checks, it never lands work.
+
 ## Settings
 
 In `.env`:
