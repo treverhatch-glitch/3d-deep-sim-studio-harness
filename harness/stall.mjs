@@ -99,8 +99,16 @@ export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role)) {
  */
 export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, now = Date.now(), events } = {}) {
   // 2.64.0: the drift checks ride the same observation (heartbeat and watchdog). They only raise Check events.
-  events = events || readRecentEvents(5000); // read once for both checks
-  try { driftCheck(session, { cwd, now, events }); } catch { /* a help, never a crash */ }
+  // At most once per STUDIO_DRIFT_EVERY_S (120 s) per session, like the watchdog's pass: each check runs git (status,
+  // log) synchronously, and on Windows a heartbeat that ran them every beat held the launcher up (CI #49: sessions
+  // ended late, a supervisor test's lanes never started).
+  const every = Number(process.env.STUDIO_DRIFT_EVERY_S ?? 120) * 1000;
+  let driftFresh = false;
+  try { driftFresh = readDrift(session.agent)?.startedAt === session.startedAt && now - fs.statSync(driftFile(session.agent)).mtimeMs < every; } catch {}
+  if (!driftFresh && !/^off$/i.test(process.env.STUDIO_DRIFT || '')) {
+    events = events || readRecentEvents(5000); // read once for both checks
+    try { driftCheck(session, { cwd, now, events }); } catch { /* a help, never a crash */ }
+  }
   if (/^off$/i.test(process.env.STUDIO_STALL || '')) return { stalled: false, kind: null, why: 'STUDIO_STALL=off' };
   const fp = progressFingerprint(session.agent, cwd, events);
   const prev = readStall(session.agent);
