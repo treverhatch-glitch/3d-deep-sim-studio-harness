@@ -66,6 +66,9 @@ export function judgeFiles(files = [], { settings = {}, exists = () => true } = 
   const kinds = { test: [], docs: [], config: [] };
   const logic = [];
   for (const f of lane.files) {
+    // 2.65.0 (CI): a regression replay is the bug flow itself: the task stays a bug, so its replay must fail on the
+    // code before the fix (a "regression" that passes before catches nothing). Never evidence for a "change".
+    if (/(^|\/)qa\/regressions\//.test(f.path) || f.rules.some((r) => /regression/.test(r))) { logic.push({ path: f.path, why: 'a regression replay (a bug fix brings one, and it must fail before the fix)' }); continue; }
     const hit = f.rules.find((r) => LOGIC_RULES.has(r));
     if (hit) { logic.push({ path: f.path, why: hit === 'sim' ? 'a sim path' : hit === 'harness' ? 'the studio\'s own code' : `the ${hit} rule` }); continue; }
     const k = fileKind(f.path);
