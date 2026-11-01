@@ -3840,6 +3840,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.0 (#5, #6): heavy stop kills a holder's whole process tree (and a killed holder's orphans go at the next take),
+// createLaneCopy refuses a task id that isn't on the board, a manifest's slowTests get the load factor
+// (qa/selftest-260d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260d.mjs')).href);
+  await selftest260D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
