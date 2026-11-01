@@ -3850,6 +3850,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.63.0 (helper i): blast-radius landing tiers (tier C held for the owner until a person releases it, tier B verified
+// with --all and its Golden-Reason / Pin-Moves required), STUDIO_TRAIN_MIN / _MAX / _WAIT_MIN batching, run-alone lanes,
+// and a lone task done riding along with queued lanes (qa/selftest-263i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest263I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263i.mjs')).href);
+  await selftest263I({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
