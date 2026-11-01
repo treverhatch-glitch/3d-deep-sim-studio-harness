@@ -121,6 +121,7 @@
     "new-studio": "node scripts/new-studio.mjs",
     "causes": "node harness/causes.mjs",
     "release": "node scripts/release.mjs",
+    "hooks": "node harness/hook-stamp.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "session:report": "node harness/session-report.mjs",
     "selftest": "node qa/selftest.mjs",

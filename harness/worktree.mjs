@@ -364,6 +364,10 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
         git(REPO_ROOT, 'rebase', '--abort');
         return { ok: false, message: `The studio's branch (${main}) changed files you changed too. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again.` };
       }
+      // 2.59.0 (H-13): a commit whose hook stamp was valid before this rebase and isn't after it is re-committed through
+      // the real hooks (harness/hook-stamp.mjs restamp --auto), never stamped by hand; if the hooks refuse it, it doesn't land.
+      const rs = restampAfterRebase(taskId, { tip, before, preHead });
+      if (!rs.ok) return { ok: false, message: rs.message };
       const head = git(REPO_ROOT, 'rev-parse', 'HEAD').stdout.trim();
       if (runChecks) {
         const incoming = changedSince(REPO_ROOT, before, tip);
@@ -422,6 +426,29 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
     return res;
   }
   return { ok: false, message: `${main} kept moving while ${taskId} was landing (${tries} tries). Run task done again.` };
+}
+
+/**
+ * 2.59.0 (H-13): after deliver's rebase, re-commit through the hooks the lane commits whose stamps the rebase made stale
+ * (only when every stamp was valid before it). STUDIO_HOOKS_RESTAMP=off skips it (the hooks gate then lists them).
+ * Returns { ok, message, replayed }.
+ */
+export function restampAfterRebase(taskId, { tip, before, preHead }) {
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_HOOKS_RESTAMP || '')) return { ok: true, replayed: 0 };
+  const script = path.join(REPO_ROOT, 'harness', 'hook-stamp.mjs');
+  if (!fs.existsSync(script)) return { ok: true, replayed: 0 };
+  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
+  let j = null;
+  try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch {}
+  if (j?.ok) {
+    if (j.replayed) {
+      console.log(`[deliver] ${taskId}: ${j.why} after the rebase (their stamps no longer matched)`);
+      emitEvent({ type: 'hooks.restamped', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${j.why} after task done's rebase` });
+    }
+    return { ok: true, replayed: j.replayed || 0 };
+  }
+  const why = j?.why || `${(r.stderr || r.stdout || '').trim().split('\n').slice(-3).join(' ') || `exit ${r.status}`}`;
+  return { ok: false, message: `Your work was rebased on the latest studio branch, and its commits' hook stamps no longer match, so they were re-committed through the hooks, which failed: ${why}. Fix it in your copy and commit (or npm run hooks -- restamp), then task done again.` };
 }
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
