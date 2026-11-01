@@ -183,6 +183,18 @@ track's folder. It runs in `cwd` (relative to the studio), else the Unity track'
   event and a line in `studio/engine/LOG.md`.
 - It is not part of `npm run verify`: a verify checks, it never lands work.
 
+### Editor runs and the machine:heavy lock (2.60.1)
+
+A Unity editor run takes 6-7 GB, so it shares the `machine:heavy` lock with full verifies and browser playtests:
+
+- `node harness/unity.mjs gate` and `build` take the lock themselves (one hold for Edit Mode and Play Mode). When
+  it stays busy, or free memory stays under `STUDIO_RAM_FLOOR_GB`, the editor doesn't start and they exit 3 (busy).
+- Any other editor batch work a Unity lane runs goes through the wrapper, so it waits its turn and can be stopped
+  with its whole process tree: `node harness/heavy.mjs run --label "unity import" -- "<Unity.exe>" -batchmode -quit -projectPath <folder> ...`.
+- An editor someone opened by hand is outside the lock. `node harness/heavy.mjs status` lists it as an implicit
+  holder and game checks scale their timeouts for it; heavy jobs still start beside it, so close it before a long
+  verify. `STUDIO_HEAVY_PROGRAMS` (default `Unity.exe,Unity`) names the programs counted this way.
+
 ## Settings
 
 In `.env`:

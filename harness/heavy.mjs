@@ -40,7 +40,26 @@
  * (scripts/run-gates.mjs) re-runs itself as the leader of a new group (heavyOwnGroup), so a stop gets its gates.
  * A live holder past STUDIO_HEAVY_STALE_MIN loses its slot as before but is never killed by a take.
  *
- * Test hook: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one).
+ * 2.60.1 (B-17, B-35): on Windows os.loadavg() is always zeros, so a game check timed out at its base 600 s with the
+ * CPU 63% busy and a Unity editor open (the suite takes about 555 s quiet), and no scaling line was printed.
+ *   - Where there is no load average (Windows, or all zeros), loadFactor samples os.cpus() twice ~500 ms apart; a
+ *     busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds 0.5 at the threshold up to 2 at 100%, as the load
+ *     term does (STUDIO_CPU_PROBE=off skips the probe).
+ *   - A heavy program running outside the lock (STUDIO_HEAVY_PROGRAMS, default Unity.exe,Unity: a Unity editor
+ *     someone opened) that is in no holder's tree is an implicit holder: it counts like another heavy job in
+ *     loadFactor and `status` lists it. It doesn't make heavy jobs wait (an editor can stay open all day).
+ *   - scaledTimeout(base, root, { label }) never gives less than STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5) times the
+ *     check's last passing run at factor 1 (recordGateTime, .studio/gates/game-gate-times.json in the main checkout),
+ *     capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) times the base like the load factor: one bound, and a suite
+ *     whose quiet time nears that needs its base raised, which is the owner's setting, not the harness's.
+ *   - acquireHeavy checks free memory against STUDIO_HEAVY_RAM_FLOOR_GB, else STUDIO_RAM_FLOOR_GB (supervisor.mjs
+ *     ramCheck, 3; 0 turns it off): under it the job
+ *     waits, saying so, up to STUDIO_HEAVY_RAM_WAIT_MIN (10, at most STUDIO_HEAVY_WAIT_MIN), then fails HEAVY_BUSY.
+ *
+ * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
+ * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
+ * average exists); STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the process list; STUDIO_TEST_FREEMEM_MB for free
+ * memory (supervisor.mjs ramCheck).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -51,6 +70,7 @@ import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, s
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { landingWaiters } from './merge-lane.mjs';
+import { ramCheck } from './supervisor.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -340,7 +360,7 @@ function heldByParent(dir, env) {
  * Error with code HEAVY_BUSY when the wait limit passes. While held, process.env.STUDIO_HEAVY_HELD names the slot
  * so the processes this one starts don't wait for it.
  */
-export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null } = {}) {
+export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined } = {}) {
   const n = heavySlots(env);
   const none = { release: () => {}, update: () => false, held: null, waitedMs: 0 };
   if (!(n > 0)) return { ...none, skipped: true };
@@ -350,6 +370,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   if (parent) return { ...none, inside: parent };
   const staleMs = staleOf(env);
   const waitMs = num(env.STUDIO_HEAVY_WAIT_MIN, 60) * 60000;
+  // 2.60.1 (B-35): free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long.
+  const ramWaitMs = Math.min(waitMs, num(env.STUDIO_HEAVY_RAM_WAIT_MIN, 10) * 60000);
   const poll = num(env.STUDIO_HEAVY_POLL_MS, 2000);
   const remind = num(env.STUDIO_HEAVY_REMIND_MS, 5 * 60000);
   const landing = String(env.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing';
@@ -358,9 +380,26 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   let mine = null;
   let toldAt = 0;
   let holders = [];
+  let ram = { low: false };
+  // STUDIO_HEAVY_RAM_FLOOR_GB, when set, is heavy work's own floor; else the agents' STUDIO_RAM_FLOOR_GB (3).
+  const ownFloor = env.STUDIO_HEAVY_RAM_FLOOR_GB !== undefined && env.STUDIO_HEAVY_RAM_FLOOR_GB !== '';
+  const ramVar = ownFloor ? 'STUDIO_HEAVY_RAM_FLOOR_GB' : 'STUDIO_RAM_FLOOR_GB';
+  const ramEnv = ownFloor ? { ...env, STUDIO_RAM_FLOOR_GB: env.STUDIO_HEAVY_RAM_FLOOR_GB } : env;
+  let ramTold = false;
   try {
     while (!mine) {
       const ahead = landing ? [] : landingWaiters(dir, { staleMs, prefix: PREFIX });
+      try { ram = ramCheck(freemem ? { freemem } : {}, ramEnv); } catch { ram = { low: false }; }
+      const ramWhy = ram.low ? `free memory is ${ram.freeGb} GB, under the floor (${ramVar}=${ram.floorGb})` : '';
+      if (ram.low && Date.now() - t0 >= ramWaitMs) {
+        throw Object.assign(new Error(`[heavy] ${label} did not start: ${ramWhy} and stayed there for ${span(Date.now() - t0)} (STUDIO_HEAVY_RAM_WAIT_MIN). Heavy work never starts that low on memory (a Unity editor run takes 6-7 GB). Close what holds the memory (an open editor, a browser playtest) or run it again later; ${ramVar}=0 turns the check off.`), { code: 'HEAVY_BUSY', ram: true, holders });
+      }
+      if (ram.low && !ramTold) {
+        log(`[heavy] ${label} waits: ${ramWhy}; it starts once more is free, waiting up to ${span(ramWaitMs)}`);
+        ramTold = true;
+        toldAt = Date.now();
+      }
+      if (!ram.low && ramTold) { log(`[heavy] ${label}: free memory is back over the floor (${ram.freeGb ?? '?'} GB)`); ramTold = false; }
       holders = [];
       for (let i = 1; i <= n && !mine; i += 1) {
         const f = path.join(dir, `${PREFIX}-${i}.lock`);
@@ -375,7 +414,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
             try { fs.rmSync(f, { force: true }); } catch {}
           } else continue;
         }
-        if (ahead.length) continue;
+        if (ahead.length || ram.low) continue;
         try {
           fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
           mine = f;
@@ -384,6 +423,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         }
       }
       if (mine) break;
+      if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
       const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `a landing waiting first (${ahead.map((w) => w.label).join(', ')})` : 'unknown';
       if (Date.now() - t0 >= waitMs) {
         throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders });
@@ -447,37 +487,154 @@ function otherGateSlots(root, env) {
   return names.filter((n) => /^gate-slot-\d+\.lock$/.test(n)).map((n) => readJson(path.join(dir, n))).filter((h) => h?.pid && h.pid !== process.pid && pidAlive(h.pid, h.identity) && Date.now() - Number(h.at || 0) <= staleMs);
 }
 
+// ---- 2.60.1 (B-17, B-35): what loads the machine outside the lock ----
+
+/** Heavy programs that may run outside the lock, lower-cased: STUDIO_HEAVY_PROGRAMS (comma list; '' or off: none). */
+export function heavyPrograms(env = process.env) {
+  const v = env.STUDIO_HEAVY_PROGRAMS === undefined ? 'Unity.exe,Unity' : String(env.STUDIO_HEAVY_PROGRAMS);
+  return off(v) ? [] : v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * Heavy programs (heavyPrograms: a Unity editor) running outside every live machine:heavy holder's tree, and not
+ * this process or one it runs under: [{ pid, cmd, start }]. Only the topmost of a program's own processes counts
+ * (Unity's asset-import workers are Unity.exe children of the editor). Never throws: [] when processes can't be
+ * listed. Injectable: procs (a listProcesses array) or listProcs.
+ */
+export function implicitHolders(root, { env = process.env, procs = null, listProcs = listProcesses, self = process.pid } = {}) {
+  const names = heavyPrograms(env);
+  if (!names.length) return [];
+  let list;
+  try { list = (procs || listProcs()).filter((p) => p && Number.isInteger(Number(p.pid))); } catch { return []; }
+  const isHeavy = (p) => Boolean(p && !p.zombie && names.includes(String(p.cmd || '').toLowerCase()));
+  if (!list.some(isHeavy)) return [];
+  const byPid = new Map(list.map((p) => [Number(p.pid), p]));
+  const covered = new Set();
+  for (const h of heavyHolders(root, { env })) { try { for (const m of holderTree(h, list, { self: -1 }).members) covered.add(m); } catch {} }
+  for (let p = self, k = 0; p && k < 64; k += 1) { covered.add(p); const rec = byPid.get(p); if (!rec || Number(rec.ppid) === p) break; p = Number(rec.ppid); }
+  return list.filter((p) => isHeavy(p) && !covered.has(Number(p.pid)) && !(isHeavy(byPid.get(Number(p.ppid))))).map((p) => ({ pid: Number(p.pid), cmd: p.cmd, start: p.start || null }));
+}
+export const describeImplicit = (p) => `${p.cmd} (pid ${p.pid}${p.start ? `, for ${span(Date.now() - Number(p.start))}` : ''})`;
+
+/**
+ * How busy every core is: two os.cpus() samples `ms` apart (sync), 0..1, or null when they can't be read. Used where
+ * there is no load average (Windows). Injectable: cpus (os.cpus), wait(ms).
+ */
+export function cpuBusy({ ms = 500, cpus = os.cpus, wait = sleep } = {}) {
+  const sum = (list) => (list || []).reduce((a, c) => {
+    const t = c?.times || {};
+    const busy = Number(t.user || 0) + Number(t.nice || 0) + Number(t.sys || 0) + Number(t.irq || 0);
+    a.idle += Number(t.idle || 0);
+    a.total += busy + Number(t.idle || 0);
+    return a;
+  }, { idle: 0, total: 0 });
+  try {
+    const a = sum(cpus());
+    wait(ms);
+    const b = sum(cpus());
+    const total = b.total - a.total;
+    if (!(total > 0)) return null;
+    return Math.min(1, Math.max(0, 1 - (b.idle - a.idle) / total));
+  } catch { return null; }
+}
+
+/**
+ * The CPU's busy fraction when it stands in for the load average: STUDIO_TEST_CPU_BUSY (or opts.cpuBusy, a number
+ * or a function) when given; else, only where there is no load average (Windows, or all zeros) and no
+ * STUDIO_TEST_LOADAVG, the probe (STUDIO_CPU_PROBE=off: none). { busy, load }: load is the 1-min load to use instead.
+ */
+function cpuOrLoad({ env, loadavg, cpuBusy: given, platform, cpus }) {
+  const testBusy = given !== undefined && given !== null ? given : env.STUDIO_TEST_CPU_BUSY !== undefined && env.STUDIO_TEST_CPU_BUSY !== '' ? Number(env.STUDIO_TEST_CPU_BUSY) : null;
+  const load = loadavg ?? (env.STUDIO_TEST_LOADAVG !== undefined && env.STUDIO_TEST_LOADAVG !== '' ? Number(env.STUDIO_TEST_LOADAVG) : null);
+  if (testBusy !== null) {
+    const b = Number(typeof testBusy === 'function' ? testBusy() : testBusy);
+    return { busy: Number.isFinite(b) ? b : null, load: null };
+  }
+  if (load !== null) return { busy: null, load };
+  const la = os.loadavg();
+  if (platform !== 'win32' && la.some((x) => x > 0)) return { busy: null, load: la[0] };
+  return { busy: off(env.STUDIO_CPU_PROBE) ? null : cpuBusy(cpus ? { cpus } : {}), load: null };
+}
+
 /**
  * 2.59.0 (#2): how loaded the machine is, as a factor for a gate's timeout: 1 + 1 per other live machine:heavy holder
- * (not the one this process runs inside) + 0.5 per other running gate check + the 1-minute load above 1.5 per core
- * (os.loadavg is all zeros on Windows, so there only the holder counts decide). Capped at
- * STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3), never below 1. { factor, why }.
+ * (not the one this process runs inside) + 0.5 per other running gate check + the 1-minute load above 1.5 per core.
+ * 2.60.1 (B-17): + 1 per heavy program outside the lock (implicitHolders: a Unity editor), and where there is no
+ * load average (Windows: os.loadavg is all zeros) the CPU's busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds
+ * 0.5 at the threshold up to 2 at 100% busy, as the load term does. Capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
+ * (3), never below 1. { factor, why }. Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus for the
+ * probe), platform, procs, listProcs.
  */
-export function loadFactor(root, { env = process.env, loadavg = null, cpus = null } = {}) {
+export function loadFactor(root, { env = process.env, loadavg = null, cpus = null, cpuBusy: busyGiven = null, cpuSample = null, platform = process.platform, procs = null, listProcs = undefined } = {}) {
   const dir = heavyDir(root);
   const parent = heldByParent(dir, env);
   const heavy = heavyHolders(root, { env }).filter((h) => h.pid !== process.pid && !(parent && h.pid === parent.pid));
   const slots = otherGateSlots(root, env);
-  const load = loadavg ?? (env.STUDIO_TEST_LOADAVG !== undefined && env.STUDIO_TEST_LOADAVG !== '' ? Number(env.STUDIO_TEST_LOADAVG) : os.loadavg()[0]);
+  const implicit = implicitHolders(root, { env, procs, ...(listProcs ? { listProcs } : {}) });
+  const { busy, load } = cpuOrLoad({ env, loadavg, cpuBusy: busyGiven, platform, cpus: cpuSample });
   const cores = cpus ?? Math.max(1, (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 1);
   const why = [];
   let f = 1;
   if (heavy.length) { f += heavy.length; why.push(`${heavy.length} other heavy job${heavy.length === 1 ? '' : 's'} running: ${heavy.map(describeHolder).join('; ')}`); }
+  if (implicit.length) { f += implicit.length; why.push(`${implicit.map(describeImplicit).join('; ')} running outside the machine:heavy lock`); }
   if (slots.length) { f += 0.5 * slots.length; why.push(`${slots.length} other game check${slots.length === 1 ? '' : 's'} running (${slots.map((s) => s.label).join(', ')})`); }
   const per = Number.isFinite(load) ? load / cores : 0;
   if (per > 1.5) { f += Math.min(2, per - 1); why.push(`load ${load.toFixed(1)} on ${cores} core${cores === 1 ? '' : 's'}`); }
-  const cap = Math.max(1, num(env.STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR, 3));
+  const thr = Math.min(0.99, Math.max(0.05, num(env.STUDIO_CPU_BUSY_THRESHOLD, 0.6)));
+  if (Number.isFinite(busy) && busy > thr) { f += Math.min(2, 0.5 + (1.5 * (busy - thr)) / (1 - thr)); why.push(`CPU ${Math.round(busy * 100)}% busy (over ${Math.round(thr * 100)}%, STUDIO_CPU_BUSY_THRESHOLD; no load average here)`); }
+  const cap = maxFactor(env);
   return { factor: Math.round(Math.min(cap, Math.max(1, f)) * 10) / 10, why: why.join('; ') };
+}
+const maxFactor = (env) => Math.max(1, num(env.STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR, 3));
+
+// ---- 2.60.1 (B-17): the last quiet run of each game check ----
+
+const timesFile = (root) => path.join(root, '.studio', 'gates', 'game-gate-times.json');
+/** The last passing run of `label` at load factor 1: { ms, at } or null. */
+export function lastQuietTime(root, label) {
+  const r = readJson(timesFile(root))?.[label];
+  return r && Number(r.ms) > 0 ? { ms: Number(r.ms), at: r.at || null } : null;
+}
+/** Record a passing run of `label` at load factor 1 (the caller decides that). Never throws. */
+export function recordGateTime(root, label, ms) {
+  if (!label || !(Number(ms) > 0)) return false;
+  const f = timesFile(root);
+  try {
+    const cur = readJson(f) || {};
+    cur[label] = { ms: Math.round(Number(ms)), at: new Date().toISOString() };
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cur, null, 2));
+    fs.renameSync(tmp, f);
+    return true;
+  } catch { return false; }
 }
 
 /**
- * A timeout scaled for load: { ms, base, factor, why }. Never shorter than the configured base;
- * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base.
+ * A timeout scaled for load: { ms, base, factor, why, floor }. Never shorter than the configured base;
+ * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. 2.60.1 (B-17): with a `label`, never shorter than
+ * STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5; 0 or off: none) times that check's last quiet run (lastQuietTime), capped at
+ * the same STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR times the base as the load factor. floor: { lastMs, mult, capped,
+ * why } when it raised the timeout, else null.
  */
-export function scaledTimeout(base, root, { env = process.env, ...rest } = {}) {
-  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_GAME_GATE_TIMEOUT_SCALE || ''))) return { ms: base, base, factor: 1, why: '' };
+export function scaledTimeout(base, root, { env = process.env, label = null, ...rest } = {}) {
+  if (off(env.STUDIO_GAME_GATE_TIMEOUT_SCALE)) return { ms: base, base, factor: 1, why: '', floor: null };
   const { factor, why } = loadFactor(root, { env, ...rest });
-  return { ms: Math.max(base, Math.round(base * factor)), base, factor, why };
+  let ms = Math.max(base, Math.round(base * factor));
+  let floor = null;
+  const fv = env.STUDIO_GAME_GATE_TIMEOUT_FLOOR;
+  const mult = off(fv) ? 0 : num(fv, 1.5);
+  const last = label && mult > 0 ? lastQuietTime(root, label) : null;
+  if (last) {
+    const want = Math.round(last.ms * mult);
+    const cap = Math.round(base * maxFactor(env));
+    const got = Math.min(want, cap);
+    if (got > ms) {
+      ms = got;
+      floor = { lastMs: last.ms, mult, capped: want > cap, why: `at least ${mult} x its last quiet run of ${Math.round(last.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_FLOOR)${want > cap ? `, capped at ${maxFactor(env)} x the base (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR): the check's quiet time is near its base, raise STUDIO_GAME_GATE_TIMEOUT_MS` : ''}` };
+    }
+  }
+  return { ms, base, factor, why, floor };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -524,7 +681,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       try { const t = holderTree(r, listProcesses()); if (t.members.length) left.push({ ...r, orphans: t.members }); } catch {}
     }
     for (const r of left) console.error(`[heavy] ${describeHolder(r)} is gone but ${r.orphans.length} process(es) of its tree still run (pids ${r.orphans.join(', ')}): the next heavy take stops them, or node harness/heavy.mjs stop --all --by <name>`);
-    if (argv.includes('--json')) console.log(JSON.stringify({ slots: heavySlots(), holders, orphaned: left }));
-    else console.log(holders.length ? `machine:heavy (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+    // 2.60.1 (B-35): a Unity editor (STUDIO_HEAVY_PROGRAMS) running outside the lock is an implicit holder.
+    const implicit = implicitHolders(root);
+    if (argv.includes('--json')) console.log(JSON.stringify({ slots: heavySlots(), holders, orphaned: left, implicit }));
+    else {
+      console.log(holders.length ? `machine:heavy (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+      if (implicit.length) console.log(`implicit holder${implicit.length === 1 ? '' : 's'} (outside the lock): ${implicit.map(describeImplicit).join('; ')}: counted as heavy work when game checks scale their timeouts; heavy jobs still start beside it. Run editor batch work with node harness/heavy.mjs run --label <what> -- <command> so it takes the lock`);
+    }
   }
 }

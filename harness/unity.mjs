@@ -14,6 +14,7 @@
  *                                        (any browser; the Arcade's engine tab) (Assets/Editor/StudioBuild.cs)
  *   node harness/unity.mjs purity <folder>
  *   node harness/unity.mjs version <folder>
+ *   gate and build exit 3 when machine:heavy (or free memory) stayed busy and the editor didn't run.
  *
  * The folder is a Unity project (ProjectSettings/ProjectVersion.txt): engine/<game> for an engine track, or
  * game/<slug> for an adopted Unity game. The editor: STUDIO_UNITY (its full path) or `unity` on the PATH.
@@ -22,12 +23,19 @@
  * that runs it, so an agent's every change can't wait for it. The sim is a pure C# assembly
  * (Assets/Sim, Sim.asmdef with noEngineReferences), so .NET builds and tests it anywhere in seconds, and the
  * purity check keeps it that way: no UnityEngine, no Time, no unseeded Random, no wall clock.
+ *
+ * 2.60.1 (B-35): the editor's runs here (`gate`'s Edit Mode and Play Mode tests, `build`) take the machine:heavy lock
+ * (harness/heavy.mjs; free memory under STUDIO_RAM_FLOOR_GB holds them back too), so an agent's Unity run never
+ * overlaps a full verify, a browser playtest or another editor run. Other editor batch work a Unity lane starts
+ * goes through `node harness/heavy.mjs run --label <what> -- <command>`. When the lock stays busy (or memory stays
+ * low) the run doesn't start and the command exits 3 (busy; not a failure of the work).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
+import { withHeavy } from './heavy.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const rel = (f) => path.relative(REPO_ROOT, f).split(path.sep).join('/');
@@ -138,6 +146,21 @@ const which = (bin) => fs.existsSync(bin) || spawnSync(process.platform === 'win
 export const unityBin = () => process.env.STUDIO_UNITY || 'unity';
 export const dotnetBin = () => process.env.STUDIO_DOTNET || 'dotnet';
 
+/**
+ * 2.60.1 (B-35): run fn under machine:heavy (heavyRoot: the main checkout, which the CLI passes; else this one).
+ * { value } or { busy: message } when the lock (or free memory) stayed busy. heavy: false runs fn as it is.
+ * Inside a holder (a full verify, the Unity land gate, an outer gate()) it doesn't wait for its own parent.
+ */
+export function underHeavy(label, fn, { heavy = true, heavyRoot = REPO_ROOT, log = (m) => console.error(m) } = {}) {
+  if (heavy === false) return { value: fn() };
+  try {
+    return { value: withHeavy(heavyRoot, label, fn, { log }) };
+  } catch (err) {
+    if (err.code === 'HEAVY_BUSY') return { busy: String(err.message || err).replace(/^\[heavy\]\s*/, '') };
+    throw err;
+  }
+}
+
 /** The sim with plain .NET: purity, then `dotnet test tools/SimTests`. */
 export function runSim(dir, { log = console.log } = {}) {
   const p = simPurity(dir);
@@ -164,12 +187,14 @@ export function runSim(dir, { log = console.log } = {}) {
 }
 
 /** Unity's test runner in batch mode, one platform: { ok, platform, results, problems, log }. */
-export function runUnityTests(dir, platform, { controlsOut = null } = {}) {
+export function runUnityTests(dir, platform, { controlsOut = null, ...heavyOpts } = {}) {
   const resultsFile = path.join(dir, `TestResults-${platform}.xml`);
   fs.rmSync(resultsFile, { force: true });
   const args = ['-batchmode', '-nographics', '-projectPath', dir, '-runTests', '-testPlatform', platform, '-testResults', resultsFile, '-logFile', '-'];
-  const env = { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) };
-  const r = spawnSync(unityBin(), args, { cwd: REPO_ROOT, encoding: 'utf8', env, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 });
+  // Under machine:heavy (2.60.1, B-35); STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
+  const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => spawnSync(unityBin(), args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }), heavyOpts);
+  if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '' };
+  const r = h.value;
   const log = `${r.stdout || ''}${r.stderr || ''}`;
   const problems = [];
   if (/No valid Unity Editor license|License is not active|Failed to activate|com\.unity\.editor\.headless/i.test(log)) problems.push('the editor has no active licence on this machine (activate one in Unity Hub; CI needs the UNITY_LICENSE secret)');
@@ -189,13 +214,15 @@ export function runUnityTests(dir, platform, { controlsOut = null } = {}) {
  * A playable build (Assets/Editor/StudioBuild.cs): web (WebGL, played in a browser and on the Arcade's engine
  * tab) or windows (Build/Windows/Game.exe). Returns { ok, target, out, problems }.
  */
-export function build(dir, target = 'windows', { out = null } = {}) {
+export function build(dir, target = 'windows', { out = null, ...heavyOpts } = {}) {
   const t = { web: ['WebGL', 'Build/WebGL'], webgl: ['WebGL', 'Build/WebGL'], windows: ['Windows', 'Build/Windows'] }[String(target).toLowerCase()];
   if (!t) return { ok: false, problems: [`unknown build target "${target}" (web or windows)`] };
   if (!fs.existsSync(path.join(dir, 'Assets', 'Editor', 'StudioBuild.cs'))) return { ok: false, problems: [`${rel(dir)}/Assets/Editor/StudioBuild.cs is missing (copy it from engine/_unity)`] };
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): set STUDIO_UNITY to the editor's full path. A ${t[0]} build also needs that platform's module installed in Unity Hub.`] };
   const dest = path.resolve(dir, out || t[1]);
-  const r = spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, '-logFile', '-'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 });
+  const h = underHeavy(`unity ${t[0]} build (${rel(dir) || '.'})`, () => spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, '-logFile', '-'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 }), heavyOpts);
+  if (h.busy) return { ok: false, busy: true, target: t[0], out: rel(dest), problems: [`the ${t[0]} build did not start: ${h.busy}`] };
+  const r = h.value;
   const log = `${r.stdout || ''}${r.stderr || ''}`;
   const line = (log.match(/\[build\] (?:PASS|FAIL)[^\n]*/) || [])[0];
   const problems = [];
@@ -205,7 +232,7 @@ export function build(dir, target = 'windows', { out = null } = {}) {
 }
 
 /** The editor's gate: purity, pin, Edit Mode and Play Mode tests. */
-export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log } = {}) {
+export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log, ...heavyOpts } = {}) {
   const problems = [];
   const p = simPurity(dir);
   if (!p.ok) return { ok: false, problems: p.problems };
@@ -214,12 +241,16 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
   if (pin.note) log(`[unity] note: ${pin.note}`);
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): install Unity ${pin.version} with Unity Hub and set STUDIO_UNITY to the editor's full path (Windows: C:\\Program Files\\Unity\\Hub\\Editor\\${pin.version}\\Editor\\Unity.exe). The sim's checks need no editor: npm run engine:sim`] };
   const controlsOut = path.join(REPO_ROOT, 'qa', 'reports', 'controls-unity.json');
-  for (const platform of platforms) {
-    const r = runUnityTests(dir, platform, { controlsOut: platform === 'PlayMode' ? controlsOut : null });
-    log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} ${platform}${r.results ? `: ${r.results.passed}/${r.results.total} passed` : ''}`);
-    problems.push(...r.problems);
-    if (r.problems.some((x) => /licence/.test(x))) break;
-  }
+  // One machine:heavy hold for every platform (no other heavy job slips in between Edit Mode and Play Mode).
+  const h = underHeavy(`unity gate ${platforms.join('+')} (${rel(dir) || '.'})`, () => {
+    for (const platform of platforms) {
+      const r = runUnityTests(dir, platform, { controlsOut: platform === 'PlayMode' ? controlsOut : null, ...heavyOpts });
+      log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} ${platform}${r.results ? `: ${r.results.passed}/${r.results.total} passed` : ''}`);
+      problems.push(...r.problems);
+      if (r.problems.some((x) => /licence/.test(x))) break;
+    }
+  }, heavyOpts);
+  if (h.busy) return { ok: false, busy: true, problems: [`the editor's tests did not run: ${h.busy}`] };
   return { ok: problems.length === 0, problems };
 }
 
@@ -236,7 +267,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   const dir = path.resolve(REPO_ROOT, folder);
   if (!isUnityProject(dir)) { console.error(`[unity] FAIL ${folder} is not a Unity project (no ProjectSettings/ProjectVersion.txt)`); process.exit(1); }
-  const fail = (problems) => { for (const p of problems) console.error(`[unity] FAIL ${p}`); process.exit(1); };
+  const fail = (problems, code = 1) => { for (const p of problems) console.error(`[unity] ${code === 3 ? 'BUSY' : 'FAIL'} ${p}`); process.exit(code); };
+  // 2.60.1 (B-35): the editor's runs take machine:heavy in the main checkout (lane copies share its lock).
+  let heavyRoot = REPO_ROOT;
+  try { heavyRoot = await (await import('./heavy.mjs')).heavyRoot(); } catch {}
   if (cmd === 'purity') {
     const r = simPurity(dir);
     if (!r.ok) fail(r.problems);
@@ -251,13 +285,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`[unity] PASS sim: ${r.total} test(s) passed with .NET (no editor needed)`);
   } else if (cmd === 'gate') {
     const pf = flag('platform');
-    const r = gate(dir, { platforms: pf ? [pf] : undefined });
-    if (!r.ok) fail(r.problems);
+    const r = gate(dir, { platforms: pf ? [pf] : undefined, heavyRoot });
+    if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
   } else if (cmd === 'build') {
     // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
-    const r = build(dir, flag('target') || track?.buildTarget || 'windows', { out: flag('out') });
-    if (!r.ok) fail(r.problems);
+    const r = build(dir, flag('target') || track?.buildTarget || 'windows', { out: flag('out'), heavyRoot });
+    if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else {
     console.error('usage: node harness/unity.mjs sim|gate|build|purity|version [<folder>] [--platform EditMode|PlayMode] [--target web|windows]');

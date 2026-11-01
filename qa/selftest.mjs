@@ -125,7 +125,9 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
 // 2.59.0: the supervisor starts no agent under STUDIO_RAM_FLOOR_GB free memory; checks run with it off so a busy test
 // machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0' };
+// 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
+// counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off' };
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
@@ -3847,6 +3849,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest260D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260d.mjs')).href);
   await selftest260D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.1 (B-17, B-35): a game check's timeout scales on Windows (a CPU probe, a Unity editor outside the lock, a
+// floor from the last quiet run); the Unity editor's runs take machine:heavy and a heavy take checks free memory
+// (qa/selftest-2601m.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601m.mjs')).href);
+  await selftest2601M({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
