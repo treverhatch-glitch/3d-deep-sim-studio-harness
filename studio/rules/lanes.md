@@ -40,3 +40,42 @@ Parallel work is capped by file layout. One 900-line renderer file means one ren
   turn re-reads it. `node scripts/check-function-size.mjs` lists them.
 - A task can't finish if it made one of these bigger, or made a new one. Edits inside one that don't grow
   it are fine; the Producer queues a split for the rest.
+- 2.60.0: the game's check manifest (`game/<name>/studio.gates.json`, protected: the owner approves it once) may say
+  `"sizeRule": { "exempt": ["src/game/modules.ts"], "importLinesFree": true }`. Paths are relative to the manifest's
+  folder (or repo-relative). An exempt file may grow, up to a hard cap (`"exemptMaxLines"`, default 800 lines, and
+  60 KB); its functions keep their limit. With `importLinesFree`, added lines that are only imports or re-exports
+  (`import … from '…'`, `export … from '…'`, `export * from '…'`, a multi-line import block) don't count as growth in
+  any file of the game. The rule is read from the manifest as committed on the studio's main branch: a task's own
+  edit of it, or a `sizeRule` anywhere else, is ignored (the refusal says so). JS/TS imports only.
+
+## The registry pattern (2.60.0)
+
+A list every feature appends to (module imports, save/load/reset spreads) makes every lane change the same line, so
+every landing conflicts. Give each entry its own module in one folder, and keep the list itself one entry per line,
+or generated:
+
+```ts
+// src/systems/fuel.ts: one file per entry
+export const fuel = { id: 'fuel', save: (s) => s.fuel, load: (s, v) => { s.fuel = v; }, reset: (s) => { s.fuel = 0; } };
+
+// src/systems/index.ts: the registry, one line per entry (exempt in the manifest), never a joined line or a spread
+export { fuel } from './fuel';
+export { cargo } from './cargo';
+
+// the big file imports the registry once and loops over it
+import * as systems from './systems/index';
+for (const sys of Object.values(systems)) sys.reset(state);
+```
+
+Two lanes that both add a line at the end of the registry still conflict (git can't tell which goes first); insert in
+name order, or generate the index from the folder (a build-time glob or a small script), so no lane edits it. Where
+save order changes a hash, sort the entries by id rather than by file order.
+
+## Hotspots (2.60.0)
+
+`task start`, `task done --train` and the merge train's start log warn when two lanes in flight (queued for a train,
+or lane copies with commits main doesn't have) change the same lines of the same file, naming the file, the line and
+the lanes; the Producer gets each such overlap once in its inbox (`studio/producer/INBOX.md`) and as a
+`hotspot.overlap` event. Each train that meets a conflict counts it by file and line (`.studio/hotspots.json`); at 3
+(`STUDIO_HOTSPOT_ASK`) the Producer gets one ask, "hotspot: restructure <file>:<line> (registry/barrel pattern)":
+queue a task that moves those lines into a registry. `node harness/hotspots.mjs` lists both.

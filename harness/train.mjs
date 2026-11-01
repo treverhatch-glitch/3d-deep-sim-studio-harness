@@ -708,6 +708,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   if (Number(max) > 0) lanes = lanes.slice(0, Number(max));
   if (!lanes.length) { res.message = 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
   ev('start', id, `${lanes.length} lane(s): ${lanes.map((l) => l.task).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun } });
+  (await import('./hotspots.mjs')).trainStart(root, lanes, log, id); // 2.60.0 (helper b): lines two lanes change, in the start log
   const drop = (lane, why, { handBack = true } = {}) => {
     res.dropped.push({ task: lane.task, why });
     if (dryRun) return;
@@ -759,6 +760,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       let set = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.deferred.some((d) => d.task === l.task));
       // (b) Build: main + each lane, in order.
       let built = buildIntegration(sc, tip, set, { id, unionFiles });
+      if (!dryRun) (await import('./hotspots.mjs')).noteTrainConflicts(root, tip, built, { id, log }); // 2.60.0 (helper b): conflict count per line
       for (const l of built.conflictMain) drop(l, `${l.why}. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again`);
       for (const l of built.deferred) defer(l, l.why);
       set = built.included;
