@@ -14,6 +14,8 @@
  *       the lane (a refresh, task done's game checks, the lane's own full verify), its declared Pin-Moves, predicted
  *       conflicts (git merge-tree with main, and pairwise among queued lanes that touch the same files; git older than
  *       2.38: the hotspots overlap, with a note), and its age. Read-only: nothing is written, nothing is merged.
+ *       2.65.3: a running merge train's current step and ETA (harness/train-status.mjs), with a note on STUDIO_TRAIN_MAX
+ *       when it has more than 6 lanes.
  *
  *   npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]
  *       Per lane, in its own copy: refuses when its session is running (a launched session alive, a process working in
@@ -39,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
 import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, LANES_DIR } from './worktree.mjs';
 import { readQueue, heldNow, pinMoves, trainManifest } from './train.mjs';
+import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';
 import { mergeTreeSupport, mergeTree, placesFor } from './merge-tree.mjs';
 import { readPass } from './merge-lane.mjs';
 import { readHolds } from './task-hold.mjs';
@@ -252,7 +255,10 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
     }
   }
   for (const r of lanes) delete r.files;
-  return { main, tip, at: new Date(now).toISOString(), lanes, notes };
+  // 2.65.3 (B-43): the running train's current step and ETA (.studio/train/<id>/status.json), and the lane cap.
+  const train = readTrainStatus(root);
+  { const cn = train ? capNote(train.lanes) : ''; if (cn) notes.push(cn); }
+  return { main, tip, at: new Date(now).toISOString(), lanes, notes, ...(train ? { train } : {}) };
 }
 
 // ---- the table, in words ------------------------------------------------------------------------
@@ -280,6 +286,7 @@ export function tableText(t) {
   const L = [`Lanes against ${t.main} (${String(t.tip).slice(0, 8)}), ${t.lanes.length} lane(s), ${t.at.slice(0, 16).replace('T', ' ')} UTC`];
   if (rows.length) L.push(line(head), ...rows.map(line));
   else L.push('No lane copies, lane branches with unlanded work, or queued lanes.');
+  if (t.train) L.push(trainStatusLine(t.train));
   for (const n of t.notes) L.push(`note: ${n}`);
   return L.join('\n');
 }

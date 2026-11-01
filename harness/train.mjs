@@ -43,6 +43,11 @@
  *  10. batching (2.63.0): a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes, takes at most
  *      STUDIO_TRAIN_MAX; a "runAlone" lane (manifest) gets a train of its own (the next trains run right after); a lone
  *      task done takes the queued lanes along (ride along), its own lane's result its answer.
+ *  11. B-43 (2.65.3): re-checks run only the failing test files (harness/train-focus.mjs, STUDIO_GATE_FOCUS); the red
+ *      event names the failing tests; each re-check says its question and an ETA (harness/train-status.mjs), a new
+ *      round says what it is, the step is in .studio/train/<id>/status.json; once a culprit at position k > 1 is named
+ *      the green prefix is verified in full and lands at once, the lanes after it go in the next train, run right away
+ *      (landPrefixEarly; STUDIO_TRAIN_LAND_PREFIX=off keeps 2.65.2).
  *
  * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
  * was built on (if main moved meanwhile, the train is rebuilt and verified again); one train at a time
@@ -67,6 +72,8 @@ import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './p
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
+import { trainFocus, failingTestsLine } from './train-focus.mjs';
+import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -467,7 +474,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lo
   const { gates, detail } = failLines(text);
   const why = ok ? '' : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0 } });
-  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/') };
+  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0 };
   seen.set(tree, res);
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
@@ -487,23 +494,34 @@ const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDI
  * verify), scoped as the train's verify was (the train's changed files), so the same game checks run on every
  * prefix. Cached by tree and gates. Returns { ok, gates, detail, log }.
  */
-function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label }) {
-  const key = `${tree}:${gates.join(',')}`;
+function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, focus = null, question = '', about = 0, eta = null }) {
+  const key = `${tree}:${gates.join(',')}${focus ? `:${JSON.stringify(focus)}` : ''}`;
   if (cache.has(key)) return cache.get(key);
   const root = sc.root;
   const owner = `train-${id}-re`;
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
   if (!all && changed.length) { env.STUDIO_GATE_CHANGED = changed.join(','); env.STUDIO_GATE_PATHS = changed.join(','); }
+  // 2.65.3 (B-43): only the failing test files of the failing game checks (harness/train-focus.mjs); run-gates passes
+  // STUDIO_GATE_FOCUS on only in this --only run, which stands for no verify.
+  delete env.STUDIO_GATE_FOCUS;
+  if (focus) env.STUDIO_GATE_FOCUS = JSON.stringify(focus);
   res.rechecks = (res.rechecks || 0) + 1;
   const n = res.rechecks;
-  log(`[train] ${id}: re-check ${n}: ${gates.join(', ')} on ${label} (tree ${tree.slice(0, 8)})`);
+  const nFiles = focus ? Object.values(focus).reduce((a, f) => a + f.length, 0) : 0;
+  const what = `${gates.join(', ')}${focus ? ` (${nFiles} failing test file(s) only)` : ''} on ${label}, tree ${tree.slice(0, 8)}`;
+  const line = `re-check ${n}${about ? ` of about ${Math.max(about, n)}` : ''}: ${question ? `${question} (running ${what})` : what}${eta ? `; ${eta.text}` : ''}`;
+  log(`[train] ${id}: ${line}`);
+  writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, recheck: n, eta });
+  ev('recheck', id, line, { meta: { n, about: about || null, question, gates, tree, focus: focus || null, eta: eta ? { ms: eta.ms, text: eta.text } : null } });
+  const t0 = Date.now();
   const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const text = `${r.stdout || ''}${r.stderr || ''}`;
   const logFile = path.join(root, TRAIN_DIR, `${id}-recheck-${n}.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
   for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
   const { gates: failed, detail } = failLines(text);
+  res.recheckMs = [...(res.recheckMs || []), Date.now() - t0];
   const c = { ok: r.status === 0, gates: failed, detail, text, log: path.relative(root, logFile).split(path.sep).join('/') };
   cache.set(key, c);
   return c;
@@ -550,9 +568,14 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   if (!failGates.length) return { kind: 'alone', why: 'the red verify names no failing check' };
   const label = (k) => (k ? `${main} + ${set.slice(0, k).map((l) => l.task).join(' + ')}` : main);
   const prefix = (k) => { const b = buildIntegration(sc, tip, set.slice(0, k), { id, unionFiles }); return b.included.length === k ? b : null; };
-  const check = (k) => { const b = prefix(k); if (!b) return null; return { ...recheck(sc, { id, tree: b.tree, gates: failGates, changed, all, cache: cache.checks, log, res, label: label(k) }), b }; };
+  // 2.65.3 (B-43): focused re-checks (only the failing test files) and each re-check's question and ETA, in words.
+  const fx = focusPlan(ctx, failGates);
+  const n = set.length;
+  const about = (res.rechecks || 0) + 1 + stepsLeft(0, n);
+  const ask = recheckWords(ctx, n);
+  const check = (k, q = {}) => { const b = prefix(k); if (!b) return null; return { ...recheck(sc, { id, tree: b.tree, gates: failGates, changed, all, cache: cache.checks, log, res, label: label(k), focus: fx, question: q.question || '', about, eta: ctx.eta ? ctx.eta(q.left ?? 0) : null }), b }; };
   const steps = [];
-  const c0 = check(0);
+  const c0 = check(0, { question: ask.main(), left: 1 + stepsLeft(0, n) });
   if (!c0) return { kind: 'alone', why: `${main} alone doesn't build` };
   steps.push({ prefix: [], ok: c0.ok });
   const pinsOnly = settings.pins && tryPins ? pinsOnlyRed(v.rec?.tree === built.tree ? ctx.text : '', { failGates, gameGates: gameGateIds(sc.root), tests: settings.pins.tests }) : { ok: false, why: settings.pins ? 'pins already tried' : 'the game declares no pins' };
@@ -572,14 +595,14 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   let red = null;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    const c = check(mid);
+    const c = check(mid, { question: ask.mid(lo, hi, mid, Boolean(red)), left: stepsLeft(lo, hi, Boolean(red)) });
     if (!c) return { kind: 'alone', why: `${label(mid)} doesn't build` };
     steps.push({ prefix: set.slice(0, mid).map((l) => l.task), ok: c.ok });
     if (c.ok) lo = mid; else { hi = mid; red = c; }
   }
   if (!red) {
     // Only the full verify said the whole train is red: confirm it before anyone is handed back.
-    const c = check(hi);
+    const c = check(hi, { question: ask.confirm(lo, hi), left: 1 });
     if (!c) return { kind: 'alone', why: `${label(hi)} doesn't build` };
     steps.push({ prefix: set.slice(0, hi).map((l) => l.task), ok: c.ok });
     if (c.ok) return { kind: 'flaky', steps, why: `${failGates.join(', ')} failed in the train's verify but passed when run again on the same tree` };
@@ -592,6 +615,76 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
     ? `the checks ${what} pass on ${main} + ${before.join(' + ')} (the lanes before it in this train) and fail once this lane is added (${label(hi)}): it breaks them, alone or only together with those lanes`
     : `the checks ${what} pass on ${main} and fail on ${main} + this lane`;
   return { kind: 'culprit', lane, steps, why: `${why}${red.detail.length ? `:\n${red.detail.join('\n')}` : ''}\nLog: ${red.log}. ${before.length ? `Once ${before.join(', ')} land${before.length === 1 ? 's' : ''}, merge ${main} into your copy (git merge ${main}), fix it there` : 'Fix it in your copy'}, commit, run npm run verify, then task done again` };
+}
+
+/**
+ * 2.65.3 (B-43): the STUDIO_GATE_FOCUS map for this red train's re-checks (harness/train-focus.mjs trainFocus): the
+ * failing game checks and their failing test files, read from the verify log; null (the whole gate, as before) when
+ * no failing game gate is among the failing checks or no failing test file is named. The log says which, and why.
+ */
+function focusPlan(ctx, failGates) {
+  const { sc, text, id, log } = ctx;
+  const games = gameGateIds(sc.root);
+  if (!failGates.some((g) => games.includes(g))) return null;
+  const f = trainFocus(text);
+  if (!f.focus) { log(`[train] ${id}: re-checks run the whole failing gate(s) (${failGates.join(', ')}): ${f.why}`); return null; }
+  const said = Object.entries(f.focus).map(([k, v]) => `${k}: ${v.length ? `${v.slice(0, 4).join(', ')}${v.length > 4 ? ` +${v.length - 4} more` : ''}` : 'the whole check (no failing file named)'}`);
+  log(`[train] ${id}: re-checks run only the failing test files (${said.join('; ')}); checks that passed in the verify are skipped. A re-check stands for no verify: landing still needs a full verify of the exact tree`);
+  return f.focus;
+}
+
+/** 2.65.3 (B-43): what each re-check of a bisection over this round's n lanes decides, in plain words. */
+function recheckWords(ctx, n) {
+  const { set, main, res } = ctx;
+  const lanes = `lanes 1-${n}${res.roundWithout?.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}`;
+  const at = (k) => `lane ${k} (${set[k - 1].task})`;
+  const range = (a, b) => (a === b ? at(a) : `lanes ${a}-${b}`);
+  const green = (lo) => (lo ? `green through ${at(lo)}` : `${main} green`);
+  return {
+    main: () => `${lanes} red in the verify; is ${main} itself red?`,
+    mid: (lo, hi, mid, sawRed) => `${lanes}; ${green(lo)}, red at ${hi}${sawRed ? '' : ' (the verify)'}; is the break in ${range(lo + 1, mid)}?`,
+    confirm: (lo, hi) => `${lanes}; ${green(lo)}, and only the verify said ${range(1, hi)} is red; is it still red when run again?`,
+  };
+}
+
+/** STUDIO_TRAIN_LAND_PREFIX (2.65.3, default on): once a culprit is named, verify and land the green prefix before it. */
+export const landPrefixOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_LAND_PREFIX || '').trim());
+
+/**
+ * 2.65.3 (B-43, c): the culprit at 0-based index k > 0 was handed back. Verify main + the lanes before it in full; green:
+ * land them now (landTrain, the same compare-and-swap) and defer the lanes after the culprit to the next train, on top
+ * of them. Returns { landed: true } | { landed: false, stop?: true } (stop: landing failed for another reason than a
+ * moved main; res says why). Only when every lane after the culprit is in the queue (it is picked up again from there).
+ */
+function landPrefixEarly(ctx, k) {
+  const { sc, tip, set, id, log, res, seen, by, deps, main, root, unionFiles, defer } = ctx;
+  const culprit = set[k];
+  const pre = set.slice(0, k);
+  const after = set.slice(k + 1);
+  const names = pre.map((l) => l.task).join(', ');
+  const notQueued = after.filter((l) => !l.fromQueue);
+  if (notQueued.length) { log(`[train] ${id}: the green prefix (${names}) is not landed early: ${notQueued.map((l) => l.task).join(', ')} after ${culprit.task} is not in the train queue to be picked up again`); return { landed: false }; }
+  const b = buildIntegration(sc, tip, pre, { id, unionFiles });
+  if (b.included.length !== pre.length) { log(`[train] ${id}: the green prefix (${names}) no longer builds alone; carrying on as before`); return { landed: false }; }
+  const line = `${k === 1 ? 'lane 1' : `lanes 1-${k}`} (${names}) passed the re-checks before ${culprit.task}: verifying ${main} + them in full to land them now${after.length ? `; ${after.map((l) => l.task).join(', ')} after it go${after.length === 1 ? 'es' : ''} in the next train` : ''}`;
+  log(`[train] ${id}: ${line}`);
+  writeTrainStatus(root, id, { step: 'prefix', text: line, lanes: res.trainLanes || null, round: res.round || 1, eta: ctx.eta ? ctx.eta(0) : null });
+  const v = verifyTree(sc, { id, n: res.verifies + 1, tree: b.tree, changed: changedVs(sc.dir, tip, b.head), all: pre.some((l) => l.all), seen, tasks: pre.map((l) => l.task), log });
+  if (!v.cached && !v.reused) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
+  if (v.reused) res.reused += 1;
+  if (!v.ok) {
+    log(`[train] ${id}: the full verify of the prefix ${names} is red (${v.why || v.gates.join(', ')}); carrying on as before`);
+    ev('prefix_red', id, `the green prefix ${names} before ${culprit.task} is red in a full verify (${v.why || v.gates.join(', ')}); not landed early`, { agent: by, status: 'warn', meta: { lanes: pre.map((l) => l.task), culprit: culprit.task, gates: v.gates } });
+    return { landed: false };
+  }
+  const before = res.landed.length;
+  const r = landTrain(root, sc, main, tip, { built: b, v }, { id, by, deps, log, res, unionFiles });
+  if (r === 'moved') return { landed: false };
+  if (res.landed.length === before) return { landed: false, stop: true };
+  ev('prefix_landed', id, `the green prefix ${names} (before the culprit ${culprit.task}) landed early on a full verify${after.length ? `; ${after.map((l) => l.task).join(', ')} wait for the next train, on top of it` : ''}`, { agent: by, status: 'ok', meta: { lanes: pre.map((l) => l.task), culprit: culprit.task, after: after.map((l) => l.task) } });
+  for (const l of after) defer(l, `${culprit.task} before it was handed back and the lanes before that (${names}) landed early as a green prefix; it goes in the next train, on top of them`);
+  if (after.length) { res.more = true; res.prefixMore = true; }
+  return { landed: true };
 }
 
 /**
@@ -911,13 +1004,15 @@ export async function runTrain(opts = {}) {
   }
   // 2.63.0 (batching): a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes (--now: it doesn't).
   if (!opts.lanes && !opts.dryRun && !opts.now) waitForBatch(root, { log, id });
-  const one = (tid) => withTrainLock(root, { id: tid, by }, () => trainBody({ ...opts, root, log, deps, id: tid, by }), { waitMs: opts.waitMs ?? 0, log });
+  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by }), { waitMs: opts.waitMs ?? 0, log });
   let locked = await one(id);
   if (locked?.busy) return { ok: false, id, busy: locked.busy, message: `Another train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}); run this again when it ends.`, landed: [], dropped: [], deferred: [] };
   // 2.63.0 (run alone): lanes that waited because a lane ran alone get the next train(s) now, one after another.
   const trains = [locked.id];
-  for (let k = 1; locked.more && !opts.dryRun && !opts.lanes && k <= 50; k += 1) {
-    const next = await one(`${id}-${k}`);
+  // 2.65.3 (B-43, c): after an early landing of a green prefix, the lanes deferred behind its culprit (queued) get the
+  // next train now, also after a task done's own train (then as a queued train: its riders are in the queue).
+  for (let k = 1; locked.more && !opts.dryRun && (!opts.lanes || locked.prefixMore) && k <= 50; k += 1) {
+    const next = await one(`${id}-${k}`, opts.lanes ? { lanes: undefined, oneLane: false, rideAlong: false } : {});
     if (next?.busy) break;
     trains.push(next.id);
     const later = new Set([...next.landed, ...next.dropped.map((d) => d.task), ...next.held.map((h) => h.task)]);
@@ -1149,6 +1244,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
 
   const main = mainBranch(root);
   for (const l of ready) deps.markRunning?.(l.task, l.agent);
+  // 2.65.3 (B-43): the running train's step, for npm run lanes and status --brief; a long train is told about the cap.
+  res.trainLanes = ready.length;
+  { const cn = capNote(ready.length); if (cn) log(`[train] ${id}: note: ${cn}`); }
   let sc = null;
   try {
     for (let attempt = 0; attempt < Number(process.env.STUDIO_TRAIN_TRIES || 3); attempt += 1) {
@@ -1180,7 +1278,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       const all = set.some((l) => l.all);
       // (c) ONE full verify of the final tree; (e) red: find who fails alone.
       let verdict = null;
+      // 2.65.3 (B-43): the ETA from this train's own timings (harness/train-status.mjs trainEta).
+      const quiet = res.lastVerifyMs ? null : quietVerifyMs(root, settings.gameRoot ? path.basename(settings.gameRoot) : null);
+      const etaFor = (rechecks, verifies = 1) => trainEta({ rechecks, verifies, recheckMs: res.recheckMs, verifyMs: res.lastVerifyMs || quiet, quiet: !res.lastVerifyMs && Boolean(quiet) });
+      res.roundWithout = [];
       for (let round = 0; set.length && round <= ready.length + 1; round += 1) {
+        res.round = round + 1;
         if (round > 0) { built = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo); for (const l of built.depWait) defer(l, l.why); }
         // (Round 0's build was handled above; 2.59.0 handled it twice: a deferral logged twice, a hand-back made twice.)
         if (round > 0 && (built.conflictMain.length || built.deferred.length || built.depWait.length)) {
@@ -1189,17 +1292,23 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           set = built.included;
           if (!set.length) break;
         }
+        writeTrainStatus(root, id, { step: 'verify', text: `verify ${res.verifies + 1}: lanes 1-${set.length}${res.roundWithout.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}, ${set.map((l) => l.task).join(', ')}`, lanes: ready.length, round: res.round, eta: etaFor(0) });
         const v = verifyTree(sc, { id, n: res.verifies + 1, tree: built.tree, changed: changedVs(sc.dir, tip, built.head), all, seen, tasks: set.map((l) => l.task), log });
-        if (!v.cached && !v.reused) res.verifies += 1;
+        if (!v.cached && !v.reused) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
         if (v.reused) res.reused += 1;
         if (v.ok) { verdict = { built, v }; break; }
-        ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why}); log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates } });
+        // 2.65.3 (B-43): the red event and the log name the failing tests (parsed from the verify log, capped).
+        let redText = '';
+        try { redText = v.log ? fs.readFileSync(path.join(root, v.log), 'utf8') : ''; } catch {}
+        const ft = failingTestsLine(redText);
+        const redEta = bisectMode() === 'prefix' && set.length > 1 ? etaFor(1 + stepsLeft(0, set.length)) : null;
+        if (ft.list.length) log(`[train] ${id}: verify ${res.verifies} red; failing tests: ${ft.list.join('; ')}${ft.more ? ` (+${ft.more} more)` : ''}`);
+        ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.60.0: prefix bisection on the failing checks only, and pin refresh (redPlan). STUDIO_TRAIN_BISECT=alone, or
         // a plan that can't name the failing checks: the 2.59 way below.
         if (bisectMode() === 'prefix' && !(oneLane && set.length === 1 && !settings.pins)) {
-          let text = '';
-          try { text = v.log ? fs.readFileSync(path.join(root, v.log), 'utf8') : ''; } catch {}
-          const ctx = { sc, tip, set, built, v, id, log, res, settings, all, cache, main, root, text };
+          const text = redText;
+          const ctx = { sc, tip, set, built, v, id, log, res, settings, all, cache, main, root, text, eta: (left) => etaFor(left), seen, by, deps, unionFiles, defer };
           let plan = redPlan(ctx, { bisect: !(oneLane && set.length === 1) });
           if (plan.kind === 'refreshed') {
             const v2 = verifyTree(sc, { id, n: res.verifies + 1, tree: plan.built.tree, changed: changedVs(sc.dir, tip, plan.built.head), all, seen, tasks: set.map((l) => l.task), log });
@@ -1233,9 +1342,18 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             continue;
           }
           if (plan.kind === 'culprit') {
-            ev('bisect', id, `${plan.steps.map((st) => `${st.prefix.length ? `${main} + ${st.prefix.join(' + ')}` : main}: ${st.ok ? 'green' : 'red'}`).join(', ')}; first red with ${plan.lane.task}`, { agent: by, meta: { mode: 'prefix', steps: plan.steps, culprit: plan.lane.task } });
+            ev('bisect', id, `${plan.steps.map((st) => `${st.prefix.length ? `${main} + ${st.prefix.join(' + ')}` : main}: ${st.ok ? 'green' : 'red'}`).join(', ')}; first red with ${plan.lane.task}`, { agent: by, meta: { mode: 'prefix', steps: plan.steps, culprit: plan.lane.task, eta: (({ ms, text: t }) => ({ ms, text: t }))(etaFor(0)) } });
             drop(plan.lane, plan.why);
+            // 2.65.3 (B-43, c): land the green prefix before the culprit now (STUDIO_TRAIN_LAND_PREFIX, default on).
+            const k = set.findIndex((l) => l.task === plan.lane.task);
+            if (k > 0 && landPrefixOn()) {
+              const early = landPrefixEarly(ctx, k);
+              if (early.landed || early.stop) { set = []; break; }
+            }
             set = set.filter((l) => l.task !== plan.lane.task);
+            res.roundWithout.push(plan.lane.task);
+            // 2.65.3 (B-43, b): the new round says what it is (its lanes are prefixes of the reduced set).
+            if (set.length) log(`[train] ${id}: round ${res.round + 1}: ${set.length} lane(s) left without ${res.roundWithout.join(', ')} (${set.map((l) => l.task).join(', ')}); verify, then bisect again if red${(({ text: t }) => `; ${t}`)(etaFor(0))}`);
             continue;
           }
           log(`[train] ${id}: ${plan.why}; each lane is verified alone`);
@@ -1295,6 +1413,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   }
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   res.message = res.message || summary(res);
+  writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });
   ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: brief(res) });
   return res;
 }

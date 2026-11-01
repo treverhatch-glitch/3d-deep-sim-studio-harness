@@ -83,6 +83,18 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait (event `task.train.flaky`). A check already red when every task in the train was claimed (its baseline)
   doesn't count, as at task done. `STUDIO_TRAIN_BISECT=alone` keeps the 2.59 way: each lane verified alone on main,
   one that fails alone handed back, lanes that pass alone but fail together: the last one waits.
+- Red, faster and said (2.65.3, B-43): a re-check runs only the failing test FILES of the failing game checks
+  (read from the verify log; `STUDIO_GATE_FOCUS`, honoured only by a `run-gates --only` run, which stands for no
+  verify): the manifest gate's `focus` command, else the files appended to a command that clearly runs vitest, jest
+  or `node --test`, else the whole check (the log says why; also when no file is named, or the focused run fails
+  without naming a test). The red event and the log name the failing tests; each re-check line says its question
+  ("re-check 3 of about 4: lanes 1-9; green through lane 2 (T-a), red at 9; is the break in lanes 3-5?") and an ETA
+  from this train's timings ("ETA unknown (no timing yet)" before any); a new round says "round 2: 8 lane(s) left
+  without T-x; verify, then bisect again if red". The step is kept in `.studio/train/<id>/status.json`, shown by
+  `npm run lanes` and `status --brief` (with a STUDIO_TRAIN_MAX note above 6 lanes). Once a culprit at position k > 1
+  is named, main + lanes 1..k-1 get a full verify and, green, land at once (`STUDIO_TRAIN_LAND_PREFIX`, default on;
+  `off` keeps 2.65.2); the culprit is handed back and the lanes after it wait for the next train, which runs right
+  away (also after a task done's own train). Events `task.train.recheck`, `.prefix_landed`, `.prefix_red`.
 - Pins (2.60.0; the game declares them in its manifest, `docs/ONBOARDING-A-GAME.md`): when the red is only the game's
   pin tests, the pins' report runs on every prefix (main, main+A, ...) and each moved value is attributed to every
   lane whose step changed it. If each of those lanes declared the pin (`Pin-Moves: <pin>` trailer on its own commits)
