@@ -150,7 +150,9 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
   const hL = lane('int-h', 'Docs: clash b', { 'game/demo/notes/clash-b.md': '# B\n' });
   const iL = lane('int-i', 'Docs: note i', { 'game/demo/notes/i.md': '# I\n' });
   queueIt(gL); queueIt(hL); queueIt(iL);
-  const t4 = train();
+  // 2.65.3 (B-43): this is the one-train path (G and I land together after one more verify); with the 2.65.3 default
+  // (STUDIO_TRAIN_LAND_PREFIX on) G lands first and I waits for the next train: qa/selftest-2653a.mjs checks that.
+  const t4 = run(dir, 'node harness/task.mjs train --by tester', { ...env, STUDIO_TRAIN_LAND_PREFIX: 'off' });
   const noteH = handBack(hL.id);
   const bis = evs().filter((x) => x.type === 'task.train.bisect' && x.meta?.mode === 'prefix').pop();
   report('2.60.0 (#1): prefix bisection on the failing checks only: with lanes G, H, I where G and H each pass alone but fail together, the first red prefix (main+G+H) hands back H with a note that it breaks the checks together with G; G and I land; no lane waits (fails on 2.59.1: "the last" lane I waited, then H waited, nobody was handed back)',

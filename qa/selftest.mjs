@@ -4032,6 +4032,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.3 (a), B-43: a red merge train re-checks only the failing test files, says what each step decides, lands the
+// green prefix before a culprit early and prints an ETA (qa/selftest-2653a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2653A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2653a.mjs')).href);
+  await selftest2653A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
