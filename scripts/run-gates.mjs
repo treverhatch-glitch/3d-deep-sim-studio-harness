@@ -134,6 +134,14 @@ if (changedFiles?.length) {
   if (!process.env.STUDIO_GATE_PATHS) process.env.STUDIO_GATE_PATHS = changedFiles.join(',');
   console.log(`[gates] scoped to the ${changedFiles.length} file(s) this lane changed${changedBase ? ` since ${changedBase.slice(0, 8)}` : ''}; game checks outside them are skipped (--all runs everything)`);
 }
+// 2.59.0: the owner's task reclassifications in force (harness/reclassify.mjs), shown like approvals, and any on file
+// that doesn't count (unsigned with an owner key, set by an agent's commit, not committed).
+if (fs.existsSync(path.join(root, 'studio', 'task-types.json')) || fs.existsSync(path.join(root, 'studio', 'approvals'))) {
+  try {
+    const { typeRecordLines } = await import('../harness/reclassify.mjs');
+    for (const l of typeRecordLines()) console.log(`[gates] ${l.ok ? 'owner type:' : 'WARN owner type:'} ${l.line}`);
+  } catch { /* the list is a help, never a failure */ }
+}
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
 // 2.58.0 (PU-34): the commit and tree the gates start on are the ones they test, so the record names HEAD from
 // before the first gate, and the tree counts as dirty if it was dirty then or is at the end (an edit made while the

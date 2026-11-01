@@ -9,6 +9,9 @@
  *
  * The type comes from a title prefix (Bug:, Fix, Chore:, Study:, Balance:, Fun:, Playtest:, Review:, Docs:)
  * and otherwise from the role. Each type is described in studio/skills/ (the table in studio/skills/README.md).
+ * 2.59.0: the owner can reclassify a task (npm run task -- type <ID> <type> --by <owner> --why "…",
+ * harness/reclassify.mjs); that type wins over the title's, and the output says which one is used and why.
+ * A bug's regression is a cartridge replay or a seeded game unit test ("kind": "test", qa/regressions/README.md).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +21,8 @@ import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { isSha256 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
-import { failsBefore } from '../qa/fails-before.mjs';
+import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
+import { ownerType, ownerTypeWords } from './reclassify.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
@@ -112,7 +116,7 @@ const BY_ROLE = {
 export const TYPES = {
   change: { skill: 'studio/skills/builder.md', means: 'changes exist for the task, and a full `npm run verify` passed after the last of them' },
   chore: { skill: 'studio/skills/builder.md', means: 'build, toolchain, CI or dependency work: changes exist for the task, and a full `npm run verify` passed after the last of them (no regression, no gameplay checks, no reach check)' },
-  bug: { skill: 'studio/skills/bug.md', means: 'a regression with seed, tick and pinned SHA-256 that fails on the code before the fix, a lesson naming the bug, the fix committed with the task\'s tag, and a green verify after the last change' },
+  bug: { skill: 'studio/skills/bug.md', means: 'a regression that fails on the code before the fix (a cartridge replay with seed, tick and pinned SHA-256, or a seeded game unit test, "kind": "test", that passes with the fix), a lesson naming the bug, the fix committed with the task\'s tag, and a green verify after the last change' },
   balance: { skill: 'studio/skills/balance.md', means: 'a sweep of the current tuning, newer than the last game change; a person picks the number' },
   fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
   playtest: { skill: 'studio/skills/playtest.md', means: 'a playtest report on the current build with seed, ticks, hash, and the failing tick if it failed' },
@@ -129,13 +133,33 @@ export const TYPES = {
   none: { skill: null, means: 'nothing to check (coordination work)' },
 };
 
-export function taskType(task) {
+/** The type the title (or, failing that, the role) gives: { type, by: 'title' | 'role' }. */
+function titleRule(task) {
   const title = String(task?.title || '');
   // 2.58.0: a [chore] tag retypes a "Fix …" or a plain build task, never a review, study, rescue...
   const tagged = choreTagged(task);
-  for (const [re, type] of PREFIX) if (re.test(title)) return type === 'bug' && tagged ? 'chore' : type;
+  for (const [re, type] of PREFIX) if (re.test(title)) return { type: type === 'bug' && tagged ? 'chore' : type, by: 'title' };
   const byRole = BY_ROLE[task?.role] || 'change';
-  return byRole === 'change' && tagged ? 'chore' : byRole;
+  return { type: byRole === 'change' && tagged ? 'chore' : byRole, by: 'role' };
+}
+/** The type the title (or the role) gives, ignoring any owner reclassification. */
+export const titleType = (task) => titleRule(task).type;
+
+/**
+ * 2.59.0: the task's type and where it comes from: { type, source, owner, ignored }. An owner reclassification
+ * (harness/reclassify.mjs) wins; one on file that doesn't count (unsigned with an owner key, set by an agent's commit,
+ * not committed yet) is named in `ignored` and the title decides.
+ */
+export function typeOf(task) {
+  const rule = titleRule(task);
+  let o = null;
+  try { o = task?.id ? ownerType(task.id) : null; } catch { o = null; }
+  if (o?.type) return { type: o.type, source: ownerTypeWords(o), owner: o, ignored: null, titleType: rule.type };
+  return { type: rule.type, source: rule.by === 'title' ? 'from its title' : `from its role (${task?.role || 'none'})`, owner: null, ignored: o?.ignored || null, titleType: rule.type };
+}
+
+export function taskType(task) {
+  return typeOf(task).type;
 }
 
 /**
@@ -184,7 +208,7 @@ function filesUnder(rel, test, deep = false) {
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
 // ---- what changed, and when ----
-const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
+const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
@@ -552,7 +576,8 @@ export function gameplayChecks(task, part, since, check) {
  * Each check reads what the work contains, not only when a file was touched.
  */
 export function checkDone(task, since = startedAt(task.id)) {
-  const type = taskType(task);
+  const typed = typeOf(task);
+  const type = typed.type;
   const part = task.part || partOf(task.id);
   const seen = part === 'renderer' || part === 'both';
   const checks = [];
@@ -592,10 +617,14 @@ export function checkDone(task, since = startedAt(task.id)) {
   }
   if (type === 'docs') workAndVerify(true);
   if (type === 'bug') {
+    // 2.59.0: a cartridge replay (seed, tick, pinned hash) or a seeded game unit test ("kind": "test": the test file,
+    // its name and the seed; the command is the studio's own, qa/regressions/README.md).
+    const replayReg = (j) => regressionKind(j) === 'replay' && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256);
+    const testReg = (j) => regressionKind(j) === 'test' && Number.isInteger(j.seed) && typeof j.test?.file === 'string' && j.test.file && typeof j.test?.name === 'string' && j.test.name;
     const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
       .map((f) => ({ f, j: readJson(f) }))
-      .filter(({ j }) => j && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256));
-    if (part !== 'renderer') check('Regression saved with seed, tick and a pinned hash', regs.length, 'no regression in qa/regressions/ with a seed, a tick and a pinned hash since this task started (save the replay, then `node qa/check-regressions.mjs --update`)');
+      .filter(({ j }) => j && (replayReg(j) || testReg(j)));
+    if (part !== 'renderer') check('Regression saved (a cartridge replay with seed, tick and a pinned hash, or a seeded game test)', regs.length, 'no regression in qa/regressions/ since this task started: a cartridge replay with a seed, a tick and a pinned hash (save the replay, then `node qa/check-regressions.mjs --update`), or, where no cartridge covers the bug, a seeded game unit test ("kind": "test" with test.file, test.name and seed; studio/skills/bug.md)');
     const lessons = fs.existsSync(abs('studio/memory/failures.md')) ? fs.readFileSync(abs('studio/memory/failures.md'), 'utf8').match(/^### .+$/gm) || [] : [];
     const ids = [task.id, ...(task.title.match(/\b(BUG|REG)-[\w-]+/g) || []), ...regs.map(({ j }) => j.id).filter(Boolean)];
     const day = new Date(since).toISOString().slice(0, 10);
@@ -745,7 +774,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, part, since, checks, missing, notes, ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, part, since, checks, missing, notes, ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -757,7 +786,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(1);
   }
   const res = checkDone(task);
-  console.log(`${task.id} is a "${res.type}" task. Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
+  console.log(`${task.id} is a "${res.type}" task (${res.typeSource}). Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
+  if (res.typeIgnored) console.log(`  note: ${res.typeIgnored}`);
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
   for (const n of res.notes || []) console.log(`  note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
