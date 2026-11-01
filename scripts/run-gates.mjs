@@ -117,7 +117,9 @@ if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : '
 // gates ran). Engine cache files a gate rewrites (.godot/, *.import, *.uid) don't count. task done trusts a verify
 // only for this commit on a clean tree (harness/done-check.mjs gatesAfter).
 const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
-const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : s.split('\n').filter((l) => l.length > 3).some((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''))); };
+// 2.58.3 (O3, crew P-035): nor does a tracked file that differs only in line endings (harness/eol-only.mjs).
+const { splitEolOnly } = await import('../harness/eol-only.mjs');
+const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, s.split('\n').filter((l) => l.length > 3).filter((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, '')))).real.length > 0; };
 const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
 const dirtyAtStart = treeDirty();
 const rows = [];
