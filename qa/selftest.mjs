@@ -3811,6 +3811,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.0 (helper b): a game's protected manifest may exempt a barrel from the size ratchet (with a hard cap) and let
+// import-only lines through; lines two lanes in flight change are warned about, and the third conflict on one line
+// asks the Producer to restructure it (qa/selftest-260b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260b.mjs')).href);
+  await selftest260B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
