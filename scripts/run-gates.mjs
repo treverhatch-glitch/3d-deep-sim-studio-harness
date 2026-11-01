@@ -46,6 +46,22 @@ const verifyOwner = /^[\w.-]+$/.test(process.env.STUDIO_LOCK_OWNER || '') ? proc
   const detach = !argv.includes('--no-detach') && !process.env.STUDIO_VERIFY_RUN && !/^(off|0|false|no)$/i.test(detachEnv)
     && (argv.includes('--detach') || /^(on|1|true|yes)$/i.test(detachEnv) || process.env.npm_lifecycle_event === 'verify');
   const wait = argv.includes('--wait') && !process.env.STUDIO_VERIFY_RUN;
+  // 2.59.0 (#6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed them since
+  // the lane branched, its gates would judge with the old code (T-061 failed the hooks gate again after the fix had
+  // landed on main): refuse and name the files and the fix (rebase). The studio's branch holds the reviewed harness; a
+  // lane's own harness edits (a harness task) don't count. STUDIO_LANE_HARNESS=own runs the lane's copy anyway.
+  if (!wait) {
+    let d = null;
+    try { d = (await import('../harness/hook-stamp.mjs')).laneHarnessDrift(root); } catch {}
+    if (d?.files.length) {
+      const { laneDriftText, laneHarnessOwn } = await import('../harness/hook-stamp.mjs');
+      if (laneHarnessOwn()) console.log(`[gates] note: STUDIO_LANE_HARNESS=own: running this lane copy's own harness, ${d.files.length} file(s) behind ${d.branch}`);
+      else {
+        console.error(`[gates] FAIL not run: ${laneDriftText(d)}`);
+        process.exit(1);
+      }
+    }
+  }
   if (wait || detach) process.stdout.on('error', () => {}); // a reader that went away (| head) never stops the run
   if (wait) process.exit(await flushed(await waitForVerify()));
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));

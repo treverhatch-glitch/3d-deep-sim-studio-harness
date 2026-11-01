@@ -56,6 +56,30 @@
 - Exempt: commits made before the stamping hooks existed, and harness commits made without hooks that say so
   (`Studio-Harness: experiment-drop` with its `Studio-Experiment-Drop` trailer). CI's own merge commit of a pull request
   isn't judged; the PR head is.
+- A clean rebase (2.59.0, crew H-13): a patch-id hashes the diff's context lines, so a rebase onto a main that changed
+  lines near a commit's hunks made its stamp stale. `commit-msg` now also writes `Studio-Patch-U0: p<id>`, the patch-id
+  of the same change without context (`git diff -U0`), and a commit whose tree and patch-id no longer match passes when
+  that id does: the same added and removed lines, files and order. A commit with any changed line still fails; a stamp
+  without the line (before 2.59.0) keeps the old rule. What it can't see is where in a file those lines sit and the
+  unchanged lines around them: those come from the base, whose own commits are judged too, and the hook checks judge
+  staged lines and file names, not positions. A second trailer so an older harness reads the stamp as before.
+- Re-stamp (2.59.0): in a lane copy, `npm run hooks -- restamp` re-commits the lane's commits since the studio's branch
+  through the real hooks (`git commit -C`, from the oldest stale one), the same files, messages and authors, and keeps
+  the old head as `backup/<lane>-pre-restamp-<time>`. It refuses on the main checkout, with uncommitted changes and over
+  a merge commit (rebase first), and never writes a stamp itself: a commit the hooks refuse stops it and the lane goes
+  back. `task done` does the same after its own rebase, but only for commits whose stamps were valid before it
+  (`STUDIO_HOOKS_RESTAMP=off` turns that off); if the hooks refuse, nothing lands.
+- Studio-Task (2.59.0, crew H-12): `commit-msg` tags a commit with one task, not every task the agent holds: the lane
+  copy's own task (`.studio/lane-branches.json`, or the launcher's session record for the lane), else the subject's
+  leading id (`T-012: …`) when the agent holds it, else its only task lock; with several and nothing saying which, no
+  `Studio-Task` and a note. done-check's "changes exist for this task" reads that trailer.
+- A lane's own harness (2.59.0, #6): a lane copy runs its committed `harness/` and `scripts/`. When the studio's branch
+  changed files there since the lane branched, `npm run verify` and the hooks check (so every `task done`) refuse in that
+  lane and name the files: rebase on the studio's branch first (`git rebase main`, then `npm run hooks -- restamp` if
+  asked). A commit there gets a note, never a refusal. The studio's branch holds the reviewed harness, so it only
+  overrules an older lane copy; a lane's own harness edits aren't refused. `STUDIO_LANE_HARNESS=own` runs the lane's copy.
+  Running main's scripts on a lane instead isn't safe: they find their checkout from their own folder, so they would
+  check the main checkout's files and index, not the lane's.
 - Enforced where the hooks are installed (`core.hooksPath=scripts/hooks`) or the base branch's last 50 commits carry
   stamps (so unsetting the hooks doesn't switch it off), or with `STUDIO_HOOKS_CHECK=on`; `STUDIO_HOOKS_CHECK=off` turns it off.
 - Size (2.58.5): the `hooks` gate patch-ids only the commits that need it (a stamp whose tree no longer matches, after a
