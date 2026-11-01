@@ -11,9 +11,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export async function selftest263I({ dir, run, report, tmpRoot }) {
+export async function selftest263I({ dir, run, report, tmpRoot, root }) {
+  // The size rule reads JavaScript with the typescript package: a copy made without node_modules (the full selftest's
+  // copyRepo) gets the harness's own, linked, as selftest-260b does.
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
