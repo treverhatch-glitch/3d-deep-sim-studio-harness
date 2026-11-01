@@ -64,6 +64,7 @@
 - `npm run models:check [-- --dry-run | --accept-top-tier <name>]`
   Asks each provider you have a key for which models it serves (free model-list endpoints, no tokens); exits 1 if a configured model is gone. It also prints each role's model tier (a suggestion, never enforced) and the warning when every role is on the top tier (docs/SESSIONS.md).
 - `npm run focus -- <ID>` (written for you by `task start`)
+- `npm run thread -- inbox <ID>` — follow-ups routed to your task (CI, merge-train results, messages tied to it); `status | sweep | resolve <key> | link <key> <ID> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> | shadow-report [--sample 50]` (docs/THREADS.md)
   The agent's one-page brief in `.studio/briefs/<ID>.md`: done means, the skill's steps, notes from before, lanes, related lessons, finish commands.
 - `npm run notes -- add --kind well|bad|workaround|upgrade "…"` · `list` · `export`
   Notes about the harness itself (`studio/harness-notes/NOTES.md`); kept across `studio:reset`.
