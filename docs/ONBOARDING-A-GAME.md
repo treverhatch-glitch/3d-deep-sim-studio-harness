@@ -160,6 +160,40 @@ testTimeout: 5000 * scale, hookTimeout: 10000 * scale,
 or only for the slow files, with `{ timeout: 6000 * scale }` on those tests. Outside the gate the variable is unset, so
 the factor is 1. `"timeoutScale": false` turns it off. The manifest is protected: adding this needs the owner's approval.
 
+## Landing tiers and batching for the merge train (2.63.0)
+
+The merge train gives each lane a blast-radius tier from its diff (`harness/tiers.mjs`; docs/WORK-ORGANIZATION.md):
+C waits for a person's release, B verifies the whole game and needs its Golden-Reason / Pin-Moves, A lands as before.
+These keys in `<game>/studio.gates.json` (protected: the owner approves changes) tell it about the game:
+
+```json
+{
+  "simPaths": ["src/sim/**"],
+  "shared": ["src/util/**"],
+  "registry": ["src/systems/registry.ts"],
+  "ui": ["src/panels/**"],
+  "irreversible": ["src/save/format.ts", "data/schema/**"],
+  "pins": { "tests": ["throughput"], "report": "…", "refresh": "…", "files": ["src/sim/pins.expected.json"] },
+  "runAlone": { "maxFiles": 40, "paths": ["src/sim/core/**"] },
+  "tiers": {
+    "rules": [{ "id": "render", "tier": "A", "paths": ["src/render/**"], "why": "drawing only, no game state" }],
+    "set": { "registry": "A" },
+    "default": "B"
+  }
+}
+```
+
+- **simPaths**, **shared**, **registry** (with `unionFiles`): tier B (behaviour, shared code, the registry or barrel).
+  `game/*/sim/**`, `web/*/sim/**`, `cartridges/**`, `**/lib/**`, `**/utils/**`, `**/shared/**`, package files and
+  `index.*` barrels are B already. **ui**: tier A unless the file is also in the sim paths.
+- **irreversible**: files a wrong change can't be undone in (a save or schema format players' saves depend on):
+  tier C, so a person releases each lane that changes them.
+- **pins.files**: the pinned expectation files; a lane that changes one without a `Pin-Moves:` trailer is handed back.
+- **runAlone**: a lane with more than `maxFiles` changed files, or one under `paths`, trains by itself.
+- **tiers**: `rules` add rules (a file's tier is the highest rule it matches), `set` changes a default rule's tier by
+  id (see `DEFAULT_TIER_RULES`), `default` is the tier of a file no rule names (B). A tier-C rule (protected files,
+  harness code, deleted tests, irreversible files, upgrade merges) can't be lowered: the train notes and ignores it.
+
 ## Path-scoped gates and parallel tracks (2.30p)
 
 A game with more than one build (for example a browser build under `web/` and an engine build under `godot/`) should scope its gates, so a change to one build doesn't run the other's checks:
