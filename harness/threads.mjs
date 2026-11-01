@@ -8,7 +8,7 @@
  *   npm run thread -- inbox <ID> [--peek]                 a task's inbox (studio/handoffs/<ID>.inbox.md)
  *   npm run thread -- link <key> <ID> --by <name>         a bot ties a Discord message or a PR/issue to a task
  *   npm run thread -- unlink <key> --by <name>
- *   npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>]
+ *   npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
  *   npm run thread -- shadow-report [--sample 50]         what shadow mode would have routed, for the owner to check
  *
  * The index (.studio/threads.json) maps exact keys to tasks. It is built by code from the events the studio
@@ -24,6 +24,10 @@
  * An event with no thread (or whose tasks are all done) goes to the Producer: one line in studio/producer/INBOX.md,
  * which the Producer reads at its next start (batched as before). Pass-through never adds a task and never edits
  * the board (studio/NEXT.md): the Producer stays the only writer to the live queue.
+ *
+ * 2.65.0, "senders" in studio/triggers.json: a discord or github event responds only when its author id (--author, the id
+ * the bot got from Discord or GitHub; the harness can't verify it) is listed as owner or trusted; any other author's
+ * event, or one with no author, is at most a candidate (logged as such in shadow mode). Empty lists: all candidates.
  *
  * STUDIO_THREADS (or "mode" in studio/triggers.json): shadow (default) logs thread.would_route and
  * trigger.would_drop events only; on routes for the sources listed in "live" (ci and train by default; the others
@@ -56,10 +60,14 @@ export const DEFAULT_TRIGGERS = {
     ci: { policy: 'respond', types: { 'ci.green': 'ignore' } },
     train: { policy: 'ignore', types: { 'task.train.dropped': 'respond', 'task.train.partial': 'respond', 'task.train.deferred': 'candidate', 'task.train.red': 'candidate', 'task.train.red_main': 'candidate', 'task.train.flaky': 'candidate' } },
     hub: { policy: 'candidate' },
-    discord: { policy: 'candidate' },
-    github: { policy: 'candidate' },
+    // 2.65.0: respond only for an admitted sender (senders below); with the lists empty every post is a candidate.
+    discord: { policy: 'respond' },
+    github: { policy: 'respond' },
   },
+  senders: { discord: { owner: [], trusted: [] }, github: { owner: [] } },
 };
+/** 2.65.0: the sources whose events carry an outside author (the id the bot got from Discord or GitHub). */
+export const SENDER_SOURCES = ['discord', 'github'];
 
 // Keys: "<kind>:<value>". Code builds every kind but the external ones, which a bot registers with `link`.
 export const KINDS = ['task', 'branch', 'sha', 'train', 'brief', 'ask', 'away', 'wave', 'bug', 'discord', 'pr', 'issue'];
@@ -103,7 +111,36 @@ export function readTriggers(file = TRIGGERS_FILE()) {
     const o = (t.sources && typeof t.sources[s] === 'object' && t.sources[s]) || {};
     sources[s] = { policy: POLICIES.includes(o.policy) ? o.policy : d.policy, types: { ...(d.types || {}), ...Object.fromEntries(Object.entries(o.types || {}).filter(([, p]) => POLICIES.includes(p))) } };
   }
-  return { mode: ['off', 'shadow', 'on'].includes(t.mode) ? t.mode : DEFAULT_TRIGGERS.mode, live: Array.isArray(t.live) ? t.live.filter((s) => SOURCES.includes(s)) : DEFAULT_TRIGGERS.live, sources };
+  return { mode: ['off', 'shadow', 'on'].includes(t.mode) ? t.mode : DEFAULT_TRIGGERS.mode, live: Array.isArray(t.live) ? t.live.filter((s) => SOURCES.includes(s)) : DEFAULT_TRIGGERS.live, sources, senders: readSenders(t.senders) };
+}
+
+/** 2.65.0: "senders": { discord: { owner: [ids], trusted: [ids] }, github: { owner: [ids] } }; anything else ignored. */
+export function readSenders(raw) {
+  const ids = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).trim()).filter((x) => /^[\w.-]{1,64}$/.test(x)))] : []);
+  const out = {};
+  for (const src of SENDER_SOURCES) {
+    const o = raw && typeof raw === 'object' && raw[src] && typeof raw[src] === 'object' ? raw[src] : {};
+    out[src] = { owner: ids(o.owner), trusted: ids(o.trusted) };
+  }
+  return out;
+}
+
+/**
+ * 2.65.0: who sent an outside event, as the studio's trigger table admits them: owner | trusted | untrusted (an author
+ * not listed) | unknown (no author id given), or null for a source without outside authors. The author id is the
+ * one the bot passed (meta.author): the harness can't check a Discord or GitHub identity itself; it applies the
+ * owner's lists to the id it was given. GitHub logins compare without case.
+ */
+export function senderClass(e, triggers = readTriggers()) {
+  const source = sourceOf(e);
+  if (!SENDER_SOURCES.includes(source)) return null;
+  const a = String(e?.meta?.author ?? '').trim();
+  if (!a) return 'unknown';
+  const lists = triggers.senders?.[source] || { owner: [], trusted: [] };
+  const same = (x) => (source === 'github' ? x.toLowerCase() === a.toLowerCase() : x === a);
+  if (lists.owner.some(same)) return 'owner';
+  if (lists.trusted.some(same)) return 'trusted';
+  return 'untrusted';
 }
 
 /** off | shadow | on: STUDIO_THREADS first, then studio/triggers.json, else shadow. */
@@ -306,9 +343,16 @@ function deliverToProducer(line) {
 export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTriggers(), board = boardState(), quietDrops = true, producer = true } = {}) {
   const source = sourceOf(e);
   if (!source || mode === 'off') return { action: 'none' };
-  const policy = policyFor(source, e.type, triggers);
+  let policy = policyFor(source, e.type, triggers);
+  // 2.65.0: a Discord or GitHub event responds only for an admitted sender (studio/triggers.json "senders"); anyone
+  // else's is at most a candidate (never respond), in shadow mode and live alike.
+  const sender = senderClass(e, triggers);
+  const admitted = sender === 'owner' || sender === 'trusted';
+  const capped = sender !== null && !admitted && policy === 'respond';
+  if (capped) policy = 'candidate';
   const live = mode === 'on' && triggers.live.includes(source);
-  const base = { event: e.id, type: e.type, source, policy, live };
+  const base = { event: e.id, type: e.type, source, policy, live, ...(sender !== null ? { sender, author: String(e.meta?.author ?? '').slice(0, 64) || null, ...(capped ? { capped: true } : {}) } : {}) };
+  const capNote = capped ? ` (sender ${sender === 'unknown' ? 'not given' : `${base.author} not in senders`}: at most a candidate)` : '';
   if (policy === 'ignore') {
     if (!live) emitEvent({ type: 'trigger.would_drop', agent: 'threads', msg: `would drop ${e.type} (${source}: ignore)`, meta: base });
     else if (!quietDrops) emitEvent({ type: 'trigger.dropped', agent: 'threads', msg: `dropped ${e.type} (${source}: ignore)`, meta: base });
@@ -321,12 +365,12 @@ export function routeEvent(e, { idx, mode = threadsMode(), triggers = readTrigge
   const ref = e.meta?.ref || hit?.key || keysOf(e)[0] || '';
   const out = { ...base, to, tasks: open, key: hit?.key || null };
   if (!live) {
-    emitEvent({ type: 'thread.would_route', agent: 'threads', task: open[0] || null, to: to === 'task' ? null : 'producer', msg: `would route ${e.type} to ${to === 'task' ? `${open.join(', ')}'s inbox` : `the Producer${hit ? why : ' (no thread)'}`}: ${oneLine(e.msg, 160)}`, meta: out });
+    emitEvent({ type: 'thread.would_route', agent: 'threads', task: open[0] || null, to: to === 'task' ? null : 'producer', msg: `would route ${e.type} to ${to === 'task' ? `${open.join(', ')}'s inbox` : `the Producer${hit ? why : ' (no thread)'}`} as ${policy}${capNote}: ${oneLine(e.msg, 160)}`, meta: out });
     return { action: 'would_route', ...out };
   }
   if (to === 'task') {
     const told = open.map((id) => deliverToTask(id, lineOf(e, source, ref), { notice: policy === 'respond' })).filter(Boolean);
-    emitEvent({ type: 'thread.routed', agent: 'threads', task: open[0], msg: `${e.type} routed to ${open.join(', ')}'s inbox${told.length ? ` (${told.join(', ')} told at the next tool call)` : ''}`, meta: { ...out, told } });
+    emitEvent({ type: 'thread.routed', agent: 'threads', task: open[0], msg: `${e.type} routed to ${open.join(', ')}'s inbox${told.length ? ` (${told.join(', ')} told at the next tool call)` : ''}${capNote}`, meta: { ...out, told } });
   } else {
     // producer: false — the caller delivers to the Producer its own way (the War Room's /api/inbox, as before).
     if (producer) deliverToProducer(`- [${stamp(e.ts)}] **${source}** (${hit ? `thread ${hit.key}${why}` : 'no thread'}): ${oneLine(e.msg || e.type, 300)}`);
@@ -449,7 +493,7 @@ export function unlinkKey(rawKey, { by, env = process.env } = {}) {
  * An inbound message for a thread (a chat bot, a GitHub relay, the War Room's /api/inbox with a task): one
  * inbound.message event, routed now. Returns the routing result: { action, to, tasks, ... }.
  */
-export function postInbound({ source, key, text, by, ref = null, env = process.env, producer = true } = {}) {
+export function postInbound({ source, key, text, by, ref = null, author = null, env = process.env, producer = true } = {}) {
   if (!SOURCES.includes(source)) return { ok: false, message: `--source is one of ${SOURCES.join(', ')}` };
   const may = source === 'hub' ? { ok: Boolean(by), why: 'say who' } : mayTouchThreads({ by, env });
   if (!may.ok) return { ok: false, message: may.why };
@@ -457,7 +501,10 @@ export function postInbound({ source, key, text, by, ref = null, env = process.e
   if (!k) return { ok: false, message: `"${key}" isn't a key (a task id, a lane branch, a sha, discord:<id>, pr:<n> ...)` };
   const msg = oneLine(text, 600);
   if (!msg) return { ok: false, message: 'empty message' };
-  const e = emitEvent({ type: 'inbound.message', agent: oneLine(by, 60), msg: `${oneLine(by, 60)}: ${msg}`, meta: { source, thread: k, ...(ref ? { ref: oneLine(ref, 80) } : {}) } });
+  // 2.65.0: the author id the bot got from Discord or GitHub (not checked here: the bot passes it; the policy uses it).
+  const who = author === null || author === undefined || author === '' ? null : String(author).trim();
+  if (who !== null && !/^[\w.-]{1,64}$/.test(who)) return { ok: false, message: `--author is the sender's id as Discord or GitHub gave it (digits, or a GitHub login); got "${oneLine(who, 40)}"` };
+  const e = emitEvent({ type: 'inbound.message', agent: oneLine(by, 60), msg: `${oneLine(by, 60)}: ${msg}`, meta: { source, thread: k, ...(ref ? { ref: oneLine(ref, 80) } : {}), ...(who ? { author: who } : {}) } });
   const mode = threadsMode(env);
   if (mode === 'off') return { ok: true, action: 'none', mode };
   return { ok: true, mode, ...routeNow(e, { producer }) };
@@ -495,7 +542,7 @@ export function shadowReport({ sample = 50, events = readRecentEvents(50000) } =
   const n = Math.max(0, Math.min(Number(sample) || 0, shadow.length));
   const step = n ? shadow.length / n : 1;
   const picked = n ? Array.from({ length: n }, (_, i) => shadow[Math.min(shadow.length - 1, Math.floor(i * step))]) : [];
-  return { total: shadow.length, counts, sample: picked.map((e) => ({ ts: e.ts, source: e.meta?.source, type: e.meta?.type, to: e.type === 'trigger.would_drop' ? 'drop' : e.meta?.to, tasks: e.meta?.tasks || [], key: e.meta?.key || null, event: e.meta?.event, msg: e.msg })) };
+  return { total: shadow.length, counts, sample: picked.map((e) => ({ ts: e.ts, source: e.meta?.source, type: e.meta?.type, to: e.type === 'trigger.would_drop' ? 'drop' : e.meta?.to, tasks: e.meta?.tasks || [], key: e.meta?.key || null, event: e.meta?.event, ...(e.meta?.sender ? { sender: e.meta.sender, policy: e.meta.policy } : {}), msg: e.msg })) };
 }
 
 // ---- CLI --------------------------------------------------------------------------------------------------------
@@ -512,7 +559,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const idx = readThreads();
     const mode = threadsMode(process.env, t);
     console.log(`[thread] mode ${mode}${mode === 'on' ? ` (live: ${t.live.join(', ') || 'none'}; others in shadow)` : ''}; ${Object.keys(idx.keys).length} key(s); last sweep ${idx.updatedAt || 'never'}`);
-    for (const s of SOURCES) console.log(`  ${s.padEnd(8)} ${t.sources[s].policy}${Object.keys(t.sources[s].types).length ? ` (${Object.entries(t.sources[s].types).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}`);
+    for (const s of SOURCES) console.log(`  ${s.padEnd(8)} ${t.sources[s].policy}${Object.keys(t.sources[s].types).length ? ` (${Object.entries(t.sources[s].types).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}${t.senders[s] ? `; respond only for listed senders (owner ${t.senders[s].owner.length}, trusted ${t.senders[s].trusted.length}); anyone else: candidate` : ''}`);
   } else if (cmd === 'sweep') {
     const r = sweepThreads();
     console.log(`[thread] ${r.mode}: ${r.first ? 'first sweep, keys learned from history, nothing old routed' : `${r.routed.length} event(s) ${r.mode === 'on' ? 'handled' : 'checked'}`}`);
@@ -534,17 +581,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!r.ok) fail(r.message);
     console.log(`[thread] ${r.key} unlinked`);
   } else if (cmd === 'post') {
-    const r = postInbound({ source: flag('source') || 'discord', key: pos[1], text: pos.slice(2).join(' '), by, ref: flag('ref') });
+    const r = postInbound({ source: flag('source') || 'discord', key: pos[1], text: pos.slice(2).join(' '), by, ref: flag('ref'), author: flag('author') });
     if (!r.ok) fail(r.message);
-    const where = r.action === 'routed' ? (r.to === 'task' ? `in ${r.tasks.join(', ')}'s inbox` : "in the Producer's inbox") : r.action === 'would_route' ? `shadow mode: logged where it would go (${r.to === 'task' ? r.tasks.join(', ') : 'the Producer'}); nothing delivered` : r.action === 'dropped' || r.action === 'would_drop' ? `dropped (${r.source}: ignore)` : 'threads are off';
+    const where = (r.capped ? `sender ${r.author || '(not given)'} is not in studio/triggers.json "senders" for ${r.source}: at most a candidate; ` : '') + (r.action === 'routed' ? (r.to === 'task' ? `in ${r.tasks.join(', ')}'s inbox` : "in the Producer's inbox") : r.action === 'would_route' ? `shadow mode: logged where it would go (${r.to === 'task' ? r.tasks.join(', ') : 'the Producer'}); nothing delivered` : r.action === 'dropped' || r.action === 'would_drop' ? `dropped (${r.source}: ignore)` : 'threads are off');
     console.log(`[thread] ${where}`);
   } else if (cmd === 'shadow-report') {
     const r = shadowReport({ sample: Number(flag('sample') || 50) });
     if (argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(0); }
     console.log(`[thread] shadow mode: ${r.total} decision(s): ${Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join(', ') || 'none yet'}`);
     console.log(`Sample of ${r.sample.length} (spread over the period). Check each: is the task right, or should it have gone to the Producer or been dropped?`);
-    for (const s of r.sample) console.log(`- ${stamp(s.ts)} ${s.source} ${s.type} -> ${s.to === 'task' ? s.tasks.join(', ') : s.to}${s.key ? ` [${s.key}]` : ''} · ${oneLine(s.msg, 160)}`);
+    for (const s of r.sample) console.log(`- ${stamp(s.ts)} ${s.source} ${s.type} -> ${s.to === 'task' ? s.tasks.join(', ') : s.to}${s.key ? ` [${s.key}]` : ''}${s.sender ? ` (sender ${s.sender}: ${s.policy})` : ''} · ${oneLine(s.msg, 160)}`);
   } else {
-    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] | shadow-report [--sample 50]');
+    fail('Usage: npm run thread -- status | sweep | resolve <key> | inbox <ID> [--peek] | link <key> <ID> --by <name> | unlink <key> --by <name> | post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>] | shadow-report [--sample 50]');
   }
 }
