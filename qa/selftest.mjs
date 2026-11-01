@@ -3698,6 +3698,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.5 (helper s, a crew orchestrator's report H-3, H-4, H-11): task done lets a green full verify of the same tree
+// stand in for the game's checks; after a rebase only the checks whose inputs main changed run again; a landing takes
+// the next free gate slot first; `npm run upgrade -- --check` keeps the board out of upgrade stashes; every "no owner
+// key" note says how; a loop over seeds isn't a seed special case (qa/selftest-2585s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585s.mjs')).href);
+  await selftest2585S({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
