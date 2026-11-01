@@ -23,6 +23,11 @@ window, past `--until`, or past the budget. The Ops view shows "Running unattend
 report has a section for it. `--install` uses launchd (macOS), systemd --user (Linux) or Task
 Scheduler (Windows); `--uninstall` removes it.
 
+- **A memory floor (2.59.0).** No new agent starts while free memory is under `STUDIO_RAM_FLOOR_GB` (3; `0`
+  turns it off): a Unity editor and browser playtests beside a full verify took a PC down to 2.6 GB free. The
+  pass says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never
+  stopped. The watcher's and the Director's auto-start use the same pass; an agent a person starts is not held.
+
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME

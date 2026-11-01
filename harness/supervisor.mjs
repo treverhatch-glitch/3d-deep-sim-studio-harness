@@ -229,6 +229,7 @@ export async function supervise(opts, state, now = Date.now()) {
   if (!opts.dryRun) writeWaiting(waitingOn);
   const canStart = new Set(launchableRoles([...new Set(waiting.map((t) => t.role))]));
   const started = [];
+  let ram = null;
   // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
   const ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
   for (const g of ordered) {
@@ -290,6 +291,14 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${g.role}: every tool is out of quota (npm run budget)`);
       continue;
     }
+    // 2.59.0 (#11c): no new agent while free memory is under the floor (a Unity editor and browser playtests beside a
+    // full verify took a PC to 2.6 GB free). Running agents are never stopped; the next pass looks again.
+    ram ||= ramCheck(opts);
+    if (ram.low) {
+      why.push(ram.why);
+      ramNote(ram, now);
+      break;
+    }
     const agent = nextAgentName(g.role, opts.prefix || 's');
     state.names = [...(state.names || []), agent].slice(-200);
     // 2.30l: one builder per task. Two passes at once (the watcher and the Director flow) both started
@@ -316,6 +325,29 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   if (!groups.size) why.push('no waiting tasks for agents');
   return { started, why };
+}
+
+/**
+ * 2.59.0 (#11c): is free memory under STUDIO_RAM_FLOOR_GB (3; 0 turns it off)? { low, freeGb, floorGb, why }.
+ * Free memory is os.freemem() (on Linux the kernel's "available" figure; on Windows free physical memory).
+ * Test hooks, inert unless set: opts.freemem (a function giving bytes) or STUDIO_TEST_FREEMEM_MB.
+ */
+export function ramCheck(opts = {}, env = process.env) {
+  const floorGb = env.STUDIO_RAM_FLOOR_GB === undefined || env.STUDIO_RAM_FLOOR_GB === '' ? 3 : Number(env.STUDIO_RAM_FLOOR_GB);
+  if (!(floorGb > 0)) return { low: false, floorGb: 0 };
+  const test = env.STUDIO_TEST_FREEMEM_MB;
+  const bytes = typeof opts.freemem === 'function' ? Number(opts.freemem()) : test !== undefined && test !== '' ? Number(test) * 1024 * 1024 : os.freemem();
+  if (!Number.isFinite(bytes)) return { low: false, floorGb };
+  const freeGb = Math.round((bytes / 1024 ** 3) * 10) / 10;
+  return { low: freeGb < floorGb, freeGb, floorGb, why: `free memory ${freeGb} GB is under the floor (STUDIO_RAM_FLOOR_GB=${floorGb}): no new agent starts until more is free` };
+}
+
+/** Says so once per pass, as an event at most every STUDIO_RAM_NOTE_MIN (15) minutes while it stays low. */
+function ramNote(ram, now) {
+  const every = Number(process.env.STUDIO_RAM_NOTE_MIN || 15) * 60000;
+  const last = readRecentEvents(2000).filter((e) => e.type === 'supervisor.ram_low').pop();
+  if (last && now - Date.parse(last.ts) < every) return;
+  emitEvent({ type: 'supervisor.ram_low', agent: 'supervisor', to: 'producer', status: 'warn', msg: `Not starting agents: ${ram.why}`, meta: { freeGb: ram.freeGb, floorGb: ram.floorGb } });
 }
 
 function hubUp(port) {
