@@ -28,6 +28,8 @@ import { isGoldenPath, isTestPath } from './test-weakening.mjs';
 import { DEFAULT_PROTECTED } from './approve.mjs';
 
 export const TIERS = ['A', 'B', 'C'];
+/** 2.66.0: studio files that silence a check; a lane changing one is tier C (released by a game dev or an outside agent with permission). */
+export const SILENCERS = ['studio/fuzz.ignore.json'];
 /**
  * The shipped protected list (studio/protected.json as the harness ships it, and approve.mjs's defaults): always tier C,
  * whatever the studio's own list says (it can add globs, never take these out of tier C).
@@ -60,6 +62,10 @@ export const DEFAULT_TIER_RULES = [
   // 2.65.0 (B-40): a config proposal (studio-proposals/<ID>.json, harness/config-proposal.mjs) for a protected studio
   // file is the owner's decision like the file itself; one the harness can't read counts as protected.
   { id: 'config-proposal-protected', tier: 'C', locked: true, kind: 'proposal-protected', paths: ['studio-proposals/**'], why: 'a config proposal for a protected studio file (studio-proposals/): only the owner decides it' },
+  // 2.66.0: a list that silences a check (the fuzz ignore list) isn't owner-only (not protected) but isn't a worker's
+  // call either: a game dev releases the lane, or an outside agent records their permission (train release).
+  { id: 'silencer', tier: 'C', locked: true, paths: SILENCERS, why: 'it changes a list that silences a check (studio/fuzz.ignore.json): a game dev releases it, or an outside agent with their permission' },
+  { id: 'config-proposal-silencer', tier: 'C', locked: true, kind: 'proposal-silencer', paths: ['studio-proposals/**'], why: 'a config proposal for a list that silences a check (studio/fuzz.ignore.json): a game dev releases it, or an outside agent with their permission' },
   { id: 'golden', tier: 'B', kind: 'golden', why: 'it moves a golden or snapshot (behaviour)' },
   { id: 'config-proposal', tier: 'B', paths: ['studio-proposals/**'], why: 'a studio config proposal (studio-proposals/): it changes main\'s studio/ config when it lands' },
   { id: 'pins', tier: 'B', trailer: 'Pin-Moves', why: 'it declares pin moves (Pin-Moves: trailer)' },
@@ -140,6 +146,11 @@ export function classifyLane({ files = [], trailers = {}, settings = {}, protect
     if (r.kind === 'test' && !isTestPath(f.path)) return false;
     if (r.kind === 'golden' && !isGoldenPath(f.path)) return false;
     if (r.kind === 'protected' && !(matchAny(f.path, prot) && !(String(f.status).startsWith('A') && matchAny(f.path, addOnly)))) return false;
+    if (r.kind === 'proposal-silencer') {
+      if (String(f.status).startsWith('D') || !Object.prototype.hasOwnProperty.call(proposals || {}, f.path)) return false;
+      const targets = proposals[f.path];
+      if (!Array.isArray(targets) || !targets.some((t) => matchAny(t, SILENCERS))) return false;
+    }
     if (r.kind === 'proposal-protected') {
       if (String(f.status).startsWith('D') || !Object.prototype.hasOwnProperty.call(proposals || {}, f.path)) return false;
       const targets = proposals[f.path];

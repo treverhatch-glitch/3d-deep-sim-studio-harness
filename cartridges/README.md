@@ -58,7 +58,8 @@ Filing is hands-off with a shadow week (`studio/fuzz.json`): `"mode": "suggest"`
 `"autoFileAfter"` (the first run sets it to first run + 7 days; `null` never), files one `Fix fuzz finding <id>` bug
 task per new id through the board, never twice. `npm run fuzz -- file <id> --by <you>` files a suggestion now.
 `studio/fuzz.ignore.json` (`[{ "id": "F-…", "why": "…" }]`) lists intended behaviour; an entry with no why is not
-honoured. It should be on the protected list (owner's approval) so an agent can't silence a finding.
+honoured. A lane that changes it (directly or by a config proposal) is tier C, held until a game dev releases it or
+an outside agent records their permission (harness/tiers.mjs "silencer"), so a worker can't silence a finding.
 
 Not a gate yet. To join the soak tier later, the owner adds to `studio/gates.json`
 `{ "id": "fuzz", "cartridge": true, "command": "node qa/fuzz.mjs --check --seeds 5 --ticks 300", "required": false }`

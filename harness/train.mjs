@@ -427,7 +427,7 @@ function recordedVerifies(root) {
 export function failLines(text) {
   const lines = String(text || '').split('\n');
   const gates = [...new Set(lines.map((l) => (l.match(/^\[gates\] FAIL (\S+)/) || [])[1]).filter(Boolean))];
-  const detail = lines.filter((l) => /\bFAIL\b|Error:|failed/i.test(l) && !/^\[gates\] (FAIL|in plain words)/.test(l)).slice(-8).map((l) => l.trim().slice(0, 240));
+  const detail = lines.filter((l) => /\bFAIL\b|Error:|failed/i.test(l) && !/^\[gates\] (FAIL|in plain words|Fix:)/.test(l)).slice(-8).map((l) => l.trim().slice(0, 240));
   return { gates, detail };
 }
 

@@ -24,6 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { mainBranch } from '../harness/worktree.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NAME = /STUDIO_[A-Z0-9_]+/g;
@@ -172,12 +174,32 @@ export function checkSettings(root = ROOT) {
   const used = new Map(rows.map((r) => [r.name, r]));
   const prunable = [...base].filter((n) => !used.has(n) || used.get(n).doc).sort();
   const stale = read(path.join(root, MAP_FILE)) !== renderMap(rows);
-  return { ok: missing.length === 0, missing, prunable, baseline: baseline ? baseline.length : null, names: rows.length, stale };
+  // The baseline only shrinks: names added to it since the main branch's copy fail the check (a new setting is
+  // documented instead of frozen). No main branch or no baseline there (a fresh clone, CI's shallow checkout): skipped.
+  const was = baselineAt(root, process.env.STUDIO_SETTINGS_BASE_REF || mainRef());
+  const grown = was ? [...base].filter((n) => !was.has(n)).sort() : [];
+  return { ok: missing.length === 0 && grown.length === 0, missing, grown, prunable, baseline: baseline ? baseline.length : null, names: rows.length, stale };
+}
+
+const gitOut = (root, args) => { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? String(r.stdout || '') : null; };
+/** The main branch to compare the baseline with: the main checkout's branch (a lane copy's main), or null. */
+function mainRef() {
+  try { return mainBranch() || null; } catch { return null; }
+}
+/** The baseline's names at a git revision, or null when there is none. */
+export function baselineAt(root, ref) {
+  if (!ref) return null;
+  const t = gitOut(root, ['show', `${ref}:${BASELINE_FILE}`]);
+  if (t === null) return null;
+  try { const j = JSON.parse(t); const names = Array.isArray(j) ? j : j.undocumented; return Array.isArray(names) ? new Set(names.map(String)) : null; } catch { return null; }
 }
 
 /** The lines check-docs (or the CLI) prints for a failing check. */
 export function checkLines(c) {
-  const out = [`[settings] FAIL ${c.missing.length} STUDIO_* setting(s) used in the code but not documented in docs/${c.baseline === null ? ` (no ${BASELINE_FILE})` : ''}:`];
+  const out = [];
+  if (c.grown?.length) out.push(`[settings] FAIL ${BASELINE_FILE} gained ${c.grown.length} name(s) since the main branch (${c.grown.slice(0, 8).join(', ')}${c.grown.length > 8 ? ', …' : ''}): it only shrinks. Document each in docs/ and take it out of the baseline.`);
+  if (!c.missing.length) return out;
+  out.push(`[settings] FAIL ${c.missing.length} STUDIO_* setting(s) used in the code but not documented in docs/${c.baseline === null ? ` (no ${BASELINE_FILE})` : ''}:`);
   for (const m of c.missing.slice(0, 20)) out.push(`  ${m.name} (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})`);
   if (c.missing.length > 20) out.push(`  … and ${c.missing.length - 20} more`);
   out.push('[settings] Fix: describe each on the docs/ page for its area (what it does, its default), then run node scripts/settings-map.mjs to refresh docs/SETTINGS.md');

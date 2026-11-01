@@ -4078,6 +4078,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (e): who may silence a check (the fuzz ignore list is tier C), the settings baseline only shrinks, and the
+// train's hand-back detail leaves out the Fix: line (qa/selftest-266e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266e.mjs')).href);
+  await selftest266E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

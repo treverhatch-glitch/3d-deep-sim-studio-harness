@@ -132,6 +132,9 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   fuzz bug tasks were filed. Nothing waiting: one line says so.
 - **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
   (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
+  Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in
+  `studio/fuzz.json`). An entry in `studio/fuzz.ignore.json` silences a finding, so a lane that adds one (directly or
+  by a config proposal) is tier C: a game dev releases it, or an outside agent records their permission.
 - **The blocked-command log (2.66.0)** (`npm run denials [-- --days 7] [--json]`, harness/denials.mjs). At session
   end the launcher reads Claude Code's `permission_denials` from every `{"type":"result"}` line of the session's log
   (the crew's logs carry the field on every result line) into `.studio/denials.jsonl`: task, agent, role, tool, a
