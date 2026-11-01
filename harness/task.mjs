@@ -1617,6 +1617,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       let laneBranch = '';
       try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
       const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
+      // 2.63.0: a tier C lane (harness code, protected files, deleted tests or regressions, irreversible files, upgrade
+      // merges) lands only through the merge train after a person releases it. STUDIO_TRAIN=off, --force and
+      // --accepted-by take the old path, which has no tiers, so they can't carry a tier C lane past that hold.
+      if (!viaTrain && inLaneCopy() && laneBranch && unmerged(laneBranch) > 0) {
+        const { laneTier } = await import('./train.mjs');
+        const { tierLine } = await import('./tiers.mjs');
+        let tier = null;
+        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
+        if (tier?.tier === 'C') {
+          emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: tier C lands only through the merge train after a person releases it` });
+          done = { error: 'tier-c', message: `${targetId} is not done: this lane is ${tierLine(tier)}. A tier C lane lands only through the merge train once a person releases it: npm run task -- done ${targetId} --train, then npm run task -- train release ${targetId} --by <person> [--permission "<their words or a link>"]. STUDIO_TRAIN=off, --force and --accepted-by don't skip that.` };
+        }
+      }
+      if (done) { /* refused above */ } else
       if (viaTrain) {
         const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
         if (!pre || pre.error) done = pre;

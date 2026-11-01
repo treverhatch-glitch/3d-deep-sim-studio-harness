@@ -103,6 +103,14 @@ export async function selftest263I({ dir, run, report, tmpRoot }) {
       && t1c.status === 0 && isDone(hc.id) && mainHas('harness/demo-extra.mjs') && !queue().includes(hc.id),
     `${hc.log.slice(-300)}\nq1: ${out(q1).slice(-600)}\nt1: ${out(t1).slice(-1200)}\nheld=${JSON.stringify(heldAfter)}\nworker: ${out(workerRel).slice(-300)}\nagent: ${out(agentRel).slice(-300)}\nt1b: ${out(t1b).slice(-500)}\nperson: ${out(personRel).slice(-300)}\nt1c: ${out(t1c).slice(-1500)}`);
 
+  // ---- 1b. the old path can't carry a tier C lane past its hold: STUDIO_TRAIN=off, --force ----
+  const hc2 = lane('tier-c2', 'Tools: another harness note', { 'harness/demo-extra2.mjs': 'export const extra2 = 1;\n' });
+  const off = run(hc2.dir, `node harness/task.mjs done ${hc2.id} --agent ${hc2.agent}`, { ...hc2.as, STUDIO_TRAIN: 'off' });
+  const forced = run(hc2.dir, `node harness/task.mjs done ${hc2.id} --agent ${hc2.agent} --force --reason "skip the checks for a harness note"`, hc2.as);
+  report('2.63.0 (i #1): a tier C lane is refused on the old landing path too: task done with STUDIO_TRAIN=off, or --force, says it lands only through the merge train after a person releases it, and main doesn\'t get it (fails on 2.60.0: STUDIO_TRAIN=off delivered it)',
+    hc2.ok && off.status !== 0 && /tier C/.test(out(off)) && /train release/.test(out(off)) && forced.status !== 0 && /tier C/.test(out(forced)) && !mainHas('harness/demo-extra2.mjs') && !isDone(hc2.id),
+    `${hc2.log.slice(-300)}\n--- STUDIO_TRAIN=off (${off.status}):\n${out(off).slice(-600)}\n--- --force (${forced.status}):\n${out(forced).slice(-600)}`);
+
   // ---- 2. a tier A docs lane and a tier B sim lane train together; each logs its tier; the verify is --all ----
   let since = evs().length;
   const da = lane('tier-a', 'Docs: demo notes', { 'docs/demo/notes-a.md': '# Notes A\n' });
