@@ -11,6 +11,30 @@
  *    (`grok`, `claude`, `gemini`, `openai`, `cursor`, `ollama`, or `auto`).
  */
 
+/**
+ * 2.60.1 (B-19): the `--tool nim` session model check (harness/nim-check.mjs). Before a nim session starts, the
+ * launcher asks NIM for one token from the session's model; when NIM says the model is not found or not available
+ * to this key (404, 410, "Not found for account"), it tries the next model here. STUDIO_NIM_MODELS (comma-separated)
+ * replaces this list; STUDIO_NIM_CHECK_HOURS the cache time; STUDIO_NIM_CHECK=off turns the check off.
+ * UNVERIFIED from here: the crew's reading of NIM's public list on 2026-11-01; check with npm run models:check.
+ */
+export const NIM_SESSION = {
+  fallbackModels: ['moonshotai/kimi-k2.6', 'deepseek-ai/deepseek-v4.1-flash', 'z-ai/glm-5.3-flash'],
+  checkHours: 24,
+  checkTimeoutMs: 15_000,
+};
+
+/**
+ * 2.60.1 (B-37): aider's repo map in a launched session (`--tool nim`, `--tool aider`). aider maps the repo before its
+ * first answer; the crew's session died right after a scan of ~4,680 files. The harness's folders are left out by the
+ * session's .aiderignore (B-20); these bound the rest. mapTokens 0 turns the map off. STUDIO_AIDER_MAP_TOKENS and
+ * STUDIO_AIDER_MAP_REFRESH (auto|always|files|manual) override.
+ */
+export const AIDER_SESSION = {
+  mapTokens: 1024,
+  mapRefresh: 'files',
+};
+
 export const COOLDOWN_DEFAULTS = {
   rateLimitMs: 30_000,      // 30s minimum cooldown on HTTP 429
   serverErrorMs: 45_000,    // 45s cooldown on HTTP 5xx / network error

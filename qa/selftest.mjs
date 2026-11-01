@@ -3940,6 +3940,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.1 (helper n): the aider launch path: aider found in STUDIO_AIDER_CMD or the studio's .studio/aider-venv, a custom
+// nim command keeps the NIM key, the nim model checked (stub answers) with fallback through STUDIO_NIM_MODELS, the
+// .aiderignore and the brief as --read, --no-pretty --no-fancy-input, a failed session's lane copy and last lines kept
+// (qa/selftest-2601n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601n.mjs')).href);
+  await selftest2601N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

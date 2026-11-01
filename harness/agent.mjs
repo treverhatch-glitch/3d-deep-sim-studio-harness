@@ -59,6 +59,9 @@ import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
+import { aiderProgram, writeAiderIgnore, excludeAiderFiles } from './aider-launch.mjs';
+import { pickNimModel, stubFetchFrom } from './nim-check.mjs';
+import { AIDER_SESSION } from './models.config.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
@@ -160,12 +163,33 @@ export function onPath(name, env = process.env, platform = process.platform) {
     try { const f = path.join(d, name); return fs.statSync(f).isFile() && (fs.accessSync(f, fs.constants.X_OK), true); } catch { return false; }
   });
 }
-/** Why a built-in tool can't start before anything is spawned (null: it can). M4: nim needs aider and a NIM key. */
+/**
+ * Why a built-in tool can't start before anything is spawned (null: it can). M4: nim needs aider and a NIM key.
+ * B-18 (2.60.1): aider (nim and aider) is STUDIO_AIDER_CMD, else the studio's .studio/aider-venv, else PATH
+ * (harness/aider-launch.mjs aiderProgram, which the launched argv uses too).
+ */
 export function toolPreflight(tool, env = process.env, platform = process.platform) {
-  if (tool !== 'nim') return null;
-  if (!onPath('aider', env, platform)) return 'aider is not installed (not found on PATH): install aider (pip install aider-chat) — needs the owner\'s OK';
-  if (nimKeyMissing(env)) return 'NVIDIA_API_KEY is not set: add your NVIDIA NIM key to .env (the agent gets it as OPENAI_API_KEY; it is never printed)';
+  if (tool !== 'nim' && tool !== 'aider') return null;
+  const prog = aiderProgram({ env, platform, onPath });
+  if (!prog.cmd) return prog.why;
+  if (tool === 'nim' && nimKeyMissing(env)) return 'NVIDIA_API_KEY is not set: add your NVIDIA NIM key to .env (the agent gets it as OPENAI_API_KEY; it is never printed)';
   return null;
+}
+
+/**
+ * B-20, B-21, B-37 (2.60.1): the arguments every aider session (nim, aider) gets after its model and message file.
+ * --no-pretty --no-fancy-input: stdout is a log file, not a terminal (prompt-toolkit warned on Git Bash's
+ * xterm-256color). --no-gitignore: aider would add `.aider*` to the tracked .gitignore. --aiderignore <file>: the
+ * harness's folders and the protected paths are never added to its chat or edited. --read <brief>: the task's brief,
+ * read-only. --map-tokens / --map-refresh (models.config.mjs AIDER_SESSION; STUDIO_AIDER_MAP_TOKENS,
+ * STUDIO_AIDER_MAP_REFRESH): a bounded repo map. --subtree-only is not used: a session's folder is the repo root.
+ */
+export function aiderTail({ ignoreFile = null, reads = [], env = process.env } = {}) {
+  const mt = String(env.STUDIO_AIDER_MAP_TOKENS ?? '').trim();
+  const tokens = /^\d+$/.test(mt) ? mt : String(AIDER_SESSION.mapTokens);
+  const refresh = String(env.STUDIO_AIDER_MAP_REFRESH || '').trim() || AIDER_SESSION.mapRefresh;
+  return ['--no-pretty', '--no-fancy-input', '--no-gitignore', '--map-tokens', tokens, ...(refresh && /^(auto|always|files|manual)$/.test(refresh) ? ['--map-refresh', refresh] : []),
+    ...(ignoreFile ? ['--aiderignore', ignoreFile] : []), ...(reads || []).filter(Boolean).flatMap((r) => ['--read', r])];
 }
 
 /** H-2: the settings file as agy's argument. A path with a space (C:\\Users\\Jo Ann\\…) would split as the prompt did, so
@@ -183,7 +207,7 @@ function agySettingsArg(file) {
  * since 2.58.5 agy); cursor and grok take it as one argument, and a prompt too long for the command line becomes an
  * instruction to read the kickoff file.
  */
-export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] }) {
+export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], aider = {} }) {
   const m = model && model !== 'unknown' ? model : null;
   // M1 (2.58.3): a session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main
   // checkout; Claude Code resolves the link and refuses a target outside its working directory ("outside the allowed
@@ -233,14 +257,16 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] })
     case 'grok':
       return { argv: ['grok', '-p', prompt, ...(m ? ['-m', m] : []), '--output-format', 'json', '--always-approve'], promptAt: 2 };
     case 'aider':
-      return { argv: ['aider', '--model', `ollama_chat/${m || process.env.OLLAMA_MODEL || 'qwen2.5-coder:14b'}`, '--message-file', file, '--yes'] };
+      // B-18: aider.program is the launcher's resolved aider (STUDIO_AIDER_CMD, the venv, or 'aider' on PATH).
+      return { argv: [aider.program || 'aider', '--model', `ollama_chat/${m || process.env.OLLAMA_MODEL || 'qwen2.5-coder:14b'}`, '--message-file', file, '--yes', ...aiderTail(aider)] };
     case 'nim':
       // M4 (2.58.3, crew P-040): aider on NVIDIA NIM's OpenAI-compatible endpoint, so a NIM model can edit files and run
       // commands (route.mjs only chats). Same shape as the Ollama case, without aider's own commits. The key
       // never goes in argv: the child gets OPENAI_API_KEY from NVIDIA_API_KEY (harness/agent-env.mjs).
       // H-1 (2.58.5): nimModel() never takes a role's or Claude's model. H-8: --no-auto-commits, the owner's condition
       // for NIM (aider's own commits skipped the studio's hooks and task flow; the crew set AIDER_AUTO_COMMITS=false).
-      return { argv: ['aider', '--model', `openai/${nimModel(m)}`, '--openai-api-base', NIM_API_BASE, '--message-file', file, '--yes-always', '--no-auto-commits'] };
+      // 2.60.1: B-18 the resolved aider; B-20/B-21 aiderTail (no pretty output, ignore file, the brief as --read).
+      return { argv: [aider.program || 'aider', '--model', `openai/${nimModel(m)}`, '--openai-api-base', NIM_API_BASE, '--message-file', file, '--yes-always', '--no-auto-commits', ...aiderTail(aider)] };
     default:
       return null;
   }
@@ -616,6 +642,29 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   { const st = launchStop({ role, tool, model, agent, task }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // 2.31.0: a task that used its own budget (harness/task-budget.mjs) gets no new session, refresh or failover.
   { const over = task ? stopIfOverBudget(task, { by: 'launcher' }) : null; if (over) { emitEvent({ type: 'launch.skipped', agent, task, msg: `${agent} not started on ${task}: ${over.split('. ')[0]}` }); return { ok: false, skipped: true, message: `Not started: ${over}` }; } }
+  // Lines for the agent's log, written once it is open.
+  const launchNotes = [];
+  // B-19 (2.60.1): a nim session's model is checked once before it starts (one 1-token request, cached per model and
+  // key for 24 h in .studio/nim-models.json; harness/nim-check.mjs). NIM says not found / not for this account: the
+  // next model in STUDIO_NIM_MODELS (or models.config.mjs NIM_SESSION) is tried; none works: not started. A 429 or a
+  // network error never changes the model (the quota fallback handles a 429). STUDIO_NIM_CHECK_STUB: a test's answers.
+  if (tool === 'nim' && process.env.STUDIO_REHEARSAL !== '1') {
+    const key = agentEnv({ tool: 'nim', role, model, agent }).OPENAI_API_KEY || null;
+    const stub = String(process.env.STUDIO_NIM_CHECK_STUB || '').trim();
+    const pick = await pickNimModel(model, { key, base: NIM_API_BASE, fetchImpl: stub ? stubFetchFrom(stub) : globalThis.fetch });
+    const meta = { role, configured: pick.configured, chosen: pick.model, tried: pick.tried.map((t) => ({ model: t.model, verdict: t.verdict, status: t.status, cached: t.cached })) };
+    if (!pick.model) {
+      emitEvent({ type: 'launch.skipped', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent} not started (${role} on nim): ${pick.refused}`.slice(0, 600), meta });
+      return { ok: false, skipped: true, message: `${agent} not started: ${pick.refused}` };
+    }
+    launchNotes.push(pick.line);
+    if (pick.tried.length) emitEvent({ type: 'agent.nim_model', agent, to: pick.changed ? 'producer' : undefined, task: task || undefined, status: pick.changed || pick.skipped ? 'warn' : 'ok', msg: `${agent}: ${pick.line}`.slice(0, 600), meta });
+    if (pick.changed) {
+      model = pick.model;
+      const st = launchStop({ role, tool, model, agent, task });
+      if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` };
+    }
+  }
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   // 2.30k: a lane can be several files (a,b,c); each is claimed, and all are let go if one is taken.
   const lanePaths = laneList(lane);
@@ -730,7 +779,22 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, prompt);
   const effort = { 'every-build': 'high', systems: 'medium' }[effectiveMode().review] || null;
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: copy ? laneShareDirs() : [] });
+  // 2.60.1, aider sessions (nim, aider): B-18 the aider to start (STUDIO_AIDER_CMD, .studio/aider-venv, PATH; the
+  // preflight below says why when there is none); B-20 the agent's .aiderignore and the task's brief as --read; in a
+  // lane copy aider's own .aider* files are kept out of the lane's change.
+  const aiderRun = !custom && (tool === 'nim' || tool === 'aider');
+  let aider = {};
+  if (aiderRun) {
+    const prog = aiderProgram({ env: process.env, onPath });
+    let ignoreFile = null;
+    try { ignoreFile = writeAiderIgnore(agent); } catch {}
+    if (copy) excludeAiderFiles(agent);
+    const brief = task ? path.join(STUDIO_STATE_DIR, 'briefs', `${task}.md`) : null;
+    aider = { program: prog.cmd || 'aider', ignoreFile, reads: brief && fs.existsSync(brief) ? [brief] : [] };
+    if (prog.cmd && prog.via !== 'PATH') launchNotes.push(`aider: ${prog.cmd} (${prog.via === 'venv' ? "the studio's .studio/aider-venv" : 'STUDIO_AIDER_CMD'})`);
+    if (ignoreFile) launchNotes.push(`aider ignores the harness's folders and the protected paths (${path.relative(REPO_ROOT, ignoreFile).split(path.sep).join('/')})${aider.reads.length ? `; the brief is passed with --read` : ''}`);
+  }
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: copy ? laneShareDirs() : [], aider });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
@@ -742,7 +806,18 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.33.0: the agent sees only its own tool's credentials and the studio's settings (harness/agent-env.mjs).
   // 2.59.0 (#14): the owner's key mapping (STUDIO_KEYMAP_<ROLE>, STUDIO_KEYMAP_AGENT_<NAME>): names in the log, never values.
   const keyNotes = [];
-  const env = agentEnv({ tool: custom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  // B-18 (2.60.1): a custom command for --tool nim (STUDIO_TOOL_NIM_CMD, the old venv workaround, or a role's command)
+  // keeps nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (as a 'custom' tool it had no key).
+  const nimCustom = Boolean(custom) && tool === 'nim' && !rehearsal;
+  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  for (const n of launchNotes) fs.writeSync(out, `[launcher] ${n}\n`);
+  if (nimCustom) fs.writeSync(out, `[launcher] the custom command for --tool nim gets nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (value not shown)\n`);
+  // B-37 (2.60.1): Python holds its output in a buffer when stdout is a file, so an aider that died left nothing in the
+  // log; unbuffered, and UTF-8 (a Windows code page can't print every character aider prints).
+  if (aiderRun || nimCustom) {
+    env.PYTHONUNBUFFERED ||= '1';
+    env.PYTHONIOENCODING ||= 'utf-8';
+  }
   if (keyNotes.length) {
     for (const n of keyNotes) fs.writeSync(out, `[launcher] ${n}\n`);
     const refusedKeys = keyNotes.filter((n) => /refused|not set/.test(n));
@@ -767,6 +842,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let plan = null;
   try {
     if (custom) {
+      if (nimCustom && nimKeyMissing(env)) throw new Error('NVIDIA_API_KEY is not set: add your NVIDIA NIM key to .env (the agent gets it as OPENAI_API_KEY; it is never printed)');
       // H-9: in a copy, a script the line names that isn't committed is run from the main checkout (absolute path).
       const loc = copy ? localizeCommand(custom, { from: REPO_ROOT, to: copy.dir }) : { template: custom, values: {}, moved: [] };
       if (loc.moved.length) fs.writeSync(out, `[launcher] not in this agent's copy, run from the main checkout: ${loc.moved.join(', ')}\n`);
@@ -786,6 +862,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const said = describePlan(plan);
   if (said) fs.writeSync(out, `[launcher] ${said}\n`);
+  // B-37: where this session's own output starts in the log (the log is appended to across sessions).
+  let logStart = 0;
+  try { logStart = fs.fstatSync(out).size; } catch {}
+  const t0 = Date.now();
   if (custom && copy) fs.writeSync(out, `[launcher] the custom command runs in this agent's own copy (${path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/')}); the main checkout is $STUDIO_MAIN_ROOT, {mainRoot} in the command; {addDirs} gives the --add-dir pair for its studio/ and .studio/\n`);
   const child = custom
     ? spawn(line, { cwd, shell: true, env, stdio: ['ignore', out, out] })
@@ -869,6 +949,18 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   clearInterval(beat);
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
+  // B-37 (2.60.1): a failed aider session (nim, aider) leaves evidence: the last lines of its output in a file beside
+  // the log, and its lane copy kept for a look (STUDIO_KEEP_FAILED_LANE=off removes it as before). Before H-1's line,
+  // which stays the log's last.
+  let keptCopy = false;
+  if ((session.tool === 'nim' || session.tool === 'aider') && code !== 0) {
+    const ev = failedSessionEvidence({ agent, logFile, from: logStart, code, tool: session.tool, model, secs: Math.round((Date.now() - t0) / 1000), cwd, secrets: [env.OPENAI_API_KEY, env.AIDER_OPENAI_API_KEY] });
+    keptCopy = Boolean(copy) && !/^(off|0|false|no)$/i.test(process.env.STUDIO_KEEP_FAILED_LANE || '');
+    const rel = copy ? path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/') : null;
+    const kept = keptCopy ? ` Its lane copy is kept for a look: ${rel} (branch ${copy.branch}); a session named ${agent} replaces it, or remove it: git worktree remove --force ${rel}.` : '';
+    try { fs.appendFileSync(logFile, `\n[launcher] ${ev.line}${kept}\n`); } catch {}
+    emitEvent({ type: 'agent.failed_evidence', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${ev.line}${kept}`.slice(0, 600), meta: { tool: session.tool, model, code, tail: ev.file, keptCopy: keptCopy ? rel : null } });
+  }
   // H-1 (2.58.5): a NIM model that is gone (410) or unknown (404) gets one clear line in the log and for a person.
   if (session.tool === 'nim') {
     const gone = nimModelTrouble(log, model);
@@ -878,7 +970,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     }
   }
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null });
-  if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+  if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
   // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).
@@ -910,6 +1002,41 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by });
   }
   return { ok: true, code, ...result };
+}
+
+/**
+ * B-37 (2.60.1): the last lines (STUDIO_FAILED_TAIL_LINES, 200) of a failed session's own output, from `from` (its
+ * start in the log), written to .studio/agents/<agent>.failed-<time>.log with what exited and how; { file, line }.
+ */
+export function failedSessionEvidence({ agent, logFile, from = 0, code, tool, model, secs = null, cwd = null, secrets = [] }) {
+  let text = '';
+  try {
+    const fd = fs.openSync(logFile, 'r');
+    const size = fs.fstatSync(fd).size;
+    const start = Math.max(from, size - 2 * 1024 * 1024);
+    const buf = Buffer.alloc(Math.max(0, size - start));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+    text = buf.toString('utf8');
+  } catch {}
+  // The session's key never goes into the copy (aider doesn't print it; this makes sure).
+  for (const k of secrets) if (k && String(k).length >= 8) text = text.split(String(k)).join('<key>');
+  const n = Math.max(1, Number(process.env.STUDIO_FAILED_TAIL_LINES || 200) || 200);
+  const lines = text.split(/\r?\n/);
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const tail = lines.slice(-n);
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '');
+  const file = path.join(AGENTS_DIR, `${agent}.failed-${stamp}.log`);
+  const head = [`# ${agent}: ${tool} (${model}) exited with code ${code}${secs !== null ? ` after ${secs} s` : ''}`, `# cwd: ${cwd ? path.relative(REPO_ROOT, cwd).split(path.sep).join('/') || '.' : '?'}`, `# the last ${tail.length} of ${lines.length} lines it printed:`, ''];
+  try {
+    fs.mkdirSync(AGENTS_DIR, { recursive: true });
+    fs.writeFileSync(file, `${head.join('\n')}${tail.join('\n')}\n`);
+  } catch {}
+  const rel = path.relative(REPO_ROOT, file).split(path.sep).join('/');
+  const line = tail.length
+    ? `${tool} exited with code ${code}${secs !== null ? ` after ${secs} s` : ''}; its last ${tail.length} lines are in ${rel}.`
+    : `${tool} exited with code ${code}${secs !== null ? ` after ${secs} s` : ''} and printed nothing (output unbuffered); ${rel} records the exit.`;
+  return { file: rel, line, lines: tail.length };
 }
 
 /**

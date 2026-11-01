@@ -55,15 +55,16 @@ export const TOOLS = {
   },
   aider: {
     name: 'Aider (free local dry run with Ollama)',
-    line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes`,
+    // 2.60.1 (B-21): stdout is a log file, not a terminal; --no-gitignore keeps aider off the tracked .gitignore.
+    line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes --no-pretty --no-fancy-input --no-gitignore`,
     note: 'One instruction, then exits: best for single small tasks. Start Ollama with OLLAMA_CONTEXT_LENGTH=32768 or more; its 2k default silently drops context.',
   },
   nim: {
     name: 'Aider on NVIDIA NIM',
     // The key is named, never written out: the launcher sets OPENAI_API_KEY from NVIDIA_API_KEY for the child only.
     // H-8 (2.58.5): AIDER_OPENAI_API_KEY too, which aider applies after the .env files it loads over the environment.
-    line: (f, model) => `OPENAI_API_KEY="$NVIDIA_API_KEY" AIDER_OPENAI_API_KEY="$NVIDIA_API_KEY" aider --model openai/${nimModel(model)} --openai-api-base https://integrate.api.nvidia.com/v1 --message-file ${f} --yes-always --no-auto-commits`,
-    note: `One instruction, then exits, like aider on Ollama, without aider's own commits. Needs aider (pip install aider-chat, with the owner's OK) and NVIDIA_API_KEY; the model is a NIM id (<org>/<model>) from --model, else STUDIO_NIM_MODEL, else ${NIM_DEFAULT_MODEL} (never the role's model).`,
+    line: (f, model) => `OPENAI_API_KEY="$NVIDIA_API_KEY" AIDER_OPENAI_API_KEY="$NVIDIA_API_KEY" aider --model openai/${nimModel(model)} --openai-api-base https://integrate.api.nvidia.com/v1 --message-file ${f} --yes-always --no-auto-commits --no-pretty --no-fancy-input --no-gitignore`,
+    note: `One instruction, then exits, like aider on Ollama, without aider's own commits. Needs aider (pip install aider-chat, with the owner's OK; the launcher also finds STUDIO_AIDER_CMD or .studio/aider-venv, and adds --aiderignore for the harness's folders and the brief as --read) and NVIDIA_API_KEY; the model is a NIM id (<org>/<model>) from --model, else STUDIO_NIM_MODEL, else ${NIM_DEFAULT_MODEL} (never the role's model).`,
   },
 };
 
