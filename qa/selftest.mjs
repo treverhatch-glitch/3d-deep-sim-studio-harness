@@ -3802,6 +3802,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.1: with a person's direct permission (--by <them> --permission "…") a Producer or Director session, or an agent
+// outside the harness, may record a task's type or resume the supervisor for them; workers never (qa/selftest-2591.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2591 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2591.mjs')).href);
+  await selftest2591({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

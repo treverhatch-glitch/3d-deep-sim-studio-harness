@@ -24,6 +24,12 @@
  *     nothing an agent can write is proof. Every record in force is shown in verify and done output.
  * In a lane copy the record is read from the main checkout, so the owner's decision counts without a rebase.
  * "none" and "rescue" can't be set here: closing a task without its check is `npm run approve -- force`.
+ *
+ * 2.59.1 (the owner's rule): with a person's direct permission a Producer or Director session, or an agent outside the
+ * harness, may record it for them: `--by <the person> --permission "<their words, or a link to the message>"`
+ * (harness/permission.mjs). The entry keeps `permission` and `recordedBy`, an agent commit that set it counts when it
+ * is that same agent and not a worker, and every output shows it. Builders never can. With an owner key the
+ * reclassification still has to be signed with it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +39,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { resolveBase, ownerPublicKey, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO, APPROVALS_REL } from './approve.mjs';
+import { agentOnPermission, permissionText, permittedSetter } from './permission.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
 export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
@@ -165,6 +172,11 @@ function resolveOwnerType(taskId, root) {
   if (bad) return { ignored: `${TYPE_RECORD_REL} names ${taskId}, but ${bad}` };
   const setter = setterOf(root, taskId, committed);
   if (!setter) return { ignored: `${TYPE_RECORD_REL}: the commit that set ${taskId}'s entry wasn't found, so who wrote it can't be checked` };
+  // 2.59.1: an agent's commit counts when the entry says it was recorded on a person's permission, by that agent, and
+  // the agent isn't a worker (harness/permission.mjs).
+  if (setter.agent && permissionText(committed.permission).length >= 10 && permittedSetter(setter.agent) && String(committed.recordedBy || '') === setter.agent) {
+    return { ...committed, source: 'owner record', onPermission: true, commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
+  }
   if (setter.agent) return { ignored: `${TYPE_RECORD_REL}: ${taskId}'s entry was set by commit ${setter.sha.slice(0, 8)} of the agent ${setter.agent} (Studio-Agent trailer); only the owner reclassifies a task (npm run task -- type, from the owner's own terminal)` };
   return { ...committed, source: 'owner record', commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
 }
@@ -175,7 +187,7 @@ export function ownerTypeWords(o) {
   const when = String(o.at || '').slice(0, 10);
   const how = o.source === 'owner-signed'
     ? `owner-signed, ${o.file}`
-    : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}; not signed: the studio has no owner key yet`;
+    : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}${o.permission ? `; recorded by ${o.recordedBy || 'an agent'} on ${o.by}'s permission: "${String(o.permission).slice(0, 160)}"` : ''}; not signed: the studio has no owner key yet`;
   return `set by ${o.by}${when ? ` on ${when}` : ''}${o.from ? ` (the title says ${o.from})` : ''} [${how}]: ${o.why}`;
 }
 
@@ -204,18 +216,28 @@ function sign(approval, pub) {
  * Record (or sign) the owner's reclassification. task: the board's task; from: its type by the title now.
  * Returns { ok, message, entry?, files? }.
  */
-export function reclassify({ task, from, to, by, why, commit = true, env = process.env }) {
-  const refusal = personRefusal(by, env);
-  if (refusal) return { ok: false, message: refusal };
+export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
+  const perm = permissionText(permission);
+  let onPerm = null;
+  if (perm) {
+    onPerm = agentOnPermission({ permission: perm, env });
+    if (!onPerm.ok) return { ok: false, message: `Refused: ${onPerm.why}. Nothing was recorded.` };
+    const who = String(by || '').trim();
+    if (!who || isAgentName(who)) return { ok: false, message: `--by names the person who gave permission${who ? `; "${who}" is an agent's name` : ''}. Nothing was recorded.` };
+  } else {
+    const refusal = personRefusal(by, env);
+    if (refusal) return { ok: false, message: refusal.replace('An agent hands the task back and asks', 'With the owner\'s direct permission a Producer or Director session, or an agent outside the harness, may record it: --by <the person> --permission "<their words or a link>". Otherwise an agent hands the task back and asks') };
+  }
   if (!task?.id) return { ok: false, message: 'No such task on the board.' };
   const target = String(to || '').toLowerCase();
   const auto = target === 'auto' || target === 'title';
   if (!auto && !RETYPABLE.includes(target)) return { ok: false, message: `"${to}" is not a type a reclassification can set. Types: ${RETYPABLE.join(', ')}, or auto (back to the title's type). To close a task without its check, the owner signs a force approval instead (npm run approve -- force ${task.id} --reason "…").` };
   if (String(why || '').trim().length < 10) return { ok: false, message: 'Say why, in 10+ characters: --why "<reason>" (it is shown in every done and verify output for this task).' };
   const at = new Date().toISOString();
-  const entry = { type: target, from, title: task.title, by: String(by).trim(), why: String(why).trim(), at };
+  const entry = { type: target, from, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
   const files = [TYPE_RECORD_REL];
   const pub = ownerKey();
+  if (pub && onPerm && onPerm.via !== 'person') return { ok: false, message: `This studio has an owner key, so a reclassification is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- type ${task.id} ${target} --by <name> --why "…"` };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id)}`;
   if (pub && !auto) {
     const approval = { kind: 'type', task: task.id, from, to: target, title: task.title, by: entry.by, why: entry.why, at };

@@ -72,8 +72,10 @@ New settings to know: `STUDIO_HEAVY_SLOTS` (1: full verifies, Unity landings and
 time), `STUDIO_RAM_FLOOR_GB` (3: no new agent below it), `STUDIO_RESUME_BY` (who may run `npm run studio:resume`),
 `STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>` (a key per role or agent), `studio/game.json`
 `engines.unity.land` (the Unity landing command), a game manifest's `"visual": { "capture": ... }` (render tasks on
-non-Godot games). A task's type can be changed only by a person in their own terminal:
-`npm run task -- type <ID> <type> --by <name> --why "..."`.
+non-Godot games). A task's type is the owner's decision: `npm run task -- type <ID> <type> --by <name> --why "..."`.
+2.59.1: with the owner's direct permission a Producer or Director session, or an agent outside the harness, may run it
+(and `npm run studio:resume`) for them by adding `--permission "<the owner's words, or a link to the message>"`; the
+record keeps the permission and who recorded it. Builders and other worker agents never can.
 
 ## What 2.30c changed for agents
 

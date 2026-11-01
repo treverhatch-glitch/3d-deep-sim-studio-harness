@@ -698,3 +698,8 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** found in the crew's events while checking this release: "a render task needs a visual result: capture ... --godot <project>" 7 times on a web game (T-028 parked; others forced).
 - **Why:** the visual proof could only capture a Godot project.
 - **Fix:** a game's manifest names its own capture command (`"visual": { "capture": ... }`, protected); `npm run visual -- capture` runs it; the same checks apply; task done's hint names the route. qa/selftest-259f.mjs.
+
+### P-112 — Owner-only commands refused agents even with the owner's direct permission · changed in 2.59.1
+- **Evidence:** the owner, 2026-11-01: "We should allow agents to sign off when we give direct permission" and "A high level director or producer agent or agent outside of the harness can change things with direct human permission". 2.59.0 refused every agent for `task type` and `studio:resume`, so a yes given on Discord had to wait for the owner's own terminal.
+- **Why:** 2.59.0 drew the line at "a person in their own terminal".
+- **Fix:** `--by <person> --permission "<words or link>"` from a Producer/Director session or an outside agent; recorded with who recorded it; workers never; an owner key's signature is still required where it exists. harness/permission.mjs, qa/selftest-2591.mjs.
