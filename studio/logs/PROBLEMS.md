@@ -878,3 +878,14 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** 0.58–0.68% pixel difference on unchanged code vs a 1% line; 2.60.0 recorded only `heavy run`'s shell.
 - **Why:** no per-camera baseline; gates ran with spawnSync.
 - **Fix:** double before-capture with a k×noise bar; recorded gate shells. qa/selftest-265s.mjs.
+
+### P-148 — A game check near its base timeout never printed why, and never got a floor (B-17, 2.65.1 hitlist #1) · fixed in 2.65.1
+- **Evidence:** the crew's game:test timed out at 600 s with nothing printed; the suite takes 560–640 s.
+- **Why:** the timeout line printed only when scaled; a timeout at load factor 1 was never re-run, so no quiet run was recorded.
+- **Fix:** a reading line for every check; self-triage's one re-run at the cap when no quiet run is recorded. qa/selftest-2651a.mjs.
+
+### P-149 — `npm run lanes` and the queue disagreed on conflicts · fixed in 2.65.1
+- **Evidence:** two merge-tree calls; the lanes table ignored `unionFiles`.
+- **Why:** each tool had its own merge-tree code.
+- **Fix:** harness/merge-tree.mjs, shared. qa/selftest-2651a.mjs.
+
