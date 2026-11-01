@@ -63,7 +63,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 
 - `npm run task -- done <ID> --train` (in the lane copy) runs every check task done runs before the game's checks
   (board, done-check, committed work, protected files, secrets, hooks, weakened tests) and queues the lane
-  (`.studio/train/queue.json`); the task stays in progress. `npm run task -- train status` lists the queue.
+  (`.studio/train/queue.json`); the task stays in progress. `npm run task -- train status` lists the queue. Its own
+  full verify isn't required (the train's verify covers it); a refusal names the check that blocks on its first line
+  and in the `task.not_done` event, and lists the verify rows as "(the train's verify covers this)" (2.60.1, B-33).
 - `npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>]` lands the queue, oldest first: each lane
   is checked again in its own copy, then merged in order onto main in a scratch copy (`.lanes/_train-<id>`, branch
   `train/<id>`; never the main checkout's files or a lane's copy). A lane is merged as it is (a fast-forward, or a
@@ -94,6 +96,16 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Union files (2.60.0): a conflict ONLY inside the manifest's `unionFiles` (one-import-per-line barrels, never an
   order-sensitive list) is merged with git's union driver for those files (both sides' added lines, the train's side
   first); the merge commit says `Union-Merge: <files>`. Any other conflict is handled as below.
+- Main moved by board files only (2.60.1, B-29): if main moved while the train was verified and every file changed
+  since is on the board/record list in `harness/train-board.json` (`studio/NEXT.md`, `studio/DONE.md`,
+  `studio/task-types.json`, `studio/handoffs/**`, `studio/memory/**`, `studio/logs/**`, `studio/notes/**`; added or
+  modified, never deleted or renamed), the train, under the land lock, merges its lanes again onto the new main and
+  lands on the same verify, but only when that merge is clean and git shows the new tree is the verified tree plus
+  exactly those files as main has them (event `task.train.board_move`; the `landed` event and the log say the verify
+  was reused and which files moved). The train's copy never tests `studio/` from its tree (it is sparse-excluded and
+  linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
+  `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
+  again, as before.
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
