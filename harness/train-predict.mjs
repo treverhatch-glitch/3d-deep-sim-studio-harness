@@ -16,40 +16,18 @@
  * (hotspots.mjs) and says why. Events: task.train.predicted_conflict. Code only (git), no model.
  */
 import { spawnSync } from 'node:child_process';
-import { matchAny } from './merge-lane.mjs';
-import { conflictPlaces } from './hotspots.mjs';
+import * as mt from './merge-tree.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
+const { gitVersion, mergeTree } = mt;
 const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 
-/** git's version as [major, minor, patch] (from `git version`), or null. */
-export function gitVersion(cwd = process.cwd(), text = null) {
-  const m = String(text ?? out(git(cwd, 'version'))).match(/(\d+)\.(\d+)(?:\.(\d+))?/);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3] || 0)] : null;
-}
-/** Does this git have `merge-tree --write-tree` (2.38+)? { ok, version, why } */
+// 2.65.1: git's version, the merge-tree call, its parsing, the union-file exemption and the file:line places are
+// harness/merge-tree.mjs's, shared with npm run lanes (harness/lanes.mjs); the names stay exported here.
+export { gitVersion, mergeTree };
+/** Does this git have `merge-tree --write-tree` (2.38+)? { ok, version, why }; STUDIO_TRAIN_PREDICT=off: no prediction. */
 export function mergeTreeSupport(cwd = process.cwd(), text = null, env = process.env) {
   if (/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_PREDICT || ''))) return { ok: false, version: null, why: 'STUDIO_TRAIN_PREDICT=off' };
-  const v = gitVersion(cwd, text);
-  if (!v) return { ok: false, version: null, why: 'git\'s version could not be read' };
-  const ok = v[0] > 2 || (v[0] === 2 && v[1] >= 38);
-  return { ok, version: v.join('.'), why: ok ? '' : `git ${v.join('.')} has no merge-tree --write-tree (2.38+)` };
-}
-
-/**
- * Merge `a` and `b` in memory. { clean, tree, files: [conflicted, not union], union: [conflicted, union only], error }.
- * A conflict only inside unionFiles is clean (the train merges those with the union driver).
- */
-export function mergeTree(root, a, b, { unionFiles = [] } = {}) {
-  const r = git(root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', a, b);
-  const lines = String(r.stdout || '').split('\n');
-  if (r.status === 0) return { clean: true, tree: lines[0].trim(), files: [], union: [] };
-  if (r.status !== 1) return { clean: false, error: `${r.stderr || r.stdout || `exit ${r.status}`}`.trim().split('\n').slice(-2).join(' '), files: [], union: [] };
-  const conflicted = [...new Set(lines.slice(1).map((s) => s.trim()).filter(Boolean))];
-  const union = conflicted.filter((f) => unionFiles.length && matchAny(f, unionFiles));
-  const files = conflicted.filter((f) => !union.includes(f));
-  return { clean: files.length === 0, tree: lines[0].trim(), files, union };
+  return mt.mergeTreeSupport(cwd, text, env);
 }
 
 /**
@@ -65,10 +43,8 @@ function mainPlus(root, tip, head, unionFiles) {
   return c.status === 0 && isSha(c.stdout.trim()) ? { commit: c.stdout.trim() } : { union: true };
 }
 
-const placesOf = (root, ours, theirs, files) => {
-  try { return conflictPlaces(root, ours, theirs).filter((p) => files.includes(p.file)).slice(0, 12); } catch { return []; }
-};
-export const placeText = (c) => (c.places?.length ? c.places.map((p) => `${p.file}:${p.line}`) : c.files).slice(0, 6).join(', ') + ((c.places?.length || c.files.length) > 6 ? ', …' : '');
+const placesOf = mt.placesFor;
+export const placeText = mt.placeText;
 
 /**
  * Predict this lane's merge in the next train. lane: { task, head }; queue: the train queue's entries; tip: main's

@@ -37,8 +37,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
-import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, gitVersion, LANES_DIR } from './worktree.mjs';
-import { readQueue, heldNow, pinMoves } from './train.mjs';
+import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, LANES_DIR } from './worktree.mjs';
+import { readQueue, heldNow, pinMoves, trainManifest } from './train.mjs';
+import { mergeTreeSupport, mergeTree, placesFor } from './merge-tree.mjs';
 import { readPass } from './merge-lane.mjs';
 import { readHolds } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
@@ -66,17 +67,18 @@ function recordRefresh(root, key, rec) {
   } catch {}
 }
 
-/** Does this git have `git merge-tree --write-tree` (2.38)? */
+/** Does this git have `git merge-tree --write-tree` (2.38)? (harness/merge-tree.mjs, shared with the queue's prediction) */
 export function mergeTreeSupported() {
-  const v = gitVersion();
-  return Boolean(v) && (v[0] > 2 || (v[0] === 2 && v[1] >= 38));
+  return mergeTreeSupport(mainRoot()).ok;
 }
-/** Files two commits would conflict in (merge-tree touches no index and no files): [] when they merge clean. */
-export function conflictFiles(root, a, b) {
-  const r = git(root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', a, b);
-  if (r.status === 0) return [];
-  if (r.status !== 1) return null; // couldn't tell
-  return [...new Set(String(r.stdout || '').split('\n').slice(1).map((s) => s.trim()).filter(Boolean))];
+/**
+ * Files two commits would conflict in (merge-tree touches no index and no files): [] when they merge clean, null when
+ * git couldn't tell. 2.65.1: harness/merge-tree.mjs's call; files listed in unionFiles don't count (the train merges
+ * them with git's union driver), as at queue time.
+ */
+export function conflictFiles(root, a, b, { unionFiles = [] } = {}) {
+  const m = mergeTree(root, a, b, { unionFiles });
+  return m.error ? null : m.files;
 }
 
 /** A launched session for this agent that is running (its record says so and its process is alive). */
@@ -201,13 +203,24 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
   }
   // Predicted conflicts: with main (every lane both ahead and behind), and pairwise among queued lanes on shared files.
   if (conflicts && isSha(tip)) {
-    if (mergeTreeSupported()) {
+    const sup = mergeTreeSupport(root);
+    if (sup.ok) {
+      // 2.65.1: the same call, union-file exemption and file:line places as the queue's prediction (merge-tree.mjs).
+      let unionFiles = [];
+      try { unionFiles = (await trainManifest(root, tip)).unionFiles || []; } catch {}
+      const unionOnly = new Map();
+      const judge = (r, a, b) => {
+        const m = mergeTree(root, a, b, { unionFiles });
+        for (const f of m.union) unionOnly.set(f, [...new Set([...(unionOnly.get(f) || []), r.task || r.branch])]);
+        return m.error ? null : m.files.length ? { files: m.files, places: placesFor(root, a, b, m.files) } : null;
+      };
       for (const r of lanes) {
         r.conflicts = [];
         if (!r.ahead || !r.behind || !isSha(r.head)) continue;
-        const f = conflictFiles(root, tip, r.head);
-        if (f === null) r.conflicts.push({ with: main, files: [], unknown: true });
-        else if (f.length) r.conflicts.push({ with: main, files: f });
+        const m = mergeTree(root, tip, r.head, { unionFiles });
+        for (const f of m.union) unionOnly.set(f, [...new Set([...(unionOnly.get(f) || []), r.task || r.branch])]);
+        if (m.error) r.conflicts.push({ with: main, files: [], unknown: true });
+        else if (m.files.length) r.conflicts.push({ with: main, files: m.files, places: placesFor(root, tip, r.head, m.files) });
       }
       const queued = lanes.filter((r) => r.queued && r.ahead && isSha(r.head));
       for (let i = 0; i < queued.length; i += 1) {
@@ -216,14 +229,15 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
           const b = queued[j];
           const shared = a.files.filter((x) => b.files.includes(x));
           if (!shared.length) continue;
-          const f = conflictFiles(root, a.head, b.head);
-          if (!f?.length) continue;
-          a.conflicts.push({ with: b.task || b.branch, files: f });
-          b.conflicts.push({ with: a.task || a.branch, files: f });
+          const c = judge(a, a.head, b.head);
+          if (!c) continue;
+          a.conflicts.push({ with: b.task || b.branch, ...c });
+          b.conflicts.push({ with: a.task || a.branch, ...c });
         }
       }
+      for (const [f, who] of unionOnly) notes.push(`${f} conflicts only as a union file (unionFiles) for ${who.join(', ')}: the train merges it with git's union driver, so it is not listed as a conflict`);
     } else {
-      notes.push(`git ${(gitVersion() || ['?']).join('.')} has no merge-tree --write-tree (2.38+): conflicts are predicted from overlapping changed lines (harness/hotspots.mjs) instead`);
+      notes.push(`${sup.why || 'git has no merge-tree --write-tree (2.38+)'}: conflicts are predicted from overlapping changed lines (harness/hotspots.mjs) instead`);
       try {
         const { overlaps, lanesInFlight } = await import('./hotspots.mjs');
         for (const r of lanes) r.conflicts = [];
@@ -257,7 +271,7 @@ export function tableText(t) {
     r.hold ? `held by ${r.hold.by}` : '-',
     lastWord(r.last),
     r.pinMoves?.length ? r.pinMoves.join(',') : '-',
-    !r.conflicts ? '-' : r.conflicts.length ? r.conflicts.map((c) => `${c.with}${c.files.length ? `: ${c.files.slice(0, 2).join(',')}${c.files.length > 2 ? ` +${c.files.length - 2}` : ''}` : ''}`).join('; ') : 'none',
+    !r.conflicts ? '-' : r.conflicts.length ? r.conflicts.map((c) => { const w = c.places?.length ? c.places.map((p) => `${p.file}:${p.line}`) : c.files; return `${c.with}${w.length ? `: ${w.slice(0, 2).join(',')}${w.length > 2 ? ` +${w.length - 2}` : ''}` : ''}`; }).join('; ') : 'none',
     `${r.ageMs === null || r.ageMs === undefined ? '-' : ageText(r.ageMs)}${r.session ? ' RUNNING' : ''}${r.dirty ? ' dirty' : ''}`,
   ]);
   const head = ['TASK', 'AGENT', 'BRANCH', 'AHEAD/BEHIND', 'STAMPS', 'HARNESS', 'QUEUED', 'HOLD', 'LAST TEST', 'PIN-MOVES', 'CONFLICTS', 'AGE'];

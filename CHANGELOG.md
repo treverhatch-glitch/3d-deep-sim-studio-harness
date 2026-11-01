@@ -4,6 +4,16 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.65.1] — 2026-11-02
+2.65.1: the crew's 2.65.1 hitlist, the parts 2.64.0 and 2.65.0 didn't already cover (P-148, P-149).
+### Fixed
+- **Every game check prints its load reading (B-17, P-148).** Scaled or not: the load factor and its reasons (or
+  "nothing scaling it"), the CPU-busy sample, whether a quiet-run floor is recorded. A check with no quiet run
+  recorded that times out gets self-triage's one re-run at the cap ("no quiet run recorded yet"); a pass then is its
+  quiet run at factor 1, otherwise a `lastPass` that stands in for the floor until a quiet run exists.
+- **One merge-tree helper (P-149).** `npm run lanes` and the queue's conflict prediction share
+  `harness/merge-tree.mjs`: the lanes table also exempts `unionFiles` and shows file:line.
+
 ## [2.65.0] — 2026-11-02
 2.65.0: hands-off by default, and the crew orchestrator's own tools. The owner's direction (2026-11-01): fewer human
 steps, not easier ones; the harness decides routine questions from evidence and logs why, and a person is needed only

@@ -588,7 +588,8 @@ function cpuOrLoad({ env, loadavg, cpuBusy: given, platform, cpus }) {
  * 2.60.1 (B-17): + 1 per heavy program outside the lock (implicitHolders: a Unity editor), and where there is no
  * load average (Windows: os.loadavg is all zeros) the CPU's busy fraction over STUDIO_CPU_BUSY_THRESHOLD (0.6) adds
  * 0.5 at the threshold up to 2 at 100% busy, as the load term does. Capped at STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
- * (3), never below 1. { factor, why }. Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus for the
+ * (3), never below 1. { factor, why, busy, busyThreshold, load, cores } (2.65.1: busy is the CPU's busy fraction the probe
+ * measured, or null when it didn't sample; load the 1-min load average used, or null). Injectable: loadavg, cpus (core count), cpuBusy, cpuSample (os.cpus for the
  * probe), platform, procs, listProcs.
  */
 export function loadFactor(root, { env = process.env, loadavg = null, cpus = null, cpuBusy: busyGiven = null, cpuSample = null, platform = process.platform, procs = null, listProcs = undefined } = {}) {
@@ -609,7 +610,8 @@ export function loadFactor(root, { env = process.env, loadavg = null, cpus = nul
   const thr = Math.min(0.99, Math.max(0.05, num(env.STUDIO_CPU_BUSY_THRESHOLD, 0.6)));
   if (Number.isFinite(busy) && busy > thr) { f += Math.min(2, 0.5 + (1.5 * (busy - thr)) / (1 - thr)); why.push(`CPU ${Math.round(busy * 100)}% busy (over ${Math.round(thr * 100)}%, STUDIO_CPU_BUSY_THRESHOLD; no load average here)`); }
   const cap = maxFactor(env);
-  return { factor: Math.round(Math.min(cap, Math.max(1, f)) * 10) / 10, why: why.join('; ') };
+  // 2.65.1 (B-17): the readings themselves, so the gate can print them even when nothing scales the timeout.
+  return { factor: Math.round(Math.min(cap, Math.max(1, f)) * 10) / 10, why: why.join('; '), busy: Number.isFinite(busy) ? busy : null, busyThreshold: thr, load: Number.isFinite(load) ? load : null, cores };
 }
 const maxFactor = (env) => Math.max(1, num(env.STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR, 3));
 
@@ -621,13 +623,20 @@ export function lastQuietTime(root, label) {
   const r = readJson(timesFile(root))?.[label];
   return r && Number(r.ms) > 0 ? { ms: Number(r.ms), at: r.at || null } : null;
 }
-/** Record a passing run of `label` at load factor 1 (the caller decides that). Never throws. */
-export function recordGateTime(root, label, ms) {
-  if (!label || !(Number(ms) > 0)) return false;
+/**
+ * 2.65.1: the last pass of `label` in self-triage's one re-run at the cap, at any load factor: { ms, at, factor } or
+ * null. It stands in for the floor only while no quiet run is recorded (scaledTimeout); it is never a quiet run.
+ */
+export function lastPassTime(root, label) {
+  const r = readJson(timesFile(root))?.[label]?.lastPass;
+  return r && Number(r.ms) > 0 ? { ms: Number(r.ms), at: r.at || null, factor: Number(r.factor) || 1 } : null;
+}
+function writeTimes(root, label, fn) {
+  if (!label) return false;
   const f = timesFile(root);
   try {
     const cur = readJson(f) || {};
-    cur[label] = { ms: Math.round(Number(ms)), at: new Date().toISOString() };
+    cur[label] = fn(cur[label] && typeof cur[label] === 'object' ? cur[label] : {});
     fs.mkdirSync(path.dirname(f), { recursive: true });
     const tmp = `${f}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(cur, null, 2));
@@ -635,32 +644,51 @@ export function recordGateTime(root, label, ms) {
     return true;
   } catch { return false; }
 }
+/** Record a passing run of `label` at load factor 1 (the caller decides that). Never throws. */
+export function recordGateTime(root, label, ms) {
+  if (!(Number(ms) > 0)) return false;
+  return writeTimes(root, label, (r) => ({ ...r, ms: Math.round(Number(ms)), at: new Date().toISOString() }));
+}
+/** 2.65.1: record a pass of self-triage's re-run (any factor) as `label`'s lastPass. Never throws. */
+export function recordGatePass(root, label, ms, factor = 1) {
+  if (!(Number(ms) > 0)) return false;
+  return writeTimes(root, label, (r) => ({ ...r, lastPass: { ms: Math.round(Number(ms)), at: new Date().toISOString(), factor: Number(factor) || 1 } }));
+}
 
 /**
  * A timeout scaled for load: { ms, base, factor, why, floor }. Never shorter than the configured base;
  * STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps the base. 2.60.1 (B-17): with a `label`, never shorter than
  * STUDIO_GAME_GATE_TIMEOUT_FLOOR (1.5; 0 or off: none) times that check's last quiet run (lastQuietTime), capped at
  * the same STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR times the base as the load factor. floor: { lastMs, mult, capped,
- * why } when it raised the timeout, else null.
+ * from, why } when it raised the timeout, else null.
+ * 2.65.1: the readings come back too, for the line the gate prints every time: busy, busyThreshold, load, cores (the
+ * load factor's), scaleOff, floorMult (0: no floor), quiet (the quiet run, null when none is recorded; undefined
+ * without a label), lastPass, floorMs (the floor's value before it is compared with the timeout). While no quiet run
+ * is recorded, the last pass of self-triage's re-run at the cap (lastPassTime) stands in for it (from: 'last pass').
  */
 export function scaledTimeout(base, root, { env = process.env, label = null, ...rest } = {}) {
-  if (off(env.STUDIO_GAME_GATE_TIMEOUT_SCALE)) return { ms: base, base, factor: 1, why: '', floor: null };
-  const { factor, why } = loadFactor(root, { env, ...rest });
+  if (off(env.STUDIO_GAME_GATE_TIMEOUT_SCALE)) return { ms: base, base, factor: 1, why: '', floor: null, scaleOff: true, label };
+  const { factor, why, busy, busyThreshold, load, cores } = loadFactor(root, { env, ...rest });
   let ms = Math.max(base, Math.round(base * factor));
   let floor = null;
   const fv = env.STUDIO_GAME_GATE_TIMEOUT_FLOOR;
   const mult = off(fv) ? 0 : num(fv, 1.5);
-  const last = label && mult > 0 ? lastQuietTime(root, label) : null;
-  if (last) {
-    const want = Math.round(last.ms * mult);
+  const quiet = label ? lastQuietTime(root, label) : undefined;
+  const lastPass = label && !quiet ? lastPassTime(root, label) : null;
+  const src = mult > 0 ? quiet || lastPass : null;
+  let floorMs = null;
+  if (src) {
+    const want = Math.round(src.ms * mult);
     const cap = Math.round(base * maxFactor(env));
     const got = Math.min(want, cap);
+    floorMs = got;
     if (got > ms) {
       ms = got;
-      floor = { lastMs: last.ms, mult, capped: want > cap, why: `at least ${mult} x its last quiet run of ${Math.round(last.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_FLOOR)${want > cap ? `, capped at ${maxFactor(env)} x the base (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR): the check's quiet time is near its base, raise STUDIO_GAME_GATE_TIMEOUT_MS` : ''}` };
+      const what = quiet ? `its last quiet run of ${Math.round(src.ms / 1000)} s` : `its last passing run of ${Math.round(src.ms / 1000)} s (self-triage's re-run at load factor ${src.factor}; no quiet run recorded yet)`;
+      floor = { lastMs: src.ms, mult, capped: want > cap, from: quiet ? 'quiet' : 'last pass', why: `at least ${mult} x ${what} (STUDIO_GAME_GATE_TIMEOUT_FLOOR)${want > cap ? `, capped at ${maxFactor(env)} x the base (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR): the check's quiet time is near its base, raise STUDIO_GAME_GATE_TIMEOUT_MS` : ''}` };
     }
   }
-  return { ms, base, factor, why, floor };
+  return { ms, base, factor, why, floor, busy, busyThreshold, load, cores, scaleOff: false, floorMult: mult, label, quiet: label ? quiet || null : undefined, lastPass, floorMs };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

@@ -171,7 +171,10 @@ console.log(JSON.stringify({ started: r.started, why: r.why, starts, events: rea
         try { j = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {}
         return { r, j };
       };
-      const quiet = gg();
+      // 2.65.1: the floor off for the quiet run, as in 2.65.0 when no quiet run is recorded (the floor then changes
+      // nothing): with the floor on, a first timeout with no quiet run recorded gets self-triage's one re-run at the cap
+      // (qa/selftest-2651a.mjs covers that), and this check is about the base standing on a quiet machine.
+      const quiet = gg({ STUDIO_GAME_GATE_TIMEOUT_FLOOR: 'off' });
       const h = holder(10000 * SLOW);
       const busy = gg();
       write('game/heavy259/studio.gates.json', JSON.stringify({ gates: [{ id: 'nap', command: `node "${sleepF}" 60000`, required: true }] }));

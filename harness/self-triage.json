@@ -3,7 +3,7 @@
   "onceHours": 6,
   "fixes": {
     "reap-orphans": { "on": true, "what": "a machine:heavy holder whose root process died left its tree running: kill the leftovers (harness/heavy.mjs killHolderTree) and free its slot" },
-    "rerun-timeout": { "on": true, "what": "a game check timed out while the machine was loaded (its load factor was above 1, the B-17 timeout line): run it once more at the cap (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base); never longer than the cap" },
+    "rerun-timeout": { "on": true, "what": "a game check timed out while the machine was loaded (its load factor was above 1, the B-17 timeout line), or with no quiet passing run recorded for it yet (the floor is on): run it once more at the cap (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base); never longer than the cap" },
     "switch-tool": { "on": true, "what": "the supervisor halted because two sessions ended with exit 127/9009 (the tool isn't on PATH): mark that tool out for onceHours so the next tool in the budget order that is on PATH takes over, and clear the halt as studio:resume does (by self-triage)", "codes": [127, 9009], "words": "wasn't found|not found|not on (the )?PATH" },
     "restart-hub": { "on": true, "what": "the War Room hub stopped answering while no supervisor runs (a running supervisor restarts it itself): start it again" },
     "close-rescues": { "on": true, "what": "rescue tasks of a task that has landed: close them (task done does this on landing; this is the sweep for any it missed)" }

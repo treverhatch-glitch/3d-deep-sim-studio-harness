@@ -84,8 +84,11 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   not on the list, still stops for a person (`selftriage.declined` says why). `STUDIO_SELF_TRIAGE=off` turns it off.
   - `reap-orphans`: a machine:heavy holder whose root died with its tree still running: the leftovers are killed and
     the slot freed.
-  - `rerun-timeout`: a game check that timed out under load (load factor above 1) runs once more at the cap
-    (`STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` x the base), never longer.
+  - `rerun-timeout`: a game check that timed out under load (load factor above 1), or (2.65.1) with no quiet passing run
+    recorded for it yet while the floor is on ("no quiet run recorded yet"), runs once more at the cap
+    (`STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` x the base), never longer. A pass of that re-run at load factor 1 is the
+    check's quiet run (its floor); under load it is only its last passing run, which stands in for the floor until a
+    quiet run is recorded.
   - `switch-tool`: two sessions ended with exit 127/9009 (the tool isn't on PATH) and another tool of the budget order is
     on PATH: the missing one is marked out for the window, the halt is cleared as `studio:resume` does, by "self-triage".
     A custom command has no other tool and stays halted.

@@ -29,7 +29,7 @@ There is one row per lane copy (`.lanes/<agent>`), per lane branch with unlanded
 | HOLD | `npm run task -- hold` (a conductor parked it on purpose) |
 | LAST TEST | the newest of: a refresh's targeted tests, task done's game checks, the lane's own full verify; `(older head)` when the lane has moved since |
 | PIN-MOVES | the lane's `Pin-Moves:` trailers |
-| CONFLICTS | `git merge-tree` against main, and between queued lanes that change the same files. With git older than 2.38 the hotspots overlap is used instead, and a note says so |
+| CONFLICTS | `git merge-tree` against main, and between queued lanes that change the same files, as file:line where it can (2.65.1: the same helper as the queue's prediction, harness/merge-tree.mjs, so a conflict only in the manifest's `unionFiles` is none here either, with a note). With git older than 2.38 the hotspots overlap is used instead, and a note says so |
 | AGE | since the lane's first own commit; `RUNNING` when its session is alive, `dirty` with uncommitted work |
 
 The command is read-only: it writes nothing and merges nothing.
