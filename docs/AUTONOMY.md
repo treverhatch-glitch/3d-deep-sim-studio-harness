@@ -60,13 +60,15 @@ The file holds the level the owner set (`"level": "L2"`) and the bar for L3. Def
 ## Drift checks (Check cards to the Producer)
 
 Each observation of a running session (the launcher's heartbeat, and the watch pass for a session whose
-heartbeat stopped) runs three deterministic checks in `harness/stall.mjs` (`driftCheck`):
+heartbeat stopped) runs these deterministic checks in `harness/stall.mjs` (`driftCheck`):
 
 | Signal | When |
 | --- | --- |
 | `gate-loop` | the same gate failed with the same signature (its id plus its output, numbers and ids taken out) `STUDIO_DRIFT_SAME_FAIL` (3) times in the session's own verify runs |
 | `verify-no-diff` | `STUDIO_DRIFT_SAME_DIFF` (2) verify runs in a row with no change to its working copy since the one before. A file dated after a verify, or rewritten by one, counts as unknown, never as unchanged |
 | `out-of-scope` | a file it changed (uncommitted, or committed under its own `Studio-Agent` trailer) outside its task's lane and its path claims. Harness-written files (the board, hand-offs, notes, regressions) and `STUDIO_DRIFT_SCOPE_ALLOW` paths are fine. A session with no lane and no claim (the whole game) isn't judged |
+| `no-heartbeat` (2.65.0) | a session the launcher lists running has never sent a heartbeat `STUDIO_DRIFT_NOHEARTBEAT_MIN` (5) minutes after it started: its tool may never have started (not on PATH, a crash at launch) |
+| `borrowed-commits` (2.65.0) | its lane holds commits of another **open** task's unlanded lane: shared with that task's lane branch (`.studio/lane-branches.json`) or queued head and not on its own first-parent line (it merged that lane wholesale), or tagged `Studio-Task: <that task>` (a cherry-pick). Its own work now depends on unlanded work: land that task first (`--after`) or take the commits out |
 
 Each signal is raised **once per session** as a `drift.check` event to the Producer, with the task and the
 details. A Check never stops, kills, hands back, parks or edits anything: the Producer (or a person) looks, then
