@@ -4060,6 +4060,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (c): hand-back facts written by the harness ahead of the prose (train drop, task pause, a refused done, the
+// next brief), and the blocked-command log (permission_denials, npm run denials, digest candidates) (qa/selftest-266c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266c.mjs')).href);
+  await selftest266C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
