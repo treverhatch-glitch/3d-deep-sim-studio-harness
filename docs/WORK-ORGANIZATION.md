@@ -106,6 +106,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
   `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
   again, as before.
+- Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
+  `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
+  each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
+  or refresh the lane with the `lanes refresh` command). A conflict only with a queued lane queues it marked `after: <that task>`
+  (`train status` shows it): the train leaves it out (no check, no verify; the `task.train.deferred` event once per
+  reason) until that task has landed or left the queue. Conflicts only in the manifest's `unionFiles` count as none.
+  Event `task.train.predicted_conflict`. Git older than 2.38, or `STUDIO_TRAIN_PREDICT=off`: no prediction (the
+  queue says so) and the line-overlap warning stays the only hint.
+- Dependencies (2.65.0, feedback 3.3, `harness/train-deps.mjs`): the train reads `--after` / `task block --until
+  T-x` (`studio/task-holds.json`), which before only gated a start. A lane whose dependency is done, or queued in the
+  same train, goes, and within a train lanes merge in dependency order; if that dependency drops out of the train,
+  the lane leaves with it. A dependency still open and not in the train: the lane waits for a later train (says
+  which). A dependency dropped from the board or not on it: the lane is handed back with a note (`npm run task --
+  unblock <ID>` clears the dependency if the Producer decides so), never left waiting. Tasks the planner or a
+  proposal adds keep their `--after` (addTask and `proposed promote` carry `meta.after`); nothing else writes tasks
+  with dependencies.
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.

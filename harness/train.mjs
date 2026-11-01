@@ -65,6 +65,7 @@ import { classifyLane, tierLine } from './tiers.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { jobDone } from './jobs.mjs';
+import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -900,6 +901,87 @@ function trainJobDone(res, t0) {
   } catch {}
 }
 
+// ---- 2.65.0: lanes that wait (a predicted conflict, B-34; --after dependencies, crew feedback 3.3) -------------
+
+/** The board's states and the dependency map: deps.taskStates() (task.mjs) or the board files under root. */
+function depContext(root, deps = {}) {
+  let states = null;
+  try { states = deps.taskStates?.() || null; } catch {}
+  states = states || boardStates(root) || { open: new Set(), done: new Set() };
+  return { map: readDeps(root), done: states.done, states };
+}
+
+/**
+ * Which of these lanes wait, before anything is spent on them: [{ lane, why, key, kind: 'after'|'deps'|'stuck' }].
+ *   after  queued after a predicted conflict with another queued lane (train-predict.mjs) still in the queue and
+ *          not done: it goes in a train after that one;
+ *   deps   an --after dependency that isn't done and isn't among this train's lanes;
+ *   stuck  a dependency dropped from the board or not on it: handed back with a note (never waits forever).
+ */
+export function laneWaits(root, lanes, deps = {}) {
+  const ctx = depContext(root, deps);
+  const queue = readQueue(root);
+  const here = new Set(lanes.map((l) => l.task));
+  let dropped = null;
+  const out = [];
+  for (const l of lanes) {
+    const a = l.after?.task;
+    if (a && a !== l.task && !ctx.done.has(a) && queue.some((e) => e.task === a)) {
+      out.push({ lane: l, kind: 'after', key: `after:${a}:${l.head}`, why: `it was queued after ${a} (predicted conflict: ${(l.after.places?.length ? l.after.places.map((p) => `${p.file}:${p.line}`) : l.after.files || []).slice(0, 4).join(', ') || 'see the queue'}); it goes in a train after ${a} lands or leaves the queue` });
+      continue;
+    }
+    if (!ctx.map.has(l.task)) continue;
+    dropped = dropped || droppedTasks();
+    const j = judgeDeps(l.task, ctx.map, { states: ctx.states, dropped, inTrain: here });
+    if (j.stuck) out.push({ lane: l, kind: 'stuck', key: `stuck:${j.deps.join(',')}`, why: j.stuck });
+    else if (j.wait) out.push({ lane: l, kind: 'deps', key: `deps:${j.deps.join(',')}`, why: j.wait });
+  }
+  return out;
+}
+
+/** Defer the waiting lanes (the event once per lane and reason: the queue entry keeps waitTold) and hand back the stuck. */
+function waitActions(root, waits, { id, by, dryRun, res, log, deps = {} }) {
+  for (const w of waits) {
+    const { lane, why } = w;
+    log(`[train] ${id}: ${lane.task} ${w.kind === 'stuck' ? 'is handed back' : 'waits'}: ${why}`);
+    if (w.kind === 'stuck') {
+      res.dropped.push({ task: lane.task, why });
+      if (dryRun) continue;
+      if (lane.fromQueue) dequeue(root, lane.task);
+      ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', meta: { deps: true } });
+      if (!lane.own) {
+        try { if (lane.branch) rememberTaskBranch(lane.task, lane.branch); } catch {}
+        try { deps.handBack?.(lane, `Not landed by merge train ${id}: ${why}`); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
+      }
+      continue;
+    }
+    res.deferred.push({ task: lane.task, why });
+    if (dryRun) continue;
+    const told = lane.fromQueue && readQueue(root).find((e) => e.task === lane.task)?.waitTold === w.key;
+    if (told) continue;
+    ev('deferred', id, `${lane.task} waits for a later train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn', meta: { wait: w.kind, ...(w.kind === 'after' ? { after: lane.after.task } : {}) } });
+    if (lane.fromQueue) requeue(root, lane, { waitTold: w.key });
+  }
+}
+
+/**
+ * buildIntegration in dependency order. A lane whose dependency in this train didn't merge (it conflicted or was
+ * deferred) is taken out and the rest built again: depWait [{ ...lane, why }].
+ */
+function buildInOrder(sc, tip, set, opts, dep) {
+  const depWait = [];
+  let lanes = set;
+  for (let k = 0; ; k += 1) {
+    const o = orderByDeps(lanes, dep.map, { done: dep.done });
+    depWait.push(...o.out.map((x) => ({ ...x.lane, why: x.why })));
+    const built = buildIntegration(sc, tip, o.ordered, opts);
+    const lost = dep.map.size ? orderByDeps(built.included, dep.map, { done: dep.done }).out : [];
+    if (!lost.length || k >= 20) return { ...built, depWait };
+    depWait.push(...lost.map((x) => ({ ...x.lane, why: x.why })));
+    lanes = o.ordered.filter((l) => !lost.some((x) => x.lane.task === l.task));
+  }
+}
+
 /** Scratch copies and train/* branches a killed train left (only called while holding the train lock). */
 function sweepScratch(root, log) {
   const d = path.join(root, LANES_DIR);
@@ -926,7 +1008,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const riders = readQueue(root).filter((e) => !given.some((g0) => g0.task === e.task) && !heldNow(e)).map((e) => ({ ...e, fromQueue: true, rider: true }));
     lanes.push(...riders);
   }
+  // 2.65.0 (B-34, 3.3): lanes queued after a predicted conflict, or whose --after dependencies haven't landed, wait
+  // here: before any check, tier or verify is spent on them (laneWaits; deferral logged once per reason).
+  const waits = laneWaits(root, lanes, deps);
+  lanes = lanes.filter((l) => !waits.some((w) => w.lane === l));
   if (maxLanes > 0) lanes = lanes.slice(0, maxLanes);
+  if (!lanes.length && waits.length) { waitActions(root, waits, { id, by, dryRun, res, log, deps }); res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
   if (!lanes.length) { res.message = res.held.length ? `No lane can land now: ${res.held.map((h) => `${h.task} needs the owner (tier ${h.tier})`).join('; ')}.` : 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
   ev('start', id, `${lanes.length} lane(s): ${lanes.map((l) => l.task).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun, ...(lanes.some((l) => l.rider) ? { riders: lanes.filter((l) => l.rider).map((l) => l.task) } : {}) } });
   (await import('./hotspots.mjs')).trainStart(root, lanes, log, id); // 2.60.0 (helper b): lines two lanes change, in the start log
@@ -948,6 +1035,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const h = holdLane(root, lane, { tier, why });
     if (h.fresh) ev('held', id, `${lane.task} needs the owner (tier ${tier}): ${why}. It waits in the queue; a person releases it with npm run task -- train release ${lane.task} --by <name> [--permission "…"]`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why } });
   };
+
+  waitActions(root, waits, { id, by, dryRun, res, log, deps });
 
   // (a) The lanes, as they are now: tier (2.63.0), then each checked again in its own copy.
   const tip0 = out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`));
@@ -999,6 +1088,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     group = ready[0].runAlone?.yes ? [ready[0]] : ready.filter((l) => !l.runAlone?.yes);
     for (const l of ready.filter((x) => !group.includes(x))) { defer(l, l.runAlone?.yes ? `it runs alone (${l.runAlone.why}): it gets a train of its own` : `${ready[0].task} runs alone (${ready[0].runAlone.why}); this lane goes in the next train`); res.more = true; }
   }
+  // 2.65.0 (3.3): within one train, lanes merge in dependency order (--after).
+  const depInfo = depContext(root, deps);
+  { const o = orderByDeps(group, depInfo.map, { done: depInfo.done }); for (const x of o.out) defer(x.lane, x.why); group = o.ordered; }
   if (group.length > 1 || group.some((l) => l.runAlone?.yes)) log(`[train] ${id}: this train: ${group.map((l) => `${l.task} (tier ${l.tier}${l.runAlone?.yes ? ', alone' : ''})`).join(', ')}`);
   ready.splice(0, ready.length, ...group);
   if (!ready.length) { res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
@@ -1021,7 +1113,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       const cache = { checks: new Map(), reports: new Map() };
       let set = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.deferred.some((d) => d.task === l.task));
       // (b) Build: main + each lane, in order.
-      let built = buildIntegration(sc, tip, set, { id, unionFiles });
+      let built = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo);
+      for (const l of built.depWait) defer(l, l.why);
       if (!dryRun) (await import('./hotspots.mjs')).noteTrainConflicts(root, tip, built, { id, log }); // 2.60.0 (helper b): conflict count per line
       for (const l of built.conflictMain) drop(l, `${l.why}. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again`);
       for (const l of built.deferred) defer(l, l.why);
@@ -1036,9 +1129,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       // (c) ONE full verify of the final tree; (e) red: find who fails alone.
       let verdict = null;
       for (let round = 0; set.length && round <= ready.length + 1; round += 1) {
-        if (round > 0) built = buildIntegration(sc, tip, set, { id, unionFiles });
+        if (round > 0) { built = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo); for (const l of built.depWait) defer(l, l.why); }
         // (Round 0's build was handled above; 2.59.0 handled it twice: a deferral logged twice, a hand-back made twice.)
-        if (round > 0 && (built.conflictMain.length || built.deferred.length)) {
+        if (round > 0 && (built.conflictMain.length || built.deferred.length || built.depWait.length)) {
           for (const l of built.conflictMain) drop(l, l.why);
           for (const l of built.deferred) defer(l, l.why);
           set = built.included;

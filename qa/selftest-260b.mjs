@@ -22,7 +22,7 @@ export async function selftest260B({ dir, run, report, tmpRoot, root }) {
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const events = path.join(dir, '.studio', 'events-260b.jsonl');
   const mark = path.join(tmpRoot, `train-runs-260b-${process.pid}.txt`);
-  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_HOTSPOT_ASK: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260b-${process.pid}.pem`), AGENT_EVENTS_FILE: events, TRAIN_MARK: mark, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
+  const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_PREDICT: 'off', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_HOTSPOT_ASK: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260b-${process.pid}.pem`), AGENT_EVENTS_FILE: events, TRAIN_MARK: mark, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const lines = (n, f) => `${Array.from({ length: n }, (_, i) => f(i)).join('\n')}\n`;
   // The size check reads JavaScript with the harness's typescript; the selftest copy has no node_modules of its own
@@ -136,6 +136,8 @@ export async function selftest260B({ dir, run, report, tmpRoot, root }) {
     const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, st, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
+  // 2.65.0: these lanes are queued with the queue-time conflict prediction off (STUDIO_TRAIN_PREDICT=off, in env), so
+  // the train itself meets and counts each conflict, as before (qa/selftest-265r.mjs tests the prediction).
   const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
   const train = () => run(dir, 'node harness/task.mjs train --by tester', env);
   const reg = (who) => `# Registry\n\nentries: a, ${who}\n\nend\n`;

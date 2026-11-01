@@ -945,6 +945,26 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   return target;
 }
 
+/**
+ * 2.65.0 (B-34): conflict prediction when a lane is queued (harness/train-predict.mjs): { refuse } for a conflict
+ * with main, else { after, lines }. Never throws: a prediction that can't run queues as before, with a note.
+ */
+async function predictAtQueue(pre, agent) {
+  try {
+    const root = mainRoot();
+    const tr = await import('./train.mjs');
+    const tp = await import('./train-predict.mjs');
+    const { mainBranch } = await import('./worktree.mjs');
+    const main = mainBranch(root);
+    const tip = spawnSync('git', ['rev-parse', `refs/heads/${main}`], { cwd: root, encoding: 'utf8' }).stdout?.trim() || '';
+    const settings = await tr.trainManifest(root, tip);
+    const p = tp.predictLane(root, { lane: { task: pre.id, head: pre.head }, queue: tr.readQueue(root), tip, unionFiles: settings.unionFiles || [] });
+    return tp.queueVerdict(p, { task: pre.id, agent, head: pre.head, main, lane: pre.branch || '', emit: emitEvent });
+  } catch (err) {
+    return { after: null, lines: [`${pre.id}: note: the conflict prediction didn't run (${err.message}); the train finds conflicts when it merges.`] };
+  }
+}
+
 /** 2.59.0: what the merge train needs from the board (harness/train.mjs never imports this module). */
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
@@ -954,6 +974,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     },
     handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
+    // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
+    taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1642,8 +1664,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       if (pre.error) { console.error(pre.message); process.exit(1); }
+      const predicted = await predictAtQueue(pre, whoAmI(flags));
+      if (predicted.refuse) { console.error(predicted.refuse); process.exit(1); }
       const { enqueue } = await import('./train.mjs');
-      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '' });
+      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}) });
+      for (const l of predicted.lines || []) console.log(l);
       emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
       console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
       // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
@@ -1749,7 +1774,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
-      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
       { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
       process.exit(0);
     }
