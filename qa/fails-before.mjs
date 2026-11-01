@@ -9,6 +9,12 @@
  * regression with that commit's cartridge, and hashes the end state with today's SHA-256. The
  * regression "fails before" when the old code breaks an invariant, throws, or ends in a different
  * state than the pinned sha256. Results are cached by regression and commit (.studio/cache/).
+ *
+ * 2.58.4: a run that never got to play the old code proves nothing, so it is an error (known: false), never a pass,
+ * and never cached: the cartridge couldn't be loaded at that commit (not there yet, its build failed, a dependency
+ * such as node_modules is missing in the worktree), or the run timed out, was killed or printed no result. Before,
+ * every one of those counted as "the old code throws" and a regression that guards nothing passed the check.
+ * STUDIO_FAILS_BEFORE_TIMEOUT_MS sets the time limit (default 120000).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -45,20 +51,39 @@ const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const { loadCartridge, replay } = await import(${JSON.stringify(pathToFileURL(path.join(tmp, 'harness', 'cartridge.mjs')).href)});
 const { sha256 } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'harness', 'hash.mjs')).href)});
 let out;
+let cart = null;
 try {
-  const cart = await loadCartridge(spec.cartridge || undefined);
-  const r = replay(cart, { seed: spec.seed, tick: spec.tick, actions: spec.actions || [], tuning: spec.tuning });
-  out = { findings: r.findings.map((f) => f.id), failingTick: r.failingTick, sha256: sha256(r.state) };
+  cart = await loadCartridge(spec.cartridge || undefined);
 } catch (err) {
-  out = { threw: String(err && err.message || err) };
+  out = { loadFailed: String(err && err.message || err) };
 }
-console.log(JSON.stringify(out));
+if (cart) {
+  try {
+    const r = replay(cart, { seed: spec.seed, tick: spec.tick, actions: spec.actions || [], tuning: spec.tuning });
+    out = { findings: r.findings.map((f) => f.id), failingTick: r.failingTick, sha256: sha256(r.state) };
+  } catch (err) {
+    out = { threw: String(err && err.message || err) };
+  }
+}
+console.log('FAILS_BEFORE_RESULT ' + JSON.stringify(out));
 `);
     const specFile = path.join(tmp, '.fails-before-spec.json');
     fs.writeFileSync(specFile, JSON.stringify(spec));
-    const run = spawnSync(process.execPath, [probe, specFile], { cwd: tmp, encoding: 'utf8', timeout: 120000, env: { ...process.env, AGENT_EVENTS_FILE: path.join(tmp, '.events.jsonl') } });
-    const last = run.stdout.trim().split('\n').pop() || '{}';
-    const before = JSON.parse(last);
+    const limit = Number(process.env.STUDIO_FAILS_BEFORE_TIMEOUT_MS || 120000);
+    const run = spawnSync(process.execPath, [probe, specFile], { cwd: tmp, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AGENT_EVENTS_FILE: path.join(tmp, '.events.jsonl') } });
+    const line = String(run.stdout || '').split('\n').reverse().find((l) => l.startsWith('FAILS_BEFORE_RESULT '));
+    let before = null;
+    try { before = line ? JSON.parse(line.slice('FAILS_BEFORE_RESULT '.length)) : null; } catch { before = null; }
+    const short = (t) => String(t || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    // Never played the old code: an error, not a pass (and not cached, so a fixed setup is checked again).
+    const unplayed = run.error?.code === 'ETIMEDOUT' || run.signal
+      ? `the run at ${resolved.slice(0, 7)} timed out or was killed after ${Math.round(limit / 1000)} s (STUDIO_FAILS_BEFORE_TIMEOUT_MS)`
+      : !before
+        ? `the run at ${resolved.slice(0, 7)} printed no result (exit ${run.status}): ${short(run.stderr) || 'no output'}`
+        : before.loadFailed
+          ? `the cartridge couldn't be loaded at ${resolved.slice(0, 7)} (${short(before.loadFailed)})`
+          : null;
+    if (unplayed) return { ok: false, known: false, commit: resolved.slice(0, 7), why: `${unplayed}; that proves nothing about the bug, so it doesn't count as failing before the fix. Land the cartridge (and anything its build needs) before the fix that relies on it` };
     const failed = Boolean(before.threw) || (before.findings || []).length > 0 || before.sha256 !== spec.sha256;
     result = {
       ok: failed,
@@ -77,6 +102,7 @@ console.log(JSON.stringify(out));
     fs.rmSync(tmp, { recursive: true, force: true });
     git(['worktree', 'prune']);
   }
+  if (!result) return { ok: false, known: false, why: 'no result' };
   fs.mkdirSync(path.dirname(CACHE), { recursive: true });
   cache[key] = result;
   fs.writeFileSync(CACHE, JSON.stringify(cache));
