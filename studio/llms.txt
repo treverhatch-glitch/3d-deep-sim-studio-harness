@@ -41,6 +41,8 @@
   Scrubbed, labelled records of finished tasks for evaluating or training models; `.studio/exports/`.
 - `npm run learn [-- backup --to <folder> | restore --from <folder> --to <dir> [--at <time>] | prune --keep 30]` — backups store each file content once, gzipped (docs/BACKUPS.md)
   What keeps happening, lessons that didn't stick, suggestions never handled, the overseer's evaluations; daily by the HUB, backed up to `STUDIO_BACKUP_DIR`.
+- `npm run learn -- change add --kind harness|skill|pitfall|rule --target <what> --signature <sig> --expect "…" --risk "…" --revert "<cmd>" | change list | change eval`
+  Change records graded before/after per task type; a regression asks the owner to revert (docs/CLOSED-LOOP.md).
 - `node harness/meeting.mjs start "<topic>" --with a,b | say "<text>" --agent <name> | end [--decision "..."] [--action "title|role|P2"] | status`
   A Producer meeting with several agents. Notes in `studio/meetings/`, actions become tasks.
 - `node harness/task.mjs pause <ID> --agent <you> --note "<where you stopped>"`

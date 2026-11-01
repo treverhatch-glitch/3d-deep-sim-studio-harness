@@ -3850,6 +3850,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.61.0 (e): the learning edge: change records graded before/after (one revert question for a regression), the lesson →
+// check ladder (one task per signature), and skill load/follow telemetry per model (qa/selftest-261e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest261E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261e.mjs')).href);
+  await selftest261E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -22,6 +22,12 @@ Whenever an agent fixes a bug or resolves a failing `qa/playtest.mjs` run, it **
 3. **The fix that worked** — The exact file/symbol change that resolved it.
 4. **How to avoid it next time** — The guardrail rule for future tasks.
 
+**Name the failure's signature (2.61.0).** `npm run learn` shows each repeating failure with an id like
+`sig-3fa9c2d1`. Put that id in the lesson (in "What broke", for example): the lesson then matches that failure exactly,
+instead of by shared keywords. A failure that keeps happening on a day after its lesson's date gets one "Make the
+lesson a check" task (docs/CLOSED-LOOP.md, the learning edge), and the change that follows gets a change record
+(`studio/changes/`, graded before and after by `npm run learn`).
+
 ---
 
 ## 3. Seeing & Acting in 3D (`blender-orchestrator`)
