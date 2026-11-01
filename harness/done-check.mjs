@@ -25,6 +25,7 @@ import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
 import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
 import { ownerType, ownerTypeWords } from './reclassify.mjs';
+import { renderDecision } from './verdict-split.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
@@ -831,6 +832,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const res = checkDone(task);
   console.log(`${task.id} is a "${res.type}" task (${res.typeSource}). Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
   if (res.typeIgnored) console.log(`  note: ${res.typeIgnored}`);
+  // 2.60.1 (B-38): whether it needs a visual result, and why (the owner's decision, the evidence or the title).
+  try {
+    const d = renderDecision(task);
+    if (d.by === 'owner') console.log(`  ${d.why}`);
+    else if (d.why) console.log(`  visual proof: ${d.render ? 'needed' : 'not needed'} (${d.why})`);
+    if (d.warn) console.log(`  WARN ${d.warn}`);
+    if (d.ignored) console.log(`  note: ${d.ignored}`);
+  } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
   for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');

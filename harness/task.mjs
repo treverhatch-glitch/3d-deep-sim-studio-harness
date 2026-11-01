@@ -12,7 +12,7 @@ import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from '
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
-import { summarize as summarizeVerdict } from './verdict-split.mjs';
+import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
@@ -563,6 +563,13 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (!force && process.env.STUDIO_VISUAL_GATE !== 'off') {
     const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track;
     const vs = summarizeVerdict(target.id, { ...target, track });
+    // 2.60.1 (B-38): why it is (not) a render task, and the evidence warning for a non-render title.
+    if (vs.renderBy === 'owner' || (vs.renderBy === 'evidence' && vs.renderWhy)) {
+      const line = vs.renderBy === 'owner' ? vs.renderWhy : `visual proof ${vs.render ? 'needed' : 'not needed'}: ${vs.renderWhy}`;
+      console.warn(`[done] ${line}`);
+      if (!checkOnly && !vs.render) emitEvent({ type: 'task.visual_skipped', agent: agent || target.role, task: target.id, msg: `${target.id}: ${line}`.slice(0, 400), meta: { by: vs.renderBy } });
+    }
+    if (vs.warn) { console.warn(`[done] WARN ${target.id} ${vs.warn}`); if (!checkOnly) emitEvent({ type: 'task.visual_recommended', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id} ${vs.warn}`.slice(0, 400) }); }
     if (!vs.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${vs.why.slice(0, 200)}` });
       return { error: 'visual', verdict: vs, message: `${target.id} is not done: ${vs.why}\nChecked: ${vs.passed.join(', ') || 'nothing'}; unchecked: ${vs.unchecked.join(', ') || 'none'}.` };
@@ -1486,6 +1493,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     const { reclassify } = await import('./reclassify.mjs');
     const r = reclassify({ task: t, from: titleType(t), to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', commit: !flags['no-commit'] });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+
+  // 2.60.1 (B-38): the owner's visual-proof decision for a task (harness/reclassify.mjs setVisual), recorded like task type.
+  if (cmd === 'visual') {
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    const to = flags._[2];
+    if (!t) {
+      console.error('Usage: npm run task -- visual <TASK_ID> [off|on|auto --by <owner> --why "<reason>" [--permission "<the owner\'s words or a link>"]] [--no-commit]');
+      process.exit(1);
+    }
+    if (!to) {
+      const d = renderDecision(t);
+      console.log(d.by === 'owner' ? `${t.id}: ${d.why}` : `${t.id}: visual proof ${d.render ? 'needed' : 'not needed'}${d.why ? ` (${d.why})` : ''}.${d.warn ? `\nWARN ${d.warn}` : ''}${d.ignored ? `\nnote: ${d.ignored}` : ''}`);
+      process.exit(0);
+    }
+    const { setVisual } = await import('./reclassify.mjs');
+    const r = setVisual({ task: t, to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', commit: !flags['no-commit'] });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
