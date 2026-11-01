@@ -1647,7 +1647,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
     (r.ok ? console.log : console.error)(r.message);
-    console.log(JSON.stringify({ train: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+    console.log(JSON.stringify({ train: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
     process.exit(r.ok ? 0 : 1);
   }
 

@@ -71,11 +71,29 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   (`scripts/run-gates.mjs`, scoped to the files the lanes change, as a lane's verify is; `--all` when a task is
   "whole") checks the final tree; a green full verify already recorded for exactly that tree stands for it. Green:
   main moves (compare-and-swap, under the land lock) to that tree and each task closes as task done closes it.
-- Red: each lane is verified alone on main. A lane that fails alone is handed back (back in the queue, its claim
-  freed, a hand-back note with the failing checks and the log in `.studio/train/`); the rest train again. Lanes that
-  pass alone but fail together: the last one waits for the next train. If every lane fails alone and main itself
-  fails, nothing lands and nobody is handed back. A check already red when every task in the train was claimed (its
-  baseline) doesn't count, as at task done.
+- Red (2.60.0, prefix bisection): only the failing checks run again (`run-gates --only`, scoped as the train's verify
+  was), first on main, then on cumulative prefixes main+A, main+A+B, ... by binary search (about log2 N targeted
+  runs; logs `.studio/train/<id>-recheck-<n>.log`). Red on main: main itself is red, nothing lands and nobody is
+  handed back. Otherwise the lane that turns the first prefix red is handed back (back in the queue, its claim freed,
+  a hand-back note with the failing checks, the prefix and the log), whether it fails alone or only together with
+  the lanes before it (an interaction culprit); the rest train again with one more full verify. When only the
+  whole train is red, that red is re-run before anyone is blamed; if it passes, nobody is handed back and the lanes
+  wait (event `task.train.flaky`). A check already red when every task in the train was claimed (its baseline)
+  doesn't count, as at task done. `STUDIO_TRAIN_BISECT=alone` keeps the 2.59 way: each lane verified alone on main,
+  one that fails alone handed back, lanes that pass alone but fail together: the last one waits.
+- Pins (2.60.0; the game declares them in its manifest, `docs/ONBOARDING-A-GAME.md`): when the red is only the game's
+  pin tests, the pins' report runs on every prefix (main, main+A, ...) and each moved value is attributed to every
+  lane whose step changed it. If each of those lanes declared the pin (`Pin-Moves: <pin>` trailer on its own commits)
+  and no invariant pin moved, the refresh runs on the combined tree and ONE extra train commit lands with the lanes
+  ("train <id>: pin refresh", trailers `Pin-Refresh: <lanes>` and a Golden-Reason, the moved values in its body),
+  after a full verify of that tree. The before/after report, per pin and per prefix, is `.studio/train/<id>/pins.json`.
+  An undeclared move or a moved invariant hands back the lane(s) it is attributed to; pins red on main itself are a
+  regression on main (nobody handed back); a refresh that fails, changes nothing, is refused by the hooks or leaves
+  the train red falls back to prefix bisection. All of this is code; no model decides it. Events `task.train.pins`,
+  `.pin_refresh`, `.pin_refresh_red`.
+- Union files (2.60.0): a conflict ONLY inside the manifest's `unionFiles` (one-import-per-line barrels, never an
+  order-sensitive list) is merged with git's union driver for those files (both sides' added lines, the train's side
+  first); the merge commit says `Union-Merge: <files>`. Any other conflict is handled as below.
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
@@ -86,7 +104,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_WAIT_MIN`, 120, for a
   running one; `task train` doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
-  `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.done`.
+  `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
+  `.pin_refresh`, `.pin_refresh_red`, `.done`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 

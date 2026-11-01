@@ -155,3 +155,45 @@ A game with more than one build (for example a browser build under `web/` and an
 - `task done` in a lane copy runs only the gates whose `paths` its diff touches and logs each skipped gate with the reason. A change under `shared` (or `harness/`, `scripts/`, `studio/gates.json`, package files, the manifest) runs every gate. A gate without `paths` always runs, so manifests without them behave as before.
 - The pass is recorded with its commit and scope. If the studio's branch moves before the lane lands, and everything it brought in is outside that scope, the pass is reused instead of re-run.
 - Only the final fast-forward and the board write take the short land lock, so the tracks verify and land in parallel.
+
+## Pins and union files for the merge train (2.60.0)
+
+Two optional keys in `<game>/studio.gates.json` (a protected file: the owner approves changes) tell the merge train
+(`harness/train.mjs`, see `docs/WORK-ORGANIZATION.md`) how to land lanes that touch the same seeded numbers or the
+same import list:
+
+```json
+{
+  "gates": [{ "id": "unit", "command": "npm test" }],
+  "pins": {
+    "tests": ["runwayCapacity", "curbWindow", "replays/start-*"],
+    "report": "node game/mygame/pins.mjs report --out {out}",
+    "refresh": "node game/mygame/pins.mjs refresh --in {in}",
+    "invariants": ["goAroundCap", "stuckCheck"]
+  },
+  "unionFiles": ["src/game/modules.ts"]
+}
+```
+
+- **pins.tests**: the game's pin tests (exact numbers from a seeded run, recordings), as names or `*` globs. A failing
+  test is a pin test when an entry matches its name whole or as a token (`runwayCapacity` matches
+  `pins > runwayCapacity` and `runwayCapacity: expected 10, got 11`). The game's checks name their failing tests in
+  the log (lines like `FAIL <name>`, `× <name>`, `not ok N - <name>`): a check that fails without naming its tests is
+  never treated as pins-only.
+- **pins.report**: a command (run from the repo root of the tree being checked, `CI=true`) that runs the pins and
+  writes a JSON object `{ "<pin>": <value>, ... }` to `{out}` (replaced by a quoted path). It must exit 0 when the
+  values don't match the expectations: it reports the values, it doesn't judge them. Pin names are its keys.
+- **pins.refresh**: a command that rewrites the pinned expectations from such a report at `{in}`. It may change only
+  the expectation files; the train commits whatever it changes, then runs the full verify again.
+- **pins.invariants**: pin names (or `*` globs) that are never refreshed: a red line, a cap, a "no divert", a
+  stuck/gridlock check. A lane that moves one is handed back. Keep their expectations in protected files too.
+- A lane declares the pins it means to move with a commit trailer on its own commits: `Pin-Moves: runwayCapacity,
+  curbWindow` (globs allowed). `git commit -m "T-12: wider taxiway" -m "Pin-Moves: runwayCapacity"`.
+- **unionFiles**: repo-relative paths (or globs) of files that hold ONE import or re-export per line, in no particular
+  order (an import barrel). When two lanes (or a lane and main) conflict only inside these files, the train merges
+  them with git's union driver: both sides' added lines are kept, the train's side first. Never list a file whose
+  order matters (save/restore/reset spreads, registration lists that change hashes, anything with a closing bracket
+  both sides edit): union merge would silently produce a wrong order or a broken file there. For those, prefer a
+  generated, sorted registry so no lane edits a shared file. A game may also put `<file> merge=union` in its own
+  `.gitattributes`, so agents' own merges and rebases union it too (git 2.43's `merge-tree --write-tree`, which the
+  train uses for its "onto main alone?" check, honours that attribute).
