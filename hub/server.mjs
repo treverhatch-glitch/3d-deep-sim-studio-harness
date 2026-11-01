@@ -1041,6 +1041,15 @@ export function createHubServer() {
       return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: 'no such agent' });
     }
 
+    // 2.64.0: the autonomy scorecard for the Ops view (harness/autonomy.mjs; cached 5 min there). Read-only.
+    if (url.pathname === '/api/autonomy' && req.method === 'GET') {
+      try {
+        const { autonomyCard } = await import('../harness/autonomy.mjs');
+        return sendJson(res, 200, await autonomyCard());
+      } catch (err) {
+        return sendJson(res, 500, { error: err.message });
+      }
+    }
     if (url.pathname === '/api/hud' && req.method === 'GET') {
       return sendJson(res, 200, buildHudState());
     }

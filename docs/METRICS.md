@@ -59,3 +59,10 @@ tests. A check that was red with no test names to compare is excused with a note
 the whole-game check finishing red does the same. While it's red only fix tasks start: a title starting
 Fix/Bug/Hotfix/Repair/Revert, a `[fix]` or `[bug]` tag, or a whole-game red task. `npm run task -- trunk green
 --by <name>` ends it; `npm run task -- trunk` shows the state.
+
+## The autonomy scorecard (2.64.0)
+
+`npm run autonomy` rolls these attempts and the rest of the log up into how much the studio needs a person: hours
+of supervisor running between unplanned person interventions, the hands-free land rate, forced and reopen rates,
+hand-backs by the labels above, halt wait, gate catches, the owner's verdicts and tokens per landed task, with an
+L2/L3 badge. See `docs/AUTONOMY.md`.
