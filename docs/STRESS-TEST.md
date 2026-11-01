@@ -14,8 +14,9 @@ cd tmp-mirror && git push --mirror https://github.com/<you>/<studio-name>.git &&
 git clone https://github.com/<you>/<studio-name>.git && cd <studio-name>
 ```
 
-To pull later harness updates into the private copy: `git remote add upstream <public url>` and
-`git pull upstream main`.
+To pull later harness updates into the private copy: `git remote add upstream <public url>`, commit the board
+(`npm run upgrade -- --check` says what isn't), then `git pull upstream main`. Never stash the board for an upgrade:
+`docs/RELEASE.md` ("Taking a harness update into a studio").
 
 ## 2. Set it up
 
