@@ -69,9 +69,16 @@ const skipped = [];
 const { studioGame, declaredGates, isEngineChurn } = await import('../harness/game-gates.mjs');
 const sg = await studioGame();
 const gameOwnsGates = Boolean(sg && declaredGates(sg).length);
+// 2.58.4: a studio game with its own checks can also have real cartridges (a replay cartridge that drives the game's
+// sim for goldens, regressions and soak). The cartridge gates that check every cartridge keep running for those; the
+// ones that test only the default cartridge (playtest, browser-play: the template's, here) stay skipped.
+const EVERY_CARTRIDGE_GATES = new Set(['purity', 'isolation', 'golden', 'golden-py', 'regressions', 'vertical-slice', 'soak', 'tick-budget']);
+const { listCartridges, isTemplateCartridge } = await import('../harness/cartridge.mjs');
+const realCartridges = listCartridges().filter((n) => !isTemplateCartridge(n));
+const keepForCartridges = (g) => realCartridges.length > 0 && EVERY_CARTRIDGE_GATES.has(g.id);
 const gates = all.filter((g) => {
   if (only) return only.has(g.id);
-  if (gameOwnsGates && g.cartridge) return skipped.push(`${g.id} (cartridge; ${sg.name} runs its own)`), false;
+  if (gameOwnsGates && g.cartridge && !keepForCartridges(g)) return skipped.push(`${g.id} (cartridge; ${sg.name} runs its own)`), false;
   if (argv.includes('--required-only') && g.required === false) return false;
   if (isFastTier && !LITE.has(g.id)) return false;
   if (!deep && DEEP.has(g.id)) return skipped.push(`${g.id} (deep)`), false;
@@ -81,7 +88,7 @@ const gates = all.filter((g) => {
 
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
-console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); the cartridge gates are skipped` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
+console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); ${realCartridges.length ? `its cartridge${realCartridges.length === 1 ? '' : 's'} (${realCartridges.join(', ')}) get${realCartridges.length === 1 ? 's' : ''} the cartridge gates that check every cartridge, the rest are skipped` : 'the cartridge gates are skipped'}` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
 // 2.31.0: in a lane copy, verify tests what this lane changed against the studio's branch (committed and
 // not), the same scope `task done` uses. Before, verify had no diff, so a Godot-only lane ran every web
 // game check (~11 min in the Marina run) and never ran the Godot gate, which only runs for changed paths.

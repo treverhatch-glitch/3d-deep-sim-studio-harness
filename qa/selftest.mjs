@@ -3689,6 +3689,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.4: a studio game with its own checks keeps the every-cartridge gates for a real cartridge beside it, and a
+// cartridge sets its own tick budget (qa/selftest-2584b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2584B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2584b.mjs')).href);
+  await selftest2584B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
