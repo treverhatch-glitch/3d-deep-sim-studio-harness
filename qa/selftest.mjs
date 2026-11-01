@@ -3811,6 +3811,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.62.0 (H): per-task acceptance contracts: agreed before coding, only `passes` flips after; the weakened-tests gate,
+// done-check and the reviewer's brief read them (qa/selftest-262h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest262H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262h.mjs')).href);
+  await selftest262H({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
