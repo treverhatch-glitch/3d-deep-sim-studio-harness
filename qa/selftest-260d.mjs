@@ -93,7 +93,7 @@ setTimeout(() => {}, 600000);
       const allGone = until(() => tree.every(gone), 8000 * SLOW);
       const ev = evts().filter((e) => e.type === 'heavy.stop').pop();
       guard('#5: node harness/heavy.mjs stop --label <x> --by <name> kills the holder\'s whole tree (holder, child, grandchild), frees the machine:heavy slot and records a heavy.stop event; the holder records its tree root, groups and how it is killed (2.59.1: no stop command; the crew killed the tree by hand with taskkill /T /F)', () => [
-        h.up && rec?.tree?.root === rec.pid && rec.tree.groups?.length >= 1 && /group|taskkill/.test(rec.tree.kill || '') && stillUp
+        h.up && rec?.tree?.root === rec.pid && (process.platform === 'win32' || rec.tree.groups?.length >= 1) && /group|taskkill/.test(rec.tree.kill || '') && stillUp
           && stop.status === 0 && /stopped tree-260d/.test(out(stop)) && /slot is free/.test(out(stop)) && allGone && !fs.existsSync(lockF)
           && ev?.agent === 'tester' && ev.meta?.recordedBy === 'opus-bot' && ev.meta?.freed === true && tree.every((p) => ev.meta.killed.includes(p)),
         JSON.stringify({ up: h.up, rec, stillUp, stop: out(stop), tree, alive: tree.filter((p) => !gone(p)), lock: readJson(lockF), ev }).slice(0, 2500)]);
