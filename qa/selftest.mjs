@@ -3850,6 +3850,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.64.0 (helper k): the autonomy scorecard (npm run autonomy, the overnight line, the War Room card; a person's
+// permission counts as the person; L3 only ever suggested) and the drift Checks (same gate failing 3 times, verify with
+// no new diff, edits outside the lane), which never stop anything (qa/selftest-264k.mjs).
+{
+  const dir = copyRepo();
+  const { selftest264K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264k.mjs')).href);
+  await selftest264K({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
