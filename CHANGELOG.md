@@ -4,6 +4,16 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.59.1] — 2026-11-01
+2.59.1: the owner's permission rule (P-112).
+### Changed
+- **Agents may act on a person's direct permission (P-112).** `npm run task -- type` and `npm run studio:resume` accept
+  `--by <the person> --permission "<their words, or a link to the message>"` from a Producer or Director session or an
+  agent outside the harness (a coding agent's shell, such as the crew's orchestrator). The record and its event keep
+  the permission and who recorded it, and done/verify output show them. Builders and other workers are refused with or
+  without permission; without `--permission` agents are refused as in 2.59.0. With an owner key, a reclassification
+  still has to be signed with it. harness/permission.mjs, qa/selftest-2591.mjs.
+
 ## [2.59.0] — 2026-11-01
 2.59.0: opus-bot's final brief of 2026-11-01 (items 1-16; 2.58.5 had already closed 7, 9, 10, 12, 13) and one gap found
 in the crew's logs (P-098 to P-111). Migration note for live lanes: docs/RELEASE.md, "Taking 2.59.0 with live lanes".

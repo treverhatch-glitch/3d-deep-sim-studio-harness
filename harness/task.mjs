@@ -1458,7 +1458,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'type') {
     const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
     if (!t) {
-      console.error('Usage: npm run task -- type <TASK_ID> [<change|chore|bug|docs|…|auto> --by <owner> --why "<reason>"] [--no-commit]');
+      console.error('Usage: npm run task -- type <TASK_ID> [<change|chore|bug|docs|…|auto> --by <owner> --why "<reason>" [--permission "<the owner\'s words or a link>"]] [--no-commit]');
       process.exit(1);
     }
     const to = flags._[2];
@@ -1472,7 +1472,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     const { reclassify } = await import('./reclassify.mjs');
-    const r = reclassify({ task: t, from: titleType(t), to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', commit: !flags['no-commit'] });
+    const r = reclassify({ task: t, from: titleType(t), to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', commit: !flags['no-commit'] });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
