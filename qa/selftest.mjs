@@ -3830,6 +3830,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.0 (#3, #4): the upgrade path (a bootstrap from the ref, upgrade --merge through the hooks with the main-checkout
+// guard opened for that merge only, Golden-Reason for goldens straight from the ref, --restore-stash keeping both
+// sides' rows) and STUDIO_HARNESS_REF in the hooks gate (qa/selftest-260c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260c.mjs')).href);
+  await selftest260C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

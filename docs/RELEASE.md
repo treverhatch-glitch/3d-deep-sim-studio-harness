@@ -35,16 +35,50 @@ A studio (a private copy with a game in it) takes a new harness version by mergi
 On a crew's PC the 2.58.2 update stashed the dirty main checkout and the board went with it: finished tasks' DONE.md
 rows and that morning's NEXT.md tasks, uncommitted. A finished task reopened and seven sessions were spent on it.
 
+**Which ref.** Take the harness's merged `main` (`upstream/main`, or `origin/main` when origin is the harness). An
+unmerged branch (`upstream/claude/<x>`) only on the owner's say-so; then the owner sets
+`STUDIO_HARNESS_REF=<remote>/<branch>` in `.env` so the hooks gate treats that branch's own commits like main's (they
+carry no stamp until the branch merges; see docs/SECURITY.md). Remove it once the branch is on main.
+
+**A studio older than the upgrade commands** (no `npm run upgrade -- --merge` yet): run the new guard straight from the
+ref, without checking anything out. After `git fetch <remote>`, in the studio's main checkout (cmd, PowerShell or bash):
+
+```bash
+node -e "require('fs').mkdirSync('.studio',{recursive:true});require('fs').writeFileSync('.studio/upgrade-guard.mjs',require('child_process').execFileSync('git',['show',process.argv[1]+':harness/upgrade-guard.mjs']))" <ref>
+node .studio/upgrade-guard.mjs --check
+```
+
+then use `node .studio/upgrade-guard.mjs` wherever the steps below say `npm run upgrade --`. (In bash,
+`git show <ref>:harness/upgrade-guard.mjs > .studio/upgrade-guard.mjs` does the same; PowerShell 5's `>` writes UTF-16,
+which node can't run, so use the line above there.) The guard finds the studio by git from the folder it runs in.
+
 1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the
    `git add` / `git commit` to run. `--snapshot` also copies them to `.studio/board-snapshots/<time>/`.
 3. Other uncommitted work: commit it on a branch, or set it aside with a named stash
    (`git stash push -u -m "<unique-tag>" -- <paths>`) that leaves `studio/` out. Never `git stash` the whole checkout.
-4. Back up `main` (`git branch backup/pre-<version> main`), then `git pull upstream main` (a merge: the board keeps
-   both sides). A conflict in a board file: keep the rows from both sides.
-5. A stash that did take board changes: `npm run upgrade -- --check` names it. Restore by merge: with the board
-   committed, `git stash apply <sha>` (three-way), keep both sides' rows, commit; drop the entry only after.
+4. **Merge:** `npm run upgrade -- --merge <ref> --by <you>`. It refuses unless step 2's check passes, backs the branch
+   up as `backup/pre-<version>`, and merges `<ref>` through the hooks. The main-checkout guard ("only studio notes and
+   the board are committed here") opens for exactly that merge commit, so nobody needs `STUDIO_MAIN_COMMIT=allow`.
+   The merge commit records `Upgrade-By`, `Upgrade-Recorded-By`, `Upgrade-Ref`, `Upgrade-Versions` and
+   `Upgrade-Backup`; an `upgrade.merged` event too. An agent (a Producer or Director session, or an agent outside the
+   harness such as the crew's orchestrator) adds `--permission "<the owner's words, or a link to the message>"`, kept
+   as `Upgrade-Permission`; a worker agent can't run it at all. A conflict stops with the files listed: nothing is
+   resolved for you. `git merge --abort` undoes it; resolving an update's conflicts is the owner's call, and a person who
+   resolves them by hand finishes with `npm run upgrade -- --merge <ref> --by <you> --continue`.
+   **Goldens:** a commit that changes `qa/golden/` needs a `Golden-Reason:` trailer (the commit-msg hook). `--merge`
+   adds `Golden-Reason: from <ref> (upgrade): <files>` for the golden files that arrive exactly as `<ref>` has them.
+   A golden the merge combined with the studio's own change isn't the upstream's answer: `--merge` stops and asks for
+   `--golden-reason "<why>"`. A bundle merged by hand (`git merge` of a bundle's branch) needs the trailer in its merge
+   commit's message the same way. The weakened-tests gate judges each of the merged branch's own commits (never the
+   merge): a bundle commit that changes or deletes a golden needs its own `Golden-Reason`; one that only adds goldens
+   doesn't. Golden changes made in the studio still need their own reason, as always.
+5. A stash that did take board changes: `npm run upgrade -- --check` names it. Restore by merge:
+   `npm run upgrade -- --restore-stash <sha> --by <you>` (board committed first) three-way merges the stash's board
+   files into the board, keeping both sides' rows (conflicting task rows of `studio/NEXT.md` and `studio/DONE.md` are
+   all kept), and commits. Any other conflict refuses and lists the files, writing nothing. It never drops the stash:
+   it prints the `git stash drop stash@{n}` to run once the board has every row.
 6. `npm run verify`, then `npm run task -- drain off --by <you>`.
 
 ### Taking 2.59.0 with live lanes (migration note)
@@ -56,7 +90,7 @@ gates while its harness is behind main. Do it once, in this order:
 2. One-shot board snapshot, then commit the board: `npm run upgrade -- --snapshot` (copies the board files to
    `.studio/board-snapshots/<time>/` and checks), commit what it names, and run `npm run upgrade -- --check` until it
    passes. Never stash the board.
-3. Back up main (`git branch backup/pre-2.59.0 main`), merge the harness's main. A studio that patched a harness file
+3. Back up main and merge the harness's main: `npm run upgrade -- --merge <ref> --by <you>` (2.60.0; above). A studio that patched a harness file
    locally (for example its own fix for the hooks gate) takes upstream's version of that file: 2.58.5 and 2.59.0
    replace such patches.
 4. `npm run verify -- --all` on main must be green before any lane lands.

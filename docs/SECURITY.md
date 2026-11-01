@@ -78,6 +78,10 @@
   doesn't count) and `git ls-remote` must confirm the branch and its commit there (a remote-tracking ref moved by hand
   doesn't count). It asks the remote only when a commit is unstamped, and when it can't reach it the ref isn't used
   (the gate fails closed). The output names the ref and commit used, or why it wasn't. Remove it once the branch merges.
+- The main-checkout guard and a harness update (2.60.0, #3): `npm run upgrade -- --merge <ref> --by <person>` sets
+  `STUDIO_UPGRADE_MERGE=<the merged commit>` for its own merge commit only; `pre-commit` lets a commit through the
+  guard with it only while `MERGE_HEAD` is exactly that commit. Every other hook check still runs, and the merge is
+  stamped. Agents need `--permission` (harness/permission.mjs); workers can't run it (docs/RELEASE.md).
 - A clean rebase (2.59.0, crew H-13): a patch-id hashes the diff's context lines, so a rebase onto a main that changed
   lines near a commit's hunks made its stamp stale. `commit-msg` now also writes `Studio-Patch-U0: p<id>`, the patch-id
   of the same change without context (`git diff -U0`), and a commit whose tree and patch-id no longer match passes when
