@@ -4014,6 +4014,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.1 (a): a game check's load reading printed every time; self-triage's re-run of a first timeout with no quiet run
+// recorded (and its lastPass); one merge-tree helper for npm run lanes and the queue's prediction (qa/selftest-2651a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2651A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2651a.mjs')).href);
+  await selftest2651A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
