@@ -4005,6 +4005,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.0 (hands-off by default): a bug task's type from its diff, the self-triage list, the daily digest, the autonomy
+// level command, cost per merged change on the scorecard (qa/selftest-265t.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265t.mjs')).href);
+  await selftest265T({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

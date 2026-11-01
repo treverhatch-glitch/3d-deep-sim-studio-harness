@@ -1,4 +1,4 @@
-# Autonomy: the scorecard and the drift checks (2.64.0)
+# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0)
 
 Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
 read files and the event log only: no model, no tokens. Neither changes how the studio runs.
@@ -27,6 +27,9 @@ Autonomy card (read from `GET /api/autonomy`, cached 5 minutes on the hub).
 | Gate catches | merge-train reds and done-check refusals, per landed task: the gates catching it, not the agents improving |
 | Your verdicts | away cards marked great / redo / comment; Redo rate = redo over all three |
 | Tokens per landed task | session tokens in the window (counted as the overnight page counts them) over landed tasks |
+| Cost per landed task (2.65) | the tokens per landed task, and the same for the window before (the trend). Dollars only with a price table, `studio/prices.json` (`{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million tokens); none ships, so the card says "tokens only" |
+| Person round-trips per landed task (2.65) | a person's planned and unplanned interventions over landed tasks |
+| Orchestrator interventions (2.65) | `conductor.note` events (an outside orchestrator's rulings in a task's record), by who wrote them |
 
 **Who is a person.** The harness's own rules: `harness/verdict.mjs` `isPerson`, `harness/reclassify.mjs`
 `isAgentName` (agent name shapes, a `-bot` suffix, launched session names), and the harness's own scripts
@@ -56,6 +59,44 @@ The file holds the level the owner set (`"level": "L2"`) and the bar for L3. Def
   outside the harness (on the owner's word) may change `"level"` and the bar; workers never (in a lane copy studio/ is
   main's and a hook refuses edits to studio config). The file is deliberately not in the protected list; a studio
   that wants owner-signed changes only adds `studio/autonomy.json` to `studio/protected.json`.
+
+**Setting the level (2.65.0).** `npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]`
+writes `"level"` (and `"levelSet"`: who, when, why, from) and one `autonomy.level` event. A person in their own
+terminal and a launched Producer or Director session may run it; an agent outside the harness needs the person's
+words or a link (`--permission`, as in harness/permission.mjs); a worker never. The level is set once; agents then make
+every decision it allows, and the scorecard only suggests a change.
+
+## Hands-off by default (2.65.0)
+
+Fewer human steps, not easier ones: the harness decides routine questions from evidence and logs why, fixes routine
+stops from a fixed list, and sends one daily digest instead of approval pings.
+
+- **The type from the diff.** A task whose title (or role) makes it a "bug" but whose commits change only tests, docs
+  or config is judged a "change" by done-check: no regression replay is asked, the output says
+  `type: change (evidence: only tests/config changed: …)` and one `task.type.evidence` event records it
+  (harness/type-evidence.mjs). Any file in the game's sim paths (`game|web/<g>/sim`, `cartridges/`, the manifest's
+  `simPaths`, `pins.files`, `irreversible`, `shared`, `registry`), a golden, a deleted test, the studio's own code or
+  other code keeps the bug and its replay. An owner's `npm run task -- type <ID> bug` outranks the evidence.
+  `STUDIO_TYPE_EVIDENCE=off` lets the title decide.
+- **Self-triage** (harness/self-triage.mjs, the list in harness/self-triage.json; `node harness/self-triage.mjs status`).
+  The watchdog runs it on every pass; the supervisor and the game checks ask it when they stop. Each fix is one
+  `selftriage.<fix>` event and runs at most once per cause per `onceHours` (6); a cause that comes back, and any cause
+  not on the list, still stops for a person (`selftriage.declined` says why). `STUDIO_SELF_TRIAGE=off` turns it off.
+  - `reap-orphans`: a machine:heavy holder whose root died with its tree still running: the leftovers are killed and
+    the slot freed.
+  - `rerun-timeout`: a game check that timed out under load (load factor above 1) runs once more at the cap
+    (`STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR` x the base), never longer.
+  - `switch-tool`: two sessions ended with exit 127/9009 (the tool isn't on PATH) and another tool of the budget order is
+    on PATH: the missing one is marked out for the window, the halt is cleared as `studio:resume` does, by "self-triage".
+    A custom command has no other tool and stays halted.
+  - `restart-hub`: the hub stopped answering while no supervisor runs: started again.
+  - `close-rescues`: rescue tasks of a task that has landed are closed (the sweep behind task done's own close).
+  A halt cleared by self-triage is not a person's intervention on the scorecard.
+- **The daily digest** (`npm run digest`, harness/digest.mjs): `studio/digest/<date>.md` and one `digest.written`
+  event, written by the watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local time; `STUDIO_DIGEST=off`
+  stops the daily run). Under 200 words, only what needs a person: lanes held for a person's release (tier C) and
+  protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
+  self-triage can't fix; then the scorecard line and what self-triage fixed. Nothing waiting: one line says so.
 
 ## Drift checks (Check cards to the Producer)
 
