@@ -277,7 +277,12 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     for (const n of r.notes || []) log(`[game-gates] WARN ${e.id}: ${n} (STUDIO_GODOT_PIN=fail makes this fail the gate)`);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
-  for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+  // 2.60.0: a failing check's test names, one JSON line, so the merge train can tell a red that is only the game's
+  // declared pins (harness/train.mjs pinsOnlyRed) from any other.
+  for (const r of rows) {
+    log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+    if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
+  }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);

@@ -63,7 +63,7 @@ export async function selftest259A({ dir, run, report, tmpRoot }) {
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
-  const train = (extra = '') => run(dir, `node harness/task.mjs train --by tester ${extra}`, env);
+  const train = (extra = '', more = {}) => run(dir, `node harness/task.mjs train --by tester ${extra}`, { ...env, ...more });
 
   // ---- 1. two lanes that don't overlap land in one train on ONE verify ----
   const a = lane('bld-a', 'Docs: note a', 'game/demo/notes/a.md', '# A\n');
@@ -84,7 +84,8 @@ export async function selftest259A({ dir, run, report, tmpRoot }) {
   const d = lane('bld-d', 'Docs: note d', 'game/demo/notes/d.md', '# D\n\nBROKEN on purpose\n');
   queueIt(c); queueIt(d);
   const r1 = runs();
-  const t2 = train();
+  // 2.60.0: the default is prefix bisection (qa/selftest-260a.mjs); this check keeps the 2.59 way, still reachable.
+  const t2 = train('', { STUDIO_TRAIN_BISECT: 'alone' });
   const handoff = path.join(dir, 'studio', 'handoffs', `${d.id}.md`);
   const note = fs.existsSync(handoff) ? fs.readFileSync(handoff, 'utf8') : '';
   report('2.59.0 (#1): a red train is bisected: the lane whose change breaks the check fails alone, is dropped and handed back (back in the queue, its claim freed, a note naming the failing gate); the other lane lands; main never holds the broken note (fails on 2.58.5: no train command)',

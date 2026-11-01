@@ -3811,6 +3811,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.0 (helper a): a red merge train re-runs only its failing checks on prefixes (exact blame, interaction culprits
+// too), refreshes declared pins in one Pin-Refresh commit, and union-merges the manifest's unionFiles (qa/selftest-260a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260a.mjs')).href);
+  await selftest260A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
