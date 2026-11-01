@@ -12,9 +12,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export async function selftest260B({ dir, run, report, tmpRoot }) {
+export async function selftest260B({ dir, run, report, tmpRoot, root }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
@@ -25,6 +25,13 @@ export async function selftest260B({ dir, run, report, tmpRoot }) {
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_HOTSPOT_ASK: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260b-${process.pid}.pem`), AGENT_EVENTS_FILE: events, TRAIN_MARK: mark, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   const lines = (n, f) => `${Array.from({ length: n }, (_, i) => f(i)).join('\n')}\n`;
+  // The size check reads JavaScript with the harness's typescript; the selftest copy has no node_modules of its own
+  // (CI found this), so link the harness's, as qa/selftest-2582k.mjs does.
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
 
   // ---- the studio ----
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
