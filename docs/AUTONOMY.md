@@ -127,10 +127,20 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   event, written by the watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local time; `STUDIO_DIGEST=off`
   stops the daily run). Under 200 words, only what needs a person: lanes held for a person's release (tier C) and
   protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
-  self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then the
-  scorecard line, what self-triage fixed and how many fuzz bug tasks were filed. Nothing waiting: one line says so.
+  self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then (2.66.0)
+  the top 5 allowlist candidates from the blocked-command log, the scorecard line, what self-triage fixed and how many
+  fuzz bug tasks were filed. Nothing waiting: one line says so.
 - **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
   (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
+- **The blocked-command log (2.66.0)** (`npm run denials [-- --days 7] [--json]`, harness/denials.mjs). At session
+  end the launcher reads Claude Code's `permission_denials` from every `{"type":"result"}` line of the session's log
+  (the crew's logs carry the field on every result line) into `.studio/denials.jsonl`: task, agent, role, tool, a
+  redacted command summary (keys, tokens, passwords, `Authorization` headers, `NAME_TOKEN=…`, `--password …`,
+  `user:pass@` removed; at most 200 characters), a group key (`Bash(git push *)`, `Read(dir/**)`) and why it was
+  refused (not on the list; chained, prefixed or using a variable; on the list but refused by a hook or a rule). A
+  result line without the field records nothing. `npm run denials` shows the top commands and the count per task.
+  Only plain commands off the list are **candidates**. Nothing ever adds them to `.claude/settings*.json`,
+  `harness/allowlist.mjs` or `--allowedTools`: a person reads them and decides.
 
 ## Drift checks (Check cards to the Producer)
 

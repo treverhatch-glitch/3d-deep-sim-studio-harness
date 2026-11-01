@@ -99,6 +99,7 @@
     "metrics": "node harness/metrics.mjs",
     "autonomy": "node harness/autonomy.mjs",
     "digest": "node harness/digest.mjs",
+    "denials": "node harness/denials.mjs",
     "vfx": "node harness/vfx.mjs",
     "public-guard": "node harness/public-guard.mjs",
     "engine:build": "node harness/unity.mjs build",
