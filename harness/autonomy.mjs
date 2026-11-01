@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { weightedTokens } from './token-weight.mjs';
 
 export const AUTONOMY_REL = 'studio/autonomy.json';
 export const DEFAULT_AUTONOMY = Object.freeze({
@@ -181,7 +182,8 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const from = now - days * DAY;
   const inWin = (t) => t >= from && t <= now;
   const win = sorted.filter((e) => inWin(ts(e)));
-  const weight = weigh || ((e) => (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead ?? e.cacheRead) || 0));
+  // 2.65.2: without `weigh`, the budget meter's weighting (cache reads at cacheReadWeight), as the CLI and the hub use.
+  const weight = weigh || ((e) => weightedTokens(e));
 
   // Interventions. A reopen an away verdict made (same person and task, within 2 min) is that verdict, not a second one.
   const all = [];
