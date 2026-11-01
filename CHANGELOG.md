@@ -4,6 +4,32 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.3] — 2026-11-01
+2.58.3: fixes from a read-only dive into the crew's studio logs (P-069 to P-080; crew P-034, P-035, P-037, P-039 to P-041).
+### Fixed
+- **A person's stop isn't a crash (P-070).** `agent stop`, Pause and Stop all are recorded before the kill, so the session
+  ends "stopped by <name>" (`meta.stoppedBy`), never halts the supervisor, and its hand-back never counts toward parking,
+  the breaker or a model tier-up. qa/selftest-2583n.mjs.
+- **Live owners keep their claims (P-072).** An expired claim whose owner was active within `STUDIO_CLAIM_ACTIVE_MIN` (30)
+  minutes, or whose lane copy changed, isn't handed back, requeued or given to a new agent.
+- **Watchdog (P-073, P-080).** Its hand-back count resets on unpark; concurrent passes park once; rescue pick-up clocks stop
+  while no launcher runs or the supervisor is halted.
+- **Lane agents can read studio/ and .studio/ (P-071).** Claude in a lane copy gets `--add-dir` for the main checkout's
+  folders (Codex with `STUDIO_CODEX_ADD_DIR=on`). qa/selftest-2583m.mjs.
+- **Code agents always get a copy (P-074, crew P-039).** A task with no lane no longer puts a builder, QA or reviewer in the
+  main checkout (`STUDIO_LANELESS=shared` opts out).
+- **Profiles (P-069).** claude's `-p` is --print, not a profile; with no profiles set up a Producer or Director starts while
+  builders run. qa/selftest-2583p.mjs.
+- **What task done asks for (P-075, P-076; crew P-041, P-034, P-035).** "Fix: … see <file>.md" is a bug, not docs; the size
+  ratchet matches anonymous functions by their test titles and lists every item; line-ending-only files don't block task
+  done, a lane landing, the verify record or `onboard --sync`; someone else's files on the main checkout don't refuse a task
+  that isn't code work; a stale verify says whether your files changed, main moved or another name ran it.
+  qa/selftest-2583o.mjs.
+### Added
+- **`--tool nim` (P-078, crew P-040):** aider on NVIDIA NIM, the key mapped in the child only and never printed.
+- **agy settings file (P-077):** `npm run agent -- allow agy` writes `.studio/agy-settings.json`, passed as `agy --settings`.
+- **Kickoff (P-079):** one command per Bash call; read files with the file tools.
+
 ## [2.58.2] — 2026-11-01
 2.58.2: the flaky HUD check, a gate against dodged checks, and deterministic maths in the purity gate.
 ### Fixed

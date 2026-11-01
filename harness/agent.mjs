@@ -167,7 +167,9 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] })
   // M1 (2.58.3): a session in a lane copy (.lanes/<agent>) reads studio/ and .studio/ through links to the main
   // checkout; Claude Code resolves the link and refuses a target outside its working directory ("outside the allowed
   // working directories"), so the launcher names the main checkout's real folders (harness/worktree.mjs laneShareDirs).
-  // Each flag and each path is its own argument. Codex takes the same flag (extra writable roots); the others: none known.
+  // Each flag and each path is its own argument. Codex takes the same flag (extra writable roots) but an older Codex
+  // refuses it and its sandbox already reads outside the copy, so Codex gets it only with STUDIO_CODEX_ADD_DIR=on.
+  // The others: no known flag.
   const dirs = (addDirs || []).filter(Boolean).flatMap((d) => ['--add-dir', d]);
   switch (tool) {
     case 'claude': {
@@ -186,7 +188,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] })
     case 'codex': {
       // In a frozen test clone, Codex's sandbox can't write .git or bind 127.0.0.1 on macOS; the clone itself is the boundary.
       const bypass = process.env.STUDIO_CODEX_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
-      return { argv: ['codex', 'exec', '--json', ...(bypass ? ['--dangerously-bypass-approvals-and-sandbox'] : ['--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']), ...dirs, ...(m ? ['-m', m] : []), '-'], stdin: prompt };
+      return { argv: ['codex', 'exec', '--json', ...(bypass ? ['--dangerously-bypass-approvals-and-sandbox'] : ['--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true']), ...(/^(on|1|true|yes)$/i.test(process.env.STUDIO_CODEX_ADD_DIR || '') ? dirs : []), ...(m ? ['-m', m] : []), '-'], stdin: prompt };
     }
     case 'agy': {
       // From run #1: agy exits with "I'll report back" before it finishes unless it has a print timeout

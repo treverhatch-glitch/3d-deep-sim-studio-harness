@@ -492,3 +492,65 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **What happened (found while assembling 2.58.2):** a checkout on 2.58.1 with lane work takes 2.58.2; the lane's commits were never stamped, and once the lane rebases onto the upgrade their parent's commit-msg hook stamps, so `task done` refused each of them as "skipped the hooks". Reproduced in a throwaway clone (2.58.1 + a lane commit, merge, rebase, `hook-stamp.mjs check` FAIL).
 - **Fix:** the first stamping hook run in a checkout (normally the upgrade's own merge commit) lists the unstamped commits on local branches that no remote has, by sha and patch-id, in `<git common dir>/studio-hooks-grandfather.json` (shared by every lane worktree, never committed). Those stay exempt after a clean rebase; a commit made after the list was written is still caught. `node harness/hook-stamp.mjs grandfather` adds to the list by hand. Two checks in `qa/selftest-2582k.mjs`, both failing on the old code.
 
+
+## Log deep dive, 2026-11-01 (studio-hatchfield on 2.56.0, Oct 31 14:00Z to Nov 1 02:13Z; read-only)
+Sources on the crew's PC, read only: `.studio/events.jsonl` (1,434 events in the window; "ev N" = line N),
+`.studio/agents/*.json|log` (180 files), `.studio/supervisor.json`, `.studio/hub.log`, `studio/logs/PROBLEMS.md` (crew numbers
+P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was changed.
+
+### P-069 — The Producer and Director were refused 62 times: claude's `-p` read as a profile · fixed in 2.58.3
+- **Evidence:** ev 260–830, 62× profile.refused: "Not started (producer on --permission-mode): profile \"--permission-mode\" is in use by builder-s16"; also "profile \"default\" is in use by builder-s1".
+- **Why:** `profileOf` took `-p <next word>` as a profile; for claude `-p` is --print. And with no profiles set up, any builder on the one account blocked planning.
+- **Fix:** -p is never a profile for claude, agy, cursor's agent, grok, gemini, codex; a flag is never a profile; the builder-sharing rule applies only once profiles are set up. qa/selftest-2583p.mjs.
+
+### P-070 — A person's stop was recorded as a crash and halted the supervisor for 5 hours · fixed in 2.58.3
+- **Evidence:** ev 841–842 21:08:40 "human stopped builder-s16 / qa-playtester-s3"; ev 843 "stopped: exit code 1"; ev 847 21:09:24 supervisor.halted "two sessions in a row ended with exit 1"; `.studio/supervisor.json` still halted at 02:10.
+- **Fix:** a stop is recorded before the kill (`.studio/agents/<agent>.stop`); the session ends "stopped by <name>", doesn't halt the supervisor and its hand-back never counts toward parking, the breaker or a model tier-up. qa/selftest-2583n.mjs (N1).
+
+### P-071 — Lane agents couldn't read their own role and brief · fixed in 2.58.3
+- **Evidence:** 46 session logs: "…to C:\…\studio-hatchfield\studio\roles\builder.md, which is outside the allowed working directories"; ev 569/659/680 "Blocked: my sandbox can't read .studio/briefs/T-012.md or studio/roles/builder.md (symlinks outside allowed dir)"; ask A-001 "Lane agents can't read/write studio/ and .studio/". With P-066 (still on 2.56.0) this made 59 sessions under 90 s (15.5M tokens incl. cache reads) that did nothing.
+- **Fix:** Claude in a lane copy gets `--add-dir` for the main checkout's real studio/ and .studio/ (Codex only with STUDIO_CODEX_ADD_DIR=on). qa/selftest-2583m.mjs (M1).
+
+### P-072 — Claims held by an agent working outside the launcher were handed to new agents · fixed in 2.58.3
+- **Evidence:** T-038: opus-bot start 19:48:39 (ev 403); ev 597 20:49:03 "The claim ran out with no running session on it"; supervisor started builder-s16 on it 20:52 while opus-bot ran gates at 20:49:20. Same for T-014 (ev 662, qa-playtester-s2/s3), T-057 (ev 1322, builder-s29; ev 1529/1532/1552 "already claimed by builder-s29"), T-031 (four builders handed back within 15–60 s, "nothing edited").
+- **Fix:** an expired claim whose owner had any event in STUDIO_CLAIM_ACTIVE_MIN (30) minutes, or whose lane copy changed, is busy: not handed back, requeued or given out. qa/selftest-2583n.mjs (N2).
+
+### P-073 — The watchdog ignored an unpark and parked three times at once · fixed in 2.58.3
+- **Evidence:** ev 868 21:21:33 "hatch unparked T-031" → ev 869 21:21:43 "watchdog parked T-031: handed back 3 times in 2 h" (also ev 848→850); ev 698–709 each park three times within 6 s.
+- **Fix:** one hand-back count for the launcher and the watchdog, reset by done, unblock or unpark; parks are written once under the holds lock. qa/selftest-2583n.mjs (N3).
+
+### P-074 — Code agents on a task with no lane worked in the main checkout (crew P-039) · fixed in 2.58.3
+- **Evidence:** builder-s3..s7 (T-037), qa-playtester-s2/s3 (T-014), builder-s21/s22 (T-051) started with lane None; builder-s21 left 3 test files staged on main; T-051 was force-closed with its fix only staged (ev 1129; ask A-005).
+- **Fix:** any role but producer/director/planner/liaison gets its own copy when its task has no lane (STUDIO_LANELESS=shared opts out). qa/selftest-2583m.mjs (M2).
+
+### P-075 — Files left on the main checkout blocked unrelated tasks for 3 hours · fixed in 2.58.3
+- **Evidence:** ev 1092, 1107, 1155, 1219, 1233, 1438, 1455, 1457, 1563: T-025, T-001, T-022, T-009, T-008, T-054 "3/4 uncommitted changes (…starterInterior.test.ts, …vehicles.test.ts, …hallRestock.e2e.test.ts)"; those tasks changed only studio/ docs.
+- **Fix:** with no claimed paths, a task that isn't code work and committed no game code isn't refused for someone else's files; the Producer gets a `checkout.strays` event. qa/selftest-2583o.mjs (O4).
+
+### P-076 — Done-check fixes from the crew's P-041, P-034 and P-035 · fixed in 2.58.3
+- **P-041 (bug fixes typed as docs):** ev 718, 1235 "no changed .md file since this task started" for "Fix: bug batch N … see qa/reports/….md". Now only a .md in the title's subject makes a fix a docs task. A "batch" done rule needs Hatch's decision (bug fixes still need a seed/tick replay).
+- **P-034 rest (size check):** ev 200/205 "(anonymous, line 141)() is 135 lines (was 134)"; anonymous functions are matched by their test titles and calls, and every item is listed (10 + the rest in `.studio/size-growth/<ID>.txt`).
+- **P-035 (line endings):** ev 196/198, 208/210, 1401, 1421 "uncommitted change (…buildingMass.test.ts.snap)"; a line-ending-only file no longer blocks task done, a lane landing, the verify record or onboard --sync.
+- **Stale-verify wording (T-019):** ev 188/193/215 said "after your last change" when main had moved (T-006 landed, ev 191) or another owner name ran the verify (ev 189, opus-1); the message now says which. qa/selftest-2583o.mjs.
+
+### P-077 — agy permissions: exact commands only, and a session settings file exists (crew P-037 addendum) · changed in 2.58.3
+- **Evidence:** crew: `agy --settings <file>` works; `command(node --version)` allowed, `command(node *)`, `command(node)` and the like denied on Windows.
+- **Change:** `npm run agent -- allow agy` writes `.studio/agy-settings.json`, passed as `agy --settings`; `--scope user` still exists. The regex form stays UNTESTED on real agy. qa/selftest-2583m.mjs (M3).
+
+### P-078 — No coding agent could use the NVIDIA NIM key (crew P-040) · added in 2.58.3
+- **Change:** `--tool nim` runs aider on NIM (`--openai-api-base https://integrate.api.nvidia.com/v1`), the key mapped to OPENAI_API_KEY in the child only, never in argv, logs or events. Installing aider needs Hatch's OK; the default model is UNVERIFIED. qa/selftest-2583m.mjs (M4).
+
+### P-079 — Agents lost turns to chained shell commands · kickoff note in 2.58.3
+- **Evidence:** "This Bash command contains multiple operations. The following part requires approval: cat AGENTS.lite.md ; cat studio/roles/art.md"; 51× "head -5; …". After the P-066 quoting is fixed these still stop.
+- **Change:** the kickoff says one command per Bash call and read files with the file tools. Widening the allow-list (pwd, wc, git rev-parse, git ls-files) needs Hatch's OK.
+
+### P-080 — Rescues escalated while nothing could pick them up · fixed in 2.58.3
+- **Evidence:** ev 920/934 "nobody picked the rescue up in 60 min"; ev 1055 T-016 shelved, all while the supervisor was halted (P-070).
+- **Fix:** the pick-up clock stops while no launcher runs or the supervisor is halted; the Producer is told once. qa/selftest-2583n.mjs (N4).
+
+### Seen, not changed in code (proposals)
+- **Verify load:** 84 verify runs (median 265 s), up to 4 at once, 43 overlapping; 39 not all green. e2e timeouts seen for alertStack (120 s) and negotiation/panel. Proposal: `STUDIO_GATE_SLOTS=1` on a single-PC studio (one heavy game check at a time), and in the game repo run e2e files serially with a free port (crew P-038). Needs Hatch's OK.
+- **Planning cost:** the 45-minute development cycle woke an Opus Director and Producer 7 times while the supervisor was halted (9 producer and 12 director sessions, 16.6M tokens incl. cache reads; director-1 read 1.8M tokens with no progress, ev 1013). Proposal: skip the regular cycle while nothing can start.
+- **Opus gaps over 15 min:** 9, mostly waits on a 4–7 minute verify (e.g. 23:06→23:25, 00:11→00:29); 2.58's detached verify (`verify -- --wait`) covers a killed shell.
+- **No low-memory guard events** in the studio logs; the harness has no memory guard of its own. Launcher sessions peaked at 3 at once; extra Claude processes come from verify's test workers and the crew's own bots.
+- **P-036 (crew) / P-066:** still present in the logs (node/npm commands blocked 205 times) because the studio runs 2.56.0; 2.58.1 fixes the quoting (Windows CI proof). Real installed claude.cmd/agy.cmd stay UNTESTED until the studio updates.
