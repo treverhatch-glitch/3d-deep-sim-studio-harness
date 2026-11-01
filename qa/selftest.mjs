@@ -3641,6 +3641,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.3 (M1-M5): Claude in a lane copy gets --add-dir for studio/ and .studio/; a code-writing role on a laneless
+// task gets its own copy; agy's rules go to .studio/agy-settings.json (agy --settings); a nim tool (aider on NVIDIA
+// NIM, key mapped, never printed); the kickoff says one command per Bash call (qa/selftest-2583m.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583m.mjs')).href);
+  await selftest2583M({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
