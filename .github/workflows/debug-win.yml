@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        only: ['2601m,2601n', '2601o,2601q', '261e,261f,262g', '262h,263i,263j', '264k,264l,260c,260d']
+        only: ['2601m']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

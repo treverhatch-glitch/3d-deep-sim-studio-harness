@@ -271,7 +271,7 @@ else console.log('[build] PASS stand-in');
         guard('B-41: {folder} (and the land command\'s directory) comes from studio/game.json engines.unity.folder, relative to the studio or absolute; a folder that doesn\'t exist is an error naming the setting, never a guess (2.60.0: only the track\'s folder, a sibling clone without the land script)', () => [
           rel.j?.status === 'red' && new RegExp(`land branch=unity/pier cwd=${path.basename(uf)}`).test(rel.j.tail || '')
             && missing.code === 1 && missing.j?.status === 'error' && /no-such-unity-2601m.*engines\.unity\.folder.*doesn't exist/.test(missing.j.why || ''),
-          JSON.stringify({ rel: rel.j, missing: missing.j }).slice(0, 1500)]);
+          JSON.stringify({ rel: rel.j, missing: missing.j, missingCode: missing.code, missingText: missing.text.slice(-1200) }).slice(0, 2500)]);
 
         // Exit meanings from the script's own contract.
         setUnity({ land, folder: uf, exits: { 1: { status: 'red', why: 'a test or the build failed' }, 3: { status: 'error', why: 'bad branch: no such branch in the Unity repo' } } });
