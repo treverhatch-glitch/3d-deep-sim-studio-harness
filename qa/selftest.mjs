@@ -3995,6 +3995,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.0 (helper s): studio config proposals a lane carries (studio-proposals/<ID>.json) applied when it lands, under
+// the protected-file rules; the visual proof's per-camera noise baseline; a full verify's gate shells recorded in the
+// machine:heavy holder's tree on Windows (qa/selftest-265s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265s.mjs')).href);
+  await selftest265S({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
