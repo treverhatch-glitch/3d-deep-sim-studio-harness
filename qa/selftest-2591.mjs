@@ -23,7 +23,8 @@ export async function selftest2591({ dir, run, report }) {
   const doneCheck = (id) => out(run(dir, `node harness/done-check.mjs ${id}`, env));
   const readRec = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-types.json'), 'utf8')); } catch { return { tasks: {} }; } };
   const record = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-types.json'), 'utf8')).tasks || {}; } catch { return {}; } };
-  const PERM = 'Hatch on Discord 2026-11-01 18:29: "T-x is a UI change, not a bug; retype it"';
+  // No quote marks inside, and passed in double quotes: cmd.exe (Windows) doesn't treat single quotes as quoting.
+  const PERM = 'Hatch on Discord 2026-11-01 18:29, T-x is a UI change, not a bug, retype it';
 
   git('init -q -b main');
   git('config core.autocrlf false');
@@ -32,7 +33,7 @@ export async function selftest2591({ dir, run, report }) {
 
   // An agent outside the harness (a coding agent's shell), on the owner's permission.
   const t1 = add('Fix: bug batch 21 - panel copy');
-  const bot = task(`type ${t1} change --by hatch --why "UI copy only; nothing to replay" --permission '${PERM}'`, { CLAUDECODE: '1', STUDIO_LOCK_OWNER: '' });
+  const bot = task(`type ${t1} change --by hatch --why "UI copy only; nothing to replay" --permission "${PERM}"`, { CLAUDECODE: '1', STUDIO_LOCK_OWNER: '' });
   const r1 = record()[t1] || {};
   const dc1 = doneCheck(t1);
   report('2.59.1: an agent outside the harness (a coding agent\'s shell) records a reclassification on the owner\'s permission: --by hatch --permission "…" is kept with who recorded it, it counts, and done-check shows the permission',
@@ -41,7 +42,7 @@ export async function selftest2591({ dir, run, report }) {
 
   // A launched Producer session, whose commit carries Studio-Agent: producer-s3 (as the commit-msg hook writes).
   const t2 = add('Fix: bug batch 22 - timetable labels');
-  const prod = task(`type ${t2} change --by hatch --why "labels only; nothing to replay" --permission '${PERM}' --no-commit`, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s3' });
+  const prod = task(`type ${t2} change --by hatch --why "labels only; nothing to replay" --permission "${PERM}" --no-commit`, { STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s3' });
   git('add studio/task-types.json');
   git('commit -q -m "T: retype on permission" --no-verify --trailer "Studio-Agent: producer-s3"');
   const dc2 = doneCheck(t2);
@@ -51,11 +52,11 @@ export async function selftest2591({ dir, run, report }) {
 
   // Workers never; no permission, no change from 2.59.0.
   const t3 = add('Fix: bug batch 23 - hangar menu');
-  const builder = task(`type ${t3} change --by hatch --why "a builder relaying permission" --permission '${PERM}'`, { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s9' });
-  const workerShell = task(`type ${t3} change --by hatch --why "a worker shell relaying permission" --permission '${PERM}'`, { STUDIO_LOCK_OWNER: 'builder-s9' });
+  const builder = task(`type ${t3} change --by hatch --why "a builder relaying permission" --permission "${PERM}"`, { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s9' });
+  const workerShell = task(`type ${t3} change --by hatch --why "a worker shell relaying permission" --permission "${PERM}"`, { STUDIO_LOCK_OWNER: 'builder-s9' });
   const noPerm = task(`type ${t3} change --by hatch --why "the bot says the owner agreed"`, { CLAUDECODE: '1' });
-  const shortPerm = task(`type ${t3} change --by hatch --why "too short a permission" --permission 'ok'`, { CLAUDECODE: '1' });
-  const agentBy = task(`type ${t3} change --by opus-bot --why "permission from itself" --permission '${PERM}'`, { CLAUDECODE: '1' });
+  const shortPerm = task(`type ${t3} change --by hatch --why "too short a permission" --permission "ok"`, { CLAUDECODE: '1' });
+  const agentBy = task(`type ${t3} change --by opus-bot --why "permission from itself" --permission "${PERM}"`, { CLAUDECODE: '1' });
   report('2.59.1: a builder session or a worker\'s shell is refused even with --permission; without --permission (or with a too-short one) an agent is refused as in 2.59.0; --by must be the person, not an agent; nothing is recorded',
     builder.status !== 0 && /launched builder session can't act on permission/.test(out(builder)) && workerShell.status !== 0 && /builder-s9 is a worker agent/.test(out(workerShell))
       && noPerm.status !== 0 && /coding agent/.test(out(noPerm)) && /--permission/.test(out(noPerm)) && shortPerm.status !== 0 && agentBy.status !== 0 && /agent's name/.test(out(agentBy)) && !record()[t3],
