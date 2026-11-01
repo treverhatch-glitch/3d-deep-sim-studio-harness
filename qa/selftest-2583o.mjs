@@ -138,7 +138,7 @@ console.log(JSON.stringify(res));`);
   // task done on the main checkout: a claimed folder holding a CRLF-only file, after a real verify.
   const t4 = add('Wire the dock bell');
   start(t4, 'eol-1');
-  run(dir, 'node harness/lock.mjs claim path:game/pier --owner eol-1', env);
+  run(dir, 'node harness/lock.mjs claim path:game/pier --owner eol-1 --wide "selftest: the task holds the whole game"', env);
   write('game/pier/src/dock.gd', 'var dock = 1\nvar bell = 2\n');
   commitTask(t4, 'bell', 'game/pier/src/dock.gd');
   write('game/pier/src/snap.txt', 'line one\r\nline two\r\nline three\r\n');
@@ -153,7 +153,7 @@ console.log(JSON.stringify(res));`);
 
   const t5 = add('Wire the dock horn');
   start(t5, 'eol-2');
-  run(dir, 'node harness/lock.mjs claim path:game/pier --owner eol-2', env);
+  run(dir, 'node harness/lock.mjs claim path:game/pier --owner eol-2 --wide "selftest: the task holds the whole game"', env);
   write('game/pier/src/dock.gd', 'var dock = 1\nvar bell = 2\nvar horn = 3\n');
   commitTask(t5, 'horn', 'game/pier/src/dock.gd');
   verify('eol-2');
@@ -240,7 +240,7 @@ console.log(JSON.stringify(res));`);
   const d7 = done(t7, 'prod-2');
   const t8 = add('Plan: the dock signs', 'producer');
   start(t8, 'prod-3');
-  run(dir, 'node harness/lock.mjs claim path:game/pier --owner prod-3', env);
+  run(dir, 'node harness/lock.mjs claim path:game/pier --owner prod-3 --wide "selftest: the task holds the whole game"', env);
   write('studio/notes/signs.md', '# Signs\n');
   commitTask(t8, 'signs', 'studio/notes/signs.md');
   const d8 = done(t8, 'prod-3');
