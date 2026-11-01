@@ -4,7 +4,7 @@
  *
  *   npm run overnight [-- --since 8h|<ISO>]     write it now for the last 8 h (or since a time)
  *
- * The supervisor writes it on its own when --until is reached. One page, in this order: tasks done,
+ * The supervisor writes it on its own when --until is reached. One page: (2.64.0) one autonomy line, then tasks done,
  * tokens per finished task (model named), sessions that finished nothing, forced closes, reviews,
  * the top 5 sessions by tokens, and the cards still open. Files only, no model, no tokens.
  * Saved to studio/daily/overnight-<date>.md (it travels with the studio) and logged as an event.
@@ -49,6 +49,8 @@ export function buildOvernight({ from, to = Date.now(), events = readRecentEvent
 
 export function renderOvernight(o) {
   const L = [`# Overnight summary, ${hm(o.from)} to ${hm(o.to)} (${day(o.to)}, local time)`, ''];
+  // 2.64.0: one line from the autonomy scorecard (npm run autonomy), not a heading, so the War Room's head lines stay.
+  if (o.autonomy) L.push(o.autonomy, '');
   L.push(`## Tasks done: ${o.done.length}`, ...(o.done.length ? o.done.slice(0, 12).map((d) => `- ${d.task} (${d.agent}): ${String(d.msg).replace(/^Completed [^:]+:\s*/, '').slice(0, 90)}`) : ['- None.']), ...(o.done.length > 12 ? [`- … and ${o.done.length - 12} more (studio/DONE.md)`] : []), '');
   L.push(`## Tokens per finished task: ${o.perDone === null ? 'no task finished' : `${M(o.perDone)} counted tokens`}`, ...o.byModel.map((m) => `- ${m.model}: ${m.sessions} session${m.sessions === 1 ? '' : 's'}, ${M(m.tokens)} counted tokens`), `- Total: ${M(o.total)} counted tokens (in + out + cache reads at their weight) over ${o.sessions} session${o.sessions === 1 ? '' : 's'}`, '');
   L.push(`## Sessions that finished nothing: ${o.noDone.length}`, ...o.noDone.slice(0, 6).map((s) => `- ${s.agent} (${s.model}) on ${s.task || 'no task'}: ${M(s.tokens)} tokens; ${s.reason || 'ended'}`), '');
@@ -67,6 +69,10 @@ export async function writeOvernight({ from, to = Date.now() } = {}) {
     cards = buildHudState().signals?.needsYou || [];
   } catch {}
   const o = buildOvernight({ from, to, openCards: cards });
+  try {
+    const { autonomyReport } = await import('./autonomy.mjs');
+    o.autonomy = (await autonomyReport({ now: to })).line;
+  } catch {}
   const md = renderOvernight(o);
   const rel = `studio/daily/overnight-${day(to)}.md`;
   fs.mkdirSync(path.join(REPO_ROOT, 'studio', 'daily'), { recursive: true });
