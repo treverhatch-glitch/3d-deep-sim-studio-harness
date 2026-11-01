@@ -56,6 +56,7 @@ import { startAgent, stopAgentNamed, stopAllAgents, pauseAgent, sessions as agen
 import { readDesigns, readArtRefs, approve as approveDesign, changes as changeDesign, feedback as artFeedback, addArtReference, IMAGE as ART_IMAGE, MODEL as ART_MODEL } from '../harness/art.mjs';
 import { answer as answerAsk, reverse as reverseAsk, runAskAction } from '../harness/ask.mjs';
 import { readRefs } from '../harness/refs.mjs';
+import { postInbound } from '../harness/threads.mjs';
 import { readExperiments } from '../harness/experiment.mjs';
 import { readBriefs, chatTurn, confirmBrief, dropBrief } from '../harness/liaison.mjs';
 import { readBible, writeBible, checkBible, catalog, readIdeas, signBible, suggestedLayers, latestReview, pendingFollowups, answerFollowup } from '../harness/bible.mjs';
@@ -1016,6 +1017,19 @@ export function createHubServer() {
       const msg = String(body.msg || '').trim().slice(0, 2000);
       if (!msg) return sendJson(res, 400, { ok: false, error: 'empty message' });
       noteHuman(by);
+      // 2.64.0: an optional task or thread key (harness/threads.mjs). With threads on and the hub source live, a
+      // message for an open task goes to that task's inbox; otherwise (shadow mode logs where it would have gone, an
+      // unknown key, a done task) it reaches the Producer exactly as before. Never adds a task.
+      const threadKey = body.thread || (body.task ? `task:${String(body.task)}` : null);
+      let threadNote = '';
+      if (threadKey) {
+        const r = postInbound({ source: 'hub', key: String(threadKey).slice(0, 120), text: msg, by, producer: false });
+        if (r.ok && r.action === 'routed' && r.to === 'task') {
+          broadcastSnapshot();
+          return sendJson(res, 201, { ok: true, routed: r.tasks, next: `In ${r.tasks.join(', ')}'s inbox (studio/handoffs/${r.tasks[0]}.inbox.md); the session holding it is told at its next step.` });
+        }
+        threadNote = r.ok ? (r.action === 'routed' ? ' (no open task for that key)' : '') : ` (${r.message})`;
+      }
       const inbox = path.join(REPO_ROOT, 'studio', 'producer', 'INBOX.md');
       fs.mkdirSync(path.dirname(inbox), { recursive: true });
       if (!fs.existsSync(inbox)) fs.writeFileSync(inbox, '# Producer inbox\n\n> Messages from people in the War Room. The Producer reads new ones in its briefing (`npm run handoff`).\n\n');
@@ -1023,7 +1037,7 @@ export function createHubServer() {
       emitEvent({ type: 'human.message', agent: by, to: 'producer', msg: msg.slice(0, 300) });
       const w = wake('producer', { why: `a message from ${by}` });
       broadcastSnapshot();
-      return sendJson(res, 201, { ok: true, started: w.agent || null, next: `In the Producer's inbox. ${w.next}` });
+      return sendJson(res, 201, { ok: true, started: w.agent || null, next: `In the Producer's inbox${threadNote}. ${w.next}` });
     }
 
     if (url.pathname === '/api/brief' && req.method === 'POST') {
