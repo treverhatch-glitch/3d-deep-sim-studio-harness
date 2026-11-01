@@ -12,7 +12,9 @@
  *   - Bible and phase decisions: an unsigned Bible, open questions for the game dev (npm run ask);
  *   - spend: a tool over its weekly target (npm run budget);
  *   - stops: a halted supervisor whose cause isn't on the self-triage list, and causes self-triage left for a person;
- * then the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
+ *   - 2.66.0: fuzz findings suggested in the last 24 h (npm run fuzz's shadow week); filed ones get a count line;
+ * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
+ * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
  * that fails to read is skipped, never a crash).
  */
@@ -73,9 +75,26 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const pending = fs.existsSync(path.join(STUDIO_STATE_DIR, 'supervisor-resume'));
     if (s?.status === 'running' && s.halted && !pending) out.push({ kind: 'halt', line: `the supervisor is halted: ${String(s.halted.why || 'no reason recorded').slice(0, 120)} (npm run studio:resume -- --by <you>)` });
   });
+  out.push(...fuzzSuggestions(ev, now));
   const declined = ev.filter((e) => e.type === 'selftriage.declined' && (Date.parse(e.ts) || 0) >= now - DAY);
   for (const e of declined.slice(-3)) { const why = String(e.meta?.why || e.msg || ''); out.push({ kind: 'halt', line: `self-triage left for you (${e.meta?.fix || 'a fix'}, ${e.meta?.cause || 'a cause'}): ${why.length > 110 ? `${why.slice(0, 109)}…` : why}` }); }
   return out;
+}
+
+/**
+ * 2.66.0 (npm run fuzz): fuzz findings of the last 24 h. Suggested ones (the shadow week) need a person to file or
+ * ignore them: [{ kind: 'fuzz', line }]. Filed ones are only counted (fuzzFiledLine).
+ */
+export function fuzzSuggestions(ev, now = Date.now()) {
+  const recent = ev.filter((e) => e.type === 'fuzz.finding' && e.meta?.mode === 'suggest' && (Date.parse(e.ts) || 0) >= now - DAY);
+  if (!recent.length) return [];
+  const ids = [...new Set(recent.map((e) => e.meta?.id).filter(Boolean))];
+  const until = recent.map((e) => e.meta?.until).filter(Boolean).pop();
+  return [{ kind: 'fuzz', line: `fuzz found ${ids.length} new bug${ids.length === 1 ? '' : 's'} (${ids.slice(0, 3).join(', ')}${ids.length > 3 ? ' …' : ''}), suggested, not filed${until ? ` until ${String(until).slice(0, 10)}` : ''}: .studio/fuzz/suggestions.md (npm run fuzz -- file <id> --by <you>, or ignore it with a why in studio/fuzz.ignore.json)` }];
+}
+export function fuzzFiledLine(ev, now = Date.now()) {
+  const filed = ev.filter((e) => e.type === 'fuzz.finding' && e.meta?.mode === 'file' && (Date.parse(e.ts) || 0) >= now - DAY);
+  return filed.length ? `Fuzz filed ${filed.length} bug task${filed.length === 1 ? '' : 's'} in 24 h: ${filed.map((e) => e.meta?.task).filter(Boolean).slice(0, 4).join(', ')}.` : '';
 }
 
 /** The digest's text (markdown) and its parts. */
@@ -90,13 +109,19 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const d = date || localDate(now);
   const head = `# Studio digest ${d}`;
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', line, tri, ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const fuzzLine = fuzzFiledLine(ev, now);
+  // 2.66.0 (c): the top blocked commands (harness/denials.mjs) as allowlist candidates; a person decides, nothing is added.
+  let cands = [];
+  try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
+  let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
+  if (words(text) >= MAX_WORDS && candLine) { candLine = `Allowlist candidates: ${cands.length} (npm run denials; never added automatically).`; text = compose(items); }
   while (words(text) >= MAX_WORDS && items.length > 1) { items = items.slice(0, -1); text = compose(items).replace(/Needs you \((\d+)\):/, `Needs you ($1; ${need.length - items.length} more: npm run digest -- --all):`); }
   if (words(text) >= MAX_WORDS) { line = line.split(' · ').slice(0, 3).join(' · '); text = compose(items); }
-  return { text, need, fixes: byFix, line, date: d, words: words(text) };
+  return { text, need, fixes: byFix, line, candidates: cands, date: d, words: words(text) };
 }
 
 /** Write studio/digest/<date>.md and one digest.written event. */

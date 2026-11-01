@@ -49,6 +49,7 @@ import { kickoffParts } from './kickoff.mjs';
 import { sweepThreads } from './threads.mjs';
 import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES, volatileLeaks } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
+import { recordDenials } from './denials.mjs';
 import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { savePatch } from './wip.mjs';
@@ -521,6 +522,8 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
   // 2.61.0: which skills and pitfall lines this session was given, and whether its log shows it used them (telemetry only).
   try { recordFollow({ agent, model, role, task: s0.task || tasks[0] || null, log }); } catch { /* telemetry, never a blocker */ }
+  // 2.66.0 (c): Claude Code's permission_denials, harvested into .studio/denials.jsonl (redacted; candidates only, never allowed).
+  try { recordDenials({ log, logFile: s0.log ? path.join(REPO_ROOT, s0.log) : null, task: s0.task || tasks[0] || null, agent, role }); } catch { /* evidence, never a blocker */ }
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
   fs.rmSync(stopFile(agent), { force: true });

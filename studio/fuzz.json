@@ -1,0 +1,4 @@
+{
+  "note": "npm run fuzz (qa/fuzz.mjs, 2.66.0). mode: suggest (findings go to .studio/fuzz/suggestions.md and the daily digest) or file (one bug task per new finding id). autoFileAfter: the first run writes first-run + 7 days (the shadow week); from that date suggest files too; null keeps suggesting. Optional numbers (defaults in code): seeds 20, ticks 500, saveEvery 50, rate 0.25, shrinkBudget 2000; cartridges: [names] (default every game cartridge).",
+  "mode": "suggest"
+}

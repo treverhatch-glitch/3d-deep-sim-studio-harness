@@ -8,6 +8,7 @@
  *                                optional: invariants(state) · outcome(state) · hashState(state) · TUNING
  *   cartridges/<name>/qa.mjs     optional: scenarios { name: { seed, maxTicks, actions?, policy? } }
  *                                optional: createAdapter() for a custom or browser-backed adapter
+ *   either file                  optional (2.66.0, npm run fuzz): actions(state, rand) · actionTypes (qa.mjs wins)
  *
  * Pick the cartridge with --cartridge <name>, STUDIO_CARTRIDGE, studio/game.json (new-game writes it),
  * or "cartridge" in studio/gates.json (the template's fallback).
@@ -163,6 +164,9 @@ export async function loadCartridge(name = defaultCartridgeName(), { dir: fromDi
     browser: qa.browser || null,
     // 2.30b (J4): what the sim can do; each must be bound to input and shown in the browser build.
     simFeatures: Array.isArray(qa.simFeatures) ? qa.simFeatures : [],
+    // 2.66.0 (npm run fuzz, qa/fuzz.mjs): a seeded action generator, else declared action types; qa.mjs wins, like scenarios.
+    actions: typeof qa.actions === 'function' ? qa.actions : typeof mod.actions === 'function' ? mod.actions : null,
+    actionTypes: Array.isArray(qa.actionTypes) ? qa.actionTypes : Array.isArray(mod.actionTypes) ? mod.actionTypes : null,
     init: (seed, overrides) => mod.createInitialState(Number(seed) >>> 0, overrides ? { ...tuning, ...overrides } : undefined),
     step: (state, actions) => mod.step(state, actions && actions.length ? actions : null),
     invariants: (state) => normalizeFindings(mod.invariants ? mod.invariants(state) : [], state),

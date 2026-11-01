@@ -4,6 +4,39 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.66.0] — 2026-11-02
+2.66.0, "measure and find": from the 2026-11-02 research pass (P-156 to P-160).
+### Added
+- **Tokens that do work (a).** `npm run autonomy` adds a Tokens block: the effective-token ratio (tokens of work that
+  stayed landed for `keepDays`, default 7, over all judged tokens), cost per kept change (also per task type) and the
+  waste split (reopened, reverted or redone, handed back, dropped, no task), with pending work reported apart. Any rate
+  on fewer than 30 items says "not enough data" with a Wilson 95% interval. `--since` sets the window; `--json` carries
+  `card.tokenWork`; the War Room card shows the ratio.
+- **`npm run fuzz` (b).** Seeded generated play for every cartridge (its `actions(state, rand)` export or
+  `actionTypes`), checking invariants every tick, a save/load round trip and determinism. Failures are shrunk (ddmin)
+  into `.studio/fuzz/findings/<id>.json` in the regression format, deduped by id. A 7-day shadow week of suggestions
+  (the digest lists them), then one bug task per new finding, never twice. Advisory, not a gate. The new-game template
+  and example-sim gain `actions()`.
+- **Hand-back facts (c).** Every hand-back starts with a block the harness writes: files changed since the task
+  started, the gates run with pass/fail, a failure signature, the failing seed and the last verify log. The next
+  agent's brief shows it first.
+- **Blocked-command log (c).** Claude Code's `permission_denials` are saved, redacted, to `.studio/denials.jsonl` at
+  session end; `npm run denials` summarises them and the digest lists the top 5 as allowlist candidates. Nothing is
+  ever added to a settings or permission file.
+- **A `Fix:` line under every failing gate (d)** (harness/gate-fix.mjs; a gate may carry its own `"fix"`; safety gates
+  say "hand back", never "approve"), and **a settings map (d)**: `node scripts/settings-map.mjs` writes
+  docs/SETTINGS.md (about 400 `STUDIO_*` names with defaults, files and docs). The docs gate fails on a new setting no
+  docs/ page mentions; today's undocumented ones are frozen in docs/settings-baseline.json.
+- **Who may silence a check (e).** `studio/fuzz.ignore.json` is not owner-only: a lane changing it (directly or by a
+  config proposal) is tier C, released by a game dev or an outside agent recording their permission (owner's decision).
+  docs/settings-baseline.json only shrinks: names added since the main branch's copy fail the docs gate, so nobody has
+  to guard it. A train's hand-back detail leaves out the Fix: lines.
+
+### Untested
+- Windows: all of it (CI runs the selftest). Nothing is shell-specific; `git log` is spawned without a shell.
+
+---
+
 ## [2.65.3] — 2026-11-02
 2.65.3: the crew's B-43, a red merge train took over an hour to find the lane that broke it (P-154), and B-44 (P-155).
 ### Fixed

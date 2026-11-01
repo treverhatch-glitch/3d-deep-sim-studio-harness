@@ -28,6 +28,7 @@ import { checkDone } from './done-check.mjs';
 import { DEFAULT_SIZE } from './scorecard.mjs';
 import { readAttached } from './cheatsheet.mjs';
 import { HANDOFF_MAX } from './session-cap.mjs';
+import { latestFacts, withoutFacts } from './handback-facts.mjs';
 import { untrustedBlock } from './untrusted.mjs';
 import { inboxForBrief } from './threads.mjs';
 import { conductorForBrief } from './conductor.mjs';
@@ -116,8 +117,12 @@ export function renderFocus(f) {
   const L = [];
   // 2.58.0 (PU-36, P-049): what agents or people wrote (the title, hand-off notes, meeting and review notes, lessons,
   // the game's off-limits line) goes in one marked block (harness/untrusted.mjs), never among this page's steps.
-  const handoff = f.handoff ? f.handoff.replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim() : '';
+  // 2.66.0 (c): the newest hand-back facts (harness-written: changed files, gates, failure signature, seed, log) come
+  // first; the older blocks are taken out of the notes (stale, and they'd fill the 3k carry-forward).
+  const facts = latestFacts(f.handoff);
+  const handoff = f.handoff ? withoutFacts(f.handoff).replace(/^# .*\n+/, '').replace(/^Newest last.*\n/m, '').trim() : '';
   const told = untrustedBlock([
+    { label: `Hand-back facts from the newest hand-back${facts?.heading ? ` (${facts.heading})` : ''}, written by the harness from git and the gate logs`, text: facts ? facts.block.split('\n').slice(1, -1).join('\n') : '' },
     { label: `Task title (${f.task.id})`, text: f.task.title },
     // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
     { label: `Notes from whoever worked on this before, newest last (${handoff.length > HANDOFF_MAX ? `the newest ${Math.round(HANDOFF_MAX / 1000)}k characters. Older notes in studio/handoffs/${f.task.id}.md` : `studio/handoffs/${f.task.id}.md`})`, text: handoff.length > HANDOFF_MAX ? `…${handoff.slice(-HANDOFF_MAX)}` : handoff },

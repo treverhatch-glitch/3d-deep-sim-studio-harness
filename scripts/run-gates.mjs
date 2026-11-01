@@ -238,6 +238,7 @@ for (const gate of gates) {
   const required = gate.required !== false;
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name });
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
+  if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: `${res.stdout || ''}${res.stderr || ''}`, compact })}`); // 2.66.0 (d): one next step per failure
 
   if (cacheable && !isMergeTier && !focusRun) {
     if (ok) set(gate, ms);

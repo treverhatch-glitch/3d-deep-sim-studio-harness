@@ -4041,6 +4041,52 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (a): tokens that do work: kept / pending / reopened / reverted-or-redone landings over keepDays, the waste
+// split, the effective-token ratio and cost per kept change (per type), the minimum sample with a Wilson interval,
+// --since, revert commits from git (qa/selftest-266a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266a.mjs')).href);
+  await selftest266A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.66.0 (b): npm run fuzz: generated play, invariants, save/load, determinism, ddmin shrinking, findings deduped by id,
+// suggest vs file (the shadow week), the ignore list, the digest line (qa/selftest-266b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266b.mjs')).href);
+  await selftest266B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.66.0 (c): hand-back facts written by the harness ahead of the prose (train drop, task pause, a refused done, the
+// next brief), and the blocked-command log (permission_denials, npm run denials, digest candidates) (qa/selftest-266c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266c.mjs')).href);
+  await selftest266C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.66.0 (d): a Fix: line under every gate failure (an entry for every gate and game check kind), and the generated
+// settings map with its ratchet on new undocumented STUDIO_* names (qa/selftest-266d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266d.mjs')).href);
+  await selftest266D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.66.0 (e): who may silence a check (the fuzz ignore list is tier C), the settings baseline only shrinks, and the
+// train's hand-back detail leaves out the Fix: line (qa/selftest-266e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266e.mjs')).href);
+  await selftest266E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

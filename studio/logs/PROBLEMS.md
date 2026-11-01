@@ -918,3 +918,28 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the crew's 2.65.0 gates: "timeout 1800 s (600 s x 3: unity.exe ... running outside the machine:heavy lock)" while only Hub's 27-hour-old serve process ran.
 - **Why:** implicitHolders matched the program name only.
 - **Fix:** command lines of the matches are read (processArgs) and STUDIO_HEAVY_IGNORE_ARGS skips background services. qa/selftest-2653a.mjs.
+
+### P-156 — the scorecard counted landings, not tokens that did work · fixed in 2.66.0
+- **Evidence:** research M1: a card can read 100% hands-free while about a fifth of tokens end in a kept change.
+- **Why:** hands-free counts only a person's touches.
+- **Fix:** `tokenWork` in harness/autonomy.mjs. qa/selftest-266a.mjs.
+
+### P-157 — no generated-input testing · fixed in 2.66.0
+- **Evidence:** a 0.6 s fuzz run found example-sim's duplicate id (P-153); the soak's policies never generate such input.
+- **Why:** soak replays fixed policies; nothing generated or shrank actions.
+- **Fix:** `npm run fuzz` (qa/fuzz.mjs), shadow week then auto-filed. qa/selftest-266b.mjs.
+
+### P-158 — hand-backs lost which files changed; permission denials were never read · fixed in 2.66.0
+- **Evidence:** research F5 (summaries are weakest on changed files); the crew's logs carry `permission_denials` on every result line (132 of 132), unread.
+- **Why:** hand-back notes were prose only; agent.mjs ignored the field.
+- **Fix:** harness/handback-facts.mjs, harness/denials.mjs. qa/selftest-266c.mjs.
+
+### P-159 — gate failures had no next step; about 400 settings, 226 undocumented · fixed in 2.66.0
+- **Evidence:** the settings scan; research (OpenHands' settings sprawl).
+- **Why:** no table of next steps; no settings inventory.
+- **Fix:** harness/gate-fix.mjs, scripts/settings-map.mjs with a shrink-only baseline. qa/selftest-266d.mjs, qa/selftest-266e.mjs.
+
+### P-160 — a list that silences a check had no guard · fixed in 2.66.0
+- **Evidence:** 2.66.0 (b) added studio/fuzz.ignore.json and (d) a settings baseline; a worker could add to either.
+- **Why:** they're not protected (the owner chose a game dev or an outside agent, not owner-only).
+- **Fix:** tier C "silencer" rules for the ignore list; the baseline only shrinks. qa/selftest-266e.mjs.

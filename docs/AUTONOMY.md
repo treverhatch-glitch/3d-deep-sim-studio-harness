@@ -1,4 +1,4 @@
-# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0)
+# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0, 2.66.0)
 
 Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
 read files and the event log only: no model, no tokens. Neither changes how the studio runs.
@@ -9,6 +9,7 @@ read files and the event log only: no model, no tokens. Neither changes how the 
 npm run autonomy                                   # the last 7 days: one line, details, daily buckets, the L3 bar
 npm run autonomy -- --days 14 --json               # another window, as JSON
 npm run autonomy -- --now 2026-11-08T00:00:00Z     # the window ending then (score an older week)
+npm run autonomy -- --since 2026-11-01T00:00:00Z   # 2.66.0: the window from then to now
 ```
 
 The same line is at the top of the overnight page (`npm run overnight`), and the War Room's Ops view has an
@@ -30,6 +31,33 @@ Autonomy card (read from `GET /api/autonomy`, cached 5 minutes on the hub).
 | Cost per landed task (2.65) | the tokens per landed task, and the same for the window before (the trend). Dollars only with a price table, `studio/prices.json` (`{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million tokens); none ships, so the card says "tokens only". 2.65.2: cache writes (inside `tokensIn`) are priced by TTL, 1.25x input for 5-minute writes and 2x for 1-hour ones (the split from Claude's usage, else the TTL the launcher asked for); a model with no `cacheRead` price reads at 0.1x input; the file's top-level `"multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }` changes them. A session whose tool reported its cost (`meta.costUsd`) counts at that cost. Tokens are counted as the budget meter counts them, whoever calls the scorecard |
 | Person round-trips per landed task (2.65) | a person's planned and unplanned interventions over landed tasks |
 | Orchestrator interventions (2.65) | `conductor.note` events (an outside orchestrator's rulings in a task's record), by who wrote them |
+
+### Tokens that do work (2.66.0)
+
+`npm run autonomy` ends its details with a short **Tokens** block (`--json`: `card.tokenWork`; the War Room card shows
+the effective-token line). `--since <ISO time>` scores the window from then to now (or to `--now`).
+
+- **Kept.** A landed change is kept when, within `keepDays` (`STUDIO_KEEP_DAYS`, else `"keepDays"` in
+  `studio/autonomy.json`, default 7) of its landing, it was not reopened, not reverted (a later commit
+  `Revert "…<task>…"` on the checked-out branch, or a merge-train hand-back of the same task after it landed) and not
+  redone (a task added naming it: `--caused-by`, `meta.redoOf` / `meta.fixes`, or "redo of T-…" / "fixes T-…" in its
+  title). A landing younger than `keepDays` with none of these yet is **pending**: reported apart, counted neither way.
+- **Which session paid for what.** Each `agent.session.end` in the window is shared among the task attempts it held
+  (an attempt belongs to its agent's first session end at or after its claim, shared by wall time, as
+  `docs/METRICS.md` shares tokens). An attempt counts for the landing it led to (a landing after its claim and before
+  the task's next claim); one with no landing is **handed back**, or **dropped** when the task was dropped or shelved
+  after it; a session that held no attempt (Producer, Director, reviews) is **no task**. A hand-back is judged with its
+  task: it stays pending while the landing that followed it is pending, or, with no landing yet, for `keepDays` after
+  it (otherwise a young window would count failures at once and successes `keepDays` later).
+- **Effective-token ratio** = weighted tokens of kept attempts / all judged weighted tokens (all minus pending). By
+  dollars too when they are known (a price table, or every session reporting its cost).
+- **Cost per kept change** = judged weighted tokens and dollars / kept landings in the window; also per task type (the
+  type done-check gives), without the no-task sessions.
+- **Waste split**: reopened, reverted or redone, handed back, dropped, no task: tokens and dollars each.
+- **Minimum sample.** A rate on fewer than `"minSample"` items (default 30: sessions for the token ratio and the
+  waste shares, judged landings for the keep rate) prints "not enough data (n=…)" with its Wilson 95% interval, never a
+  bare percentage. The token ratio's interval counts each session as one item (an approximation: sessions differ in
+  size).
 
 **Who is a person.** The harness's own rules: `harness/verdict.mjs` `isPerson`, `harness/reclassify.mjs`
 `isAgentName` (agent name shapes, a `-bot` suffix, launched session names), and the harness's own scripts
@@ -99,7 +127,23 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   event, written by the watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local time; `STUDIO_DIGEST=off`
   stops the daily run). Under 200 words, only what needs a person: lanes held for a person's release (tier C) and
   protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
-  self-triage can't fix; then the scorecard line and what self-triage fixed. Nothing waiting: one line says so.
+  self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then (2.66.0)
+  the top 5 allowlist candidates from the blocked-command log, the scorecard line, what self-triage fixed and how many
+  fuzz bug tasks were filed. Nothing waiting: one line says so.
+- **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
+  (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
+  Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in
+  `studio/fuzz.json`). An entry in `studio/fuzz.ignore.json` silences a finding, so a lane that adds one (directly or
+  by a config proposal) is tier C: a game dev releases it, or an outside agent records their permission.
+- **The blocked-command log (2.66.0)** (`npm run denials [-- --days 7] [--json]`, harness/denials.mjs). At session
+  end the launcher reads Claude Code's `permission_denials` from every `{"type":"result"}` line of the session's log
+  (the crew's logs carry the field on every result line) into `.studio/denials.jsonl`: task, agent, role, tool, a
+  redacted command summary (keys, tokens, passwords, `Authorization` headers, `NAME_TOKEN=…`, `--password …`,
+  `user:pass@` removed; at most 200 characters), a group key (`Bash(git push *)`, `Read(dir/**)`) and why it was
+  refused (not on the list; chained, prefixed or using a variable; on the list but refused by a hook or a rule). A
+  result line without the field records nothing. `npm run denials` shows the top commands and the count per task.
+  Only plain commands off the list are **candidates**. Nothing ever adds them to `.claude/settings*.json`,
+  `harness/allowlist.mjs` or `--allowedTools`: a person reads them and decides.
 
 ## Drift checks (Check cards to the Producer)
 

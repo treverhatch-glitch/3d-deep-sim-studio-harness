@@ -35,6 +35,7 @@ import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -780,6 +781,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (gg.status !== 0) {
       const failed = res?.failed?.length ? res.failed : [{ id: 'game-gates', why: `${(gg.stderr || gg.stdout || '').trim().slice(0, 300)}` }];
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${failed.map((f) => f.id).join(', ')} failed` });
+      if (!checkOnly) recordGateRefusal(target.id, { gates: res?.rows?.length ? res.rows : failed.map((f) => ({ id: f.id, ok: false })), text: failed.map((f) => `${(f.failures || []).map((x) => `FAIL ${x}`).join('\n')}\n${f.why || ''}`).join('\n') }); // 2.66.0 (c): the next hand-back's facts
       return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
     }
   }
@@ -1060,13 +1062,18 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   if (!mine.some((l) => l.key.startsWith('task:'))) for (const l of mine) if (release(l.key, who).ok !== false) freed.push(l.key);
   // A hand-back note is for the next agent, who shouldn't have to read the last one's logs: 20 lines
   // at most, in a fixed shape (done, not done, files, next step, proof). Longer notes are cut.
+  // 2.66.0 (c): facts a caller already put in front (the merge train's drop) aren't prose: kept whole, never cut,
+  // and the events, the breaker and the "blocked by" hold read only the prose.
+  const given = splitFacts(note);
+  note = given.prose;
   const capLines = String(note || '').split('\n');
   if (capLines.length > 20 || String(note || '').length > HANDBACK_MAX) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
   if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
-  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${note || 'No note left.'}\n`);
+  // 2.66.0 (c): the harness's own facts (changed files, gates, failure signature, seed, log) go in front of the prose.
+  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${given.facts ? `${given.facts}\n${note || 'No note left.'}` : withFacts(target.id, note || 'No note left.', { agent: lock.lock?.owner || agent })}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: isFailureNote(note) ? { reasonKey: reasonKey(note) } : {} });
   // 2.30c (#8): a second hand-back for the same reason parks the task with a card; other lanes go on.

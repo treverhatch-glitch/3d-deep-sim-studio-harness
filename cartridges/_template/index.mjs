@@ -6,6 +6,7 @@
  *   step(state, actions|null)          one fixed tick; returns a NEW state; actions is an array or null
  *   invariants(state)                  [{ id, severity: 'P0'|'P1'|'P2', summary }]
  *   outcome(state)                     'won' | 'lost' | null
+ *   actions(state, rand)               one random player action (or [actions] or null) for npm run fuzz
  *   TUNING                             every balance number in one table (the balancer sweeps it)
  *
  * Pure: no DOM, no Three.js, no Math.random, no Date, no timers. The purity gate traps them at runtime.
@@ -68,6 +69,17 @@ export function invariants(state) {
   if (!Number.isInteger(state.workers) || state.workers < 0) findings.push({ id: 'WORKERS_RANGE', severity: 'P0', summary: `workers is ${state.workers}` });
   if (state.won && state.lost) findings.push({ id: 'WON_AND_LOST', severity: 'P0', summary: 'state is both won and lost' });
   return findings;
+}
+
+/**
+ * Fuzz actions (npm run fuzz, qa/fuzz.mjs): return one action a player could send now, an array, or null. Use only the
+ * seeded `rand` passed in (rand() in [0, 1), rand.int(n), rand.pick(list)), never Math.random. Cover every action type
+ * step() accepts, including ones that should be refused (unaffordable, unknown ids): the fuzzer checks invariants(),
+ * a JSON save/load round trip and determinism after each, and shrinks any failure to a short repro.
+ */
+export function actions(state, rand) {
+  // Mostly hires (refused when unaffordable), sometimes an action step() doesn't know (it must be ignored).
+  return rand() < 0.8 ? { type: 'hire' } : { type: rand.pick(['fire', 'unknown']) };
 }
 
 export function outcome(state) {
