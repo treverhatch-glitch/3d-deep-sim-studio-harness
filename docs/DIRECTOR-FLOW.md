@@ -54,7 +54,13 @@ default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. 
    while its `task done` runs or its lane waits to land, and (2.58.3) not while the owner of that claim (an agent
    working outside the launcher, claiming with `task start`) was heard from within `STUDIO_CLAIM_ACTIVE_MIN` (30)
    minutes or its lane copy changed in that time: the pass says "kept T-… (busy: …'s owner … is still working on
-   it)". The watcher's requeue follows the same rule, and the supervisor won't give such a task to a new agent;
+   it)". The watcher's requeue follows the same rule, and the supervisor won't give such a task to a new agent.
+   (2.58.5) A kept task's claim is made again in the owner's name (`lock.kept`), and `task start` by anyone else is
+   refused until the owner lets go (`--force` for a person reassigning it). A lane copy with commits that name the
+   task (or on its branch, or named for the owner) ahead of the studio's branch keeps it however quiet the owner is
+   (built, not landed), for up to `STUDIO_CLAIM_LANE_MAX_H` (24) hours since the lane last changed, unless the
+   owner's session ended. These hand-backs, and every other one the harness causes, never count for the circuit
+   breaker or as a failure;
 2. counts idle builder slots against ready work across the whole board, every role and lane, minus held and
    parked tasks (breaker parks included) and minus failing tasks: a task whose last hand-back was a failure is
    never re-fed by the flow; the circuit breaker or a person decides what happens to it;
