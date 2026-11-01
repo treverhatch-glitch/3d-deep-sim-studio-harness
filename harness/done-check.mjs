@@ -14,12 +14,17 @@
  * A bug's regression is a cartridge replay or a seeded game unit test ("kind": "test", qa/regressions/README.md).
  * 2.62.0 (H): a task with an agreed acceptance contract (studio/contracts/<ID>.json) also needs every criterion in
  * force passing (harness/contracts.mjs contractChecks); one without a contract is checked as before.
+ * 2.65.0 (hands-off by default): a "bug" type from the title or role whose committed changes are only tests, docs or
+ * config (no game logic: harness/type-evidence.mjs, the sim paths of harness/tiers.mjs and the game's manifest) is
+ * judged a "change" task (no regression replay), said as "type: change (evidence: …)" and logged once as a
+ * task.type.evidence event (evidenceType). An owner or permission record always outranks the evidence; a change in
+ * a sim path keeps "bug" and its replay. STUDIO_TYPE_EVIDENCE=off: the title decides, as before.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { isSha256 } from './hash.mjs';
 import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
@@ -37,6 +42,8 @@ import { inLaneCopy, mainRoot } from './worktree.mjs';
 import { isEolOnlyLine } from './eol-only.mjs';
 import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
+import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
+import { activeGame } from './cartridge.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -161,6 +168,32 @@ export function typeOf(task) {
   try { o = task?.id ? ownerType(task.id) : null; } catch { o = null; }
   if (o?.type) return { type: o.type, source: ownerTypeWords(o), owner: o, ignored: null, titleType: rule.type };
   return { type: rule.type, source: rule.by === 'title' ? 'from its title' : `from its role (${task?.role || 'none'})`, owner: null, ignored: o?.ignored || null, titleType: rule.type };
+}
+
+/**
+ * 2.65.0: the type the task's own diff gives, when it overrides a title/role "bug": { type: 'change', source, files,
+ * kinds } or null (no override: an owner record, not a bug, no commits yet, or any game-logic file changed). Writes
+ * one task.type.evidence event per task and file set (emit: false skips it). ch: taskChanges() when the caller has it.
+ */
+export function evidenceType(task, typed = typeOf(task), { since = null, ch = null, emit = true, env = process.env } = {}) {
+  if (/^off$/i.test(String(env.STUDIO_TYPE_EVIDENCE || '')) || !task?.id || typed.owner || typed.type !== 'bug') return null;
+  let changes = ch;
+  try { changes ||= taskChanges(task.id, since ?? startedAt(task.id)); } catch { return null; }
+  if (!changes?.commits?.length || !changes.files?.length) return null;
+  let game = null;
+  try { game = activeGame().name || null; } catch { game = null; }
+  const j = judgeFiles(changes.files, { settings: manifestSettings(REPO_ROOT, game), exists: (f) => fs.existsSync(abs(f)) });
+  if (!j.onlyNonLogic) return null;
+  const words = evidenceWords(j.kinds);
+  const files = [...j.kinds.test, ...j.kinds.docs, ...j.kinds.config].sort();
+  if (emit) {
+    try {
+      const key = files.join('\n');
+      const seen = readRecentEvents(20000).some((e) => e.type === 'task.type.evidence' && e.task === task.id && (e.meta?.files || []).join('\n') === key);
+      if (!seen) emitEvent({ type: 'task.type.evidence', agent: 'done-check', task: task.id, msg: `${task.id}: judged a "change" task, not a "bug" (${typed.source}): ${words}; no regression replay needed (an owner's npm run task -- type ${task.id} bug outranks this)`.slice(0, 600), meta: { from: 'bug', to: 'change', titleType: typed.titleType, evidence: words, files: files.slice(0, 50) } });
+    } catch { /* the decision stands without its event */ }
+  }
+  return { type: 'change', source: `evidence: ${words}`, files, kinds: j.kinds };
 }
 
 export function taskType(task) {
@@ -613,6 +646,9 @@ export function gameplayChecks(task, part, since, check) {
  */
 export function checkDone(task, since = startedAt(task.id)) {
   const typed = typeOf(task);
+  // 2.65.0: a bug whose diff is only tests, docs or config is a change (evidence; an owner record outranks it).
+  const ev = evidenceType(task, typed, { since });
+  if (ev) Object.assign(typed, { type: ev.type, source: ev.source, evidence: ev });
   const type = typed.type;
   const part = task.part || partOf(task.id);
   const seen = part === 'renderer' || part === 'both';
@@ -818,7 +854,7 @@ export function checkDone(task, since = startedAt(task.id)) {
     notes.push(...k.notes);
   }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
-  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, part, since, checks, missing, notes, ...TYPES[type] };
+  return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, ...(typed.evidence ? { typeEvidence: typed.evidence } : {}), part, since, checks, missing, notes, ...TYPES[type] };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -832,6 +868,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const res = checkDone(task);
   console.log(`${task.id} is a "${res.type}" task (${res.typeSource}). Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
   if (res.typeIgnored) console.log(`  note: ${res.typeIgnored}`);
+  if (res.typeEvidence) console.log(`  type: ${res.type} (${res.typeSource}; the title says ${res.titleType}, so no regression replay is needed)`);
   // 2.60.1 (B-38): whether it needs a visual result, and why (the owner's decision, the evidence or the title).
   try {
     const d = renderDecision(task);
