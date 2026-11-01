@@ -18,6 +18,16 @@ The studio's files are the memory, not the chat.
   it at once (up to `STUDIO_REFRESH_RELAUNCH`, default 5, in a row). No failover, no cooldown, and it
   doesn't count toward parking a looping task.
 - The brief shows the newest 3k characters of a task's notes (`studio/handoffs/<ID>.md` keeps them all).
+- **Hand-back facts (2.66.0).** Every hand-back (`task pause`, the merge train's drop, the watcher, a session that
+  ended holding its task) starts with a block the harness writes, not the agent (harness/handback-facts.mjs): the
+  files changed since the task's start commit (`git diff --name-only`, untracked files too, at most 30 named plus a
+  count), the newest gate run since the task started with PASS/FAIL per gate, the failure signature (the first
+  failing gate and its first failing test line, normalised, with a short `sig` hash), the failing seed when the log
+  names one, and the last verify log's path. The gate evidence is, newest first: the log the note names (the train's
+  `Full log:`), a refused `task done` (`.studio/handback-facts/<ID>.json`), the holder's own verify record. The
+  note's 20-line cap applies to the prose only; events and the breaker read the prose. The next agent's brief
+  (`.studio/briefs/<ID>.md`) shows the newest block first, inside the marked block (file names and log lines come
+  from the work), and leaves older blocks out of the notes.
 - **Mid-debug exception.** With a live repro, an agent may keep going to the ceiling:
   `npm run session -- exception "<repro: seed, tick, command>"`. That flags it. The Director or Producer
   gets a "Check <agent>" card at every 20 turns / 40k tokens past the refresh point and answers with
