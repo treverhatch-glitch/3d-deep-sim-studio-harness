@@ -107,20 +107,27 @@ export function readAcceptedLessons() {
 }
 
 /**
- * Accept a lesson for planning: { ok, message }. A person (--by, their name), or a Producer/Director session or an
- * outside agent on a person's permission (harness/permission.mjs, the 2.59.1 rule). A worker never; an agent's name in
- * --by never.
+ * Accept a lesson for planning: { ok, message }. A person (--by, their name); a launched Producer or Director session
+ * (--by its own name: it reviews what workers wrote, no person needed); an outside agent on a person's permission
+ * (harness/permission.mjs, the 2.59.1 rule). A worker never; another agent's name in --by never.
  */
 export async function acceptLesson(id, { by, why = '', permission = '', env = process.env } = {}) {
-  const { agentOnPermission, WORKER_NAME } = await import('./permission.mjs');
+  const { agentOnPermission, WORKER_NAME, DECIDER_ROLES } = await import('./permission.mjs');
   const name = String(by || '').trim();
   if (!name) return { ok: false, message: 'Say who accepts it: --by <person> --why "…".' };
-  if (WORKER_NAME.test(name) || /^(producer|director|opus|claude|codex|gemini|bot)\b/i.test(name) || /-s\d+$/.test(name)) return { ok: false, message: `--by is the person who accepts the lesson, not an agent's name (${name}).` };
+  const self = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const deciderSelf = DECIDER_ROLES.test(String(env.STUDIO_ROLE || '').trim()) && name === self && !WORKER_NAME.test(self);
+  if (!deciderSelf && (WORKER_NAME.test(name) || /^(producer|director|opus|claude|codex|gemini|bot)\b/i.test(name) || /-s\d+$/.test(name))) return { ok: false, message: `--by is the person who accepts the lesson, not an agent's name (${name}).` };
   if (!String(why).trim()) return { ok: false, message: 'Say why: --why "…" (what the lesson should change in planning).' };
   const marker = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'].some((k) => String(env[k] || '').trim());
   const asAgent = marker || String(env.STUDIO_ROLE || '').trim() || String(env.STUDIO_LOCK_OWNER || '').trim();
   let rec = null;
-  if (asAgent) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  if (asAgent && DECIDER_ROLES.test(role) && !WORKER_NAME.test(String(env.STUDIO_LOCK_OWNER || ''))) {
+    // A launched Producer or Director session reviews lessons workers wrote, without a person's permission: the agent
+    // that wrote a lesson (a worker) never accepts it, and the studio doesn't wait on a person for routine lessons.
+    rec = { ok: true, recordedBy: String(env.STUDIO_LOCK_OWNER || '').trim() || `a ${role.toLowerCase()} session`, reviewed: true };
+  } else if (asAgent) {
     rec = agentOnPermission({ permission, env });
     if (!rec.ok) return { ok: false, message: `An agent can't accept a lesson on its own: ${rec.why}.` };
   }
@@ -131,11 +138,12 @@ export async function acceptLesson(id, { by, why = '', permission = '', env = pr
   try { list = JSON.parse(fs.readFileSync(file, 'utf8')).accepted || []; } catch {}
   list = list.filter((a) => a && a.id !== lesson.id);
   const entry = { id: lesson.id, hash: lesson.hash, by: name, why: String(why).trim().slice(0, 300), at: new Date().toISOString() };
-  if (rec) Object.assign(entry, { permission: String(permission).trim().slice(0, 500), recordedBy: rec.recordedBy });
+  if (rec?.reviewed) Object.assign(entry, { recordedBy: rec.recordedBy, reviewedBy: role.toLowerCase() });
+  else if (rec) Object.assign(entry, { permission: String(permission).trim().slice(0, 500), recordedBy: rec.recordedBy });
   list.push(entry);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify({ accepted: list }, null, 2)}\n`);
-  return { ok: true, message: `Accepted ${lesson.source} for planning (by ${name}${rec ? `, recorded by ${rec.recordedBy} on ${name}'s permission` : ''}). It covers this text only: an edit to the lesson needs a new acceptance. Commit ${ACCEPTED_LESSONS}.` };
+  return { ok: true, message: `Accepted ${lesson.source} for planning (by ${name}${rec?.reviewed ? `, reviewed by ${rec.recordedBy}` : rec ? `, recorded by ${rec.recordedBy} on ${name}'s permission` : ''}). It covers this text only: an edit to the lesson needs a new acceptance. Commit ${ACCEPTED_LESSONS}.` };
 }
 
 /** Causes a person accepted with `npm run causes -- accept` (read here, never written). */
