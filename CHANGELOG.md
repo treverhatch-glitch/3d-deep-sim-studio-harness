@@ -4,6 +4,30 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.5] — 2026-11-01
+2.58.5: fixes from opus-bot's crew report of 2026-11-01 (H-1 to H-11; P-084 to P-096).
+### Fixed
+- **The hooks gate no longer crashes on big ranges (P-084, H-7).** Patch-ids only for the commits that need one,
+  streamed through `git patch-id` with no diff in Node (was ERR_STRING_TOO_LONG on every landing); an output too big to
+  read fails the gate. test-weakening diffs only test code. The crew's T-084 patch can go. qa/selftest-2585p.mjs.
+- **`task done` doesn't re-run the game's checks after a green full verify of the same tree (P-085, H-3).** Clean, full,
+  not narrower; `STUDIO_DONE_REUSE_VERIFY=off` re-runs. After a rebase only checks whose declared paths main touched run;
+  a landing takes the next free gate slot ahead of verifies. qa/selftest-2585s.mjs.
+- **Upgrades never stash the board (P-086, H-4).** `npm run upgrade -- --check` refuses while board files are uncommitted
+  and names stashes holding board rows; `--snapshot`; docs/RELEASE.md has the steps.
+- **Live owners keep their claims, really (P-089, H-5).** Kept tasks get their claim back; a lane copy with the task's
+  unlanded commits keeps it (`STUDIO_CLAIM_LANE_MAX_H`, 24); `task start` refuses a live owner's lapsed claim (`--force`);
+  harness hand-backs never trip the breaker; `task add --start --agent X`. qa/selftest-2585q.mjs.
+- **Locks (P-090, P-091; H-10, H-6).** In a lane copy another agent's path lock is a note at commit time (checked when the
+  lane lands; `STUDIO_LANE_LOCKS=block`); by-hand claims on a game's source root or a folder over `STUDIO_LOCK_MAX_FILES`
+  (50) files need `--wide`; `git merge main` is judged on the lane's own diff.
+- **Launchers (P-092 to P-096; H-9, H-2, H-2b, H-1, H-8).** Custom tool commands get the lane copy (`{mainRoot}`,
+  `{addDirs}`); agy reads its kickoff and the quota probe on stdin (`STUDIO_AGY_PROMPT=arg` restores `-p`); `allow agy`
+  writes only the approved set (`--all`, `--prune`); `--tool nim` never runs the role's model, defaults to
+  `moonshotai/kimi-k2.6`, says when a model is gone, passes the key so aider's `.env` can't blank it, and runs with
+  `--no-auto-commits`. qa/selftest-2585r.mjs. UNTESTED against real agy, aider or NIM.
+- **Owner-key notes say how to make the key (P-087, H-11)**; the seed rule no longer flags loops over seeds (P-088).
+
 ## [2.58.4] — 2026-11-01
 2.58.4: three gaps found while building a game's first real replay cartridge (P-081 to P-083).
 ### Fixed

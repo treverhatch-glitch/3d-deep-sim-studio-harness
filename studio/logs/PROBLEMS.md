@@ -570,3 +570,56 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the Hatchfield sim takes about 3–5 ms a tick (9.4 ms on a 2-core cloud box) against the 1 ms default, and `TICK_BUDGET_MS_PER_TICK` applies to every cartridge.
 - **Change:** `cartridge.json` `"tickBudgetMs"`. Note: cartridge.json isn't a protected file, so an agent could loosen it; protecting it needs the owner key and would get in the way of new-game ID minting.
 
+
+### P-084 — The hooks gate crashed with ERR_STRING_TOO_LONG (crew report H-7) · fixed in 2.58.5
+- **Evidence:** opus-bot's report 2026-11-01, H-7 ("blocker"): every landing and main failed the hooks gate once a rebased commit needed the patch-id fallback; the crew carried a local patch (T-084).
+- **Why:** harness/hook-stamp.mjs read `git log -p --binary` for the whole base..HEAD range into one Node string; with a far-behind base that range held the game's art import.
+- **Fix:** patch-ids only for the commits that need one, streamed `git log --no-walk --stdin -p | git patch-id` with no diff in Node; an output too big to read fails the gate instead of passing it; test-weakening diffs only test code. qa/selftest-2585p.mjs. The crew's T-084 patch can be dropped after updating.
+
+### P-085 — `task done` re-ran the game's checks and timed out under load (crew report H-3) · fixed in 2.58.5
+- **Evidence:** H-3 ("high"): the crew raised `STUDIO_GAME_GATE_TIMEOUT_MS` to 1,500,000 and paused builders.
+- **Why:** `task done` ran the game's gate again right after a green full `npm run verify` of the same tree; after a rebase every game check ran again; landings queued behind verifies for gate slots.
+- **Fix:** a green full verify of the same clean tree stands in (`STUDIO_DONE_REUSE_VERIFY=off` re-runs); after a rebase only checks whose declared paths main touched run; a landing takes the next free slot. qa/selftest-2585s.mjs. **Planned, not done:** scaling the gate timeout with machine load.
+
+### P-086 — The 2.58.2 upgrade's stash dropped board entries (crew report H-4) · fixed in 2.58.5
+- **Evidence:** H-4 ("high", hand repair done): done tasks reopened after the stash used for the upgrade was popped.
+- **Fix:** `npm run upgrade -- --check` (harness/upgrade-guard.mjs) refuses while board files are uncommitted, names stashes holding board rows and how to restore them by merge; `--snapshot` copies the board aside. docs/RELEASE.md says commit the board first, never stash it. qa/selftest-2585s.mjs.
+
+### P-087 — "No owner key" notes didn't say how to make one (crew report H-11) · fixed in 2.58.5 (the key itself is Hatch's to make)
+- **Evidence:** H-11 ("info"): opus-bot correctly refused to run keygen on the agents' PC; approvals for protected files, weakened tests and hooks can't happen until the key exists.
+- **Fix:** every such note says exactly how: keygen on a device no agent runs on, commit only `studio/keys/owner-ed25519.pub.pem`, the private key never on the agents' PC. Key handling unchanged. qa/selftest-2585s.mjs.
+
+### P-088 — The weakened-tests seed rule flagged loops over seeds · fixed in 2.58.5
+- **Evidence:** found while checking H-7's test-weakening changes: `for seed in [1, 2, 3]:` and `assert seed != 0` were reported as seed special cases.
+- **Fix:** only branches on the seed (if, ternary, return/continue/skip, switch, match) count. qa/selftest-2585s.mjs.
+
+### P-089 — Crew builders took built-but-unlanded tasks when a claim lapsed (crew report H-5) · fixed in 2.58.5
+- **Evidence:** H-5 ("high"), T-067 taken by a crew builder; T-060, T-061 and T-064 parked by the breaker after "claim ran out" hand-backs.
+- **Why:** 2.58.3's claimActive kept the task but not the claim, didn't count a lane named `opus-N` that was built and waiting to land, the breaker counted harness hand-backs, and `task add` then `task start` left a window.
+- **Fix:** kept tasks get their claim back; a lane copy with the task's unlanded commits keeps it (up to `STUDIO_CLAIM_LANE_MAX_H`, 24 h); `task start` refuses a live owner's lapsed claim (`--force` reassigns); harness hand-backs never trip the breaker; `task add --start --agent X`. qa/selftest-2585q.mjs.
+
+### P-090 — A crew builder locked a whole source folder for an hour (crew report H-10) · fixed in 2.58.5 (launcher part planned)
+- **Fix:** in a lane copy another agent's path lock is a note at commit time (checked when the lane lands; `STUDIO_LANE_LOCKS=block` restores the refusal); by-hand claims on a game's folder, source root or a folder over `STUDIO_LOCK_MAX_FILES` (50) files need `--wide`. qa/selftest-2585q.mjs. **Planned:** the launcher's own broad lane claims aren't checked yet (Hatch to decide: refuse or narrow).
+
+### P-091 — The lock gate blocked `git merge main` in a lane (crew report H-6) · fixed in 2.58.5
+- **Why:** the merge commit's staged list included files that came unchanged from main, locked by other lanes.
+- **Fix:** during a merge only files the result doesn't take unchanged from the merged branch are judged. qa/selftest-2585q.mjs.
+
+### P-092 — A custom tool command got no lane copy and edited the main checkout (crew report H-9) · fixed in 2.58.5 (per-agent key planned)
+- **Evidence:** evidence api-1.json: `"lane": null`, no copy; 2.58.3 refused a lane copy to any custom command.
+- **Fix:** a custom command on a laneless code task gets its own lane copy like the built-in tools, with `{mainRoot}` and `{addDirs}` placeholders; an uncommitted wrapper script named by a relative path runs from the main checkout. qa/selftest-2585r.mjs. **Planned:** a per-agent API key mapping (`STUDIO_<ROLE>_KEYMAP`), waiting on Hatch (by role or by agent; the key hold).
+
+### P-093 — agy launches failed on Windows: "unexpected argument" (crew report H-2) · fixed in 2.58.5 (untested on real agy)
+- **Evidence:** agy-1.json `cmd: "agy.exe"`, started directly and quoted right; agy.exe itself split `-p`'s text at spaces.
+- **Fix:** agy gets its kickoff on stdin (`agy --print-timeout 900s [--settings f]`), and the quota probe does the same; `STUDIO_AGY_PROMPT=arg` brings back `-p`. qa/selftest-2585r.mjs.
+
+### P-094 — `allow agy` wrote 30 rules where 16 were approved (crew report H-2b) · fixed in 2.58.5
+- **Fix:** `npm run agent -- allow agy` writes only the owner-approved set (node, npm, npx, git status/diff/add/commit/log); `--all` writes the whole list; `--prune` takes extra harness-written rules out after a backup; a plain run names extras. Docs say only exact commands matched on Windows. qa/selftest-2585r.mjs.
+
+### P-095 — `--tool nim` ran the role's model, and its default was end-of-life (crew report H-1) · fixed in 2.58.5
+- **Evidence:** aider showed `openai/claude-sonnet-5-5`; `qwen/qwen3-coder-480b-a35b-instruct` answered 410.
+- **Fix:** a model that isn't an `<org>/<model>` id is ignored; the default is `moonshotai/kimi-k2.6` (listed on build.nvidia.com; untested with a real key); a 410/404 ends the log with one clear line and an `agent.model_gone` event. qa/selftest-2585r.mjs.
+
+### P-096 — `--tool nim` child got no Authorization header (crew report H-8) · fixed in 2.58.5 (untested against real aider)
+- **Why:** not the env filter (that passed `OPENAI_API_KEY`): aider loads `.env` files over the environment, and the lane copy's `.env` has the template's empty `OPENAI_API_KEY=`.
+- **Fix:** the child also gets `AIDER_OPENAI_API_KEY`, applied after `.env`; other-cased `OPENAI_` names are dropped; aider runs with `--no-auto-commits`. qa/selftest-2585r.mjs.
