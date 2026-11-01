@@ -165,6 +165,19 @@ export function invariants(state) {
   return findings;
 }
 
+/**
+ * Fuzz actions (npm run fuzz, qa/fuzz.mjs): one random player action for this state, from the seeded `rand` the
+ * fuzzer passes in (rand() in [0, 1), rand.int(n), rand.pick(list)); never Math.random. Ids repeat on purpose: a
+ * caller-given id already in use must be refused (the 2.65.2 fix of the duplicate id a fuzz run found).
+ */
+export function actions(state, rand) {
+  const k = rand();
+  if (k < 0.04) return { type: 'PAUSE' };
+  if (k < 0.12) return { type: 'RESUME' };
+  const id = rand.pick(['a', 'b', 'c', null, null, null]);
+  return { type: 'spawn', kind: rand.pick(['vehicle', 'sensor', 'crate']), ...(id ? { id } : {}), x: rand.int(10), z: rand.int(10) };
+}
+
 export function outcome(state) {
   return state.won ? 'won' : state.lost ? 'lost' : null;
 }
