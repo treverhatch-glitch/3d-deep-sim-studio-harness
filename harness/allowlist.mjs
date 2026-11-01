@@ -29,5 +29,9 @@ export const allowedToolsList = () => ALLOWED.map(([, p]) => `Bash(${p})`);
 export const allowedTools = () => allowedToolsList().join(',');
 /** The kickoff's paragraph: exactly what runs without a prompt, and what doesn't. */
 export function allowedNote() {
-  return `You may run, without asking: ${ALLOWED.map(([n]) => `\`${n}\``).join(', ')}. Anything else (git push, git reset, rm, curl, installing tools) is not on the list: it stops for a person's yes, so don't plan around it; hand back with a note instead.`;
+  // M5 (2.58.3): each Bash call is matched as a whole, so a chain or a prefix stops for approval even when every part
+  // is on the list (the crew lost turns to "cat A ; cat B", "head -5; …", "cd ../.. && …", "STUDIO_LOCK_OWNER=x git …").
+  return `You may run, without asking: ${ALLOWED.map(([n]) => `\`${n}\``).join(', ')}. Anything else (git push, git reset, rm, curl, installing tools) is not on the list: it stops for a person's yes, so don't plan around it; hand back with a note instead.`
+    + ` One command per Bash call: no \`;\`, \`&&\` or \`||\` chains, no \`cd … &&\` first, and no \`VAR=x\` prefix in front of a command (your \`$STUDIO_LOCK_OWNER\` is already set; pass \`--agent <you>\` where a command takes it). A chained or prefixed line stops for approval even when each part is allowed.`
+    + ` Read files with your Read, Grep and Glob tools (or your tool's own file reader), not \`cat\`, \`head\`, \`tail\` or \`grep\` in Bash.`;
 }
