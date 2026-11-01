@@ -3811,6 +3811,45 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.0 (helper a): a red merge train re-runs only its failing checks on prefixes (exact blame, interaction culprits
+// too), refreshes declared pins in one Pin-Refresh commit, and union-merges the manifest's unionFiles (qa/selftest-260a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260a.mjs')).href);
+  await selftest260A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.0 (helper b): a game's protected manifest may exempt a barrel from the size ratchet (with a hard cap) and let
+// import-only lines through; lines two lanes in flight change are warned about, and the third conflict on one line
+// asks the Producer to restructure it (qa/selftest-260b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260b.mjs')).href);
+  await selftest260B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.0 (#3, #4): the upgrade path (a bootstrap from the ref, upgrade --merge through the hooks with the main-checkout
+// guard opened for that merge only, Golden-Reason for goldens straight from the ref, --restore-stash keeping both
+// sides' rows) and STUDIO_HARNESS_REF in the hooks gate (qa/selftest-260c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260c.mjs')).href);
+  await selftest260C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.0 (#5, #6): heavy stop kills a holder's whole process tree (and a killed holder's orphans go at the next take),
+// createLaneCopy refuses a task id that isn't on the board, a manifest's slowTests get the load factor
+// (qa/selftest-260d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest260D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260d.mjs')).href);
+  await selftest260D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

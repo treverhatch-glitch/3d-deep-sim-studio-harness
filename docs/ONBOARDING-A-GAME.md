@@ -138,6 +138,28 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
 - **Mid-development games:** pick a freeze point, finish or park open branches, and let the old
   workflow's CI keep running alongside until the studio's gates cover the same ground.
 
+## Slow tests under load (2.60.0)
+
+The game check's own timeout grows with load (2.59.0), but a per-test timeout in the game's test config doesn't.
+A game whose seeded tests are slow under a full suite declares them in `studio.gates.json`:
+
+```json
+{ "slowTests": { "pattern": "src/**/*.slow.test.ts", "timeoutScale": true, "minScale": 1 } }
+```
+
+Each of the game's checks then runs with `STUDIO_TEST_TIMEOUT_SCALE=<factor>` (the same load factor as the check's
+timeout, at least `minScale` and never below 1; printed for every check and kept in its row as `testTimeoutScale`) and
+`STUDIO_SLOW_TESTS=<pattern>`. The game's test config multiplies its timeouts by it, for example in `vitest.config.ts`:
+
+```ts
+const scale = Number(process.env.STUDIO_TEST_TIMEOUT_SCALE || 1);
+// in defineConfig({ test: { ... } }):
+testTimeout: 5000 * scale, hookTimeout: 10000 * scale,
+```
+
+or only for the slow files, with `{ timeout: 6000 * scale }` on those tests. Outside the gate the variable is unset, so
+the factor is 1. `"timeoutScale": false` turns it off. The manifest is protected: adding this needs the owner's approval.
+
 ## Path-scoped gates and parallel tracks (2.30p)
 
 A game with more than one build (for example a browser build under `web/` and an engine build under `godot/`) should scope its gates, so a change to one build doesn't run the other's checks:
@@ -155,3 +177,45 @@ A game with more than one build (for example a browser build under `web/` and an
 - `task done` in a lane copy runs only the gates whose `paths` its diff touches and logs each skipped gate with the reason. A change under `shared` (or `harness/`, `scripts/`, `studio/gates.json`, package files, the manifest) runs every gate. A gate without `paths` always runs, so manifests without them behave as before.
 - The pass is recorded with its commit and scope. If the studio's branch moves before the lane lands, and everything it brought in is outside that scope, the pass is reused instead of re-run.
 - Only the final fast-forward and the board write take the short land lock, so the tracks verify and land in parallel.
+
+## Pins and union files for the merge train (2.60.0)
+
+Two optional keys in `<game>/studio.gates.json` (a protected file: the owner approves changes) tell the merge train
+(`harness/train.mjs`, see `docs/WORK-ORGANIZATION.md`) how to land lanes that touch the same seeded numbers or the
+same import list:
+
+```json
+{
+  "gates": [{ "id": "unit", "command": "npm test" }],
+  "pins": {
+    "tests": ["throughput", "queueWindow", "replays/start-*"],
+    "report": "node game/mygame/pins.mjs report --out {out}",
+    "refresh": "node game/mygame/pins.mjs refresh --in {in}",
+    "invariants": ["retryCap", "stuckCheck"]
+  },
+  "unionFiles": ["src/game/modules.ts"]
+}
+```
+
+- **pins.tests**: the game's pin tests (exact numbers from a seeded run, recordings), as names or `*` globs. A failing
+  test is a pin test when an entry matches its name whole or as a token (`throughput` matches
+  `pins > throughput` and `throughput: expected 10, got 11`). The game's checks name their failing tests in
+  the log (lines like `FAIL <name>`, `× <name>`, `not ok N - <name>`): a check that fails without naming its tests is
+  never treated as pins-only.
+- **pins.report**: a command (run from the repo root of the tree being checked, `CI=true`) that runs the pins and
+  writes a JSON object `{ "<pin>": <value>, ... }` to `{out}` (replaced by a quoted path). It must exit 0 when the
+  values don't match the expectations: it reports the values, it doesn't judge them. Pin names are its keys.
+- **pins.refresh**: a command that rewrites the pinned expectations from such a report at `{in}`. It may change only
+  the expectation files; the train commits whatever it changes, then runs the full verify again.
+- **pins.invariants**: pin names (or `*` globs) that are never refreshed: a red line, a cap, a "no divert", a
+  stuck/gridlock check. A lane that moves one is handed back. Keep their expectations in protected files too.
+- A lane declares the pins it means to move with a commit trailer on its own commits: `Pin-Moves: throughput,
+  queueWindow` (globs allowed). `git commit -m "T-12: wider taxiway" -m "Pin-Moves: throughput"`.
+- **unionFiles**: repo-relative paths (or globs) of files that hold ONE import or re-export per line, in no particular
+  order (an import barrel). When two lanes (or a lane and main) conflict only inside these files, the train merges
+  them with git's union driver: both sides' added lines are kept, the train's side first. Never list a file whose
+  order matters (save/restore/reset spreads, registration lists that change hashes, anything with a closing bracket
+  both sides edit): union merge would silently produce a wrong order or a broken file there. For those, prefer a
+  generated, sorted registry so no lane edits a shared file. A game may also put `<file> merge=union` in its own
+  `.gitattributes`, so agents' own merges and rebases union it too (git 2.43's `merge-tree --write-tree`, which the
+  train uses for its "onto main alone?" check, honours that attribute).

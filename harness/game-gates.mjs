@@ -17,6 +17,8 @@
  *   node harness/game-gates.mjs [--paths a,b] [--changed a,b] [--json]   exit 1 when a required check fails
  *
  * 2.58.0: the game's checks run with CI=true (test runners then never write snapshots during a verify).
+ * 2.60.0: a manifest's "slowTests" gives the checks STUDIO_TEST_TIMEOUT_SCALE (the gate's load factor, >= 1) for the
+ * game's test config to raise its per-test timeouts by (slowTestsOf, testTimeoutScale).
  *
  * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
@@ -72,6 +74,31 @@ export function declaredGates(game) {
     }
   }
   return out;
+}
+
+/**
+ * 2.60.0 (#6): the manifest's slow seeded tests, { pattern, minScale } or null: "slowTests": { "pattern": "<file glob or
+ * test-name pattern>", "timeoutScale": true, "minScale": <n, optional> }. "timeoutScale": false turns it off.
+ */
+export function slowTestsOf(game) {
+  if (!game?.root) return null;
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).slowTests;
+    if (!st || typeof st !== 'object' || st.timeoutScale === false) return null;
+    const min = Number(st.minScale);
+    return { pattern: String(st.pattern || ''), minScale: Number.isFinite(min) && min > 1 ? min : 1 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The per-test timeout factor a game's test command gets: the gate's load factor, at least the manifest's minScale
+ * and any STUDIO_TEST_TIMEOUT_SCALE already set, never below 1 (a timeout is never lowered).
+ */
+export function testTimeoutScale(gateFactor, slow, env = process.env) {
+  const given = Number(env.STUDIO_TEST_TIMEOUT_SCALE);
+  return Math.round(Math.max(1, Number(gateFactor) || 1, slow?.minScale || 1, Number.isFinite(given) ? given : 1) * 10) / 10;
 }
 
 /** 2.30p: the manifest's shared globs (a change there runs every gate), plus the manifest itself. */
@@ -229,11 +256,23 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // (3) times it; the value used is printed and kept in the check's row, so a real hang still fails, just later.
     const baseTimeout = Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000);
     let timing = { ms: baseTimeout, base: baseTimeout, factor: 1, why: '' };
+    // 2.60.0 (#6): slow seeded tests ("slowTests" in the manifest). A per-test timeout in the game's test config still
+    // tripped under load after 2.59.0 scaled the gate's own timeout, so the game's checks get the same factor in
+    // STUDIO_TEST_TIMEOUT_SCALE (and the pattern in STUDIO_SLOW_TESTS) for its test config to multiply its timeouts by
+    // (docs/ONBOARDING-A-GAME.md, "Slow tests"). Never below 1; printed for every check.
+    const slow = slowTestsOf(game);
+    let testScale = 1;
     const runOnce = (cmd) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot);
       if (timing.factor > 1) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${Math.round(baseTimeout / 1000)} s x ${timing.factor}: ${timing.why}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
       if (timing.factor > 1) emitEvent({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${Math.round(baseTimeout / 1000)} s x ${timing.factor}): ${timing.why}`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor } });
-      return spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
+      let runEnv = env;
+      if (slow) {
+        testScale = testTimeoutScale(timing.factor, slow, env);
+        runEnv = { ...env, STUDIO_TEST_TIMEOUT_SCALE: String(testScale), STUDIO_SLOW_TESTS: slow.pattern };
+        console.error(`[game-gates] ${cmdLabel}: slow tests${slow.pattern ? ` (${slow.pattern})` : ''}: per-test timeouts x${testScale} (STUDIO_TEST_TIMEOUT_SCALE=${testScale}; the gate's load factor ${timing.factor}${slow.minScale > 1 ? `, minScale ${slow.minScale}` : ''})`);
+      }
+      return spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
     });
     for (const g of gates) {
       cmdLabel = g.id;
@@ -263,7 +302,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
       // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(timing.factor > 1 ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: timing.why } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(timing.factor > 1 ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: timing.why } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
@@ -277,7 +316,12 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     for (const n of r.notes || []) log(`[game-gates] WARN ${e.id}: ${n} (STUDIO_GODOT_PIN=fail makes this fail the gate)`);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
-  for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+  // 2.60.0: a failing check's test names, one JSON line, so the merge train can tell a red that is only the game's
+  // declared pins (harness/train.mjs pinsOnlyRed) from any other.
+  for (const r of rows) {
+    log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+    if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
+  }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);

@@ -703,3 +703,58 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the owner, 2026-11-01: "We should allow agents to sign off when we give direct permission" and "A high level director or producer agent or agent outside of the harness can change things with direct human permission". 2.59.0 refused every agent for `task type` and `studio:resume`, so a yes given on Discord had to wait for the owner's own terminal.
 - **Why:** 2.59.0 drew the line at "a person in their own terminal".
 - **Fix:** `--by <person> --permission "<words or link>"` from a Producer/Director session or an outside agent; recorded with who recorded it; workers never; an owner key's signature is still required where it exists. harness/permission.mjs, qa/selftest-2591.mjs.
+
+### P-113 — Stale pins blocked parallel lanes (crew 2.60 #1) · fixed in 2.60.0
+- **Evidence:** T-067 failed curbWindow 16 vs 15 after T-093 landed; five lanes re-pinned the same test; a seven-lane hand-stacked chain.
+- **Why:** each lane re-pinned against an old main, so whichever landed second had stale numbers.
+- **Fix:** declared pins in the manifest, `Pin-Moves:` per lane, one `Pin-Refresh:` train commit when every move is declared; invariants never refreshed. qa/selftest-260a.mjs.
+
+### P-114 — A red train guessed its culprit ("the last one waits") · fixed in 2.60.0
+- **Evidence:** research (merge queues: GitLab/GitHub prefixes, Bors halving).
+- **Why:** interactions were never tested on prefixes.
+- **Fix:** binary search over prefixes on the failing checks only. qa/selftest-260a.mjs.
+
+### P-115 — The train handled deferred lanes twice · fixed in 2.60.0
+- **Evidence:** duplicate `task.train.deferred` events; a possible double hand-back.
+- **Why:** round 0 re-handled the first build.
+- **Fix:** a round guard. qa/selftest-260a.mjs.
+
+### P-116 — Barrel import lines conflicted on every landing (crew #2c) · fixed in 2.60.0
+- **Evidence:** T-092 and T-099 conflicted three times on one line.
+- **Why:** every lane appended to the same line.
+- **Fix:** `unionFiles` with git's union driver, only for one-import-per-line files. qa/selftest-260a.mjs.
+
+### P-117 — The size rule forced every lane onto one line (crew #2a) · fixed in 2.60.0
+- **Evidence:** sim.ts about line 671: files over 400 lines can't grow, so imports were crammed onto one joined line.
+- **Why:** no exemption or import allowance.
+- **Fix:** `sizeRule.exempt` (capped) and `importLinesFree`, only from the manifest committed on main. qa/selftest-260b.mjs.
+
+### P-118 — Nobody saw shared-line conflicts coming (crew #2b) · fixed in 2.60.0
+- **Evidence:** the same; conflict history only in logs.
+- **Why:** no check compared lanes in flight.
+- **Fix:** harness/hotspots.mjs warnings and a one-time restructure ask after 3 conflicts. qa/selftest-260b.mjs.
+
+### P-119 — Upgrade commands arrived with the upgrade, and the documented merge was refused (crew #3) · fixed in 2.60.0
+- **Evidence:** the orchestrator ran the guard from the ref by hand and used `STUDIO_MAIN_COMMIT=allow` for two merges.
+- **Why:** the guard found the studio from its own folder; the main-checkout guard only had a global override.
+- **Fix:** bootstrap one-liner, `upgrade --merge` with a per-merge allowance and recorded permission, `--restore-stash`. qa/selftest-260c.mjs.
+
+### P-120 — The hooks gate failed on the harness's own unmerged commit (crew #4) · fixed in 2.60.0
+- **Evidence:** 6b06869 (2.59.1 taken from its branch before it reached main).
+- **Why:** only commits reachable from the base were exempt.
+- **Fix:** `STUDIO_HARNESS_REF`, confirmed on the remote; and 2.59.1 was merged (not squashed) so 6b06869 is on main. qa/selftest-260c.mjs.
+
+### P-121 — Killing a landing loop left verify and vitest running on Windows (crew #5) · fixed in 2.60.0
+- **Evidence:** the crew had to `taskkill /T /F` by hand.
+- **Why:** holders recorded only their own pid.
+- **Fix:** process trees recorded; `heavy stop`; leftovers reaped at the next take; verify in its own group. qa/selftest-260d.mjs.
+
+### P-122 — A guessed task id got a lane copy and a stale key (crew #6) · fixed in 2.60.0
+- **Evidence:** T-115 in `.studio/lane-branches.json`.
+- **Why:** no board check.
+- **Fix:** refuse unknown ids; prune their keys. qa/selftest-260d.mjs.
+
+### P-123 — Per-test timeouts tripped under load (crew #6) · fixed in 2.60.0
+- **Evidence:** a ~6 s seeded test failing in the full suite.
+- **Why:** only the gate's own timeout was scaled.
+- **Fix:** `"slowTests"` and `STUDIO_TEST_TIMEOUT_SCALE`. qa/selftest-260d.mjs.

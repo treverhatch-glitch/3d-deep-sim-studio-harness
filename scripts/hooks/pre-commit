@@ -26,7 +26,13 @@ node harness/lock.mjs check-staged ${STUDIO_LOCK_OWNER:+--owner "$STUDIO_LOCK_OW
 # reaches the main checkout only by landing (task done in a lane). A commit made straight on the main
 # checkout may touch studio/ notes and the board, nothing else; builders outside the harness committed
 # game code there in the Marina run, unchecked and unrecorded. STUDIO_MAIN_COMMIT=allow lets a person through.
-if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "${STUDIO_MAIN_COMMIT:-}" != "allow" ] \
+# 2.60.0 (#3): `npm run upgrade -- --merge` sets STUDIO_UPGRADE_MERGE=<the merged commit> in that one commit's
+# environment; it lets through only the merge whose MERGE_HEAD is exactly that commit, nothing else.
+upgrade_merge=""
+if [ -n "${STUDIO_UPGRADE_MERGE:-}" ] && mh="$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" && [ "$mh" = "$STUDIO_UPGRADE_MERGE" ]; then
+  upgrade_merge=1
+fi
+if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "${STUDIO_MAIN_COMMIT:-}" != "allow" ] && [ -z "$upgrade_merge" ] \
    && git worktree list --porcelain | grep -q '/\.lanes/'; then
   outside="$(git diff --cached --name-only | grep -vE '^(studio|\.studio)/' || true)"
   if [ -n "$outside" ]; then
