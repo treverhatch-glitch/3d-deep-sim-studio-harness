@@ -20,6 +20,7 @@ import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, hol
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
+import { laneConfigWarning } from './lane-studio.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
@@ -529,6 +530,15 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+
+  // 2.60.1 (B-40): studio/ in a lane copy is main's: main's studio config changed while this task was worked and not
+  // committed there doesn't land with the lane. Said loudly, never a refusal.
+  if (inLaneCopy()) {
+    try {
+      const warn = laneConfigWarning(target.id, mainRoot(), startedAt(target.id));
+      if (warn) { console.warn(`[done] ${warn}`); if (!checkOnly) emitEvent({ type: 'lane.studio_config', agent: agent || target.role, task: target.id, to: 'producer', status: 'warn', msg: `${target.id}: ${warn}`.slice(0, 600) }); }
+    } catch { /* a note only */ }
+  }
 
   // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
   // (the agent judged the existing code good enough). Zero code changes since the task started are

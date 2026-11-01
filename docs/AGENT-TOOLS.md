@@ -38,6 +38,9 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
   command line, a line break through cmd.exe, which can't carry one, or over 120 KB on macOS and Linux), the tool
   gets one line telling it to read `.studio/kickoff/<agent>.md` instead, and the agent's log says so.
 - In a lane copy (`.lanes/<agent>`), `studio/` and `.studio/` are links (junctions on Windows) to the main checkout.
+  (2.60.1) So an edit there is an edit to main: only the board commands write in `studio/`, and the
+  `lane-studio-guard` hook refuses Edit/Write/MultiEdit/NotebookEdit of studio config in a lane copy
+  (docs/WORK-ORGANIZATION.md, "Landing lanes").
   Claude Code resolves a link and refused its target as "outside the allowed working directories" (crew logs: 46 of
   ~90 sessions; builders handed back within a minute, unable to read their brief or role file). The launcher now adds
   `--add-dir <main>/studio --add-dir <main>/.studio` (the main checkout's real folders, each flag and path its own

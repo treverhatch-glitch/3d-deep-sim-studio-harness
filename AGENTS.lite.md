@@ -14,6 +14,9 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 - Use a unique name (`claude-a`, not `claude`): `export STUDIO_LOCK_OWNER=claude-a`.
 - Claim: `npm run task -- start <ID> --agent <you>`. If it refuses, pick another task.
 - Edit only inside your task's lane or a path you claimed (`node harness/lock.mjs claim path:<dir> --owner <you>`).
+- In a lane copy (`.lanes/<you>`) `studio/` is the main checkout's (a link): only the board commands write there.
+  Don't edit studio config (`studio/*.json`): it would land straight in main and your commits can't carry it. Hand the
+  task back with a note naming the change (`npm run task -- pause <ID> --note "…"`); a hook refuses the edit.
 - Done: `npm run task -- done <ID> --agent <you> --check` first (seconds), then `npm run verify` in the foreground, then `npm run task -- done <ID> --agent <you>`.
   If your verify's shell was killed, the run goes on: `npm run verify -- --wait` shows it and its result.
   `node harness/done-check.mjs <ID>` says what is missing.
