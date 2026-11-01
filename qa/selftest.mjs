@@ -3985,6 +3985,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.0 (helper r): conflict prediction at task done --train (B-34: after a queued lane, refused against main, union
+// files), --after honoured by the train, drift Checks for no heartbeat and borrowed commits, trigger senders
+// (qa/selftest-265r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265r.mjs')).href);
+  await selftest265R({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
