@@ -4,6 +4,33 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.60.0] — 2026-11-01
+2.60.0: the crew's round-2.60 brief (pins, shared lines, upgrade path, heavy-lock trees), shaped by merge-queue practice
+(P-113 to P-123). Studio changes to make first: docs/ONBOARDING-A-GAME.md ("Pins and union files", "Slow tests under
+load") and studio/rules/lanes.md (sizeRule, registry pattern).
+### Added
+- **Pin refresh in the merge train (P-113).** A game's protected manifest declares `"pins"` (tests, a report command
+  writing {out}, a refresh command reading {in}, invariants). A lane declares the pins it moves with `Pin-Moves:`. A train
+  red only on declared pin moves runs the refresh in one `Pin-Refresh:` commit with a before/after report and lands;
+  undeclared or invariant moves hand the lane back; pins red on main itself are reported as a regression on main.
+- **Prefix bisection (P-114).** A red train re-runs only its failing checks on main+A, main+A+B… by binary search and
+  hands back exactly the lane that breaks them, interaction culprits included (`STUDIO_TRAIN_BISECT=alone` = 2.59).
+- **Union files (P-116).** `"unionFiles"` lets a one-import-per-line barrel merge with git's union driver in a train.
+- **Size-rule exemptions (P-117).** `"sizeRule": { "exempt": [...], "importLinesFree": true }` in the manifest committed
+  on main: exempt files grow up to a hard cap (800 lines); import/re-export lines don't count as growth.
+- **Hotspots (P-118).** Lanes in flight changing the same lines are named at task start, `task done --train` and in the
+  train log, and the Producer is told once; the third conflict on one line raises one "hotspot: restructure" ask.
+- **Upgrade path (P-119).** `npm run upgrade -- --merge <ref> --by <person> [--permission "…"]` (backup, merge through the
+  hooks, the main-checkout guard opened for that one merge, recorded trailers); `--restore-stash <sha>` (keeps both
+  sides' board rows, never drops); a bootstrap one-liner for studios too old to have these (docs/RELEASE.md).
+- **Declared harness ref (P-120).** `STUDIO_HARNESS_REF=<remote>/<branch>` exempts that branch's commits, as the remote
+  has them, from the hooks gate.
+- **Heavy work stops cleanly (P-121).** Holders record their process tree; `node harness/heavy.mjs stop` kills it
+  (taskkill /T /F on Windows); a gone holder's leftovers are stopped by the next take.
+- **Slow tests (P-123).** `"slowTests"` passes the gate's load factor to the game's tests as `STUDIO_TEST_TIMEOUT_SCALE`.
+### Fixed
+- A train processed deferred lanes twice (P-115). `createLaneCopy` refuses a task id that isn't on the board (P-122).
+
 ## [2.59.1] — 2026-11-01
 2.59.1: the owner's permission rule (P-112).
 ### Changed
