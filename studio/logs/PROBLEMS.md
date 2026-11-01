@@ -838,3 +838,43 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** found in review of the 2.63 tiers.
 - **Why:** STUDIO_TRAIN=off, --force and --accepted-by took the path that has no tiers.
 - **Fix:** task done refuses tier C outside the train. qa/selftest-263i.mjs.
+
+### P-140 — The crew orchestrator rebuilt lane state, refreshed lanes, wrote status posts and polled logs by hand · fixed in 2.65.0
+- **Evidence:** the crew's report of 2026-11-01, section 3.1: a lane table rebuilt 8 times, ~15 refresh sub-agents, a status post every 30 min.
+- **Why:** no command joined worktree, train queue, stamps and holds; completion events had no common shape.
+- **Fix:** `npm run lanes`, `lanes refresh`, `status --brief`, `task note`, `job.done` and `events wait`. qa/selftest-265p.mjs.
+
+### P-141 — A train conflict was found only after its verify started (B-34) · fixed in 2.65.0
+- **Evidence:** T-099 deferred in train 1.
+- **Why:** queueing only warned about line overlaps.
+- **Fix:** merge-tree at `task done --train`. qa/selftest-265r.mjs.
+
+### P-142 — Task order lived in prompts, not in the train · fixed in 2.65.0
+- **Evidence:** T-097 had to land after T-067/T-094.
+- **Why:** `--after` only gated starting a task.
+- **Fix:** the train honours dependencies. qa/selftest-265r.mjs.
+
+### P-143 — A lane couldn't carry studio config (B-40) · fixed in 2.65.0
+- **Evidence:** engines.unity.land committed on main by hand; a lane's studio/game.json edit landed in main through the link.
+- **Why:** studio/ in a lane is main's.
+- **Fix:** config proposals applied at landing under the protected rules. qa/selftest-265s.mjs.
+
+### P-144 — Routine questions waited for the owner · fixed in 2.65.0
+- **Evidence:** reclassify and visual-proof round-trips; halts with known causes.
+- **Why:** no evidence-based decisions or fixed self-triage list.
+- **Fix:** evidence type, self-triage, daily digest, autonomy level command. qa/selftest-265t.mjs.
+
+### P-145 — A session that never started, or a lane holding another lane's work, went unnoticed · fixed in 2.65.0
+- **Evidence:** nim-test-1 with a null heartbeat; T-105's lane merged T-097's unlanded lane.
+- **Why:** no such drift signals.
+- **Fix:** no-heartbeat and borrowed-commits Checks. qa/selftest-265r.mjs.
+
+### P-146 — Any chat author could make a trigger respond · fixed in 2.65.0
+- **Evidence:** a second bot posted in the owner's channel.
+- **Why:** triggers had no sender list.
+- **Fix:** `senders` in studio/triggers.json. qa/selftest-265r.mjs.
+
+### P-147 — Visual proofs sat at the edge of their noise; a full verify's gates could leave Windows orphans · fixed in 2.65.0
+- **Evidence:** 0.58–0.68% pixel difference on unchanged code vs a 1% line; 2.60.0 recorded only `heavy run`'s shell.
+- **Why:** no per-camera baseline; gates ran with spawnSync.
+- **Fix:** double before-capture with a k×noise bar; recorded gate shells. qa/selftest-265s.mjs.
