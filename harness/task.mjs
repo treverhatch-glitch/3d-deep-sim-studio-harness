@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict } from './verdict-split.mjs';
@@ -580,7 +580,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       error: 'not-done',
       check,
       message: [
-        `${target.id} is a "${check.type}" task. Done means: ${check.means}.`,
+        `${target.id} is a "${check.type}" task (${check.typeSource}). Done means: ${check.means}.`,
+        check.typeIgnored ? `  note: ${check.typeIgnored}` : '',
         ...(check.checks?.length ? check.checks.map((c) => `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : check.missing.map((m) => `  missing: ${m}`)),
         check.skill ? `How: ${check.skill}` : '',
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
@@ -635,7 +636,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   if (checkOnly) {
     const verifyNeeded = Boolean(check.checks?.some((c) => !c.ok && c.label === VERIFY_LABEL));
-    return { checkOnly: true, ok: true, id: target.id, verifyNeeded, message: `${target.id}: every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
+    return { checkOnly: true, ok: true, id: target.id, verifyNeeded, type: check.type, typeSource: check.typeSource, message: `${target.id} (a "${check.type}" task, ${check.typeSource}): every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
   }
 
   // 2.58.0 (PU-34, P-047): a verify record is a file anyone can write, so task done runs the two checks that matter
@@ -1360,6 +1361,30 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     const r = setTrunk(sub, { by: typeof flags.by === 'string' ? flags.by : null, why: typeof flags.why === 'string' ? flags.why : '' });
     console.log(r.ok ? (sub === 'red' ? 'Trunk marked red: only fix tasks start until it is green.' : 'Trunk marked green: all tasks can start.') : r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+
+  // 2.59.0: the owner reclassifies a task's type (harness/reclassify.mjs): a person in their own terminal, recorded,
+  // or signed once the studio has an owner key. Without a type, shows the type and where it comes from.
+  if (cmd === 'type') {
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    if (!t) {
+      console.error('Usage: npm run task -- type <TASK_ID> [<change|chore|bug|docs|…|auto> --by <owner> --why "<reason>"] [--no-commit]');
+      process.exit(1);
+    }
+    const to = flags._[2];
+    if (!to) {
+      const ty = typeOf(t);
+      console.log(`${t.id} is a "${ty.type}" task (${ty.source}).${ty.ignored ? `\nnote: ${ty.ignored}` : ''}`);
+      process.exit(0);
+    }
+    if (q.done.some((x) => x.id === t.id)) {
+      console.error(`${t.id} is already done; reopen it first (npm run task -- reopen ${t.id} --reason "…").`);
+      process.exit(1);
+    }
+    const { reclassify } = await import('./reclassify.mjs');
+    const r = reclassify({ task: t, from: titleType(t), to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', commit: !flags['no-commit'] });
+    (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
 

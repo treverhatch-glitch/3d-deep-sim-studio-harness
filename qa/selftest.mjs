@@ -3742,6 +3742,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0 (crew brief item 5): the owner reclassifies a task's type (task type, recorded or signed; agents refused), and
+// a bug's regression can be a seeded game unit test proven by fails-before (qa/selftest-259c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259c.mjs')).href);
+  await selftest259C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

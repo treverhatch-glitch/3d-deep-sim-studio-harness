@@ -49,6 +49,18 @@ after it, main moved (which task landed when), or it was run under another name 
 Queue a typed task with `node harness/task.mjs add "<title>" --type bug` (the prefix is added for you;
 `--type chore` for build, toolchain, CI or dependency work). Any other `Fix …` is still a bug and needs its regression.
 
+**The owner's reclassification (2.59.0).** When the title rule is wrong for a task, the owner (a person, in their
+own terminal; refused for agent names, in a launched session, in a shell with an agent's `STUDIO_LOCK_OWNER` and in
+a coding agent's own shell: `CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX` or `GEMINI_CLI` set)
+sets the type: `npm run task -- type <ID> <change|chore|bug|docs|…> --by <owner> --why "<reason>"` (`auto` goes back
+to the title; `npm run task -- type <ID>` shows the type and where it comes from). With no owner key yet it is
+recorded in `studio/task-types.json` (who, why, when, from → to) and committed; it counts only when the commit that
+set it isn't an agent's (no `Studio-Agent` trailer). Once the studio has an owner key it must be signed on the owner's
+device (`studio/approvals/type-<ID>.json`); an unsigned record is then ignored. `task done`, `done-check` and verify
+print the type and its source. `none` can't be set this way: closing without a check is `npm run approve -- force`.
+A bug's regression is a cartridge replay or, where no cartridge covers the bug, a seeded game unit test
+(`"kind": "test"`, `qa/regressions/README.md`).
+
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
 hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and
 at session start) catches agents that stop without a word.
