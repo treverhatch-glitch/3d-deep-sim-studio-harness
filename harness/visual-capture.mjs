@@ -30,6 +30,6 @@ export function captureHint(task, t = {}) {
   const godotTrack = /engine:godot/i.test(String(t.track || ''));
   if (godotTrack || (!g.capture && (g.godot || !g.root))) return `capture before/after (npm run visual -- capture ${task} before|after --godot <project>) and run npm run visual -- check ${task}`;
   if (g.capture) return `capture before/after (npm run visual -- capture ${task} before|after, the game's own capture command) and run npm run visual -- check ${task}`;
-  return `this game has no capture command: the owner adds "visual": { "capture": "<a command that writes <camera>.png into {out}>" } to ${g.manifest} (a protected file), or marks the task visual: off; then npm run visual -- capture ${task} before|after and npm run visual -- check ${task}`;
+  return `this game has no capture command: the owner adds "visual": { "capture": "<a command that writes <camera>.png into {out}>" } to ${g.manifest} (a protected file), or the owner turns it off for this task (npm run task -- visual ${task} off --by <name> --why "…"); then npm run visual -- capture ${task} before|after and npm run visual -- check ${task}`;
 }
 

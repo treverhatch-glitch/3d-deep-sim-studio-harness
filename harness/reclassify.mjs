@@ -30,6 +30,15 @@
  * (harness/permission.mjs). The entry keeps `permission` and `recordedBy`, an agent commit that set it counts when it
  * is that same agent and not a worker, and every output shows it. Builders never can. With an owner key the
  * reclassification still has to be signed with it.
+ *
+ * 2.60.1 (B-38): the owner's visual-proof decision for a task, recorded the same way and under the same rules (a person,
+ * or a Producer/Director/outside agent on a person's permission; workers never; signed once there is an owner key):
+ *
+ *   npm run task -- visual <ID> off|on --by <owner> --why "…" [--permission "…"]     auto: back to the detection
+ *
+ * It is kept in the same file, under "visual" (studio/task-types.json), and an approval is studio/approvals/visual-<ID>.json.
+ * ownerVisual() applies exactly the validity rules ownerType() applies (one resolver serves both); harness/verdict-split.mjs
+ * honours a valid one before anything else, and a valid owner type that isn't render work outranks the title's words.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -94,32 +103,32 @@ function readRecord(root = REPO_ROOT) {
   return j && typeof j === 'object' && j.tasks && typeof j.tasks === 'object' ? j : { note: NOTE, tasks: {} };
 }
 const approvalDirs = () => [...new Set([REPO_ROOT, recordRoot()])].map((root) => ({ root, dir: path.join(root, APPROVALS_REL) }));
-const approvalName = (taskId) => `type-${String(taskId).replace(/[^\w.-]/g, '_')}.json`;
+const approvalName = (taskId, prefix = 'type') => `${prefix}-${String(taskId).replace(/[^\w.-]/g, '_')}.json`;
 /** The newest signed reclassification of this task that verifies against the owner key. */
-function signedApproval(taskId, pub) {
+function signedApproval(taskId, pub, kind = 'type') {
   const found = [];
   for (const { root, dir } of approvalDirs()) {
-    const full = path.join(dir, approvalName(taskId));
+    const full = path.join(dir, approvalName(taskId, kind));
     const doc = readJson(full);
-    if (doc?.approval?.kind === 'type' && doc.approval.task === taskId && verifyApproval(doc, pub)) found.push({ ...doc, file: path.relative(root, full).split(path.sep).join('/') });
+    if (doc?.approval?.kind === kind && doc.approval.task === taskId && verifyApproval(doc, pub)) found.push({ ...doc, file: path.relative(root, full).split(path.sep).join('/') });
   }
   return found.sort((a, b) => String(b.approval.at).localeCompare(String(a.approval.at)))[0] || null;
 }
 
-const entryAt = (root, rev, taskId) => {
+const entryAt = (root, rev, taskId, section = 'tasks') => {
   const r = git(root, 'show', `${rev}:${TYPE_RECORD_REL}`);
   if (r.status !== 0) return null;
-  try { return JSON.parse(r.stdout)?.tasks?.[taskId] || null; } catch { return null; }
+  try { return JSON.parse(r.stdout)?.[section]?.[taskId] || null; } catch { return null; }
 };
 const same = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
 /** The commit that set this task's committed entry, and whether it is an agent's: { sha, agent } or null. */
-function setterOf(root, taskId, entry) {
+function setterOf(root, taskId, entry, section = 'tasks') {
   const log = git(root, 'log', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '-n', '200', '--', TYPE_RECORD_REL);
   if (log.status !== 0) return null;
   for (const line of log.stdout.split('\n').filter(Boolean)) {
     const [sha, agent] = line.split('\t');
-    if (!same(entryAt(root, sha, taskId), entry)) continue;
-    if (!same(entryAt(root, `${sha}^`, taskId), entry)) return { sha, agent: String(agent || '').trim() || null };
+    if (!same(entryAt(root, sha, taskId, section), entry)) continue;
+    if (!same(entryAt(root, `${sha}^`, taskId, section), entry)) return { sha, agent: String(agent || '').trim() || null };
   }
   return null;
 }
@@ -130,26 +139,44 @@ const validEntry = (e) => {
   if (String(e.why || '').trim().length < 10) return 'it gives no reason (why, 10+ characters)';
   return null;
 };
+const validVisual = (e) => {
+  if (!e || typeof e !== 'object') return 'the entry is not an object';
+  if (!['off', 'on'].includes(e.visual)) return `"${e.visual}" is not off or on`;
+  if (isAgentName(e.by) || !String(e.by || '').trim()) return `"${e.by || ''}" is not a person`;
+  if (String(e.why || '').trim().length < 10) return 'it gives no reason (why, 10+ characters)';
+  return null;
+};
+
+// 2.60.1 (B-38): the owner decisions kept in studio/task-types.json. One resolver applies the same validity rules to each.
+const KINDS = {
+  type: { section: 'tasks', validate: validEntry, what: 'a reclassification', set: (id) => `npm run task -- type ${id} <type> --by <name> --why "…"`, fromApproval: (a) => ({ type: a.to, from: a.from }), only: 'only the owner reclassifies a task (npm run task -- type, from the owner\'s own terminal)' },
+  visual: { section: 'visual', validate: validVisual, what: 'a visual-proof decision', set: (id) => `npm run task -- visual ${id} off|on --by <name> --why "…"`, fromApproval: (a) => ({ visual: a.to }), only: 'only the owner decides a task\'s visual proof (npm run task -- visual, from the owner\'s own terminal, or on their permission)' },
+};
 
 const memo = new Map();
 /**
  * The owner's type for this task: { type, from, by, why, at, source: 'owner-signed' | 'owner record', file, commit },
  * { ignored: why } when a record exists but doesn't count, or null (the title decides).
  */
-export function ownerType(taskId) {
+export function ownerType(taskId) { return ownerDecision(taskId, 'type'); }
+/** 2.60.1 (B-38): the owner's visual-proof decision: { visual: 'off'|'on', by, why, at, source, ... }, { ignored }, or null. */
+export function ownerVisual(taskId) { return ownerDecision(taskId, 'visual'); }
+
+function ownerDecision(taskId, kind) {
   if (!taskId) return null;
   const root = recordRoot();
   const stamp = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
-  const key = `${taskId}|${stamp(path.join(root, TYPE_RECORD_REL))}|${approvalDirs().map(({ dir }) => stamp(path.join(dir, approvalName(taskId)))).join(',')}`;
-  const hit = memo.get(taskId);
+  const key = `${taskId}|${stamp(path.join(root, TYPE_RECORD_REL))}|${approvalDirs().map(({ dir }) => stamp(path.join(dir, approvalName(taskId, kind)))).join(',')}`;
+  const hit = memo.get(`${kind}|${taskId}`);
   if (hit && hit.key === key && Date.now() - hit.at < 5000) return hit.value;
-  const value = resolveOwnerType(taskId, root);
-  memo.set(taskId, { key, at: Date.now(), value });
+  const value = resolveOwnerDecision(taskId, root, kind);
+  memo.set(`${kind}|${taskId}`, { key, at: Date.now(), value });
   return value;
 }
-function resolveOwnerType(taskId, root) {
-  const work = readRecord(root).tasks[taskId] || null;
-  const hasApproval = approvalDirs().some(({ dir }) => fs.existsSync(path.join(dir, approvalName(taskId))));
+function resolveOwnerDecision(taskId, root, kind) {
+  const K = KINDS[kind];
+  const work = (readRecord(root)[K.section] || {})[taskId] || null;
+  const hasApproval = approvalDirs().some(({ dir }) => fs.existsSync(path.join(dir, approvalName(taskId, kind))));
   if (!work && !hasApproval) {
     // Cheap common case: nothing on disk names this task. A committed entry removed from the working tree only makes
     // the check stricter, so it is not looked up.
@@ -157,27 +184,27 @@ function resolveOwnerType(taskId, root) {
   }
   const pub = ownerKey();
   if (pub) {
-    const a = signedApproval(taskId, pub);
-    if (a) return { type: a.approval.to, from: a.approval.from, by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-signed', file: a.file };
-    return { ignored: `${TYPE_RECORD_REL} or ${APPROVALS_REL}/ names ${taskId}, but this studio has an owner key, so a reclassification counts only when it is signed with it (the owner runs npm run task -- type ${taskId} <type> --by <name> --why "…" on the device that holds the key)` };
+    const a = signedApproval(taskId, pub, kind);
+    if (a) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-signed', file: a.file };
+    return { ignored: `${TYPE_RECORD_REL} or ${APPROVALS_REL}/ names ${taskId}, but this studio has an owner key, so ${K.what} counts only when it is signed with it (the owner runs ${K.set(taskId)} on the device that holds the key)` };
   }
   const isGit = git(root, 'rev-parse', '--verify', 'HEAD').status === 0;
   if (!isGit) {
-    const bad = validEntry(work);
+    const bad = K.validate(work);
     return bad ? { ignored: `${TYPE_RECORD_REL} names ${taskId}, but ${bad}` } : { ...work, source: 'owner record', commit: null, note: 'not a git checkout: who wrote it can\'t be checked' };
   }
-  const committed = entryAt(root, 'HEAD', taskId);
-  if (!committed) return { ignored: `${TYPE_RECORD_REL} names ${taskId} but isn't committed yet${inLaneCopy() ? ' on the main checkout' : ''}: the owner commits it (the type command does, unless --no-commit), then it counts` };
-  const bad = validEntry(committed);
+  const committed = entryAt(root, 'HEAD', taskId, K.section);
+  if (!committed) return { ignored: `${TYPE_RECORD_REL} names ${taskId} but isn't committed yet${inLaneCopy() ? ' on the main checkout' : ''}: the owner commits it (the ${kind} command does, unless --no-commit), then it counts` };
+  const bad = K.validate(committed);
   if (bad) return { ignored: `${TYPE_RECORD_REL} names ${taskId}, but ${bad}` };
-  const setter = setterOf(root, taskId, committed);
+  const setter = setterOf(root, taskId, committed, K.section);
   if (!setter) return { ignored: `${TYPE_RECORD_REL}: the commit that set ${taskId}'s entry wasn't found, so who wrote it can't be checked` };
   // 2.59.1: an agent's commit counts when the entry says it was recorded on a person's permission, by that agent, and
   // the agent isn't a worker (harness/permission.mjs).
   if (setter.agent && permissionText(committed.permission).length >= 10 && permittedSetter(setter.agent) && String(committed.recordedBy || '') === setter.agent) {
     return { ...committed, source: 'owner record', onPermission: true, commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
   }
-  if (setter.agent) return { ignored: `${TYPE_RECORD_REL}: ${taskId}'s entry was set by commit ${setter.sha.slice(0, 8)} of the agent ${setter.agent} (Studio-Agent trailer); only the owner reclassifies a task (npm run task -- type, from the owner's own terminal)` };
+  if (setter.agent) return { ignored: `${TYPE_RECORD_REL}: ${taskId}'s entry was set by commit ${setter.sha.slice(0, 8)} of the agent ${setter.agent} (Studio-Agent trailer); ${K.only}` };
   return { ...committed, source: 'owner record', commit: setter.sha.slice(0, 8), ...(same(work, committed) ? {} : { note: `the working copy of ${TYPE_RECORD_REL} differs from the committed one, which is what counts` }) };
 }
 
@@ -191,17 +218,36 @@ export function ownerTypeWords(o) {
   return `set by ${o.by}${when ? ` on ${when}` : ''}${o.from ? ` (the title says ${o.from})` : ''} [${how}]: ${o.why}`;
 }
 
-/** Every reclassification on record, honoured or not, for the verify output: [{ task, line, ok }]. */
+/**
+ * 2.60.1 (B-38): words for the owner's visual-proof decision, for done-check and verify output:
+ * 'visual proof: off, set by opus-bot on hatch's permission ("…") [commit 1a2b3c4d]: why'.
+ */
+export function ownerVisualWords(o) {
+  if (!o?.visual) return '';
+  const when = String(o.at || '').slice(0, 10);
+  const who = o.permission ? `set by ${o.recordedBy || 'an agent'} on ${o.by}'s permission ("${String(o.permission).slice(0, 160)}")` : `set by ${o.by}${when ? ` on ${when}` : ''}`;
+  const how = o.source === 'owner-signed' ? `owner-signed, ${o.file}` : `owner record in ${TYPE_RECORD_REL}${o.commit ? `, commit ${o.commit}` : ''}; not signed: the studio has no owner key yet`;
+  return `visual proof: ${o.visual}, ${who} [${how}]: ${o.why}`;
+}
+
+/** Every reclassification (and, 2.60.1, visual-proof decision) on record, honoured or not, for the verify output: [{ task, line, ok }]. */
 export function typeRecordLines() {
   const root = recordRoot();
-  const ids = new Set(Object.keys(readRecord(root).tasks));
+  const rec = readRecord(root);
+  const ids = new Set(Object.keys(rec.tasks));
+  const vids = new Set(Object.keys(rec.visual || {}));
   for (const { dir } of approvalDirs()) {
-    try { for (const f of fs.readdirSync(dir)) { const m = f.match(/^type-(.+)\.json$/); if (m) ids.add(m[1]); } } catch { /* none */ }
+    try { for (const f of fs.readdirSync(dir)) { const m = f.match(/^type-(.+)\.json$/); if (m) ids.add(m[1]); const v = f.match(/^visual-(.+)\.json$/); if (v) vids.add(v[1]); } } catch { /* none */ }
   }
-  return [...ids].sort().map((task) => {
+  const types = [...ids].sort().map((task) => {
     const o = ownerType(task);
     return o?.type ? { task, ok: true, line: `${task} is a "${o.type}" task, ${ownerTypeWords(o)}` } : { task, ok: false, line: `${task}: a reclassification is on file but doesn't count: ${o?.ignored || 'no entry'}` };
   });
+  const visuals = [...vids].sort().map((task) => {
+    const o = ownerVisual(task);
+    return o?.visual ? { task, ok: true, line: `${task}: ${ownerVisualWords(o)}` } : { task, ok: false, line: `${task}: a visual-proof decision is on file but doesn't count: ${o?.ignored || 'no entry'}` };
+  });
+  return [...types, ...visuals];
 }
 
 function sign(approval, pub) {
@@ -216,18 +262,36 @@ function sign(approval, pub) {
  * Record (or sign) the owner's reclassification. task: the board's task; from: its type by the title now.
  * Returns { ok, message, entry?, files? }.
  */
-export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
+/** Who may record an owner decision: a person, or a Producer/Director/outside agent on a person's permission. */
+function callerCheck(by, permission, env) {
   const perm = permissionText(permission);
-  let onPerm = null;
   if (perm) {
-    onPerm = agentOnPermission({ permission: perm, env });
+    const onPerm = agentOnPermission({ permission: perm, env });
     if (!onPerm.ok) return { ok: false, message: `Refused: ${onPerm.why}. Nothing was recorded.` };
     const who = String(by || '').trim();
     if (!who || isAgentName(who)) return { ok: false, message: `--by names the person who gave permission${who ? `; "${who}" is an agent's name` : ''}. Nothing was recorded.` };
-  } else {
-    const refusal = personRefusal(by, env);
-    if (refusal) return { ok: false, message: refusal.replace('An agent hands the task back and asks', 'With the owner\'s direct permission a Producer or Director session, or an agent outside the harness, may record it: --by <the person> --permission "<their words or a link>". Otherwise an agent hands the task back and asks') };
+    return { ok: true, perm, onPerm };
   }
+  const refusal = personRefusal(by, env);
+  if (refusal) return { ok: false, message: refusal.replace('An agent hands the task back and asks', 'With the owner\'s direct permission a Producer or Director session, or an agent outside the harness, may record it: --by <the person> --permission "<their words or a link>". Otherwise an agent hands the task back and asks') };
+  return { ok: true, perm, onPerm: null };
+}
+
+/** Commit the record files from this checkout: { committed, commitNote }. */
+function commitRecord(files, msg, why) {
+  if (git(REPO_ROOT, 'rev-parse', '--verify', 'HEAD').status !== 0) return { committed: false, commitNote: '' };
+  const present = files.filter((f) => fs.existsSync(path.join(REPO_ROOT, f)));
+  git(REPO_ROOT, 'add', '--', ...present);
+  const known = files.filter((f) => present.includes(f) || git(REPO_ROOT, 'ls-files', '--error-unmatch', '--', f).status === 0);
+  const r = git(REPO_ROOT, 'commit', '--only', '-m', msg, '-m', `Why: ${why}`, '--', ...known);
+  const committed = r.status === 0;
+  return { committed, commitNote: committed ? '' : ` Committing it failed (${String(r.stderr || r.stdout).trim().split('\n').pop() || `exit ${r.status}`}): commit ${files.join(' and ')} yourself, from this terminal.` };
+}
+
+export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
+  const who = callerCheck(by, permission, env);
+  if (!who.ok) return { ok: false, message: who.message };
+  const { perm, onPerm } = who;
   if (!task?.id) return { ok: false, message: 'No such task on the board.' };
   const target = String(to || '').toLowerCase();
   const auto = target === 'auto' || target === 'title';
@@ -256,19 +320,10 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   } else rec.tasks[task.id] = entry;
   fs.mkdirSync(path.join(REPO_ROOT, 'studio'), { recursive: true });
   fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
-  memo.delete(task.id);
+  memo.delete(`type|${task.id}`);
   emitEvent({ type: 'task.retyped', agent: entry.by, task: task.id, msg: auto ? `${entry.by} put ${task.id} back to its title's type (${from}): ${entry.why}` : `${entry.by} reclassified ${task.id} from ${from} to ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`.slice(0, 400), meta: { from, to: auto ? from : target, signed: Boolean(pub && !auto), at } });
-  let committed = false;
-  let commitNote = '';
-  if (commit && git(REPO_ROOT, 'rev-parse', '--verify', 'HEAD').status === 0) {
-    const present = files.filter((f) => fs.existsSync(path.join(REPO_ROOT, f)));
-    git(REPO_ROOT, 'add', '--', ...present);
-    const known = files.filter((f) => present.includes(f) || git(REPO_ROOT, 'ls-files', '--error-unmatch', '--', f).status === 0);
-    const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
-    const r = git(REPO_ROOT, 'commit', '--only', '-m', msg, '-m', `Why: ${entry.why}`, '--', ...known);
-    committed = r.status === 0;
-    if (!committed) commitNote = ` Committing it failed (${String(r.stderr || r.stdout).trim().split('\n').pop() || `exit ${r.status}`}): commit ${files.join(' and ')} yourself, from this terminal.`;
-  }
+  const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
+  const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
   const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (from your terminal, not an agent\'s); until the studio has an owner key it is a record, not a signature.';
   return {
     ok: true,
@@ -276,5 +331,58 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
     files,
     committed,
     message: `${auto ? `${task.id} goes back to its title's type (${from}).` : `${task.id} is now a "${target}" task (the title says ${from}), ${pub ? 'signed with the owner key' : 'recorded'} by ${entry.by}: ${entry.why}`} ${committed ? `Committed ${files.join(' and ')}.` : commit ? '' : `Not committed (--no-commit): commit ${files.join(' and ')} yourself.`}${commitNote} ${auto ? '' : counts}`.replace(/\s+/g, ' ').trim(),
+  };
+}
+
+/**
+ * 2.60.1 (B-38): record (or sign) the owner's visual-proof decision for a task: to = off | on | auto (remove it).
+ * The same callers as a reclassification (callerCheck), the same file, the same commit, the same signing with an owner key.
+ */
+export function setVisual({ task, to, by, why, permission = '', commit = true, env = process.env }) {
+  const who = callerCheck(by, permission, env);
+  if (!who.ok) return { ok: false, message: who.message };
+  const { perm, onPerm } = who;
+  if (!task?.id) return { ok: false, message: 'No such task on the board.' };
+  const target = String(to || '').toLowerCase();
+  const auto = target === 'auto';
+  if (!['off', 'on', 'auto'].includes(target)) return { ok: false, message: `"${to}" is not off, on or auto. off: this task needs no visual result; on: it needs one whatever its title says; auto: back to the detection.` };
+  if (String(why || '').trim().length < 10) return { ok: false, message: 'Say why, in 10+ characters: --why "<reason>" (it is shown in every done-check and verify output for this task).' };
+  const at = new Date().toISOString();
+  const entry = { visual: target, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
+  const files = [TYPE_RECORD_REL];
+  const pub = ownerKey();
+  if (pub && onPerm && onPerm.via !== 'person') return { ok: false, message: `This studio has an owner key, so a visual-proof decision is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- visual ${task.id} ${target} --by <name> --why "…"` };
+  const approvalRel = `${APPROVALS_REL}/${approvalName(task.id, 'visual')}`;
+  if (pub && !auto) {
+    const approval = { kind: 'visual', task: task.id, to: target, title: task.title, by: entry.by, why: entry.why, at };
+    let signature;
+    try { signature = sign(approval, pub); } catch (e) { return { ok: false, message: e.message }; }
+    fs.mkdirSync(path.join(REPO_ROOT, APPROVALS_REL), { recursive: true });
+    fs.writeFileSync(path.join(REPO_ROOT, approvalRel), `${JSON.stringify({ approval, signature }, null, 2)}\n`);
+    entry.approval = approvalRel;
+    files.push(approvalRel);
+  }
+  const rec = readRecord(REPO_ROOT);
+  rec.note = NOTE;
+  rec.visual = rec.visual && typeof rec.visual === 'object' ? rec.visual : {};
+  if (auto) {
+    delete rec.visual[task.id];
+    if (fs.existsSync(path.join(REPO_ROOT, approvalRel))) { fs.rmSync(path.join(REPO_ROOT, approvalRel)); files.push(approvalRel); }
+  } else rec.visual[task.id] = entry;
+  if (!Object.keys(rec.visual).length) delete rec.visual;
+  fs.mkdirSync(path.join(REPO_ROOT, 'studio'), { recursive: true });
+  fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
+  memo.delete(`visual|${task.id}`);
+  const words = auto ? `${entry.by} put ${task.id}'s visual proof back to the detection: ${entry.why}` : `${onPerm ? `${onPerm.recordedBy} on ${entry.by}'s permission` : entry.by} set ${task.id}'s visual proof ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`;
+  emitEvent({ type: 'task.visual_set', agent: onPerm ? onPerm.recordedBy : entry.by, task: task.id, msg: words.slice(0, 400), meta: { to: target, by: entry.by, signed: Boolean(pub && !auto), at, ...(onPerm ? { permission: entry.permission, recordedBy: entry.recordedBy } : {}) } });
+  const msg = auto ? `${task.id}: visual proof back to the detection, by ${entry.by}` : `${task.id}: owner set visual proof ${target} (${entry.by})`;
+  const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
+  const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (by a person, or by the Producer/Director/outside agent that recorded it on permission; never a worker\'s commit); until the studio has an owner key it is a record, not a signature.';
+  return {
+    ok: true,
+    entry,
+    files,
+    committed,
+    message: `${words}. ${committed ? `Committed ${files.join(' and ')}.` : commit ? '' : `Not committed (--no-commit): commit ${files.join(' and ')} yourself.`}${commitNote} ${auto ? '' : counts}`.replace(/\s+/g, ' ').trim(),
   };
 }
