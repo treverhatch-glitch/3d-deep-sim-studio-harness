@@ -20,12 +20,16 @@
  * waits on one provider.
  *
  * A rescue writes studio/rescues/<T-ID>.md: "Diagnosis:" (40+ words) and one "Decision:" (studio/skills/rescue.md).
+ *
+ * 2.60.1 (B-39): a lane held for landing (`task hold`) or queued for the merge train is waiting on purpose, not stuck:
+ * no rescue is filed or escalated for it, its open rescues can't start, and when a task lands (task done, a train)
+ * its open rescues are closed with a note (closeRescuesFor; the watchdog's pass also sweeps any it missed).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
-import { setHold } from './task-hold.mjs';
+import { setHold, heldForLanding, heldWords } from './task-hold.mjs';
 import { budgetStopFor } from './budget.mjs';
 
 export const RESCUE_RE = /^Rescue:\s*(T-\d+)\b/;
@@ -82,6 +86,31 @@ export function shelve(taskId, why, { now = Date.now() } = {}) {
   return { shelved: reason };
 }
 
+/**
+ * 2.60.1 (B-39): close the open rescue tasks of a task that landed (or is held for landing). Waiting ones are dropped
+ * with a note; one somebody already claimed gets a message to its claimant instead (its work isn't thrown away).
+ * board: { parseNextQueue, dropTask } (from harness/task.mjs: this module never imports it statically).
+ * Returns [{ id, action: 'closed'|'told', why }].
+ */
+export function closeRescuesFor(taskId, { by = 'harness', why = 'landed', board } = {}) {
+  if (!taskId || !board?.parseNextQueue) return [];
+  const q = board.parseNextQueue();
+  const out = [];
+  const note = `${taskId} ${why}; this rescue isn't needed any more (closed automatically, harness/rescue.mjs)`;
+  for (const t of q.backlog.filter((x) => rescueOf(x.title) === taskId)) {
+    const r = board.dropTask(t.id, { by, why: note });
+    if (r?.ok) {
+      out.push({ id: t.id, action: 'closed', why: note });
+      emitEvent({ type: 'task.rescue.closed', agent: by, task: t.id, to: 'producer', msg: `${t.id} closed: ${note}`, meta: { stuck: taskId, why } });
+    }
+  }
+  for (const t of q.inProgress.filter((x) => rescueOf(x.title) === taskId)) {
+    out.push({ id: t.id, action: 'told', why: note });
+    emitEvent({ type: 'task.rescue.obsolete', agent: by, task: t.id, to: 'producer', msg: `${t.id}: ${note}. Its claimant hands it back (npm run task -- pause ${t.id} --note "…") or closes it with --no-op.`, meta: { stuck: taskId, why } });
+  }
+  return out;
+}
+
 /** The rescue report: { diagnosis, decision, words } or null. */
 export function readRescue(taskId) {
   const f = rescueFile(taskId);
@@ -118,17 +147,25 @@ export function applyRescue(rescueTask, { by = 'rescue' } = {}) {
  */
 export async function rescuePass({ now = Date.now(), env = process.env, launcher = null, clockFrom = 0 } = {}) {
   const { readHolds } = await import('./task-hold.mjs');
-  const { parseNextQueue } = await import('./task.mjs');
-  const q = parseNextQueue();
-  const open = [...q.inProgress, ...q.backlog];
+  const { parseNextQueue, dropTask } = await import('./task.mjs');
+  let q = parseNextQueue();
   const holds = readHolds();
   const actions = [];
+  // 2.60.1 (B-39): rescues of a task that has landed since are closed (task done closes them too; this sweeps the rest).
+  const doneIds = new Set(q.done.map((t) => t.id));
+  for (const stuck of [...new Set([...q.backlog, ...q.inProgress].map((t) => rescueOf(t.title)).filter((id) => id && doneIds.has(id)))]) {
+    for (const r of closeRescuesFor(stuck, { by: 'watchdog', why: 'has landed', board: { parseNextQueue, dropTask } })) if (r.action === 'closed') actions.push({ kind: 'rescue-closed', task: r.id, msg: `closed ${r.id}: ${stuck} has landed` });
+  }
+  q = parseNextQueue();
+  const open = [...q.inProgress, ...q.backlog];
+  const landing = (id) => { try { return heldForLanding(id, { holds }); } catch { return null; } };
   const waitMs = Number(env.STUDIO_RESCUE_WAIT_MIN ?? 60) * 60000;
   const events = readRecentEvents(20000);
   // A rescue that is stuck itself: parked by its own budget, or nobody picked it up in time.
   for (const t of open) {
     const stuck = rescueOf(t.title);
     if (!stuck) continue;
+    if (landing(stuck)) continue; // waiting to land on purpose: its rescue isn't escalated
     const h = holds[t.id]?.parked;
     const added = Date.parse(events.filter((e) => e.type === 'task.added' && e.task === t.id).pop()?.ts || '') || now;
     const claimed = events.some((e) => e.type === 'task.start' && e.task === t.id);
@@ -148,6 +185,8 @@ export async function rescuePass({ now = Date.now(), env = process.env, launcher
     if (!h?.parked?.budget || h.parked.rescue) continue;
     const task = open.find((t) => t.id === id);
     if (!task || rescueOf(task.title)) continue;
+    const hl = landing(id);
+    if (hl) continue; // held or queued to land: not stuck
     const r = await fileRescue(id, h.parked.why, { now, env, waiting: launcher && !launcher.picking ? launcher.why : null });
     if (!r.shelved) setHold(id, { parked: { ...h.parked, rescue: r.id || 'person' } }, { by: 'watchdog', msg: r.id ? `rescue ${r.id} queued for ${id}` : `${id}: a person is needed (${r.person})` });
     if (r.id) actions.push({ kind: 'rescue', task: id, msg: `queued rescue step ${r.level} ${r.id} for ${id}${r.model ? ` on ${r.model}` : ''}` });
