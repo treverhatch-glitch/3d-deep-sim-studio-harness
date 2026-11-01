@@ -269,7 +269,10 @@ const CANNOT = { selftest: 'this file' };
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
-  // Lanes: two builders at once, each holding its own folder.
+  // Lanes: two builders at once, each holding its own folder. The check starts from builder work that names a lane
+  // only: builder tasks the first run left open (how many depends on the machine's speed: a slower Windows runner
+  // left one) hold the whole game and kept both lanes waiting (2.64.0, Windows CI).
+  for (const m of fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').matchAll(/^- \[ \] \*\*(T-\d+)\*\*.*\(`builder`\)/gm)) run(dir, `node harness/task.mjs drop ${m[1]} --by selftest --why "the lanes check starts from lane work only"`, env);
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
   run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
