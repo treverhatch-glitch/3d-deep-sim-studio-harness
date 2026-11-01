@@ -314,6 +314,15 @@ export function buildStudioSnapshot() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  // 2.65.0: the fixed-format brief for a chat channel, under 100 words (harness/brief-status.mjs).
+  if (process.argv.includes('--brief')) {
+    const opt = (k) => (process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : null);
+    const nowArg = Date.parse(opt('--now') || '');
+    const { briefStatus } = await import('./brief-status.mjs');
+    const b = await briefStatus({ since: opt('--since'), now: Number.isFinite(nowArg) ? nowArg : Date.now(), peek: process.argv.includes('--peek') });
+    console.log(process.argv.includes('--json') ? JSON.stringify({ text: b.text, words: b.words, facts: b.facts }) : b.text);
+    process.exit(0);
+  }
   const snap = buildStudioSnapshot();
   if (process.argv.includes('--json')) {
     console.log(JSON.stringify(snap, null, 2));
