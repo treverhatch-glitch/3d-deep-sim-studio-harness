@@ -50,6 +50,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`[function-size] FAIL — ${err.message}`);
     process.exit(1);
   }
+  // 2.60.0: a file the game's protected manifest exempts (studio.gates.json "sizeRule") is listed only past its hard cap.
+  const { sizeRuleFor } = await import('../harness/size-rule.mjs');
+  const { spawnSync } = await import('node:child_process');
+  const ref = ['main', 'origin/main', 'HEAD'].find((b) => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${b}^{commit}`], { cwd: root }).status === 0) || null;
+  const cache = new Map();
+  found = found.filter((x) => {
+    if (x.kind !== 'file' || !ref) return true;
+    const rule = sizeRuleFor(x.file, ref, LIMITS(), cache);
+    if (!rule.exempt) return true;
+    const text = fs.readFileSync(path.join(root, x.file), 'utf8');
+    return text.split('\n').length > rule.cap.lines || Buffer.byteLength(text) / 1024 > rule.cap.kb;
+  });
   if (process.argv.includes('--json')) console.log(JSON.stringify(found, null, 2));
   else if (!found.length) console.log(`[function-size] PASS — no game function over ${LIMITS().fn} lines, no file over ${LIMITS().lines} lines or ${LIMITS().kb} KB`);
   else {
