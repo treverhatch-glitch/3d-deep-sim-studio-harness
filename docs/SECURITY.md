@@ -62,7 +62,9 @@
   `.skip`/`.only`/`xit`/`xdescribe`/`test.todo`/`[Ignore]`/`@Disabled`/pytest skips/gdUnit `do_skip`, raised timeouts,
   wider tolerances (`toBeCloseTo` precision lowered; eps, tol, atol, an `abs()` bound, an `AreEqual` delta raised), a
   condition on a literal seed (or a tick that returns or skips), deleted test files, and golden or snapshot files changed
-  by a commit without a `Golden-Reason` trailer.
+  by a commit without a `Golden-Reason` trailer. Not a seed special case (2.58.5): a loop over seeds (`for seed in [1, 2, 3]:`)
+  and an assertion about the seed itself (`expect(sim.seed !== 0).toBe(true)`, `assert seed != 0`); with a branch on the
+  same line (`if`, a ternary, `return`/`continue`) it still counts.
 - The owner key (2.58.5, every "no owner key" note says this): the owner makes it once on a device no agent runs on (not
   the crew's PC), with `npm run approve -- keygen`, commits only `studio/keys/owner-ed25519.pub.pem` and merges it to the
   studio's main branch. The private key never goes to the agents' PC; approvals are signed on that device. An agent
