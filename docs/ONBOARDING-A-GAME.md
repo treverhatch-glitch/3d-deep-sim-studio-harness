@@ -138,6 +138,28 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
 - **Mid-development games:** pick a freeze point, finish or park open branches, and let the old
   workflow's CI keep running alongside until the studio's gates cover the same ground.
 
+## Slow tests under load (2.60.0)
+
+The game check's own timeout grows with load (2.59.0), but a per-test timeout in the game's test config doesn't.
+A game whose seeded tests are slow under a full suite declares them in `studio.gates.json`:
+
+```json
+{ "slowTests": { "pattern": "src/**/*.slow.test.ts", "timeoutScale": true, "minScale": 1 } }
+```
+
+Each of the game's checks then runs with `STUDIO_TEST_TIMEOUT_SCALE=<factor>` (the same load factor as the check's
+timeout, at least `minScale` and never below 1; printed for every check and kept in its row as `testTimeoutScale`) and
+`STUDIO_SLOW_TESTS=<pattern>`. The game's test config multiplies its timeouts by it, for example in `vitest.config.ts`:
+
+```ts
+const scale = Number(process.env.STUDIO_TEST_TIMEOUT_SCALE || 1);
+// in defineConfig({ test: { ... } }):
+testTimeout: 5000 * scale, hookTimeout: 10000 * scale,
+```
+
+or only for the slow files, with `{ timeout: 6000 * scale }` on those tests. Outside the gate the variable is unset, so
+the factor is 1. `"timeoutScale": false` turns it off. The manifest is protected: adding this needs the owner's approval.
+
 ## Path-scoped gates and parallel tracks (2.30p)
 
 A game with more than one build (for example a browser build under `web/` and an engine build under `godot/`) should scope its gates, so a change to one build doesn't run the other's checks:
