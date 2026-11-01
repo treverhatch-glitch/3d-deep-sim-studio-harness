@@ -106,7 +106,11 @@ New settings to know: `STUDIO_HEAVY_SLOTS` (1: full verifies, Unity landings and
 time), `STUDIO_RAM_FLOOR_GB` (3: no new agent below it), `STUDIO_RESUME_BY` (who may run `npm run studio:resume`),
 `STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>` (a key per role or agent), `studio/game.json`
 `engines.unity.land` (the Unity landing command), a game manifest's `"visual": { "capture": ... }` (render tasks on
-non-Godot games). A task's type is the owner's decision: `npm run task -- type <ID> <type> --by <name> --why "..."`.
+non-Godot games). 2.65.0: a render task's "before" is captured twice per camera (`before-noise/`) and its change must
+reach max(1%, `STUDIO_VISUAL_NOISE_K` (2) x that camera's noise), capped at `STUDIO_VISUAL_NOISE_CAP` (0.05): a noisier
+scene is "too noisy to judge", never a pass (`STUDIO_VISUAL_NOISE=off` skips the second capture); on Windows a full
+verify records each gate's shell in its machine:heavy tree, so `heavy stop` and the next take find what a gate left
+running. A task's type is the owner's decision: `npm run task -- type <ID> <type> --by <name> --why "..."`.
 2.59.1: with the owner's direct permission a Producer or Director session, or an agent outside the harness, may run it
 (and `npm run studio:resume`) for them by adding `--permission "<the owner's words, or a link to the message>"`; the
 record keeps the permission and who recorded it. Builders and other worker agents never can.

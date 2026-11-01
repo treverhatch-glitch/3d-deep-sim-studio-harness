@@ -164,11 +164,14 @@ if (fullRun) claimFullVerify();
 // 2.59.0 (#11a): heavy work takes the machine:heavy lock (harness/heavy.mjs) for the whole run: the full set, or a
 // run with a heavy gate in it (the studio game's checks, browser-play, or a gate marked "heavy": true). It waits,
 // naming the holder, and fails clearly past STUDIO_HEAVY_WAIT_MIN; its gates (children) don't wait for it again.
+// 2.65.0: the slot's handle, so each gate's shell is recorded in its tree on Windows (harness/gate-spawn.mjs).
+let heavyLock = null;
 {
   if (fullRun || gates.some(isHeavyGate)) {
     const { acquireHeavy, heavyRoot } = await import('../harness/heavy.mjs');
     try {
       const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null });
+      heavyLock = lk;
       process.on('exit', () => lk.release());
     } catch (err) {
       if (err.code !== 'HEAVY_BUSY') throw err;
@@ -192,6 +195,7 @@ const treeAtStart = headAtStart ? gitOut(['rev-parse', 'HEAD^{tree}'])?.trim() |
 const gatePathsAtStart = String(process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
 const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsOn();
 const dirtyAtStart = treeDirty();
+const { runGateCommand } = await import('../harness/gate-spawn.mjs');
 const rows = [];
 let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
@@ -217,7 +221,9 @@ for (const gate of gates) {
   // 2.30q (#8): compact output (STUDIO_COMPACT_OUTPUT=on, set for launched sessions): a gate's own output goes to
   // .studio/gates/out/<gate>.log and only a failure's last lines are printed, so an agent's context doesn't
   // carry every passing gate's log into every later turn (verify was ~3k chars a call in the Marina run).
-  const res = compact ? spawnSync(gate.command, { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) : spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
+  // 2.65.0: on Windows, while this run holds machine:heavy, the gate's shell is recorded in the holder's tree so its
+  // children that outlive it are found by `heavy stop` and the next take; POSIX runs exactly as before (spawnSync).
+  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock });
   if (compact) {
     const text = `${res.stdout || ''}${res.stderr || ''}`;
     try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
