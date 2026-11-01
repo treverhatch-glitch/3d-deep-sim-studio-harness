@@ -3850,6 +3850,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.64.0 (l): thread subscription and pass-through with the trigger table, shadow mode first: a CI failure or a red
+// train reaches the task's inbox (on) or is only logged (shadow), no thread goes to the Producer, ignore drops, links
+// refuse workers, the hook tells the session, hub /api/inbox takes a task key, nothing creates a task
+// (qa/selftest-264l.mjs).
+{
+  const dir = copyRepo();
+  const { selftest264L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264l.mjs')).href);
+  await selftest264L({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

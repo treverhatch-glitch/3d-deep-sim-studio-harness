@@ -111,7 +111,10 @@ for the GitHub Actions runs on the commit and re-runs failed jobs once. If a job
 - raises `ci.failed`, which appears on the Director card and as a phone alert when alerts are on;
 - runs `STUDIO_CI_NOTIFY_CMD` if it's set (the notification hook), with `CI_SHA`, `CI_STATE` and
   `CI_SUMMARY` in its environment;
-- writes `.studio/ci-watch.json`.
+- writes `.studio/ci-watch.json`;
+- routes the result (2.64.0, docs/THREADS.md). With `STUDIO_THREADS=on`, a red run on a commit that a lane
+  queued or a train landed goes to that task's inbox. A commit with no task goes to the Producer's inbox. In
+  shadow mode (the default) it is only logged.
 
 Without the gh CLI, it says "CI not checked", never "green".
 
