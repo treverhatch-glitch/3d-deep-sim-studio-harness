@@ -21,6 +21,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { routeNow } from './threads.mjs';
 
 export const CI_FILE = () => path.join(STUDIO_STATE_DIR, 'ci-watch.json');
 // STUDIO_GH may be a command line ("node fake-gh.mjs"); the arguments here never hold spaces or quotes.
@@ -110,7 +111,10 @@ export function watchCi({ sha, timeoutMin = 60, pollSec = 30 } = {}) {
   rec.summary = rec.state.startsWith('green') ? `CI ${rec.state} on ${sha.slice(0, 7)}: ${jobsN} job(s)` : rec.state === 'red' ? `CI red on ${sha.slice(0, 7)} after one re-run: ${failing.join(', ') || 'a job'} failed` : `CI ${rec.state} on ${sha.slice(0, 7)}`;
   save();
   const red = rec.state === 'red' || rec.state === 'timed out';
-  emitEvent({ type: red ? 'ci.failed' : 'ci.green', agent: 'ci-watch', to: 'producer', status: red ? 'error' : 'ok', msg: rec.summary, meta: { sha, failing } });
+  const ev = emitEvent({ type: red ? 'ci.failed' : 'ci.green', agent: 'ci-watch', to: 'producer', status: red ? 'error' : 'ok', msg: rec.summary, meta: { sha, failing } });
+  // 2.64.0: pass-through (harness/threads.mjs). The result goes to the task whose lane or landing made this commit, or
+  // to the Producer; in shadow mode (the default) it is only logged as thread.would_route. Never blocks the watch.
+  try { rec.routed = routeNow(ev); save(); } catch {}
   if (red && process.env.STUDIO_CI_NOTIFY_CMD) {
     const n = spawnSync(process.env.STUDIO_CI_NOTIFY_CMD, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, CI_SHA: sha, CI_STATE: rec.state, CI_SUMMARY: rec.summary } });
     rec.notified = n.status === 0;
