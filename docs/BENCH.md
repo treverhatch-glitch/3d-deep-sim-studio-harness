@@ -145,6 +145,10 @@ silent-green, lane-copies, merge-train.
 
 The task budget is not on the list, because the bench uses it to enforce its own caps.
 
+If your own shell already switches one of these off (say `STUDIO_HOOKS_CHECK=off` in your environment), the run
+says so and records it as `offInEnv`. The compare warns when two runs differ that way, because a "baseline" with a
+switch already off is not a baseline.
+
 `--without <component>` sets that one off-switch in the measured agent's environment. It never changes the studio's
 config, and the run records which switch it set. Compare that run against a baseline run with the same harness, and
 the compare adds a component line:

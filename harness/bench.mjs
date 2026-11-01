@@ -483,6 +483,9 @@ export async function runBench(opts = {}, { log = console.log, env = process.env
   if (!/^[0-9a-f]{40}$/.test(harnessSha)) return { code: 1, text: `Not run: --harness ${harnessRef} is not a commit in this studio.` };
   for (const c of cases) if (git(root, ['cat-file', '-e', `${c.commit}^{commit}`]).status !== 0) return { code: 1, text: `Not run: case ${c.id}'s commit ${c.commit} isn't in this studio's git history (fetch it first).` };
   const ceiling = tokenCeiling(cases, k);
+  // A switch already off in this shell would make a "baseline" a run without that component: say so, and record it.
+  const offInEnv = Object.entries(COMPONENTS).filter(([n, c]) => n !== without && Object.entries(c.env).every(([key, v]) => String(env[key] ?? '') === v)).map(([n]) => n);
+  if (offInEnv.length) log(`[bench] note: this shell already switches off ${offInEnv.join(', ')} (its STUDIO_* settings); the agents run without ${offInEnv.length === 1 ? 'it' : 'them'} too, and the results say so.`);
   log(`[bench] ${cases.length} case(s) x ${k} tries = ${cases.length * k} agent sessions; token ceiling ${fmt(ceiling)} weighted tokens (cases x k x tokenCap).`);
   log('[bench] Each try is stopped at its own tokenCap and timeoutMin; tokens are counted when a session reports them (at its end), so one session can go somewhat past its cap before it is stopped.');
   if (!opts.yes) return { code: 2, text: '[bench] Nothing started. Add --yes to spend up to that many tokens.' };
@@ -493,7 +496,7 @@ export async function runBench(opts = {}, { log = console.log, env = process.env
   const copiesRoot = path.join(env.STUDIO_BENCH_COPIES ? path.resolve(env.STUDIO_BENCH_COPIES) : path.join(os.tmpdir(), 'studio-bench'), runId);
   const res = {
     id: runId, label: opts.label || null, by: who.by, ...(who.permission ? { permission: who.permission, recordedBy: who.recordedBy } : {}),
-    at: new Date().toISOString(), harness: { ref: harnessRef, sha: harnessSha }, without, withoutEnv: without ? COMPONENTS[without].env : null,
+    at: new Date().toISOString(), harness: { ref: harnessRef, sha: harnessSha }, without, withoutEnv: without ? COMPONENTS[without].env : null, offInEnv,
     k, parallel, agent: env.STUDIO_BENCH_AGENT_CMD ? 'STUDIO_BENCH_AGENT_CMD (a stand-in)' : 'harness/agent.mjs start (the studio\'s configured tool and model)',
     cases: cases.map((c) => c.id), caseHashes: Object.fromEntries(cases.map((c) => [c.id, caseHash(root, c, env)])), tokenCeiling: ceiling, tries: [], done: false,
   };
@@ -596,6 +599,7 @@ export function compareText(A, B, cmp) {
   const L = [`Compare ${A.id} (A) with ${B.id} (B): ${cmp.paired} paired case(s)${cmp.left.length ? `; left out: ${cmp.left.join(', ')}` : ''}`];
   if (A.harness?.sha !== B.harness?.sha) L.push(`  harness: A ${A.harness?.sha?.slice(0, 8)}  B ${B.harness?.sha?.slice(0, 8)}`);
   if (A.without || B.without) L.push(`  without: A ${A.without || '-'}  B ${B.without || '-'}`);
+  if (String(A.offInEnv || []) !== String(B.offInEnv || [])) L.push(`  note: the runs had different switches off in their shells (A: ${(A.offInEnv || []).join(', ') || 'none'}; B: ${(B.offInEnv || []).join(', ') || 'none'}), so they don't measure only what differs on purpose`);
   for (const c of cmp.cases) L.push(`  ${c.id}: ${pct(c.a)} -> ${pct(c.b)}${c.b > c.a ? '  (B better)' : c.b < c.a ? '  (B worse)' : ''}`);
   L.push(`pass@1: ${pct(cmp.a.pass1)} -> ${pct(cmp.b.pass1)}   pass^k: ${pct(cmp.a.passK)} -> ${pct(cmp.b.passK)}`);
   L.push(`tokens per try: ${fmt(cmp.delta.tokens.a)} -> ${fmt(cmp.delta.tokens.b)} (${cmp.delta.tokens.d >= 0 ? '+' : ''}${fmt(cmp.delta.tokens.d)})   turns: ${cmp.delta.turns.a} -> ${cmp.delta.turns.b} (${cmp.delta.turns.d >= 0 ? '+' : ''}${cmp.delta.turns.d})   minutes: ${cmp.delta.minutes.a} -> ${cmp.delta.minutes.b}`);
