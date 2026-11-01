@@ -22,11 +22,3 @@ Early game is done when all of the following are true:
 Agents should not call early game complete until this list is satisfied.
 
 See also `studio/templates/vertical-slice.md` and `studio/templates/polish-checklist.md`.
-
-## Session health: drift Checks (2.64.0)
-
-Besides the stall check (no progress, read burn, wall clock: the session is ended), every running session gets
-three drift checks that only raise a Check to the Producer, once per session each: the same gate failing the same
-way 3 times, verify runs with no new diff in between, and edits outside the task's lane and claims. Nothing is
-stopped. `npm run watchdog -- drift` lists them; `docs/AUTONOMY.md` has the details, and `npm run autonomy` shows
-how much the studio needed a person this week.

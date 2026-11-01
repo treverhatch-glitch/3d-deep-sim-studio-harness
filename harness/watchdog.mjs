@@ -13,9 +13,6 @@
  *   3. stops the studio when no task finished in STUDIO_WATCHDOG_IDLE_HOURS (2) while sessions that held a task
  *      ran (planning sessions don't count; the window never starts before the studio, a switch-on or a resume).
  *      0 turns the idle stop off.
- *   4. (2.64.0) raises drift Checks for running sessions (harness/stall.mjs driftCheck: the same gate failing the
- *      same way 3 times, verify runs with no new diff, edits outside the task's lane and claims). A Check is an event
- *      to the Producer, once per session per signal; nothing is stopped. `npm run watchdog -- drift` lists them.
  * Every action is an event with "watchdog" as the agent, so the morning report shows what it did.
  */
 import fs from 'node:fs';
@@ -206,40 +203,8 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   } catch (e) {
     actions.push({ kind: 'error', msg: `whole-game check: ${e.message}` });
   }
-  // 2e. 2.64.0: drift checks for running sessions nobody observed lately (heartbeats run them too). Check events only.
-  // Each Check is its own drift.check event, so it isn't logged a second time as a watchdog action.
-  let checks = [];
-  try {
-    checks = await driftPass(now, { events });
-  } catch (e) {
-    actions.push({ kind: 'error', msg: `drift checks: ${e.message}` });
-  }
   const logged = logActions(actions, { now });
-  return { on: true, auto, actions, checks, quieted: actions.length - logged.length };
-}
-
-/**
- * 2.64.0: the drift checks (harness/stall.mjs driftCheck) for every running session whose drift state is older than
- * STUDIO_DRIFT_EVERY_S (120 s): the launcher's heartbeat runs them for its own sessions; this covers a session whose
- * heartbeat stopped. It only raises Check events (drift.check, once per session per signal); it never stops,
- * kills, hands back or edits anything. Returns the Checks raised: [{ agent, task, signal }].
- */
-export async function driftPass(now = Date.now(), { events = readRecentEvents(5000), list = null, env = process.env } = {}) {
-  if (/^off$/i.test(env.STUDIO_DRIFT || '')) return [];
-  const { driftCheck, readDrift } = await import('./stall.mjs');
-  const running = list || (await import('./agent.mjs')).sessions().filter((s) => s.running);
-  const every = Number(env.STUDIO_DRIFT_EVERY_S ?? 120) * 1000;
-  const { REPO_ROOT } = await import('./event.mjs');
-  const out = [];
-  for (const s of running) {
-    const d = readDrift(s.agent);
-    let at = 0;
-    try { at = d?.startedAt === s.startedAt ? fs.statSync(path.join(STUDIO_STATE_DIR, 'drift', `${String(s.agent).replace(/[^\w.-]/g, '_')}.json`)).mtimeMs : 0; } catch {}
-    if (at && now - at < every) continue;
-    const cwd = s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : REPO_ROOT;
-    for (const c of driftCheck(s, { cwd, now, events, env })) out.push({ agent: s.agent, task: c.detail?.task || s.task || undefined, signal: c.signal });
-  }
-  return out;
+  return { on: true, auto, actions, quieted: actions.length - logged.length };
 }
 
 /**
@@ -297,15 +262,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await watchdogPass();
     console.log(r.on ? (r.actions.length ? r.actions.map((a) => a.msg).join('\n') : 'Watchdog: nothing to do.') : 'Watchdog is off.');
     process.exit(0);
-  } else if (cmd === 'drift') {
-    // 2.64.0: each running session's drift Checks so far (read-only; the heartbeat and the watch pass raise them).
-    const { sessions } = await import('./agent.mjs');
-    const { readDrift } = await import('./stall.mjs');
-    const rows = sessions().filter((s) => s.running).map((s) => { const d = readDrift(s.agent); return { agent: s.agent, role: s.role, checks: d?.startedAt === s.startedAt ? d.raised || {} : {} }; });
-    console.log(rows.length ? rows.map((r) => `${r.agent} (${r.role}): ${Object.keys(r.checks).length ? Object.entries(r.checks).map(([k, at]) => `${k} at ${String(at).slice(11, 16)}`).join(', ') : 'no Check raised'}`).join('\n') : 'No running sessions.');
-    process.exit(0);
   } else if (cmd !== 'status') {
-    console.log('Usage: npm run watchdog -- on|off --by <name> | status | pass | drift | loop [seconds] [--once]');
+    console.log('Usage: npm run watchdog -- on|off --by <name> | status | pass | loop [seconds] [--once]');
     process.exit(1);
   }
   const w = readWatchdog();

@@ -663,7 +663,6 @@
       <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
       <section><h2>Latest playtest</h2><div id="o-play"></div></section>
       <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
-      <section><h2>Autonomy <small>npm run autonomy</small></h2><div id="o-autonomy"><p class="note">Not measured yet.</p></div><p class="note">Hours of supervisor running per unplanned intervention, hands-free landings, forced, reopened, your Redo verdicts. Moving a level is only ever a suggestion: you set it in <code>studio/autonomy.json</code>.</p></section>
       <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
       <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
       <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
@@ -1301,7 +1300,6 @@
     renderSessions(s.sessionCap, ro);
     renderStatus(s.status);
     renderYourCall(s, ro);
-    renderAutonomy();
     $('o-act').classList.toggle('ro', ro);
     $('o-actstate').textContent = ro ? 'read-only' : `as ${actor()}`;
 
@@ -1354,25 +1352,6 @@
       tile('budget', v.budgetPct != null ? `${Math.round(v.budgetPct)}%` : 'cap off', 'daily budget used', v.budgetPct != null ? (mm.budget || '') : null) +
       `<p class="note tiles-note">${prov ? `Providers: ${prov}.${mm.all ? ` Models: ${esc(mm.all)}.` : ''} Est. means a free model reported no usage, so it is counted at 4 characters per token.` : 'No token use recorded yet.'}</p>`;
     if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
-  }
-  // 2.64.0: the autonomy scorecard (GET /api/autonomy, cached on the hub), fetched at most once a minute.
-  let autonomyAt = 0;
-  async function renderAutonomy() {
-    const box = $('o-autonomy');
-    if (!box || Date.now() - autonomyAt < 60000) return;
-    autonomyAt = Date.now();
-    try {
-      const a = await (await fetch('/api/autonomy', { cache: 'no-store' })).json();
-      if (!a || a.error || !a.badge) return;
-      const pct = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x * 100)}%`);
-      const sug = a.badge.suggestion?.kind ? `<p class="${a.badge.suggestion.kind === 'demote' ? 'you' : ''}">${esc(a.badge.suggestion.text)}</p>` : '';
-      const miss = (a.badge.checks || []).filter((c) => !c.ok).map((c) => `${c.id} ${c.value}`);
-      box.innerHTML = `<div><b>${esc(a.badge.level)}</b>${a.badge.meets === 'L3' ? ' · meets the L3 bar' : ''} <span class="note">(${esc(a.window.days)} days)</span></div>` +
-        `<dl class="facts"><dt>Between interventions</dt><dd>${esc(a.hoursBetweenInterventions)} h (${esc(a.interventions.unplanned)} unplanned, ${esc(a.interventions.planned)} planned)</dd><dt>Hands-free</dt><dd>${pct(a.handsFreeLandRate)} of ${esc(a.landed)} landed</dd><dt>Forced / reopened</dt><dd>${pct(a.forcedRate)} / ${pct(a.reopenRate)}</dd><dt>Halt wait</dt><dd>${esc(a.haltWait.totalMin ?? 0)} min over ${esc(a.haltWait.count)} halt(s)</dd><dt>Gate catches</dt><dd>${esc(a.gateCatches.total)} (${esc(a.gateCatches.perLanded ?? '-')} per landed task)</dd><dt>Your verdicts</dt><dd>${esc(a.verdicts.great)} great, ${esc(a.verdicts.redo)} redo</dd><dt>Tokens per landed</dt><dd>${a.tokensPerLanded === null ? '-' : big(a.tokensPerLanded)}</dd></dl>` +
-        (miss.length ? `<p class="note">Below the L3 bar: ${esc(miss.join('; '))}</p>` : '') + sug;
-    } catch {
-      // the card is a help; Ops works without it
-    }
   }
   // 2.30 (J10): one plain line: building now, waiting on you, tokens today with the model named.
   function renderStatus(st) {
