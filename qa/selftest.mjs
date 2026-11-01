@@ -1051,7 +1051,10 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
+  // 2.58.5: laneless tasks keep the shared checkout here, as custom commands did before H-9 (a lane copy and a landing
+  // per session take seconds on Windows, and this checks the supervisor's sequence, not lanes; the lanes part below
+  // still uses copies). The fake agent commits in a copy anyway (qa/fixtures/agents/fake-agent.mjs).
+  const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1', STUDIO_LANELESS: 'shared', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} ok' };
   for (const t of ['Tidy the HUD', 'Tidy the menu', 'Tidy the end screen']) run(dir, `node harness/task.mjs add "${t}" --role builder`, env);
   const sup = run(dir, `node harness/supervisor.mjs --no-hub --until ${secs(9)} --foreground`, env);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
@@ -3695,6 +3698,47 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest2584B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2584b.mjs')).href);
   await selftest2584B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.5 (H-7): the hooks gate patch-ids only the commits that need it, streamed (a whole-range git log -p --binary over
+// a game's art passed Node's string limit); the grandfather list too; the weakened-tests gate reads only the files it
+// judges; an output too big to read fails a gate instead of passing it (qa/selftest-2585p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585p.mjs')).href);
+  await selftest2585P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.5 (helper s, a crew orchestrator's report H-3, H-4, H-11): task done lets a green full verify of the same tree
+// stand in for the game's checks; after a rebase only the checks whose inputs main changed run again; a landing takes
+// the next free gate slot first; `npm run upgrade -- --check` keeps the board out of upgrade stashes; every "no owner
+// key" note says how; a loop over seeds isn't a seed special case (qa/selftest-2585s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585s.mjs')).href);
+  await selftest2585S({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.5 (H-5, H-10, H-6): a live owner's lapsed claim stays its own (built-but-unlanded lanes, `task start`, atomic
+// `task add --start`, the breaker), lane commits aren't refused for other lanes' locks, broad by-hand claims need --wide,
+// and a merge commit is judged on its own diff (qa/selftest-2585q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585q.mjs')).href);
+  await selftest2585Q({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.5 (crew report 2026-11-01, H-9 H-2 H-2b H-1 H-8): a custom tool command gets the lane copy and {mainRoot}
+// {addDirs}; agy's prompt on stdin; agy's approved rule set; nim never runs the role's model, a gone model says so;
+// the NIM key survives aider's .env loading (qa/selftest-2585r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585r.mjs')).href);
+  await selftest2585R({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

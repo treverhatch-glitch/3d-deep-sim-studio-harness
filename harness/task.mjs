@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
-import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
+import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
@@ -21,10 +21,11 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
-import { recordPass, clearPass, withLandLock } from './merge-lane.mjs';
-import { isEngineChurn } from './game-gates.mjs';
+import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
+import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
+import { claimActive, claimOwner } from './busy.mjs';
 import { startSummary, carryForward } from './carry.mjs';
 import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
@@ -353,9 +354,11 @@ const PRI = { P0: 0, P1: 1, P2: 2, P3: 3 };
 export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()) {
   const held = agent ? q.inProgress.find((t) => lockStatus(`task:${t.id}`).lock?.owner === agent) : null;
   if (held) return { task: held, held: true };
+  // 2.58.5 (H-5): nor a task handed back by the harness while its owner is still at work on it (liveOwner).
+  let evs = null;
   const open = q.backlog
     .map((t, i) => [t, i])
-    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q))
+    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
     .sort((a, b) => (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
   return { task: open[0]?.[0] || null, held: false };
 }
@@ -382,6 +385,23 @@ export function showTask(taskId, q = parseNextQueue()) {
   };
 }
 
+/**
+ * 2.58.5 (H-5): another agent's claim on this task ran out while that agent is still at work on it (harness/busy.mjs
+ * claimActive: active in the last STUDIO_CLAIM_ACTIVE_MIN, or its lane copy holds the task's unlanded commits).
+ * Returns that claimActive result, or null. On 2.58.3 only the flow pass, the watcher and the supervisor asked; a crew
+ * builder's own `task start` took such a task (T-067 built in lane opus-14, taken by builder-s30 and builder-s44).
+ */
+export function liveOwner(taskId, agent, events = null, { waiting = false } = {}) {
+  try {
+    const evs = events || readRecentEvents(20000);
+    // A waiting task counts only when the harness handed it back from that owner (orphaned); one whose owner's own
+    // hand-back was cut off (no task.paused logged) is anyone's.
+    if (waiting && !claimOwner(taskId, evs)?.orphaned) return null;
+    const a = claimActive(taskId, { root: mainRoot(), orphaned: true, events: evs });
+    return a.busy && a.owner && a.owner !== agent ? a : null;
+  } catch { return null; }
+}
+
 export function startTask(taskId, agent = null, { model = null, force = false } = {}) {
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
   const stop = readStop();
@@ -393,6 +413,14 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
   const overWhy = stopIfOverBudget(taskId, { by: 'budget' });
   if (overWhy) return { error: 'over-budget', message: `${taskId} can't start: ${overWhy}` };
+  // 2.58.5 (H-5): a claim that ran out under an owner still at work is that owner's (--force: a person reassigns it).
+  if (!force && !lockStatus(`task:${taskId}`).locked) {
+    const live = liveOwner(taskId, agent, null, { waiting: !parseNextQueue().inProgress.some((t) => t.id === taskId) });
+    if (live) {
+      emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: ${live.why}` });
+      return { error: 'locked', lock: { owner: live.owner }, message: `${taskId} is ${live.owner}'s: ${live.why}. Pick another task (npm run task -- next); a person can reassign it with --force.` };
+    }
+  }
   const lockRes = claim(`task:${taskId}`, agent);
   if (!lockRes.ok) {
     if (lockRes.reason === 'owner-required') return { error: 'owner-required', message: lockRes.message };
@@ -657,24 +685,43 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
     const ggEnv = { ...process.env };
     delete ggEnv.STUDIO_GATE_CHANGED;
-    // 2.43.0: STUDIO_DONE_REUSE_VERIFY=on (opt-in): the game's checks passed in this agent's own full verify on
-    // this exact commit with a clean tree are not run a second time (on a real 236k-line game that was another
-    // 6 minutes per task, right after the same checks passed).
-    const reused = (() => {
-      if (!/^(on|1|true|yes)$/i.test(process.env.STUDIO_DONE_REUSE_VERIFY || '')) return null;
+    // 2.43.0: the game's checks that passed in a full verify are not run a second time at done (on a real 236k-line
+    // game that was another 6 minutes per task, right after the same checks passed).
+    // 2.58.5 (H-3): on by default, keyed on the tree: a green full verify whose tree (HEAD^{tree} when it started, with a
+    // clean tree start to end) is the tree being landed counts, so task done doesn't run the game's checks again (under
+    // load the second run timed out or flaked: 600 s, then e2e timeouts that passed alone in 48 s). A partial, dirty,
+    // failing, old (24 h, STUDIO_DONE_REUSE_MAX_H), narrower (scoped to fewer files, no engine gate, related tests only)
+    // or other-tree record never counts (merge-lane.mjs judgeVerifyReuse). The safety checks above always ran.
+    // STUDIO_DONE_REUSE_VERIFY=off always runs them; =on also lets a record from before 2.58.5 count by its commit.
+    const reuseEnv = String(process.env.STUDIO_DONE_REUSE_VERIFY || '');
+    const reuse = (() => {
+      if (/^(off|0|false|no)$/i.test(reuseEnv)) return null;
       const rec = lastFullRecord();
-      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
-      const dirty = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
-      const game = (rec?.rows || []).find((r) => r.id === 'game');
-      if (!rec || rec.partial || !head || rec.head !== head || rec.dirty !== false || dirty || !game?.ok) return null;
-      if (rec.scoped && changed?.length && changed.some((f) => !(rec.changed || []).includes(f))) return null;
-      return rec;
+      if (!rec) return null;
+      const gitOut = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
+      const tree = gitOut('rev-parse', 'HEAD^{tree}');
+      const recTree = rec.head && /^[0-9a-f]{40,64}$/.test(String(rec.head)) ? gitOut('rev-parse', '--verify', '--quiet', `${rec.head}^{tree}`) : '';
+      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const clean = st.status === 0 && !String(st.stdout || '').trim();
+      const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
+      return { rec, ...judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) }) };
     })();
-    if (reused) {
-      console.log(`[task done] the game's checks passed in your verify at ${String(reused.at).slice(11, 19)} UTC on this commit (${String(reused.head).slice(0, 8)}, clean tree): not run again (STUDIO_DONE_REUSE_VERIFY)`);
-      emitEvent({ type: 'gates.reused', agent: agent || target.role, task: target.id, msg: `${target.id}: game checks from the verify on ${String(reused.head).slice(0, 8)} reused at done` });
+    let plan = null;
+    if (reuse?.ok) {
+      // The checks this done would have run, and the scope that pass covers (for deliver's re-check after a rebase).
+      const pr = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--plan', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+      try { plan = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch { plan = null; }
+      if (!Array.isArray(plan?.gates)) plan = null;
     }
-    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: [{ id: 'game', ok: true }], skipped: [], scope: null }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+    const reused = plan ? reuse.rec : null;
+    if (reused) {
+      console.log(`[task done] ${reuse.why}: not run again (STUDIO_DONE_REUSE_VERIFY)`);
+      emitEvent({ type: 'gates.reused', agent: agent || target.role, task: target.id, msg: `${target.id}: game checks from the verify on tree ${String(reused.tree || reused.head).slice(0, 8)} reused at done` });
+    } else if (reuse?.ok) console.log('[task done] running the game\'s checks: which ones a verify covers could not be read (game-gates --plan)');
+    else if (reuse) console.log(`[task done] running the game's checks: the last verify can't stand in for them (${reuse.why})`);
+    // Game checks run now (not reused) take the next free gate slot ahead of verifies (merge-lane.mjs withGateSlot).
+    ggEnv.STUDIO_GATE_PRIORITY = 'landing';
+    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: plan.gates.map((id) => ({ id, ok: true, reused: true })), skipped: plan.skipped, scope: plan.scope }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
     let res = null;
     try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
     if (res?.skipped?.length) {
@@ -723,7 +770,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
   // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
   if (inLaneCopy()) {
-    const d = deliver(taskId, { onLanded: writeBoard });
+    // 2.58.5 (H-3): the re-check after a rebase is a landing too: its game checks take the next free gate slot first.
+    const hadPriority = process.env.STUDIO_GATE_PRIORITY;
+    process.env.STUDIO_GATE_PRIORITY = 'landing';
+    let d;
+    try { d = deliver(taskId, { onLanded: writeBoard }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
     if (d && !d.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
       return { error: 'not-delivered', message: d.message };
@@ -1018,7 +1069,27 @@ export function allocateTaskId(q = parseNextQueue()) {
   }
 }
 
-export function addTask({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {} }) {
+/**
+ * 2.58.5 (H-5): `task add ... --start --agent X` queues the task and starts it for X in one step. The claim is taken
+ * before the task appears on the board, so there is no moment when it waits unclaimed (on 2.58.3 the supervisor
+ * started builder-s32 on T-074 in the seconds between opus-bot's `task add` and its `task start`). The result is the
+ * started task, or the queued one with `startError` when it couldn't start (a hold, the budget, a stop).
+ */
+export function addTask(opts) {
+  const startFor = opts?.startFor || null;
+  if (!startFor) return addTaskInner(opts);
+  if (SHARED_OWNERS.has(String(startFor).trim().toLowerCase())) return { error: 'owner-required', message: `--start needs a unique --agent (e.g. claude-a), not "${startFor}".` };
+  const created = addTaskInner(opts);
+  if (!created?.id || created.error || created.proposed) return created;
+  // Already in progress (the same title, already queued and started): only its holder carries on.
+  const started = startTask(created.id, startFor, { model: opts.model || null });
+  const out = { ...created };
+  if (started && !started.error) return { ...out, status: 'in_progress', owner: startFor, ...(started.brief ? { brief: started.brief } : {}), started: true };
+  if (!created.duplicate) { try { release(`task:${created.id}`, startFor); } catch { /* the watcher frees a claim on a waiting task */ } }
+  return { ...out, started: false, startError: started?.message || (started?.lock?.owner ? `claimed by ${started.lock.owner}` : 'not started') };
+}
+
+function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {}, startFor = null }) {
   // 2.35.0: a rescuer splitting a stuck task (it holds "Rescue: T-x" and the new title names T-x) queues directly.
   if (!meta.promoted && agent && !isDecider(agent, process.env)) {
     try {
@@ -1060,11 +1131,21 @@ export function addTask({ title, role = 'builder', priority = 'P1', agent = PROD
   // A rescue's split pieces are parts of a task already in the plan, not new mechanics: no dev "yes" needed.
   const fromRescue = meta.origin === 'rescue';
   meta = { ...meta, origin: originOf({ origin: meta.origin, agent, asked: meta.asked }), ...(fromRescue ? { rescueSplit: true } : {}) };
-  withBoard(() => {
-    const q = parseNextQueue();
-    q.backlog.push(newTask);
-    writeNextQueue(q);
-  });
+  // 2.58.5 (H-5): --start claims the id before the task is on the board (no window for another agent's pick).
+  if (startFor) {
+    const c = claim(`task:${newTask.id}`, startFor);
+    if (!c.ok) return { error: 'locked', message: `${newTask.id} couldn't be claimed for ${startFor}: ${c.message || c.reason}. Nothing was queued.` };
+  }
+  try {
+    withBoard(() => {
+      const q = parseNextQueue();
+      q.backlog.push(newTask);
+      writeNextQueue(q);
+    });
+  } catch (err) {
+    if (startFor) { try { release(`task:${newTask.id}`, startFor); } catch { /* not queued: the watcher frees it */ } }
+    throw err;
+  }
   if (meta.after?.length) setHold(newTask.id, { after: meta.after });
   if (meta.origin === 'agent-proposed' && !fromRescue && isMechanic(title, meta)) {
     setHold(newTask.id, { needsYes: { by: agent, at: new Date().toISOString() } });
@@ -1294,7 +1375,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     if (started.error) {
-      console.error(started.error === 'locked' && started.lock?.owner ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
+      console.error(started.error === 'locked' && started.lock?.owner && !started.message ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
       process.exit(1);
     }
     // 2.30c (#4): short output. The brief's path and a 10-line summary; the carry-forward note (newest
@@ -1545,9 +1626,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   if (cmd === 'add') {
-    const title = flags._.slice(1).join(' ');
+    // --start/--claim are switches: a title word the parser took as their value is part of the title.
+    const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
       process.exit(1);
     }
     // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -1567,11 +1649,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('--part is which part of the game it touches: sim (rules and state), renderer (what is drawn and shown) or both. Renderer work closes with screenshots someone else checked; renderer bugs with a browser regression.');
       process.exit(1);
     }
+    // 2.58.5 (H-5): --start queues it and claims it for --agent in one step.
+    const startFor = flags.start || flags.claim ? whoAmI(flags) : null;
+    if ((flags.start || flags.claim) && !startFor) {
+      console.error('--start needs --agent <unique-name> (or STUDIO_LOCK_OWNER): the task is claimed for that agent as it is queued.');
+      process.exit(1);
+    }
     const created = addTask({
       title: `${prefix}${title}`,
       role: flags.role || 'builder',
       priority: flags.priority || 'P1',
       agent: typeof flags.agent === 'string' ? flags.agent : actor(),
+      ...(startFor ? { startFor, model: typeof flags.model === 'string' ? flags.model : null } : {}),
       meta: {
         ...(size ? { size } : {}),
         ...(flags.tricks !== undefined ? { tricks: Math.max(1, Math.min(6, Math.round(Number(flags.tricks)) || 3)) } : {}),
@@ -1604,6 +1693,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     for (const w of created.warnings || []) console.error(`note: ${w}`);
+    if (startFor && created.started) console.error(`Started ${created.id} for ${startFor}${created.brief ? `. Your brief: ${created.brief}` : ''}`);
+    if (startFor && created.started === false) console.error(`note: queued but not started for ${startFor}: ${created.startError}`);
     if (created.split) console.error(`note: size ${size} is over the builder cap of ${SIZE_CAP}; ${created.split} (planner) splits it first.`);
     if (created.tricks) console.error(`note: pre-approved cheat sheet tricks: ${created.tricks.join(', ')}`);
     console.log(JSON.stringify(created, null, 2));

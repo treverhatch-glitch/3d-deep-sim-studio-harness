@@ -42,8 +42,9 @@ export async function selftest259I({ dir, run, report, tmpRoot }) {
   // A person's shell: no launched-session variables.
   const as = (h, extra = {}) => ({ HOME: h, USERPROFILE: h, STUDIO_ROLE: '', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', ...extra });
   const allow = (h, args, extra) => run(dir, `node harness/agent.mjs allow agy ${args}`, as(h, extra));
-  const { ALLOWED } = await import(pathToFileURL(path.join(dir, 'harness', 'allowlist.mjs')).href);
-  const prefixes = ALLOWED.map(([, p]) => p.replace(/\s*\*$/, '').trim());
+  // 2.58.5 (H-2b): the rules written by default are the owner's approved set (AGY_APPROVED), not the whole harness list.
+  const { agyApprovedList } = await import(pathToFileURL(path.join(dir, 'harness', 'agy-allow.mjs')).href);
+  const prefixes = agyApprovedList().map(([, p]) => p.replace(/\s*\*$/, '').trim());
   const hasAll = (allowList) => prefixes.every((p) => allowList.includes(`command(${p})`) && allowList.some((r) => r.startsWith(`command(regex:^${p}`)));
   const userSettings = '{\n    "colorScheme": "dark",\n    "toolPermission": "request-review",\n    "trustedWorkspaces": ["/work/a"],\n    "permissions": {\n        "allow": ["command(Get-ChildItem)"],\n        "deny": ["command(rm -rf)"],\n        "ask": ["execute_url(example.com)"]\n    }\n}\n';
 
@@ -55,7 +56,7 @@ export async function selftest259I({ dir, run, report, tmpRoot }) {
     const d2 = allow(h2, '--dry-run --scope user');
     const o1 = out(d1);
     const listed = prefixes.filter((p) => !(o1.includes(`command(${p})`) && o1.includes(`command(regex:^${p}`)));
-    report('P-067 (crew P-037): npm run agent -- allow agy --dry-run prints agy\'s settings file (the user-level one) and an agy rule for every entry of the harness allowlist (a word-prefix rule and a regex rule), and writes nothing, with or without a settings file there',
+    report('P-067 (crew P-037): npm run agent -- allow agy --dry-run prints agy\'s settings file (the user-level one) and an agy rule for every entry of the approved set (2.58.5: node, npm, npx, git status/diff/add/commit/log) (a word-prefix rule and a regex rule), and writes nothing, with or without a settings file there',
       d1.status === 0 && d2.status === 0 && o1.includes(fileOf(h1)) && out(d2).includes(fileOf(h2)) && !listed.length && !fs.existsSync(path.join(h1, '.gemini')) && bytes(fileOf(h2)) === userSettings && !backups(h2).length,
       `missing rules: ${listed.join(', ')}\n${o1.slice(-1500)}\n--- with a file ---\n${out(d2).slice(-600)}`);
   }

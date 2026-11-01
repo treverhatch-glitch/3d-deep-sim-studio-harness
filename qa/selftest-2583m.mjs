@@ -2,8 +2,8 @@
  * qa/selftest-2583m.mjs — 2.58.3 launcher fixes from the crew's Windows logs (M1 to M5).
  *   M1: a session in a lane copy is told it may use the main checkout's real studio/ and .studio/ (Claude Code:
  *       --add-dir, each flag and path its own argument); outside a lane copy, nothing is added.
- *   M2: a code-writing role on a task with no lane gets its own copy (.lanes/<agent>) with a built-in tool; a producer,
- *       a custom command and STUDIO_LANELESS=shared stay in the main checkout.
+ *   M2: a code-writing role on a task with no lane gets its own copy (.lanes/<agent>) with a built-in tool (and since
+ *       2.58.5, H-9, with a custom command too); a producer and STUDIO_LANELESS=shared stay in the main checkout.
  *   M3: `npm run agent -- allow agy` writes the studio's .studio/agy-settings.json by default (not agy's user file),
  *       --scope user still writes the user file, and toolCommand('agy') passes --settings <file> only when it exists.
  *   M4: a `nim` tool (aider on NVIDIA NIM): its argv, OPENAI_API_KEY set from NVIDIA_API_KEY for the child only (never
@@ -99,9 +99,9 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, tool + '-' + (e.STUDIO_LOCK_O
     const cu = start(`--role builder --agent m2-custom --task ${tasks.m2c} --tool claude --model m-1`, { STUDIO_BUILDER_CMD: `node "${fakeJs}"` });
     const rc = recOf('fake-tool-2583m', 'm2-custom');
     const stray = g('status --porcelain').stdout.split('\n').filter((l) => /\.lanes/.test(l));
-    report('M2 (crew P-039: "builder-s21/s22 on T-051 with lane None … left 3 test files staged on the main checkout"): a builder started on a task with no lane works in its own copy (.lanes/<agent>, with the --add-dir pair), which is removed when it ends; a producer on a laneless task stays in the main checkout, and so does a custom command (STUDIO_BUILDER_CMD: the launcher can\'t give it --add-dir); STUDIO_LANELESS=shared keeps the old shared checkout',
+    report('M2 (crew P-039: "builder-s21/s22 on T-051 with lane None … left 3 test files staged on the main checkout"): a builder started on a task with no lane works in its own copy (.lanes/<agent>, with the --add-dir pair), which is removed when it ends; a producer on a laneless task stays in the main checkout; since 2.58.5 (H-9) a custom command (STUDIO_BUILDER_CMD) works in its own copy too; STUDIO_LANELESS=shared keeps the old shared checkout',
       b.status === 0 && inCopy(rb, 'm2-builder') && addDirsOf(rb?.argv).length === 2 && !fs.existsSync(path.join(repo, '.lanes', 'm2-builder'))
-        && p.status === 0 && rp && real(rp.cwd) === real(repo) && sh.status === 0 && rs && real(rs.cwd) === real(repo) && cu.status === 0 && rc && real(rc.cwd) === real(repo) && !stray.length,
+        && p.status === 0 && rp && real(rp.cwd) === real(repo) && sh.status === 0 && rs && real(rs.cwd) === real(repo) && cu.status === 0 && inCopy(rc, 'm2-custom') && !fs.existsSync(path.join(repo, '.lanes', 'm2-custom')) && !stray.length,
       `builder: ${JSON.stringify(rb)}\n${out(b).slice(-500)}\nproducer: ${JSON.stringify(rp)}\nshared: ${JSON.stringify(rs)}\ncustom: ${JSON.stringify(rc)} ${out(cu).slice(-300)}\nstray: ${stray.join(', ')}`);
   }
 
@@ -110,7 +110,8 @@ fs.writeFileSync(path.join(${JSON.stringify(rec)}, tool + '-' + (e.STUDIO_LOCK_O
     const studioFile = path.join(dir, '.studio', 'agy-settings.json');
     fs.rmSync(studioFile, { force: true });
     const agyArgv = () => probe(dir, `import { toolCommand } from ${u(dir, 'harness/agent.mjs')};
-console.log(JSON.stringify({ argv: toolCommand('agy', { model: 'm', prompt: 'P R' }).argv }));`);
+const c = toolCommand('agy', { model: 'm', prompt: 'P R' });
+console.log(JSON.stringify({ argv: c.argv, stdin: c.stdin }));`);
     const before = agyArgv();
     const homeA = path.join(tmpRoot, 'home-2583m-a');
     fs.mkdirSync(homeA, { recursive: true });
@@ -133,8 +134,8 @@ console.log(JSON.stringify({ argv: toolCommand('agy', { model: 'm', prompt: 'P R
       dry.status === 0 && out(dry).includes(studioFile) && w.status === 0 && rules.includes('command(npm)') && rules.some((r) => r.startsWith('command(regex:^npm')) && !fs.existsSync(userFileA)
         && us.status === 0 && (uf.permissions?.allow || []).includes('command(npm)') && fs.readFileSync(studioFile, 'utf8') === studioBytes,
       `dry (${dry.status}): ${out(dry).slice(-500)}\nwrite (${w.status}): ${out(w).slice(-500)}\nstudio rules: ${rules.length}; user file A exists: ${fs.existsSync(userFileA)}\nuser scope (${us.status}): ${out(us).slice(-400)}`);
-    report('M3: the launcher passes the studio file to agy (toolCommand: --settings <file>, as separate arguments, after the prompt\'s place) only when it exists',
-      Array.isArray(before.argv) && !before.argv.includes('--settings') && i > 2 && real(after.argv[i + 1]) === real(studioFile) && after.argv[2] === 'P R',
+    report('M3: the launcher passes the studio file to agy (toolCommand: --settings <file>, as separate arguments; since 2.58.5 the prompt goes on stdin) only when it exists',
+      Array.isArray(before.argv) && !before.argv.includes('--settings') && i >= 1 && real(after.argv[i + 1]) === real(studioFile) && after.stdin === 'P R' && !after.argv.includes('P R'),
       `before: ${JSON.stringify(before.argv)} ${before.raw?.slice(-300)}\nafter: ${JSON.stringify(after.argv)} ${after.raw?.slice(-300)}`);
     fs.rmSync(studioFile, { force: true });
   }
@@ -154,7 +155,7 @@ console.log(JSON.stringify({
   names: Object.keys(e).filter((k) => /^(OPENAI_|NVIDIA_)/.test(k)).sort(),
   noneNames: Object.keys(none).filter((k) => /^(OPENAI_|NVIDIA_)/.test(k)),
 }));`, { STUDIO_NIM_MODEL: 'nv/model-from-env' });
-    const want = ['aider', '--model', 'openai/meta/llama-x', '--openai-api-base', 'https://integrate.api.nvidia.com/v1', '--message-file', '/k/kick.md', '--yes-always'];
+    const want = ['aider', '--model', 'openai/meta/llama-x', '--openai-api-base', 'https://integrate.api.nvidia.com/v1', '--message-file', '/k/kick.md', '--yes-always', '--no-auto-commits'];
     report('M4 (crew P-040: "2.56.0 uses NIM only in route.mjs … The launcher\'s aider case is hard-coded to Ollama"): toolCommand(\'nim\') runs aider on NIM\'s OpenAI-compatible endpoint (openai/<model>, STUDIO_NIM_MODEL when no --model); the child gets OPENAI_API_KEY from NVIDIA_API_KEY (first of a list, also with STUDIO_AGENT_ENV=full) and none of the owner\'s own OPENAI_ names; no NIM key, no OPENAI_API_KEY',
       JSON.stringify(t.argv) === JSON.stringify(want) && t.envModel === 'openai/nv/model-from-env' && t.keyOk === true && JSON.stringify(t.names) === '["OPENAI_API_KEY"]' && Array.isArray(t.noneNames) && !t.noneNames.length,
       JSON.stringify(t).slice(0, 1500));

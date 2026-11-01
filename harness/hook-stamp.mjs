@@ -31,6 +31,10 @@
  * protected-file gates still judge the content); `git revert`, `git rebase` with conflicts or squashes, and an amend
  * with `-m` that is later rebased onto a moved base are flagged until re-committed with the hooks.
  *
+ * Size (2.58.5, H-7): only the commits that need a patch-id get one (a stamp whose tree doesn't match, the grandfather
+ * list, the commits listed), and every diff streams from git into git patch-id; none is held in memory, so a range
+ * holding a game's binary art costs time, not memory. A commit list too big to read fails the gate, never passes it.
+ *
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
  *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
@@ -38,7 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -59,8 +63,83 @@ const GIT_CFG = ['-c', 'core.quotePath=true', '-c', 'diff.noprefix=false', '-c',
   '-c', 'diff.suppressBlankEmpty=false', '-c', 'log.showSignature=false', '-c', 'color.ui=false', '-c', 'patchid.verbatim=false', '-c', 'patchid.stable=false'];
 export const DIFF_OPTS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-algorithm=myers', '--indent-heuristic', '-U3',
   '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--binary', '--ignore-submodules=none', '--submodule=short'];
-const git = (args, { cwd = ROOT, input } = {}) => spawnSync('git', [...GIT_CFG, ...args], { cwd, encoding: 'utf8', input, maxBuffer: 512 * 1024 * 1024 });
+// 2.58.5 (H-7): no diff is read into memory any more (patch-ids stream, below); what is still read whole is small
+// (commit messages, names). STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the limit, for tests that prove that.
+export const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
+const git = (args, { cwd = ROOT, input } = {}) => spawnSync('git', [...GIT_CFG, ...args], { cwd, encoding: 'utf8', input, maxBuffer: MAX_BUFFER });
+/** git(), but an output too big to read is an error, never a silently cut list (spawnSync stops at maxBuffer). */
+function gitAll(args, opts) {
+  let r;
+  try { r = git(args, opts); } catch (e) { throw new Error(`git ${args[0]}: output too big to read (${e.code || e.message})`); }
+  if (r.error) throw new Error(`git ${args[0]}: ${r.error.code === 'ENOBUFS' ? `output over ${MAX_BUFFER} bytes, not read` : r.error.message}`);
+  return r;
+}
 const isSha = (s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(String(s || ''));
+
+/**
+ * 2.58.5 (H-7): `git <diffArgs>` piped straight into `git patch-id`, so the diff never passes through this process (a
+ * whole-range `git log -p --binary` over a game's art passed Node's string limit: ERR_STRING_TOO_LONG). stdinText feeds
+ * the first command (commit ids for `log --stdin`). Resolves { status, lines } with patch-id's output lines.
+ */
+function pipePatchId(diffArgs, mode, { cwd = ROOT, stdinText = null } = {}) {
+  return new Promise((resolve) => {
+    const src = spawn('git', [...GIT_CFG, ...diffArgs], { cwd, stdio: [stdinText === null ? 'ignore' : 'pipe', 'pipe', 'ignore'], windowsHide: true });
+    const pid = spawn('git', [...GIT_CFG, 'patch-id', mode === 'p' ? '--verbatim' : '--stable'], { cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+    let out = '';
+    let codes = 0;
+    let bad = false;
+    const finish = (code) => { if (code !== 0) bad = true; if (++codes === 2) resolve({ status: bad ? 1 : 0, lines: out.split('\n').map((l) => l.trim()).filter(Boolean) }); };
+    for (const s of [src.stdout, pid.stdin, pid.stdout, src.stdin].filter(Boolean)) s.on('error', () => { bad = true; });
+    src.on('error', () => { bad = true; pid.stdin.end(); });
+    pid.on('error', () => { bad = true; src.kill(); });
+    src.on('close', finish);
+    pid.on('close', finish);
+    src.stdout.pipe(pid.stdin);
+    pid.stdout.setEncoding('utf8');
+    pid.stdout.on('data', (d) => { out += d; });
+    if (src.stdin) src.stdin.end(stdinText);
+  });
+}
+
+/**
+ * Patch-ids (12 hex) of exactly these non-merge commits, for one mode: Map sha -> id (a commit with an empty diff has
+ * none). Each commit's diff against its first parent (the empty tree for a root), the same diff the commit-msg hook
+ * patch-ids (`git diff --cached` against the parent), streamed (pipePatchId). The ids go in on stdin: no command-line limit.
+ */
+export async function patchIdsOf(shas, mode = 'p', cwd = ROOT) {
+  const out = new Map();
+  const list = [...new Set(shas)].filter(isSha);
+  if (!list.length) return out;
+  const r = await pipePatchId(['-c', 'log.showRoot=true', 'log', '--no-walk=unsorted', '--stdin', '--no-merges', '-p', '--format=commit %H', ...DIFF_OPTS], mode, { cwd, stdinText: `${list.join('\n')}\n` });
+  if (r.status !== 0) return out;
+  for (const l of r.lines) { const [pid, sha] = l.split(/\s+/); if (sha && /^[0-9a-f]{40}/.test(pid)) out.set(sha, pid.slice(0, 12)); }
+  return out;
+}
+
+/** A cache of patch-ids that computes only the ones asked for, in one streamed batch per mode. */
+function pidStore(cwd = ROOT) {
+  const cache = { p: new Map(), s: new Map() };
+  let computed = 0;
+  return {
+    get: (sha, mode) => cache[mode || 'p'].get(sha) ?? null,
+    get computed() { return computed; },
+    async need(shas, mode = 'p') {
+      const m = mode || 'p';
+      const missing = [...new Set(shas)].filter((s) => !cache[m].has(s));
+      if (!missing.length) return;
+      computed += missing.length;
+      const got = await patchIdsOf(missing, m, cwd);
+      for (const s of missing) cache[m].set(s, got.get(s) || null);
+    },
+    /** stampValid for many commits: a dry run says which patch-ids it would look at (only where the tree doesn't match). */
+    async validate(list) {
+      const want = { p: new Set(), s: new Set() };
+      for (const { c, parentTree } of list) stampValid(c, (sha, m) => { want[m || 'p'].add(sha); return null; }, parentTree);
+      for (const m of ['p', 's']) await this.need([...want[m]], m);
+      return list.map(({ c, parentTree }) => stampValid(c, this.get, parentTree));
+    },
+  };
+}
 
 /** The hooks' version: a short hash of their text (line endings ignored). */
 export function hooksVersion(root = ROOT) {
@@ -80,6 +159,20 @@ export function patchIdOf(diff, cwd = ROOT, mode = null) {
     const r = git(['patch-id', m === 'p' ? '--verbatim' : '--stable'], { cwd, input: diff });
     const id = (r.stdout || '').trim().split(/\s+/)[0];
     if (r.status === 0 && /^[0-9a-f]{40}/.test(id || '')) return { mode: m, id };
+  }
+  return null;
+}
+
+/**
+ * The patch-id of the staged change against a parent, as patchIdOf gives it ({ mode, id } or null when empty), the diff
+ * streamed into git patch-id (2.58.5, H-7: a large binary file staged no longer has to fit in this process).
+ */
+export async function stagedPatchId(parent, cwd = ROOT) {
+  for (const m of ['p', 's']) {
+    const r = await pipePatchId(['diff', '--cached', ...DIFF_OPTS, parent], m, { cwd });
+    const id = (r.lines[0] || '').split(/\s+/)[0];
+    if (r.status === 0 && /^[0-9a-f]{40}/.test(id)) return { mode: m, id };
+    if (r.status === 0 && !r.lines.length) return null; // an empty diff
   }
   return null;
 }
@@ -113,11 +206,6 @@ function commitInfo(rev, cwd) {
   const [sha, tree, parents, msg] = r.stdout.split('\x1f');
   return { sha, tree, parents: parents.trim() ? parents.trim().split(' ') : [], msg: msg || '' };
 }
-const singlePid = (cwd) => (sha, mode) => {
-  const c = commitInfo(sha, cwd);
-  const p = c?.parents[0] || emptyTree(cwd);
-  return patchIdOf(git(['diff', ...DIFF_OPTS, p, sha], { cwd }).stdout, cwd, mode)?.id.slice(0, 12) || null;
-};
 const emptyTree = (cwd) => git(['hash-object', '-t', 'tree', '--stdin'], { cwd, input: '' }).stdout.trim();
 const hookStamps = (blob, cwd) => isSha(blob) && git(['cat-file', 'blob', blob], { cwd }).stdout.includes(MARKER);
 
@@ -139,20 +227,17 @@ export function readGrandfather(cwd = ROOT) {
  * List every commit on a local branch that no remote branch has (lane work, unpushed local commits) and that carries no
  * stamp, by sha and verbatim patch-id. Adds to an existing list. With no remote, the last 5000 commits of local branches.
  */
-export function writeGrandfather(cwd = ROOT) {
+export async function writeGrandfather(cwd = ROOT) {
   const f = grandfatherPath(cwd);
   if (!f) return { ok: false, why: 'not a git checkout' };
   const remotes = git(['for-each-ref', '--format=%(refname)', 'refs/remotes'], { cwd }).stdout.trim();
   const range = ['--branches', ...(remotes ? ['--not', '--remotes'] : ['-n', '5000'])];
-  const list = git(['log', '--no-merges', '--format=%x1e%H%x1f%B', ...range], { cwd });
+  const list = gitAll(['log', '--no-merges', '--format=%x1e%H%x1f%B', ...range], { cwd });
   const unstamped = new Set(list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, msg]) => !parseStamps(msg).length).map(([sha]) => sha.trim()));
   const old = readGrandfather(cwd);
   const pids = new Set(old.pids);
-  if (unstamped.size) {
-    const log = git(['log', '-p', '--no-merges', '--format=commit %H', ...DIFF_OPTS, ...range], { cwd });
-    const r = git(['patch-id', '--verbatim'], { cwd, input: log.stdout });
-    for (const l of (r.status === 0 ? r.stdout : '').split('\n')) { const [pid, sha] = l.trim().split(/\s+/); if (sha && unstamped.has(sha)) pids.add(pid.slice(0, 12)); }
-  }
+  // 2.58.5 (H-7): patch-ids of the unstamped commits only, streamed; never a whole-history `git log -p --binary`.
+  for (const pid of (await patchIdsOf([...unstamped], 'p', cwd)).values()) pids.add(pid);
   const shas = new Set([...old.shas, ...unstamped]);
   fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
   return { ok: true, file: f, added: unstamped.size - [...unstamped].filter((x) => old.shas.has(x)).length, total: shas.size };
@@ -163,12 +248,14 @@ async function headChecked(cwd) {
   const h = commitInfo('HEAD', cwd);
   if (!h) return { ok: true }; // the first commit
   const parentTree = h.parents[0] ? git(['rev-parse', `${h.parents[0]}^{tree}`], { cwd }).stdout.trim() : null;
-  if (stampValid(h, singlePid(cwd), parentTree).ok) return { ok: true };
+  const pids = pidStore(cwd);
+  if ((await pids.validate([{ c: h, parentTree }]))[0].ok) return { ok: true };
   const kind = (h.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
   if (kind && HARNESS_KINDS[kind]?.test(h.msg)) return { ok: true };
   if (!h.parents[0] || !hookStamps(git(['rev-parse', '-q', '--verify', `${h.parents[0]}:${HOOK_REL}`], { cwd }).stdout.trim(), cwd)) return { ok: true };
   const g = readGrandfather(cwd);
-  if ((g.shas.size || g.pids.size) && grandfathered(g, h.sha, singlePid(cwd)(h.sha, 'p'))) return { ok: true };
+  if (g.pids.size) await pids.need([h.sha], 'p');
+  if ((g.shas.size || g.pids.size) && grandfathered(g, h.sha, pids.get(h.sha, 'p'))) return { ok: true };
   const own = git(['symbolic-ref', '-q', 'HEAD'], { cwd }).stdout.trim();
   const holders = git(['for-each-ref', '--contains', h.sha, '--format=%(refname)', 'refs/heads', 'refs/remotes'], { cwd }).stdout.split('\n').map((s) => s.trim()).filter((s) => s && s !== own);
   if (holders.length) return { ok: true };
@@ -177,7 +264,8 @@ async function headChecked(cwd) {
   try {
     const { ownerPublicKey, readApprovals, verifyApproval } = await import('./approve.mjs');
     const pub = ownerPublicKey(null);
-    const pid = singlePid(cwd)(h.sha, 'p');
+    await pids.need([h.sha], 'p');
+    const pid = pids.get(h.sha, 'p');
     if (pub && readApprovals().some((a) => a.approval?.kind === 'hooks' && (a.approval.commits || []).some((x) => x.sha === h.sha || (pid && x.pid === pid)) && verifyApproval(a, pub))) return { ok: true };
   } catch {}
   return { ok: false, sha: h.sha };
@@ -190,7 +278,7 @@ export async function stampMessage(msgFile, { cwd = process.cwd() } = {}) {
   const passed = take(PASS_FILE);
   const amend = take(AMEND_FILE);
   // The first stamping hook run in this checkout (normally the upgrade's own merge commit): list what it already has.
-  try { if (!readGrandfather(cwd).exists) writeGrandfather(cwd); } catch {}
+  try { if (!readGrandfather(cwd).exists) await writeGrandfather(cwd); } catch {}
   const file = path.resolve(cwd, msgFile);
   const original = fs.readFileSync(file, 'utf8');
   // A message with no final newline (git merge's) makes interpret-trailers glue the trailer to the subject line.
@@ -220,7 +308,7 @@ export async function stampMessage(msgFile, { cwd = process.cwd() } = {}) {
       }
       if (mergeAmend) stamp = `v${ver} t${tree.slice(0, 12)} merge`;
       else {
-        const pid = patchIdOf(git(['diff', '--cached', ...DIFF_OPTS, parent], { cwd }).stdout, cwd);
+        const pid = await stagedPatchId(parent, cwd);
         stamp = `v${ver} t${tree.slice(0, 12)} ${pid ? `${pid.mode}${pid.id.slice(0, 12)}` : 'empty'}`;
       }
     }
@@ -259,19 +347,10 @@ function headToJudge(env) {
   return h && h.sha === env.GITHUB_SHA && h.parents.length === 2 ? h.parents[1] : 'HEAD';
 }
 
-/** Patch-ids (12 hex) of every non-merge commit in a range, for one mode, in one pass. */
-function rangePids(range, mode) {
-  const log = git(['log', '-p', '--no-merges', '--format=commit %H', ...DIFF_OPTS, range]);
-  const r = git(['patch-id', mode === 'p' ? '--verbatim' : '--stable'], { input: log.stdout });
-  const out = new Map();
-  if (r.status !== 0) return out;
-  for (const l of r.stdout.split('\n')) { const [pid, sha] = l.trim().split(/\s+/); if (sha) out.set(sha, pid.slice(0, 12)); }
-  return out;
-}
-
 /**
  * The commits since the base that skipped the hooks.
- * { ok, enforced, off, base, checked, open: [{ sha, subject, why, pid }], exempt, approved, why }
+ * { ok, enforced, off, base, checked, open: [{ sha, subject, why, pid }], exempt, approved, patchIds (commits patch-id'd), why }
+ * Throws when the commit list is too big to read (never judges a list cut short).
  */
 export async function checkHookStamps({ env = process.env, ignoreApprovals = false } = {}) {
   if (falsy(env.STUDIO_HOOKS_CHECK)) return { ok: true, off: true, enforced: false, open: [], why: 'off (STUDIO_HOOKS_CHECK=off): commits are not checked for skipped hooks' };
@@ -279,7 +358,8 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   if (!b) return { ok: true, enforced: false, open: [], why: 'no base branch to compare with, so no commits to check' };
   const head = headToJudge(env);
   const range = `${b.base}..${head}`;
-  const log = git(['log', '--format=%x1e%H%x1f%T%x1f%P%x1f%B', range]);
+  // Messages only (small); a list cut short would pass commits unchecked, so too big to read is an error (gitAll).
+  const log = gitAll(['log', '--format=%x1e%H%x1f%T%x1f%P%x1f%B', range]);
   const commits = log.stdout.split('\x1e').filter((s) => s.includes('\x1f')).map((s) => {
     const [sha, tree, parents, msg] = s.split('\x1f');
     return { sha: sha.trim(), tree, parents: parents.trim() ? parents.trim().split(' ') : [], msg: msg || '' };
@@ -296,22 +376,35 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   const treeOf = new Map(commits.map((c) => [c.sha, c.tree]));
   const parentTree = (c) => (c.parents[0] ? treeOf.get(c.parents[0]) || git(['rev-parse', `${c.parents[0]}^{tree}`]).stdout.trim() : null);
 
-  const pidMaps = {};
-  const pidOf = (sha, mode) => { const m = mode || 'p'; if (!pidMaps[m]) pidMaps[m] = rangePids(range, m); return pidMaps[m].get(sha) || null; };
+  // 2.58.5 (H-7): patch-ids only for the commits that need one (a stamp whose tree doesn't match: rebased, cherry-picked;
+  // the grandfather list; the commits listed), streamed in one batch per mode. Never a whole-range `git log -p --binary`:
+  // with a base far behind, the range holds a game's whole art import and that passed Node's string limit.
+  const pids = pidStore(ROOT);
   const open = [];
   let exempt = 0;
   const g = readGrandfather(ROOT);
+  const stamped = (c) => c.parents[0] && stamping.get(blobOf.get(c.parents[0]));
+  const maybeOld = (c) => (g.shas.size || g.pids.size) && !parseStamps(c.msg).length && c.parents.length < 2;
+  if (g.pids.size) await pids.need(commits.filter((c) => stamped(c) && maybeOld(c) && !g.shas.has(c.sha)).map((c) => c.sha), 'p');
+  const judged = [];
   for (const c of commits) {
-    if (!c.parents[0] || !stamping.get(blobOf.get(c.parents[0]))) { exempt++; continue; }
-    if ((g.shas.size || g.pids.size) && !parseStamps(c.msg).length && c.parents.length < 2 && grandfathered(g, c.sha, pidOf(c.sha, 'p'))) { exempt++; continue; }
+    if (!stamped(c)) { exempt++; continue; }
+    if (maybeOld(c) && grandfathered(g, c.sha, pids.get(c.sha, 'p'))) { exempt++; continue; }
     const kind = (c.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
     if (kind && HARNESS_KINDS[kind]?.test(c.msg)) { exempt++; continue; }
-    const v = stampValid(c, pidOf, parentTree(c));
-    if (v.ok) continue;
+    judged.push({ c, kind, parentTree: parentTree(c) });
+  }
+  const verdicts = await pids.validate(judged);
+  judged.forEach(({ c, kind }, i) => {
+    const v = verdicts[i];
+    if (v.ok) return;
     const subject = c.msg.split('\n')[0].slice(0, 80);
     open.push({ sha: c.sha, subject, why: kind ? `it says Studio-Harness: ${kind}, which isn't a commit the harness makes without hooks; ${v.why}` : v.why, merge: c.parents.length > 1 });
-  }
-  for (const o of open) o.pid = o.merge ? null : pidOf(o.sha, 'p') || pidOf(o.sha, 's');
+  });
+  const single = open.filter((o) => !o.merge).map((o) => o.sha);
+  await pids.need(single, 'p');
+  await pids.need(single.filter((s) => !pids.get(s, 'p')), 's');
+  for (const o of open) o.pid = o.merge ? null : pids.get(o.sha, 'p') || pids.get(o.sha, 's');
 
   let approved = [];
   let left = open;
@@ -328,7 +421,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   const why = left.length
     ? `${left.length} commit(s) since ${b.ref} skipped the git hooks (no valid ${TRAILER} stamp)${enforced ? '' : '; not enforced here: the hooks aren\'t installed in this checkout and the base has no stamped commits (npm run hooks:install; STUDIO_HOOKS_CHECK=on enforces)'}`
     : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}`;
-  return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, why };
+  return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, why };
 }
 
 /** How to fix it, in commands that work in cmd, PowerShell and bash. */
@@ -339,7 +432,7 @@ export function fixText(open) {
     `  git reset --soft ${oldest.sha.slice(0, 12)}~1`,
     '  git commit -C ORIG_HEAD',
     '  (one commit with everything since; just the last commit: the same with HEAD~1)',
-    'Hooks not installed? npm run hooks:install first. A commit the owner accepts as it is: on the owner\'s machine, npm run approve -- hooks --note "why".',
+    'Hooks not installed? npm run hooks:install first. A commit the owner accepts as it is: on the owner\'s own device (one no agent runs on), npm run approve -- hooks --note "why". No owner key yet? npm run approve -- show says how the owner makes one; an agent never runs keygen.',
   ];
 }
 
@@ -355,7 +448,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'check') {
-    const r = await checkHookStamps();
+    let r;
+    try { r = await checkHookStamps(); } catch (e) {
+      if (process.argv.includes('--json')) console.log(JSON.stringify({ ok: false, error: e.message, open: [], why: `could not check the commits: ${e.message}` }));
+      else console.error(`[hooks] FAIL could not check the commits since the base: ${e.message}`);
+      process.exit(1);
+    }
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
     if (r.off) { console.log(`[hooks] ${r.why}`); process.exit(0); }
     const list = r.open.map((o) => `  ${o.sha.slice(0, 8)} ${o.subject} — ${o.why}`);
@@ -370,7 +468,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'grandfather') {
-    const r = writeGrandfather();
+    const r = await writeGrandfather();
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
     if (!r.ok) { console.error(`[hooks] FAIL ${r.why}`); process.exit(1); }
     console.log(`[hooks] PASS ${r.added} unstamped commit(s) on local branches added to the exempt list (${r.total} in all): ${r.file}`);

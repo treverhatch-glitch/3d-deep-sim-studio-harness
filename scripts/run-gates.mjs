@@ -128,6 +128,11 @@ const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, e
 const { splitEolOnly } = await import('../harness/eol-only.mjs');
 const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, s.split('\n').filter((l) => l.length > 3).filter((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, '')))).real.length > 0; };
 const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
+// 2.58.5 (H-3): the tree it tests too (with dirty=false, the files the gates saw), so task done can let this verify
+// stand in for its game checks on the same tree; with what scoped the game gate (its paths, related tests only).
+const treeAtStart = headAtStart ? gitOut(['rev-parse', 'HEAD^{tree}'])?.trim() || null : null;
+const gatePathsAtStart = String(process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
+const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsOn();
 const dirtyAtStart = treeDirty();
 const rows = [];
 let cachedCount = 0;
@@ -196,7 +201,7 @@ try {
   const headNow = headAtStart;
   const dirtyEnd = treeDirty();
   const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
-  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, dirty: dirtyNow, partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
+  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;

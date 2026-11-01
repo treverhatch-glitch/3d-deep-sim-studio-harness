@@ -30,7 +30,7 @@ import { judgePass } from './silent-green.mjs';
 import { pinMode, checkGodotVersions } from './godot-version.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
-import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
+import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
@@ -132,35 +132,90 @@ function runGodot(project) {
   return { ok: true, why: '', notes };
 }
 
-/** Run the game's checks and the engine gate for these paths. */
-export async function runGameGates({ paths = [], changed = null, quiet = false } = {}) {
+/**
+ * 2.58.5 (H-3): which of the game's checks a change runs, and the scope a pass covers, without running anything:
+ * { game, all, shared, gates, skipped, scope, layout, layoutPaths, engine, why }. runGameGates runs this plan;
+ * task done uses it to record the right scope when a verify stands in for the checks.
+ *
+ * incoming (the landing re-check after a rebase onto a moved main, STUDIO_GATE_INCOMING_FILE): the files main brought
+ * in. The lane's own pass on its pre-rebase commit stands for a check whose declared inputs ("paths", layoutPaths, a
+ * Godot project's folder) none of them touch; such a check is skipped with that reason. A check with no declared
+ * paths, or any incoming file that is shared (harness/, scripts/, the manifest, its "shared" globs), runs again.
+ */
+export async function planGameGates({ paths = [], changed = null, incoming = null } = {}) {
   const game = await studioGame();
+  const all = game ? declaredGates(game) : [];
+  const shared = game ? sharedPaths(game) : [];
+  const sel = game ? selectGates(all, changed, { shared }) : { run: [], skipped: [], why: '' };
+  let gates = sel.run;
+  const skipped = [...sel.skipped];
+  let scope = game && all.length ? scopeOf(gates, shared) : null;
+  // 2.30o: the game's layout rules (studio.layout.json), when it declares them; unscoped unless the manifest names
+  // its inputs ("layoutPaths").
+  const layout = Boolean(game?.root && fs.existsSync(path.join(REPO_ROOT, game.root, 'studio.layout.json')) && process.env.STUDIO_LAYOUT_GATE !== 'off');
+  let layoutPaths = null;
+  if (layout) {
+    try { const lp = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).layoutPaths; layoutPaths = Array.isArray(lp) && lp.length ? lp.map(String) : null; } catch {}
+    scope = scope && layoutPaths ? [...scope, ...layoutPaths] : null;
+  }
+  let engine = engineGates(paths);
+  if (scope) scope = [...new Set([...scope, ...engine.map((e) => `${e.project}/**`)])];
+  let runLayout = layout;
+  if (Array.isArray(incoming)) {
+    const files = incoming.map((f) => String(f).replace(/\\/g, '/')).filter(Boolean);
+    const hitShared = files.find((f) => matchAny(f, [...ALWAYS_SHARED, ...shared]));
+    const untouched = (globs) => !hitShared && !files.some((f) => matchAny(f, globs));
+    const why = `none of the ${files.length} file(s) the rebase brought in are among its inputs; it passed on this lane's commit before the rebase`;
+    const keep = [];
+    for (const g of gates) {
+      if (g.paths?.length && untouched(g.paths)) skipped.push({ id: g.id, why });
+      else keep.push(g);
+    }
+    gates = keep;
+    if (layout && layoutPaths && untouched(layoutPaths)) { runLayout = false; skipped.push({ id: 'game:layout', why }); }
+    const keepEngine = [];
+    for (const e of engine) {
+      if (untouched([`${e.project}/**`])) skipped.push({ id: e.id, why });
+      else keepEngine.push(e);
+    }
+    engine = keepEngine;
+  }
+  return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '' };
+}
+
+/** 2.44.0: related tests only (STUDIO_GATE_RELATED=on, or STUDIO_WHOLE_GAME=on). */
+export const relatedTestsOn = (env = process.env) => /^(on|1|true|yes)$/i.test(env.STUDIO_GATE_RELATED || '') || /^(on|1|true|yes)$/i.test(env.STUDIO_WHOLE_GAME || '');
+
+/** The files a landing re-check was told main brought in (STUDIO_GATE_INCOMING_FILE), or null (unknown: no filter). */
+export function readIncoming(env = process.env) {
+  const f = env.STUDIO_GATE_INCOMING_FILE;
+  if (!f) return null;
+  try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return Array.isArray(j.incoming) ? j.incoming.map(String) : null; } catch { return null; }
+}
+
+/** Run the game's checks and the engine gate for these paths. */
+export async function runGameGates({ paths = [], changed = null, incoming = null, quiet = false } = {}) {
+  const plan = await planGameGates({ paths, changed, incoming });
+  const { game, all, gates, scope } = plan;
   const rows = [];
-  const skipped = [];
-  let scope = null;
+  const skipped = [...plan.skipped];
   const log = (s) => !quiet && console.log(s);
   // 2.31.0: heavy checks take a box-wide gate slot (shared by every lane copy through the main checkout).
   let slotRoot = REPO_ROOT;
   try { slotRoot = (await import('./worktree.mjs')).mainRoot(); } catch {}
   const slot = (label, fn) => withGateSlot(slotRoot, label, fn, { log: (m) => console.error(m) });
   if (game) {
-    const all = declaredGates(game);
-    const shared = sharedPaths(game);
-    const sel = selectGates(all, changed, { shared });
-    const gates = sel.run;
-    skipped.push(...sel.skipped);
-    scope = all.length ? scopeOf(gates, shared) : null;
-    if (sel.why) log(`[game-gates] ${sel.why}`);
+    if (plan.why) log(`[game-gates] ${plan.why}`);
     if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });
     // 2.44.0: related tests only. A gate may declare `related` (a command with {files}, such as
     // "cd game/x && npx vitest related --run --passWithNoTests {files}"): when the change is known and is only
     // code files under the game, that runs instead of the whole suite. Only when the whole suite still runs
     // after landing (STUDIO_WHOLE_GAME=on) or STUDIO_GATE_RELATED=on says so. A real 2,244-test game: a leaf
     // module's tests took 2.5 s instead of 5 min 40 s.
-    const relatedOn = /^(on|1|true|yes)$/i.test(process.env.STUDIO_GATE_RELATED || '') || /^(on|1|true|yes)$/i.test(process.env.STUDIO_WHOLE_GAME || '');
+    const relatedOn = relatedTestsOn();
     const prefix = `${game.root}/`;
     const changedHere = (changed || []).map((f) => String(f).replace(/\\/g, '/')).filter((f) => f.startsWith(prefix));
-    const codeOnly = changedHere.length && changedHere.every((f) => /\.(m?[jt]sx?|cjs|vue|svelte)$/i.test(f)) && !/ is shared/.test(sel.why || '');
+    const codeOnly = changedHere.length && changedHere.every((f) => /\.(m?[jt]sx?|cjs|vue|svelte)$/i.test(f)) && !/ is shared/.test(plan.why || '');
     const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
     let cmdLabel = '';
     // 2.58.0 (F2): the game's checks run with CI=true, so test runners (Vitest, Jest, ...) never write or rewrite
@@ -200,25 +255,19 @@ export async function runGameGates({ paths = [], changed = null, quiet = false }
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
-  if (game?.root && fs.existsSync(path.join(REPO_ROOT, game.root, 'studio.layout.json')) && process.env.STUDIO_LAYOUT_GATE !== 'off') {
+  if (plan.layout) {
     const { runLayoutGate } = await import('./layout-gate.mjs');
     const lay = runLayoutGate({ gameDir: game.root });
     rows.push({ id: 'game:layout', ok: lay.ok, required: true, why: lay.ok ? '' : lay.why.slice(0, 400) });
-    // 2.30p: the layout gate is unscoped unless the manifest names its inputs ("layoutPaths").
-    let lp = null;
-    try { lp = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).layoutPaths; } catch {}
-    scope = scope && Array.isArray(lp) && lp.length ? [...scope, ...lp.map(String)] : null;
   }
-  const eg = engineGates(paths);
-  if (scope) scope = [...new Set([...scope, ...eg.map((e) => `${e.project}/**`)])];
-  for (const e of eg) {
+  for (const e of plan.engine) {
     const r = slot(e.id, () => runGodot(e.project));
     for (const n of r.notes || []) log(`[game-gates] WARN ${e.id}: ${n} (STUDIO_GODOT_PIN=fail makes this fail the gate)`);
     rows.push({ id: e.id, ok: r.ok, required: true, why: r.why });
   }
   for (const r of rows) log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
-  if (!rows.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
+  if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
   const failed = rows.filter((r) => !r.ok && r.required);
   return { ok: failed.length === 0, game: game?.name || null, rows, failed, skipped, scope };
 }
@@ -227,7 +276,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const a = process.argv.slice(2);
   const paths = String(a.includes('--paths') ? a[a.indexOf('--paths') + 1] || '' : process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
   const ch = String(a.includes('--changed') ? a[a.indexOf('--changed') + 1] || '' : process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
-  const res = await runGameGates({ paths, changed: ch.length ? ch : null, quiet: a.includes('--json') });
+  // 2.58.5 (H-3): --plan prints which checks would run and the scope a pass covers, running nothing.
+  if (a.includes('--plan')) {
+    const p = await planGameGates({ paths, changed: ch.length ? ch : null });
+    console.log(JSON.stringify({ game: p.game?.name || null, gates: [...p.gates.map((g) => g.id), ...(p.layout ? ['game:layout'] : []), ...p.engine.map((e) => e.id)], skipped: p.skipped, scope: p.scope }));
+    process.exit(0);
+  }
+  const res = await runGameGates({ paths, changed: ch.length ? ch : null, incoming: readIncoming(), quiet: a.includes('--json') });
   if (a.includes('--json')) console.log(JSON.stringify(res));
   process.exit(res.ok ? 0 : 1);
 }

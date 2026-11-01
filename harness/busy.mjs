@@ -18,6 +18,11 @@
  * is not the owner leaving: the Director's flow pass, the watcher's requeue and the supervisor's pick all keep away.
  * (N1, N3): a person's stop is never a loop either (PERSON_CAUSE), and one rule counts hand-backs for every parker
  * (loopHandBacks: since the last done, unblock or unpark), and a park is written once (parkOnce).
+ *
+ * 2.58.5 (H-5): on 2.58.3 a kept task was still left with no claim (a crew builder's `task start` took it), an owner
+ * with built but unlanded work went quiet for 30 min and lost it, and the breaker parked tasks for hand-backs the harness
+ * caused. Now a lane copy with the task's commits ahead of the studio's branch keeps it (laneAhead), a kept claim is
+ * made again in the owner's name (keepClaim), and `task start` itself refuses a live owner's task (task.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { readRecentEvents, emitEvent } from './event.mjs';
 import { updateHolds } from './task-hold.mjs';
 import { LIMIT_STOP } from './budget.mjs';
+import { claim as claimLock, status as lockStatus } from './lock.mjs';
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const read = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -75,6 +81,9 @@ export function claimOwner(task, events = readRecentEvents(20000)) {
   for (const e of events) {
     if (e.task !== task) continue;
     if (e.type === 'task.start' && e.agent) cur = { owner: e.agent, at: e.ts, orphaned: false };
+    // 2.58.5 (H-5): a claim the harness kept for its owner (keepClaim) carries the owner on, even once the task.start
+    // is older than the events read.
+    else if (e.type === 'lock.kept' && e.meta?.owner) cur = cur && cur.owner === e.meta.owner ? { ...cur, orphaned: false } : { owner: e.meta.owner, at: e.ts, orphaned: false };
     else if (cur && ENDS.has(e.type)) {
       if (e.type === 'task.paused' && e.agent !== cur.owner && harnessCaused(e)) cur = { ...cur, orphaned: true };
       else cur = null;
@@ -146,7 +155,78 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
       }
     } catch {}
   }
+  // 2.58.5 (H-5): built but not landed. The owner's work sits in a lane copy with commits the studio's branch lacks
+  // (waiting for a landing, a green gate or a quiet machine), however long ago it last changed: a new agent would
+  // build it again. Not when the owner is gone (its session ended: the next agent carries its branch, as designed).
+  if (root && !ownerGone(c, mine, root)) {
+    const ahead = laneAhead(task, c.owner, root, now, env);
+    if (ahead) return { busy: true, owner: c.owner, short: `${task}'s owner ${c.owner} has it built in ${ahead.lane}, not landed yet`, why: `${task}'s claim ran out, but ${c.owner}'s lane copy ${ahead.lane} has ${ahead.n} commit(s) the studio's branch doesn't (built, not landed; last change ${min(ahead.at)} min ago)` };
+  }
   return { busy: false, owner: c.owner };
+}
+
+/** The owner has gone: its last event says so, or its launcher session record ended after it claimed. */
+function ownerGone(c, mine, root) {
+  const last = mine[mine.length - 1];
+  if (last && GONE_TYPES.has(last.type)) return true;
+  const rec = read(path.join(root, '.studio', 'agents', `${c.owner}.json`), null);
+  return Boolean(rec && rec.status === 'ended' && Date.parse(rec.endedAt || '') >= (Date.parse(c.at) || 0));
+}
+
+const laneMaxMs = (env) => {
+  const v = Number(env.STUDIO_CLAIM_LANE_MAX_H ?? 24);
+  return (Number.isFinite(v) ? Math.max(0, v) : 24) * 3600000;
+};
+
+/**
+ * 2.58.5 (H-5): a lane copy holding this task's unlanded commits. A lane copy counts when it is the owner's
+ * (.lanes/<owner>, .lanes/<owner>-*), sits on the task's remembered branch, or has a commit ahead of the studio's branch
+ * that names the task (an orchestrator's lanes are often named for itself, not the agent: opus-14 for opus-bot).
+ * Its last change must be within STUDIO_CLAIM_LANE_MAX_H (24) hours. { lane, n, at } or null.
+ */
+function laneAhead(task, owner, root, now, env) {
+  const max = laneMaxMs(env);
+  if (!(max > 0)) return null;
+  const lanes = path.join(root, '.lanes');
+  if (!fs.existsSync(lanes)) return null;
+  const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  const main = git(root, 'symbolic-ref', '--short', 'HEAD').stdout?.trim();
+  if (!main) return null;
+  const want = read(path.join(root, '.studio', 'lane-branches.json'), {})[task] || null;
+  const names = new RegExp(`(^|[^\\w-])${task.replace(/[^\w-]/g, '')}(?![\\w-])`);
+  let dirs = [];
+  try { dirs = fs.readdirSync(lanes, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).slice(0, 64); } catch { return null; }
+  for (const name of dirs) {
+    const d = path.join(lanes, name);
+    const head = git(d, 'symbolic-ref', '--short', 'HEAD').stdout?.trim();
+    if (!head || head === main) continue;
+    const log = git(d, 'log', '--format=%x1e%s%n%b', `${main}..HEAD`);
+    if (log.status !== 0) continue;
+    const commits = String(log.stdout || '').split('\x1e').filter((s) => s.trim());
+    if (!commits.length) continue;
+    const mineLane = name === owner || name.startsWith(`${owner}-`) || (want && head === want);
+    if (!mineLane && !commits.some((m) => names.test(m))) continue;
+    const at = laneChangedAt(d);
+    if (at && now - at <= max) return { lane: `.lanes/${name}`, n: commits.length, at };
+  }
+  return null;
+}
+
+/**
+ * 2.58.5 (H-5): renew a kept claim for its owner. The flow pass and the watcher keep a task whose owner is still at
+ * work (claimActive), but on 2.58.3 they left it in progress with no claim at all, so a crew builder's `task start`
+ * took it. The claim is made again in the owner's name (same TTL as `task start`); the event is the harness's, so it
+ * never counts as the owner being active. Returns true when a claim was made.
+ */
+export function keepClaim(task, owner, { by = 'harness', why = '' } = {}) {
+  if (!task || !owner) return false;
+  try {
+    if (lockStatus(`task:${task}`).locked) return false;
+    const r = claimLock(`task:${task}`, owner);
+    if (!r?.ok || r.reused) return false;
+    emitEvent({ type: 'lock.kept', agent: by, task, msg: `Kept ${task}'s claim for ${owner}${why ? `: ${why}` : ''}`.slice(0, 300), meta: { owner, cause: 'harness' } });
+    return true;
+  } catch { return false; }
 }
 
 /** Is this task busy even though no harness session holds it? { busy, why }. */

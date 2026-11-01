@@ -10,6 +10,9 @@
  *   node harness/lock.mjs check-staged [--owner me]  (pre-commit: refuse staged files locked by someone else)
  *
  * Owners must be unique per running agent: tool and role names that several agents share are refused.
+ * 2.58.5 (H-10): a by-hand claim on a game's (source) root or a folder of more than STUDIO_LOCK_MAX_FILES (50) tracked
+ * files needs --wide; in a lane copy another agent's lock only warns at commit (checked when the lane lands); and a
+ * merge commit is judged on its own diff, not the files the merged branch brings (H-6).
  * `file:` is accepted as an alias of `path:`. Paths are compared without regard to case (2.58.0, PU-43): on Windows
  * `game/Branding` and `game/branding` are one folder, so two agents can't hold it under two spellings.
  */
@@ -150,13 +153,35 @@ function withMutex(fn) {
 /** Top-level folders: claiming one blocks every other agent, so it needs a stated reason. */
 export const WIDE_PATHS = new Set(['', 'studio', 'qa', 'cartridges', 'src', 'game', 'harness', 'hub', 'scripts', 'docs', 'tools', 'assets', 'public']);
 
-export function claim(key, owner, ttlSec = 3600, { wide = null } = {}) {
+/**
+ * 2.58.5 (H-10): a folder too broad to claim by hand without --wide: a game's root or source root (game|web|engine/<name>,
+ * .../<name>/src), or a folder with more than STUDIO_LOCK_MAX_FILES (50) tracked files. Returns why, or null. A file is
+ * never too broad. (The launcher's lane claims are not checked here: a task's lane decides those.)
+ */
+export function tooBroad(rel, { cwd = REPO_ROOT, env = process.env } = {}) {
+  const at = String(rel || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!at) return null;
+  if (/^(game|web|engine)\/[^/]+(\/src)?$/i.test(at)) return `${at} is a game's ${/\/src$/i.test(at) ? 'source root' : 'folder'}`;
+  const max = Number(env.STUDIO_LOCK_MAX_FILES ?? 50);
+  if (!(max > 0)) return null;
+  let full = null;
+  try { full = fs.statSync(path.join(cwd, at)); } catch { return null; }
+  if (!full.isDirectory()) return null;
+  const n = (gitLines(['ls-files', '--', `${at}/`], cwd) || []).length;
+  return n > max ? `${at} holds ${n} tracked files (more than STUDIO_LOCK_MAX_FILES, ${max})` : null;
+}
+
+export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false } = {}) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   const k = normalizeKey(key);
   if (k.startsWith('path:') && WIDE_PATHS.has(k.slice(5).replace(/\/+$/, '')) && !wide) {
     const at = k.slice(5).replace(/\/+$/, '');
     return { ok: false, reason: 'too-wide', message: `path:${at} is a whole top-level folder and would block every other agent. Claim the narrowest folder or file you will edit (for example path:${at || '<folder>'}/<subfolder or file>), or pass --wide "<why you need all of it>".` };
+  }
+  if (byHand && k.startsWith('path:') && !wide) {
+    const why = tooBroad(k.slice(5));
+    if (why) return { ok: false, reason: 'too-wide', message: `path:${k.slice(5)} is too broad to claim: ${why}. Claim the files your task changes (path:<file>, one claim each), or the narrowest folder, or pass --wide "<why you need all of it>". A file many tasks share (the sim's main file) needs no claim in a lane copy: overlapping edits are caught when the lane lands.` };
   }
   return k.startsWith('path:') ? withMutex(() => claimUnlocked(k, check.owner, ttlSec)) : claimUnlocked(k, check.owner, ttlSec);
 }
@@ -278,17 +303,62 @@ export function coveringLock(relFile, locks = listLocks()) {
     .sort((a, b) => b.at.length - a.at.length)[0]?.lock || null;
 }
 
-/** For pre-commit: staged files locked by another owner fail; STUDIO_LOCK_STRICT=1 also requires your own lock. */
-export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT === '1', files } = {}) {
-  const staged = files || execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+const gitLines = (args, cwd) => {
+  try { return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean); } catch { return null; }
+};
+
+/**
+ * The files a commit being made changes, as the lock gate judges them. 2.58.5 (H-6): for a merge commit (MERGE_HEAD is
+ * set) only the files the result doesn't simply take from the branch merged in: the lane's own diff and the conflicts it
+ * resolved. On 2.58.3 `git merge main` in a lane failed with "studio/bible/BIBLE.md is locked by director-s32", a file
+ * that came from main as it was. { files, merge } (merge: the number of heads merged, or 0).
+ */
+export function stagedForLocks(cwd = REPO_ROOT) {
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+  let heads = [];
+  const mh = gitLines(['rev-parse', '--git-path', 'MERGE_HEAD'], cwd)?.[0];
+  try { if (mh) heads = fs.readFileSync(path.resolve(cwd, mh), 'utf8').split(/\r?\n/).map((x) => x.trim()).filter((x) => /^[0-9a-f]{7,64}$/i.test(x)); } catch { /* not merging */ }
+  if (!heads.length) return { files: staged, merge: 0 };
+  let files = staged;
+  for (const h of heads) {
+    const differs = gitLines(['diff', '--cached', '--name-only', '--no-renames', h], cwd);
+    if (!differs) return { files: staged, merge: heads.length }; // can't tell: judge every staged file, as before
+    const set = new Set(differs);
+    files = files.filter((f) => set.has(f));
+  }
+  return { files, merge: heads.length };
+}
+
+/** 2.58.5 (H-10): the lane copy this checkout is (<main>/.lanes/<name>), or null for the main checkout. */
+export function laneCopyName(root = REPO_ROOT) {
+  const m = String(root).replace(/\\/g, '/').match(/\/\.lanes\/([^/]+)\/?$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * For pre-commit: staged files locked by another owner fail; STUDIO_LOCK_STRICT=1 also requires your own lock.
+ * 2.58.5 (H-10): in a lane copy (.lanes/<name>, its own working copy), another agent's path lock is a warning, not a
+ * refusal: that agent edits its own copy, so the two can't collide here, and overlapping edits are caught when the
+ * lane lands (task done rebases onto the studio's branch and stops on a conflict). Only a lock held in this lane's own
+ * name still refuses. On 2.58.3 builder-s45's path:<game>/src/game and builder-s51's path:<game>/src refused unrelated
+ * lane commits for an hour. STUDIO_LANE_LOCKS=block restores the refusal. The main checkout is judged as before.
+ */
+export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT === '1', files, lane = laneCopyName(), env = process.env } = {}) {
+  const picked = files ? { files, merge: 0 } : stagedForLocks();
+  const staged = picked.files;
   const locks = listLocks();
   const problems = [];
+  const warnings = [];
+  const laneBlocks = /^(block|on|1|true|yes)$/i.test(String(env.STUDIO_LANE_LOCKS || ''));
   for (const file of staged) {
     const lock = coveringLock(file, locks);
-    if (lock && lock.owner !== owner) problems.push(`${file} is locked by ${lock.owner} (${lock.key}, until ${lock.expiresAt})`);
-    else if (!lock && strict) problems.push(`${file} has no lock. Run: node harness/lock.mjs claim path:${file} --owner ${owner || '<you>'}`);
+    if (lock && lock.owner !== owner) {
+      const line = `${file} is locked by ${lock.owner} (${lock.key}, until ${lock.expiresAt})`;
+      if (lane && !laneBlocks && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
+      else problems.push(line);
+    } else if (!lock && strict) problems.push(`${file} has no lock. Run: node harness/lock.mjs claim path:${file} --owner ${owner || '<you>'}`);
   }
-  return { ok: problems.length === 0, checked: staged.length, problems };
+  return { ok: problems.length === 0, checked: staged.length, problems, warnings, ...(picked.merge ? { merge: picked.merge } : {}) };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -303,19 +373,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'list') out({ ok: true, locks: listLocks() });
   if (cmd === 'check-staged') {
     const res = checkStaged(owner);
+    for (const w of res.warnings || []) console.error(`[locks] note: ${w}`);
     if (!res.ok) {
       console.error('[locks] FAIL');
       for (const p of res.problems) console.error(`  x ${p}`);
       process.exit(1);
     }
-    console.log(`[locks] PASS ${res.checked} staged file(s)`);
+    console.log(`[locks] PASS ${res.checked} staged file(s)${res.merge ? ' (a merge: only files it doesn\'t take as they are from the branch merged in)' : ''}`);
     process.exit(0);
   }
   if (!cmd || !maybeKey || maybeKey.startsWith('--')) {
     console.log('Usage: node harness/lock.mjs claim|release|status <key> --owner <unique-name> | list | check-staged');
     process.exit(1);
   }
-  if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null }));
+  if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
   if (cmd === 'release') out(release(maybeKey, owner));
   if (cmd === 'status') out(status(maybeKey), true);
   void rest;

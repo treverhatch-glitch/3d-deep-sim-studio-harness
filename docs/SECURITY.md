@@ -33,6 +33,15 @@
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
+- (2.58.5) Claim files, not whole trees: a by-hand claim on a game's folder or source root (`game|web|engine/<name>`,
+  `…/<name>/src`) or a folder of more than `STUDIO_LOCK_MAX_FILES` (50) tracked files needs `--wide "<why>"`.
+- (2.58.5) In a lane copy (`.lanes/<name>`) another agent's path lock is a note at commit, not a refusal: that agent
+  edits its own copy, and overlapping edits are caught when the lane lands (task done rebases and stops on a
+  conflict). A lock in the lane's own name still refuses; `STUDIO_LANE_LOCKS=block` restores the old refusal. The main
+  checkout is judged as before. A merge commit is judged only on the files it doesn't take unchanged from the branch
+  merged in (its own diff and resolved conflicts), so `git merge main` isn't refused for what main brought.
+- (2.58.5) `task add "<title>" --start --agent <you>` queues a task and claims it in one step (no moment where it waits
+  unclaimed for another agent to pick).
 
 ## Skipped hooks and weakened tests (2.58.2, PU-29)
 - A hook can't stop `git commit --no-verify`, so the hooks leave a stamp and a gate checks for it afterwards. When
@@ -49,6 +58,12 @@
   isn't judged; the PR head is.
 - Enforced where the hooks are installed (`core.hooksPath=scripts/hooks`) or the base branch's last 50 commits carry
   stamps (so unsetting the hooks doesn't switch it off), or with `STUDIO_HOOKS_CHECK=on`; `STUDIO_HOOKS_CHECK=off` turns it off.
+- Size (2.58.5): the `hooks` gate patch-ids only the commits that need it (a stamp whose tree no longer matches, after a
+  rebase or cherry-pick; the grandfather list; the commits it lists), streaming each diff from git into `git patch-id`,
+  so a range holding a game's binary art costs time, not memory (a whole-range `git log -p --binary` used to crash it
+  with `ERR_STRING_TOO_LONG`). The `weakened-tests` gate diffs only test code and test-runner configs, not fixtures or
+  data under test folders. A git output too big to read fails either gate with the reason; it is never judged cut short.
+  `STUDIO_HOOKS_MAX_BUFFER` (bytes) lowers that read limit, for tests.
 - The `weakened-tests` gate (`node harness/test-weakening.mjs`, also at `task done`) reads the diff since the base branch
   (committed or not) in test files (`*.test.*`, `*.spec.*`, `tests/`, `test/`, `__tests__/`, `qa/`, `specs/`, C# `*.Tests/`
   and `*Tests/` folders, `test_*.py`, `*_test.*`, `*Test(s).cs|gd`) and test-runner configs, and names file:line and the
@@ -56,7 +71,13 @@
   `.skip`/`.only`/`xit`/`xdescribe`/`test.todo`/`[Ignore]`/`@Disabled`/pytest skips/gdUnit `do_skip`, raised timeouts,
   wider tolerances (`toBeCloseTo` precision lowered; eps, tol, atol, an `abs()` bound, an `AreEqual` delta raised), a
   condition on a literal seed (or a tick that returns or skips), deleted test files, and golden or snapshot files changed
-  by a commit without a `Golden-Reason` trailer.
+  by a commit without a `Golden-Reason` trailer. Not a seed special case (2.58.5): a loop over seeds (`for seed in [1, 2, 3]:`)
+  and an assertion about the seed itself (`expect(sim.seed !== 0).toBe(true)`, `assert seed != 0`); with a branch on the
+  same line (`if`, a ternary, `return`/`continue`) it still counts.
+- The owner key (2.58.5, every "no owner key" note says this): the owner makes it once on a device no agent runs on (not
+  the crew's PC), with `npm run approve -- keygen`, commits only `studio/keys/owner-ed25519.pub.pem` and merges it to the
+  studio's main branch. The private key never goes to the agents' PC; approvals are signed on that device. An agent
+  asked to run keygen on the agents' PC refuses.
 - It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
   `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
   --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.

@@ -86,6 +86,7 @@ export function readPass(root, taskId) {
 }
 export function clearPass(root, taskId) {
   try { fs.rmSync(passFile(root, taskId), { force: true }); } catch {}
+  try { fs.rmSync(passFile(root, taskId).replace(/\.json$/, '.incoming.json'), { force: true }); } catch {}
 }
 
 /**
@@ -100,6 +101,68 @@ export function canReuse(rec, { head, incoming }) {
   const hit = (incoming || []).find((f) => matchAny(f, rec.scope));
   if (hit) return { ok: false, why: `the studio's branch changed ${hit}, inside this lane's gate scope` };
   return { ok: true, why: `${(incoming || []).length} incoming file(s), all outside this lane's gate scope` };
+}
+
+// ---- a green verify standing in for task done's game checks (2.58.5, H-3) ------------------------
+
+/**
+ * May this verify record stand in for the game checks task done would run now? Pure: the caller gathers the facts.
+ *   rec       the verify record (scripts/run-gates.mjs)
+ *   tree      the tree being landed (HEAD^{tree} of this copy); recTree the tree of rec.head (git), when it has one
+ *   clean     no tracked change and no untracked file outside studio/ right now
+ *   changed   the files task done would scope its game checks to (null = unknown: every check would run)
+ *   needEngine / hadEngine   the Godot projects task done's engine gate would check / the verify's game gate checked
+ *   relatedNow  whether task done would run related tests only (a verify that did, while done wouldn't, can't stand in)
+ *   optIn     STUDIO_DONE_REUSE_VERIFY=on: a record from before 2.58.5 (no `tree`) may count by its commit's tree
+ * Returns { ok, why }. A partial, fast-tier, dirty, old, other-tree, failing or narrower record never counts.
+ */
+export function judgeVerifyReuse(rec, { tree, recTree = null, clean, changed = null, needEngine = [], hadEngine = [], relatedNow = false, optIn = false, now = Date.now(), maxAgeH = 24 } = {}) {
+  if (!rec) return { ok: false, why: 'no full verify is recorded' };
+  if (rec.partial || rec.tier === 'fast') return { ok: false, why: 'the last verify was partial (--only or the fast tier)' };
+  if (rec.dirty !== false) return { ok: false, why: 'the last verify ran with uncommitted changes (or didn\'t say)' };
+  if (rec.incomingOnly) return { ok: false, why: 'the last run was a landing re-check that ran only the game checks a rebase touched' };
+  const game = (rec.rows || []).find((r) => r.id === 'game');
+  if (!game) return { ok: false, why: 'the last verify didn\'t run the game\'s checks' };
+  if (!game.ok || game.cached) return { ok: false, why: game.ok ? 'the last verify took the game\'s checks from a cache' : 'the game\'s checks failed in the last verify' };
+  const age = now - (Date.parse(rec.at) || 0);
+  if (!(age >= -5 * 60000 && age <= maxAgeH * 3600000)) return { ok: false, why: `the last verify is more than ${maxAgeH} h old (or its time is wrong)` };
+  if (!tree) return { ok: false, why: 'the tree being landed is unknown' };
+  if (!rec.tree && !optIn) return { ok: false, why: 'the last verify record names no tree (it is from before 2.58.5); STUDIO_DONE_REUSE_VERIFY=on lets its commit stand for it' };
+  const tested = rec.tree || recTree;
+  if (rec.tree && recTree && rec.tree !== recTree) return { ok: false, why: `the verify record's tree ${String(rec.tree).slice(0, 8)} isn't its commit's tree ${String(recTree).slice(0, 8)}` };
+  if (!tested || tested !== tree) return { ok: false, why: `the last verify tested tree ${String(tested || 'unknown').slice(0, 8)}, not the one being landed (${String(tree).slice(0, 8)})` };
+  if (!clean) return { ok: false, why: 'this copy has uncommitted or untracked files outside studio/ now' };
+  if (rec.scoped) {
+    if (!changed?.length) return { ok: false, why: `the last verify was scoped to ${(rec.changed || []).length} file(s), and task done would run every check here` };
+    const inScope = new Set(rec.changed || []);
+    const outside = changed.filter((f) => !inScope.has(f));
+    if (outside.length) return { ok: false, why: `the last verify was scoped to ${(rec.changed || []).length} file(s) and missed ${outside.slice(0, 3).join(', ')}` };
+  }
+  const had = new Set(hadEngine);
+  const missing = needEngine.filter((p) => !had.has(p));
+  if (missing.length) return { ok: false, why: `the last verify didn't run the engine gate for ${missing.join(', ')}` };
+  if (rec.related && !relatedNow) return { ok: false, why: 'the last verify ran only the related tests' };
+  return { ok: true, why: `the game's checks passed in the verify at ${String(rec.at).slice(11, 19)} UTC on this same tree (${String(tree).slice(0, 8)}, clean)` };
+}
+
+/**
+ * The landing re-check after a rebase (harness/worktree.mjs deliver): when the lane's own pass was recorded for its
+ * pre-rebase commit, the files main brought in are written to .studio/gate-pass/<task>.incoming.json and the env
+ * names it (STUDIO_GATE_INCOMING_FILE), so harness/game-gates.mjs re-runs only the game checks whose inputs changed.
+ * No valid pass: {} (everything in the lane's scope runs, as before). A file, not an env list: Windows caps the
+ * environment at 32,767 characters.
+ */
+export function landingRecheckEnv(root, taskId, rec, { preHead, incoming }) {
+  if (!rec || !preHead || rec.head !== preHead || !Array.isArray(incoming)) return {};
+  if (process.env.STUDIO_GATE_REUSE === 'off') return {};
+  try {
+    const f = passFile(root, taskId).replace(/\.json$/, '.incoming.json');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify({ task: taskId, from: preHead, incoming }, null, 2));
+    return { STUDIO_GATE_INCOMING_FILE: f };
+  } catch {
+    return {};
+  }
 }
 
 // ---- the short land lock -------------------------------------------------------------------------
@@ -124,7 +187,30 @@ const held = new Map();
  * toward a gate's own timeout. A slot held by a dead process, or older than STUDIO_GATE_SLOT_STALE_MIN
  * (120), is taken over. After STUDIO_GATE_SLOT_WAIT_MIN (60) of waiting the gate runs anyway, with a note.
  * STUDIO_GATE_SLOTS=0 turns slots off.
+ *
+ * 2.58.5 (H-3): a landing goes first. A gate run with STUDIO_GATE_PRIORITY=landing (task done sets it for its game
+ * checks and the re-check after a rebase) leaves a gate-slot-landing-<pid>.wait marker while it waits; any other
+ * run (a verify) leaves a free slot to it until the marker is gone. Running gates are never stopped. A marker of a
+ * dead process, or older than the stale limit, doesn't count.
  */
+const LANDING_WAIT = /^gate-slot-landing-(\d+)\.wait$/;
+/** Live landing markers other than this process's: [{ pid, label }]. */
+export function landingWaiters(dir, { staleMs = 120 * 60000, self = process.pid } = {}) {
+  const out = [];
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return out; }
+  for (const n of names) {
+    const m = n.match(LANDING_WAIT);
+    if (!m || Number(m[1]) === self) continue;
+    const f = path.join(dir, n);
+    try {
+      const h = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if ((h.pid && !alive(h.pid)) || Date.now() - h.at > staleMs) { fs.rmSync(f, { force: true }); continue; }
+      out.push({ pid: h.pid, label: h.label });
+    } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 5000) fs.rmSync(f, { force: true }); } catch {} }
+  }
+  return out;
+}
 export function withGateSlot(root, label, fn, { log = () => {}, env = process.env } = {}) {
   const n = Number(env.STUDIO_GATE_SLOTS ?? 2);
   if (!(n > 0)) return fn();
@@ -133,37 +219,49 @@ export function withGateSlot(root, label, fn, { log = () => {}, env = process.en
   const staleMs = Number(env.STUDIO_GATE_SLOT_STALE_MIN ?? 120) * 60000;
   const deadline = Date.now() + Number(env.STUDIO_GATE_SLOT_WAIT_MIN ?? 60) * 60000;
   const poll = Number(env.STUDIO_GATE_SLOT_POLL_MS ?? 1000);
+  const landing = String(env.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing';
+  const marker = landing ? path.join(dir, `gate-slot-landing-${process.pid}.wait`) : null;
   const t0 = Date.now();
   let mine = null;
   let told = false;
-  while (!mine) {
-    for (let i = 1; i <= n && !mine; i += 1) {
-      const f = path.join(dir, `gate-slot-${i}.lock`);
-      try {
-        fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), label }), { flag: 'wx' });
-        mine = f;
-      } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
+  let yielded = false;
+  try {
+    while (!mine) {
+      // A verify leaves a free slot to a landing that is waiting for one.
+      const ahead = landing ? [] : landingWaiters(dir, { staleMs });
+      if (ahead.length && !yielded) { log(`[gate-slots] a landing is waiting for a gate slot (${ahead.map((w) => w.label).join(', ')}); it goes first, ${label} waits`); yielded = true; }
+      for (let i = 1; i <= n && !mine && !ahead.length; i += 1) {
+        const f = path.join(dir, `gate-slot-${i}.lock`);
         try {
-          const h = JSON.parse(fs.readFileSync(f, 'utf8'));
-          if ((h.pid && !alive(h.pid)) || Date.now() - h.at > staleMs) fs.rmSync(f, { force: true });
-        } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 5000) fs.rmSync(f, { force: true }); } catch {} }
+          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), label, ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
+          mine = f;
+        } catch (err) {
+          if (err.code !== 'EEXIST') throw err;
+          try {
+            const h = JSON.parse(fs.readFileSync(f, 'utf8'));
+            if ((h.pid && !alive(h.pid)) || Date.now() - h.at > staleMs) fs.rmSync(f, { force: true });
+          } catch { try { if (Date.now() - fs.statSync(f).mtimeMs > 5000) fs.rmSync(f, { force: true }); } catch {} }
+        }
       }
+      if (mine) break;
+      if (Date.now() > deadline) {
+        log(`[gate-slots] waited ${Math.round((Date.now() - t0) / 60000)} min for a free slot; running ${label} anyway`);
+        if (marker) try { fs.rmSync(marker, { force: true }); } catch {}
+        return fn();
+      }
+      if (marker && !fs.existsSync(marker)) { try { fs.writeFileSync(marker, JSON.stringify({ pid: process.pid, at: Date.now(), label })); } catch {} }
+      if (!told) {
+        const holders = [];
+        for (let i = 1; i <= n; i += 1) { try { holders.push(JSON.parse(fs.readFileSync(path.join(dir, `gate-slot-${i}.lock`), 'utf8')).label); } catch {} }
+        log(`[gate-slots] waiting for one of ${n} gate slot(s) (busy: ${holders.join(', ') || 'unknown'})${landing ? '; a landing: it takes the next free slot ahead of verifies' : ''}; waiting doesn't count toward ${label}'s timeout`);
+        told = true;
+      }
+      sleep(poll);
     }
-    if (mine) break;
-    if (Date.now() > deadline) {
-      log(`[gate-slots] waited ${Math.round((Date.now() - t0) / 60000)} min for a free slot; running ${label} anyway`);
-      return fn();
-    }
-    if (!told) {
-      const holders = [];
-      for (let i = 1; i <= n; i += 1) { try { holders.push(JSON.parse(fs.readFileSync(path.join(dir, `gate-slot-${i}.lock`), 'utf8')).label); } catch {} }
-      log(`[gate-slots] waiting for one of ${n} gate slot(s) (busy: ${holders.join(', ') || 'unknown'}); waiting doesn't count toward ${label}'s timeout`);
-      told = true;
-    }
-    sleep(poll);
+  } finally {
+    if (marker) try { fs.rmSync(marker, { force: true }); } catch {}
   }
-  if (told) log(`[gate-slots] got a slot after ${Math.round((Date.now() - t0) / 1000)} s`);
+  if (told || yielded) log(`[gate-slots] got a slot after ${Math.round((Date.now() - t0) / 1000)} s`);
   try { return fn(); } finally { try { fs.rmSync(mine, { force: true }); } catch {} }
 }
 export function withLandLock(root, fn, { waitMs = Number(process.env.STUDIO_LAND_LOCK_WAIT_MS || 180000), name = 'land', busy = busyCode } = {}) {

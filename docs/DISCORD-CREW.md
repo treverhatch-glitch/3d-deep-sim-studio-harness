@@ -53,7 +53,8 @@ clones would each think they own the board.
 
 - Keep the game's studio copy **private**: an adopted game's code lives in it (`game/<slug>/`).
 - Agents and bots never edit the harness itself (`harness/`, `hub/`, `scripts/`, `qa/*.mjs`). With the
-  owner's key in place (`npm run approve -- keygen` on the owner's own computer), the protected checks
+  owner's key in place (`npm run approve -- keygen` on the owner's own device, one no agent runs on; commit only
+  `studio/keys/owner-ed25519.pub.pem`), the protected checks
   can't be weakened without the owner's signature.
 
 ## Settings for a big adopted game
@@ -63,7 +64,8 @@ In the studio's `.env`:
 ```bash
 STUDIO_WHOLE_GAME=on            # every check on the whole game after each landing (2.37)
 STUDIO_REACHABILITY=fail        # new code nothing in the game uses can't close a task (2.38)
-STUDIO_DONE_REUSE_VERIFY=on     # task done trusts a green verify on the same commit (2.43)
+STUDIO_DONE_REUSE_VERIFY=on     # also trust a green verify from before 2.58.5 (its commit's tree); on by default for new
+                                # records: task done doesn't re-run game checks a green full verify of the same tree ran (=off re-runs)
 STUDIO_GAME_GATE_RETRY=on       # a failed game check runs once more before it counts (2.44)
 STUDIO_WATCHDOG_QUIET_MIN=60    # a repeating watchdog line, once an hour (2.40)
 STUDIO_SILENT_GREEN=fail        # once the game's tests are set up: a run that tested nothing fails (2.36)

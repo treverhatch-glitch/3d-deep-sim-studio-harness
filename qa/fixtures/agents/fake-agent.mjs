@@ -30,6 +30,13 @@ if (how === 'quit') process.exit(0);
 if (how === 'wait') {
   setTimeout(() => process.exit(0), 60000);
 } else {
+  // 2.58.5 (H-9): a custom command now runs in its own lane copy like a built-in tool (STUDIO_MAIN_ROOT is the main
+  // checkout); there, as a real agent must, it commits its work before task done.
+  if (process.env.STUDIO_MAIN_ROOT && fs.existsSync('.git')) {
+    const git = (...a) => spawnSync('git', ['-c', `user.name=${agent}`, '-c', `user.email=${agent}@selftest.invalid`, ...a], { encoding: 'utf8', env: process.env });
+    git('add', '-A', 'docs/fake');
+    git('commit', '-q', '-m', `${task}: fake agent's work`);
+  }
   sh('harness/task.mjs', 'done', task, '--agent', agent, '--force', '--reason', 'fake agent', '--accepted-by', 'selftest');
   if (how === 'chatty') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Done. Checked the quota and rate limit handling.', usage: { input_tokens: 10, output_tokens: 5 } }));
   process.exit(0);

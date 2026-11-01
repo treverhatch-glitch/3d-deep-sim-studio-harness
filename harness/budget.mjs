@@ -295,16 +295,22 @@ export function cleanQuotaMarks(now = Date.now()) {
   }
   return { dropped, kept };
 }
+const AGY_PROBE_PROMPT = 'Reply with the word OK.';
+/** agy's probe call: the prompt on stdin (2.58.5, H-2); STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` as for sessions. */
+export const agyProbeArgv = () => (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')
+  ? ['agy', '-p', AGY_PROBE_PROMPT, '--print-timeout', '60s'] : ['agy', '--print-timeout', '60s']);
 /**
  * Ask the tool itself before believing an old mark: one tiny call ("reply OK"). It answers: the mark is
  * cleared. STUDIO_QUOTA_PROBE=off turns it off; STUDIO_<TOOL>_PROBE_CMD replaces the call.
  */
 export function probeTool(tool, { timeoutMs = 90000 } = {}) {
   const custom = process.env[`STUDIO_${String(tool).toUpperCase()}_PROBE_CMD`];
-  const argv = custom ? null : { claude: ['claude', '-p', 'Reply with the word OK.', '--output-format', 'json', '--max-turns', '1'], codex: ['codex', 'exec', '--json', ...(process.env.STUDIO_AGENT_MODEL ? ['-m', process.env.STUDIO_AGENT_MODEL] : []), 'Reply with the word OK.'], agy: ['agy', '-p', 'Reply with the word OK.', '--print-timeout', '60s'] }[tool];
+  const argv = custom ? null : { claude: ['claude', '-p', 'Reply with the word OK.', '--output-format', 'json', '--max-turns', '1'], codex: ['codex', 'exec', '--json', ...(process.env.STUDIO_AGENT_MODEL ? ['-m', process.env.STUDIO_AGENT_MODEL] : []), 'Reply with the word OK.'], agy: agyProbeArgv() }[tool];
   if (!custom && !argv) return { ok: null, why: `no probe for ${tool}` };
   // P-066: no shell for the tool (harness/launch.mjs); on Windows "Reply with the word OK." reached claude word by word.
-  const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  // 2.58.5 (H-2): agy reads the probe's prompt on stdin like a session's kickoff (agy.exe split -p's text on spaces).
+  const input = tool === 'agy' && !argv.includes('-p') ? AGY_PROBE_PROMPT : null;
+  const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, ...(input === null ? { stdio: ['ignore', 'pipe', 'pipe'] } : { input, stdio: ['pipe', 'pipe', 'pipe'] }) });
   const out = `${r.stdout || ''}\n${r.stderr || ''}`;
   // 2.30 (J12): the provider's own limit message only; a word like "quota" anywhere in the answer isn't one.
   const said = limitLine(r.stderr, r.stdout, r.status);

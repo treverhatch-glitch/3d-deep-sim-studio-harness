@@ -4,12 +4,18 @@
  *   npm run agent -- allow agy --dry-run                       the rules and the file, nothing written
  *   npm run agent -- allow agy --by <owner>                    merge them into the studio's .studio/agy-settings.json
  *   npm run agent -- allow agy --by <owner> --scope user       merge them into agy's own (user-level) settings.json
+ *   … --all                                                    the whole harness list, beyond the approved set (owner)
+ *   … --prune                                                  remove harness rules beyond the set being written
  *
+ * H-2b (2.58.5): the default set is the owner's approval for agy (2026-10-31): node, npm, npx and git status, diff,
+ * add, commit, log (AGY_APPROVED), not the whole harness list: 2.58.3 wrote 30 rules (ffmpeg, blender, git show, ls,
+ * mkdir, cp, mv too) that nobody had approved for agy. More needs --all and the owner; --prune takes extra harness
+ * rules back out (the file is backed up first; the owner's own rules are never touched).
  * Claude agents get the harness's command list (harness/allowlist.mjs) on their command line (--allowedTools).
  * Antigravity CLI (agy) has no such flag: in headless mode (-p) a shell command is "Ask" by default and is
  * soft-denied (the run goes on, exits 0, and prints "add an allow-rule under permissions.allow in settings.json"),
- * so a launched agy agent couldn't run node, npm or git. This writes the same list as agy rules, once, with the
- * owner's OK. It never adds a skip-all setting (toolPermission, --dangerously-skip-permissions): that stays for a
+ * so a launched agy agent couldn't run node, npm or git. This writes the owner-approved part of that list as agy
+ * rules, once, with the owner's OK. It never adds a skip-all setting (toolPermission, --dangerously-skip-permissions): that stays for a
  * frozen test clone (STUDIO_AGY_BYPASS=1, harness/agent.mjs).
  *
  * What agy reads (checked 2026-11-01 against Google's docs, see docs/AGENT-TOOLS.md):
@@ -73,8 +79,13 @@ export function agyRulesFor(pattern) {
   return [`command(${prefix})`, `command(regex:^${escapeRe(prefix)}(?: ${REST})?$)`];
 }
 
-/** Every rule the harness list gives, in list order. */
-export const agyRules = (list = ALLOWED) => [...new Set(list.flatMap(([, p]) => agyRulesFor(p)))];
+/** H-2b: the entries of the harness list (harness/allowlist.mjs, by name) the owner approved for agy. */
+export const AGY_APPROVED = ['node', 'npm', 'npx', 'git status', 'git diff', 'git add', 'git commit', 'git log'];
+/** The approved entries, as harness list rows. */
+export const agyApprovedList = (list = ALLOWED) => list.filter(([name]) => AGY_APPROVED.includes(name));
+
+/** Every rule a list gives, in list order: by default the approved set (H-2b); agyRules(ALLOWED) for the whole list. */
+export const agyRules = (list = agyApprovedList()) => [...new Set(list.flatMap(([, p]) => agyRulesFor(p)))];
 
 /** The settings file for a scope, or null when agy reads none there. */
 export function settingsFile(scope = DEFAULT_SCOPE, { home = os.homedir(), stateDir = STUDIO_STATE_DIR } = {}) {
@@ -123,7 +134,7 @@ export function agyAllowHint({ home = os.homedir() } = {}) {
   const st = agyAllowState({ home });
   if (!st.missing.length) return null;
   if (st.error) return `agy has no allow-rules it can read (${tilde(st.file, home)}: ${st.error}): run ${HINT_CMD}`;
-  return st.have ? `agy has ${st.have} of the harness's ${st.want} allow-rules: run ${HINT_CMD}` : NO_RULES_HINT;
+  return st.have ? `agy has ${st.have} of its ${st.want} approved allow-rules: run ${HINT_CMD}` : NO_RULES_HINT;
 }
 
 /** The hint as an event too, at most once an hour, for launches nobody watches (the HUB, the watcher). */
@@ -145,8 +156,9 @@ const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtest
  * Merge the harness's rules into agy's settings. Returns { ok, code, lines, file, added, backup }.
  * dryRun: print the target and the rules, write nothing. A real run needs `by` (the owner) and scope 'user'.
  */
-export function enrolAgy({ by = null, scope = null, dryRun = false, home = os.homedir(), stateDir = STUDIO_STATE_DIR, env = process.env, now = new Date() } = {}) {
-  const rules = agyRules();
+export function enrolAgy({ by = null, scope = null, dryRun = false, all = false, prune = false, home = os.homedir(), stateDir = STUDIO_STATE_DIR, env = process.env, now = new Date() } = {}) {
+  const rules = all ? agyRules(ALLOWED) : agyRules();
+  const setName = all ? 'the whole harness list (--all: beyond the owner\'s approved set)' : `the approved set (${AGY_APPROVED.join(', ')})`;
   const lines = [];
   const fail = (msg) => ({ ok: false, code: 1, lines: [...lines, msg] });
   if (scope && !Object.hasOwn(AGY_SETTINGS, scope)) return fail(`--scope is studio (the default) or user, not "${scope}".`);
@@ -164,20 +176,28 @@ export function enrolAgy({ by = null, scope = null, dryRun = false, home = os.ho
   const allow = (s.data.permissions?.allow || []).map(String);
   const toAdd = rules.filter((r) => !allow.includes(r));
   const kept = rules.length - toAdd.length;
+  // Rules the harness writes (from its whole list) that the set being written doesn't hold: an earlier, wider run's.
+  const harnessMade = new Set(agyRules(ALLOWED));
+  const extra = allow.filter((r) => harnessMade.has(r) && !rules.includes(r));
+  const toRemove = prune ? extra : [];
+  const extraNote = extra.length && !prune ? `${extra.length} harness rule(s) beyond ${all ? 'the harness list' : 'the approved set'} are in the file (${[...new Set(extra.map((r) => r.replace(/^command\((?:regex:\^)?/, '').replace(/[(\\].*$|\)$/, '')))].join(', ')}): ${again} --prune takes them out.` : null;
   if (dryRun) {
     lines.push(`Dry run: nothing written. Target: ${file}${s.exists ? '' : ' (doesn\'t exist yet; a real run creates it)'}.`);
     if (want === 'studio') lines.push(`That is the studio's own file: the launcher passes it to agy as --settings <file>. agy's user-level ${userFile} is left alone (write it with --scope user instead).`);
-    lines.push(toAdd.length ? `Would add ${toAdd.length} rule(s) under permissions.allow${kept ? ` (${kept} already there)` : ''}, from harness/allowlist.mjs:` : `All ${rules.length} rules are already there: nothing to add.`);
+    lines.push(toAdd.length ? `Would add ${toAdd.length} rule(s) under permissions.allow${kept ? ` (${kept} already there)` : ''}, ${setName}:` : `All ${rules.length} rules of ${setName} are already there: nothing to add.`);
     for (const r of toAdd) lines.push(`  ${r}`);
-    if (toAdd.length) lines.push(`Then: ${again}. Other settings and rules in the file stay; it is backed up first.`);
-    return { ok: true, code: 0, lines, file, added: [], rules: toAdd };
+    if (toRemove.length) lines.push(`Would remove ${toRemove.length} harness rule(s) beyond it (--prune):`, ...toRemove.map((r) => `  ${r}`));
+    if (extraNote) lines.push(extraNote);
+    if (toAdd.length || toRemove.length) lines.push(`Then: ${again}${all ? ' --all' : ''}${prune ? ' --prune' : ''}. Other settings and rules in the file stay; it is backed up first.`);
+    return { ok: true, code: 0, lines, file, added: [], rules: toAdd, removed: [] };
   }
   const who = String(by || '').trim();
   if (!who) return fail('Nothing written: --by <owner> is required. The owner approves what agy may run without asking.');
   if (env.STUDIO_ROLE || AGENTISH.test(who)) return fail(`Nothing written: ${env.STUDIO_ROLE ? `this runs inside a launched ${env.STUDIO_ROLE} session` : `"${who}" is an agent's name`}. The owner runs this in their own terminal, after reading the --dry-run.`);
-  if (!toAdd.length) {
-    lines.push(`agy already has all ${rules.length} of the harness's allow-rules in ${file}: nothing added, nothing written.`);
-    return { ok: true, code: 0, lines, file, added: [], backup: null };
+  if (!toAdd.length && !toRemove.length) {
+    lines.push(`agy already has all ${rules.length} rules of ${setName} in ${file}: nothing added, nothing written.`);
+    if (extraNote) lines.push(extraNote);
+    return { ok: true, code: 0, lines, file, added: [], removed: [], backup: null };
   }
   let backup = null;
   if (s.exists) {
@@ -186,34 +206,35 @@ export function enrolAgy({ by = null, scope = null, dryRun = false, home = os.ho
   }
   const data = s.data;
   data.permissions = data.permissions || {};
-  data.permissions.allow = [...(Array.isArray(data.permissions.allow) ? data.permissions.allow : []), ...toAdd];
+  data.permissions.allow = [...(Array.isArray(data.permissions.allow) ? data.permissions.allow : []).filter((r) => !toRemove.includes(String(r))), ...toAdd];
   // Keep the file's own indent, line ends and BOM.
   const indent = (s.raw.match(/^([ \t]+)"/m) || [null, '  '])[1];
   const eol = /\r\n/.test(s.raw) ? '\r\n' : '\n';
   const text = `${s.raw.startsWith('﻿') ? '﻿' : ''}${JSON.stringify(data, null, indent).replace(/\n/g, eol)}${eol}`;
   try { writeAtomic(file, text); } catch (err) { return fail(`Couldn't write ${file} (${err.code || err.message}).${backup ? ` The backup is ${backup}.` : ''}`); }
-  lines.push(`Added ${toAdd.length} allow-rule(s) to ${file}${kept ? ` (${kept} were already there)` : ''}, approved by ${who}.${backup ? ` Backup: ${backup}.` : ''}`);
-  lines.push(`agy agents can now run the harness list (node, npm, npx, read-only git plus add and commit, …) headless${want === 'studio' ? ' (the launcher passes this file with --settings)' : ''}. Nothing else changed.`);
-  if (want === 'studio') lines.push('On Windows agy matched exact commands only in the crew\'s test (command(node --version) yes, command(node) no); the regex rules are untested on real agy: check one launched agy agent runs node.');
+  lines.push(`${toAdd.length ? `Added ${toAdd.length} allow-rule(s)` : 'Added no rules'}${toRemove.length ? `, removed ${toRemove.length} harness rule(s) beyond ${all ? 'the harness list' : 'the approved set'},` : ''} in ${file}${kept ? ` (${kept} were already there)` : ''}, approved by ${who}.${backup ? ` Backup: ${backup}.` : ''}`);
+  lines.push(`agy agents may now run ${setName} headless${want === 'studio' ? ' (the launcher passes this file with --settings)' : ''}. Nothing else changed.`);
+  if (extraNote) lines.push(extraNote);
+  lines.push('On Windows agy matched exact commands only in the crew\'s test (command(node --version) yes, command(node) no): these rules may allow nothing there. The regex rules are untested on real agy: check one launched agy agent runs node; if not, add the exact commands it needs by hand.');
   try {
-    emitEvent({ type: 'agy.allow_enrolled', agent: who, to: 'producer', msg: `${who} approved agy's allow-rules: ${toAdd.length} added to ${tilde(file, home)} (the harness list, harness/allowlist.mjs)${backup ? `; backup ${tilde(backup, home)}` : ''}`, meta: { by: who, scope: want, file: tilde(file, home), added: toAdd.length, backup: backup ? tilde(backup, home) : null } });
+    emitEvent({ type: 'agy.allow_enrolled', agent: who, to: 'producer', msg: `${who} approved agy's allow-rules: ${toAdd.length} added${toRemove.length ? `, ${toRemove.length} removed` : ''} in ${tilde(file, home)} (${all ? 'the whole harness list, --all' : 'the approved set'})${backup ? `; backup ${tilde(backup, home)}` : ''}`, meta: { by: who, scope: want, file: tilde(file, home), added: toAdd.length, removed: toRemove.length, set: all ? 'all' : 'approved', backup: backup ? tilde(backup, home) : null } });
   } catch {
     // the file is written; the log line is a record, not a step
   }
-  return { ok: true, code: 0, lines, file, added: toAdd, backup };
+  return { ok: true, code: 0, lines, file, added: toAdd, removed: toRemove, backup };
 }
 
 /** `npm run agent -- allow <tool> …` (argv after "allow"). Returns the exit code. */
 export function allowCli(argv, { log = console.log, err = console.error } = {}) {
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] ?? '' : null);
   const tool = argv[0] && !argv[0].startsWith('--') ? argv[0] : null;
-  const usage = 'Usage: npm run agent -- allow agy [--dry-run] | npm run agent -- allow agy --by <owner> [--scope user]';
+  const usage = 'Usage: npm run agent -- allow agy [--dry-run] | npm run agent -- allow agy --by <owner> [--scope user] [--all] [--prune]';
   if (!tool) { err(usage); return 1; }
   if (tool !== 'agy') {
     err(tool === 'claude' ? 'Claude Code needs no enrolment: the launcher gives it the list on its command line (--allowedTools).' : `Only agy reads its allow-rules from a settings file; "${tool}" isn't enrolled this way. ${usage}`);
     return 1;
   }
-  const r = enrolAgy({ by: flag('by'), scope: flag('scope') || null, dryRun: argv.includes('--dry-run') });
+  const r = enrolAgy({ by: flag('by'), scope: flag('scope') || null, dryRun: argv.includes('--dry-run'), all: argv.includes('--all'), prune: argv.includes('--prune') });
   for (const l of r.lines) (r.ok ? log : err)(l);
   return r.code;
 }
