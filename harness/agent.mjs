@@ -56,7 +56,6 @@ import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, remove
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
-import { setHold } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { agentEnv, nimKeyMissing } from './agent-env.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
@@ -69,7 +68,8 @@ import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mj
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
-import { harnessCaused } from './busy.mjs';
+import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
+import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
@@ -361,13 +361,17 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   const capped = !trouble && (/"subtype"\s*:\s*"error_max_turns"/.test(String(log).slice(-20000)) || Boolean(refresh?.endedBy));
   // 2.30h (3): an empty final answer after spending output tokens is a failed hand-off, not a finish.
   const reasoningOnly = !capped && !trouble && code === 0 && sessionReasoningOnly(log);
-  const bad = !capped && (code !== 0 || Boolean(trouble) || reasoningOnly);
+  // 2.58.3 (N1): a person (or the Producer) stopped or paused it: the kill ends it with exit 1 (taskkill /F on
+  // Windows) or a signal, but that's a stop, not a crash: no failover, no "error", and the supervisor's halt, the
+  // loop park, the breaker and the tier-up don't count it. stopAgent wrote who before it killed (stopMark).
+  const stop = !capped ? stopMark(agent) : null;
+  const bad = !capped && !stop && (code !== 0 || Boolean(trouble) || reasoningOnly);
   // PU-19 (P-042): the session stopped at a usage limit: its own, or for a custom command (no tool name of its
   // own) the one its line names. That's waiting for the reset, not a failure: the tool is marked out until
   // then (below), and the hand-back says "usage limit", so the breaker, the loop park, the model escalation
   // and the supervisor's halt don't count it.
   // (Repeated 5xx refusals are a run-out too, but not a usage limit: they keep their old handling.)
-  const limit = !capped && found?.kind === 'quota' && !/^provider refused/.test(found.text) && (!other || (tool === 'custom' && code !== 0)) ? found : null;
+  const limit = !capped && !stop && found?.kind === 'quota' && !/^provider refused/.test(found.text) && (!other || (tool === 'custom' && code !== 0)) ? found : null;
   // Out of quota: remember until when, so the supervisor moves this tool's lanes to the next tool.
   // STUDIO_QUOTA_SKIP=off: usage is watched outside the harness, so never skip a tool for quota.
   // (PU-19: marked before the hand-back, so the note can say until when.)
@@ -400,7 +404,8 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
       return git.status === 0 && git.stdout.trim().length > 0;
     })();
     let af = null;
-    if (crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit })) {
+    // A stopped session's task isn't closed for it: the person asked it to stop (its work is saved below).
+    if (!stop && crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit })) {
       af = autoFinish(agent, id, copyDir, mine, code);
       if (af.ok) {
         finished.push(id);
@@ -412,7 +417,9 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
     const onBranch = ahead ? ` ${ahead} commit(s) not yet in the studio's branch are on ${s0.copy.branch}; the next agent's copy gets them merged in.` : '';
     // A session that ended without task done or a hand-back still holds its task (test #2: claims sat
     // for up to an hour). Hand it back now, with what it last said and what it left.
-    const note = capped
+    const note = stop
+      ? `${agent} (${tool}, ${model}) was ${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by} (${STOP_NOTE}).${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch}${s0.now ? ` It last said: "${s0.now}".` : ''} Check its commits (git log --grep ${id}) before redoing anything.`
+      : capped
       ? `${agent} (${tool}, ${model}) refreshed: ${refresh?.endedBy || `it reached the ${sessionLimits().ceilingTurns}-turn ceiling`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} A fresh session continues from this hand-back${s0.now ? `; it last said: "${s0.now}"` : ''}.`
       : limit
       ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
@@ -422,18 +429,19 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
     pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
-    if (!capped && !limit) parkIfLooping(id);
+    if (!capped && !limit && !stop) parkIfLooping(id);
   }
   for (const l of listLocks().filter((x) => x.owner === agent)) release(l.key, agent);
   const tok = tokensFrom(log);
   // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
-  const reason = capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined } });
+  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   const s = readJson(sessionFile(agent)) || {};
-  fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...tok }, null, 2));
-  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped, usageLimit: Boolean(limit) };
+  fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
+  fs.rmSync(stopFile(agent), { force: true });
+  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
 }
 
 /**
@@ -484,17 +492,15 @@ export function autoFinish(agent, id, copyDir, mine, code) {
 export function parkIfLooping(id, now = Date.now()) {
   const limit = Number(process.env.STUDIO_LOOP_HANDBACKS ?? 3);
   if (!(limit > 0)) return null;
-  const evs = readRecentEvents(20000).filter((e) => e.task === id && Date.parse(e.ts) >= now - 2 * 3600000);
-  const lastDone = evs.filter((e) => e.type === 'task.done').pop();
   // 2.30q (#6): harness-caused hand-backs (claim ran out during gates, merge refused, land lock) don't count.
   // PU-19: nor a session that stopped at its usage limit (it waits for the reset; it isn't stuck).
-  const pauses = evs.filter((e) => e.type === 'task.paused' && (!lastDone || e.ts > lastDone.ts) && !harnessCaused(e) && !LIMIT_STOP.test(e.msg || ''));
-  const unparked = evs.filter((e) => e.type === 'task.hold' && /unparked/.test(e.msg || '')).pop();
-  const since = unparked ? pauses.filter((e) => e.ts > unparked.ts) : pauses;
+  // 2.58.3 (N1, N3): nor a person's stop; counted since the last done, unblock or unpark (busy.mjs loopHandBacks,
+  // the watchdog's rule too), and parked once however many passes get here at the same moment (parkOnce).
+  const since = loopHandBacks(id, readRecentEvents(20000), { since: now - 2 * 3600000 });
   if (since.length < limit) return null;
   const last = String(since[since.length - 1].msg || '').replace(/^Handed back [^:]+:\s*/, '').slice(0, 200);
   const why = `handed back ${since.length} times in 2 h without being done; the last note: "${last}". Fix the blocker, then npm run task -- unpark ${id} --by <name>`;
-  setHold(id, { parked: { by: 'launcher', why, at: new Date(now).toISOString() } }, { by: 'launcher', msg: `Parked ${id}: ${why}` });
+  if (!parkOnce(id, { by: 'launcher', why, at: new Date(now).toISOString() }, { by: 'launcher', msg: `Parked ${id}: ${why}` })) return null;
   emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: id, msg: `${id} keeps coming back (${since.length} hand-backs in 2 h), so it's parked. Last note: "${last}"` });
   return why;
 }
@@ -854,6 +860,33 @@ export function killVerdict(s, cur, now = Date.now()) {
 }
 
 /**
+ * 2.58.3 (N1): who stopped a session, written by stopAgent (agent stop, pause, stop all) before it kills, and read by
+ * the launcher when the agent exits. Kept beside the record (.studio/agents/<agent>.stop, written whole) as well as in
+ * it (stopRequested), because the launcher's heartbeat rewrites the record and could drop a field written meanwhile.
+ * Only a mark made during this session counts (the same startedAt).
+ */
+const stopFile = (agent) => path.join(AGENTS_DIR, `${agent}.stop`);
+export function recordStop(s, by, kind = 'stop') {
+  const mark = { by: String(by || 'unknown').slice(0, 60), kind, at: new Date().toISOString(), startedAt: s.startedAt || null };
+  try {
+    fs.mkdirSync(AGENTS_DIR, { recursive: true });
+    writeAtomic(stopFile(s.agent), `${JSON.stringify(mark)}\n`, { fsync: false });
+    const cur = readJson(sessionFile(s.agent));
+    if (cur && cur.startedAt === s.startedAt) writeAtomic(sessionFile(s.agent), JSON.stringify({ ...cur, stopRequested: mark }, null, 2), { fsync: false });
+  } catch {
+    // the stop goes ahead; at worst it reads as a crash, as before
+  }
+  return mark;
+}
+export function stopMark(agent, s = readJson(sessionFile(agent))) {
+  if (!s) return null;
+  const ok = (m) => m && m.by && (!s.startedAt || !m.startedAt || m.startedAt === s.startedAt) && (!s.startedAt || Date.parse(m.at) >= Date.parse(s.startedAt) - 1000);
+  const side = readJson(stopFile(agent));
+  if (ok(side)) return side;
+  return ok(s.stopRequested) ? s.stopRequested : null;
+}
+
+/**
  * A session whose process is gone, isn't the agent any more, or whose launcher was just killed ends here, the way
  * the watcher ends a dead one (markGone, then the hand-back and releaseDeadLocks): the record is marked ended,
  * uncommitted work is saved, its tasks go back to the queue with a note, and its claims are freed.
@@ -865,16 +898,19 @@ function endAsDead(s, v, by) {
   if (cur.startedAt && s.startedAt && cur.startedAt !== s.startedAt && !(v.kill && v.target === 'launcher' && cur.supervisor === s.supervisor)) return false;
   const what = v.kill ? (v.target === 'launcher' ? `stopped by ${by} while it was starting; its launcher was stopped, so the stop handed its work back` : `stopped by ${by}; its launcher was gone, so the stop handed its work back`) : v.why;
   const reason = v.kill ? what : `ended by ${by}: ${v.why}`;
-  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: new Date().toISOString(), reason }, null, 2));
+  // 2.58.3 (N1): a stop someone asked for (agent stop, pause, stop all) is a stop, not a crash.
+  const stop = stopMark(s.agent, cur);
+  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: new Date().toISOString(), reason, ...(stop ? { stoppedBy: stop.by } : {}) }, null, 2));
+  fs.rmSync(stopFile(s.agent), { force: true });
   const mine = listLocks().filter((l) => l.owner === s.agent);
   const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
   for (const t of held) {
     const patch = saveWorkOf(s.agent, t, mine, cur);
-    pauseTask(t, s.agent, `${s.agent}'s session ended without a hand-back (${what}).${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Check its commits (git log --grep ${t}) before redoing anything.`, { force: true });
+    pauseTask(t, s.agent, `${s.agent}'s session ended without a hand-back (${what}${stop ? `; ${STOP_NOTE}` : ''}).${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'} Check its commits (git log --grep ${t}) before redoing anything.`, { force: true });
   }
   for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
   if (cur.copy) removeLaneCopy(s.agent, { keepBranch: unmerged(cur.copy.branch) > 0, ifIdle: true });
-  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held } });
+  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   if (v.kind === 'reused' || v.kind === 'stale') {
     emitEvent({ type: 'agent.pid_reused', agent: by, status: 'warn', msg: `${s.agent}: ${v.why}; its session is marked ended${held.length ? ` and ${held.join(', ')} handed back` : ''}`, meta: { session: s.agent, pid: v.pid, target: v.target, verified: v.kind === 'reused', now: v.cmd || undefined } });
   }
@@ -888,12 +924,15 @@ function endAsDead(s, v, by) {
  * or still its launcher's while it starts; otherwise the session is ended as dead and the other program is left
  * alone. A bare pid is looked up among the sessions; a number no session owns is never killed.
  */
-export function stopAgent(target, { by = 'launcher', starts = null } = {}) {
+export function stopAgent(target, { by = 'launcher', starts = null, record = null } = {}) {
   const s = target && typeof target === 'object' ? target : sessions().find((x) => x.status === 'running' && x.pid === Number(target));
   if (!s) return { killed: false, ended: false, why: `pid ${target} is not a launcher session: not killed` };
   const pid = Number(s.pid || s.supervisor) || null;
   const cur = pid && pidExists(pid) ? (starts || readStarts([pid])).get(pid) || null : null;
   const v = killVerdict(s, cur);
+  // 2.58.3 (N1): agent stop, pause and stop all (record: 'stop' | 'pause' | 'stop-all') say who stopped it first, so
+  // the launcher's clean-up (or endAsDead below) records a stop, not a crash. The stall and refresh checks don't.
+  if (record) recordStop(s, by, record);
   // A launcher stopped while it starts leads its own process group (--detach), so its agent goes with it.
   const killed = v.kill ? killTree(v.pid, { group: v.target === 'launcher' && Boolean(s.starting) }) : false;
   const ended = v.end ? endAsDead(s, v, by) : false;
@@ -986,11 +1025,11 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
   // The patch is saved before the hand-back frees the claims, so the launcher's clean-up still has it.
   for (const t of held) {
     const patch = saveWorkOf(agent, t, mine);
-    pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}.`}${patch ? ` Saved to ${patch}.` : ''}`, { force: true });
+    pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}.`}${patch ? ` Saved to ${patch}.` : ''} Paused by ${by} (${STOP_NOTE}).`, { force: true });
   }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
   for (const t of tasksOf(agent, s)) cooldown(t, by);
-  stopAgent(s, { by });
+  stopAgent(s, { by, record: 'pause' });
   emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, handed: held };
 }
@@ -1005,7 +1044,7 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
   const until = tasks.map((t) => cooldown(t, by)).filter(Boolean)[0] || null;
-  const r = stopAgent(s, { by });
+  const r = stopAgent(s, { by, record: 'stop' });
   emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
   return { ok: true, agent, tasks, until, killed: r.killed, ended: r.ended, kind: r.kind, target: r.target, why: r.why };
 }
@@ -1022,9 +1061,9 @@ export function stopAllAgents(by = 'war-room-human', reason = '') {
     const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
     for (const t of held) {
       const patch = saveWorkOf(s.agent, t, mine, s);
-      pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}${patch ? ` and saved to ${patch}` : ''}.`, { force: true });
+      pauseTask(t, s.agent, `The studio was stopped by ${by}${reason ? ` (${reason})` : ''}; ${s.agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}${patch ? ` and saved to ${patch}` : ''} (${STOP_NOTE}).`, { force: true });
     }
-    stopAgent(s, { by, starts });
+    stopAgent(s, { by, starts, record: 'stop-all' });
     stopped.push(s.agent);
   }
   if (stopped.length) emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `Stop all: ${stopped.join(', ')} handed back their work` });
