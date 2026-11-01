@@ -44,7 +44,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 import { withLandLock } from './merge-lane.mjs';
 import { selfIdentity, pidAlive } from './proc-identity.mjs';
-import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName } from './unity-gate.mjs';
+import { runUnityGate, unityConfig, unityTrack, landManyCommand, safeRefName, taskBranch } from './unity-gate.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -109,12 +109,15 @@ export const dequeueUnity = (root, task) => withQueue(root, (q) => { const i = q
 
 /**
  * Queue a Unity-track task's branch (task done <ID> --train, after its checks). { ok, entry, message } or
- * { ok: false, error, message }. The branch: `branch`, else the Unity folder's current branch.
+ * { ok: false, error, message }. The branch: `branch`, else the task's recorded Unity branch, else the Unity folder's
+ * current branch (never the target).
  */
 export function queueUnityTask(root, { task, agent = null, branch = null, note = '' } = {}) {
   const s = unityTrainSettings(root);
   if (s.error) return { ok: false, error: s.error, message: `${task} was not queued. ${s.message}` };
-  let br = typeof branch === 'string' && branch ? branch : '';
+  // 2.60.1 (B-41) with the train: --branch, else the task's recorded Unity branch (task add --branch, unity-gate branch),
+  // else the Unity folder's current branch (refused below when it is the target itself).
+  let br = typeof branch === 'string' && branch ? branch : (taskBranch(task) || '');
   if (!br) {
     const cur = out(git(s.folder, 'symbolic-ref', '--short', 'HEAD'));
     if (!cur) return { ok: false, error: 'no-branch', message: `${task} was not queued: which Unity branch? Pass --branch <name> (the Unity folder is not on a branch).` };
