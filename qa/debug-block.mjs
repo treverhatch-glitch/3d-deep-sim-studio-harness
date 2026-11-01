@@ -283,6 +283,13 @@ const CANNOT = { selftest: 'this file' };
   }
   report('with --lanes auto, each lane gets its own agent holding that folder', lanes.length === 2, lanes.join('\n'));
   console.log('[debug] lanes found after', Date.now() - t0, 'ms; SLOW =', SLOW);
+  await new Promise((r) => { if (child.exitCode !== null) r(); else child.on('exit', r); });
+  console.log('[debug] child exit', child.exitCode, child.signalCode);
+  for (const f of fs.readdirSync(path.join(dir, '.studio/locks'))) { try { fs.rmSync(path.join(dir, '.studio/locks', f)); } catch {} }
+  const again = spawnSync(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, encoding: 'utf8', timeout: 40000 });
+  console.log('[debug] again status', again.status, again.signal, again.error?.code, '\nOUT:', String(again.stdout).slice(-2500), '\nERR:', String(again.stderr).slice(-2500));
+  const st9 = spawnSync(process.execPath, ['harness/supervisor.mjs', 'status'], { cwd: dir, env: { ...CLEAN_ENV, ...wenv }, encoding: 'utf8', timeout: 20000 });
+  console.log('[debug] status:', st9.stdout, st9.stderr);
   await new Promise((r) => child.on('exit', r)).catch(() => {});
   try { console.log('[debug] supervisor out:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.log'), 'utf8').slice(-3000) + '\n[debug] err:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.err'), 'utf8').slice(-3000)); } catch (e) { console.log('[debug] no log', e.message); }
   try { console.log('[debug] events:\n' + fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter((l) => /lane|session|agent\./.test(l)).slice(-30).map((l) => l.slice(0, 300)).join('\n')); } catch {}
