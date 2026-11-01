@@ -56,6 +56,40 @@ Every verify compares the tracked files (outside `studio/`) before and after its
 rewriting a snapshot's line endings, a generated file) are named in a warning and listed as `changedByVerify` in
 the verify record; the exit code is unchanged. Game checks run with `CI=true` so test runners don't write snapshots.
 
+## Landing lanes: the merge train (2.59.0)
+
+A lane copy's work reaches the studio's branch through a merge train (`harness/train.mjs`). Before 2.59.0 every
+landing moved main, so every other lane rebased (often breaking its hook stamps) and verified again, one at a time.
+
+- `npm run task -- done <ID> --train` (in the lane copy) runs every check task done runs before the game's checks
+  (board, done-check, committed work, protected files, secrets, hooks, weakened tests) and queues the lane
+  (`.studio/train/queue.json`); the task stays in progress. `npm run task -- train status` lists the queue.
+- `npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>]` lands the queue, oldest first: each lane
+  is checked again in its own copy, then merged in order onto main in a scratch copy (`.lanes/_train-<id>`, branch
+  `train/<id>`; never the main checkout's files or a lane's copy). A lane is merged as it is (a fast-forward, or a
+  merge commit the hooks stamp), so its own commits and their stamps never change. ONE full verify
+  (`scripts/run-gates.mjs`, scoped to the files the lanes change, as a lane's verify is; `--all` when a task is
+  "whole") checks the final tree; a green full verify already recorded for exactly that tree stands for it. Green:
+  main moves (compare-and-swap, under the land lock) to that tree and each task closes as task done closes it.
+- Red: each lane is verified alone on main. A lane that fails alone is handed back (back in the queue, its claim
+  freed, a hand-back note with the failing checks and the log in `.studio/train/`); the rest train again. Lanes that
+  pass alone but fail together: the last one waits for the next train. If every lane fails alone and main itself
+  fails, nothing lands and nobody is handed back. A check already red when every task in the train was claimed (its
+  baseline) doesn't count, as at task done.
+- A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
+  back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
+  agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
+- `npm run task -- done <ID>` in a lane copy with commits of its own is a one-lane train: main + the lane, verified
+  (or the lane's own green verify of that tree reused), then main moves. Unlike the old path, a lane main has moved
+  past is merged (not rebased) and main + lane gets a full verify before main moves (the old path re-checked only
+  what main brought in). `STUDIO_TRAIN=off`, `--force`, or a copy with no commits of its own use the old path.
+- One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_WAIT_MIN`, 120, for a
+  running one; `task train` doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
+  wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
+  `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.done`.
+- Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
+  queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
+
 ### When a command is killed halfway (2.58.0)
 
 - **Moving a task between NEXT.md and DONE.md** takes two writes. The file that gains the task is written first

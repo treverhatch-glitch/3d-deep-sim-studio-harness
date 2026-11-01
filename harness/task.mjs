@@ -20,7 +20,7 @@ import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds } fr
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
@@ -30,7 +30,7 @@ import { startSummary, carryForward } from './carry.mjs';
 import { openPending, readPending } from './pending-review.mjs';
 import { isDecider, propose, SIZE_CAP } from './proposed.mjs';
 import { attachTricks } from './cheatsheet.mjs';
-import { readBaseline, recordBaseline, setTrunk, trunkState } from './baseline.mjs';
+import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 
@@ -504,7 +504,12 @@ const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false } = {}) {
+  // 2.59.0: trainCheck runs every check task done runs before the game's checks (board, done-check, the committed lane
+  // copy, protected files, secrets, hooks, weakened tests) and stops there: nothing is closed or landed. The merge train
+  // (harness/train.mjs) lands the lane after ONE full verify of main + the lanes, which stands for the game's checks and
+  // the "full verify after the last change" check. Never forced.
+  if (trainCheck && force) return { error: 'train-force', message: 'A forced done never goes through the merge train; run it without --train (STUDIO_TRAIN=off).' };
   // 2.30n: a builder in a lane copy (.lanes/<agent>) launched without STUDIO_MAIN_ROOT used to be
   // "done" with its work never merged (T-028 in the Marina run). Refuse, forced or not.
   if (/[\\/]\.lanes[\\/][^\\/]+$/.test(REPO_ROOT) && !inLaneCopy()) {
@@ -573,7 +578,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.33.0: task done --check runs every cheap precondition and stops before the game gates. A missing
   // full verify is reported, not refused: running it is the next step.
   const VERIFY_LABEL = 'Full verify green after the last change';
-  const blocking = check.checks?.length ? check.checks.filter((c) => !c.ok && !(checkOnly && c.label === VERIFY_LABEL)) : check.ok ? [] : [{ why: check.missing[0] }];
+  // 2.59.0: in a train check the train's own verify (of main + this lane, --all for a "whole" task) stands for these two.
+  const TRAIN_VERIFIED = new Set([VERIFY_LABEL, 'The verify ran on the whole game (--all), not scoped to your files']);
+  const blocking = check.checks?.length ? check.checks.filter((c) => !c.ok && !(checkOnly && c.label === VERIFY_LABEL) && !(trainCheck && TRAIN_VERIFIED.has(c.label))) : check.ok ? [] : [{ why: check.missing[0] }];
   if (!check.ok && !force && blocking.length) {
     emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${check.missing[0]}` });
     return {
@@ -633,6 +640,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.59.0: the train lands committed work only, from a lane copy (the same refusal deliver makes, made up front).
+  if (trainCheck) {
+    if (!inLaneCopy()) return { error: 'not-lane', message: `${target.id}: the merge train lands lane copies; in the main checkout task done closes the task directly.` };
+    const { dirty, eol } = laneDirty(REPO_ROOT);
+    if (eol.length) console.warn(`[task done] note: ${eolNote(eol)}`);
+    if (dirty.length) return { error: 'uncommitted', dirty, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
+  }
+
   if (checkOnly) {
     const verifyNeeded = Boolean(check.checks?.some((c) => !c.ok && c.label === VERIFY_LABEL));
     return { checkOnly: true, ok: true, id: target.id, verifyNeeded, message: `${target.id}: every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
@@ -668,6 +683,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const how = Object.fromEntries(SAFETY.map(([id, , , h]) => [id, h]));
       return { error: 'safety', failed, message: `${target.id} is not done: ${failed.map((f) => `the ${f.id} check fails (node ${f.rel}):\n${f.why.split('\n').map((l) => `  ${l}`).join('\n')}\n  Fix: ${how[f.id]}.`).join('\n')}\nThese run at every task done, forced or not.` };
     }
+  }
+
+  if (trainCheck) {
+    const g = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
+    return { trainReady: true, id: target.id, type: check.type, all: check.type === 'whole', head: g('rev-parse', 'HEAD'), tree: g('rev-parse', 'HEAD^{tree}'), branch: g('symbolic-ref', '--short', 'HEAD') };
   }
 
   // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
@@ -838,6 +858,64 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     return { ...target, forced: true, check, followUp: followUp.id, patch: forcedPatch };
   }
   return target;
+}
+
+/**
+ * 2.59.0: close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified
+ * head, which main now contains. The board move, the claim, the events and the follow-ups are task done's; its checks
+ * ran in the train's lane check (trainCheck) and the train's verify. Returns the task, null (not on the board) or
+ * { error, message }.
+ */
+export function closeTrainTask(taskId, agent, { train, head, laneHead, record = null, note = '' } = {}) {
+  const lock = lockStatus(`task:${taskId}`);
+  if (lock.locked && lock.lock.owner !== agent) return { error: 'locked', message: `${taskId} is claimed by ${lock.lock.owner} now, not ${agent}` };
+  const root = mainRoot();
+  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: root }).status === 0;
+  const mainTip = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
+  // The train's verify: clean and full, with no red required check but one already red when this task was claimed.
+  if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
+  let target = null;
+  let q = null;
+  const writeBoard = () => withBoard(() => {
+    const fresh = parseNextQueue();
+    target = fresh.inProgress.find((t) => t.id === taskId) || fresh.backlog.find((t) => t.id === taskId) || null;
+    if (!target) return;
+    fresh.inProgress = fresh.inProgress.filter((t) => t.id !== taskId);
+    fresh.backlog = fresh.backlog.filter((t) => t.id !== taskId);
+    fresh.done = fresh.done.filter((t) => t.id !== taskId);
+    target.status = 'done';
+    if (note) target.title = `${target.title} _(✓ ${note})_`;
+    fresh.done.unshift(target);
+    writeNextQueue(fresh);
+    q = fresh;
+  });
+  try { withLandLock(root, writeBoard); } catch (err) { if (err.code !== 'LAND_BUSY') throw err; writeBoard(); }
+  if (!target) return null;
+  clearPass(root, taskId);
+  if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
+  syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
+  emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
+  if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
+  joinWaveIfGameplay(target, agent || target.role);
+  return target;
+}
+
+/** 2.59.0: what the merge train needs from the board (harness/train.mjs never imports this module). */
+export function trainDeps(busyMod, { forDone = false } = {}) {
+  return {
+    close: (lane, ctx) => {
+      const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '' });
+      return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
+    },
+    handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
+    stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
+    ...(forDone ? {} : {
+      waitForDrain: () => busyMod.waitForDrain(),
+      markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
+      clearRunning: (t) => { busyMod.clearDoneRunning(t).catch(() => {}); },
+    }),
+  };
 }
 
 /**
@@ -1423,7 +1501,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--note "..."] [--force --reason "<10+ chars>"]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--train] [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
     // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
@@ -1453,6 +1531,26 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(pre.error ? pre.message : pre.message);
       process.exit(pre.error ? 1 : 0);
     }
+    const noopFlag = typeof flags['no-op'] === 'string' ? flags['no-op'] : '';
+    // 2.59.0: the merge train's lane check (harness/train.mjs runs it in the lane's own copy): one JSON line, nothing closed.
+    if (flags['train-check']) {
+      const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
+      const res = !pre ? { ok: false, error: 'not-found', message: `Task "${targetId}" not found.` } : pre.error ? { ok: false, error: pre.error, message: pre.message } : { ok: true, ...pre };
+      console.log(JSON.stringify({ train: 'check', ...res }));
+      process.exit(res.ok ? 0 : 1);
+    }
+    // 2.59.0: --train: check the lane now and queue it for the next merge train (npm run task -- train lands it).
+    if (flags.train) {
+      if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
+      const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
+      if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
+      if (pre.error) { console.error(pre.message); process.exit(1); }
+      const { enqueue } = await import('./train.mjs');
+      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '' });
+      emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
+      console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
+      process.exit(0);
+    }
     const busyMod = await import('./busy.mjs');
     // 2.30q: drain on: a new done waits here (before its marker, so drain wait doesn't wait for it).
     { const w = await busyMod.waitForDrain(); if (!w.ok) { console.error(w.message); process.exit(1); } }
@@ -1461,7 +1559,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     emitEvent({ type: 'task.done.start', agent: whoAmI(flags), task: targetId, msg: `${targetId}: task done started`, meta: { at: Date.now() } });
     let done;
     try {
-      done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: typeof flags['no-op'] === 'string' ? flags['no-op'] : '' });
+      // 2.59.0: in a lane copy with commits to land, task done is a one-lane merge train (harness/train.mjs): the same
+      // checks, then main moves only after a green full verify of exactly the tree it ends at (the lane's own verify of
+      // that tree counts). STUDIO_TRAIN=off, --force, or no commits of its own: the old path (deliver).
+      const { trainOn } = await import('./train.mjs');
+      let laneBranch = '';
+      try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
+      const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
+      if (viaTrain) {
+        const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
+        if (!pre || pre.error) done = pre;
+        else {
+          const { runTrain } = await import('./train.mjs');
+          const r = await runTrain({ root: mainRoot(), lanes: [{ task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, prechecked: true, note: typeof flags.note === 'string' ? flags.note : '' }], oneLane: true, by: whoAmI(flags) || 'task-done', waitMs: Number(process.env.STUDIO_TRAIN_WAIT_MIN ?? 120) * 60000, deps: trainDeps(busyMod, { forDone: true }) });
+          if (r.landed.includes(pre.id) && !r.unclosed?.length) done = r.closed?.[0] || { id: pre.id, status: 'done' };
+          else {
+            const why = r.unclosed?.[0]?.why || r.dropped[0]?.why || r.deferred[0]?.why || (r.landed.includes(pre.id) ? 'it landed but stays open: its copy gained commits after the check (they land with the next task done)' : r.message);
+            emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: pre.id, status: 'blocked', msg: `${pre.id} not done yet: ${String(why).split('\n')[0].slice(0, 300)}` });
+            done = { error: 'not-delivered', message: `${pre.id} is not done: ${why}` };
+          }
+        }
+      } else {
+        done = completeTask(targetId, flags.note || '', whoAmI(flags), { force: Boolean(flags.force), reason: typeof flags.reason === 'string' ? flags.reason : '', acceptedBy: typeof flags['accepted-by'] === 'string' ? flags['accepted-by'] : '', noop: noopFlag });
+      }
     } finally {
       await busyMod.clearDoneRunning(targetId).catch(() => {});
     }
@@ -1476,6 +1596,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (done.forced) console.error(done.followUp ? `Forced past the ${done.check.type} check. The Producer has ${done.followUp} to run it. (With --reason "..." --accepted-by <person>, a person's acceptance is logged instead.)` : `Forced past the ${done.check.type} check, accepted by ${done.acceptedBy}; logged for the run report.`);
     console.log(JSON.stringify(done, null, 2));
     process.exit(0);
+  }
+
+  // 2.59.0: the merge train (harness/train.mjs): land the queued lanes on one full verify.
+  if (cmd === 'train') {
+    const tr = await import('./train.mjs');
+    if (arg1 === 'status' || flags.status) {
+      const qd = tr.readQueue(mainRoot());
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      process.exit(0);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>] | train status'); process.exit(1); }
+    const busyMod = await import('./busy.mjs');
+    const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
+    const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+    (r.ok ? console.log : console.error)(r.message);
+    console.log(JSON.stringify({ train: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+    process.exit(r.ok ? 0 : 1);
   }
 
   // Holds: dependencies, parking, blocks and lanes (harness/task-hold.mjs).

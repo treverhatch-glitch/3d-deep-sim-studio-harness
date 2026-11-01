@@ -3742,6 +3742,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0 (helper a, brief item 1): the merge train: queued lanes land on one full verify of main + the lanes; a red train
+// hands back the lane that fails alone; conflicting lanes aren't trained together; the hooks gate still judges every
+// lane's commits; task done in a lane copy is a one-lane train (qa/selftest-259a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259a.mjs')).href);
+  await selftest259A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
