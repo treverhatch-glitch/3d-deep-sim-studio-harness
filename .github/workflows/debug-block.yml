@@ -14,4 +14,4 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --no-audit --no-fund
-      - run: node qa/debug-block.mjs
+      - run: node qa/debug-lanes.mjs
