@@ -174,6 +174,15 @@ console.log(JSON.stringify({ stdin: c.stdin === prompt, mode: plan.mode, file: p
       JSON.stringify(t).slice(0, 1500));
   }
 
+  {
+    // The quota probe (harness/budget.mjs probeTool) asks agy too: its prompt goes on stdin as well (r's note, 2.58.5).
+    const t = probe(dir, `import { probeTool } from ${u(dir, 'harness/budget.mjs')};
+console.log(JSON.stringify(probeTool('agy', { timeoutMs: 30000 })));`, { ...withBin, STUDIO_LOCK_OWNER: 'h2-probe' });
+    const r = recOf('agy', 'h2-probe');
+    report('H-2: the quota probe asks agy with its prompt on stdin too (an agy that splits its arguments gets no stray word; the probe answers ok)',
+      t.ok === true && r && !r.error && r.via === 'stdin' && r.prompt === 'Reply with the word OK.' && same(r.argv, ['--print-timeout', '60s']),
+      `probe: ${JSON.stringify(t).slice(0, 600)}\nrecord: ${JSON.stringify(r)}`);
+  }
   // ---------- H-2b: the approved agy rule set ----------
   {
     const studioFile = path.join(dir, '.studio', 'agy-settings.json');
