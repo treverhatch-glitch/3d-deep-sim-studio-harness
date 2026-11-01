@@ -3811,6 +3811,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.61.0 (the learning edge, f): a bounded "constraints from past failures" block in the Director's brief, the Producer's
+// handoff and the planner's kickoff/brief; agents' pitfalls are proposals until accepted, scoped by role, and evicted
+// by measured usefulness, never a line tied to a regression without a person (qa/selftest-261f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest261F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261f.mjs')).href);
+  await selftest261F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

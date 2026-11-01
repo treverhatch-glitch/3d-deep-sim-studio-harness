@@ -28,6 +28,11 @@ import { parseNextQueue, readTaskHandoff } from './task.mjs';
 import { PROVIDERS } from './models.config.mjs';
 import { routeChatCompletion } from './route.mjs';
 import { untrustedBlock } from './untrusted.mjs';
+import { constraintsBlock } from './learning-edge.mjs';
+import { pitfallPartsForRole } from './pitfalls.mjs';
+
+// 2.61 (the learning edge): roles whose work is planning and cutting work get the constraints from past failures.
+const PLANNING_ROLES = new Set(['planner', 'producer', 'director']);
 
 const BRIEFS_DIR = path.join(STUDIO_STATE_DIR, 'briefs');
 const MAX_WORDS = 300;
@@ -88,7 +93,13 @@ export function gatherWindow(task) {
   const handoff = readTaskHandoff(task.id) || '';
   const history = mine.map((e) => `- ${(e.ts || '').slice(0, 16).replace('T', ' ')} ${e.agent} ${e.type}: ${e.msg}`);
   const source = [task.title, handoff, ...history, ...lessons, qa || ''].join('\n');
-  return { task, history, handoff, lessons, qa, files, sourceWords: words(source) };
+  let constraints = '';
+  if (PLANNING_ROLES.has(String(task.role || '').toLowerCase())) {
+    try {
+      constraints = constraintsBlock({ for: task.role === 'director' ? 'director' : 'planning' });
+    } catch {}
+  }
+  return { task, history, handoff, lessons, qa, files, constraints, sourceWords: words(source) };
 }
 
 /**
@@ -103,6 +114,8 @@ export function untrustedParts(w) {
     { label: `Hand-off notes (studio/handoffs/${t.id}.md)`, text: w.handoff ? w.handoff.replace(/^# .*\n+/, '').replace(/\s+/g, ' ').trim().slice(0, 400) : '' },
     { label: 'Lessons that look related (studio/memory/failures.md)', text: w.lessons.map((l) => `- ${l.replace(/\s+/g, ' ').slice(0, 220)}`).join('\n') },
     { label: 'Newest QA report', text: w.qa || '' },
+    // 2.61: the pitfalls scoped to this task's role (lines for all are in every prompt already).
+    ...pitfallPartsForRole(t.role),
   ];
 }
 
@@ -128,6 +141,7 @@ export function templateBrief(w) {
     ``,
     `## Written by agents or people`,
     untrustedBlock(untrustedParts(w)).trimEnd(),
+    ...(w.constraints ? ['', w.constraints] : []),
   ].join('\n');
 }
 
@@ -196,7 +210,7 @@ export async function prepareBrief({ taskId = null, mode = 'auto', force = false
       if (problems.length) note = `${res.provider} drafted one but it failed checks (${problems.join('; ')}), so the script wrote it instead.`;
       else {
         // PU-36: a model's summary of text agents and people wrote is still their text: it goes in the marked block.
-        body = [`The draft below summarises text written by agents or people; your steps and finish commands are in .studio/briefs/${task.id}.md.`, '', untrustedBlock([{ label: `Draft by ${res.provider} (${res.model}) from this task's history`, text: draft }]).trimEnd(), '', '## Verify', `- node harness/done-check.mjs ${task.id}`, '- npm run verify'].join('\n');
+        body = [`The draft below summarises text written by agents or people; your steps and finish commands are in .studio/briefs/${task.id}.md.`, '', untrustedBlock([{ label: `Draft by ${res.provider} (${res.model}) from this task's history`, text: draft }]).trimEnd(), '', '## Verify', `- node harness/done-check.mjs ${task.id}`, '- npm run verify', ...(w.constraints ? ['', w.constraints] : [])].join('\n');
         by = `${res.provider} (${res.model})`;
         provider = res.provider;
         model = res.model;

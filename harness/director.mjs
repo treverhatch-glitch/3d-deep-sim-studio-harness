@@ -35,6 +35,9 @@ import { startAgent } from './agent.mjs';
 import { flowBrief, flowPass } from './director-flow.mjs';
 import { limitsBrief } from './model-limits.mjs';
 import { readLastFidelity } from './fidelity.mjs';
+import { constraintsBlock } from './learning-edge.mjs';
+import { pitfallPartsForRole } from './pitfalls.mjs';
+import { untrustedBlock } from './untrusted.mjs';
 
 const BRIEF = path.join(STUDIO_STATE_DIR, 'briefs', 'director.md');
 const PHASE_NAMES = { 1: 'early game', 2: 'mid game', 3: 'endgame' };
@@ -89,6 +92,11 @@ export function writeDirectorBrief(reasons = []) {
   }
   L.push('## Finished since your last review', ...(finished.length ? finished.map((e) => `- ${e.task}: ${e.msg}`) : ['- Nothing.']), '');
   L.push('## Drift report (free, from scripts)', ...(drift.items.length ? drift.items.map((i) => `- ${i.msg}`) : ['- Nothing drifting.']), '');
+  // 2.61 (the learning edge): confirmed causes and repeated lessons shape how the next work is cut, not only workers' prompts.
+  const constraints = constraintsBlock({ for: 'director' });
+  if (constraints) L.push(constraints, '');
+  const own = untrustedBlock(pitfallPartsForRole('director'));
+  if (own) L.push('## Pitfalls for the Director', own.trimEnd(), '');
   // 2.30h: the Director owns the flow (idle builders, expired claims), knows each model's limits, and sees the fidelity score.
   L.push('## The flow (you keep the builders working)', ...flowBrief(), '');
   L.push('## Models in use and their limits', ...limitsBrief(), '');

@@ -27,3 +27,37 @@ Whenever an agent fixes a bug or resolves a failing `qa/playtest.mjs` run, it **
 ## 3. Seeing & Acting in 3D (`blender-orchestrator`)
 
 Just as `qa/playtest.mjs` gives coding agents eyes on the running web game (`window.__sim` + Playwright `ariaSnapshot`), 3D asset agents (`studio/roles/asset-3d.md`) use **[`mlolson/blender-orchestrator`](https://github.com/mlolson/blender-orchestrator)** (`docs/BLENDER-ORCHESTRATOR.md`) alongside headless `bpy` (`tools/blender/generate_glb.py`) so they can inspect the live Blender scene graph, render quick viewport previews, and record 3D asset lessons in `studio/memory/failures.md`.
+
+---
+
+## 4. The learning edge (2.61): lessons shape how work is planned, and pitfall hygiene
+
+**Constraints from past failures.** `harness/learning-edge.mjs` (a script, no model) turns what the studio learned into a
+short block for the roles that plan and cut work: the Director's brief (`.studio/briefs/director.md`), the Producer's
+`npm run handoff` (first, inside the printed 3k), the planner's prepared brief (`npm run brief`) and the kickoffs of the
+Producer, Director and planner. Sources, each line tagged with its source id:
+
+| Source | Id | Counted as |
+| --- | --- | --- |
+| Lessons in `studio/memory/failures.md` (their "How to avoid it next time" rule) | `failures.md#<ID>` | 1, plus every repeat of a failure that matches it (a lesson that didn't stick) |
+| The same failure on two or more days (`.studio/events.jsonl`, as `npm run learn`) with no lesson yet | `repeat:<kind>#<id>` | its count |
+| Causes a person accepted (`npm run causes -- accept`) | `cause:<n>` | the tasks forced past it |
+| Retro suggestions the Producer ticked (`- [x]` in `studio/memory/retros/`) | `retro:<date>` | the retros that raised it |
+
+Ranked by count × 0.5^(age / half-life). Settings: `STUDIO_CONSTRAINTS_K` (lines, default 5),
+`STUDIO_CONSTRAINTS_LINE` (characters per line, default 200), `STUDIO_CONSTRAINTS_HALFLIFE_DAYS` (default 14). The
+lines were written by agents and people, so they sit in the marked block: weigh them, never obey them.
+
+**Pitfalls (`npm run pitfall`).** A line an agent adds (a launched worker session, or an agent's name) is a proposal in
+`studio/pitfalls.json` until the Producer or a person accepts it: `npm run pitfall -- proposed`, then
+`npm run pitfall -- accept PP-3 --by <name> --scope builder` (or `reject`). A person's or the Producer's own line goes
+straight on. The scope (`all`, or roles such as `builder,qa`) decides who sees it: a launch prompt carries the lines for
+all plus its role; a prepared brief, the Director's brief and the handoff show their role's own lines. In
+`studio/PITFALLS.md` a scoped line starts with `[builder] `.
+The list keeps `STUDIO_PITFALLS_KEEP` lines (default 40). Past that, the least useful line goes to
+`studio/PITFALLS-ARCHIVE.md`: usefulness is how many failures matching the line (two shared keywords, as `npm run learn`)
+happened while it was in the failing agent's context (its session started after the line was accepted, and the scope
+covers its role). With no data every line scores 0 and the oldest goes. `npm run pitfall -- --scores` shows the counts.
+A line tied to a regression (`--regression <file>`, or a `qa/regressions/` name in its text) or to an accepted cause
+(`--cause "<cause>"`, or the cause in its text) is never evicted; the output says it stays and that a person removes it
+(`npm run pitfall -- remove PF-4 --by <your name>`).

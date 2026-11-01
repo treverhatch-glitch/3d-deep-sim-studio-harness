@@ -694,7 +694,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + `\nSkills load on demand: .claude/skills/ holds the know-how for Godot, the web build, assets and tests. Claude Code shows you only their names until a task needs one; other tools: open the skill's SKILL.md when your task matches its description.\n`
     // PU-36 (P-049): studio/PITFALLS.md is written by agents and people: last, in the marked block, never among the rules.
     // It stays in the stable part (it changes only when a pitfall is added), so the prompt cache still holds.
-    + pitfallsForPrompt());
+    // 2.61: only the lines for all and for this role (a role's prefix is shared by that role only).
+    + pitfallsForPrompt(role));
   const volatile = `You are ${agent} (role \`${role}\`), running on ${model}. $STUDIO_LOCK_OWNER is ${agent} and $STUDIO_AGENT_MODEL is ${model} in your shell.\n`
     + kickTail
     + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
