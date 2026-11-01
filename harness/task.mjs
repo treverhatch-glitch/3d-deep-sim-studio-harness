@@ -21,8 +21,8 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot } from './worktree.mjs';
-import { recordPass, clearPass, withLandLock } from './merge-lane.mjs';
-import { isEngineChurn } from './game-gates.mjs';
+import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
+import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
 import { startSummary, carryForward } from './carry.mjs';
@@ -657,24 +657,43 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
     const ggEnv = { ...process.env };
     delete ggEnv.STUDIO_GATE_CHANGED;
-    // 2.43.0: STUDIO_DONE_REUSE_VERIFY=on (opt-in): the game's checks passed in this agent's own full verify on
-    // this exact commit with a clean tree are not run a second time (on a real 236k-line game that was another
-    // 6 minutes per task, right after the same checks passed).
-    const reused = (() => {
-      if (!/^(on|1|true|yes)$/i.test(process.env.STUDIO_DONE_REUSE_VERIFY || '')) return null;
+    // 2.43.0: the game's checks that passed in a full verify are not run a second time at done (on a real 236k-line
+    // game that was another 6 minutes per task, right after the same checks passed).
+    // 2.58.5 (H-3): on by default, keyed on the tree: a green full verify whose tree (HEAD^{tree} when it started, with a
+    // clean tree start to end) is the tree being landed counts, so task done doesn't run the game's checks again (under
+    // load the second run timed out or flaked: 600 s, then e2e timeouts that passed alone in 48 s). A partial, dirty,
+    // failing, old (24 h, STUDIO_DONE_REUSE_MAX_H), narrower (scoped to fewer files, no engine gate, related tests only)
+    // or other-tree record never counts (merge-lane.mjs judgeVerifyReuse). The safety checks above always ran.
+    // STUDIO_DONE_REUSE_VERIFY=off always runs them; =on also lets a record from before 2.58.5 count by its commit.
+    const reuseEnv = String(process.env.STUDIO_DONE_REUSE_VERIFY || '');
+    const reuse = (() => {
+      if (/^(off|0|false|no)$/i.test(reuseEnv)) return null;
       const rec = lastFullRecord();
-      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
-      const dirty = spawnSync('git', ['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
-      const game = (rec?.rows || []).find((r) => r.id === 'game');
-      if (!rec || rec.partial || !head || rec.head !== head || rec.dirty !== false || dirty || !game?.ok) return null;
-      if (rec.scoped && changed?.length && changed.some((f) => !(rec.changed || []).includes(f))) return null;
-      return rec;
+      if (!rec) return null;
+      const gitOut = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
+      const tree = gitOut('rev-parse', 'HEAD^{tree}');
+      const recTree = rec.head && /^[0-9a-f]{40,64}$/.test(String(rec.head)) ? gitOut('rev-parse', '--verify', '--quiet', `${rec.head}^{tree}`) : '';
+      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const clean = st.status === 0 && !String(st.stdout || '').trim();
+      const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
+      return { rec, ...judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) }) };
     })();
-    if (reused) {
-      console.log(`[task done] the game's checks passed in your verify at ${String(reused.at).slice(11, 19)} UTC on this commit (${String(reused.head).slice(0, 8)}, clean tree): not run again (STUDIO_DONE_REUSE_VERIFY)`);
-      emitEvent({ type: 'gates.reused', agent: agent || target.role, task: target.id, msg: `${target.id}: game checks from the verify on ${String(reused.head).slice(0, 8)} reused at done` });
+    let plan = null;
+    if (reuse?.ok) {
+      // The checks this done would have run, and the scope that pass covers (for deliver's re-check after a rebase).
+      const pr = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--plan', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+      try { plan = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch { plan = null; }
+      if (!Array.isArray(plan?.gates)) plan = null;
     }
-    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: [{ id: 'game', ok: true }], skipped: [], scope: null }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+    const reused = plan ? reuse.rec : null;
+    if (reused) {
+      console.log(`[task done] ${reuse.why}: not run again (STUDIO_DONE_REUSE_VERIFY)`);
+      emitEvent({ type: 'gates.reused', agent: agent || target.role, task: target.id, msg: `${target.id}: game checks from the verify on tree ${String(reused.tree || reused.head).slice(0, 8)} reused at done` });
+    } else if (reuse?.ok) console.log('[task done] running the game\'s checks: which ones a verify covers could not be read (game-gates --plan)');
+    else if (reuse) console.log(`[task done] running the game's checks: the last verify can't stand in for them (${reuse.why})`);
+    // Game checks run now (not reused) take the next free gate slot ahead of verifies (merge-lane.mjs withGateSlot).
+    ggEnv.STUDIO_GATE_PRIORITY = 'landing';
+    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: plan.gates.map((id) => ({ id, ok: true, reused: true })), skipped: plan.skipped, scope: plan.scope }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
     let res = null;
     try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
     if (res?.skipped?.length) {
@@ -723,7 +742,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // In a lane copy (2.29), done is when the work reaches the studio's branch: committed, rebased on the
   // latest, checked again if that moved, then added. Forced or not, uncommitted work is refused here.
   if (inLaneCopy()) {
-    const d = deliver(taskId, { onLanded: writeBoard });
+    // 2.58.5 (H-3): the re-check after a rebase is a landing too: its game checks take the next free gate slot first.
+    const hadPriority = process.env.STUDIO_GATE_PRIORITY;
+    process.env.STUDIO_GATE_PRIORITY = 'landing';
+    let d;
+    try { d = deliver(taskId, { onLanded: writeBoard }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
     if (d && !d.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
       return { error: 'not-delivered', message: d.message };

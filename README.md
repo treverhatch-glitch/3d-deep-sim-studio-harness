@@ -90,7 +90,7 @@ The task budget counts every session on a task, including builders the harness d
 
 ## Web and engine tracks land in parallel (2.30p, 2.31.0)
 
-In a lane copy, `npm run verify` and `task done` check only what the lane changed: a Godot-only change runs the Godot gate and skips the web checks, and the reverse. Heavy checks share `STUDIO_GATE_SLOTS` (2) slots on the machine, so one web and one Godot check run at once without timing each other out. Only the final fast-forward and board write take the short land lock.
+In a lane copy, `npm run verify` and `task done` check only what the lane changed: a Godot-only change runs the Godot gate and skips the web checks, and the reverse. Heavy checks share `STUDIO_GATE_SLOTS` (2) slots on the machine, so one web and one Godot check run at once without timing each other out; a landing (`task done`'s game checks and its re-check after a rebase) takes the next free slot ahead of verifies (2.58.5). Only the final fast-forward and board write take the short land lock. `task done` doesn't run the game's checks again when a green full verify tested the same tree (clean, not partial, not narrower; `STUDIO_DONE_REUSE_VERIFY=off` re-runs them); after a rebase onto a moved main, only the game checks whose declared `paths` the incoming files touch run again (a check with no `paths` always does).
 
 ## Every control is pressed, and only the owner changes the judges (2.32.0)
 
