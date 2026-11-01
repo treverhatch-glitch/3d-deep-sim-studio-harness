@@ -39,6 +39,12 @@ a weight: `STUDIO_CACHE_READ_WEIGHT` or `cacheReadWeight` in `studio/budget.json
 tool's line names the models behind its counts: tokenizers differ by model family (roughly 10–30%), so
 compare tokens within a model.
 
+2.65.2: a session end also records its cache writes split by TTL (`meta.cacheWrite5m` / `cacheWrite1h`, when
+Claude's result usage gives `cache_creation`) and the TTL the launcher asked for (`meta.cacheTtl`: 1h for the
+Director and Producer, else 5m). A plain usage report from another tool counts cached tokens once: in the OpenAI
+shapes (`prompt_tokens_details.cached_tokens`, `input_tokens_details.cached_tokens`, `cached_input_tokens`) they come
+off the input and count as cache reads.
+
 `studio:start --budget 50%` warns at start when no tool has a `--weekly` figure to pace against.
 
 ## The daily token cap has a default
