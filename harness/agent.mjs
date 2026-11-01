@@ -46,6 +46,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { escalationFor } from './model-tiers.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
 import { kickoffParts } from './kickoff.mjs';
+import { sweepThreads } from './threads.mjs';
 import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES, volatileLeaks } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
@@ -683,7 +684,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.30g: cache-friendly order. The fixed part (role kickoff, rules, the map tip, pitfalls) comes first
   // and never names this agent, its model or the time, so every session of a role starts with the same
   // bytes and Claude reads it from the prompt cache. Everything that changes per session goes last.
-  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true });
+  const { stable: kick, volatile: kickTail } = kickoffParts({ role, agent, model, launched: true, task });
   const stable = (kick
     // Cheaper to read (2.26): the map instead of searching, never the long changelog, a short hand-back,
     // and the rules this game has learned the hard way.
@@ -850,6 +851,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     } catch {
       // the budget check is a guard, never a crash
     }
+    // 2.64.0: route what happened since the last beat to the tasks' inboxes (harness/threads.mjs; shadow mode logs only).
+    try { sweepThreads({ lockMs: 1000 }); } catch { /* routing is a help, never a crash */ }
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
   const code = await new Promise((resolve) => {

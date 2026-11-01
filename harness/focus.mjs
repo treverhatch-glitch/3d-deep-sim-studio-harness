@@ -29,6 +29,7 @@ import { DEFAULT_SIZE } from './scorecard.mjs';
 import { readAttached } from './cheatsheet.mjs';
 import { HANDOFF_MAX } from './session-cap.mjs';
 import { untrustedBlock } from './untrusted.mjs';
+import { inboxForBrief } from './threads.mjs';
 
 const read = (rel) => {
   try {
@@ -102,7 +103,7 @@ export function buildFocus(taskId, agent = null) {
   const preparedRel = `.studio/briefs/${taskId}.prepared.md`;
   const prepared = fs.existsSync(path.join(REPO_ROOT, preparedRel)) ? preparedRel : null;
   const historyWords = events.filter((e) => e.task === taskId && e.msg).reduce((n, e) => n + String(e.msg).split(/\s+/).length, 0);
-  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()) };
+  return { task, check, skill, size, causedBy, handoff: readTaskHandoff(taskId), tricks: readAttached(taskId)?.tricks || [], tricksBy: readAttached(taskId)?.preapproved?.approvedBy || null, mine, others, offLimits, lessons, gates, red, meetingNotes, agent, prepared, historyWords, identity, roleRefusals, roleLessons, voice, verdictNotes: safe(() => notesForBrief({ id: task.id, title: task.title, role: task.role })), godotFailures: safe(() => godotFailuresForBrief()), inbox: safe(() => inboxForBrief(task.id)) || null };
 }
 
 export function renderVoice(v) {
@@ -119,6 +120,8 @@ export function renderFocus(f) {
     { label: `Task title (${f.task.id})`, text: f.task.title },
     // 2.29.2: the carry-forward is the newest notes, at most 3k characters (test #4: hand-offs had a median of 21k).
     { label: `Notes from whoever worked on this before, newest last (${handoff.length > HANDOFF_MAX ? `the newest ${Math.round(HANDOFF_MAX / 1000)}k characters. Older notes in studio/handoffs/${f.task.id}.md` : `studio/handoffs/${f.task.id}.md`})`, text: handoff.length > HANDOFF_MAX ? `…${handoff.slice(-HANDOFF_MAX)}` : handoff },
+    // 2.64.0: follow-ups routed to this task (harness/threads.mjs): CI and merge-train results, messages tied to it.
+    { label: `Inbox: follow-ups routed to this task, newest last (${f.inbox ? `${f.inbox.lines.length} of ${f.inbox.total}, ${f.inbox.file}` : ''})`, text: f.inbox ? f.inbox.lines.join('\n') : '' },
     { label: 'Mentioned in a meeting (studio/meetings/)', text: f.meetingNotes.map((t) => `- ${(t.match(/^# (.+)$/m) || [, ''])[1]}`).join('\n') },
     // 2.30g: the dev's earlier verdicts that touch this task (context, never rules).
     { label: 'Review notes: earlier verdicts that touch this task', text: f.verdictNotes ? f.verdictNotes.trim() : '' },
@@ -129,6 +132,7 @@ export function renderFocus(f) {
   L.push(`# Focus: ${f.task.id}`, '');
   L.push(`${f.task.priority}, size ${f.size} of 5, a "${f.check.type}" task for \`${f.task.role}\`${f.causedBy ? `. It is a bug traced to ${f.causedBy}` : ''}. Read this page instead of the repo; open other files only when a step needs them.`);
   if (told) L.push('', '## What this task is, and what others left on it', told.trimEnd());
+  if (f.inbox) L.push('', '## Inbox', `${f.inbox.total} follow-up(s) routed to this task (${f.inbox.unread} unread), quoted in the marked block above. Read them before you start: \`npm run thread -- inbox ${f.task.id}\`. New ones arrive while you work; a Claude Code session is told at its next tool call.`);
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
   if (f.roleRefusals?.length) L.push('', `## Where \`${f.task.role}\` agents get refused most`, ...f.roleRefusals.map((r) => `- ${r.n}x: ${r.why}`), 'Do these before you run done.');
