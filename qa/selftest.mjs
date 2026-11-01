@@ -4041,6 +4041,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (a): tokens that do work: kept / pending / reopened / reverted-or-redone landings over keepDays, the waste
+// split, the effective-token ratio and cost per kept change (per type), the minimum sample with a Wilson interval,
+// --since, revert commits from git (qa/selftest-266a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266a.mjs')).href);
+  await selftest266A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
