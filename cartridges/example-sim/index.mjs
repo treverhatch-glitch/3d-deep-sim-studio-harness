@@ -111,7 +111,10 @@ export function step(prevState, action = null) {
     if (act.type === 'SPAWN_ENTITY' || act.type === 'spawn') {
       const kind = act.kind || 'crate';
       const cost = UNIT_KINDS.has(kind) ? nextUnitCost(state) : 0;
-      const ok = state.resources.credits >= cost;
+      // A caller-given id already in use is refused like an unaffordable spawn (logged, ok: false, nothing charged):
+      // two entities with one id broke the DUPLICATE_ID invariant (found by a fuzz run, 2.65.2).
+      const taken = act.id != null && state.entities.some((e) => e.id === act.id);
+      const ok = !taken && state.resources.credits >= cost;
       state.actionLog.push({ tick: state.tick, action: act, ok });
       if (!ok) continue;
       state.entities.push({

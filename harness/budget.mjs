@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { spawnAgentSync } from './launch.mjs';
+import { cacheReadWeight, weightedTokens } from './token-weight.mjs';
 
 export const BUDGET_FILE = path.join(REPO_ROOT, 'studio', 'budget.json');
 export const QUOTA_FILE = path.join(STUDIO_STATE_DIR, 'tool-quota.json');
@@ -52,19 +53,11 @@ export function weekStart(cfg = {}, now = Date.now()) {
 }
 
 /**
- * Cache reads count (2.29.2). Test #4's overnight run: 97% of all tokens were cache reads, and a meter
- * that saw only input + output read 4.66M against 100M+ real, so --budget could never trip. They are
- * cheaper than fresh input, so they count at a weight: STUDIO_CACHE_READ_WEIGHT, or cacheReadWeight in
- * studio/budget.json, default 0.1. Cache writes are already in tokensIn.
+ * Cache reads count (2.29.2) at a weight: STUDIO_CACHE_READ_WEIGHT, or cacheReadWeight in studio/budget.json,
+ * default 0.1. 2.65.2: the two functions live in harness/token-weight.mjs (no harness imports but event.mjs), so the
+ * autonomy scorecard's default weighting is this one without importing budget.mjs at load.
  */
-export function cacheReadWeight() {
-  const v = process.env.STUDIO_CACHE_READ_WEIGHT ?? readBudget().cacheReadWeight;
-  return v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? 0.1 : Math.max(0, Number(v));
-}
-/** One event's tokens for the meters: input (with cache writes) + output + weighted cache reads. */
-export function weightedTokens(e, w = cacheReadWeight()) {
-  return (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead ?? e.cacheRead) || 0) * w;
-}
+export { cacheReadWeight, weightedTokens };
 /**
  * The daily token cap (weighted tokens since midnight UTC). 2.29.2: it had no default (0 = no cap), so
  * nothing stopped a runaway night. Default 50,000,000, about 1.4x a 10-hour, 104-session overnight

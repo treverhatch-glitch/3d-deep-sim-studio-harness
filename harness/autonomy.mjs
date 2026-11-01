@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { weightedTokens } from './token-weight.mjs';
 
 export const AUTONOMY_REL = 'studio/autonomy.json';
 export const DEFAULT_AUTONOMY = Object.freeze({
@@ -52,21 +53,53 @@ const DAY = 86400000;
 /**
  * 2.65.0: an optional price table, studio/prices.json (none ships): { "models": { "<model or tool>": { "in": usd,
  * "out": usd, "cacheRead": usd } } } per million tokens. Without it the scorecard's cost is in tokens only.
+ * 2.65.2: cache writes are priced as Anthropic bills them, not as plain input: a 5-minute write at 1.25x the model's
+ * input price, a 1-hour write at 2x (a model may set "cacheWrite5m" / "cacheWrite1h" in USD itself). A model with no
+ * "cacheRead" price reads at 0.1x its input price, not $0. The multipliers can be set in the file's top-level
+ * "multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }.
  */
 export const PRICES_REL = 'studio/prices.json';
+export const DEFAULT_PRICE_MULTIPLIERS = Object.freeze({ cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1 });
+const readPriceFile = (root) => { try { return JSON.parse(fs.readFileSync(path.join(root, PRICES_REL), 'utf8')); } catch { return null; } };
 export function readPrices(root = REPO_ROOT) {
-  try { const j = JSON.parse(fs.readFileSync(path.join(root, PRICES_REL), 'utf8')); return j?.models && typeof j.models === 'object' ? j.models : null; } catch { return null; }
+  const j = readPriceFile(root);
+  return j?.models && typeof j.models === 'object' ? j.models : null;
 }
-/** Dollars for session-end events at a price table (by the event's model, else its tool): { usd, unpriced }. */
-export function dollarsOf(ends, prices) {
-  let usd = 0; let unpriced = 0;
+/** 2.65.2: the price file's "multipliers" over DEFAULT_PRICE_MULTIPLIERS (a value that isn't a number >= 0 is ignored). */
+export function readPriceMultipliers(root = REPO_ROOT) {
+  const m = readPriceFile(root)?.multipliers;
+  const out = { ...DEFAULT_PRICE_MULTIPLIERS };
+  if (m && typeof m === 'object') for (const k of Object.keys(out)) if (m[k] !== null && m[k] !== '' && Number.isFinite(Number(m[k])) && Number(m[k]) >= 0) out[k] = Number(m[k]);
+  return out;
+}
+const num = (x) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
+/**
+ * Dollars for session-end events at a price table (by the event's model, else its tool): { usd, unpriced, reported }.
+ * 2.65.2: a session whose tool reported its own cost (meta.costUsd, Claude Code's total_cost_usd) counts at that cost
+ * (reported); the others are priced from the table, with tokensIn split into plain input and cache writes
+ * (meta.cacheWrite, which agent.mjs folds into tokensIn): writes at the 1-hour price for meta.cacheWrite1h, else at
+ * the TTL the launcher asked for (meta.cacheTtl), else at the 5-minute price.
+ */
+export function dollarsOf(ends, prices, multipliers = DEFAULT_PRICE_MULTIPLIERS) {
+  const mult = { ...DEFAULT_PRICE_MULTIPLIERS, ...(multipliers || {}) };
+  let usd = 0; let unpriced = 0; let reported = 0;
   for (const e of ends) {
-    const p = prices[e.model] || prices[e.meta?.tool] || null;
     const tin = Number(e.tokensIn) || 0; const tout = Number(e.tokensOut) || 0; const cr = Number(e.meta?.cacheRead ?? e.cacheRead) || 0;
+    const cost = num(e.meta?.costUsd);
+    if (cost !== null && cost >= 0 && (cost > 0 || !(tin + tout + cr))) { usd += cost; reported += 1; continue; }
+    const p = (prices && (prices[e.model] || prices[e.meta?.tool])) || null;
     if (!p) { if (tin + tout + cr) unpriced += 1; continue; }
-    usd += (tin * (Number(p.in) || 0) + tout * (Number(p.out) || 0) + cr * (Number(p.cacheRead) || 0)) / 1e6;
+    const w1hSplit = num(e.meta?.cacheWrite1h); const w5mSplit = num(e.meta?.cacheWrite5m);
+    const cw = Math.min(tin, num(e.meta?.cacheWrite) ?? ((w1hSplit || 0) + (w5mSplit || 0)));
+    let w1h;
+    if (w1hSplit !== null || w5mSplit !== null) w1h = Math.min(cw, w1hSplit ?? Math.max(0, cw - (w5mSplit || 0)));
+    else w1h = e.meta?.cacheTtl === '1h' ? cw : 0;
+    const w5m = cw - w1h;
+    const pin = Number(p.in) || 0;
+    const price = (k) => num(p[k]) ?? pin * mult[k];
+    usd += ((tin - cw) * pin + w5m * price('cacheWrite5m') + w1h * price('cacheWrite1h') + tout * (Number(p.out) || 0) + cr * price('cacheRead')) / 1e6;
   }
-  return { usd, unpriced };
+  return { usd, unpriced, reported };
 }
 const ESCAPE_DAYS = 7;
 const ts = (e) => Date.parse(e?.ts) || 0;
@@ -175,13 +208,14 @@ function runningMs(a, b, runs, halts) {
  * The scorecard. events: the log (any order); now: the window's end; days: its length.
  * isPersonName: a name -> bool function (personClassifier()); attempts: rows from metrics.mjs attemptRows (optional).
  */
-export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null, prices = null } = {}) {
+export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null, prices = null, priceMultipliers = null } = {}) {
   if (typeof isPersonName !== 'function') throw new Error('buildAutonomy needs isPersonName (await personClassifier())');
   const sorted = [...events].map((e, i) => [ts(e), i, e]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map((x) => x[2]);
   const from = now - days * DAY;
   const inWin = (t) => t >= from && t <= now;
   const win = sorted.filter((e) => inWin(ts(e)));
-  const weight = weigh || ((e) => (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead ?? e.cacheRead) || 0));
+  // 2.65.2: without `weigh`, the budget meter's weighting (cache reads at cacheReadWeight), as the CLI and the hub use.
+  const weight = weigh || ((e) => weightedTokens(e));
 
   // Interventions. A reopen an away verdict made (same person and task, within 2 min) is that verdict, not a second one.
   const all = [];
@@ -286,8 +320,8 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
   const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
   if (prices && typeof prices === 'object') {
-    const d = dollarsOf(win.filter((e) => e.type === 'agent.session.end'), prices);
-    Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, note: `at the prices in ${PRICES_REL}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
+    const d = dollarsOf(win.filter((e) => e.type === 'agent.session.end'), prices, priceMultipliers || DEFAULT_PRICE_MULTIPLIERS);
+    Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, reportedSessions: d.reported, note: `at the prices in ${PRICES_REL}${d.reported ? ` (${d.reported} session(s) at the cost their tool reported)` : ''}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
   }
   // 2.65.0: orchestrator interventions: conductor notes (event conductor.note, an outside orchestrator's rulings in a
   // task's record), counted by type so they show once the conductor tools write them; and a person's round-trips
@@ -442,7 +476,7 @@ export async function autonomyReport({ now = Date.now(), days = null, events = n
   if (withAttempts) { try { attempts = (await import('./metrics.mjs')).attemptRows(evs, { now }); } catch {} }
   let weigh = null;
   try { const { weightedTokens } = await import('./budget.mjs'); weigh = (e) => weightedTokens(e); } catch {}
-  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices() });
+  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices(), priceMultipliers: readPriceMultipliers() });
   const badge = levelBadge(card, { ...cfg, days: d });
   return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, protected: await configProtected() } };
 }

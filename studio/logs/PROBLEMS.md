@@ -889,3 +889,22 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Why:** each tool had its own merge-tree code.
 - **Fix:** harness/merge-tree.mjs, shared. qa/selftest-2651a.mjs.
 
+### P-150 — cache writes priced as plain input · fixed in 2.65.2
+- **Evidence:** `dollarsOf` charged `tokensIn` (writes included) at 1x and never read `costUsd`; a test session showed $3 where $4.35 was billed.
+- **Why:** the price table had no write multiplier and the session end didn't record the TTL.
+- **Fix:** TTL-priced writes, reported cost preferred. qa/selftest-2652a.mjs.
+
+### P-151 — scorecard counted cache reads at full weight by default · fixed in 2.65.2
+- **Evidence:** `buildAutonomy` with no `weigh` gave 10,200 tokens where the budget meter gives 1,200.
+- **Why:** only the CLI and hub passed the weighting.
+- **Fix:** harness/token-weight.mjs is the default. qa/selftest-2652a.mjs.
+
+### P-152 — OpenAI-format cached tokens counted as fresh input or twice · fixed in 2.65.2
+- **Evidence:** `prompt_tokens_details.cached_tokens` was never read; `cached_input_tokens` was added on top.
+- **Why:** the plain path of `tokensFrom` predated cached-token fields.
+- **Fix:** cached tokens come off the input. qa/selftest-2652a.mjs.
+
+### P-153 — example-sim allowed two entities with one id · fixed in 2.65.2
+- **Evidence:** a seeded fuzz run (research pass, 2026-11-02) broke DUPLICATE_ID at tick 2 in 0.6 s; the soak never sends caller-given ids.
+- **Why:** `spawn` didn't check a caller-given id.
+- **Fix:** refused like an unaffordable spawn. qa/regressions/example-duplicate-spawn-id.json.

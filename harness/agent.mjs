@@ -382,7 +382,7 @@ export function tokensFrom(log) {
     }
     if (o.type === 'result' && o.usage) {
       const u = o.usage;
-      claude = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, turns: Number(o.num_turns) || null };
+      claude = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, turns: Number(o.num_turns) || null, ...writeSplit(u) };
       if (o.total_cost_usd != null) cost = Number(o.total_cost_usd);
     } else if (o.type === 'turn.completed' && o.usage) {
       const u = o.usage;
@@ -393,14 +393,33 @@ export function tokensFrom(log) {
       codex.out += u.output_tokens || 0;
     } else if (o.usage && (o.usage.input_tokens != null || o.usage.prompt_tokens != null)) {
       // Another tool's (or a script's) single usage report: the last one counts.
-      plain = { in: (o.usage.input_tokens ?? o.usage.prompt_tokens) || 0, cacheRead: o.usage.cache_read_input_tokens || o.usage.cached_input_tokens || 0, out: (o.usage.output_tokens ?? o.usage.completion_tokens) || 0 };
+      // 2.65.2: in the OpenAI shapes the cached tokens are part of prompt_tokens / input_tokens
+      // (prompt_tokens_details.cached_tokens, input_tokens_details.cached_tokens, cached_input_tokens), so they come
+      // off the input, as the Codex path does; before, they were counted as fresh input (and cached_input_tokens twice).
+      // In Anthropic's shape input_tokens excludes cache reads, and cache writes are added as the Claude path adds them.
+      const u = o.usage;
+      if (u.cache_read_input_tokens != null || u.cache_creation_input_tokens != null) {
+        plain = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0, ...writeSplit(u) };
+      } else {
+        const cached = Number(u.cached_input_tokens ?? u.input_tokens_details?.cached_tokens ?? u.prompt_tokens_details?.cached_tokens) || 0;
+        plain = { in: Math.max(0, ((u.input_tokens ?? u.prompt_tokens) || 0) - cached), cacheRead: cached, out: (u.output_tokens ?? u.completion_tokens) || 0 };
+      }
     }
   }
   const r = claude || (codex.seen ? { in: codex.in, cacheRead: codex.cached, out: codex.out, turns: codex.turns } : plain);
   // Turns too (2.28): each turn re-reads the whole context, so cost follows turns more than file size
   // (Jed's sandbox A/B: a map-first workflow added turns and cost 27% more cache reads).
-  return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost, turns: r.turns || null } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null, turns: null };
+  return r ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: cost, turns: r.turns || null, cacheWrite: r.cacheWrite || 0, cacheWrite5m: r.cacheWrite5m ?? null, cacheWrite1h: r.cacheWrite1h ?? null } : { tokensIn: 0, tokensOut: 0, cacheRead: 0, costUsd: null, turns: null, cacheWrite: 0, cacheWrite5m: null, cacheWrite1h: null };
 }
+/** 2.65.2: cache writes (already in tokensIn) and, when the usage gives it (cache_creation), their 5-minute / 1-hour split. */
+function writeSplit(u) {
+  const c = u.cache_creation && typeof u.cache_creation === 'object' ? u.cache_creation : null;
+  const n = (x) => (x === null || x === undefined || !Number.isFinite(Number(x)) ? null : Number(x));
+  return { cacheWrite: Number(u.cache_creation_input_tokens) || 0, cacheWrite5m: c ? n(c.ephemeral_5m_input_tokens) : null, cacheWrite1h: c ? n(c.ephemeral_1h_input_tokens) : null };
+}
+
+/** 2.65.2: the prompt-cache TTL the launcher asks Claude Code for in this role's sessions (recorded at session end, so cache writes are priced by it when the stream gives no split). */
+export const cacheTtlAsked = (role) => (LONG_CACHE_ROLES.has(role) && process.env.STUDIO_LONG_CACHE !== 'off' ? '1h' : '5m');
 
 /** 2.30i: a session that ended without task done gets the launcher's foreground verify: a clean exit, or a crash after it committed. */
 export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit }) {
@@ -498,7 +517,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
   // 2.61.0: which skills and pitfall lines this session was given, and whether its log shows it used them (telemetry only).
   try { recordFollow({ agent, model, role, task: s0.task || tasks[0] || null, log }); } catch { /* telemetry, never a blocker */ }
@@ -833,7 +852,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   env.BASH_MAX_TIMEOUT_MS ||= '1200000';
   // 2.30g: the Director and Producer start from the same prefix every time, often more than 5 minutes
   // apart, so they ask Claude Code for the 1-hour cache (Claude Code 2.1.108+; older versions ignore it).
-  if (LONG_CACHE_ROLES.has(role) && process.env.STUDIO_LONG_CACHE !== 'off') {
+  if (cacheTtlAsked(role) === '1h') {
     env.ENABLE_PROMPT_CACHING_1H ||= '1';
     env.CLAUDE_CODE_PROMPT_CACHE_TTL ||= '1h';
   }

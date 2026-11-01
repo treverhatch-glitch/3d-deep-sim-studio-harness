@@ -1,0 +1,41 @@
+{
+  "id": "REG-duplicate-spawn-id",
+  "seed": 1337,
+  "tick": 3,
+  "actions": [
+    {
+      "tick": 1,
+      "action": {
+        "type": "spawn",
+        "kind": "crate",
+        "id": "c",
+        "x": 1,
+        "z": 1
+      }
+    },
+    {
+      "tick": 2,
+      "action": {
+        "type": "spawn",
+        "kind": "crate",
+        "id": "c",
+        "x": 2,
+        "z": 2
+      }
+    },
+    {
+      "tick": 3,
+      "action": {
+        "type": "spawn",
+        "kind": "vehicle",
+        "id": "unit-1",
+        "x": 3,
+        "z": 3
+      }
+    }
+  ],
+  "description": "A spawn with a caller-given id that is already in use must be refused (logged with ok: false, nothing charged), not create a second entity with that id (the DUPLICATE_ID invariant). Found by a seeded fuzz run (research 2026-11-01, E2).",
+  "cartridge": "example-sim",
+  "hash": "5ce94eb78f764dad",
+  "sha256": "770505e7b411e3c4f976107158a24ed68a93f60ab7309206c9adc6ff29738340"
+}
