@@ -16,6 +16,7 @@ import { allowedNote, allowedTools } from './allowlist.mjs';
 import { nimModel, NIM_DEFAULT_MODEL } from './agent-env.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inboxForBrief } from './threads.mjs';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
@@ -108,6 +109,14 @@ export function kickoffParts(opts, { named = false } = {}) {
     try {
       const c = constraintsBlock({ heading: '', for: opts.role === 'director' ? 'director' : 'planning' });
       if (c) volatile += `\n${c}\n`;
+    } catch {}
+  }
+  // 2.64.0: follow-ups already routed to the task this session starts on (harness/threads.mjs): a count and the
+  // command, never the text (that is quoted, marked as untrusted, in the task's brief).
+  if (opts.task) {
+    try {
+      const box = inboxForBrief(opts.task, { max: 0 });
+      if (box) volatile += `${opts.task}'s inbox has ${box.total} follow-up(s) (${box.unread} unread: CI or merge-train results, messages tied to the task). Read them first: npm run thread -- inbox ${opts.task}\n`;
     } catch {}
   }
   return { stable: text, volatile };
