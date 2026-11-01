@@ -274,14 +274,18 @@ const CANNOT = { selftest: 'this file' };
   run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
   run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
-  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: ['ignore', fs.openSync(path.join(tmpRoot, 'sup-lanes.log'), 'w'), fs.openSync(path.join(tmpRoot, 'sup-lanes.err'), 'w')] });
   const t0 = Date.now();
   let lanes = [];
-  while (Date.now() - t0 < 8000 * SLOW && lanes.length < 2) {
+  while (Date.now() - t0 < 60000 && lanes.length < 2) {
     spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)']);
     lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8')).filter((x) => /path:docs\/lane-[ab]/.test(x));
   }
   report('with --lanes auto, each lane gets its own agent holding that folder', lanes.length === 2, lanes.join('\n'));
+  console.log('[debug] lanes found after', Date.now() - t0, 'ms; SLOW =', SLOW);
+  await new Promise((r) => child.on('exit', r)).catch(() => {});
+  try { console.log('[debug] supervisor out:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.log'), 'utf8').slice(-3000) + '\n[debug] err:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.err'), 'utf8').slice(-3000)); } catch (e) { console.log('[debug] no log', e.message); }
+  try { console.log('[debug] events:\n' + fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter((l) => /lane|session|agent\./.test(l)).slice(-30).map((l) => l.slice(0, 300)).join('\n')); } catch {}
   await new Promise((r) => child.on('exit', r));
   for (const s of fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json'))) run(dir, `node harness/agent.mjs stop ${s.replace(/\.json$/, '')}`, env);
   // Quota: a tool that ran out is skipped until its reset; its lanes go to the next tool.
