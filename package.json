@@ -150,6 +150,7 @@
     "fidelity": "node harness/fidelity.mjs",
     "models:limits": "node harness/model-limits.mjs",
     "ci:watch": "node harness/ci-watch.mjs",
+    "thread": "node harness/threads.mjs",
     "gdscript:parse": "node harness/gdscript-parse.mjs"
   },
   "devDependencies": {
