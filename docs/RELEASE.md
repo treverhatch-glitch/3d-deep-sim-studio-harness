@@ -15,6 +15,12 @@ npm run release -- 2.30.0-c --notes notes.md --title "short output, breakers, th
 7. Waits for CI on that commit. A failed job is re-run once (known flaky timing checks); both results are reported.
 8. Reports failing steps first, "not run" apart from "pass". Saved to `.studio/release-last.json`; the clone's verify log is `.studio/release-verify.log`.
 
+**The War Room browser check** (`node qa/hud-check.mjs`, also CI's `war-room-browser` job) waits for each state it
+checks (up to 15 s, 30 s on Windows; `HUD_WAIT_MS` changes it) and, on a time-out, prints what the page showed;
+Stop and Pause must show an empty list that holds through a page refresh. To test a timing fix, run the agent checks
+alone many times: `node qa/hud-check.mjs --only stop-pause --repeat 30` (pass count and seconds per round at the end;
+`HUD_TRACE=1` prints each press and wait).
+
 Any red step before the push undoes the commit and leaves the work uncommitted; nothing is pushed. `--dry-run` stops before the push. Without the `gh` CLI, CI is reported as "not checked", never as green.
 
 `npm run release` with no version is the read-only check CI runs (syntax, required gates, closed loop, changelog).

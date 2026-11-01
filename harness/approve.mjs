@@ -14,6 +14,10 @@
  *   npm run approve -- show [--base <ref>]          the protected files this branch changes, and whether approved
  *   npm run approve -- protected --note "why" [--base <ref>]   sign exactly those changes (by content)
  *   npm run approve -- force <T-ID> --reason "why"  let task done --force / --accepted-by close that task
+ *   npm run approve -- tests --note "why"           2.58.2 (PU-29): accept exactly the weakened tests listed now
+ *                                                   (harness/test-weakening.mjs: a removed assert, a .skip, a wider tolerance…)
+ *   npm run approve -- hooks --note "why"           2.58.2 (PU-29): accept exactly the commits listed now that skipped
+ *                                                   the git hooks (harness/hook-stamp.mjs), by commit and patch-id
  *
  * An approval is a file in studio/approvals/ (commit it with the change). It holds what was approved
  * (each protected file's path and content hash, or the task) and an Ed25519 signature. The check
@@ -45,6 +49,7 @@ export const DEFAULT_PROTECTED = [
   'cartridges/*/qa.mjs', 'web/*/sim/qa.mjs', 'game/*/sim/qa.mjs', 'qa/regressions/**',
   'qa/controls-check.mjs', 'qa/protected-check.mjs', 'harness/approve.mjs',
   '**/tools/controls.gd', '**/tools/gate.gd', '.github/workflows/**',
+  'scripts/hooks/**', 'harness/hook-stamp.mjs', 'harness/test-weakening.mjs',
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
@@ -121,7 +126,7 @@ export function protectedChanges(base, globs = protectedGlobs(base)) {
 
 export const changeId = (changes) => crypto.createHash('sha256').update(canonicalBytes(changes.map((c) => [c.path, c.sha256]))).digest('hex');
 
-function readApprovals() {
+export function readApprovals() {
   const dir = path.join(ROOT, APPROVALS_REL);
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => { try { return { file: `${APPROVALS_REL}/${f}`, ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) }; } catch { return null; } }).filter(Boolean);
@@ -183,6 +188,28 @@ function writeApproval(name, approval) {
   return path.relative(ROOT, f).split(path.sep).join('/');
 }
 
+/** 2.58.2 (PU-29): sign the weakened tests (`tests`) or the commits that skipped the hooks (`hooks`) the gate lists now. */
+async function approveListed(cmd, note, by) {
+  const { changeBase, checkHookStamps } = await import('./hook-stamp.mjs');
+  const b = await changeBase();
+  if (!b) throw new Error('no base branch to compare with (--base <ref>)');
+  let items;
+  if (cmd === 'tests') {
+    const { findWeakenings, formatFinding } = await import('./test-weakening.mjs');
+    items = (await findWeakenings()).findings.map(({ id, kind, file, text }) => ({ id, kind, file, text }));
+    if (!items.length) throw new Error(`no weakened test since ${b.ref}`);
+    for (const x of items) console.log(formatFinding({ ...x, line: '-' }));
+  } else {
+    items = (await checkHookStamps({ ignoreApprovals: true, env: { ...process.env, STUDIO_HOOKS_CHECK: 'on' } })).open.map(({ sha, pid, subject }) => ({ sha, pid: pid || null, subject }));
+    if (!items.length) throw new Error(`no commit since ${b.ref} skipped the hooks`);
+    for (const x of items) console.log(`  ${x.sha.slice(0, 8)} ${x.subject}`);
+  }
+  const id = crypto.createHash('sha256').update(canonicalBytes(items)).digest('hex');
+  const file = writeApproval(`${cmd}-${id.slice(0, 16)}`, { kind: cmd, [cmd === 'tests' ? 'findings' : 'commits']: items, base: b.ref, by, note, at: new Date().toISOString() });
+  emitEvent({ type: `approval.${cmd}`, agent: by, msg: `${by} approved ${items.length} ${cmd === 'tests' ? 'weakened test(s)' : 'commit(s) made without the hooks'}: ${note.slice(0, 200)}` });
+  console.log(`Approved ${items.length} ${cmd === 'tests' ? 'weakened test(s)' : 'commit(s)'}. Commit ${file}. Anything else changed later needs a new approval.`);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const a = process.argv.slice(2);
   const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
@@ -225,8 +252,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const file = writeApproval(`force-${task}`, { kind: 'force', task, reason, by, at: new Date().toISOString() });
       emitEvent({ type: 'approval.force', agent: by, task, msg: `${by} approved closing ${task} without its check: ${reason.slice(0, 200)}` });
       console.log(`Approved: ${task} may close with task done --force. Commit ${file}.`);
+    } else if (cmd === 'tests' || cmd === 'hooks') {
+      // 2.58.2 (PU-29): sign exactly what the gate lists now, by content, so the approval can't cover a later change.
+      // Not awaited here: the checks import this module, which must finish loading first.
+      const note = flag('--note') || '';
+      if (note.trim().length < 10) throw new Error('say why, in 10+ characters: --note "…"');
+      approveListed(cmd, note, by).catch((e) => { console.error(e.message); process.exit(1); });
     } else {
-      console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…"   [--base <ref>] [--by <name>]');
+      console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…" | tests --note "…" | hooks --note "…"   [--base <ref>] [--by <name>]');
       process.exit(1);
     }
   } catch (e) {

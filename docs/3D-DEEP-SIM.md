@@ -20,6 +20,11 @@ Why web + TypeScript first? As demonstrated across the 17-repo benchmark audit, 
 4. **100% Plain-JSON State (`JSON.stringify` / `JSON.parse`)**:
    - Entities are plain objects referenced by integer `id` (never class instances, `Map`, `Set`, or object pointers).
    - Saves never lose in-flight tasks or vehicles, and canonical state hashes (`hashCanonicalState` in `qa/sim.adapter.mjs`) verify cross-engine ports bit-for-bit.
+5. **Deterministic math (`harness/det-math.mjs`)**:
+   - `Math.sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, the hyperbolics, `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `pow`, `hypot`, `cbrt` and the `**` operator are only approximately specified: Node, browsers, Jint on .NET and a C# port give different last bits for the same input, so a replay can drift in a port. `Math.sqrt`, `+ - * /`, `floor`, `ceil`, `round`, `trunc`, `abs`, `min`, `max`, `sign`, `fround` and `imul` are exact and fine.
+   - Sim code calls the game's `detMath` module instead (sin, cos, atan2, hypot, …, written to give the same bits in every engine). That module may use `Math` itself: any file named `detMath` / `det-math` / `det_math`, any file in a folder with that name, and any path listed in `allow`.
+   - `node scripts/check-sim-purity.mjs` reports each use with file, line and function: direct calls, `Math['sin']`, `const { sin } = Math`, aliases of `Math`, computed keys, and imported wrappers that forward to `Math`. While a cartridge plays, the runtime probe traps the same functions and names the line that called them, however they were reached.
+   - The mode is per game: `"warn"` (the default: printed, never fails, so an existing game doesn't turn red), `"required"` (the purity gate fails; `npm run new-game` writes it) or `"off"`. A cartridge sets it in `cartridges/<name>/cartridge.json` (`"detMath": "required"`, or `{ "mode": "required", "allow": ["lib/trig.mjs"] }`). A studio game that isn't a cartridge sets it in its `studio.gates.json`: `"detMath": { "mode": "warn", "paths": ["src/sim"] }` (default path `<game>/sim`), which adds a `game:det-math` check to the game's own checks (required when the mode is). Bare package imports are not followed; the static scan sees relative imports only.
 
 ---
 

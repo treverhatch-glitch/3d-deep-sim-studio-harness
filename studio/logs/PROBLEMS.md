@@ -356,7 +356,7 @@ Fixes are planned as PU-16 to PU-21 in PROPOSALS.md and need Hatch's OK.
 - **Workaround:** re-run the failed job once (the release flow already does this for known timing checks).
 - **Fix?** 2.57.0 moves board writes off the land lock and adds a Windows rename retry (PU-16); `merge-lane.mjs`'s own land lock is unchanged. Watch whether it recurs.
 
-### P-044 — The HUD "Stop ends it and hands its task back" check flakes on main · open
+### P-044 — The HUD "Stop ends it and hands its task back" check flakes on main · fixed in 2.58.2 (the check waits for the page state; `--only stop-pause --repeat 30` passed 30/30 under load and with refreshes 4.5 s late, where the old logic got 0/10)
 - **What happened:** main's `war-room-browser` job failed on 2 of 4 pushes (7f4a736, 3eb0cf2) on `[hud] FAIL Stop ends it and hands its task back` (and once on Pause), while the same code passed on its PR.
 - **Why (from the log):** the agent did stop (its record says ended) but the page still listed it when the check looked: the check reads the page before the HUD's next refresh.
 - **Fix (proposed):** the check waits for the row to go (poll up to a few seconds) instead of reading once. Small; needs Hatch's OK. PU-17 changes the stop path, so re-check after 2.57.0 first.
@@ -487,4 +487,8 @@ The crew's log numbers these P-034 and P-035; here they get new numbers, since P
 - **Fix:** `npm run agent -- allow agy --dry-run`, then `--by <owner> --scope user` (merge only, backup first, atomic,
   logged, never skip-all). Research links in docs/AGENT-TOOLS.md.
 - **UNTESTED:** real agy accepting the rules (on Windows, the `regex:` form) until the owner's first run.
+
+### P-068 — PU-29's hooks gate would have failed every in-flight lane task after the upgrade · fixed in 2.58.2 before release
+- **What happened (found while assembling 2.58.2):** a checkout on 2.58.1 with lane work takes 2.58.2; the lane's commits were never stamped, and once the lane rebases onto the upgrade their parent's commit-msg hook stamps, so `task done` refused each of them as "skipped the hooks". Reproduced in a throwaway clone (2.58.1 + a lane commit, merge, rebase, `hook-stamp.mjs check` FAIL).
+- **Fix:** the first stamping hook run in a checkout (normally the upgrade's own merge commit) lists the unstamped commits on local branches that no remote has, by sha and patch-id, in `<git common dir>/studio-hooks-grandfather.json` (shared by every lane worktree, never committed). Those stay exempt after a clean rebase; a commit made after the list was written is still caught. `node harness/hook-stamp.mjs grandfather` adds to the list by hand. Two checks in `qa/selftest-2582k.mjs`, both failing on the old code.
 

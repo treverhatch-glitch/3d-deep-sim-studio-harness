@@ -31,6 +31,7 @@ import { pinMode, checkGodotVersions } from './godot-version.mjs';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot } from './merge-lane.mjs';
+import { normMode } from './det-math.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -54,7 +55,14 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    return (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}) }));
+    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}) }));
+    // 2.58.2 (PU-22): a manifest with "detMath" (warn or required) gets the deterministic-math check on its sim
+    // paths; the cartridge purity gate is skipped for such a game, so this is where it runs. Required fails.
+    if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
+      const { mode } = normMode(j.detMath && typeof j.detMath === 'object' ? j.detMath.mode : j.detMath);
+      if (mode !== 'off') list.push({ id: 'game:det-math', command: 'node scripts/check-sim-purity.mjs --det-math-only', required: mode === 'required' });
+    }
+    return list;
   }
   const out = [];
   if (game.sim) {

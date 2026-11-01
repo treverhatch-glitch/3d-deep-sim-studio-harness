@@ -34,6 +34,38 @@
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
 
+## Skipped hooks and weakened tests (2.58.2, PU-29)
+- A hook can't stop `git commit --no-verify`, so the hooks leave a stamp and a gate checks for it afterwards. When
+  `scripts/hooks/pre-commit` passes it records the staged tree; `commit-msg` then adds `Studio-Hooks: v<hooks version>
+  t<tree> p<patch-id>` (a merge: `… merge`), and `prepare-commit-msg` (which runs even with `--no-verify`) tells it when
+  the commit is an `--amend`. The `hooks` gate (`node harness/hook-stamp.mjs check`, also run by every `task done`) lists
+  the commits since the base branch without a stamp matching their tree (the same commit) or patch-id (the same change
+  after a clean rebase or cherry-pick), names them, and says how to fix it: `git reset --soft <oldest>~1`, then
+  `git commit -C ORIG_HEAD` (the hooks check everything again), or the owner's `npm run approve -- hooks --note "why"`.
+- No laundering: amending a commit made without the hooks gets no stamp (the hooks only saw the amendment), and no
+  commit is stamped while HEAD is such a commit, until it is re-committed or the owner approves it.
+- Exempt: commits made before the stamping hooks existed, and harness commits made without hooks that say so
+  (`Studio-Harness: experiment-drop` with its `Studio-Experiment-Drop` trailer). CI's own merge commit of a pull request
+  isn't judged; the PR head is.
+- Enforced where the hooks are installed (`core.hooksPath=scripts/hooks`) or the base branch's last 50 commits carry
+  stamps (so unsetting the hooks doesn't switch it off), or with `STUDIO_HOOKS_CHECK=on`; `STUDIO_HOOKS_CHECK=off` turns it off.
+- The `weakened-tests` gate (`node harness/test-weakening.mjs`, also at `task done`) reads the diff since the base branch
+  (committed or not) in test files (`*.test.*`, `*.spec.*`, `tests/`, `test/`, `__tests__/`, `qa/`, `specs/`, C# `*.Tests/`
+  and `*Tests/` folders, `test_*.py`, `*_test.*`, `*Test(s).cs|gd`) and test-runner configs, and names file:line and the
+  kind for: removed assertions not replaced in the same place (commented out counts; moved unchanged doesn't), added
+  `.skip`/`.only`/`xit`/`xdescribe`/`test.todo`/`[Ignore]`/`@Disabled`/pytest skips/gdUnit `do_skip`, raised timeouts,
+  wider tolerances (`toBeCloseTo` precision lowered; eps, tol, atol, an `abs()` bound, an `AreEqual` delta raised), a
+  condition on a literal seed (or a tick that returns or skips), deleted test files, and golden or snapshot files changed
+  by a commit without a `Golden-Reason` trailer.
+- It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
+  `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
+  --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.
+- Both checkers and the hooks are protected files (`studio/protected.json`).
+- Not caught: a stamp a forger computes by hand (the content gates still judge the change); `git revert`, a rebase with
+  conflicts or squashes, and an `--amend -m` later rebased onto a moved base are flagged until re-committed; a weaker
+  assert in the same count (`toBe` → `toBeTruthy`), an assert removed with an unrelated one added in the same place, a
+  helper that always passes, a special case in the game code instead of the test, and tests outside the names above.
+
 ## Failures
 - Closed-loop writes the cartridge, seed, the tick the cartridge failed on, and every action to `.studio/last-seed-failure.json`.
 - Do not trust hardcoded demo seeds for real bugs.

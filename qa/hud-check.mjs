@@ -2,7 +2,7 @@
 /**
  * qa/hud-check.mjs — open the War Room in a real browser and use it like a person would.
  *
- *   node qa/hud-check.mjs [--shots <folder>]
+ *   node qa/hud-check.mjs [--shots <folder>] [--only stop-pause [--repeat <n>]]
  *
  * Copies the repo to a temporary folder, fills it with a small studio (a signed Bible, tasks, an
  * agent at work, an idea, a playtest), starts the HUB there and drives Chromium through all three
@@ -11,6 +11,12 @@
  * data-sharing box, the MAX SPEED lever and the pace, the studio's questions, approving the art
  * department's designs, the Liaison chat (on a fake local model), and starting and stopping an agent. Your own studio is never touched. Skips (exit 0) when Playwright or Chromium
  * isn't installed; set PLAYWRIGHT_CHROMIUM to a Chromium binary to use a specific one.
+ *
+ * Every check waits for the state it expects (qa/wait-for.mjs: up to 15 s, 30 s on Windows, HUD_WAIT_MS
+ * to change it) and, when it times out, prints what the page showed (P-044: reading the page once ran
+ * before the War Room's next refresh). `--only stop-pause --repeat 30` sets the studio up once and runs
+ * just the agent start/Stop/+ Hire/Pause checks 30 times, with a pass count and the seconds per round.
+ * HUD_TRACE=1 prints each Stop/Pause press and how long each check waited.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,10 +26,23 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { waitFor, waitBudget } from './wait-for.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
-const shotsAt = argv.includes('--shots') ? path.resolve(argv[argv.indexOf('--shots') + 1]) : null;
+const arg = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] ?? '' : null);
+const shotsAt = arg('--shots') ? path.resolve(arg('--shots')) : null;
+const SECTIONS = ['stop-pause'];
+const only = arg('--only');
+const repeat = arg('--repeat') === null ? 1 : Number(arg('--repeat'));
+if (only !== null && !SECTIONS.includes(only)) {
+  console.error(`[hud] --only takes one of: ${SECTIONS.join(', ')}`);
+  process.exit(2);
+}
+if (!Number.isInteger(repeat) || repeat < 1 || (repeat > 1 && !only)) {
+  console.error('[hud] --repeat takes a whole number of rounds, with --only <section> (repeat the whole check from a loop instead)');
+  process.exit(2);
+}
 let chromium;
 try {
   ({ chromium } = await import('playwright'));
@@ -92,7 +111,8 @@ env.STUDIO_PREPARE_CHAIN = 'ollama-local';
 // A saved playable build for the Arcade: the browser check passes, so the build is kept.
 // When the game's own browser check fails there is no build to play: the Arcade checks that need one are
 // skipped and say why, instead of turning the HUD red for the game's bug (Jed's run: one red became three).
-const noBuild = sh('qa/browser-play.mjs', '--no-shots').status !== 0;
+// (--only stop-pause never opens the Arcade, so it skips this.)
+const noBuild = only ? true : sh('qa/browser-play.mjs', '--no-shots').status !== 0;
 // 2.30c: a task the circuit breaker parked (two hand-backs for the same reason), and an overnight summary.
 const trip = (() => {
   try {
@@ -143,6 +163,7 @@ if (!(await fetch(`${BASE}/api/state`).then((r) => r.ok, () => false))) {
 let failed = 0;
 let total = 0;
 let skipped = 0;
+const trace = process.env.HUD_TRACE === '1' ? (msg) => console.log(`[hud] trace ${msg}`) : () => {};
 const needsBuild = (label, ok, detail) => {
   if (!noBuild) return check(label, ok, detail);
   skipped += 1;
@@ -155,9 +176,24 @@ const check = (label, ok, detail = '') => {
 };
 const read = (rel) => (fs.existsSync(path.join(dir, rel)) ? fs.readFileSync(path.join(dir, rel), 'utf8') : '');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-// Poll until a condition holds (or the deadline passes): for steps whose time varies by machine.
-// 2.41.0: press Stop (or Pause) once for each agent listed, by name, and wait for the list to empty; an
-// agent still listed after that gets one more press.
+// P-044: a check after an action waits for the state it expects instead of reading the page once (the page
+// refreshes every 2 s; on a busy CI box the result can land after a fixed pause). WAIT is one check's time;
+// STOP_WAIT covers a stop, which kills a process tree, saves a patch and hands the task back.
+const WAIT = waitBudget(15000);
+const STOP_WAIT = waitBudget(30000);
+const text = async (page, sel) => {
+  const l = page.locator(sel);
+  return (await l.count()) ? l.first().innerText() : `(no ${sel} on the page)`;
+};
+/** Wait until probe() says { ok: true } (holding for holdMs if given), then PASS; on time-out FAIL with what was seen. */
+const expect = async (label, probe, { timeout = WAIT, holdMs = 0, interval = 250, more = null, gate = check } = {}) => {
+  const r = await waitFor(probe, { timeout, holdMs, interval });
+  trace(`${r.ok ? 'ok' : 'timed out'} after ${(r.ms / 1000).toFixed(1)} s: ${label}`);
+  gate(label, r.ok, r.ok ? '' : `${r.message}${more ? await more() : ''}`);
+  return r;
+};
+// A check that needs the saved build is skipped (not waited for) when there is none.
+const expectBuild = (label, probe, opts = {}) => (noBuild ? needsBuild(label, false) : expect(label, probe, { ...opts, gate: needsBuild }));
 // 2.41.0: what each agent's record and log said, printed when a stop check fails (the CI failure couldn't be
 // reproduced locally; this shows its cause next time).
 const agentsDiag = () => {
@@ -173,29 +209,76 @@ const agentsDiag = () => {
   const ev = (() => { try { return fs.readFileSync(path.join(dir, '.studio', 'events.jsonl'), 'utf8').split('\n').filter((l) => /agent\.(stopped|paused|session|wake|refresh|failover)|launch/.test(l)).slice(-15).join('\n'); } catch { return ''; } })();
   return `\n--- agent records ---\n${out.join('\n')}\n--- agent events ---\n${ev}`;
 };
+const noAgents = (t) => /No agents started from here yet/.test(t);
+const launchedEmpty = (page) => async () => {
+  const t = await text(page, '#o-launched');
+  return { ok: noAgents(t), seen: t };
+};
+// 2.41.0: press Stop (or Pause) once for each agent listed, by name, and wait for the list to empty; an
+// agent still listed after that gets one more press. P-044: each press waits for the HUB's answer before the
+// next one (it was a fixed half second).
 const stopEach = async (page, attr) => {
-  const empty = async () => /No agents started from here yet/.test(await page.locator('#o-launched').innerText());
-  for (let round = 0; round < 2 && !(await empty()); round++) {
+  for (let round = 0; round < 2; round++) {
+    if (noAgents(await text(page, '#o-launched'))) return;
     const names = [...new Set(await page.locator(`#o-launched [data-${attr}]`).evaluateAll((els, a) => els.map((e) => e.getAttribute(`data-${a}`)), attr))];
     for (const name of names) {
-      const btn = page.locator(`#o-launched [data-${attr}="${name}"]`);
-      if (await btn.count()) await btn.first().click().catch(() => {});
-      await wait(500);
+      // The list is redrawn every 2 s; a press that lands mid-redraw is lost (no request), so a press the HUB
+      // didn't answer is made again while the button is there.
+      for (let press = 1; press <= 3; press++) {
+        const btn = page.locator(`#o-launched [data-${attr}="${name}"]`);
+        if (!(await btn.count())) break;
+        const answered = page.waitForResponse((r) => r.url().endsWith('/api/agents') && r.request().method() === 'POST', { timeout: waitBudget(8000) });
+        answered.catch(() => {});
+        const clicked = await btn.first().click({ timeout: WAIT }).then(() => true, (e) => (trace(`${attr} ${name}: the press failed (${String(e.message).split('\n')[0]})`), false));
+        const res = clicked ? await answered.catch(() => null) : null;
+        trace(`${attr} ${name} (round ${round + 1}, press ${press}): HUB answered ${res ? res.status() : 'nothing'}`);
+        if (res) break;
+      }
     }
-    await until(empty, 30000);
+    const r = await waitFor(launchedEmpty(page), { timeout: STOP_WAIT });
+    trace(`${attr} round ${round + 1}: list ${r.ok ? 'empty' : 'still listed'} after ${(r.ms / 1000).toFixed(1)} s${r.ok ? '' : `: ${r.seen.replace(/\s+/g, ' ').slice(0, 300)}`}`);
+    if (r.ok) return;
   }
 };
-const until = async (fn, ms) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await fn().catch(() => false)) return true;
-    await wait(500);
-  }
-  return false;
+const skinOf = (page) => page.evaluate(() => document.body.dataset.skin);
+const goTo = async (page, to) => {
+  const cur = await skinOf(page);
+  if (cur !== to) await page.click(`#${cur} .switch[data-to="${to}"]`);
+  await expect.quiet(async () => ({ ok: (await skinOf(page)) === to, seen: `view ${await skinOf(page)}` }));
+};
+// Waits that aren't checks of their own (they decide what is checked next).
+expect.quiet = (probe, opts = {}) => waitFor(probe, { timeout: WAIT, ...opts });
+
+/** Start agent, Stop, + Hire, Pause: the checks that flaked on main (P-044). */
+const agentChecks = async (page) => {
+  await goTo(page, 'ops');
+  await page.selectOption('#o-arole', 'builder');
+  await page.click('#o-agentform button');
+  await expect('Start agent launches one, and it shows with its heartbeat', async () => {
+    const t = await text(page, '#o-launched');
+    return { ok: /builder-/.test(t) && /heartbeat/.test(t), seen: `${t} | message: ${await text(page, '#o-actmsg')}` };
+  });
+  // Stop every agent started from the page (the bug note above woke a builder too).
+  // Stopping kills the process tree, saves a patch and hands the task back: on Windows, or a busy CI box, that
+  // takes a few seconds (Gemini's run raced it). Each agent is stopped by name, once (2.41.0: clicking "the
+  // first" Stop every 3 s kept hitting an agent still stopping and never reached the second), then the page
+  // must say so, and keep saying so through a full refresh (2.5 s; the page refreshes every 2 s).
+  await stopEach(page, 'stopagent');
+  await expect('Stop ends it and hands its task back', launchedEmpty(page), { holdMs: 2500, more: agentsDiag });
+  // + Hire in an open room of the Studio view: an agent for that department, which Pause hands back.
+  await goTo(page, 'tycoon');
+  await page.locator('#tycoon [data-hire="engineering"]').first().click();
+  await goTo(page, 'ops');
+  await expect('+ Hire in an open room hires an agent for that department, with a Pause button', async () => {
+    const t = await text(page, '#o-launched');
+    return { ok: /builder-/.test(t) && (await page.locator('#o-launched [data-pauseagent]').count()) > 0, seen: `${t} | message: ${await text(page, '#o-actmsg')}` };
+  });
+  await stopEach(page, 'pauseagent');
+  await expect('Pause stops it and hands its task back', launchedEmpty(page), { holdMs: 2500, more: agentsDiag });
 };
 
 try {
-  for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
+  for (const [w, h, size] of only ? [] : [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
     for (const skin of ['ops', 'tycoon', 'plan', 'assets', 'arcade']) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h } });
       const page = await ctx.newPage();
@@ -203,13 +286,28 @@ try {
       page.on('console', (m) => m.type() === 'error' && !/fonts\.(googleapis|gstatic)/.test(m.text()) && errs.push(m.text()));
       page.on('pageerror', (e) => errs.push(String(e)));
       page.on('response', (r) => r.status() >= 400 && r.url().startsWith(BASE) && errs.push(`${r.status()} ${r.url()}`));
+      const loaded = Date.now();
       await page.goto(`${BASE}/?skin=${skin}`);
-      await wait(3500);
+      // Wait for the first refresh to draw this view (every view has the signals strip with the pace), then
+      // keep watching for errors until 3.5 s after the load: "no errors" can be watched for, not waited for.
+      const drawn = await expect.quiet(async () => {
+        const t = await text(page, `#${skin} [data-signals]`);
+        return { ok: /Pace/.test(t), seen: t };
+      });
+      if (Date.now() - loaded < 3500) await wait(3500 - (Date.now() - loaded));
       const wide = await page.evaluate((s) => [...document.querySelectorAll(`#${s} *`)].filter((e) => !e.closest('.ticker') && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > innerWidth + 1).slice(0, 3).map((e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ''}`), skin);
-      check(`${size} ${skin}: loads without errors`, errs.length === 0, errs.slice(0, 3).join(' | '));
+      check(`${size} ${skin}: loads without errors`, errs.length === 0 && drawn.ok, [drawn.ok ? '' : `the view never drew: ${drawn.message}`, ...errs.slice(0, 3)].filter(Boolean).join(' | '));
       check(`${size} ${skin}: nothing runs off the side`, wide.length === 0, wide.join(', '));
-      if (skin === 'ops') check(`${size} ops: the Director card shows the flow (starved, builders 0/3) and the red CI job (2.30h)`, await until(async () => { const t = await page.locator('#o-director').textContent(); return /starved/.test(t) && /builders 0\/3/.test(t) && /ci\/windows/.test(t); }, 4000));
-      if (skin === 'ops') check(`${size} ops: the Floors card shows the main phase and Floor 2 (2.30f)`, await until(async () => /Main Phase 1/.test(await page.locator('#o-floors').textContent()) && /Floor 2/.test(await page.locator('#o-floors').textContent()), 4000));
+      if (skin === 'ops') {
+        await expect(`${size} ops: the Director card shows the flow (starved, builders 0/3) and the red CI job (2.30h)`, async () => {
+          const t = await text(page, '#o-director');
+          return { ok: /starved/.test(t) && /builders 0\/3/.test(t) && /ci\/windows/.test(t), seen: t };
+        });
+        await expect(`${size} ops: the Floors card shows the main phase and Floor 2 (2.30f)`, async () => {
+          const t = await text(page, '#o-floors');
+          return { ok: /Main Phase 1/.test(t) && /Floor 2/.test(t), seen: t };
+        });
+      }
       if (shotsAt) {
         fs.mkdirSync(shotsAt, { recursive: true });
         await page.screenshot({ path: path.join(shotsAt, `${size}-${skin}.png`), fullPage: true });
@@ -224,194 +322,309 @@ try {
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e)));
+  // When each Game plan refresh (GET /api/bible) was asked for and that it finished: "after the next refresh".
+  const planLoads = [];
+  const asked = new WeakMap();
+  page.on('request', (r) => asked.set(r, Date.now()));
+  page.on('requestfinished', (r) => r.method() === 'GET' && new URL(r.url()).pathname === '/api/bible' && planLoads.push(asked.get(r) || 0));
   await page.goto(`${BASE}/?skin=ops&token=${token}`);
-  await wait(2500);
-  check('the token leaves the address bar', !page.url().includes('token='));
-  check('the Ops view lists the working agent', /balancer-1/.test(await page.locator('#o-agents').innerText()));
-  await page.locator('#o-agents').getByText('balancer-1').first().click();
-  await wait(1200);
-  check('clicking an agent opens its drawer on its task', (await page.locator('#drawer').getAttribute('aria-hidden')) === 'false' && /T-002/.test(await page.locator('#dr-body').innerText()));
-  await page.keyboard.press('Escape');
-  await wait(300);
-  check('Escape closes the drawer', (await page.locator('#drawer').getAttribute('aria-hidden')) === 'true');
-  await page.fill('#o-name', 'hatch');
-  await page.click('#o-save');
-  await page.fill('#o-title', 'Docs: write the visitors hand-off');
-  await page.click('#o-add button');
-  await wait(2500);
-  check('adding a task from the page queues it', /visitors hand-off/.test(read('studio/NEXT.md')) && /visitors hand-off|more in studio\/NEXT\.md/.test(await page.locator('#o-queue').innerText()), await page.locator('#o-actmsg').innerText());
-  await page.fill('#o-msg', 'Please check the balance sweep tonight');
-  await page.click('#o-inbox button');
-  await wait(1200);
-  check('a message reaches the Producer\'s inbox', /balance sweep tonight/.test(read('studio/producer/INBOX.md')));
-  await page.click('#o-stopbtn');
-  await wait(2500);
-  check('Stop all agents stops the studio and says so', fs.existsSync(path.join(dir, '.studio/STOP.json')) && (await page.locator('#o-stop').isVisible()) && /Resume/.test(await page.locator('#o-stopbtn').innerText()));
-  await page.click('#o-stopbtn');
-  await wait(2500);
-  check('Resume clears it', !fs.existsSync(path.join(dir, '.studio/STOP.json')) && !(await page.locator('#o-stop').isVisible()));
-  const qbox = await page.locator('#o-queue').evaluate((e) => ({ scrolls: getComputedStyle(e).overflowY === 'auto', shown: e.querySelectorAll('.task').length }));
-  check('the queue lists every open task and scrolls in its box', qbox.scrolls && qbox.shown >= 10, JSON.stringify(qbox));
-  sh('harness/event.mjs', '--type', 'task.progress', '--agent', 'balancer-1', '--task', 'T-002', '--msg', 'LIVE-CHECK 77');
-  await wait(3000);
-  check('new events appear without reloading', /LIVE-CHECK 77/.test(await page.locator('#o-timeline').innerText()));
-  await page.click('#ops .switch[data-to="tycoon"]');
-  await wait(2000);
-  const office = await page.locator('#t-office').innerText();
-  check('the Studio view seats the Producer and the person in the Producer\'s office', /prod-1/.test(office) && /hatch/.test(office));
-  check('unmeasured numbers say so instead of showing 0, and Checks names a red check', /not tracked/.test(await page.locator('#t-tokens').innerText()) && !/Fans/.test(await page.locator('#tycoon .top').innerText()), await page.locator('#tycoon .top').innerText());
-  await page.click('#tycoon .switch[data-to="plan"]');
-  await wait(2500);
-  const plan = await page.locator('#plan').innerText();
-  check('the Game plan shows the signed Bible, the open phase and the idea', /Signed by hatch/.test(plan) && /Phase 1/.test(plan) && /I-001/.test(plan));
-  await page.fill('#p-ititle', 'Rainy day visitors');
-  await page.click('#p-idea button');
-  await wait(5500);
-  check('pitching an idea adds a card and says R&D has it', /Rainy day visitors/.test(await page.locator('#p-board').innerText()) && /Idea: shape I-002/.test(read('studio/NEXT.md')) && /No tool is set to start R&D/.test(await page.locator('#p-msg').innerText()), await page.locator('#p-msg').innerText());
-  const fu = page.locator('#p-fu input[data-key]');
-  if (await fu.count()) {
-    await fu.first().fill('Moss spreads slower in shade');
-    await page.click('#p-fu button');
-    await wait(1200);
-    check('answering a follow-up saves it to the Bible', /Moss spreads slower/.test(read('studio/bible/bible.json')));
-  } else check('follow-up questions are shown', false);
-  check('the sharing box starts ticked, and an automated visit is not recorded as the dev seeing it', (await page.isChecked('#p-share')) && !/"shown": true/.test(read('studio/data-consent.json') || ''), read('studio/data-consent.json') || '(no file)');
-  await page.click('#p-share');
-  await wait(1200);
-  check('unticking the box records a decline', /"how": "declined"/.test(read('studio/data-consent.json')));
-  await wait(5500);
-  check('the box stays unticked after the next refresh', !(await page.isChecked('#p-share')));
-  // The lever is on every view; pulling it turns MAX SPEED on for the whole studio.
-  await page.click('#plan [data-speed]');
-  await wait(2500);
-  const boost = JSON.parse(read('studio/mode.json') || '{}').boost;
-  check('the MAX SPEED lever turns boost on, and every view shows it', boost?.on === true && (await page.locator('[data-speed][aria-pressed="true"]').count()) === (await page.locator('.skin [data-speed]').count()));
-  await page.click('#plan [data-mode="fast"]');
-  await wait(2000);
-  check('choosing a pace in the Game plan records it', JSON.parse(read('studio/mode.json') || '{}').mode === 'fast' && /Fast and furious/.test(await page.locator('#p-modemsg').innerText()));
-  check('the studio\'s question shows with its default and deadline', /Which floor first\?/.test(await page.locator('#p-asks').innerText()) && /if you don't answer by/.test(await page.locator('#p-asks').innerText()));
-  await page.click('#p-asks [data-answer="Food court"]');
-  await wait(1500);
-  check('answering it with one click records the answer', /"answer": "Food court"/.test(read('studio/asks/A-001.json')));
-  check('the signals strip shows the pace on every view', (await page.locator('[data-signals] .sig.pace').count()) === (await page.locator('.skin [data-signals]').count()));
-  // The Liaison chat: the model reads a brief back; nothing moves until "Yes, send it".
-  await page.fill('#p-chatin', 'I want fireflies in the garden at night');
-  await page.click('#p-chat button');
-  await wait(2500);
-  check('the Liaison reads back what it understood, with a yes button', /Fireflies at dusk/.test(await page.locator('#p-chatlog').innerText()) && (await page.locator('#p-chatlog [data-brief="confirm"]').count()) === 1 && !/Fireflies/.test(read('studio/NEXT.md')), await page.locator('#p-chatlog').innerText());
-  await page.click('#p-chatlog [data-brief="confirm"]');
-  await wait(1500);
-  check('saying yes sends it to R&D and says what happens next', /Idea: shape I-\d+ Fireflies at dusk/.test(read('studio/NEXT.md')) && /sent on as I-/.test(await page.locator('#p-chatlog').innerText()), await page.locator('#p-chatlog').innerText());
-  check('the Game plan points to the Asset studio with what is waiting', /2 waiting for you/.test(await page.locator('#p-designs').innerText()), await page.locator('#p-designs').innerText());
-  // The Asset studio (view 4): designs by number and round, thumbs up, words for the next round, references.
-  await page.click('#plan .switch[data-to="assets"]');
-  await wait(2500);
-  const waiting = await page.locator('#a-waiting').innerText();
-  const imgOk = await page.locator('#a-waiting img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
-  check('the Asset studio shows each design by number and round, with its picture', /#1\s*Mossy pastel/.test(waiting) && /#2\s*Garden crate/.test(waiting) && /round 1/.test(waiting) && imgOk && /2 designs waiting in the Asset studio/.test(await page.locator('#assets [data-signals] .sig.you').getAttribute('title')), waiting + (await page.locator('#assets [data-signals]').innerText()));
-  await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('input[data-note]').fill('make it rounder, like a planter');
-  await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('[data-art="changes"]').click();
-  await wait(1500);
-  check('"Change this" gives the art department its next round with your words', /Art: round 2 of #2 Garden crate: make it rounder/.test(read('studio/NEXT.md')) && /round 2 of #2/.test(await page.locator('#a-msg').innerText()) && /Garden crate/.test(await page.locator('#a-works').innerText()), await page.locator('#a-msg').innerText());
-  await page.fill('#a-saytext', 'crate #2 needs a lid too');
-  await page.click('#a-say button');
-  await wait(1500);
-  check('typed feedback naming #2 joins its open round instead of a new task', (read('studio/NEXT.md').match(/of #2 Garden crate/g) || []).length === 1 && /added to its open round/.test(await page.locator('#a-msg').innerText()), await page.locator('#a-msg').innerText());
-  await page.locator('#a-waiting .acard', { hasText: 'Mossy pastel' }).locator('[data-art="approve"]').click();
-  await wait(1500);
-  check('a thumbs up on the style sheet makes it the art reference', /"artReference"/.test(read('studio/bible/bible.json')) && /art reference/.test(await page.locator('#a-msg').innerText()) && /Mossy pastel/.test(await page.locator('#a-approved').innerText()), await page.locator('#a-msg').innerText());
-  await page.setInputFiles('#a-reffile', path.join(dir, 'studio/art/concept.png'));
-  await page.fill('#a-reflabel', 'the moss colour I want');
-  await page.click('#a-ref button');
-  await wait(2000);
-  check('a labelled reference from the dev is listed for the art department', /the moss colour I want/.test(await page.locator('#a-refs').innerText()) && /the moss colour I want/.test(read('studio/art/references.json')), await page.locator('#a-refmsg').innerText());
-  // The Arcade (view 5): the last good build plays in the page; notes go out; the dungeon is read-only.
-  await page.click('#assets .switch[data-to="arcade"]');
-  await wait(3500);
-  const frameText = await page.frameLocator('#r-frame').locator('.hud').innerText().catch(() => '');
-  needsBuild('the Arcade plays the last build that passed the browser check', /\/play\/[^/]+\/web\/example-sim\/index\.html/.test(await page.locator('#r-frame').getAttribute('src')) && /Credits\s*\d+/.test(frameText) && /won at tick/.test(await page.locator('#r-build').innerText()), frameText + (await page.locator('#r-build').innerText()));
-  await page.locator('#r-dungeon').click({ position: { x: 20, y: 20 } });
-  await page.keyboard.press('ArrowRight');
-  await wait(400);
-  check('the dungeon shows a task when the hero walks into its room', /T-\d+/.test(await page.locator('#r-card').innerText()), await page.locator('#r-card').innerText());
-  await page.fill('#r-notetext', 'the end screen text overlaps the HUD');
-  await page.selectOption('#r-notekind', 'bug');
-  await page.click('#r-note button');
-  await wait(1500);
-  needsBuild('a note taken while playing becomes a bug task, saved with the build it was about', /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md')) && /the end screen text overlaps/.test(read('studio/playtest/NOTES.md')), await page.locator('#r-notemsg').innerText());
-  // "Is it fun?": a person's verdict on the build being played (what lets a phase close).
-  await page.click('#arcade [data-fun="yes"]');
-  await wait(800);
-  needsBuild('"Yes, it\'s fun" in the Arcade records a verdict on the build being played', /"fun": "yes"/.test(read('studio/playtest/verdicts.json')) && /"build": "/.test(read('studio/playtest/verdicts.json')) && /is fun/.test(await page.locator('#r-notemsg').innerText()), (await page.locator('#r-notemsg').innerText()) + read('studio/playtest/verdicts.json'));
-  await page.click('#arcade .switch[data-to="ops"]');
-  await wait(800);
-  await page.selectOption('#o-arole', 'builder');
-  await page.click('#o-agentform button');
-  await wait(4000);
-  check('Start agent launches one, and it shows with its heartbeat', /builder-/.test(await page.locator('#o-launched').innerText()) && /heartbeat/.test(await page.locator('#o-launched').innerText()), await page.locator('#o-actmsg').innerText());
-  // Stop every agent started from the page (the bug note above woke a builder too).
-  // Stopping kills the process tree, saves a patch and hands the task back: on Windows, or a busy CI box, that
-  // takes a few seconds (Gemini's run raced it). Each agent is stopped by name, once (2.41.0: clicking "the
-  // first" Stop every 3 s kept hitting an agent still stopping and never reached the second), then the page
-  // must say so.
-  await stopEach(page, 'stopagent');
-  check('Stop ends it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), `${await page.locator('#o-launched').innerText()}${agentsDiag()}`);
-  // + Hire in an open room of the Studio view: an agent for that department, which Pause hands back.
-  await page.click('#ops .switch[data-to="tycoon"]');
-  await wait(800);
-  await page.locator('#tycoon [data-hire="engineering"]').first().click();
-  await wait(4000);
-  await page.click('#tycoon .switch[data-to="ops"]');
-  await wait(1500);
-  const hired = await page.locator('#o-launched').innerText();
-  check('+ Hire in an open room hires an agent for that department, with a Pause button', /builder-/.test(hired) && (await page.locator('#o-launched [data-pauseagent]').count()) > 0, hired);
-  await stopEach(page, 'pauseagent');
-  check('Pause stops it and hands its task back', /No agents started from here yet/.test(await page.locator('#o-launched').innerText()), `${await page.locator('#o-launched').innerText()}${agentsDiag()}`);
-  // Throw it all away and restart: two warnings back to back; Cancel on the second changes nothing.
-  await page.click('#o-restart');
-  await wait(800);
-  const warn1 = await page.locator('#o-restartbox').innerText();
-  await page.click('#o-restartyes');
-  await wait(300);
-  const warn2 = await page.locator('#o-restartbox').innerText();
-  await page.click('#o-restartno');
-  await wait(300);
-  check('the restart button warns twice, and Cancel on the second warning changes nothing', /Throw away/.test(warn1) && /git tag/.test(warn1) && /Last warning/.test(warn2) && (await page.locator('#o-restartbox').isHidden()) && /Nothing changed/.test(await page.locator('#o-actmsg').innerText()) && fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).stdout || ''), warn1 + ' / ' + warn2);
-  // 2.30c: the breaker card with Unblock, the Producer's wake line and the overnight summary in Ops.
-  await page.click('#tycoon .switch[data-to="ops"]').catch(() => {});
-  await wait(1500);
-  const holdTxt = await page.locator('#o-holdlist').innerText();
-  const statusTxt = await page.locator('#o-status').innerText();
-  check('2.30c: a task the circuit breaker parked has a card with Unblock, and the status line says when the Producer starts and where the overnight summary is', Boolean(trip) && /circuit breaker/.test(holdTxt) && (await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).count()) === 1 && /Producer: /.test(statusTxt) && /overnight-\d{4}-\d{2}-\d{2}\.md/.test(statusTxt), `${holdTxt}\n${statusTxt}`);
-  await page.locator('#o-hold').scrollIntoViewIfNeeded().catch(() => {});
-  if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-breaker-card.png'), fullPage: false });
-  if (shotsAt) await page.locator('#o-status').screenshot({ path: path.join(shotsAt, '230c-status-line.png') }).catch(() => {});
-  await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).click().catch(() => {});
-  await until(async () => !/circuit breaker/.test(await page.locator('#o-holdlist').innerText()), 10000);
-  const holds = JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks || {};
-  check('2.30c: Unblock clears the breaker: the card goes and the task can start again', !/circuit breaker/.test(await page.locator('#o-holdlist').innerText()) && !holds[trip]?.parked, JSON.stringify(holds[trip] || null));
-  if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-after-unblock.png'), fullPage: false });
+  if (!only) {
+    await expect('the token leaves the address bar', () => ({ ok: !page.url().includes('token='), seen: page.url().replace(/token=[^&#]*/, 'token=(hidden)') }));
+    await expect('the Ops view lists the working agent', async () => {
+      const t = await text(page, '#o-agents');
+      return { ok: /balancer-1/.test(t), seen: t };
+    });
+    await page.locator('#o-agents').getByText('balancer-1').first().click();
+    await expect('clicking an agent opens its drawer on its task', async () => {
+      const hidden = await page.locator('#drawer').getAttribute('aria-hidden');
+      const body = await text(page, '#dr-body');
+      return { ok: hidden === 'false' && /T-002/.test(body), seen: `drawer aria-hidden=${hidden} | ${body}` };
+    });
+    await page.keyboard.press('Escape');
+    await expect('Escape closes the drawer', async () => {
+      const hidden = await page.locator('#drawer').getAttribute('aria-hidden');
+      return { ok: hidden === 'true', seen: `drawer aria-hidden=${hidden}` };
+    });
+    await page.fill('#o-name', 'hatch');
+    await page.click('#o-save');
+    await page.fill('#o-title', 'Docs: write the visitors hand-off');
+    await page.click('#o-add button');
+    await expect('adding a task from the page queues it', async () => {
+      const q = await text(page, '#o-queue');
+      const inNext = /visitors hand-off/.test(read('studio/NEXT.md'));
+      return { ok: inNext && /visitors hand-off|more in studio\/NEXT\.md/.test(q), seen: `in NEXT.md: ${inNext} | message: ${await text(page, '#o-actmsg')} | queue: ${q.slice(0, 400)}` };
+    });
+    await page.fill('#o-msg', 'Please check the balance sweep tonight');
+    await page.click('#o-inbox button');
+    await expect('a message reaches the Producer\'s inbox', () => ({ ok: /balance sweep tonight/.test(read('studio/producer/INBOX.md')), seen: `INBOX.md: ${read('studio/producer/INBOX.md').slice(-300)}` }));
+    const stopState = async () => {
+      const file = fs.existsSync(path.join(dir, '.studio/STOP.json'));
+      const banner = await page.locator('#o-stop').isVisible();
+      const btn = await text(page, '#o-stopbtn');
+      return { file, banner, btn, seen: `STOP.json ${file ? 'there' : 'absent'} | banner ${banner ? 'shown' : 'hidden'} | button "${btn}"` };
+    };
+    await page.click('#o-stopbtn');
+    await expect('Stop all agents stops the studio and says so', async () => {
+      const s = await stopState();
+      return { ok: s.file && s.banner && /Resume/.test(s.btn), seen: s.seen };
+    });
+    await page.click('#o-stopbtn');
+    await expect('Resume clears it', async () => {
+      const s = await stopState();
+      return { ok: !s.file && !s.banner, seen: s.seen };
+    });
+    await expect('the queue lists every open task and scrolls in its box', async () => {
+      const qbox = await page.locator('#o-queue').evaluate((e) => ({ scrolls: getComputedStyle(e).overflowY === 'auto', shown: e.querySelectorAll('.task').length }));
+      return { ok: qbox.scrolls && qbox.shown >= 10, seen: JSON.stringify(qbox) };
+    });
+    sh('harness/event.mjs', '--type', 'task.progress', '--agent', 'balancer-1', '--task', 'T-002', '--msg', 'LIVE-CHECK 77');
+    await expect('new events appear without reloading', async () => {
+      const t = await text(page, '#o-timeline');
+      return { ok: /LIVE-CHECK 77/.test(t), seen: t.slice(0, 400) };
+    });
+    await goTo(page, 'tycoon');
+    await expect('the Studio view seats the Producer and the person in the Producer\'s office', async () => {
+      const office = await text(page, '#t-office');
+      return { ok: /prod-1/.test(office) && /hatch/.test(office), seen: office };
+    });
+    await expect('unmeasured numbers say so instead of showing 0, and Checks names a red check', async () => {
+      const top = await text(page, '#tycoon .top');
+      return { ok: /not tracked/.test(await text(page, '#t-tokens')) && !/Fans/.test(top), seen: top };
+    });
+    await goTo(page, 'plan');
+    await expect('the Game plan shows the signed Bible, the open phase and the idea', async () => {
+      const plan = await text(page, '#plan');
+      return { ok: /Signed by hatch/.test(plan) && /Phase 1/.test(plan) && /I-001/.test(plan), seen: plan.slice(0, 600) };
+    });
+    await page.fill('#p-ititle', 'Rainy day visitors');
+    await page.click('#p-idea button');
+    await expect('pitching an idea adds a card and says R&D has it', async () => {
+      const msg = await text(page, '#p-msg');
+      const board = /Rainy day visitors/.test(await text(page, '#p-board'));
+      const inNext = /Idea: shape I-002/.test(read('studio/NEXT.md'));
+      return { ok: board && inNext && /No tool is set to start R&D/.test(msg), seen: `card on the board: ${board} | in NEXT.md: ${inNext} | message: ${msg}` };
+    });
+    const fu = page.locator('#p-fu input[data-key]');
+    const fuShown = await expect.quiet(async () => ({ ok: (await fu.count()) > 0, seen: await text(page, '#p-fu') }));
+    if (fuShown.ok) {
+      await fu.first().fill('Moss spreads slower in shade');
+      await page.click('#p-fu button');
+      await expect('answering a follow-up saves it to the Bible', () => ({ ok: /Moss spreads slower/.test(read('studio/bible/bible.json')), seen: `follow-ups in the Bible: ${JSON.stringify(JSON.parse(read('studio/bible/bible.json') || '{}').followups ?? '(none)').slice(0, 300)}` }));
+    } else check('follow-up questions are shown', false, fuShown.message);
+    await expect('the sharing box starts ticked, and an automated visit is not recorded as the dev seeing it', async () => {
+      const ticked = await page.isChecked('#p-share');
+      const file = read('studio/data-consent.json');
+      return { ok: ticked && !/"shown": true/.test(file || ''), seen: `ticked ${ticked} | ${file || '(no file)'}` };
+    });
+    await page.click('#p-share');
+    await expect('unticking the box records a decline', () => ({ ok: /"how": "declined"/.test(read('studio/data-consent.json')), seen: read('studio/data-consent.json') || '(no file)' }));
+    // Wait for a Game plan refresh asked for after the decline was saved, then the box must stay unticked
+    // (held 1 s, so that refresh has drawn).
+    const declinedAt = Date.now();
+    await expect('the box stays unticked after the next refresh', async () => {
+      const refreshed = planLoads.some((t) => t > declinedAt);
+      const ticked = await page.isChecked('#p-share');
+      return { ok: refreshed && !ticked, seen: `a refresh since the decline: ${refreshed} | ticked ${ticked} | ${await text(page, '#p-sharemsg')}` };
+    }, { timeout: waitBudget(20000), holdMs: 1000 });
+    // The lever is on every view; pulling it turns MAX SPEED on for the whole studio.
+    await page.click('#plan [data-speed]');
+    await expect('the MAX SPEED lever turns boost on, and every view shows it', async () => {
+      const boost = JSON.parse(read('studio/mode.json') || '{}').boost;
+      const on = await page.locator('[data-speed][aria-pressed="true"]').count();
+      const all = await page.locator('.skin [data-speed]').count();
+      return { ok: boost?.on === true && on === all, seen: `mode.json boost ${JSON.stringify(boost ?? null)} | levers pressed ${on} of ${all}` };
+    });
+    await page.click('#plan [data-mode="fast"]');
+    await expect('choosing a pace in the Game plan records it', async () => {
+      const mode = JSON.parse(read('studio/mode.json') || '{}').mode;
+      const msg = await text(page, '#p-modemsg');
+      return { ok: mode === 'fast' && /Fast and furious/.test(msg), seen: `mode.json mode ${mode} | message: ${msg}` };
+    });
+    await expect('the studio\'s question shows with its default and deadline', async () => {
+      const t = await text(page, '#p-asks');
+      return { ok: /Which floor first\?/.test(t) && /if you don't answer by/.test(t), seen: t };
+    });
+    await page.click('#p-asks [data-answer="Food court"]');
+    await expect('answering it with one click records the answer', () => ({ ok: /"answer": "Food court"/.test(read('studio/asks/A-001.json')), seen: read('studio/asks/A-001.json') || '(no file)' }));
+    await expect('the signals strip shows the pace on every view', async () => {
+      const pace = await page.locator('[data-signals] .sig.pace').count();
+      const strips = await page.locator('.skin [data-signals]').count();
+      return { ok: pace === strips, seen: `pace shown on ${pace} of ${strips} strips` };
+    });
+    // The Liaison chat: the model reads a brief back; nothing moves until "Yes, send it".
+    await page.fill('#p-chatin', 'I want fireflies in the garden at night');
+    await page.click('#p-chat button');
+    await expect('the Liaison reads back what it understood, with a yes button', async () => {
+      const log = await text(page, '#p-chatlog');
+      const yes = await page.locator('#p-chatlog [data-brief="confirm"]').count();
+      const sent = /Fireflies/.test(read('studio/NEXT.md'));
+      return { ok: /Fireflies at dusk/.test(log) && yes === 1 && !sent, seen: `yes buttons ${yes} | already in NEXT.md: ${sent} | ${log}` };
+    });
+    await page.click('#p-chatlog [data-brief="confirm"]');
+    await expect('saying yes sends it to R&D and says what happens next', async () => {
+      const log = await text(page, '#p-chatlog');
+      const inNext = /Idea: shape I-\d+ Fireflies at dusk/.test(read('studio/NEXT.md'));
+      return { ok: inNext && /sent on as I-/.test(log), seen: `in NEXT.md: ${inNext} | ${log}` };
+    });
+    await expect('the Game plan points to the Asset studio with what is waiting', async () => {
+      const t = await text(page, '#p-designs');
+      return { ok: /2 waiting for you/.test(t), seen: t };
+    });
+    // The Asset studio (view 4): designs by number and round, thumbs up, words for the next round, references.
+    await goTo(page, 'assets');
+    await expect('the Asset studio shows each design by number and round, with its picture', async () => {
+      const waiting = await text(page, '#a-waiting');
+      const imgOk = await page.locator('#a-waiting img').first().evaluate((i) => i.complete && i.naturalWidth > 0).catch(() => false);
+      const sig = (await page.locator('#assets [data-signals] .sig.you').getAttribute('title', { timeout: 1000 }).catch(() => null)) || '';
+      return { ok: /#1\s*Mossy pastel/.test(waiting) && /#2\s*Garden crate/.test(waiting) && /round 1/.test(waiting) && imgOk && /2 designs waiting in the Asset studio/.test(sig), seen: `picture loaded: ${imgOk} | signal: ${sig || '(none)'} | ${waiting}` };
+    });
+    await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('input[data-note]').fill('make it rounder, like a planter');
+    await page.locator('#a-waiting .acard', { hasText: 'Garden crate' }).locator('[data-art="changes"]').click();
+    await expect('"Change this" gives the art department its next round with your words', async () => {
+      const msg = await text(page, '#a-msg');
+      const inNext = /Art: round 2 of #2 Garden crate: make it rounder/.test(read('studio/NEXT.md'));
+      const works = await text(page, '#a-works');
+      return { ok: inNext && /round 2 of #2/.test(msg) && /Garden crate/.test(works), seen: `in NEXT.md: ${inNext} | message: ${msg} | in the works: ${works}` };
+    });
+    await page.fill('#a-saytext', 'crate #2 needs a lid too');
+    await page.click('#a-say button');
+    await expect('typed feedback naming #2 joins its open round instead of a new task', async () => {
+      const msg = await text(page, '#a-msg');
+      const rounds = (read('studio/NEXT.md').match(/of #2 Garden crate/g) || []).length;
+      return { ok: rounds === 1 && /added to its open round/.test(msg), seen: `tasks for #2 in NEXT.md: ${rounds} | message: ${msg}` };
+    });
+    await page.locator('#a-waiting .acard', { hasText: 'Mossy pastel' }).locator('[data-art="approve"]').click();
+    await expect('a thumbs up on the style sheet makes it the art reference', async () => {
+      const msg = await text(page, '#a-msg');
+      const inBible = /"artReference"/.test(read('studio/bible/bible.json'));
+      const approved = await text(page, '#a-approved');
+      return { ok: inBible && /art reference/.test(msg) && /Mossy pastel/.test(approved), seen: `in the Bible: ${inBible} | message: ${msg} | approved: ${approved}` };
+    });
+    await page.setInputFiles('#a-reffile', path.join(dir, 'studio/art/concept.png'));
+    await page.fill('#a-reflabel', 'the moss colour I want');
+    await page.click('#a-ref button');
+    await expect('a labelled reference from the dev is listed for the art department', async () => {
+      const refs = await text(page, '#a-refs');
+      const saved = /the moss colour I want/.test(read('studio/art/references.json'));
+      return { ok: /the moss colour I want/.test(refs) && saved, seen: `in references.json: ${saved} | message: ${await text(page, '#a-refmsg')} | listed: ${refs}` };
+    });
+    // The Arcade (view 5): the last good build plays in the page; notes go out; the dungeon is read-only.
+    await goTo(page, 'arcade');
+    await expectBuild('the Arcade plays the last build that passed the browser check', async () => {
+      const src = (await page.locator('#r-frame').getAttribute('src')) || '';
+      const hud = await page.frameLocator('#r-frame').locator('.hud').innerText({ timeout: 1000 }).catch(() => '');
+      const build = await text(page, '#r-build');
+      return { ok: /\/play\/[^/]+\/web\/example-sim\/index\.html/.test(src) && /Credits\s*\d+/.test(hud) && /won at tick/.test(build), seen: `frame ${src || '(none)'} | game HUD: ${hud || '(empty)'} | ${build}` };
+    });
+    await page.locator('#r-dungeon').click({ position: { x: 20, y: 20 } });
+    await page.keyboard.press('ArrowRight');
+    await expect('the dungeon shows a task when the hero walks into its room', async () => {
+      const card = await text(page, '#r-card');
+      return { ok: /T-\d+/.test(card), seen: card };
+    });
+    await page.fill('#r-notetext', 'the end screen text overlaps the HUD');
+    await page.selectOption('#r-notekind', 'bug');
+    await page.click('#r-note button');
+    await expectBuild('a note taken while playing becomes a bug task, saved with the build it was about', async () => {
+      const inNext = /Bug: the end screen text overlaps the HUD \(seen playing build /.test(read('studio/NEXT.md'));
+      const inNotes = /the end screen text overlaps/.test(read('studio/playtest/NOTES.md'));
+      return { ok: inNext && inNotes, seen: `in NEXT.md: ${inNext} | in NOTES.md: ${inNotes} | message: ${await text(page, '#r-notemsg')}` };
+    });
+    // "Is it fun?": a person's verdict on the build being played (what lets a phase close).
+    await page.click('#arcade [data-fun="yes"]');
+    await expectBuild('"Yes, it\'s fun" in the Arcade records a verdict on the build being played', async () => {
+      const v = read('studio/playtest/verdicts.json');
+      const msg = await text(page, '#r-notemsg');
+      return { ok: /"fun": "yes"/.test(v) && /"build": "/.test(v) && /is fun/.test(msg), seen: `message: ${msg} | verdicts.json: ${v || '(no file)'}` };
+    });
+  }
+
+  // The agent checks: once in a full run; --only stop-pause --repeat <n> runs just these, n times.
+  const rounds = [];
+  for (let i = 1; i <= repeat; i++) {
+    if (repeat > 1) console.log(`[hud] stop-pause round ${i} of ${repeat}`);
+    const before = failed;
+    const started = Date.now();
+    await agentChecks(page);
+    rounds.push({ ok: failed === before, s: (Date.now() - started) / 1000 });
+  }
+  if (only) {
+    const secs = rounds.map((r) => r.s).sort((a, b) => a - b);
+    const mid = secs[Math.floor((secs.length - 1) / 2)];
+    console.log(`[hud] ${only}: ${rounds.filter((r) => r.ok).length} of ${rounds.length} rounds passed; seconds per round min ${secs[0].toFixed(1)}, median ${mid.toFixed(1)}, max ${secs[secs.length - 1].toFixed(1)} (${rounds.map((r) => `${r.ok ? '' : 'FAIL '}${r.s.toFixed(1)}`).join(', ')})`);
+  }
+
+  if (!only) {
+    // Throw it all away and restart: two warnings back to back; Cancel on the second changes nothing.
+    await page.click('#o-restart');
+    const warn1 = await expect.quiet(async () => {
+      const t = await text(page, '#o-restartbox');
+      return { ok: /Throw away/.test(t) && /git tag/.test(t), seen: t };
+    });
+    await page.click('#o-restartyes');
+    const warn2 = await expect.quiet(async () => {
+      const t = await text(page, '#o-restartbox');
+      return { ok: /Last warning/.test(t), seen: t };
+    });
+    await page.click('#o-restartno');
+    const cancelled = await expect.quiet(async () => {
+      const hidden = await page.locator('#o-restartbox').isHidden();
+      const msg = await text(page, '#o-actmsg');
+      return { ok: hidden && /Nothing changed/.test(msg), seen: `box ${hidden ? 'hidden' : 'still shown'} | message: ${msg}` };
+    });
+    const kept = fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).stdout || '');
+    check('the restart button warns twice, and Cancel on the second warning changes nothing', warn1.ok && warn2.ok && cancelled.ok && kept, [warn1, warn2, cancelled].map((r) => (r.ok ? r.seen : r.message)).join(' / ') + (kept ? '' : ' / the game or the tags changed'));
+    // 2.30c: the breaker card with Unblock, the Producer's wake line and the overnight summary in Ops.
+    await goTo(page, 'ops');
+    await expect('2.30c: a task the circuit breaker parked has a card with Unblock, and the status line says when the Producer starts and where the overnight summary is', async () => {
+      const holdTxt = await text(page, '#o-holdlist');
+      const statusTxt = await text(page, '#o-status');
+      const button = trip ? await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).count() : 0;
+      return { ok: Boolean(trip) && /circuit breaker/.test(holdTxt) && button === 1 && /Producer: /.test(statusTxt) && /overnight-\d{4}-\d{2}-\d{2}\.md/.test(statusTxt), seen: `parked task ${trip || '(none)'} | Unblock buttons ${button} | ${holdTxt} | ${statusTxt}` };
+    });
+    await page.locator('#o-hold').scrollIntoViewIfNeeded().catch(() => {});
+    if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-breaker-card.png'), fullPage: false });
+    if (shotsAt) await page.locator('#o-status').screenshot({ path: path.join(shotsAt, '230c-status-line.png') }).catch(() => {});
+    await page.locator(`#o-holdlist [data-need="unblock"][data-task="${trip}"]`).click({ timeout: WAIT }).catch(() => {});
+    await expect('2.30c: Unblock clears the breaker: the card goes and the task can start again', async () => {
+      const holdTxt = await text(page, '#o-holdlist');
+      let hold = null;
+      try { hold = (JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks || {})[trip] || null; } catch {}
+      return { ok: !/circuit breaker/.test(holdTxt) && !hold?.parked, seen: `hold ${JSON.stringify(hold)} | ${holdTxt}` };
+    });
+    if (shotsAt) await page.screenshot({ path: path.join(shotsAt, '230c-ops-after-unblock.png'), fullPage: false });
+  }
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 
-  // 2.30e: the token ledger tiles, from the seeded sessions: 3k tokens for the one finished task, 1 of 2
-  // sessions ended with no task done, turns 12 / 40, and the free model flagged as estimated.
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await until(async () => (await page.locator('#o-ledger .tile').count()) === 4, 15000);
-  const tileText = async (id) => (await page.locator(`#o-ledger [data-tile="${id}"]`).innerText().catch(() => '')).replace(/\s+/g, ' ');
-  // The no-done share counts every session in this run's events (earlier steps start and pause agents), so compare with the ledger's own number.
-  const ledgerNoDone = (() => { try { return Math.round(JSON.parse(spawnSync(process.execPath, [path.join(dir, 'harness/ledger.mjs'), '--json'], { cwd: dir, encoding: 'utf8' }).stdout).noDonePct); } catch { return 'x'; } })();
-  const tiles = { task: await tileText('tokens-per-task'), nodone: await tileText('no-done'), turns: await tileText('turns'), budget: await tileText('budget'), note: await page.locator('#o-ledger .tiles-note').innerText().catch(() => '') };
-  check('the ledger tiles show tokens per finished task, no-done %, turns p50/p95 and the budget', /3k tokens per finished task/.test(tiles.task) && new RegExp(`^${ledgerNoDone}% sessions with no task done`).test(tiles.nodone.trim()) && /12 \/ 40 turns/.test(tiles.turns) && /(\d+%|cap off) daily budget used/.test(tiles.budget) && /nvidia-nim \(est\.\)/.test(tiles.note), JSON.stringify(tiles));
-  const taskModel = await page.locator('#o-ledger [data-tile="tokens-per-task"] [data-models]').innerText().catch(() => '');
-  check('every token count on the ledger tiles names its model (one model, or a mixed share)', /claude|mixed: /.test(taskModel) && /Models: /.test(tiles.note), JSON.stringify({ taskModel, note: tiles.note }));
-  const box = page.locator('#o-ledgerbox');
-  await box.scrollIntoViewIfNeeded();
-  if (shotsAt) fs.mkdirSync(shotsAt, { recursive: true }), await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-desktop.png') });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await wait(300);
-  const sideways = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
-  check('the ledger tiles wrap on a phone with no sideways scroll', !sideways && (await page.locator('#o-ledger .tile').count()) === 4, `scrollWidth past the screen: ${sideways}`);
-  if (shotsAt) await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-phone.png') });
+  if (!only) {
+    // 2.30e: the token ledger tiles, from the seeded sessions: 3k tokens for the one finished task, 1 of 2
+    // sessions ended with no task done, turns 12 / 40, and the free model flagged as estimated.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const tileText = async (id) => (await page.locator(`#o-ledger [data-tile="${id}"]`).innerText({ timeout: 1000 }).catch(() => '')).replace(/\s+/g, ' ');
+    // The no-done share counts every session in this run's events (earlier steps start and pause agents), so compare with the ledger's own number.
+    const ledgerNoDone = () => { try { return Math.round(JSON.parse(spawnSync(process.execPath, [path.join(dir, 'harness/ledger.mjs'), '--json'], { cwd: dir, encoding: 'utf8' }).stdout).noDonePct); } catch { return 'x'; } };
+    const tilesNow = async () => ({ count: await page.locator('#o-ledger .tile').count(), task: await tileText('tokens-per-task'), nodone: await tileText('no-done'), turns: await tileText('turns'), budget: await tileText('budget'), note: await page.locator('#o-ledger .tiles-note').innerText({ timeout: 1000 }).catch(() => '') });
+    await expect('the ledger tiles show tokens per finished task, no-done %, turns p50/p95 and the budget', async () => {
+      const tiles = await tilesNow();
+      const nd = ledgerNoDone();
+      return { ok: tiles.count === 4 && /3k tokens per finished task/.test(tiles.task) && new RegExp(`^${nd}% sessions with no task done`).test(tiles.nodone.trim()) && /12 \/ 40 turns/.test(tiles.turns) && /(\d+%|cap off) daily budget used/.test(tiles.budget) && /nvidia-nim \(est\.\)/.test(tiles.note), seen: `ledger says ${nd}% no-done | ${JSON.stringify(tiles)}` };
+    }, { interval: 1000, timeout: waitBudget(40000) }); // the HUB caches the ledger for 30 s (harness/hud.mjs): a session that ended since shows after that
+    await expect('every token count on the ledger tiles names its model (one model, or a mixed share)', async () => {
+      const taskModel = await page.locator('#o-ledger [data-tile="tokens-per-task"] [data-models]').innerText({ timeout: 1000 }).catch(() => '');
+      const note = await page.locator('#o-ledger .tiles-note').innerText({ timeout: 1000 }).catch(() => '');
+      return { ok: /claude|mixed: /.test(taskModel) && /Models: /.test(note), seen: JSON.stringify({ taskModel, note }) };
+    });
+    const box = page.locator('#o-ledgerbox');
+    await box.scrollIntoViewIfNeeded();
+    if (shotsAt) fs.mkdirSync(shotsAt, { recursive: true }), await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect('the ledger tiles wrap on a phone with no sideways scroll', async () => {
+      const sideways = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+      const n = await page.locator('#o-ledger .tile').count();
+      return { ok: !sideways && n === 4, seen: `scrollWidth past the screen: ${sideways} | tiles ${n}` };
+    });
+    if (shotsAt) await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-phone.png') });
+  }
 } finally {
   await browser.close();
   hub.kill();
@@ -419,5 +632,5 @@ try {
   await wait(300);
   fs.rmSync(dir, { recursive: true, force: true });
 }
-console.log(failed ? `[hud] ${failed} of ${total} checks failed` : `[hud] ok: ${total} checks across the Ops, Studio and Game plan views${skipped ? ` (${skipped} skipped: no playable build)` : ''}`);
+console.log(failed ? `[hud] ${failed} of ${total} checks failed` : `[hud] ok: ${total} checks${only ? ` (--only ${only}${repeat > 1 ? `, ${repeat} rounds` : ''})` : ' across the Ops, Studio and Game plan views'}${skipped ? ` (${skipped} skipped: no playable build)` : ''}`);
 process.exit(failed ? 1 : 0);

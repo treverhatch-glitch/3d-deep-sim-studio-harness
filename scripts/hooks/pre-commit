@@ -41,4 +41,7 @@ if git diff --cached --name-only | grep -qE '^(cartridges|src/sim)/'; then
   node scripts/check-sim-purity.mjs >/dev/null || { echo "[pre-commit] FAIL sim purity: run node scripts/check-sim-purity.mjs"; exit 1; }
   node qa/check-golden.mjs >/dev/null || { echo "[pre-commit] FAIL golden hashes changed: if intended, npm run golden -- --update and commit them together"; exit 1; }
 fi
+# 2.58.2 (PU-29): record the exact tree these checks passed on; commit-msg stamps the commit (Studio-Hooks) only for
+# that tree, so the hooks gate can tell a commit made with --no-verify afterwards (harness/hook-stamp.mjs).
+git write-tree > "$(git rev-parse --git-path studio-hooks-pass)" 2>/dev/null || true
 echo "[pre-commit] PASS"
