@@ -73,6 +73,12 @@ first (2.58.3); any other uncommitted change still refuses.
 related to the change (an adopted Vitest or Jest game's test check declares `related`), and the whole suite
 runs after landing.
 
+**Faster red merge trains (2.65.3).** When a merge train is red, its re-checks run only the failing test files.
+A test check may declare `"focus": "<command with {files}>"` (for example `"cd game/x && npx vitest run {files}"`);
+`{files}` are the failing files as the runner printed them, quoted, with forward slashes. Without `focus`, a command
+whose last step clearly runs vitest, jest or `node --test` gets the files appended; any other command (`npm test`)
+re-runs whole, and the train's log says why. The manifest is protected: adding `focus` is the owner's change.
+
 **Real key presses on the real game (2.45.0).** An adopted web game isn't a cartridge, so `npm run play:browser`
 can't drive it. `npm run play:controls` can: it serves the game, clicks from the title screen to play, presses
 every control in the Game Bible and checks what each must change. Adopting a Vite (or Next, or `npm run dev`)

@@ -28,6 +28,11 @@
  * run recorded yet that times out gets self-triage's one re-run at the cap too; that re-run's pass is its lastPass
  * (heavy.mjs recordGatePass) and, at load factor 1 only, its quiet run.
  *
+ * 2.65.3 (B-43): a merge train's re-check passes STUDIO_GATE_FOCUS ({ "<check>": [test files] }, honoured only in a
+ * run-gates --only run): a failing check runs on those files only (its manifest "focus" command with {files}, else the
+ * files appended to a command that clearly runs vitest, jest or node --test; else the whole check, saying why), checks
+ * not in the map are skipped, and a failing check's test files are printed ("failing test files in <check>: [...]").
+ *
  * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
  * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
@@ -44,6 +49,7 @@ import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './m
 import { normMode } from './det-math.mjs';
 import { scaledTimeout, recordGateTime, recordGatePass } from './heavy.mjs';
 import { timeoutRerun } from './self-triage.mjs';
+import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -67,7 +73,7 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}) }));
+    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}) }));
     // 2.58.2 (PU-22): a manifest with "detMath" (warn or required) gets the deterministic-math check on its sim
     // paths; the cartridge purity gate is skipped for such a game, so this is where it runs. Required fails.
     if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
@@ -329,14 +335,38 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       }
       return res;
     });
+    // 2.65.3 (B-43): a merge train's re-check (STUDIO_GATE_FOCUS, passed on by run-gates only in an --only run) runs a
+    // failing check on its failing test files only (harness/train-focus.mjs); the checks that passed in the verify are
+    // skipped. Never in a verify: run-gates drops the variable from any other run.
+    const focusMap = readFocus();
     for (const g of gates) {
       cmdLabel = g.id;
+      if (focusMap && !(g.id in focusMap)) { skipped.push({ id: g.id, why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' }); continue; }
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
       const related = Boolean(g.related && relatedOn && codeOnly && existing.length);
-      const cmd = related ? g.related.replace('{files}', existing.map(q).join(' ')) : g.command;
-      curRelated = related;
+      let focused = null;
+      if (focusMap && !related) {
+        const fc = focusCommand(g, focusMap[g.id]);
+        if (fc.cmd) { focused = { cmd: fc.cmd, files: focusMap[g.id], how: fc.how }; log(`[game-gates] ${g.id}: focused re-check of ${focusMap[g.id].length} failing test file(s) (${fc.how}): ${focusMap[g.id].slice(0, 6).join(', ')}${focusMap[g.id].length > 6 ? ' ...' : ''}`); }
+        else log(`[game-gates] ${g.id}: the whole check runs, not a focused re-check: ${fc.why}`);
+      }
+      const cmd = related ? g.related.replace('{files}', existing.map(q).join(' ')) : focused ? focused.cmd : g.command;
+      curRelated = related || Boolean(focused);
       if (related) log(`[game-gates] ${g.id}: only the tests related to the ${existing.length} changed file(s) (the whole suite runs in the whole-game check after landing)`);
       let r = runOnce(cmd);
+      // A focused run that fails without naming a failing test (it couldn't start, a bad path), or passes having run
+      // nothing, says nothing about the question: the whole check runs instead.
+      if (focused) {
+        const text = `${r.stdout || ''}${r.stderr || ''}`;
+        const named = r.status !== 0 && (failingTestFiles(text).length || (await import('./baseline.mjs')).failingTests(text).length);
+        const why = r.status !== 0 && !named ? `exited ${r.status ?? r.signal ?? '?'} without naming a failing test` : r.status === 0 && judgePass(g.id, { output: text, env: { ...process.env, STUDIO_SILENT_GREEN: 'warn' } }).note ? 'passed having run no test' : '';
+        if (why) {
+          log(`[game-gates] ${g.id}: the focused run ${why}; running the whole check instead`);
+          focused = { ...focused, fellBack: why };
+          curRelated = false;
+          r = runOnce(g.command);
+        }
+      }
       const timedOut = (x) => x.error?.code === 'ETIMEDOUT' || (x.status === null && x.signal);
       const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last ${timing.floor.from === 'last pass' ? 'passing' : 'quiet'} run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
       if (timedOut(r)) r.stderr = `${r.stderr || ''}${timeoutLine()}`;
@@ -373,7 +403,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
       // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
+      const failFiles = r.status === 0 ? [] : failingTestFiles(`${r.stdout || ''}${r.stderr || ''}`);
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
@@ -392,6 +423,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
   for (const r of rows) {
     log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
     if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
+    // 2.65.3 (B-43): the failing test files, for a red merge train's focused re-checks (harness/train-focus.mjs).
+    if (!r.ok && r.failingFiles?.length) log(`[game-gates] failing test files in ${r.id}: ${JSON.stringify(r.failingFiles)}`);
   }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);
