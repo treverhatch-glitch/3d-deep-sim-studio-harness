@@ -19,6 +19,9 @@
  *   seed-special-case   a condition on a literal seed (`if (seed === 7)`, `[7, 9].includes(seed)`, `switch (seed)`), or
  *                       on a literal tick/frame/step that returns, continues, breaks or skips
  *   test-deleted        a test file deleted (a rename is not a delete)
+ *   contract-*          2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) changed
+ *                       beyond `passes`, agreed or extended by a worker, or a manual criterion passed without a
+ *                       reviewer's or a person's signature; enforced with or without an owner key
  *   golden-edited       a golden or snapshot file (golden/, goldens/, __snapshots__/, *.snap, *.golden.*) changed or
  *                       deleted by a commit without a Golden-Reason trailer (a new snapshot is fine)
  *
@@ -235,7 +238,10 @@ export async function findWeakenings({ env = process.env } = {}) {
   const wanted = [...new Set(files.filter(Boolean))].filter((f) => isTestPath(f) || isTestConfig(f));
   let parsed = [];
   for (const part of chunks(wanted, 100)) parsed = parsed.concat(parseDiff(git(['diff', '-U0', '-M', '--no-color', '--no-ext-diff', '--no-textconv', b.base, '--', ...part.map((f) => `:(literal)${f}`)]).stdout));
-  const findings = [...weakeningsInDiff(parsed), ...goldenWithoutReason(`${b.base}..HEAD`)];
+  // 2.62.0 (H): the contract rule beside the test rules: an agreed acceptance contract (studio/contracts/*.json) may
+  // change only its `passes`; agreements, amendments, criteria in force and manual passes come from the right role.
+  const { contractFindings } = await import('./contracts.mjs');
+  const findings = [...weakeningsInDiff(parsed), ...goldenWithoutReason(`${b.base}..HEAD`), ...contractFindings({ base: b.base, root: ROOT, git, env })];
   return { base: b, findings };
 }
 
@@ -257,10 +263,15 @@ export async function checkWeakening({ env = process.env } = {}) {
     approved = findings.filter((x) => ok.has(x.id));
     open = findings.filter((x) => !ok.has(x.id));
   }
+  // 2.62.0 (H): a changed agreed contract fails with or without an owner key: putting it back needs nobody's approval,
+  // and the agreeing roles change a contract by agreeing it again (harness/contracts.mjs).
+  const contract = open.filter((x) => String(x.kind).startsWith('contract-'));
+  const tests = open.filter((x) => !String(x.kind).startsWith('contract-'));
   const why = open.length
-    ? `${open.length} weakened test(s) since ${b.ref} without the owner's approval${enforced ? '' : `; a warning only: ${b.ref} has no owner key (${OWNER_PUB_REL}), so nobody can approve them yet (STUDIO_WEAKENED_TESTS=on enforces); ${OWNER_KEY_HOWTO}`}`
+    ? [tests.length ? `${tests.length} weakened test(s) since ${b.ref} without the owner's approval${enforced ? '' : `; a warning only: ${b.ref} has no owner key (${OWNER_PUB_REL}), so nobody can approve them yet (STUDIO_WEAKENED_TESTS=on enforces); ${OWNER_KEY_HOWTO}`}` : '',
+      contract.length ? `${contract.length} change(s) to an agreed acceptance contract since ${b.ref} that only passes may make (enforced with or without an owner key)` : ''].filter(Boolean).join('; ')
     : `no weakened test since ${b.ref}${approved.length ? ` (${approved.length} change(s) approved by the owner)` : ''}`;
-  return { ok: !open.length || !enforced, enforced, base: b.ref, baseSha: b.base, findings: open, approved, why };
+  return { ok: !contract.length && (!tests.length || !enforced), enforced, base: b.ref, baseSha: b.base, findings: open, approved, why };
 }
 
 export const formatFinding = (x) => `  ${x.file}:${x.line}  ${x.kind}  ${x.text}${x.detail ? `  (${x.detail})` : ''}`;
@@ -277,6 +288,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (!r.ok) {
     console.error(`[tests] FAIL ${r.why}:`);
     console.error(r.findings.map(formatFinding).join('\n'));
+    if (r.findings.some((x) => String(x.kind).startsWith('contract-'))) console.error('[tests] A contract finding: put studio/contracts/<ID>.json back as it was agreed (only passes changes; npm run task -- contract <ID> check sets it). A worker proposes a criterion (contract <ID> add) and hands the task back; the Producer, the Director or the owner changes a contract by agreeing it again (contract <ID> agree --by <name> --why "…").');
     console.error('[tests] Put the test back as it was (or make the code pass it). A change the owner wants (an obsolete test, a real tolerance): on the owner\'s machine, npm run approve -- tests --note "why", then commit the approval file. An agent hands the task back with a note instead of approving or working around it. A golden change: commit it with a Golden-Reason trailer.');
     process.exit(1);
   }

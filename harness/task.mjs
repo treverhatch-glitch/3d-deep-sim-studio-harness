@@ -1768,6 +1768,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   // 2.30d (#9): close or reopen a forced "done (pending)" task: a person, or a reviewer from another model family.
+  // 2.62.0 (H): per-task acceptance contracts (harness/contracts.mjs): show, add, agree, check, sign, remove.
+  if (cmd === 'contract') {
+    const { contractCommand, CONTRACT_USAGE } = await import('./contracts.mjs');
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    if (!t) {
+      console.error(`${arg1 ? `No task ${arg1} on the board. ` : ''}${CONTRACT_USAGE}`);
+      process.exit(1);
+    }
+    const r = contractCommand({ task: t, done: q.done.some((x) => x.id === t.id) && !q.inProgress.some((x) => x.id === t.id), sub: flags._[2], args: flags._.slice(3), flags });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+
   if (cmd === 'review' || cmd === 'pending') {
     const { closePending, listPending } = await import('./pending-review.mjs');
     if (cmd === 'pending' || !arg1) {

@@ -9,6 +9,9 @@
    each point. Start it with two lines, `model-family: <yours, e.g. anthropic>` and
    `implementer-family: <the builder's>`. They must differ; the reviewer gate checks every note.
 
+4. If the task has an acceptance contract (`npm run task -- contract <ID> show`), grade against each criterion
+   and sign the manual ones: `npm run task -- contract <ID> sign <CID> pass|fail --by <you>` (docs/CONTRACTS.md).
+
 **Done means.** A review note in `studio/reviews/`, written after the task started, that names the
 task ID or commit it reviews and gives a verdict (approve, LGTM, request changes, reject, blocking).
 
