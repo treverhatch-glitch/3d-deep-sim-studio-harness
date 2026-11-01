@@ -3791,6 +3791,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0 (#11, #2, #16): the machine:heavy lock, one full verify per checkout, the supervisor's RAM floor, a game
+// check's timeout scaled for load, and the Unity engine-track landing gate (qa/selftest-259d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259d.mjs')).href);
+  await selftest259D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
