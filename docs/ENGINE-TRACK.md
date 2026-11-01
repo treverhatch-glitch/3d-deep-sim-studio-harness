@@ -52,7 +52,9 @@ track can make them required.
 
 A Unity port in its own repo can also land through its own landing script: the Unity gate
 (`node harness/unity-gate.mjs`, run by `task done` for tasks on the Unity track) runs the command the studio
-configured, under the `machine:heavy` lock, and reads its exit code. See docs/UNITY-TRACK.md, "Landing Unity work".
+configured, under the `machine:heavy` lock, and reads its exit code. See docs/UNITY-TRACK.md, "Landing Unity work". Since 2.63.0 a Unity merge train lands several
+queued Unity branches on one land run (`task done <ID> --train`, `npm run task -- train --unity`); see "The Unity
+merge train" there.
 
 ## What stays shared, and what doesn't
 

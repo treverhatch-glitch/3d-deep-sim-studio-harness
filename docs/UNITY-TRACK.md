@@ -183,6 +183,53 @@ track's folder. It runs in `cwd` (relative to the studio), else the Unity track'
   event and a line in `studio/engine/LOG.md`.
 - It is not part of `npm run verify`: a verify checks, it never lands work.
 
+## The Unity merge train (2.63.0)
+
+When several porters finish together, landing each branch alone means one Unity build after another. The Unity
+train lands them on ONE run of the land command, one train at a time, always under `machine:heavy`:
+
+- `npm run task -- done <ID> --train [--branch <name>]` on a task added with `--track engine:unity` runs every check
+  `task done` runs before the Unity gate, then queues the task's Unity branch (`--branch`, else the Unity folder's
+  current branch) in `.studio/train/unity-queue.json`. The task stays in progress.
+- `npm run task -- train --unity [--max N] [--dry-run]` lands the queue, oldest first. `npm run task -- train status`
+  shows how many Unity branches wait and the Unity train running now (`node harness/unity-train.mjs status --json`).
+- Conflicts are found first from refs only (`git merge-tree`, no files touched): a branch that conflicts with the
+  target is handed back; one that conflicts only with a branch before it waits for the next train.
+- Pass: the target must then contain every branch (else nothing closes), and every task closes.
+- Red (1) or conflict (2): prefix bisection, like the web train. The land command runs again on the target + the
+  first half, and so on (about log2 N more runs). A green prefix run lands that prefix, since it's the land command,
+  so those tasks close. The first red prefix names the culprit, which is handed back with the run's last lines.
+- Refused (3) or error (4, other, a timeout): nobody is blamed and the branches stay queued. A refusal is tried
+  again (`STUDIO_UNITY_TRAIN_RETRIES`, 2, every `STUDIO_UNITY_TRAIN_RETRY_MIN`, 10 min). After that, run the train again later.
+- One Unity train at a time (`.studio/locks/unity-train.lock`; a dead holder's lock is taken over); every land run
+  takes `machine:heavy` as a landing, so a Unity build never overlaps a full verify or another Unity build.
+
+**The land-command contract for a train** (in `studio/game.json` `engines.unity`, protected: the owner sets it):
+
+```json
+{ "engines": { "unity": {
+  "land": "<land script> {branch}",
+  "landMany": "<land script> {branches}",
+  "target": "<the branch the land script lands on>",
+  "gateWorktree": "<the land script's own worktree>",
+  "cwd": "<folder>", "timeoutMin": 120
+} } }
+```
+
+- `target` is required for the train. The harness checks each branch against it and, after a pass, checks that it
+  contains them. `{target}` puts it on the command line.
+- A command that lands a list gets `{branches}`: the branch names in order, separated by spaces. Each one is
+  merged onto the target in that order, the gates run once on the result, the result is committed on green, and the
+  command exits 0/1/2/3/4 as before. Put it in `landMany`, or use `{branches}` in `land` itself.
+- A command that lands one `{branch}` only: the harness builds an integration branch, `unity-train/<id>` (the target
+  plus each branch in order, as merge commits made from refs and objects only), and hands that one name to the land
+  command. The harness never checks out, merges or resets anything in the Unity repo. Only the land script works in
+  its gate worktree; `gateWorktree` (else the Unity folder, else `cwd`) tells the harness where to read the repo's
+  refs. The integration branch is deleted after the run.
+- `{task}` is the train's task IDs, comma-separated. Branch and task names other than letters, digits, `.`, `_`, `/`
+  and `-` are refused before any command runs, because the command line goes through a shell.
+- The harness never runs Unity itself.
+
 ## Settings
 
 In `.env`:
