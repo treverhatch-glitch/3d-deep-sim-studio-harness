@@ -6,6 +6,8 @@
  *   npm run task -- park T-020 --by <name> --why "…"         parked: never starts until unparked
  *   npm run task -- unpark T-020 --by <name>
  *   npm run task -- lane T-020 game/next-floor/src/floors --by <name>   (or "none" to clear it)
+ *   npm run task -- hold T-020 --by <name> --why "…"         2.60.1 (B-39): held for landing (a conductor or integrator
+ *   npm run task -- unhold T-020 --by <name>                 parks the lane on purpose): no claim clock, no rescue
  *   npm run agent -- stop|pause <agent>                      the task can't restart for STUDIO_STOP_COOLDOWN_MIN (15)
  *
  * Run #1: QA started on an unmerged build, Director-parked tasks still started, and a stopped agent's
@@ -22,6 +24,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
+import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -98,6 +101,32 @@ export function parkOver(until, done, now = Date.now()) {
   return Number.isFinite(t) && t <= now;
 }
 
+/**
+ * 2.60.1 (B-39): a task whose lane is waiting to land on purpose: held (`task hold`, by a Producer, Director or an
+ * outside agent such as a merge conductor) or queued for the merge train (`task done --train`). Its claim clock doesn't
+ * run and no rescue is filed for it. Returns { via: 'hold'|'train', by, why, at } or null.
+ */
+export function heldForLanding(taskId, { holds = readHolds(), queue = null } = {}) {
+  const h = holds[taskId]?.held;
+  if (h) return { via: 'hold', by: h.by || 'someone', why: h.why || '', at: h.at || null };
+  let q = queue;
+  if (!q) { try { q = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'train', 'queue.json'), 'utf8')); } catch { q = []; } }
+  const e = Array.isArray(q) ? q.find((x) => x?.task === taskId) : null;
+  return e ? { via: 'train', by: e.agent || 'the merge train', why: `queued for the merge train${e.at ? ` since ${String(e.at).slice(0, 16)}` : ''}`, at: e.at || null } : null;
+}
+export const heldWords = (h) => (h.via === 'train' ? h.why : `held for landing by ${h.by}${h.why ? `: ${h.why}` : ''}`);
+
+/** Who may hold a lane: a person, a Producer or Director session, or an agent outside the harness; never a worker. */
+export function holdRefusal(by, env = process.env, { workerName = WORKER_NAME, deciders = DECIDER_ROLES } = {}) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (!String(by || '').trim()) return 'Say who holds it: --by <name>.';
+  if (role && !deciders.test(role)) return `Refused: a launched ${role} session can't hold a lane; a Producer or Director session, a person, or an agent outside the harness (a merge conductor) can.`;
+  const worker = [owner, String(by).trim()].find((n) => n && workerName.test(n));
+  if (worker) return `Refused: ${worker} is a worker agent; a Producer or Director session, a person, or an agent outside the harness (a merge conductor) holds lanes.`;
+  return null;
+}
+
 /** Why this task can't start now, or null. `q` is parseNextQueue(). */
 export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
@@ -108,9 +137,17 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
       if (tr.red) return `the game's trunk is red (${tr.why}); only fix tasks start until it is green (npm run task -- trunk green --by <name>)`;
     }
   }
+  // 2.60.1 (B-39): a rescue for a lane that is held or queued for the train would send a builder into mid-integration work.
+  const rt = q ? [...(q.backlog || []), ...(q.inProgress || [])].find((x) => x.id === taskId) : null;
+  const stuck = rt && !q.inProgress?.some((x) => x.id === taskId) ? (String(rt.title || '').match(/^Rescue:\s*(T-\d+)\b/) || [])[1] : null;
+  if (stuck) {
+    const hl = heldForLanding(stuck, { holds });
+    if (hl) return `a rescue for ${stuck}, which is ${heldWords(hl)}; it closes when ${stuck} lands`;
+  }
   const h = holds[taskId];
   if (!h) return null;
   const done = doneIds(q);
+  if (h.held && !q?.inProgress?.some((x) => x.id === taskId)) return `${heldWords({ via: 'hold', ...h.held })} (npm run task -- unhold ${taskId} --by <name>)`;
   if (h.needsYes) return `an agent-proposed mechanic; it starts when the dev says yes (npm run task -- yes ${taskId} --by <dev>)`;
   if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}`;
   const waiting = (h.after || []).filter((id) => !done.has(id));

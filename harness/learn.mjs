@@ -6,6 +6,7 @@
  *   npm run learn -- backup [--to <folder>] [--no-media]   back up every learning file (only what changed)
  *   npm run learn -- restore --from <folder> --to <empty folder> [--at <time>]
  *   npm run learn -- prune [--from <folder>] [--keep 30]   keep the newest 30 and the first of each month
+ *   npm run learn -- change add|list|eval …                change records (harness/changes.mjs, 2.61.0)
  *
  * A script: no model, no tokens. It joins the studio's memory into one page:
  *   - lessons from fixed bugs (studio/memory/failures.md) and the newest ones,
@@ -14,6 +15,9 @@
  *   - retro suggestions raised again and again without being handled,
  *   - the overseer's evaluations and the harness notes,
  *   - models by bugs per 10 points.
+ * 2.61.0, the learning edge: `npm run learn` (and the HUB's daily pass) also grades the change records that are due
+ * (harness/changes.mjs) and files one "Make the lesson a check" task per failure signature that repeated after its
+ * lesson (the ladder, studio/changes/ladder.json). `--no-cycle` only writes the page.
  *
  * Backups go to --to, or STUDIO_BACKUP_DIR (point it at a Google Drive, Dropbox or OneDrive folder
  * on your computer and the copy syncs off the machine). The HUB runs both once a day. Backups are
@@ -28,8 +32,11 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { readNotes } from './notes.mjs';
-import { buildScorecard, renderScorecard } from './scorecard.mjs';
+import { buildScorecard, renderScorecard, renderFollow } from './scorecard.mjs';
 import { RETRO_DIR } from './retro.mjs';
+import { signature, shape, signatureKey, signatureId, FAILURE_TYPES, readChanges, addChange, evaluateChanges, changeLine, readLadder, writeLadder } from './changes.mjs';
+import { parseNextQueue, addTask, HANDOFF_DIR } from './task.mjs';
+import { taskType } from './done-check.mjs';
 
 const read = (rel) => {
   try {
@@ -41,35 +48,39 @@ const read = (rel) => {
 const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'task', 'tasks', 'after', 'since', 'when', 'not', 'was', 'has', 'have', 'its', 'are', 'but', 'agent']);
 const keywords = (s) => [...new Set(String(s).toLowerCase().match(/[a-z][a-z-]{3,}/g) || [])].filter((w) => !STOP.has(w));
 
-/** A failure's shape without the parts that change every time (ids, numbers, hashes, names in quotes). */
-export function signature(msg) {
-  return String(msg || '')
-    .toLowerCase()
-    .replace(/\b[0-9a-f]{12,}\b/g, '#')
-    .replace(/\b(t|bug|reg|i|x)-[\w-]+/g, '#')
-    .replace(/\d+(\.\d+)?/g, '#')
-    .replace(/"[^"]*"|`[^`]*`/g, '"…"')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 140);
-}
+// 2.61.0: the signature helpers live in harness/changes.mjs (change records match the same shapes); re-exported here.
+export { signature };
 
 export function lessons() {
   const text = read('studio/memory/failures.md');
   return (text.split('## Recorded Distilled Notes')[1] || '')
     .split(/^### /m)
     .slice(1)
-    .map((l) => ({ heading: l.split('\n')[0].trim(), body: l, words: keywords(l) }));
+    .map((l) => ({ heading: l.split('\n')[0].trim(), body: l, words: keywords(l), at: (l.split('\n')[0].match(/\[(\d{4}-\d{2}-\d{2})\]/) || [])[1] || null, sigs: [...new Set((l.match(/\bsig-[0-9a-f]{8}\b/gi) || []).map((x) => x.toLowerCase()))], norm: shape(l) }));
+}
+
+/**
+ * The lesson for a failure shape. 2.61.0: exact first: a lesson that names the signature id (`sig-3fa9c2d1`, shown by
+ * `npm run learn`), then one that quotes the failure's normalized text; only then two or more shared keywords (as before).
+ */
+export function lessonFor(g, L = lessons()) {
+  const exact = L.find((l) => l.sigs.includes(g.id));
+  if (exact) return { lesson: exact, how: 'signature id' };
+  const sig = signature(g.sample);
+  const quoted = sig.length >= 20 ? L.find((l) => l.norm.includes(sig)) : null;
+  if (quoted) return { lesson: quoted, how: 'failure text' };
+  const w = keywords(g.sample);
+  const kw = L.map((l) => ({ l, hits: w.filter((x) => l.words.includes(x)).length })).filter((x) => x.hits >= 2).sort((a, b) => b.hits - a.hits)[0]?.l || null;
+  return kw ? { lesson: kw, how: 'keywords' } : { lesson: null, how: null };
 }
 
 /** The same failure on two or more days. */
 export function repeats(events = readRecentEvents(50000)) {
-  const KINDS = /^(closedloop\.(retry|escalate)|task\.not_done|task\.forced|task\.reopened|route\.exhausted|watch\.alert|task\.refused)$/;
   const groups = new Map();
   for (const e of events) {
-    if (!KINDS.test(e.type || '') || !e.msg) continue;
-    const sig = `${e.type}: ${signature(e.msg)}`;
-    const g = groups.get(sig) || { sig, type: e.type, sample: e.msg, days: new Set(), count: 0 };
+    if (!FAILURE_TYPES.test(e.type || '') || !e.msg) continue;
+    const sig = signatureKey(e);
+    const g = groups.get(sig) || { sig, id: signatureId(sig), type: e.type, sample: e.msg, days: new Set(), count: 0 };
     g.days.add(String(e.ts).slice(0, 10));
     g.count += 1;
     groups.set(sig, g);
@@ -78,11 +89,59 @@ export function repeats(events = readRecentEvents(50000)) {
   return [...groups.values()]
     .filter((g) => g.days.size >= 2)
     .map((g) => {
-      const w = keywords(g.sample);
-      const lesson = L.map((l) => ({ l, hits: w.filter((x) => l.words.includes(x)).length })).filter((x) => x.hits >= 2).sort((a, b) => b.hits - a.hits)[0]?.l || null;
-      return { type: g.type, sample: g.sample, days: [...g.days].sort(), count: g.count, lesson: lesson?.heading || null };
+      const { lesson, how } = lessonFor(g, L);
+      const days = [...g.days].sort();
+      // 2.61.0: it repeated after the lesson was written (a dated lesson: a day after its date; undated: two days at all).
+      const after = lesson ? (lesson.at ? days.filter((d) => d > lesson.at) : days) : [];
+      return { id: g.id, signature: g.sig, type: g.type, sample: g.sample, days, count: g.count, lesson: lesson?.heading || null, lessonAt: lesson?.at || null, matchedBy: how, afterLesson: after.length };
     })
     .sort((a, b) => b.days.length - a.days.length || b.count - a.count);
+}
+
+/**
+ * 2.61.0, the lesson → check ladder: a failure that keeps happening after its lesson exists gets one task, once per
+ * signature ever, to turn the lesson into a mechanical check (a test, a lint rule, a done-check item or a gate) proven
+ * by the fails-before / passes-after proof. The task asks; it never edits a gate itself (gates stay owner-approved).
+ */
+export function ladder({ rep = repeats(), by = 'learn' } = {}) {
+  const ledger = readLadder();
+  const filed = [];
+  for (const r of rep) {
+    if (!r.lesson || !(r.lessonAt ? r.afterLesson >= 1 : r.days.length >= 2) || ledger[r.id]) continue;
+    const title = `Make the lesson a check: ${r.signature}`.replace(/\s+/g, ' ').slice(0, 200);
+    const t = addTask({ title, role: 'builder', priority: 'P2', agent: by, meta: { infra: true, promoted: true, origin: 'learn', ladder: true, signature: r.id, lesson: r.lesson, size: 2 } });
+    if (!t?.id || t.error) {
+      emitEvent({ type: 'learn.ladder', agent: by, status: 'warn', msg: `Couldn't queue the check task for ${r.id}: ${t?.message || 'no id'}`, meta: { signature: r.id } });
+      continue;
+    }
+    try {
+      fs.mkdirSync(HANDOFF_DIR, { recursive: true });
+      fs.appendFileSync(path.join(HANDOFF_DIR, `${t.id}.md`), `\n## ${new Date().toISOString()} · ${by} (lesson → check)\nThe failure ${r.id} (${r.signature}) happened on ${r.days.length} days (last ${r.days.at(-1)}), ${r.afterLesson} of them after its lesson "${r.lesson}". The lesson didn't stick as prose.\nTurn it into a mechanical check: a test, a lint rule, a done-check item or a gate. Prove it: commit a regression that fails on the old failure and passes on today's main (the fails-before proof, qa/fails-before.mjs; a seeded test is "kind": "test", qa/regressions/README.md). A new or changed gate, protected file or done-check rule goes to the owner for approval: hand it back with a note, never sign or force it.\nThen record the change: npm run learn -- change add --kind rule --target <the check> --signature ${r.id} --expect "…" --risk "…" --revert "…"\n`);
+    } catch {
+      // the note is a help; the task stands
+    }
+    ledger[r.id] = { task: t.id, at: new Date().toISOString(), lesson: r.lesson, signature: r.signature };
+    writeLadder(ledger);
+    emitEvent({ type: 'learn.ladder', agent: by, task: t.id, to: 'producer', msg: `${t.id}: make the lesson "${r.lesson}" a check (${r.id} repeated after it)`, meta: { signature: r.id } });
+    filed.push({ signature: r.id, task: t.id });
+  }
+  return filed;
+}
+
+/** The board's type for a task id (the change records compare rates per type). */
+export function boardTypes(events = []) {
+  const q = parseNextQueue();
+  const byId = new Map([...q.inProgress, ...q.backlog, ...q.done].map((t) => [t.id, t]));
+  const added = new Map();
+  for (const e of events) if (e.type === 'task.added' && e.task && e.meta?.type) added.set(e.task, e.meta.type);
+  return (id) => (byId.get(id) ? taskType(byId.get(id)) : added.get(id) || 'unknown');
+}
+
+/** What `npm run learn` and the HUB's daily pass do besides writing LEARNED.md: grade due changes, climb the ladder. */
+export function learnCycle({ events = readRecentEvents(50000) } = {}) {
+  const changes = evaluateChanges({ events, typeOf: boardTypes(events) });
+  const filed = ladder({ rep: repeats(events) });
+  return { changes, ladder: filed };
 }
 
 /** Retro suggestions raised in two or more retros and never ticked off. */
@@ -110,7 +169,9 @@ export function buildLearned() {
   const stale = staleSuggestions();
   const notes = readNotes();
   const sc = buildScorecard();
-  return { at: new Date().toISOString(), lessons: L.length, newest: L.slice(-5).map((l) => l.heading).reverse(), repeats: rep, stale, evals: (notes.eval || []).slice(0, 5), notes: Object.fromEntries(Object.entries(notes).map(([k, v]) => [k, v.length])), scorecard: sc };
+  const changes = readChanges();
+  const ladderLog = readLadder();
+  return { at: new Date().toISOString(), changes, ladder: ladderLog, lessons: L.length, newest: L.slice(-5).map((l) => l.heading).reverse(), repeats: rep, stale, evals: (notes.eval || []).slice(0, 5), notes: Object.fromEntries(Object.entries(notes).map(([k, v]) => [k, v.length])), scorecard: sc };
 }
 
 export function writeLearned(l = buildLearned()) {
@@ -120,7 +181,10 @@ export function writeLearned(l = buildLearned()) {
     `> Written by \`npm run learn\` at ${l.at.slice(0, 16).replace('T', ' ')} UTC from the studio's own files. No model wrote this. The HUB rewrites it daily.`,
     '',
     '## Keeps happening',
-    ...(l.repeats.length ? l.repeats.slice(0, 10).map((r) => `- ${r.type} on ${r.days.length} days (${r.days.at(-1)} last, ${r.count} times): ${r.sample}${r.lesson ? `\n  - There is a lesson for this, and it didn't stick: "${r.lesson}". Make it a check, or put it earlier in the skill.` : '\n  - No lesson covers it yet. The next fix should write one.'}`) : ['- Nothing has repeated on two different days.']),
+    ...(l.repeats.length ? l.repeats.slice(0, 10).map((r) => `- ${r.type} on ${r.days.length} days (${r.days.at(-1)} last, ${r.count} times) [${r.id}]: ${r.sample}${r.lesson ? `\n  - There is a lesson for this (matched by ${r.matchedBy}), and it didn't stick: "${r.lesson}".${l.ladder?.[r.id] ? ` ${l.ladder[r.id].task} turns it into a check.` : ' Make it a check, or put it earlier in the skill.'}` : `\n  - No lesson covers it yet. The next fix should write one (name ${r.id} in it so it matches exactly).`}`) : ['- Nothing has repeated on two different days.']),
+    '',
+    '## Change records (studio/changes/)',
+    ...(l.changes?.length ? l.changes.slice(-15).map((c) => `- ${changeLine(c)}`) : ['- None yet. Record a harness, skill, pitfall or rule change with `npm run learn -- change add …` (docs/CLOSED-LOOP.md).']),
     '',
     '## Suggestions raised again and again',
     ...(l.stale.length ? l.stale.map((s) => `- Raised in ${s.retros.length} retros (${s.retros.join(', ')}), never handled: ${s.text}`) : ['- None.']),
@@ -137,6 +201,7 @@ export function writeLearned(l = buildLearned()) {
     '## Models',
     ...renderScorecard(l.scorecard).split('\n').map((x) => `    ${x}`),
     '',
+    ...(l.scorecard.follow?.length ? ['## Skills given, loaded and followed (per model)', ...renderFollow(l.scorecard.follow).split('\n').map((x) => `    ${x}`), ''] : []),
   ].join('\n');
   fs.mkdirSync(path.join(REPO_ROOT, 'studio', 'memory'), { recursive: true });
   fs.writeFileSync(path.join(REPO_ROOT, 'studio', 'memory', 'LEARNED.md'), out);
@@ -301,12 +366,18 @@ export function pruneBackups({ from = process.env.STUDIO_BACKUP_DIR, keep = 30 }
 export function learnIfDue() {
   const today = new Date().toISOString().slice(0, 10);
   if (readRecentEvents(5000).some((e) => e.type === 'learn.written' && String(e.ts).startsWith(today))) return null;
+  let cycle = null;
+  try {
+    cycle = learnCycle();
+  } catch {
+    // grading and the ladder are a help, never a blocker for the daily page
+  }
   const w = writeLearned();
   emitEvent({ type: 'learn.written', agent: 'watch', msg: 'Rewrote studio/memory/LEARNED.md' });
   const b = process.env.STUDIO_BACKUP_DIR ? backup() : null;
   // Daily backups for a year would be 365 small manifests; keep 60 plus one a month, and drop content nothing uses.
   if (b?.ok) pruneBackups({ keep: Number(process.env.STUDIO_BACKUP_KEEP || 60) });
-  return { file: w.file, backup: b?.dest || null };
+  return { file: w.file, backup: b?.dest || null, cycle };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -327,8 +398,32 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (argv[0] === 'backup') done(backup(flag('to'), { media: !argv.includes('--no-media') }), (r) => `Backed up ${r.files} files to ${r.dest}: ${r.added} changed (+${kb(r.addedBytes)}), whole backup ${kb(r.totalBytes)}. Open latest/STUDIO-MEMORY.md for everything in one file.`);
   if (argv[0] === 'restore') done(restore({ from: flag('from'), at: flag('at') || 'latest', to: flag('to') }), (r) => `Restored ${r.files} files from the backup at ${r.at} into ${r.to}`);
   if (argv[0] === 'prune') done(pruneBackups({ from: flag('from'), keep: Number(flag('keep') || 30) }), (r) => `Kept ${r.kept} backups (the newest and the first of each month), removed ${r.removed}, freed ${kb(r.freedBytes)}; backup is now ${kb(r.totalBytes)}.`);
+  if (argv[0] === 'change') {
+    const sub = argv[1] || 'list';
+    const all = (k) => argv.flatMap((a, i) => (a === `--${k}` && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
+    if (sub === 'add') {
+      const r = addChange({ kind: flag('kind'), target: flag('target'), signatures: all('signature'), expect: flag('expect'), risk: flag('risk'), revert: flag('revert'), commit: flag('commit') || null, title: flag('title') || null, by: flag('by') || undefined });
+      if (!r.ok) {
+        console.error(r.message);
+        process.exit(1);
+      }
+      console.log(argv.includes('--json') ? JSON.stringify(r.change, null, 2) : `Recorded ${r.change.id} in studio/changes/${r.change.id}.json (commit it with the change). npm run learn grades it after the next tasks.`);
+      process.exit(0);
+    }
+    if (sub === 'eval') {
+      const events = readRecentEvents(50000);
+      const res = evaluateChanges({ events, typeOf: boardTypes(events) });
+      console.log(argv.includes('--json') ? JSON.stringify(res, null, 2) : res.length ? res.map((x) => `${x.id}: ${x.verdict}${x.proposal ? ` (revert asked in ${x.proposal})` : ''}`).join('\n') : 'No change record is due.');
+      process.exit(0);
+    }
+    const cs = readChanges();
+    console.log(argv.includes('--json') ? JSON.stringify(cs, null, 2) : cs.length ? cs.map(changeLine).join('\n') : 'No change records yet.');
+    process.exit(0);
+  }
+  const cycle = argv.includes('--no-cycle') ? null : learnCycle();
   const l = buildLearned();
   const w = writeLearned(l);
+  if (cycle && !argv.includes('--json')) for (const x of [...cycle.changes.map((c) => `change ${c.id}: ${c.verdict}${c.proposal ? `, revert asked in ${c.proposal}` : ''}`), ...cycle.ladder.map((f) => `ladder: ${f.task} makes ${f.signature}'s lesson a check`)]) console.error(`[learn] ${x}`);
   if (argv.includes('--json')) console.log(JSON.stringify(l, null, 2));
   else console.log(w.text);
 }

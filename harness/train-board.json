@@ -1,0 +1,12 @@
+{
+  "note": "2.60.1 (B-29): board and record files a commit on the studio's branch may change while a merge train is verified without the train verifying again (harness/train.mjs boardOnlyMove). The train's copy never tests studio/ from its tree (studio/ is sparse-excluded there and linked to the main checkout's), so these paths can't change what its verify saw. Only these: anything else (studio/protected.json, studio/game.json, studio/gates.json, keys, approvals, any code, any golden) still means a new verify. A deleted or renamed path never counts. Repo-relative globs (** any depth, * one segment).",
+  "boardPaths": [
+    "studio/NEXT.md",
+    "studio/DONE.md",
+    "studio/task-types.json",
+    "studio/handoffs/**",
+    "studio/memory/**",
+    "studio/logs/**",
+    "studio/notes/**"
+  ]
+}

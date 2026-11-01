@@ -58,8 +58,38 @@ recorded in `studio/task-types.json` (who, why, when, from → to) and committed
 set it isn't an agent's (no `Studio-Agent` trailer). Once the studio has an owner key it must be signed on the owner's
 device (`studio/approvals/type-<ID>.json`); an unsigned record is then ignored. `task done`, `done-check` and verify
 print the type and its source. `none` can't be set this way: closing without a check is `npm run approve -- force`.
+
+**Visual proof (2.60.1).** A build task needs a passing visual result when it changes what the player sees. Once
+the task has commits, the evidence decides: the files it changed against the game's render paths (`"visualPaths"`
+globs in `studio/game.json`, else in the game's `studio.gates.json`; both protected). A render-looking title whose
+changes touch no render path needs no visual result (done-check says "no render files changed: …"); one that does
+still needs it; a title that doesn't look like render work but changes render files gets a warning ("a visual result
+is recommended", event `task.visual_recommended`), and needs the result only with `"visualStrict": true` or
+`STUDIO_VISUAL_STRICT=on`. No render paths configured, or no commits yet: the title decides, as before. Overrides for
+odd cases: an owner type that isn't render work (change, chore, docs, …) outranks the title, and the owner's
+`npm run task -- visual <ID> off|on --by <owner> --why "<reason>" [--permission "…"]` (`auto` goes back; recorded
+under `"visual"` in `studio/task-types.json` with the same rules as a reclassification, signed as
+`studio/approvals/visual-<ID>.json` once there is an owner key) decides first. done-check prints it ("visual proof:
+off, set by … on …'s permission"); `npm run task -- visual <ID>` shows the decision and why.
 A bug's regression is a cartridge replay or, where no cartridge covers the bug, a seeded game unit test
 (`"kind": "test"`, `qa/regressions/README.md`).
+
+**Evidence front matter (optional, 2.61.0).** A skill may start with the footprints its required steps leave in a
+session's log, so the scorecard can tell whether sessions follow it (`npm run scorecard`: skills given, loaded,
+followed, unknown, per model). Telemetry only: it never blocks or approves anything.
+
+```markdown
+---
+evidence:
+  - fails-before | check-regressions
+  - /npm run verify\b/
+---
+# Skill: bug
+```
+
+Each entry is one required step; ` | ` separates ways the log may show it; `/…/` is a regular expression, anything else
+a case-insensitive substring. A session "followed" the skill when its log shows every step. No `evidence:` list: the
+skill counts as "unknown". "Loaded" means the log opened the skill's file or the task brief that carries its steps.
 
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
 hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and

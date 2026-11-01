@@ -45,6 +45,14 @@ the proposed list. Four planners would mean four plans.
 5. "Needs you" items go to the owner once, as one message each, with the command that settles it.
 6. A bot that is asked something outside its role passes it to the bot that owns it, by mention.
 
+## Tying a message to a task (2.64.0)
+
+When the owner's message is about a running task, a bot links that message to the task:
+`npm run thread -- link discord:<message id> T-123 --by <bot-name>`. A follow-up goes into the task's inbox
+with `npm run thread -- post discord:<message id> "<text>" --source discord --by <bot-name>`, which the working
+session reads, instead of going to a new task. Workers never link or post. Until `discord` is live in
+`studio/triggers.json`, posts are only logged (shadow mode). See docs/THREADS.md.
+
 ## One machine, one studio
 
 The studio keeps its locks, board and state in one checkout. Every bot drives **the same private studio

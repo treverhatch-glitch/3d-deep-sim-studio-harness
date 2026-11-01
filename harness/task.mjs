@@ -12,14 +12,15 @@ import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from '
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
-import { summarize as summarizeVerdict } from './verdict-split.mjs';
+import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds } from './task-hold.mjs';
+import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
-import { applyRescue, rescueOf } from './rescue.mjs';
+import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
+import { laneConfigWarning } from './lane-studio.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
@@ -504,7 +505,7 @@ const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false } = {}) {
   // 2.59.0: trainCheck runs every check task done runs before the game's checks (board, done-check, the committed lane
   // copy, protected files, secrets, hooks, weakened tests) and stops there: nothing is closed or landed. The merge train
   // (harness/train.mjs) lands the lane after ONE full verify of main + the lanes, which stands for the game's checks and
@@ -529,6 +530,15 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+
+  // 2.60.1 (B-40): studio/ in a lane copy is main's: main's studio config changed while this task was worked and not
+  // committed there doesn't land with the lane. Said loudly, never a refusal.
+  if (inLaneCopy()) {
+    try {
+      const warn = laneConfigWarning(target.id, mainRoot(), startedAt(target.id));
+      if (warn) { console.warn(`[done] ${warn}`); if (!checkOnly) emitEvent({ type: 'lane.studio_config', agent: agent || target.role, task: target.id, to: 'producer', status: 'warn', msg: `${target.id}: ${warn}`.slice(0, 600) }); }
+    } catch { /* a note only */ }
+  }
 
   // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
   // (the agent judged the existing code good enough). Zero code changes since the task started are
@@ -563,6 +573,13 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (!force && process.env.STUDIO_VISUAL_GATE !== 'off') {
     const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track;
     const vs = summarizeVerdict(target.id, { ...target, track });
+    // 2.60.1 (B-38): why it is (not) a render task, and the evidence warning for a non-render title.
+    if (vs.renderBy === 'owner' || (vs.renderBy === 'evidence' && vs.renderWhy)) {
+      const line = vs.renderBy === 'owner' ? vs.renderWhy : `visual proof ${vs.render ? 'needed' : 'not needed'}: ${vs.renderWhy}`;
+      console.warn(`[done] ${line}`);
+      if (!checkOnly && !vs.render) emitEvent({ type: 'task.visual_skipped', agent: agent || target.role, task: target.id, msg: `${target.id}: ${line}`.slice(0, 400), meta: { by: vs.renderBy } });
+    }
+    if (vs.warn) { console.warn(`[done] WARN ${target.id} ${vs.warn}`); if (!checkOnly) emitEvent({ type: 'task.visual_recommended', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id} ${vs.warn}`.slice(0, 400) }); }
     if (!vs.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${vs.why.slice(0, 200)}` });
       return { error: 'visual', verdict: vs, message: `${target.id} is not done: ${vs.why}\nChecked: ${vs.passed.join(', ') || 'nothing'}; unchecked: ${vs.unchecked.join(', ') || 'none'}.` };
@@ -582,14 +599,22 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const TRAIN_VERIFIED = new Set([VERIFY_LABEL, 'The verify ran on the whole game (--all), not scoped to your files']);
   const blocking = check.checks?.length ? check.checks.filter((c) => !c.ok && !(checkOnly && c.label === VERIFY_LABEL) && !(trainCheck && TRAIN_VERIFIED.has(c.label))) : check.ok ? [] : [{ why: check.missing[0] }];
   if (!check.ok && !force && blocking.length) {
-    emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${check.missing[0]}` });
+    // 2.60.1 (B-33): name the check that blocks. check.missing[0] can be a row this run doesn't require (the verify, which
+    // the train's own verify covers under --train): T-059 was refused "full verify ran on another commit" while another
+    // check was what failed. Exempt rows are listed as covered, not as open.
+    const first = blocking[0];
+    const blocker = first.label ? `${first.label}: ${first.why}` : first.why;
+    const exempt = (c) => !c.ok && trainCheck && TRAIN_VERIFIED.has(c.label);
+    emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${blocker}`.slice(0, 600) });
     return {
       error: 'not-done',
       check,
+      blocking,
       message: [
+        `${target.id} is not done: ${blocker}`,
         `${target.id} is a "${check.type}" task (${check.typeSource}). Done means: ${check.means}.`,
         check.typeIgnored ? `  note: ${check.typeIgnored}` : '',
-        ...(check.checks?.length ? check.checks.map((c) => `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`) : check.missing.map((m) => `  missing: ${m}`)),
+        ...(check.checks?.length ? check.checks.map((c) => (exempt(c) ? `  (the train's verify covers this) ${c.label}` : `  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`)) : check.missing.map((m) => `  missing: ${m}`)),
         check.skill ? `How: ${check.skill}` : '',
         'To finish anyway: --force (logged, and the Producer gets a task to run the check).',
       ].filter(Boolean).join('\n'),
@@ -758,6 +783,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
+  // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.
+  if (unityTrainCheck) return force ? { error: 'train-force', message: 'A forced done never goes through the Unity train.' } : { unityReady: true, id: target.id, type: check.type };
   // 2.59.0 (#16): a task on the Unity track (task add --track engine:unity) lands through the studio's Unity gate
   // (harness/unity-gate.mjs: its configured land command, under the machine:heavy lock); it closes only on a pass.
   if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track === 'engine:unity') {
@@ -829,6 +857,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
   // 2.35.0: a finished rescue acts on its decision (retry unparks the stuck task, split keeps it parked, needs-person asks).
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
+  else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);
 
   if (!check.ok) {
@@ -878,12 +907,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
  * ran in the train's lane check (trainCheck) and the train's verify. Returns the task, null (not on the board) or
  * { error, message }.
  */
-export function closeTrainTask(taskId, agent, { train, head, laneHead, record = null, note = '' } = {}) {
+export function closeTrainTask(taskId, agent, { train, head, laneHead, record = null, note = '', repo = null, target: landTarget = null } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent) return { error: 'locked', message: `${taskId} is claimed by ${lock.lock.owner} now, not ${agent}` };
   const root = mainRoot();
-  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: root }).status === 0;
-  const mainTip = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  // 2.63.0: a Unity train's branch landed in the Unity repo (repo) on its target branch, not in the studio's branch.
+  const gitRoot = repo || root;
+  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: gitRoot }).status === 0;
+  const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   // The train's verify: clean and full, with no red required check but one already red when this task was claimed.
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
@@ -909,6 +940,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
+  else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);
   return target;
 }
@@ -917,7 +949,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
     close: (lane, ctx) => {
-      const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '' });
+      const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
@@ -1477,6 +1509,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(r.ok ? 0 : 1);
   }
 
+  // 2.60.1 (B-38): the owner's visual-proof decision for a task (harness/reclassify.mjs setVisual), recorded like task type.
+  if (cmd === 'visual') {
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    const to = flags._[2];
+    if (!t) {
+      console.error('Usage: npm run task -- visual <TASK_ID> [off|on|auto --by <owner> --why "<reason>" [--permission "<the owner\'s words or a link>"]] [--no-commit]');
+      process.exit(1);
+    }
+    if (!to) {
+      const d = renderDecision(t);
+      console.log(d.by === 'owner' ? `${t.id}: ${d.why}` : `${t.id}: visual proof ${d.render ? 'needed' : 'not needed'}${d.why ? ` (${d.why})` : ''}.${d.warn ? `\nWARN ${d.warn}` : ''}${d.ignored ? `\nnote: ${d.ignored}` : ''}`);
+      process.exit(0);
+    }
+    const { setVisual } = await import('./reclassify.mjs');
+    const r = setVisual({ task: t, to, by: typeof flags.by === 'string' ? flags.by : '', why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '', commit: !flags['no-commit'] });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+
   if (cmd === 'start') {
     const targetId = arg1 || q.backlog[0]?.id;
     if (!targetId) {
@@ -1538,7 +1589,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--train] [--note "..."] [--force --reason "<10+ chars>"]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--train [--branch <Unity branch>]] [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
     // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
@@ -1579,6 +1630,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.59.0: --train: check the lane now and queue it for the next merge train (npm run task -- train lands it).
     if (flags.train) {
       if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
+      // 2.63.0: a Unity-track task queues its Unity branch for the Unity merge train (harness/unity-train.mjs).
+      if (process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && (await import('./unity-gate.mjs')).taskTrack(targetId) === 'engine:unity') {
+        const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
+        if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
+        if (pre.error) { console.error(pre.message); process.exit(1); }
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { task: pre.id, agent: whoAmI(flags), branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
+        (r.ok ? console.log : console.error)(r.message);
+        process.exit(r.ok ? 0 : 1);
+      }
       const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       if (pre.error) { console.error(pre.message); process.exit(1); }
@@ -1586,6 +1646,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '' });
       emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
       console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
+      // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
+      try {
+        const tr = await import('./train.mjs');
+        const c = await tr.laneTier(mainRoot(), { head: pre.head });
+        console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
+        if (c.tier === 'C') {
+          tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
+          emitEvent({ type: 'task.train.held', agent: whoAmI(flags), task: pre.id, to: 'producer', status: 'blocked', msg: `${pre.id} needs the owner (tier C): ${c.why.join('; ')}`.slice(0, 600), meta: { tier: 'C', why: c.why } });
+          console.log(`${pre.id} needs the owner: tier C never lands by itself. It waits in the queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); you can stop here (task pause ${pre.id} --note "…").`);
+        }
+        if (c.needs.goldenReason.length) console.log(`${pre.id}: note: it moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer: the train hands it back unless a commit says why.`);
+        if (c.needs.pinMoves.length) console.log(`${pre.id}: note: it changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer: the train hands it back unless a commit declares them.`);
+      } catch (err) { console.warn(`[task done] note: could not work out the lane's tier (${err.message}); the train will`); }
       (await import('./hotspots.mjs')).warnAt('train-queue', { task: pre.id, agent: whoAmI(flags) }); // 2.60.0: lines another lane changes too
       process.exit(0);
     }
@@ -1604,15 +1677,40 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       let laneBranch = '';
       try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
       const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
+      // 2.63.0: a tier C lane (harness code, protected files, deleted tests or regressions, irreversible files, upgrade
+      // merges) lands only through the merge train after a person releases it. STUDIO_TRAIN=off, --force and
+      // --accepted-by take the old path, which has no tiers, so they can't carry a tier C lane past that hold.
+      if (!viaTrain && inLaneCopy() && laneBranch && unmerged(laneBranch) > 0) {
+        const { laneTier } = await import('./train.mjs');
+        const { tierLine } = await import('./tiers.mjs');
+        let tier = null;
+        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
+        if (tier?.tier === 'C') {
+          emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: tier C lands only through the merge train after a person releases it` });
+          done = { error: 'tier-c', message: `${targetId} is not done: this lane is ${tierLine(tier)}. A tier C lane lands only through the merge train once a person releases it: npm run task -- done ${targetId} --train, then npm run task -- train release ${targetId} --by <person> [--permission "<their words or a link>"]. STUDIO_TRAIN=off, --force and --accepted-by don't skip that.` };
+        }
+      }
+      if (done) { /* refused above */ } else
       if (viaTrain) {
         const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
         if (!pre || pre.error) done = pre;
         else {
           const { runTrain } = await import('./train.mjs');
-          const r = await runTrain({ root: mainRoot(), lanes: [{ task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, prechecked: true, note: typeof flags.note === 'string' ? flags.note : '' }], oneLane: true, by: whoAmI(flags) || 'task-done', waitMs: Number(process.env.STUDIO_TRAIN_WAIT_MIN ?? 120) * 60000, deps: trainDeps(busyMod, { forDone: true }) });
-          if (r.landed.includes(pre.id) && !r.unclosed?.length) done = r.closed?.[0] || { id: pre.id, status: 'done' };
-          else {
-            const why = r.unclosed?.[0]?.why || r.dropped[0]?.why || r.deferred[0]?.why || (r.landed.includes(pre.id) ? 'it landed but stays open: its copy gained commits after the check (they land with the next task done)' : r.message);
+          // 2.63.0: it rides along with lanes already queued for the next train (one verify for all); only this lane's
+          // result is the caller's. How long it waits for a running train: STUDIO_TRAIN_LOCK_WAIT_MIN (before 2.63.0
+          // STUDIO_TRAIN_WAIT_MIN, still read when the new one is unset), 120.
+          const lockWait = Number([process.env.STUDIO_TRAIN_LOCK_WAIT_MIN, process.env.STUDIO_TRAIN_WAIT_MIN].map((v) => String(v ?? '').trim()).find((v) => v !== '' && Number.isFinite(Number(v))) ?? 120);
+          const r = await runTrain({ root: mainRoot(), lanes: [{ task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, prechecked: true, note: typeof flags.note === 'string' ? flags.note : '' }], oneLane: true, rideAlong: !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_TRAIN_RIDE_ALONG || '')), by: whoAmI(flags) || 'task-done', waitMs: lockWait * 60000, deps: trainDeps(busyMod, { forDone: true }) });
+          const others = r.landed.filter((t) => t !== pre.id);
+          if (others.length) console.error(`[task done] ${others.join(', ')} rode along in the same train (queued lanes) and landed too.`);
+          const mine = (list) => (list || []).find((x) => x.task === pre.id);
+          const unclosed = mine(r.unclosed);
+          if (r.landed.includes(pre.id) && !unclosed) done = (r.closed || []).find((t) => t?.id === pre.id) || { id: pre.id, status: 'done' };
+          else if (mine(r.held)) {
+            const h = mine(r.held);
+            done = { error: 'held', message: `${pre.id} is not done: it needs the owner (tier ${h.tier}: ${h.why}). It waits in the train queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); then the next train lands it. You can stop here: npm run task -- pause ${pre.id} --note "waits for the owner's release".` };
+          } else {
+            const why = unclosed?.why || mine(r.dropped)?.why || mine(r.deferred)?.why || (r.landed.includes(pre.id) ? 'it landed but stays open: its copy gained commits after the check (they land with the next task done)' : r.message);
             emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: pre.id, status: 'blocked', msg: `${pre.id} not done yet: ${String(why).split('\n')[0].slice(0, 300)}` });
             done = { error: 'not-delivered', message: `${pre.id} is not done: ${why}` };
           }
@@ -1639,17 +1737,36 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.59.0: the merge train (harness/train.mjs): land the queued lanes on one full verify.
   if (cmd === 'train') {
     const tr = await import('./train.mjs');
+    // 2.63.0: the Unity merge train (harness/unity-train.mjs): `train --unity` (or --track engine:unity).
+    if (flags.unity || flags.track === 'engine:unity') {
+      const ut = await import('./unity-train.mjs');
+      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot())); process.exit(0); }
+      const busyMod = await import('./busy.mjs');
+      const r = await ut.runUnityTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+      (r.ok ? console.log : console.error)(r.message);
+      console.log(JSON.stringify({ unityTrain: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+      process.exit(r.ok ? 0 : r.refused ? 3 : 1);
+    }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
-      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
       process.exit(0);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>] | train status'); process.exit(1); }
+    // 2.63.0: a person (or an agent with a person's direct permission; never a worker) releases a lane held for the owner.
+    if (arg1 === 'release') {
+      const tid = flags._[2];
+      if (!tid || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train release <TASK_ID> --by <the person> [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = tr.releaseLane(mainRoot(), tid, { by: flags.by, permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
-    const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+    const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
     (r.ok ? console.log : console.error)(r.message);
-    console.log(JSON.stringify({ train: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+    console.log(JSON.stringify({ train: r.id, ...(r.trains ? { trains: r.trains } : {}), landed: r.landed, dropped: r.dropped, deferred: r.deferred, ...(r.held?.length ? { held: r.held.map(({ fresh, ...h }) => h) } : {}), ...(r.tiers && Object.keys(r.tiers).length ? { tiers: r.tiers } : {}), verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
     process.exit(r.ok ? 0 : 1);
   }
 
@@ -1680,12 +1797,40 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`Game: ${g.name || 'none'} (from ${g.from || 'nothing'}); renderer ${f.renderer || 'none'}, sim ${f.sim || 'none'}.`);
     process.exit(0);
   }
+  // 2.60.1 (B-39): a lane held for landing on purpose (a conductor's hand-built merge chain): no claim clock, no rescue.
+  if (cmd === 'hold' || cmd === 'unhold') {
+    const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
+    const by = typeof flags.by === 'string' ? flags.by.trim() : '';
+    if (!t || (cmd === 'hold' && typeof flags.why !== 'string')) {
+      console.error(`Usage: npm run task -- ${cmd} <TASK_ID> --by <name>${cmd === 'hold' ? ' --why "<what it waits for: the merge chain, the next train …>"' : ''}`);
+      process.exit(1);
+    }
+    const refused = holdRefusal(by);
+    if (refused) { console.error(refused); process.exit(1); }
+    if (cmd === 'unhold') {
+      if (!readHolds()[t.id]?.held) { console.log(`${t.id} isn't held.`); process.exit(0); }
+      setHold(t.id, { held: null });
+      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again` });
+      console.log(`${t.id} is no longer held: its claim clock runs again.`);
+      process.exit(0);
+    }
+    const why = String(flags.why).trim();
+    const was = readHolds()[t.id]?.parked;
+    setHold(t.id, { held: { by, why, at: new Date().toISOString() } });
+    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing: ${why}`.slice(0, 400), meta: { why } });
+    // A stop by the claim clock while it waited to land wasn't a stuck lane: the park is lifted (and the budget count
+    // starts again), and its waiting rescues are closed.
+    if (was?.budget) setHold(t.id, { parked: null }, { by, msg: `${by} unparked ${t.id}: held for landing, not stuck (${why})`.slice(0, 400) });
+    const closed = closeRescuesFor(t.id, { by, why: `is held for landing by ${by} (${why})`, board: { parseNextQueue, dropTask } });
+    console.log(`${t.id} is held for landing by ${by}: its claim clock is stopped and no rescue is filed for it until it lands or someone runs npm run task -- unhold ${t.id} --by <name>.${was?.budget ? ' Its budget park is lifted.' : ''}${closed.length ? ` Rescues: ${closed.map((c) => `${c.id} ${c.action === 'closed' ? 'closed' : '(claimed: its claimant was told)'}`).join(', ')}.` : ''}`);
+    process.exit(0);
+  }
   if (['block', 'park', 'unpark', 'lane', 'holds'].includes(cmd)) {
     const by = typeof flags.by === 'string' ? flags.by : actor();
     const all = [...q.inProgress, ...q.backlog, ...q.done];
     if (cmd === 'holds') {
       const h = readHolds();
-      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
+      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.held ? `held for landing (${x.held.by}: ${x.held.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
       console.log(rows.length ? rows.join('\n') : 'No holds: every waiting task can start.');
       process.exit(0);
     }
@@ -1768,6 +1913,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   // 2.30d (#9): close or reopen a forced "done (pending)" task: a person, or a reviewer from another model family.
+  // 2.62.0 (H): per-task acceptance contracts (harness/contracts.mjs): show, add, agree, check, sign, remove.
+  if (cmd === 'contract') {
+    const { contractCommand, CONTRACT_USAGE } = await import('./contracts.mjs');
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === arg1);
+    if (!t) {
+      console.error(`${arg1 ? `No task ${arg1} on the board. ` : ''}${CONTRACT_USAGE}`);
+      process.exit(1);
+    }
+    const r = contractCommand({ task: t, done: q.done.some((x) => x.id === t.id) && !q.inProgress.some((x) => x.id === t.id), sub: flags._[2], args: flags._.slice(3), flags });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+
   if (cmd === 'review' || cmd === 'pending') {
     const { closePending, listPending } = await import('./pending-review.mjs');
     if (cmd === 'pending' || !arg1) {
@@ -1806,7 +1964,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // --start/--claim are switches: a title word the parser took as their value is part of the title.
     const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name>] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
       process.exit(1);
     }
     // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -1851,6 +2009,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         // 2.59.0 (#8): a person keeps a broad lane for a launch in the main checkout: --wide "<why>" (harness/agent.mjs).
         ...(typeof flags.wide === 'string' && (typeof flags.lane === 'string' || typeof flags.paths === 'string') ? { laneWide: { lane: laneList(typeof flags.paths === 'string' && laneList(flags.paths).length ? flags.paths : flags.lane).join(','), why: flags.wide, by: typeof flags.by === 'string' ? flags.by : actor(), ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } } : {}),
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
+        // 2.60.1 (B-41): the Unity branch a --track engine:unity task lands from (harness/unity-gate.mjs {branch}).
+        ...(typeof flags.branch === 'string' ? { branch: flags.branch } : {}),
         ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),

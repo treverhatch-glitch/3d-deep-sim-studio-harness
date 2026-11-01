@@ -758,3 +758,83 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** a ~6 s seeded test failing in the full suite.
 - **Why:** only the gate's own timeout was scaled.
 - **Fix:** `"slowTests"` and `STUDIO_TEST_TIMEOUT_SCALE`. qa/selftest-260d.mjs.
+
+### P-124 — A game check's timeout didn't scale on Windows (B-17) · fixed in 2.64.0
+- **Evidence:** the 2.59.1 main verify timed out at 600 s with CPU 63% and a Unity editor up; 564 s with a longer timeout.
+- **Why:** `os.loadavg()` is always 0 on Windows and an editor outside the lock counted for nothing.
+- **Fix:** CPU-busy probe, the editor counted as heavy, a floor of 1.5× the last quiet run. qa/selftest-2601m.mjs.
+
+### P-125 — `--tool nim` couldn't find aider in the studio's venv (B-18) · fixed in 2.64.0
+- **Evidence:** "aider is not installed (not found on PATH)"; it was in .studio/aider-venv/Scripts.
+- **Why:** PATH only; the `STUDIO_TOOL_NIM_CMD` workaround also dropped the NIM key.
+- **Fix:** STUDIO_AIDER_CMD, then the venv, then PATH; a custom nim command keeps nim's environment. qa/selftest-2601n.mjs.
+
+### P-126 — The default NIM model returned 404 for the crew's key (B-19) · fixed in 2.64.0
+- **Evidence:** nim-test-2: "Function … Not found for account".
+- **Why:** the launcher never checked the model; NIM's list shows models a key can't use.
+- **Fix:** a 1-token check, cached, falling back through STUDIO_NIM_MODELS only on not-found. qa/selftest-2601n.mjs.
+
+### P-127 — aider pulled harness files into its chat and printed terminal warnings (B-20, B-21) · fixed in 2.64.0
+- **Evidence:** nim-test-2 log.
+- **Why:** `--yes-always` accepted "add file?"; prompt-toolkit under Git Bash.
+- **Fix:** per-session .aiderignore, the brief as --read, --no-pretty --no-fancy-input. qa/selftest-2601n.mjs.
+
+### P-128 — A failed NIM session left no evidence (B-37) · fixed in 2.64.0
+- **Evidence:** exit 1 after a repo scan of 4,680 files, an empty log, the lane copy removed.
+- **Why:** copies always removed; Python output buffered.
+- **Fix:** keep a failed session's copy and its last 200 lines; unbuffered output; bounded repo map. qa/selftest-2601n.mjs.
+
+### P-129 — A board-only commit restarted the train's verify (B-29) · fixed in 2.64.0
+- **Evidence:** train-1 "verify 2 of tree 40f81c33" after a task type commit, about 9 min.
+- **Why:** any move of main meant a rebuild.
+- **Fix:** an allowlist of board/record files (harness/train-board.json); re-merge and land on the same verify after git checks the tree. qa/selftest-2601o.mjs.
+
+### P-130 — The hook-stamp check and restamp judged against different bases (B-30, B-32) · fixed in 2.64.0
+- **Evidence:** restamp said "nothing to do" while the check failed against a stale origin/main.
+- **Why:** `resolveBase` preferred origin/main without STUDIO_MAIN_ROOT; restamp used local main.
+- **Fix:** one shared base, the main checkout's local branch in a lane, printed. qa/selftest-2601o.mjs.
+
+### P-131 — Merging main into a lane asked for a Golden-Reason (B-31) · fixed in 2.64.0
+- **Evidence:** 5 lane merges.
+- **Why:** the commit-msg hook compared staged goldens with HEAD.
+- **Fix:** exempt goldens staged exactly as MERGE_HEAD has them. qa/selftest-2601o.mjs.
+
+### P-132 — task done --train named a check the train covers as its reason (B-33) · fixed in 2.64.0
+- **Evidence:** T-059.
+- **Why:** the event used the first failed check, not the first blocking one.
+- **Fix:** report `blocking[0]`; covered rows say so. qa/selftest-2601o.mjs.
+
+### P-133 — Unity builds ran outside machine:heavy (B-35) · fixed in 2.64.0
+- **Evidence:** 2.9 GB free during the pass 6 build.
+- **Why:** unity.mjs took no lock; RAM checked only at agent start.
+- **Fix:** the lock on Unity runs, a RAM check at every heavy start, an outside editor listed. qa/selftest-2601m.mjs.
+
+### P-134 — Owner-reclassified render tasks still needed a visual result (B-38) · fixed in 2.64.0
+- **Evidence:** T-115 (config only), T-028 (tests only).
+- **Why:** the title alone decided.
+- **Fix:** evidence from the changed files, a valid owner type, `task visual`. qa/selftest-2601q.mjs.
+
+### P-135 — Rescue tasks piled up for lanes parked on purpose (B-39) · fixed in 2.64.0
+- **Evidence:** about ten "Rescue: T-xxx stuck" tasks.
+- **Why:** the claim clock ignored parking.
+- **Fix:** `task hold`, no clock for held or queued lanes, rescues closed on landing. qa/selftest-2601q.mjs.
+
+### P-136 — A lane's edit to studio config landed in main (B-40) · fixed in 2.64.0
+- **Evidence:** a builder's studio/game.json edit.
+- **Why:** studio/ in a lane copy is a link to main's.
+- **Fix:** the rule written down, an edit hook, a task done warning. qa/selftest-2601q.mjs.
+
+### P-137 — The Unity land gate could land main into itself, guessed its folder, and called exit 3 busy (B-41) · fixed in 2.64.0
+- **Evidence:** the crew's first Unity landings.
+- **Why:** {branch} defaulted to the folder's checkout; {folder} was a sibling guess; a fixed exit table.
+- **Fix:** the task's own branch, engines.unity.folder, engines.unity.exits. qa/selftest-2601m.mjs.
+
+### P-138 — Agent-written lessons reached planning prompts unreviewed · fixed in 2.64.0
+- **Evidence:** the crew's report, section 7 (agent-written text loaded later as instructions, CSA note 2026-08).
+- **Why:** 2.61's constraints block took every lesson.
+- **Fix:** accepted lessons only, by exact text; hidden characters stripped from all untrusted text. qa/selftest-261f.mjs.
+
+### P-139 — A tier C lane could skip its hold through the old landing path · fixed in 2.64.0
+- **Evidence:** found in review of the 2.63 tiers.
+- **Why:** STUDIO_TRAIN=off, --force and --accepted-by took the path that has no tiers.
+- **Fix:** task done refuses tier C outside the train. qa/selftest-263i.mjs.

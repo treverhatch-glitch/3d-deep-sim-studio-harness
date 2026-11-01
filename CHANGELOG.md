@@ -4,6 +4,77 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.64.0] — 2026-11-01
+2.64.0 lands everything built for 2.60.1 through 2.64 in one release, so a studio upgrades once: the crew's bugs B-17 to
+B-41 from the operator report of 2026-11-01 (P-124 to P-139), the learning edge (2.61), the sealed bench and acceptance
+contracts (2.62), risk-tiered landing, train batching and the Unity merge train (2.63), and the autonomy scorecard and
+threads in shadow mode (2.64). The plan: docs/AUTONOMY.md. Upgrade note: docs/RELEASE.md, "2.60 to 2.64".
+### Fixed (2.60.1, the crew's report)
+- **Windows timeouts scale (B-17, P-124).** Where there is no load average, two `os.cpus()` samples measure CPU busy; a
+  Unity editor outside machine:heavy counts as heavy work; a game check's timeout is never below 1.5× its last quiet
+  passing run (within the 3× cap); the line prints whenever the timeout isn't the base.
+- **aider/NIM launch (B-18 to B-21, B-37; P-125 to P-128).** aider is found in `STUDIO_AIDER_CMD` or
+  `.studio/aider-venv` before PATH and a custom nim command keeps the NIM key; a nim model is checked once (cached 24 h)
+  and falls back through `STUDIO_NIM_MODELS` only when NIM says the key can't use it; aider gets an `.aiderignore` for
+  harness and protected paths, the brief as `--read`, `--no-pretty --no-fancy-input --no-gitignore` and a bounded repo
+  map; a failed aider session keeps its lane copy and its last 200 lines.
+- **A board-only commit keeps the train's verify (B-29, P-129).** If main moved only in `harness/train-board.json`'s
+  board/record files, the lanes merge again onto the new main and land on the same verify, after git confirms the tree.
+- **One base for stamps and gates (B-30, B-32; P-130).** The hooks gate, restamp, the protected and weakened-tests gates
+  and task done share one base (the main checkout's local branch in a lane; local main before a stale origin/main),
+  printed as `base <ref> <sha>`.
+- **Goldens from main in a merge (B-31, P-131).** Merging main into a lane needs no Golden-Reason for goldens staged
+  exactly as main has them.
+- **task done names the real blocker (B-33, P-132).** Rows the train's verify covers say so.
+- **Unity under machine:heavy (B-35, P-133).** Unity builds and tests take the lock; every heavy start waits (then
+  refuses) below the memory floor; `heavy.mjs status` lists an editor outside the lock.
+- **Render tasks decided by evidence (B-38, P-134).** Once a task has commits, its changed files against the game's
+  `"visualPaths"` decide whether it needs a visual result; a valid owner type that isn't render work beats the title;
+  `npm run task -- visual <ID> off|on|auto --by <person>` overrides, recorded like `task type`.
+- **Held lanes (B-39, P-135).** `npm run task -- hold|unhold <ID> --by <name>` (not workers); a held or train-queued
+  lane runs no claim clock and gets no rescue, and landing closes its rescue tasks.
+- **A lane's studio/ is main's (B-40, P-136).** A hook refuses edits to studio config in a lane copy; task done warns
+  when main's studio config changed uncommitted; the rule is in AGENTS.md / AGENTS.lite.md.
+- **Unity land gate (B-41, P-137).** It lands the task's own Unity branch (`task add --branch`, `unity-gate branch`),
+  never the folder's checked-out branch; `engines.unity.folder` and `engines.unity.exits` in studio/game.json.
+### Added (2.61, the learning edge)
+- **Change records (`npm run learn -- change add|list|eval`)**: each harness/skill/rule change names the failure
+  signatures it should reduce; after N tasks it is graded kept / no effect / regressed, and a regression files one
+  revert question (never reverts by itself). A failure that repeats after its lesson files one "make the lesson a
+  check" task. Skill load/follow telemetry per model on the scorecard.
+- **Constraints from past failures** in the Director's brief, the Producer's handoff and the planner's brief and
+  kickoff (top K by repeats × recency, with source ids). **Lesson quarantine (P-138):** a lesson reaches those prompts
+  only once accepted (`npm run lessons -- accept <id>`: a Producer/Director session on its own review, a person, an
+  outside agent on permission; never a worker), for that exact text. Hidden characters and HTML comments are stripped
+  from all text written by agents or people.
+- **Pitfall hygiene:** an agent's pitfall is a proposal until accepted, has a role scope, and the least useful line is
+  evicted past the budget.
+### Added (2.62)
+- **Sealed replay bench (`npm run bench`, docs/BENCH.md):** real agents on past tasks k times in clean copies with
+  hidden graders; pass@1 and pass^k; `compare` with a sign test; `--without <component>` to test whether a guardrail
+  still pays for itself. `studio/bench/**` is protected.
+- **Acceptance contracts (`npm run task -- contract`, docs/CONTRACTS.md):** checkable criteria agreed before coding;
+  after agreement only `passes` changes; done-check needs every criterion in force.
+### Added (2.63)
+- **Risk-tiered landing (harness/tiers.mjs):** each lane's tier from its own diff by code. C (harness, protected,
+  deleted tests/goldens/regressions, irreversible files, upgrade merges) waits in the queue until a person releases it
+  (`npm run task -- train release <ID> --by <person>`), and can't take the old path (`STUDIO_TRAIN=off`, `--force`;
+  P-139); B (sim, goldens, pins, shared code) verifies with `--all` and needs Golden-Reason / Pin-Moves; A lands as before.
+- **Train batching:** `STUDIO_TRAIN_MIN/MAX/WAIT_MIN`, manifest `"runAlone"` lanes, a lone task done rides along with
+  queued lanes. `task done`'s wait for a running train is now `STUDIO_TRAIN_LOCK_WAIT_MIN`.
+- **The Unity merge train (`npm run task -- train --unity`, docs/UNITY-TRACK.md):** queued Unity branches land on one
+  land run with merge-tree conflict checks first and prefix bisection on red.
+### Added (2.64, toward L3)
+- **Autonomy scorecard (`npm run autonomy`, War Room card, docs/AUTONOMY.md):** hours between interventions, who
+  stepped in, hands-free landing rate, reopens, redos, unsigned tier C, against the L3 bar in `studio/autonomy.json`
+  (a person, a Producer/Director session or an outside agent sets the level; not protected); it only suggests a
+  level change.
+- **Drift checks:** the same gate failing the same way 3 times, verify with no new diff, edits outside the lane: Check
+  events to the Producer; never stops anything.
+- **Threads and triggers (`npm run thread`, docs/THREADS.md), shadow mode by default:** exact-key thread index, a
+  per-task inbox shown in the brief and kickoff with a notice hook, `studio/triggers.json` (protected) per source,
+  unmatched events to the Producer's inbox; pass-through never creates a task.
+
 ## [2.60.0] — 2026-11-01
 2.60.0: the crew's round-2.60 brief (pins, shared lines, upgrade path, heavy-lock trees), shaped by merge-queue practice
 (P-113 to P-123). Studio changes to make first: docs/ONBOARDING-A-GAME.md ("Pins and union files", "Slow tests under

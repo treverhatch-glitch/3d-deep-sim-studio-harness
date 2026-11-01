@@ -30,6 +30,14 @@ Outgoing Producer: `node harness/handoff.mjs note "Handing over: …"` with what
 middle of. Incoming Producer: run the handoff, read the plan and the newest log entries, clear
 "Needs you first", then write your first note.
 
+## Lessons that shape the plan (2.61)
+
+`npm run handoff` opens with "Constraints from past failures": the top lessons, repeated failures, accepted causes and
+accepted retro suggestions, each with its source id. Cut the next tasks around them (a check task first for a repeated
+one; keep a lane that would trip one apart). Agents' pitfalls wait for you under "Needs you first":
+`npm run pitfall -- proposed`, then `npm run pitfall -- accept PP-3 --by <you> --scope builder` or `reject`. Details:
+[MEMORY.md](MEMORY.md) section 4.
+
 ## What reaches you, and what doesn't
 
 The Producer is the most expensive seat, so only decisions should reach it:

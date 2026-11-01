@@ -169,12 +169,29 @@ changes it and a branch can't swap it for one that always passes):
 { "engines": { "unity": { "land": "<the Unity repo's land command> {branch}", "cwd": "<folder>", "timeoutMin": 120 } } }
 ```
 
-`{branch}` is `--branch`, else the Unity folder's current branch; `{task}` the task ID; `{folder}` the Unity
-track's folder. It runs in `cwd` (relative to the studio), else the Unity track's folder.
+`{branch}` is `--branch`, else the task's Unity branch: `task add "<title>" --track engine:unity --branch <b>`, or
+later `node harness/unity-gate.mjs branch <ID> <b>`. With neither the gate refuses and says how to set it; it never
+uses the Unity folder's checked-out branch (2.60.1: that was main, which would land main into itself). `{task}` is
+the task ID; `{folder}` is `"folder"` in the same settings (relative to the studio, or absolute) when set, else the
+Unity track's folder; a folder that doesn't exist is an error. It runs in `cwd` (relative to the studio), else that
+folder.
+
+If the land script has its own exit codes, write them down with it, so the harness never guesses what a code means:
+
+```json
+{ "engines": { "unity": { "land": "node \"{folder}/tools/land.mjs\" {branch}", "folder": "../my-game-unity",
+  "exits": { "1": { "status": "red", "why": "a test or the build failed" },
+             "3": { "status": "error", "why": "bad branch: no such branch in the Unity repo" } } } } }
+```
+
+`status` is pass, red, conflict, refused (busy: try again later) or error. With `exits` set, a code it doesn't list
+is an error naming the code; without it the contract below applies. The output's last lines come with every
+result that isn't a pass.
 
 - `node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]` runs it under the `machine:heavy`
   lock (a Unity editor run never overlaps a full verify or a browser playtest; it waits, naming the holder).
-- The exit code decides: 0 pass (landed), 1 red, 2 conflict, 3 refused (busy: not a failure of the work), 4 error;
+- The exit code decides (the default contract, when `exits` isn't set): 0 pass (landed), 1 red, 2 conflict,
+  3 refused (busy: not a failure of the work), 4 error;
   anything else, a signal or a timeout (`timeoutMin`, `STUDIO_UNITY_GATE_TIMEOUT_MIN`, 120) is an error.
 - `task done` runs it for a task added with `--track engine:unity`, after the task's other checks; the task closes
   only on a pass, and a refusal leaves it in progress ("run task done again later"). `STUDIO_DONE_UNITY_GATE=skip`
@@ -182,6 +199,65 @@ track's folder. It runs in `cwd` (relative to the studio), else the Unity track'
 - Each run is kept: `.studio/gates/unity-last.json`, its output in `.studio/gates/out/unity.log`, an `engine.land`
   event and a line in `studio/engine/LOG.md`.
 - It is not part of `npm run verify`: a verify checks, it never lands work.
+
+## The Unity merge train (2.63.0)
+
+When several porters finish together, landing each branch alone means one Unity build after another. The Unity
+train lands them on ONE run of the land command, one train at a time, always under `machine:heavy`:
+
+- `npm run task -- done <ID> --train [--branch <name>]` on a task added with `--track engine:unity` runs every check
+  `task done` runs before the Unity gate, then queues the task's Unity branch (`--branch`, else the Unity folder's
+  current branch) in `.studio/train/unity-queue.json`. The task stays in progress.
+- `npm run task -- train --unity [--max N] [--dry-run]` lands the queue, oldest first. `npm run task -- train status`
+  shows how many Unity branches wait and the Unity train running now (`node harness/unity-train.mjs status --json`).
+- Conflicts are found first from refs only (`git merge-tree`, no files touched): a branch that conflicts with the
+  target is handed back; one that conflicts only with a branch before it waits for the next train.
+- Pass: the target must then contain every branch (else nothing closes), and every task closes.
+- Red (1) or conflict (2): prefix bisection, like the web train. The land command runs again on the target + the
+  first half, and so on (about log2 N more runs). A green prefix run lands that prefix, since it's the land command,
+  so those tasks close. The first red prefix names the culprit, which is handed back with the run's last lines.
+- Refused (3) or error (4, other, a timeout): nobody is blamed and the branches stay queued. A refusal is tried
+  again (`STUDIO_UNITY_TRAIN_RETRIES`, 2, every `STUDIO_UNITY_TRAIN_RETRY_MIN`, 10 min). After that, run the train again later.
+- One Unity train at a time (`.studio/locks/unity-train.lock`; a dead holder's lock is taken over); every land run
+  takes `machine:heavy` as a landing, so a Unity build never overlaps a full verify or another Unity build.
+
+**The land-command contract for a train** (in `studio/game.json` `engines.unity`, protected: the owner sets it):
+
+```json
+{ "engines": { "unity": {
+  "land": "<land script> {branch}",
+  "landMany": "<land script> {branches}",
+  "target": "<the branch the land script lands on>",
+  "gateWorktree": "<the land script's own worktree>",
+  "cwd": "<folder>", "timeoutMin": 120
+} } }
+```
+
+- `target` is required for the train. The harness checks each branch against it and, after a pass, checks that it
+  contains them. `{target}` puts it on the command line.
+- A command that lands a list gets `{branches}`: the branch names in order, separated by spaces. Each one is
+  merged onto the target in that order, the gates run once on the result, the result is committed on green, and the
+  command exits 0/1/2/3/4 as before. Put it in `landMany`, or use `{branches}` in `land` itself.
+- A command that lands one `{branch}` only: the harness builds an integration branch, `unity-train/<id>` (the target
+  plus each branch in order, as merge commits made from refs and objects only), and hands that one name to the land
+  command. The harness never checks out, merges or resets anything in the Unity repo. Only the land script works in
+  its gate worktree; `gateWorktree` (else the Unity folder, else `cwd`) tells the harness where to read the repo's
+  refs. The integration branch is deleted after the run.
+- `{task}` is the train's task IDs, comma-separated. Branch and task names other than letters, digits, `.`, `_`, `/`
+  and `-` are refused before any command runs, because the command line goes through a shell.
+- The harness never runs Unity itself.
+
+### Editor runs and the machine:heavy lock (2.60.1)
+
+A Unity editor run takes 6-7 GB, so it shares the `machine:heavy` lock with full verifies and browser playtests:
+
+- `node harness/unity.mjs gate` and `build` take the lock themselves (one hold for Edit Mode and Play Mode). When
+  it stays busy, or free memory stays under `STUDIO_RAM_FLOOR_GB`, the editor doesn't start and they exit 3 (busy).
+- Any other editor batch work a Unity lane runs goes through the wrapper, so it waits its turn and can be stopped
+  with its whole process tree: `node harness/heavy.mjs run --label "unity import" -- "<Unity.exe>" -batchmode -quit -projectPath <folder> ...`.
+- An editor someone opened by hand is outside the lock. `node harness/heavy.mjs status` lists it as an implicit
+  holder and game checks scale their timeouts for it; heavy jobs still start beside it, so close it before a long
+  verify. `STUDIO_HEAVY_PROGRAMS` (default `Unity.exe,Unity`) names the programs counted this way.
 
 ## Settings
 

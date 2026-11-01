@@ -14,13 +14,22 @@
  *   handed back       tasks it handed back (out of usage, swapped, stuck)
  *
  * A model is whatever agents report (STUDIO_AGENT_MODEL, task start --model); "unknown" otherwise.
+ *
+ * 2.61.0, load/follow telemetry (measurement only, no approvals): when a launched session ends, recordFollow() notes
+ * which skills it was given (named in its kickoff, plus its task's skill, whose steps its brief carries) and which
+ * pitfall lines (studio/PITFALLS.md lines in its kickoff), whether its log shows it opened each skill (loaded), and
+ * whether the log shows each skill's required steps (followed: the skill's optional `evidence:` front matter,
+ * studio/skills/README.md; no evidence list: unknown). One skill.follow event per session; the scorecard shows the
+ * rates per model.
  */
+import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
-import { taskType } from './done-check.mjs';
+import { taskType, TYPES } from './done-check.mjs';
 
 const NOT_CODE = /^(\.studio\/|studio\/|qa\/(reports|regressions)\/|docs\/)/;
 
@@ -143,7 +152,127 @@ export function buildScorecard({ events = readRecentEvents(20000), queue = parse
     .filter((r) => r.done || r.bugs || r.traced || r.suspected || r.refused || r.forced || r.handedBack || r.commits)
     .map((r) => ({ ...r, agents: [...r.agents], suspected: Math.round(r.suspected * 10) / 10, per10: r.points ? Math.round(((r.bugs + r.traced) / r.points) * 100) / 10 : null }))
     .sort((a, b) => (b.per10 ?? -1) - (a.per10 ?? -1) || b.bugs - a.bugs || b.done - a.done);
-  return { at: new Date().toISOString(), models: list, traces };
+  return { at: new Date().toISOString(), models: list, traces, follow: followRates(events) };
+}
+
+/**
+ * A skill's evidence patterns from its front matter (optional):
+ *   ---
+ *   evidence:
+ *     - fails-before | check-regressions      one required step; " | " separates ways the log may show it
+ *     - /npm run verify\b/                     /…/ is a regular expression, anything else a case-insensitive substring
+ *   ---
+ * or inline: `evidence: [fails-before, npm run verify]`. Null when the skill has none (its follow rate is "unknown").
+ */
+export function skillEvidence(text) {
+  const fm = String(text || '').replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---(\n|$)/);
+  if (!fm) return null;
+  const lines = fm[1].split('\n');
+  const i = lines.findIndex((l) => /^evidence\s*:/.test(l));
+  if (i < 0) return null;
+  const inline = lines[i].replace(/^evidence\s*:\s*/, '').trim();
+  let items = [];
+  if (inline) items = inline.replace(/^\[|\]$/g, '').split(',');
+  else for (const l of lines.slice(i + 1)) {
+    const m = l.match(/^\s+-\s+(.+)$/);
+    if (!m) break;
+    items.push(m[1]);
+  }
+  const unq = (x) => x.trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+  const steps = items.map((x) => unq(x).split(/\s+\|\s+/).map(unq).filter(Boolean)).filter((a) => a.length);
+  return steps.length ? steps : null;
+}
+
+const toTest = (alt) => {
+  const m = alt.match(/^\/(.+)\/([a-z]*)$/);
+  if (m) {
+    try {
+      const re = new RegExp(m[1], m[2].includes('i') ? m[2] : `${m[2]}i`);
+      return (t) => re.test(t);
+    } catch {
+      return () => false;
+    }
+  }
+  const low = alt.toLowerCase();
+  return (t) => t.toLowerCase().includes(low);
+};
+const count = (text, needle) => (needle ? String(text).split(needle).length - 1 : 0);
+const pitId = (line) => `pit-${crypto.createHash('sha1').update(String(line).toLowerCase().replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 8)}`;
+
+/**
+ * What one session was given and what its log shows. `kickoff` is the prompt it started from, `log` its output. A copy
+ * of the prompt echoed into the log is not reading: a skill counts as loaded only when the log names it more often than
+ * the echoed prompts do.
+ */
+export function followFromSession({ kickoff = '', log = '', taskSkill = null, pitfallLines = [], readSkill = (rel) => { try { return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8'); } catch { return ''; } } } = {}) {
+  const named = [...new Set(String(kickoff).match(/studio\/skills\/[\w.-]+\.md/g) || [])].filter((s) => !/README\.md$/.test(s));
+  const skills = [...new Set([...(taskSkill ? [taskSkill] : []), ...named])];
+  const head = String(kickoff).split('\n').find((l) => l.trim().length >= 30)?.trim() || '';
+  const echoes = head ? count(log, head) : 0;
+  const out = skills.map((skill) => {
+    const loaded = count(log, skill) > echoes * count(kickoff, skill);
+    const ev = skillEvidence(readSkill(skill));
+    const followed = ev ? ev.every((alts) => alts.some((a) => toTest(a)(String(log)))) : null;
+    return { skill, loaded, followed };
+  });
+  const given = pitfallLines.filter((l) => l && String(kickoff).includes(l));
+  return { skills: out, pitfalls: given.map(pitId) };
+}
+
+/** At a session's end (harness/agent.mjs): one skill.follow event. Telemetry only: never a blocker, never a gate. */
+export function recordFollow({ agent, model = null, role = null, task = null, log = '' } = {}) {
+  const read = (f) => {
+    try {
+      return fs.readFileSync(f, 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const kickoff = read(path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`));
+  if (!kickoff) return null;
+  let taskSkill = null;
+  if (task) {
+    const q = parseNextQueue();
+    const t = [...q.inProgress, ...q.backlog, ...q.done].find((x) => x.id === task);
+    taskSkill = t ? TYPES[taskType(t)]?.skill || null : null;
+  }
+  const pitfallLines = read(path.join(REPO_ROOT, 'studio', 'PITFALLS.md')).split('\n').filter((l) => /^- /.test(l)).map((l) => l.slice(2).trim());
+  const f = followFromSession({ kickoff, log, taskSkill, pitfallLines });
+  const n = (k, v) => f.skills.filter((s) => s[k] === v).length;
+  emitEvent({ type: 'skill.follow', agent, model, task: task || null, msg: `${agent}: ${f.skills.length} skill(s) given, ${n('loaded', true)} opened, ${n('followed', true)} followed, ${n('followed', null)} unknown; ${f.pitfalls.length} pitfall line(s) given`, meta: { role, ...f } });
+  return f;
+}
+
+/** Per model, from skill.follow events: skills given, and the share loaded / followed / unknown. */
+export function followRates(events = readRecentEvents(20000)) {
+  const rows = new Map();
+  for (const e of events) {
+    if (e.type !== 'skill.follow') continue;
+    const key = e.model || 'unknown';
+    const r = rows.get(key) || { model: key, sessions: 0, given: 0, loaded: 0, followed: 0, notFollowed: 0, unknown: 0, pitfalls: 0 };
+    r.sessions += 1;
+    for (const s of e.meta?.skills || []) {
+      r.given += 1;
+      if (s.loaded) r.loaded += 1;
+      if (s.followed === true) r.followed += 1;
+      else if (s.followed === false) r.notFollowed += 1;
+      else r.unknown += 1;
+    }
+    r.pitfalls += (e.meta?.pitfalls || []).length;
+    rows.set(key, r);
+  }
+  const rate = (a, b) => (b ? Math.round((a / b) * 100) / 100 : null);
+  return [...rows.values()].map((r) => ({ ...r, loadedRate: rate(r.loaded, r.given), followedRate: rate(r.followed, r.followed + r.notFollowed), unknownRate: rate(r.unknown, r.given), pitfallsPerSession: rate(r.pitfalls, r.sessions) })).sort((a, b) => a.model.localeCompare(b.model));
+}
+
+export function renderFollow(rows) {
+  if (!rows?.length) return '';
+  const p = (x) => (x == null ? '-' : `${Math.round(x * 100)}%`);
+  const head = ['model', 'sessions', 'skills given', 'loaded', 'followed', 'unknown', 'pitfall lines/session'];
+  const body = rows.map((r) => [r.model, r.sessions, r.given, p(r.loadedRate), p(r.followedRate), p(r.unknownRate), r.pitfallsPerSession ?? '-']);
+  const w = head.map((h, i) => Math.max(String(h).length, ...body.map((r) => String(r[i]).length)));
+  const line = (r) => r.map((c, i) => (i === 0 ? String(c).padEnd(w[i]) : String(c).padStart(w[i]))).join('  ');
+  return [line(head), line(w.map((n) => '-'.repeat(n))), ...body.map(line)].join('\n');
 }
 
 export function renderScorecard(sc) {
@@ -164,5 +293,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log('\nbugs: confirmed (a bug added with --caused-by, or a task reopened). traced: the bug\'s fix commits touched code last changed by that model\'s commit (Studio-Task/Model trailers).');
     console.log('per 10 pts: (bugs + traced) per 10 points of finished work.');
     console.log('suspected: closed-loop failures shared among models that finished code changes since the last clean pass.');
+    if (sc.follow.length) {
+      console.log(`\nSkills and pitfalls, per model (launched sessions):\n${renderFollow(sc.follow)}`);
+      console.log('loaded: the session\'s log opened the skill (its file or its task brief). followed: the log shows every step in the skill\'s evidence list (of skills that have one). unknown: the skill has no evidence list.');
+    }
   }
 }

@@ -111,7 +111,10 @@ for the GitHub Actions runs on the commit and re-runs failed jobs once. If a job
 - raises `ci.failed`, which appears on the Director card and as a phone alert when alerts are on;
 - runs `STUDIO_CI_NOTIFY_CMD` if it's set (the notification hook), with `CI_SHA`, `CI_STATE` and
   `CI_SUMMARY` in its environment;
-- writes `.studio/ci-watch.json`.
+- writes `.studio/ci-watch.json`;
+- routes the result (2.64.0, docs/THREADS.md). With `STUDIO_THREADS=on`, a red run on a commit that a lane
+  queued or a train landed goes to that task's inbox. A commit with no task goes to the Producer's inbox. In
+  shadow mode (the default) it is only logged.
 
 Without the gh CLI, it says "CI not checked", never "green".
 
@@ -122,6 +125,14 @@ Without the gh CLI, it says "CI not checked", never "green".
 (`npm run engine:gate`), the Godot template check (CI's engine-godot job) and the godot-unit gate all fail
 when a script doesn't parse, and they name the file and Godot's error, even when the engine's own run exited
 0. `npm run gdscript:parse -- <project>` runs it by hand.
+
+## 8. Constraints from past failures (2.61)
+
+The Director's brief has a "Constraints from past failures" section: the top lessons that didn't stick, repeated
+failures, causes a person accepted and retro suggestions the Producer accepted, one line each with its source id
+(`failures.md#…`, `repeat:…`, `cause:<n>`, `retro:<date>`), ranked by repeats × recency. Use them when you point the
+Producer at the next work: which task carries each (a check first, a split that keeps a lane away from it). How they are
+built and the settings: [MEMORY.md](MEMORY.md) section 4.
 
 ## Also
 

@@ -111,6 +111,30 @@ non-Godot games). A task's type is the owner's decision: `npm run task -- type <
 (and `npm run studio:resume`) for them by adding `--permission "<the owner's words, or a link to the message>"`; the
 record keeps the permission and who recorded it. Builders and other worker agents never can.
 
+### 2.60 to 2.64 (migration note)
+
+2.64.0 carries 2.60.1 to 2.64 in one release. Take it the same way as above (drain, snapshot and commit the board,
+`npm run upgrade -- --merge <ref> --by <you>`, verify), then:
+
+1. **Live lanes:** bring main into each lane copy (`git merge main`) and re-stamp (`npm run hooks -- restamp`; check and
+   restamp now print the same `base <ref> <sha>`). Goldens that arrive unchanged from main need no Golden-Reason in that
+   merge. Lanes parked on purpose: `npm run task -- hold <ID> --by <you> --why "…"` (no claim clock, no rescue).
+2. **Tiers:** a lane that changes harness/, hub/, scripts/, qa/*.mjs, a protected file, deletes a test/golden/regression
+   or carries an upgrade merge is tier C: it waits in the train queue until a person runs
+   `npm run task -- train release <ID> --by <person>`. `STUDIO_TRAIN=off` and `--force` no longer skip that.
+3. **Render tasks:** set `"visualPaths"` (globs of the game's render/scene code) in studio/game.json so the changed files
+   decide whether a task needs a visual result (owner's signed change: the file is protected).
+4. **Unity:** set `engines.unity.folder` (and optionally `engines.unity.exits`) in studio/game.json; Unity tasks name
+   their branch (`task add --branch <b>` or `node harness/unity-gate.mjs branch <ID> <b>`). Unity builds and tests now
+   take machine:heavy.
+5. **NIM:** put aider in `.studio/aider-venv` or set `STUDIO_AIDER_CMD`; set `STUDIO_NIM_MODELS` (the models the key may
+   use, in order).
+6. **Lessons:** lessons reach planning prompts only once accepted (`npm run lessons`, then
+   `npm run lessons -- accept <id> --by <name> --why "…"`; a Producer session may accept on its own review).
+7. **New protected file:** studio/triggers.json (which sources may route work; `"mode": "shadow"` by default). The
+   autonomy level (studio/autonomy.json) is set by a person, the Producer or an outside agent, not workers. `npm run autonomy` shows the scorecard; `npm run thread -- shadow-report`
+   what threads would have routed.
+
 ## What 2.30c changed for agents
 
 - **Short output.** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) instead of the whole history (`studio/handoffs/<ID>.md` keeps it). `npm run handoff` prints at most 3k characters; `npm run handoff -- --full` prints all of it (always saved to `.studio/briefs/producer.md`).

@@ -16,9 +16,11 @@ import { allowedNote, allowedTools } from './allowlist.mjs';
 import { nimModel, NIM_DEFAULT_MODEL } from './agent-env.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inboxForBrief } from './threads.mjs';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
+import { constraintsBlock } from './learning-edge.mjs';
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -53,15 +55,16 @@ export const TOOLS = {
   },
   aider: {
     name: 'Aider (free local dry run with Ollama)',
-    line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes`,
+    // 2.60.1 (B-21): stdout is a log file, not a terminal; --no-gitignore keeps aider off the tracked .gitignore.
+    line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes --no-pretty --no-fancy-input --no-gitignore`,
     note: 'One instruction, then exits: best for single small tasks. Start Ollama with OLLAMA_CONTEXT_LENGTH=32768 or more; its 2k default silently drops context.',
   },
   nim: {
     name: 'Aider on NVIDIA NIM',
     // The key is named, never written out: the launcher sets OPENAI_API_KEY from NVIDIA_API_KEY for the child only.
     // H-8 (2.58.5): AIDER_OPENAI_API_KEY too, which aider applies after the .env files it loads over the environment.
-    line: (f, model) => `OPENAI_API_KEY="$NVIDIA_API_KEY" AIDER_OPENAI_API_KEY="$NVIDIA_API_KEY" aider --model openai/${nimModel(model)} --openai-api-base https://integrate.api.nvidia.com/v1 --message-file ${f} --yes-always --no-auto-commits`,
-    note: `One instruction, then exits, like aider on Ollama, without aider's own commits. Needs aider (pip install aider-chat, with the owner's OK) and NVIDIA_API_KEY; the model is a NIM id (<org>/<model>) from --model, else STUDIO_NIM_MODEL, else ${NIM_DEFAULT_MODEL} (never the role's model).`,
+    line: (f, model) => `OPENAI_API_KEY="$NVIDIA_API_KEY" AIDER_OPENAI_API_KEY="$NVIDIA_API_KEY" aider --model openai/${nimModel(model)} --openai-api-base https://integrate.api.nvidia.com/v1 --message-file ${f} --yes-always --no-auto-commits --no-pretty --no-fancy-input --no-gitignore`,
+    note: `One instruction, then exits, like aider on Ollama, without aider's own commits. Needs aider (pip install aider-chat, with the owner's OK; the launcher also finds STUDIO_AIDER_CMD or .studio/aider-venv, and adds --aiderignore for the harness's folders and the brief as --read) and NVIDIA_API_KEY; the model is a NIM id (<org>/<model>) from --model, else STUDIO_NIM_MODEL, else ${NIM_DEFAULT_MODEL} (never the role's model).`,
   },
 };
 
@@ -71,6 +74,9 @@ export function launchLine(tool, { agent, model }) {
   const file = `.studio/kickoff/${agent}.md`;
   return { name: t.name, line: `STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model} ${t.line(file, model)}`, note: t.note };
 }
+
+/** Roles that plan and cut the work (2.61: their kickoff carries the constraints from past failures). */
+export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
 
 export function kickoff(opts) {
   const { stable, volatile } = kickoffParts(opts, { named: true });
@@ -98,6 +104,22 @@ export function kickoffParts(opts, { named = false } = {}) {
     const min = Math.ceil((last.rows || []).reduce((n, r) => n + (Number(r.ms) || 0), 0) / 60000);
     if (min) volatile = `Run \`npm run verify\` in the foreground: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min.\n`;
   } catch {}
+  // 2.61 (the learning edge): the roles that plan and cut work start with the constraints from past failures. They
+  // change as failures happen, so they go in the volatile part, never in the cached prefix.
+  if (PLANNING_ROLES.has(String(opts.role || '').toLowerCase())) {
+    try {
+      const c = constraintsBlock({ heading: '', for: opts.role === 'director' ? 'director' : 'planning' });
+      if (c) volatile += `\n${c}\n`;
+    } catch {}
+  }
+  // 2.64.0: follow-ups already routed to the task this session starts on (harness/threads.mjs): a count and the
+  // command, never the text (that is quoted, marked as untrusted, in the task's brief).
+  if (opts.task) {
+    try {
+      const box = inboxForBrief(opts.task, { max: 0 });
+      if (box) volatile += `${opts.task}'s inbox has ${box.total} follow-up(s) (${box.unread} unread: CI or merge-train results, messages tied to the task). Read them first: npm run thread -- inbox ${opts.task}\n`;
+    } catch {}
+  }
   return { stable: text, volatile };
 }
 

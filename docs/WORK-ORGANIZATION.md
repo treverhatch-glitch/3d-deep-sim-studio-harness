@@ -63,7 +63,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 
 - `npm run task -- done <ID> --train` (in the lane copy) runs every check task done runs before the game's checks
   (board, done-check, committed work, protected files, secrets, hooks, weakened tests) and queues the lane
-  (`.studio/train/queue.json`); the task stays in progress. `npm run task -- train status` lists the queue.
+  (`.studio/train/queue.json`); the task stays in progress. `npm run task -- train status` lists the queue. Its own
+  full verify isn't required (the train's verify covers it); a refusal names the check that blocks on its first line
+  and in the `task.not_done` event, and lists the verify rows as "(the train's verify covers this)" (2.60.1, B-33).
 - `npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>]` lands the queue, oldest first: each lane
   is checked again in its own copy, then merged in order onto main in a scratch copy (`.lanes/_train-<id>`, branch
   `train/<id>`; never the main checkout's files or a lane's copy). A lane is merged as it is (a fast-forward, or a
@@ -94,6 +96,16 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Union files (2.60.0): a conflict ONLY inside the manifest's `unionFiles` (one-import-per-line barrels, never an
   order-sensitive list) is merged with git's union driver for those files (both sides' added lines, the train's side
   first); the merge commit says `Union-Merge: <files>`. Any other conflict is handled as below.
+- Main moved by board files only (2.60.1, B-29): if main moved while the train was verified and every file changed
+  since is on the board/record list in `harness/train-board.json` (`studio/NEXT.md`, `studio/DONE.md`,
+  `studio/task-types.json`, `studio/handoffs/**`, `studio/memory/**`, `studio/logs/**`, `studio/notes/**`; added or
+  modified, never deleted or renamed), the train, under the land lock, merges its lanes again onto the new main and
+  lands on the same verify, but only when that merge is clean and git shows the new tree is the verified tree plus
+  exactly those files as main has them (event `task.train.board_move`; the `landed` event and the log say the verify
+  was reused and which files moved). The train's copy never tests `studio/` from its tree (it is sparse-excluded and
+  linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
+  `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
+  again, as before.
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
@@ -101,13 +113,54 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   (or the lane's own green verify of that tree reused), then main moves. Unlike the old path, a lane main has moved
   past is merged (not rebased) and main + lane gets a full verify before main moves (the old path re-checked only
   what main brought in). `STUDIO_TRAIN=off`, `--force`, or a copy with no commits of its own use the old path.
-- One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_WAIT_MIN`, 120, for a
-  running one; `task train` doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
+- One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_LOCK_WAIT_MIN`, 120, for a
+  running one (before 2.63.0 this was `STUDIO_TRAIN_WAIT_MIN`, still read when the new name is unset); `task train`
+  doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
-  `.pin_refresh`, `.pin_refresh_red`, `.done`.
+  `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
+- Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
+  its head) and its own commits' trailers, by code, never by a model's confidence. The tier and why are printed by
+  `task done --train`, in the train log and in a `task.train.tier` event.
+  - **C, needs the owner** (a closed lane, not a threshold): a protected file (`studio/protected.json` at main's tip
+    plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
+    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`). It is held in the queue
+    (`task.train.held`, `task train status` says NEEDS THE OWNER) and lands only after
+    `npm run task -- train release <ID> --by <name> [--permission "<their words or a link>"]`: a person in their own
+    terminal, or a Producer/Director session or an agent outside the harness recording a person's direct permission
+    (`harness/permission.mjs`); a worker never; with an owner key, only the owner's own terminal. The release is
+    recorded (`task.train.released`, in the queue entry) for the lane's head at that moment: new commits need a new one.
+  - **B, checks plus history**: the game's sim paths, goldens, declared pin moves or pin files, shared utilities, the
+    registry/barrel, a changed test, any file no rule names. The train verifies with `--all`; a golden changed with no
+    `Golden-Reason:` trailer, or a pin file (`pins.files`) with no `Pin-Moves:`, is handed back; a task handed back
+    more than `STUDIO_TRAIN_MAX_HANDBACKS` (3) times is held for a person like tier C.
+  - **A, contained**: docs, added tests, the game's tools folders, assets, UI outside the sim paths. The normal verify.
+  The rules are a table in `harness/tiers.mjs`; a game extends or changes them only through its protected manifest
+  ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.
+- Batching (2.63.0): `task train` waits up to `STUDIO_TRAIN_WAIT_MIN` (10, from when the oldest lane was queued; poll
+  `STUDIO_TRAIN_POLL_S`, 15) for `STUDIO_TRAIN_MIN` (1) lanes that aren't held, then runs with what is queued
+  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too).
+  A lane the manifest marks "runAlone" (more than `maxFiles` files, or a file under its `paths`) gets a train of its
+  own: the oldest lane decides, the rest wait and `task train` runs the next train right after (`trains` in its
+  output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
+  one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
+  `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
+- Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
+  session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
+  land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run, no rescue is filed or escalated for it,
+  its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
+  (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
+  `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.
+- `studio/` in a lane copy is the main checkout's (a link, 2.60.1, B-40): only the board commands (`npm run task`,
+  lock, proof ...) write there, and a lane's commits can never carry studio config. A config change (`studio/*.json`,
+  `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
+  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
+  (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
+  config changed uncommitted while the task was worked. Planned (2.64): a config proposal file in the lane that the
+  train applies to main's studio/ in the same landing.
 
 ### When a command is killed halfway (2.58.0)
 

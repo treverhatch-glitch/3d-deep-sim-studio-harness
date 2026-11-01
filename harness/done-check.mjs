@@ -12,6 +12,8 @@
  * 2.59.0: the owner can reclassify a task (npm run task -- type <ID> <type> --by <owner> --why "…",
  * harness/reclassify.mjs); that type wins over the title's, and the output says which one is used and why.
  * A bug's regression is a cartridge replay or a seeded game unit test ("kind": "test", qa/regressions/README.md).
+ * 2.62.0 (H): a task with an agreed acceptance contract (studio/contracts/<ID>.json) also needs every criterion in
+ * force passing (harness/contracts.mjs contractChecks); one without a contract is checked as before.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +25,7 @@ import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
 import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
 import { ownerType, ownerTypeWords } from './reclassify.mjs';
+import { renderDecision } from './verdict-split.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
@@ -33,6 +36,7 @@ import { judgeRed, readBaseline } from './baseline.mjs';
 import { inLaneCopy, mainRoot } from './worktree.mjs';
 import { isEolOnlyLine } from './eol-only.mjs';
 import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
+import { contractChecks } from './contracts.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -806,6 +810,13 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Screenshots, each with a line saying what it shows', pr.shots && pr.fresh, `no screenshots for ${task.id} since it started: npm run play:browser, then npm run proof -- add ${task.id} <png> "<what it shows>"`);
     check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
   }
+  // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
+  // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
+  {
+    const k = contractChecks(task, type);
+    for (const c of k.checks) check(c.label, c.ok, c.why);
+    notes.push(...k.notes);
+  }
   const missing = checks.filter((c) => !c.ok).map((c) => c.why);
   return { ok: missing.length === 0, type, typeSource: typed.source, typeIgnored: typed.ignored, titleType: typed.titleType, part, since, checks, missing, notes, ...TYPES[type] };
 }
@@ -821,8 +832,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const res = checkDone(task);
   console.log(`${task.id} is a "${res.type}" task (${res.typeSource}). Done means: ${res.means}.${res.skill ? ` Skill: ${res.skill}` : ''}`);
   if (res.typeIgnored) console.log(`  note: ${res.typeIgnored}`);
+  // 2.60.1 (B-38): whether it needs a visual result, and why (the owner's decision, the evidence or the title).
+  try {
+    const d = renderDecision(task);
+    if (d.by === 'owner') console.log(`  ${d.why}`);
+    else if (d.why) console.log(`  visual proof: ${d.render ? 'needed' : 'not needed'} (${d.why})`);
+    if (d.warn) console.log(`  WARN ${d.warn}`);
+    if (d.ignored) console.log(`  note: ${d.ignored}`);
+  } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
-  for (const n of res.notes || []) console.log(`  note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);
+  for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
   console.log(res.ok ? 'Ready to finish.' : 'Not done yet.');
   process.exit(res.ok ? 0 : 1);
 }

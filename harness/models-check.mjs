@@ -15,6 +15,8 @@ import { PROVIDERS } from './models.config.mjs';
 import { loadDotEnv, resolveProviderChannels } from './route.mjs';
 import { emitEvent } from './event.mjs';
 import { modelWarning, acceptModelWarning, TIER_EXAMPLES } from './model-tiers.mjs';
+import { nimModel, nimKey } from './agent-env.mjs';
+import { nimModelChain, checkNimModel, nimCheckOff } from './nim-check.mjs';
 
 const family = (id) => String(id).replace(/^models\//, '').split(/[-:/.]/).filter((x) => !/^\d/.test(x)).slice(0, 2).join('-');
 
@@ -48,6 +50,21 @@ export async function checkModels({ dryRun = false } = {}) {
       rows.push({ id: p.id, model: p.model, status: ok ? 'ok' : 'missing', note: ok ? `${ids.length} models served` : `not served. Close matches: ${near.join(', ') || 'none; see the provider docs'}` });
     } catch (err) {
       rows.push({ id: p.id, model: p.model, status: p.protocol === 'ollama' ? 'not-running' : 'error', note: p.protocol === 'ollama' ? 'Ollama is not running on this machine' : err.message });
+    }
+  }
+  // 2.60.1 (B-19): the `--tool nim` session model and its fallbacks, with the launcher's own check (a 1-token request
+  // each: NIM's list shows models a key can't use). The answers fill the launcher's cache.
+  const key = nimKey(process.env);
+  if (key && !nimCheckOff(process.env)) {
+    const chain = nimModelChain(nimModel(null), process.env);
+    for (const [i, m] of chain.entries()) {
+      if (dryRun) {
+        rows.push({ id: i ? 'nim-session-fallback' : 'nim-session', model: m, status: 'would-check', note: 'POST /chat/completions (1 token)' });
+        continue;
+      }
+      const c = await checkNimModel(m, { key, base: 'https://integrate.api.nvidia.com/v1' });
+      const status = c.verdict === 'ok' ? 'ok' : c.verdict === 'missing' ? (i ? 'unusable' : 'missing') : 'error';
+      rows.push({ id: i ? 'nim-session-fallback' : 'nim-session', model: m, status, note: `${c.why}${c.cached ? ' (cached)' : ''}${status === 'missing' ? '; set STUDIO_NIM_MODEL (a nim session falls back through STUDIO_NIM_MODELS)' : ''}` });
     }
   }
   return rows;

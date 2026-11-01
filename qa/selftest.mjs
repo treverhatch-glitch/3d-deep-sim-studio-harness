@@ -125,7 +125,9 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
 // 2.59.0: the supervisor starts no agent under STUDIO_RAM_FLOOR_GB free memory; checks run with it off so a busy test
 // machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0' };
+// 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
+// counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off' };
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
@@ -1062,7 +1064,10 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const st = JSON.parse(fs.readFileSync(path.join(dir, '.studio/supervisor.json'), 'utf8'));
   report('the supervisor starts a fresh agent per task, one after another, and stops at its time', st.status === 'stopped' && /time is up/.test(st.stopReason) && st.sessions >= 2 && st.tasksDone >= 2, sup.stdout + sup.stderr + JSON.stringify(st));
   report('npm run studio:status says what it did', /sessions started: \d+; tasks done: \d+/i.test(run(dir, 'node harness/supervisor.mjs status', env).stdout));
-  // Lanes: two builders at once, each holding its own folder.
+  // Lanes: two builders at once, each holding its own folder. The check starts from builder work that names a lane
+  // only: builder tasks the first run left open (how many depends on the machine's speed: a slower Windows runner
+  // left one) hold the whole game and kept both lanes waiting (2.64.0, Windows CI).
+  for (const m of fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8').matchAll(/^- \[ \] \*\*(T-\d+)\*\*.*\(`builder`\)/gm)) run(dir, `node harness/task.mjs drop ${m[1]} --by selftest --why "the lanes check starts from lane work only"`, env);
   run(dir, 'node harness/mode.mjs set fast --by hatch', env);
   run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
   run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
@@ -3847,6 +3852,126 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest260D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260d.mjs')).href);
   await selftest260D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.61.0 (e): the learning edge: change records graded before/after (one revert question for a regression), the lesson →
+// check ladder (one task per signature), and skill load/follow telemetry per model (qa/selftest-261e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest261E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261e.mjs')).href);
+  await selftest261E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.61.0 (the learning edge, f): a bounded "constraints from past failures" block in the Director's brief, the Producer's
+// handoff and the planner's kickoff/brief; agents' pitfalls are proposals until accepted, scoped by role, and evicted
+// by measured usefulness, never a line tied to a regression without a person (qa/selftest-261f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest261F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261f.mjs')).href);
+  await selftest261F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.62.0: the sealed replay bench (npm run bench: cases at a commit, k tries by real agents in clean copies, code
+// graders, pass@1 / pass^k, a paired compare) and the component-removal review (--without) (qa/selftest-262g.mjs).
+{
+  const dir = copyRepo();
+  const { selftest262G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262g.mjs')).href);
+  await selftest262G({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.62.0 (H): per-task acceptance contracts: agreed before coding, only `passes` flips after; the weakened-tests gate,
+// done-check and the reviewer's brief read them (qa/selftest-262h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest262H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262h.mjs')).href);
+  await selftest262H({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.63.0 (helper i): blast-radius landing tiers (tier C held for the owner until a person releases it, tier B verified
+// with --all and its Golden-Reason / Pin-Moves required), STUDIO_TRAIN_MIN / _MAX / _WAIT_MIN batching, run-alone lanes,
+// and a lone task done riding along with queued lanes (qa/selftest-263i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest263I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263i.mjs')).href);
+  await selftest263I({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.63.0 (helper j): the Unity merge train: queued Unity branches land on ONE land run, a red train hands back exactly
+// the culprit by prefix bisection, a conflict waits or is handed back, a refusal blames nobody and is retried, one Unity
+// train at a time and every land run under machine:heavy (qa/selftest-263j.mjs).
+{
+  const dir = copyRepo();
+  const { selftest263J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263j.mjs')).href);
+  await selftest263J({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.64.0 (helper k): the autonomy scorecard (npm run autonomy, the overnight line, the War Room card; a person's
+// permission counts as the person; L3 only ever suggested) and the drift Checks (same gate failing 3 times, verify with
+// no new diff, edits outside the lane), which never stop anything (qa/selftest-264k.mjs).
+{
+  const dir = copyRepo();
+  const { selftest264K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264k.mjs')).href);
+  await selftest264K({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.64.0 (l): thread subscription and pass-through with the trigger table, shadow mode first: a CI failure or a red
+// train reaches the task's inbox (on) or is only logged (shadow), no thread goes to the Producer, ignore drops, links
+// refuse workers, the hook tells the session, hub /api/inbox takes a task key, nothing creates a task
+// (qa/selftest-264l.mjs).
+{
+  const dir = copyRepo();
+  const { selftest264L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264l.mjs')).href);
+  await selftest264L({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.1 (B-17, B-35, B-41): a game check's timeout scales on Windows (a CPU probe, a Unity editor outside the lock,
+// a floor from the last quiet run); the Unity editor's runs take machine:heavy and a heavy take checks free memory;
+// the Unity land gate's branch, folder and exit meanings (qa/selftest-2601m.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601m.mjs')).href);
+  await selftest2601M({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.1 (helper n): the aider launch path: aider found in STUDIO_AIDER_CMD or the studio's .studio/aider-venv, a custom
+// nim command keeps the NIM key, the nim model checked (stub answers) with fallback through STUDIO_NIM_MODELS, the
+// .aiderignore and the brief as --read, --no-pretty --no-fancy-input, a failed session's lane copy and last lines kept
+// (qa/selftest-2601n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601n.mjs')).href);
+  await selftest2601N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.1 (helper o, B-29 to B-33): a board-only commit on main keeps the train's verify; one base for the hooks check,
+// restamp and the protected gate (local main in a lane, printed); goldens that arrive unchanged in a merge need no
+// Golden-Reason; task done --train names the check that blocks (qa/selftest-2601o.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601o.mjs')).href);
+  await selftest2601O({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.60.1 (B-38, B-39, B-40): an owner type, task visual off|on and the evidence (render paths changed) decide a render
+// task; a lane held for landing or queued for the train runs no claim clock and gets no rescue, landing closes its
+// rescues; a lane copy's studio/ config is guarded and task done in a lane warns about main's uncommitted config
+// (qa/selftest-2601q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601q.mjs')).href);
+  await selftest2601Q({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

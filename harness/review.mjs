@@ -9,6 +9,8 @@
  * and writes studio/reviews/<date>-<ID>-<model>.md with `model-family:` and `implementer-family:`
  * lines and one verdict. The done-check for system tasks and the reviewer gate read that file.
  * It refuses when the reviewer would be the same family as the builder.
+ * 2.62.0 (H): a task with an agreed acceptance contract (studio/contracts/<ID>.json) sends it too, and the reviewer
+ * grades the work against each criterion (a criterion not met means CHANGES).
  *
  * Small local models miss things: treat an approval as a second look, not proof. A person can always
  * write a review by hand instead (studio/skills/review.md).
@@ -25,6 +27,7 @@ import { modelFamily } from './families.mjs';
 import { routeChatCompletion, getRouterMatrix } from './route.mjs';
 import { scrub } from './secrets.mjs';
 import { spawnAgentSync } from './launch.mjs';
+import { contractForReview } from './contracts.mjs';
 
 const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
@@ -47,7 +50,8 @@ export function gather(taskId, { implementer = null } = {}) {
   let diff = commits.map((c) => diffOf(c.hash)).join('\n');
   const cut = diff.length > DIFF_CAP;
   diff = scrub(diff.slice(0, DIFF_CAP)).text;
-  return { task, type: taskType(task), builder, commits, specs, diff, cut };
+  // 2.62.0 (H): the task's agreed acceptance contract, if any, so the review grades against what done means.
+  return { task, type: taskType(task), builder, commits, specs, diff, cut, contract: contractForReview(taskId) };
 }
 
 export function prompt(g) {
@@ -59,7 +63,7 @@ export function prompt(g) {
     },
     {
       role: 'user',
-      content: `Task ${g.task.id} (${g.type}): ${g.task.title}\nBuilt by: ${g.builder}\n\n${spec ? `Spec:\n${spec}\n\n` : ''}Changes (${g.commits.length} commit${g.commits.length === 1 ? '' : 's'}${g.cut ? `, first ${DIFF_CAP} characters` : ''}):\n${g.diff}`,
+      content: `Task ${g.task.id} (${g.type}): ${g.task.title}\nBuilt by: ${g.builder}\n\n${spec ? `Spec:\n${spec}\n\n` : ''}${g.contract ? `${g.contract}\nIn ISSUES, add one line per criterion: CONTRACT <id>: met or not met, and why.\n\n` : ''}Changes (${g.commits.length} commit${g.commits.length === 1 ? '' : 's'}${g.cut ? `, first ${DIFF_CAP} characters` : ''}):\n${g.diff}`,
     },
   ];
 }

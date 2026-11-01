@@ -11,6 +11,25 @@ add() { grep -q "^$1:" "$MSG_FILE" || git interpret-trailers --in-place --traile
 # Goldens are the recorded answers: changing them needs a reason in the commit, and the commit says
 # which numbers moved, so a re-recorded wrong answer gets a second look (War Room: Needs you).
 GOLDEN_CHANGED="$(git diff --cached --name-only -- qa/golden)"
+# 2.60.1 (B-31): merging the studio's branch into a lane brought main's re-recorded goldens with it, and this asked the
+# lane for a Golden-Reason for answers it didn't change. During a merge (MERGE_HEAD), a golden staged exactly as
+# MERGE_HEAD has it (same blob and mode, or deleted on both) arrived unchanged from the merged branch, whose own commit
+# carried the reason: it is exempt. A golden resolved to anything else (ours, or a combination) still needs the trailer.
+if [ -n "$GOLDEN_CHANGED" ] && git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  KEPT="$(cd "$ROOT" && node -e "
+const { execFileSync } = require('node:child_process');
+const g = (a) => execFileSync('git', a, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+const z = (s) => s.split('\0').filter(Boolean);
+const entries = (text, blobAt) => new Map(z(text).map((r) => { const t = r.indexOf('\t'); const f = r.slice(0, t).split(' '); return [r.slice(t + 1), f[0] + ' ' + f[blobAt]]; }));
+const staged = entries(g(['ls-files', '-s', '-z', '--', 'qa/golden']), 1);
+const theirs = entries(g(['ls-tree', '-r', '-z', 'MERGE_HEAD', '--', 'qa/golden']), 2);
+const changed = z(g(['diff', '--cached', '--name-only', '-z', '--no-renames', '--', 'qa/golden']));
+const left = changed.filter((f) => (staged.get(f) || '') !== (theirs.get(f) || ''));
+if (left.length < changed.length) process.stderr.write('[commit-msg] note: ' + (changed.length - left.length) + ' golden file(s) staged exactly as the merged branch has them: no Golden-Reason needed for those\n');
+process.stdout.write(left.join('\n'));
+")" || KEPT="$GOLDEN_CHANGED"
+  GOLDEN_CHANGED="$KEPT"
+fi
 if [ -n "$GOLDEN_CHANGED" ]; then
   if ! grep -qi '^Golden-Reason:' "$MSG_FILE"; then
     echo "[commit-msg] FAIL this commit changes qa/golden/. Say why the recorded answers changed, as a trailer:"

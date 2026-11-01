@@ -23,7 +23,7 @@ import { activeCartridge, isTemplateCartridge, GAME_FILE } from './cartridge.mjs
 const git = (args, env = {}) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...env } });
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 // Studio state that belongs to the game (studio:reset clears the board, Bible, reviews and logs itself).
-const GAME_STATE = ['studio/game.json', 'studio/art', 'studio/asks', 'studio/signed', 'studio/proof', 'studio/playtest', 'studio/tricks', 'studio/task-holds.json', 'studio/intake-answers.json', 'studio/assets', 'studio/references', 'studio/experiments', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md', 'studio/reviews/OWED.json', 'studio/engine'];
+const GAME_STATE = ['studio/game.json', 'studio/art', 'studio/asks', 'studio/signed', 'studio/proof', 'studio/playtest', 'studio/tricks', 'studio/task-holds.json', 'studio/intake-answers.json', 'studio/assets', 'studio/references', 'studio/experiments', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md', 'studio/pitfalls.json', 'studio/reviews/OWED.json', 'studio/engine'];
 
 function gameName() {
   try {
