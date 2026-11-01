@@ -29,6 +29,24 @@ Any red step before the push undoes the commit and leaves the work uncommitted; 
 each with its own commit and its own selftest file. Still required: a backup branch of `main` first, the full
 selftest, and green online checks before the merge.
 
+## Taking a harness update into a studio
+
+A studio (a private copy with a game in it) takes a new harness version by merging it, never by stashing its board.
+On a crew's PC the 2.58.2 update stashed the dirty main checkout and the board went with it: finished tasks' DONE.md
+rows and that morning's NEXT.md tasks, uncommitted. A finished task reopened and seven sessions were spent on it.
+
+1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
+2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
+   `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the
+   `git add` / `git commit` to run. `--snapshot` also copies them to `.studio/board-snapshots/<time>/`.
+3. Other uncommitted work: commit it on a branch, or set it aside with a named stash
+   (`git stash push -u -m "<unique-tag>" -- <paths>`) that leaves `studio/` out. Never `git stash` the whole checkout.
+4. Back up `main` (`git branch backup/pre-<version> main`), then `git pull upstream main` (a merge: the board keeps
+   both sides). A conflict in a board file: keep the rows from both sides.
+5. A stash that did take board changes: `npm run upgrade -- --check` names it. Restore by merge: with the board
+   committed, `git stash apply <sha>` (three-way), keep both sides' rows, commit; drop the entry only after.
+6. `npm run verify`, then `npm run task -- drain off --by <you>`.
+
 ## What 2.30c changed for agents
 
 - **Short output.** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) instead of the whole history (`studio/handoffs/<ID>.md` keeps it). `npm run handoff` prints at most 3k characters; `npm run handoff -- --full` prints all of it (always saved to `.studio/briefs/producer.md`).
