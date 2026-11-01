@@ -49,6 +49,12 @@
   isn't judged; the PR head is.
 - Enforced where the hooks are installed (`core.hooksPath=scripts/hooks`) or the base branch's last 50 commits carry
   stamps (so unsetting the hooks doesn't switch it off), or with `STUDIO_HOOKS_CHECK=on`; `STUDIO_HOOKS_CHECK=off` turns it off.
+- Size (2.58.5): the `hooks` gate patch-ids only the commits that need it (a stamp whose tree no longer matches, after a
+  rebase or cherry-pick; the grandfather list; the commits it lists), streaming each diff from git into `git patch-id`,
+  so a range holding a game's binary art costs time, not memory (a whole-range `git log -p --binary` used to crash it
+  with `ERR_STRING_TOO_LONG`). The `weakened-tests` gate diffs only test code and test-runner configs, not fixtures or
+  data under test folders. A git output too big to read fails either gate with the reason; it is never judged cut short.
+  `STUDIO_HOOKS_MAX_BUFFER` (bytes) lowers that read limit, for tests.
 - The `weakened-tests` gate (`node harness/test-weakening.mjs`, also at `task done`) reads the diff since the base branch
   (committed or not) in test files (`*.test.*`, `*.spec.*`, `tests/`, `test/`, `__tests__/`, `qa/`, `specs/`, C# `*.Tests/`
   and `*Tests/` folders, `test_*.py`, `*_test.*`, `*Test(s).cs|gd`) and test-runner configs, and names file:line and the

@@ -3698,6 +3698,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.5 (H-7): the hooks gate patch-ids only the commits that need it, streamed (a whole-range git log -p --binary over
+// a game's art passed Node's string limit); the grandfather list too; the weakened-tests gate reads only the files it
+// judges; an output too big to read fails a gate instead of passing it (qa/selftest-2585p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585p.mjs')).href);
+  await selftest2585P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
