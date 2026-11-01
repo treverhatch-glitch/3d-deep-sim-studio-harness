@@ -59,6 +59,11 @@
  * again after the fix had landed) and names the files and the fix: rebase on the studio's branch. STUDIO_LANE_HARNESS=own
  * runs the lane's own copy anyway. The hooks only print that note at commit; they never block on it.
  *
+ * Harness ref (2.60.0, #4): a studio that took an unmerged harness branch on the owner's say-so (its commits aren't on
+ * the base branch yet, and the harness's own release commit carries no stamp) sets STUDIO_HARNESS_REF=<remote>/<branch>
+ * in .env. Commits reachable from that branch as the remote reports it (git ls-remote; never a local branch or a
+ * remote-tracking ref moved by hand) are exempt, and the output names the ref and commit used, or why it wasn't used.
+ *
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
  *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
@@ -421,6 +426,51 @@ function headToJudge(env) {
 }
 
 /**
+ * 2.60.0 (#4): STUDIO_HARNESS_REF=<remote>/<branch> (set in .env by a person; for example upstream/claude/2591) names
+ * an unmerged harness ref the owner told the studio to take. Its commits are the harness's, not the studio's, so they
+ * are exempt like the base branch's, but only as the remote itself has them: <remote> must be a configured remote,
+ * refs/remotes/<remote>/<branch> must exist (a local branch of that name doesn't count), and `git ls-remote` must
+ * confirm <branch> on <remote>; the exempt commits are the ones reachable from the commit the remote reports (a
+ * remote-tracking ref moved by hand to a local commit doesn't count). Asked only when a commit is unstamped. Can't
+ * reach the remote: not used, and the output says why (the gate fails closed). Returns { declared, ref, ok, why, sha, shas }.
+ */
+export function declaredHarnessRef(env = process.env, root = ROOT) {
+  if (String(env.STUDIO_HARNESS_REF || '').trim()) return String(env.STUDIO_HARNESS_REF).trim();
+  const main = String(env.STUDIO_MAIN_ROOT || '').trim() ? path.resolve(env.STUDIO_MAIN_ROOT) : root;
+  let found = '';
+  for (const dir of [...new Set([root, main])]) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(dir, '.env'), 'utf8'); } catch { continue; }
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:export\s+)?STUDIO_HARNESS_REF\s*=\s*(.*?)\s*$/);
+      if (m && m[1].replace(/^['"]|['"]$/g, '')) found = m[1].replace(/^['"]|['"]$/g, '');
+    }
+    if (found) return found;
+  }
+  return '';
+}
+export function harnessRefCommits(base, env = process.env, root = ROOT) {
+  const ref = declaredHarnessRef(env, root);
+  if (!ref) return { declared: false, ok: false, shas: new Set() };
+  const no = (why) => ({ declared: true, ref, ok: false, why: `STUDIO_HARNESS_REF=${ref} not used: ${why}`, shas: new Set() });
+  const m = ref.match(/^([\w.-]+)\/([\w./-]+)$/);
+  if (!m || ref.includes('..')) return no('give it as <remote>/<branch>, for example upstream/claude/2591');
+  const [, remote, branch] = m;
+  const remotes = git(['remote'], { cwd: root }).stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!remotes.includes(remote)) return no(`"${remote}" is not a configured remote (git remote -v)`);
+  const tracking = git(['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}^{commit}`], { cwd: root }).stdout.trim();
+  if (!isSha(tracking)) return no(`there is no remote-tracking branch ${remote}/${branch} (git fetch ${remote} ${branch}); a local branch of that name doesn't count`);
+  const ls = spawnSync('git', ['ls-remote', '--heads', remote, `refs/heads/${branch}`], { cwd: root, encoding: 'utf8', timeout: Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) > 0 ? Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) : 20000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  if (ls.status !== 0) return no(`couldn't reach ${remote} to confirm it has ${branch} (${String(ls.stderr || ls.error?.code || 'timed out').trim().split('\n')[0].slice(0, 120)})`);
+  const line = ls.stdout.split('\n').find((l) => l.endsWith(`\trefs/heads/${branch}`));
+  const sha = line ? line.split('\t')[0].trim() : '';
+  if (!isSha(sha)) return no(`${remote} has no branch ${branch}`);
+  if (git(['cat-file', '-e', `${sha}^{commit}`], { cwd: root }).status !== 0) return no(`${remote}/${branch} is at ${sha.slice(0, 10)} on the remote, which this checkout doesn't have yet (git fetch ${remote})`);
+  const shas = new Set(gitAll(['rev-list', sha, '--not', base], { cwd: root }).stdout.split('\n').map((s) => s.trim()).filter(Boolean));
+  return { declared: true, ref, ok: true, remote, branch, sha, shas, why: `STUDIO_HARNESS_REF=${ref} (${sha.slice(0, 10)}, confirmed on ${remote})` };
+}
+
+/**
  * The commits since the base that skipped the hooks.
  * { ok, enforced, off, base, checked, open: [{ sha, subject, why, pid }], exempt, approved, patchIds (commits patch-id'd), why }
  * Throws when the commit list is too big to read (never judges a list cut short).
@@ -475,6 +525,18 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
     const subject = c.msg.split('\n')[0].slice(0, 80);
     open.push({ sha: c.sha, subject, why: kind ? `it says Studio-Harness: ${kind}, which isn't a commit the harness makes without hooks; ${v.why}` : v.why, merge: c.parents.length > 1 });
   });
+  // 2.60.0 (#4): the declared harness ref's own commits, as its remote has them, are the harness's (asked only now).
+  let harnessRef = null;
+  if (open.length) {
+    harnessRef = harnessRefCommits(b.base, env, ROOT);
+    if (harnessRef.ok) {
+      const before = open.length;
+      for (let i = open.length - 1; i >= 0; i--) if (harnessRef.shas.has(open[i].sha)) open.splice(i, 1);
+      harnessRef.exempt = before - open.length;
+      exempt += harnessRef.exempt;
+    }
+  }
+  const refNote = !harnessRef?.declared ? '' : harnessRef.ok ? `; ${harnessRef.why}: ${harnessRef.exempt} harness commit(s) exempt` : `; ${harnessRef.why}`;
   const single = open.filter((o) => !o.merge).map((o) => o.sha);
   await pids.need(single, 'p');
   await pids.need(single.filter((s) => !pids.get(s, 'p')), 's');
@@ -493,9 +555,10 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
     }
   }
   const why = left.length
-    ? `${left.length} commit(s) since ${b.ref} skipped the git hooks (no valid ${TRAILER} stamp)${enforced ? '' : '; not enforced here: the hooks aren\'t installed in this checkout and the base has no stamped commits (npm run hooks:install; STUDIO_HOOKS_CHECK=on enforces)'}`
-    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}`;
-  return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, why };
+    ? `${left.length} commit(s) since ${b.ref} skipped the git hooks (no valid ${TRAILER} stamp)${enforced ? '' : '; not enforced here: the hooks aren\'t installed in this checkout and the base has no stamped commits (npm run hooks:install; STUDIO_HOOKS_CHECK=on enforces)'}${refNote}`
+    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}${refNote}`;
+  const hr = harnessRef?.declared ? { ref: harnessRef.ref, used: harnessRef.ok, sha: harnessRef.sha || null, exempt: harnessRef.exempt || 0, why: harnessRef.why } : null;
+  return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, harnessRef: hr, why };
 }
 
 // ---- 2.59.0 (#6): a lane copy whose harness is older than the studio's branch ----
