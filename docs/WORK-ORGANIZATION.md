@@ -175,8 +175,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
   a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
   (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
-  config changed uncommitted while the task was worked. Planned (2.64): a config proposal file in the lane that the
-  train applies to main's studio/ in the same landing.
+  config changed uncommitted while the task was worked.
+- Config proposals (2.65.0, B-40): the sanctioned route for a lane's studio config change. The lane commits
+  `studio-proposals/<ID>.json`, `{ "changes": [ { "file": "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ],
+  "why": "…" }` (top-level `studio/*.json` only, not the board's records; keys are set, nothing is deleted). When the lane
+  lands (the merge train, or the old one-lane `task done` with `STUDIO_TRAIN=off`), the harness applies it to main in the
+  next commit (`Config-From: <ID>`, `Studio-Harness: config-from`; the hooks gate exempts exactly such a commit: only
+  `studio/*.json` and `studio-proposals/`) and removes the file; the main checkout's files follow; event `config.applied`.
+  A key main changed since the lane started (and not already to the proposed value) hands the lane back with a note naming
+  the key and both values; a proposal that can't be read or names another file is handed back too. A proposal for a
+  protected file (`studio/protected.json` at main's tip plus the shipped list) makes the lane tier C (rule
+  `config-proposal-protected`; the hold names the keys and values): without an owner key the person's release is the
+  decision and the protected part applies with it; with an owner key it applies only with the owner's signed approval of
+  exactly that part (`npm run approve -- proposal <ID> --note "…"` on the owner's device, the approval committed to main).
+  Otherwise that part is held: it stays on main in the proposal file (`"held"` says why), event `config.held` goes to a
+  person, and `npm run task -- train config <ID> [--by <name>]` applies it once settled. Nothing is dropped silently. The
+  train's verify can't see the config first (a train copy's studio/ is main's live folder); the next verify does.
 
 ### When a command is killed halfway (2.58.0)
 

@@ -12,8 +12,9 @@
  *   - task done in a lane copy warns, naming the files, when main's studio config changed while the task was worked
  *     and isn't committed on main (mainConfigChanges).
  *
- * Planned for 2.64: a config proposal file in the lane (studio-proposals/<task>.json: the JSON keys to set) that the
- * merge train applies to main's studio/ in the same landing, under the protected-file rules.
+ * 2.65.0 (B-40 full): the sanctioned route is a config proposal file in the lane (studio-proposals/<task>.json: the JSON
+ * keys to set) that the landing applies to main's studio/ right after the lane lands, under the protected-file rules
+ * (harness/config-proposal.mjs). The guard's message names it.
  *
  * No imports from the rest of the harness: the hook loads this file on every edit.
  */
@@ -27,7 +28,7 @@ export const isStudioConfig = (rel) => /^studio\/([^/]+\.json|bible\/[^/]+\.json
 export const STUDIO_RECORDS = ['studio/task-holds.json', 'studio/pending-review.json', 'studio/task-types.json'];
 export const isStudioRecord = (rel) => STUDIO_RECORDS.includes(String(rel || '').replace(/\\/g, '/'));
 
-export const SANCTIONED = 'studio/ in a lane copy is the main checkout\'s (a link): only the board commands (npm run task, lock, proof …) write there. A config change goes to the owner or the Producer on main: hand the task back with a note naming the change (npm run task -- pause <ID> --note "…"); a protected file also needs the owner\'s signed approval.';
+export const SANCTIONED = 'studio/ in a lane copy is the main checkout\'s (a link): only the board commands (npm run task, lock, proof …) write there. A config change goes in a proposal the lane commits instead: studio-proposals/<TASK-ID>.json = { "changes": [ { "file": "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ], "why": "…" }; when the lane lands the harness applies it to main (a Config-From: <TASK-ID> commit) and removes the file (harness/config-proposal.mjs). A protected file in it makes the lane tier C: it lands once a person releases it (with an owner key, also the owner\'s signed approval: npm run approve -- proposal <TASK-ID>). If the change isn\'t this task\'s to propose, hand the task back with a note naming it (npm run task -- pause <ID> --note "…").';
 
 const norm = (p) => { const s = path.resolve(String(p)).replace(/\\/g, '/'); return process.platform === 'win32' ? s.toLowerCase() : s; };
 
@@ -90,5 +91,5 @@ export function mainConfigChanges(main, since = 0) {
 export function laneConfigWarning(taskId, main, since) {
   const files = mainConfigChanges(main, since);
   if (!files.length) return '';
-  return `WARNING: the main checkout's studio config changed while ${taskId} was worked, and it isn't committed on main: ${files.join(', ')}. studio/ in a lane is main's (a link), so an edit made here went straight to main. If this lane (or its agent) made it, it does NOT land with the lane: say so in the task's note so the owner or the Producer commits or reverts it on main. ${SANCTIONED.split(': ').slice(1).join(': ')}`;
+  return `WARNING: the main checkout's studio config changed while ${taskId} was worked, and it isn't committed on main: ${files.join(', ')}. studio/ in a lane is main's (a link), so an edit made here went straight to main. If this lane (or its agent) made it, it does NOT land with the lane: say so in the task's note so the owner or the Producer commits or reverts it on main, or revert it and put it in the lane's config proposal. ${SANCTIONED.split(': ').slice(1).join(': ')}`;
 }

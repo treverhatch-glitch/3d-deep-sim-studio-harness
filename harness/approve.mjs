@@ -16,6 +16,9 @@
  *   npm run approve -- force <T-ID> --reason "why"  let task done --force / --accepted-by close that task
  *   npm run approve -- tests --note "why"           2.58.2 (PU-29): accept exactly the weakened tests listed now
  *                                                   (harness/test-weakening.mjs: a removed assert, a .skip, a wider tolerance…)
+ *   npm run approve -- proposal <T-ID> --note "why" 2.65.0 (B-40): sign exactly the protected part of the lane's config
+ *                                                   proposal (studio-proposals/<T-ID>.json in this checkout), so the
+ *                                                   merge train applies it when the lane lands (harness/config-proposal.mjs)
  *   npm run approve -- hooks --note "why"           2.58.2 (PU-29): accept exactly the commits listed now that skipped
  *                                                   the git hooks (harness/hook-stamp.mjs), by commit and patch-id
  *
@@ -304,6 +307,26 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const file = writeApproval(`force-${task}`, { kind: 'force', task, reason, by, at: new Date().toISOString() });
       emitEvent({ type: 'approval.force', agent: by, task, msg: `${by} approved closing ${task} without its check: ${reason.slice(0, 200)}` });
       console.log(`Approved: ${task} may close with task done --force. Commit ${file}.`);
+    } else if (cmd === 'proposal') {
+      // 2.65.0 (B-40): the protected part of a lane's config proposal, by content (file, keys, values). Not awaited:
+      // config-proposal.mjs imports modules that import this one, which must finish loading first.
+      const task = a[1];
+      const note = flag('--note') || '';
+      if (!/^[A-Z]+-\d+$/.test(task || '')) throw new Error('Usage: npm run approve -- proposal <T-ID> --note "why" (in a checkout of the lane, or of main while the proposal is held there)');
+      if (note.trim().length < 10) throw new Error('say why, in 10+ characters: --note "…"');
+      import('./config-proposal.mjs').then((cp) => {
+        const rel = cp.proposalRel(task);
+        const f = path.join(ROOT, rel);
+        if (!fs.existsSync(f)) throw new Error(`no ${rel} in this checkout`);
+        const p = cp.parseProposal(fs.readFileSync(f, 'utf8'));
+        if (!p.ok) throw new Error(`${rel} can't be applied: ${p.errors.join('; ')}`);
+        const part = cp.protectedPart(p.changes, [...new Set([...cp.protectedGlobsAt(ROOT, 'HEAD'), ...protectedGlobs()])]);
+        if (!part.changes.length) throw new Error(`${rel} changes no protected file: it needs no approval`);
+        for (const c of part.changes) for (const [k, v] of Object.entries(c.set)) console.log(`  ${c.file}  ${k} = ${JSON.stringify(v).slice(0, 100)}`);
+        const file = writeApproval(`proposal-${task}-${part.hash.slice(0, 12)}`, { kind: 'proposal', task, change: part.hash, changes: part.changes, by, note, at: new Date().toISOString() });
+        emitEvent({ type: 'approval.proposal', agent: by, task, msg: `${by} approved ${task}'s protected config change(s) (${part.changes.map((c) => c.file).join(', ')}): ${note.slice(0, 200)}` });
+        console.log(`Approved ${task}'s protected config change(s). Commit ${file} to the studio's main branch: the merge train applies the proposal when the lane lands (or npm run task -- train config ${task} if it is held on main). A different value needs a new approval.`);
+      }).catch((e) => { console.error(e.message); process.exit(1); });
     } else if (cmd === 'tests' || cmd === 'hooks') {
       // 2.58.2 (PU-29): sign exactly what the gate lists now, by content, so the approval can't cover a later change.
       // Not awaited here: the checks import this module, which must finish loading first.
@@ -311,7 +334,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (note.trim().length < 10) throw new Error('say why, in 10+ characters: --note "…"');
       approveListed(cmd, note, by).catch((e) => { console.error(e.message); process.exit(1); });
     } else {
-      console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…" | tests --note "…" | hooks --note "…"   [--base <ref>] [--by <name>]');
+      console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…" | proposal <T-ID> --note "…" | tests --note "…" | hooks --note "…"   [--base <ref>] [--by <name>]');
       console.log(`Owner only, on the owner's own device: ${OWNER_KEY_HOWTO}.`);
       process.exit(1);
     }

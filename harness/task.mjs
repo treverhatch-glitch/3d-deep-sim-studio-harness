@@ -21,7 +21,8 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
+import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
@@ -834,7 +835,15 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const hadPriority = process.env.STUDIO_GATE_PRIORITY;
     process.env.STUDIO_GATE_PRIORITY = 'landing';
     let d;
-    try { d = deliver(taskId, { onLanded: writeBoard }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
+    // 2.65.0 (B-40): the lane's config proposal (studio-proposals/<ID>.json) is judged before it lands and applied
+    // right after it does (harness/train.mjs applyLandedConfig), as the merge train does.
+    const lp = (() => { try { return laneConfigBefore(mainRoot(), { task: taskId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward, by: agent || target.role || 'task-done' }); } catch (e) { return { has: false, error: e.message }; } })();
+    if (lp.refuse) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${lp.refuse.split('.')[0]}`.slice(0, 400) });
+      return { error: 'not-delivered', message: `${target.id} is not done: ${lp.refuse}` };
+    }
+    const landed2 = lp.has ? () => { lp.apply(); writeBoard(); } : writeBoard;
+    try { d = deliver(taskId, { onLanded: landed2 }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
     if (d && !d.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
       return { error: 'not-delivered', message: d.message };
@@ -1710,7 +1719,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const { tierLine } = await import('./tiers.mjs');
         let tier = null;
         try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
-        if (tier?.tier === 'C') {
+        // 2.65.0 (B-40): a config proposal that can't be applied (or conflicts with main) is the first thing to fix.
+        let cpBad = null;
+        try { const lb = laneConfigBefore(mainRoot(), { task: targetId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward }); if (lb.refuse) cpBad = lb.refuse; } catch {}
+        if (cpBad) {
+          emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: ${cpBad.split('.')[0]}`.slice(0, 400) });
+          done = { error: 'not-delivered', message: `${targetId} is not done: ${cpBad}` };
+        } else if (tier?.tier === 'C') {
           emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: tier C lands only through the merge train after a person releases it` });
           done = { error: 'tier-c', message: `${targetId} is not done: this lane is ${tierLine(tier)}. A tier C lane lands only through the merge train once a person releases it: npm run task -- done ${targetId} --train, then npm run task -- train release ${targetId} --by <person> [--permission "<their words or a link>"]. STUDIO_TRAIN=off, --force and --accepted-by don't skip that.` };
         }
@@ -1786,7 +1801,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
+    // 2.65.0 (B-40): apply a config proposal held on main (its protected part waited for the owner, or main moved a key).
+    if (arg1 === 'config') {
+      const tid = flags._[2];
+      if (!tid) { console.error('Usage: npm run task -- train config <TASK_ID> [--by <the person> [--permission "<their words or a link>"]]'); process.exit(1); }
+      const r = tr.applyHeldConfig(mainRoot(), tid, { by: typeof flags.by === 'string' ? flags.by : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train config <ID> [--by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });

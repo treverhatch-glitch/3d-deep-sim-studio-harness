@@ -62,6 +62,7 @@ import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot } from './merge-
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
+import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { jobDone } from './jobs.mjs';
@@ -696,7 +697,55 @@ export async function laneTier(root, { head }, { tip = null, settings = null } =
   const s = settings || await trainManifest(root, t);
   const base = out(git(root, 'merge-base', t, head)) || t;
   const prot = protectedAt(root, t);
-  return classifyLane({ files: laneFiles(root, base, head), trailers: laneTrailers(root, base, head), settings: s, protectedGlobs: prot.globs, addOnly: prot.addOnly });
+  const files = laneFiles(root, base, head);
+  // 2.65.0 (B-40): the files each config proposal of the lane names (a protected one makes the lane tier C).
+  const proposals = Object.fromEntries(files.filter((f) => isProposalPath(f.path) && !String(f.status).startsWith('D')).map((f) => {
+    const r = git(root, 'show', `${head}:${f.path}`);
+    return [f.path, r.status === 0 ? proposalTargets(r.stdout) : null];
+  }));
+  const c = classifyLane({ files, trailers: laneTrailers(root, base, head), settings: s, protectedGlobs: prot.globs, addOnly: prot.addOnly, proposals });
+  // 2.65.0 (B-40): a held lane's reason names the protected config it would change, so a release is an informed answer.
+  if (c.rules.includes('config-proposal-protected')) {
+    const globs = protectedGlobsAt(root, t);
+    const said = [];
+    for (const rel of Object.keys(proposals)) {
+      const r = git(root, 'show', `${head}:${rel}`);
+      const p = parseProposal(r.status === 0 ? r.stdout : '');
+      for (const x of p.changes.filter((y) => matchAny(y.file, globs))) said.push(`${x.file}: ${Object.entries(x.set).map(([k, v]) => `${k} = ${JSON.stringify(v)}`.slice(0, 80)).join(', ')}`);
+      if (!p.ok) said.push(`${rel} can't be read (${p.errors.slice(0, 2).join('; ')})`);
+    }
+    if (said.length && c.tier === 'C') c.why = [...c.why, `it proposes ${said.join('; ').slice(0, 400)}`];
+  }
+  return c;
+}
+
+// ---- 2.65.0 (B-40 full): a lane's studio config proposal (harness/config-proposal.mjs) ----------------------------
+
+/** Apply the config proposals of lanes that just landed (harness/config-proposal.mjs applyLandedConfig, main moved by landFastForward). */
+export const applyLandedConfig = (root, main, lanes, opts = {}) => applyLandedConfigWith(root, main, lanes, { ...opts, ff: landFastForward });
+
+/**
+ * `npm run task -- train config <ID> [--by <person>] [--permission "…"]`: apply a proposal held on main (its protected
+ * part waited for the owner's signature, or a person; or main changed a key). With an owner key the signature decides;
+ * without one, --by names the person who decides, under the release rules (releaseRefusal: never a worker).
+ */
+export function applyHeldConfig(root, task, { by = '', permission = '', env = process.env } = {}) {
+  const main = mainBranch(root);
+  const tip = out(git(root, 'rev-parse', `refs/heads/${main}`));
+  if (git(root, 'cat-file', '-e', `${tip}:${proposalRel(task)}`).status !== 0) return { ok: false, message: `${main} holds no config proposal for ${task} (${proposalRel(task)}).` };
+  const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `${tip}:studio/keys/owner-ed25519.pub.pem`)));
+  let released = null;
+  if (String(by || '').trim() && !ownerKey) {
+    const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
+    if (refusal) return { ok: false, message: `${refusal.replace(/Landing a tier-C lane/, 'Applying a protected config change')} Nothing was applied.` };
+    const perm = permissionText(permission);
+    const rec = perm ? agentOnPermission({ permission: perm, env }) : null;
+    released = { by: String(by).trim().slice(0, 60), ...(rec && rec.via !== 'person' ? { recordedBy: rec.recordedBy } : {}) };
+  }
+  let r;
+  try { r = withLandLock(root, () => applyLandedConfig(root, main, [{ task, released }], { by: released?.recordedBy || released?.by || 'train-config' })[0]); } catch (e) { return { ok: false, message: `could not apply it: ${e.message}` }; }
+  if (!r) return { ok: false, message: `${task}'s proposal could not be read.` };
+  return { ok: !r.held.length, message: configLine(task, { ...r, decision: '' }) };
 }
 
 /** How many times a task was handed back for a failure (task.paused with a reason key, as harness/breaker.mjs counts). */
@@ -1057,6 +1106,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     log(`[train] ${id}: ${lane.task} ${tierLine(c)}${released ? ` (released by ${entry.released.by})` : ''}${c.runAlone.yes ? `; runs alone: ${c.runAlone.why}` : ''}`);
     for (const n of c.notes) log(`[train] ${id}: ${settings0.manifest || 'manifest'}: ${n} (ignored)`);
     if (!dryRun) ev('tier', id, `${lane.task} ${tierLine(c)}${released ? ` (released by ${entry.released.by})` : ''}`, { task: lane.task, agent: by, meta: { tier: c.tier, why: c.why, rules: c.rules, runAlone: c.runAlone.yes ? c.runAlone.why : null, released: released ? entry.released.by : null } });
+    // 2.65.0 (B-40): a config proposal that can't be applied, or conflicts with main's value now, is handed back first.
+    const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
+    if (cp && !cp.ok) { drop(lane, cp.why); continue; }
     if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; ')); continue; }
     if (c.needs.goldenReason.length) { drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again`); continue; }
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
@@ -1075,7 +1127,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const ahead = Number(out(git(root, 'rev-list', '--count', `refs/heads/${main}..${now.head}`))) || 0;
     if (!ahead) { drop(lane, `it has no commits that ${main} doesn't have; task done ${lane.task} closes it`, { handBack: false }); continue; }
     // Tier B and C (released) lanes verify the whole game (--all).
-    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: c.runAlone });
+    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: c.runAlone, released: released ? entry.released : null });
   }
   // 2.63.0 (run alone): a large or sim-wide lane (manifest "runAlone") trains by itself. The caller's own lane goes
   // first; in a queued train the oldest decides: a run-alone lane first goes alone, else the others go without them.
@@ -1320,8 +1372,11 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
         ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
       }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };
+      const landedFrom = out(git(root, 'rev-parse', `refs/heads/${main}`));
       const ff = landFastForward(root, main, sc.branch, { taskId: `train ${id}` });
       if (!ff.ok) return { ok: false, message: ff.message };
+      // 2.65.0 (B-40): each landed lane's config proposal, in a commit right after the landing (Config-From: <task>).
+      applyLandedConfig(root, main, built.included.map((l) => ({ task: l.task, base: out(git(root, 'merge-base', landedFrom, l.head)) || landedFrom, released: l.released || null })), { log, by, res, id });
       for (const lane of built.included) {
         const now = laneNow(lane);
         forgetLanded(lane.task, lane.branch, root);
@@ -1351,12 +1406,13 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
   return undefined;
 }
 
-const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}) });
+const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}), ...(res.config ? { config: res.config } : {}) });
 function summary(res) {
   const parts = [];
   if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
+  if (res.config?.length) parts.push(`config proposals: ${res.config.map((c) => `${c.task} applied ${c.applied.join(', ') || 'nothing'}${c.held.length ? `, HELD for a person: ${c.held.map((h) => h.file).join(', ')} (npm run task -- train config ${c.task})` : ''}`).join('; ')}`);
   if (res.held?.length) parts.push(`needs the owner (held in the queue until a person releases it: npm run task -- train release <ID> --by <name>): ${res.held.map((h) => `${h.task} (tier ${h.tier}: ${String(h.why).split('\n')[0].slice(0, 300)})`).join('; ')}`);
   return parts.join('. ') || 'nothing to land';
 }
