@@ -3850,6 +3850,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.60.1 (B-38, B-39, B-40): an owner type, task visual off|on and the evidence (render paths changed) decide a render
+// task; a lane held for landing or queued for the train runs no claim clock and gets no rescue, landing closes its
+// rescues; a lane copy's studio/ config is guarded and task done in a lane warns about main's uncommitted config
+// (qa/selftest-2601q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2601Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601q.mjs')).href);
+  await selftest2601Q({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
