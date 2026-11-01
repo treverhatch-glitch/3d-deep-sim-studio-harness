@@ -147,7 +147,7 @@ export async function selftest262H({ dir, run, report }) {
   const dcGreen = doneCheck(t3);
   fs.writeFileSync(path.join(dir, 'other-262h.txt'), 'a later change\n');
   const dcStale = doneCheck(t3);
-  const t4 = add('Add the apron lights');
+  const t4 = add('Add the porch lights');
   const dcNone = doneCheck(t4);
   report('2.62.0 (H): done-check blocks a task with an agreed contract while a criterion fails (and names it), ignores a passes: true typed by hand, clears every contract line once contract check passes on the work as it is, asks for a new check after the files change; a task with no contract gets no contract line',
     /\[ \] Contract C1: .*never checked|\[ \] Contract C1: .*failed when last checked/.test(dcRed) && /\[ \] Contract C2: .*doesn't exist/.test(dcRed) && /Not done yet/.test(dcRed)
@@ -162,7 +162,7 @@ export async function selftest262H({ dir, run, report }) {
   const had = fs.existsSync(gameFile) ? fs.readFileSync(gameFile, 'utf8') : null;
   fs.writeFileSync(gameFile, JSON.stringify({ ...(had ? JSON.parse(had) : {}), contracts: { required: ['change'] } }, null, 2));
   const dcReq = doneCheck(t4);
-  const t5 = add('Docs: explain the apron lights');
+  const t5 = add('Docs: explain the porch lights');
   const dcDocs = doneCheck(t5);
   if (had === null) fs.rmSync(gameFile, { force: true }); else fs.writeFileSync(gameFile, had);
   report('2.62.0 (H): with studio/game.json "contracts": { "required": ["change"] } a change task without an agreed contract is not done (and says how to get one); a docs task is unaffected',
