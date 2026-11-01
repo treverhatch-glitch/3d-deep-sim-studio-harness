@@ -233,9 +233,11 @@ const procs = [
   { pid: 9002, ppid: 1, cmd: 'Unity.exe', args: 'Unity.exe -projectPath C:/games/demo -useHub -hubIPC', start: Date.now() - 600000 },
   { pid: 9003, ppid: 1, cmd: 'Unity.exe', start: Date.now() - 600000 },
 ];
-const pick = (env) => implicitHolders(process.cwd(), { procs, self: -1, env: { ...process.env, ...env } }).map((p) => p.pid);
+// The check sets the heavy programs itself: a run that turns them off (CI, STUDIO_HEAVY_PROGRAMS=off) would count none.
+const base = { ...process.env, STUDIO_HEAVY_PROGRAMS: 'Unity.exe,Unity' };
+const pick = (env) => implicitHolders(process.cwd(), { procs, self: -1, env: { ...base, ...env } }).map((p) => p.pid);
 const onlyServe = [procs[0]];
-const lf = loadFactor(process.cwd(), { procs: onlyServe, cpuBusy: 0, env: { ...process.env, STUDIO_HEAVY_IGNORE_ARGS: '' } });
+const lf = loadFactor(process.cwd(), { procs: onlyServe, cpuBusy: 0, env: { ...base, STUDIO_HEAVY_IGNORE_ARGS: '' } });
 console.log(JSON.stringify({ def: pick({ STUDIO_HEAVY_IGNORE_ARGS: '' }), off: pick({ STUDIO_HEAVY_IGNORE_ARGS: 'off' }), custom: pick({ STUDIO_HEAVY_IGNORE_ARGS: 'useHub' }), factor: lf.factor, why: lf.why }));
 `);
   const hr = run(dir, `node "${hp}"`, { ...env, STUDIO_HEAVY_IGNORE_ARGS: '' });
