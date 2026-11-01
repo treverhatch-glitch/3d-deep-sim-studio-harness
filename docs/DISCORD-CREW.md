@@ -53,7 +53,8 @@ clones would each think they own the board.
 
 - Keep the game's studio copy **private**: an adopted game's code lives in it (`game/<slug>/`).
 - Agents and bots never edit the harness itself (`harness/`, `hub/`, `scripts/`, `qa/*.mjs`). With the
-  owner's key in place (`npm run approve -- keygen` on the owner's own computer), the protected checks
+  owner's key in place (`npm run approve -- keygen` on the owner's own device, one no agent runs on; commit only
+  `studio/keys/owner-ed25519.pub.pem`), the protected checks
   can't be weakened without the owner's signature.
 
 ## Settings for a big adopted game

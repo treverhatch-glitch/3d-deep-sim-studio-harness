@@ -56,6 +56,15 @@ export const DEFAULT_PROTECTED = [
 // (STUDIO_PROTECT_ROOT), so a branch can't weaken the check that judges it.
 const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : REPO_ROOT;
 const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+/**
+ * 2.58.5 (H-11): how the owner key gets made, said the same way wherever a check finds none. An agent asked to make it
+ * on the agents' PC rightly refused (every agent there could then sign its own approvals); this says what to do instead.
+ */
+export const OWNER_KEY_HOWTO = `the owner makes the key once, on a device no agent runs on (not the PC the crew works on): `
+  + `clone the studio there and run npm run approve -- keygen; commit only the public key ${OWNER_PUB_REL} and merge it to the studio's main branch. `
+  + 'The private key stays on that device (~/.studio-owner/owner-ed25519.pem): never copy it to the agents\' PC, never commit it. '
+  + 'Approvals (npm run approve -- protected | tests | hooks | force) are signed on that device too, and the approval file is committed. '
+  + 'An agent never runs keygen';
 export const ownerKeyPath = (env = process.env) => env.STUDIO_OWNER_KEY || path.join(os.homedir(), '.studio-owner', 'owner-ed25519.pem');
 
 /** The protected globs: studio/protected.json at the base (so a branch can't shrink its own list), else the defaults. */
@@ -143,10 +152,10 @@ export function verifyApproval(doc, publicPem) {
 /** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
 export function checkProtected({ env = process.env } = {}) {
   const b = resolveBase(env);
-  if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet` };
+  if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet; ${OWNER_KEY_HOWTO}` };
   const pub = ownerPublicKey(b.base);
   const changes = protectedChanges(b.base);
-  if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: run npm run approve -- keygen on the owner's machine and commit the public key` };
+  if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: ${OWNER_KEY_HOWTO}` };
   if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: `no protected file changed since ${b.ref}, committed or not` };
   if (b.byHash) {
     // PU-20, no base branch: each changed file's content must be one an owner approval recorded (path + hash).
@@ -175,7 +184,7 @@ export function forceApproved(taskId, { env = process.env } = {}) {
 
 function sign(approval) {
   const keyFile = ownerKeyPath();
-  if (!fs.existsSync(keyFile)) throw new Error(`no owner key at ${keyFile}: approvals are signed on the owner's machine (npm run approve -- keygen there)`);
+  if (!fs.existsSync(keyFile)) throw new Error(`no owner key at ${keyFile} on this machine. Approvals are signed only where the owner's private key is: ${OWNER_KEY_HOWTO}.`);
   const privateKey = crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8'));
   return crypto.sign(null, Buffer.from(canonicalBytes(approval)), privateKey).toString('base64');
 }
@@ -226,7 +235,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const pub = path.join(ROOT, OWNER_PUB_REL);
       fs.mkdirSync(path.dirname(pub), { recursive: true });
       fs.writeFileSync(pub, publicKey.export({ type: 'spki', format: 'pem' }));
-      console.log(`Owner key made. Private: ${keyFile} (keep it on this machine only; never copy it to a machine agents use).\nPublic: ${OWNER_PUB_REL}. Commit it and merge it to main: from then on, protected files change only with your approval.`);
+      console.log(`Owner key made. Private: ${keyFile} (keep it on this device only; never copy it to the PC agents run on, never commit it).\nPublic: ${OWNER_PUB_REL}. Commit only that file (git add ${OWNER_PUB_REL}) and merge it to the studio's main branch: from then on, protected files, weakened tests and commits that skipped the hooks change only with your approval, signed on this device.\nIf agents run on this device, this was the wrong place: delete ${keyFile} and ${OWNER_PUB_REL} and make the key on a device with no agents.`);
     } else if (cmd === 'show') {
       const r = checkProtected();
       console.log(`${r.ok ? 'OK' : 'NEEDS APPROVAL'}: ${r.why}`);
@@ -260,6 +269,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       approveListed(cmd, note, by).catch((e) => { console.error(e.message); process.exit(1); });
     } else {
       console.log('Usage: npm run approve -- keygen | show | protected --note "…" | force <T-ID> --reason "…" | tests --note "…" | hooks --note "…"   [--base <ref>] [--by <name>]');
+      console.log(`Owner only, on the owner's own device: ${OWNER_KEY_HOWTO}.`);
       process.exit(1);
     }
   } catch (e) {
