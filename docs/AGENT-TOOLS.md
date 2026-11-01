@@ -134,7 +134,7 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
 ```
 
 - argv: `aider --model openai/<model> --openai-api-base https://integrate.api.nvidia.com/v1 --message-file
-  <kickoff> --yes-always`. aider commits its own edits, as in the Ollama case.
+  <kickoff> --yes-always --no-auto-commits`, then the flags below.
 - aider's own commits are off (`--no-auto-commits`, the owner's condition): the agent commits through the studio's
   flow like any other.
 - The model: a NIM id (`<org>/<model>`) from `--model`, else `STUDIO_NIM_MODEL`, else `moonshotai/kimi-k2.6`. A nim
@@ -150,9 +150,34 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   folder, the repo, the current folder; a lane copy has a copy of the studio's `.env`), and `.env.example`'s empty
   `OPENAI_API_KEY=` blanked the key. aider applies `AIDER_OPENAI_API_KEY` (its `--openai-api-key`) after those files.
   Don't put an empty `AIDER_OPENAI_API_KEY=` in a `.env`.
-- Without aider on PATH the start is refused: "install aider (pip install aider-chat) — needs the owner's OK".
+- Which aider (2.60.1, B-18; `--tool aider` too): `STUDIO_AIDER_CMD` (a path to the program, no arguments), else the
+  studio's own venv (`.studio/aider-venv/Scripts/aider.exe` on Windows, `.studio/aider-venv/bin/aider` elsewhere, in
+  the main checkout), else aider on PATH. The preflight and the launched command use the same answer. Nothing found:
+  "install aider (pip install aider-chat) — needs the owner's OK"; a `STUDIO_AIDER_CMD` that points nowhere is named.
   Without a NIM key: "NVIDIA_API_KEY is not set". NIM's free tier runs one session at a time
-  (`STUDIO_NIM_MAX_SESSIONS`).
+  (`STUDIO_NIM_MAX_SESSIONS`). A custom command for `--tool nim` (`STUDIO_TOOL_NIM_CMD`, a role's command) gets nim's
+  environment, the NIM key as `OPENAI_API_KEY` and `AIDER_OPENAI_API_KEY` (before 2.60.1 it got no key at all), and is
+  refused without one.
+- The model check (2.60.1, B-19): before a nim session starts, the launcher asks NIM for one token from its model
+  (NIM's model list shows models a key can't use). NIM says not found or not for this account (404, 410, "Not found
+  for account"): the next model in `STUDIO_NIM_MODELS` (comma-separated; else `NIM_SESSION.fallbackModels` in
+  `harness/models.config.mjs`) is tried, and the log's `[launcher]` line and an `agent.nim_model` event say which model
+  runs and why. None works: not started, with what to set. A 429 never changes the model (the quota fallback's job); a
+  network error launches with the model as set and says the check was skipped. Answers are cached per model and key in
+  `.studio/nim-models.json` for 24 h (`STUDIO_NIM_CHECK_HOURS`; delete the file to check again now);
+  `STUDIO_NIM_CHECK=off` turns the check off. `npm run models:check` checks the same models.
+- What aider sees (2.60.1, B-20, B-21, B-37; `--tool aider` too): `--aiderignore .studio/aider/<agent>.aiderignore`
+  (harness/, hub/, scripts/, tools/, studio/, qa/*.mjs and every path in `studio/protected.json`, anchored at the repo
+  root, so a game's own `tools/` stays editable): aider never adds those to its chat or edits them, even when the
+  kickoff names `harness/task.mjs`. The task's brief goes in with `--read` when it exists. `--no-pretty
+  --no-fancy-input` (stdout is a log file), `--no-gitignore` (aider would add `.aider*` to the tracked `.gitignore`;
+  in a lane copy `.aider*` is excluded instead), and a bounded repo map (`--map-tokens 1024 --map-refresh files`,
+  `AIDER_SESSION` in `harness/models.config.mjs`; `STUDIO_AIDER_MAP_TOKENS=0` turns the map off). `--subtree-only`
+  isn't used: a session's folder is the repo root.
+- A failed session (2.60.1, B-37): when aider exits non-zero, the last 200 lines of its output
+  (`STUDIO_FAILED_TAIL_LINES`) go to `.studio/agents/<agent>.failed-<time>.log`, and its lane copy is kept for a look
+  (`STUDIO_KEEP_FAILED_LANE=off` removes it as before); the log and an `agent.failed_evidence` event say where. Python
+  output is unbuffered (`PYTHONUNBUFFERED=1`, `PYTHONIOENCODING=utf-8`), so a crash still leaves its last lines.
 
 ## One key per agent or role (`STUDIO_KEYMAP_…`, 2.59.0)
 

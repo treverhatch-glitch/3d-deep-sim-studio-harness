@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 
 // A made-up value: the checks look for it where it must not be.
 const FAKE_KEY = 'fake-nim-key-for-selftest-2583m';
-const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '' };
+const QUIET = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_HEARTBEAT_SEC: '1', STUDIO_ROLE: '', STUDIO_MAIN_ROOT: '', STUDIO_BUILDER_CMD: '', STUDIO_PRODUCER_CMD: '', STUDIO_AGENT_CMD: '', STUDIO_REHEARSAL: '', STUDIO_NIM_CHECK: 'off' };
 
 export async function selftest2583M({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
@@ -155,7 +155,7 @@ console.log(JSON.stringify({
   names: Object.keys(e).filter((k) => /^(OPENAI_|NVIDIA_)/.test(k)).sort(),
   noneNames: Object.keys(none).filter((k) => /^(OPENAI_|NVIDIA_)/.test(k)),
 }));`, { STUDIO_NIM_MODEL: 'nv/model-from-env' });
-    const want = ['aider', '--model', 'openai/meta/llama-x', '--openai-api-base', 'https://integrate.api.nvidia.com/v1', '--message-file', '/k/kick.md', '--yes-always', '--no-auto-commits'];
+    const want = ['aider', '--model', 'openai/meta/llama-x', '--openai-api-base', 'https://integrate.api.nvidia.com/v1', '--message-file', '/k/kick.md', '--yes-always', '--no-auto-commits', '--no-pretty', '--no-fancy-input', '--no-gitignore', '--map-tokens', '1024', '--map-refresh', 'files'];
     report('M4 (crew P-040: "2.56.0 uses NIM only in route.mjs … The launcher\'s aider case is hard-coded to Ollama"): toolCommand(\'nim\') runs aider on NIM\'s OpenAI-compatible endpoint (openai/<model>, STUDIO_NIM_MODEL when no --model); the child gets OPENAI_API_KEY from NVIDIA_API_KEY (first of a list, also with STUDIO_AGENT_ENV=full) and none of the owner\'s own OPENAI_ names; no NIM key, no OPENAI_API_KEY',
       JSON.stringify(t.argv) === JSON.stringify(want) && t.envModel === 'openai/nv/model-from-env' && t.keyOk === true && JSON.stringify(t.names) === '["OPENAI_API_KEY"]' && Array.isArray(t.noneNames) && !t.noneNames.length,
       JSON.stringify(t).slice(0, 1500));
