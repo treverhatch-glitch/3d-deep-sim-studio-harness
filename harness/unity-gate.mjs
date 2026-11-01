@@ -156,6 +156,9 @@ export async function runUnityGate({ task = null, branch = null, branches = null
   if (!cfg) return { status: 'skipped', ok: true, why: `no Unity land command is configured (studio/game.json "engines": { "unity": { "land": "<command>" } })${track ? '' : ' and there is no Unity track'}: nothing to run` };
   // 2.60.1 (B-41): --branch, else the task's Unity branch; never the folder's checked-out branch (checked below).
   let br = branch || (task ? taskBranch(task) : null);
+  // 2.63.0: a list of branches (the Unity merge train) goes to the command that lands a list. (Declared before any
+  // finish(), which reads it.)
+  const many = Array.isArray(branches) ? branches : null;
   // 2.60.1 (B-41): engines.unity.folder, else the track's folder; a missing one is an error, never a guess.
   const folderSet = typeof cfg.folder === 'string' && cfg.folder.trim() ? cfg.folder.trim() : null;
   const folder = folderSet ? path.resolve(REPO_ROOT, folderSet) : track?.folder ? path.resolve(REPO_ROOT, track.folder) : null;
@@ -163,8 +166,6 @@ export async function runUnityGate({ task = null, branch = null, branches = null
   if (folder && !fs.existsSync(folder) && (folderSet || /\{folder\}/.test(cfg.land))) return finish({ status: 'error', ok: false, code: null, why: `the Unity folder ${folder} (${folderFrom}) doesn't exist: set "folder" in studio/game.json engines.unity to the Unity checkout that has the land script` });
   if (!folder && /\{folder\}/.test(cfg.land)) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {folder} and none is known: set "folder" in studio/game.json engines.unity' });
   const cwd = cfg.cwd ? path.resolve(REPO_ROOT, cfg.cwd) : folder && fs.existsSync(folder) ? folder : REPO_ROOT;
-  // 2.63.0: a list of branches (the Unity merge train) goes to the command that lands a list.
-  const many = Array.isArray(branches) ? branches : null;
   const template = many ? landManyCommand(cfg) : cfg.land;
   if (many && !template) return finish({ status: 'error', ok: false, code: null, why: 'the land command takes one {branch}, not a list: set "landMany" (a command with {branches}) in studio/game.json engines.unity, or land one branch at a time' });
   for (const name of [...(many || []), ...(branch ? [branch] : []), ...(task ? String(task).split(',') : [])]) {
