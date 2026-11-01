@@ -3850,6 +3850,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.63.0 (helper j): the Unity merge train: queued Unity branches land on ONE land run, a red train hands back exactly
+// the culprit by prefix bisection, a conflict waits or is handed back, a refusal blames nobody and is retried, one Unity
+// train at a time and every land run under machine:heavy (qa/selftest-263j.mjs).
+{
+  const dir = copyRepo();
+  const { selftest263J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263j.mjs')).href);
+  await selftest263J({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
