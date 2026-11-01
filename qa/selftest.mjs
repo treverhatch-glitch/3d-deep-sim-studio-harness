@@ -3719,6 +3719,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.5 (H-5, H-10, H-6): a live owner's lapsed claim stays its own (built-but-unlanded lanes, `task start`, atomic
+// `task add --start`, the breaker), lane commits aren't refused for other lanes' locks, broad by-hand claims need --wide,
+// and a merge commit is judged on its own diff (qa/selftest-2585q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585q.mjs')).href);
+  await selftest2585Q({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
