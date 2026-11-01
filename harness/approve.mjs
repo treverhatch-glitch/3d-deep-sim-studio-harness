@@ -52,6 +52,8 @@ export const DEFAULT_PROTECTED = [
   'scripts/hooks/**', 'harness/hook-stamp.mjs', 'harness/test-weakening.mjs',
   // 2.62.0: the replay bench's cases and graders (harness/bench.mjs).
   'studio/bench/**',
+  // 2.64.0: the autonomy level and bars (harness/autonomy.mjs) and the trigger table (harness/threads.mjs).
+  'studio/autonomy.json', 'studio/triggers.json',
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
