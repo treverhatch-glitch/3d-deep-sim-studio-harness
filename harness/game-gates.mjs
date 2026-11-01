@@ -23,6 +23,10 @@
  * the timeout line is printed whenever the value differs from the base.
  * 2.65.0 (self-triage): a check that timed out under load (load factor above 1) runs once more at the cap
  * (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base), once per check per window (harness/self-triage.mjs timeoutRerun).
+ * 2.65.1 (B-17): the load probe's reading is printed for every check, scaled or not (loadReading): the load factor and
+ * its reasons or "nothing scaling it", the CPU-busy sample, whether a quiet-run floor is recorded. A check with no quiet
+ * run recorded yet that times out gets self-triage's one re-run at the cap too; that re-run's pass is its lastPass
+ * (heavy.mjs recordGatePass) and, at load factor 1 only, its quiet run.
  *
  * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
@@ -38,7 +42,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
-import { scaledTimeout, recordGateTime } from './heavy.mjs';
+import { scaledTimeout, recordGateTime, recordGatePass } from './heavy.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
@@ -226,6 +230,32 @@ export function readIncoming(env = process.env) {
   try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return Array.isArray(j.incoming) ? j.incoming.map(String) : null; } catch { return null; }
 }
 
+/**
+ * 2.65.1 (B-17): one line with the load probe's reading for a check, printed every time (the crew saw a 600 s timeout
+ * with no line at all): "[game-gates] <check>: load factor F (<reasons> | nothing scaling it); <CPU reading>;
+ * quiet-run floor: <...>[; timeout N s, not scaled]". It never reads "timeout <n> s (": that is the scaled-timeout
+ * line, printed after it when the timeout isn't the base.
+ */
+export function loadReading(label, t, base) {
+  const sec = (ms) => Math.round(Number(ms) / 1000);
+  const parts = [];
+  if (t.scaleOff) parts.push('load factor not measured (STUDIO_GAME_GATE_TIMEOUT_SCALE=off)');
+  else {
+    parts.push(`load factor ${t.factor} (${t.why || 'nothing scaling it'})`);
+    if (Number.isFinite(t.busy)) parts.push(`CPU ${Math.round(t.busy * 100)}% busy (STUDIO_CPU_BUSY_THRESHOLD ${Math.round((t.busyThreshold ?? 0.6) * 100)}%)`);
+    else if (Number.isFinite(t.load)) parts.push(`no CPU sample (the load average ${t.load.toFixed(1)} on ${t.cores} core${t.cores === 1 ? '' : 's'} is used)`);
+    else parts.push('no CPU sample (STUDIO_CPU_PROBE=off, or it could not be read)');
+  }
+  if (t.scaleOff) parts.push('quiet-run floor: not used');
+  else if (t.label === null || t.label === undefined) parts.push('quiet-run floor: not used for a related-tests run');
+  else if (!(t.floorMult > 0)) parts.push('quiet-run floor: off (STUDIO_GAME_GATE_TIMEOUT_FLOOR)');
+  else if (t.quiet) parts.push(`quiet-run floor: recorded (last quiet run ${sec(t.quiet.ms)} s${t.quiet.at ? `, ${String(t.quiet.at).slice(0, 16).replace('T', ' ')} UTC` : ''}; floor ${sec(t.floorMs)} s)`);
+  else if (t.lastPass) parts.push(`quiet-run floor: none recorded yet; the last passing run, ${sec(t.lastPass.ms)} s at load factor ${t.lastPass.factor}, stands in (floor ${sec(t.floorMs)} s)`);
+  else parts.push('quiet-run floor: none recorded yet');
+  if (Number(t.ms) === Number(base)) parts.push(`timeout ${sec(base)} s, not scaled`);
+  return `[game-gates] ${label}: ${parts.join('; ')}`;
+}
+
 /** Run the game's checks and the engine gate for these paths. */
 export async function runGameGates({ paths = [], changed = null, incoming = null, quiet = false } = {}) {
   const plan = await planGameGates({ paths, changed, incoming });
@@ -272,12 +302,14 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // load factor 1; the line is printed whenever the timeout differs from the base, naming why.
     let curRelated = false;
     const timeKey = () => `${game.name}:${cmdLabel}`;
-    const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : ''].filter(Boolean).join('; ');
+    const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
     const runOnce = (cmd, forceMs = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
       if (forceMs) timing = { ...timing, ms: Math.max(timing.ms, forceMs), rerun: true };
       const changedT = timing.ms !== baseTimeout;
+      // 2.65.1 (B-17): the probe's reading, every time (a timeout that isn't scaled says so, and why).
+      console.error(loadReading(cmdLabel, timing, baseTimeout));
       if (changedT) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
       if (changedT) emitEvent({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)})`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor, ...(timing.floor ? { floorFromMs: timing.floor.lastMs } : {}) } });
       let runEnv = env;
@@ -288,7 +320,13 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       }
       const t0 = Date.now();
       const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
-      if (res.status === 0 && timing.factor === 1 && !curRelated) recordGateTime(slotRoot, timeKey(), Date.now() - t0);
+      // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
+      // also its lastPass at any factor, which stands in for the floor only while no quiet run is recorded.
+      if (res.status === 0 && !curRelated) {
+        const took = Date.now() - t0;
+        if (timing.factor === 1) recordGateTime(slotRoot, timeKey(), took);
+        if (timing.rerun) recordGatePass(slotRoot, timeKey(), took, timing.factor);
+      }
       return res;
     });
     for (const g of gates) {
@@ -300,10 +338,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (related) log(`[game-gates] ${g.id}: only the tests related to the ${existing.length} changed file(s) (the whole suite runs in the whole-game check after landing)`);
       let r = runOnce(cmd);
       const timedOut = (x) => x.error?.code === 'ETIMEDOUT' || (x.status === null && x.signal);
-      const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last quiet run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
+      const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last ${timing.floor.from === 'last pass' ? 'passing' : 'quiet'} run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
       if (timedOut(r)) r.stderr = `${r.stderr || ''}${timeoutLine()}`;
       // 2.65.0 (self-triage, rerun-timeout): a check that timed out under load (factor > 1) runs once more at the cap,
-      // once per check per window (harness/self-triage.json); a timeout with no load, or at the cap, stands.
+      // once per check per window (harness/self-triage.json); a timeout with no load, or at the cap, stands. 2.65.1: so
+      // does one with no quiet run recorded yet (the floor on), so a suite near its base gets a time for its floor.
       if (timedOut(r) && !curRelated) {
         const tr = timeoutRerun({ gate: timeKey(), timing, base: baseTimeout, root: slotRoot });
         if (tr.rerun) {
@@ -312,7 +351,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = runOnce(cmd, tr.ms);
           // Both attempts are named when the re-run times out too: the first timeout line, then the re-run's.
           if (timedOut(r)) r.stderr = `${first}\n${r.stderr || ''}${timeoutLine()}`;
-        } else if (timing.factor > 1) console.error(`[game-gates] ${g.id}: no re-run (${tr.why})`);
+        } else if (timing.factor > 1 || tr.reason) console.error(`[game-gates] ${g.id}: no re-run (${tr.why})`);
       }
       // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
       // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.

@@ -12,9 +12,10 @@
  * turns the whole list off; "on": false one fix.
  *   reap-orphans   a machine:heavy holder whose root died with its tree still running: kill the leftovers
  *                  (heavy.mjs killHolderTree, the same kill as `heavy.mjs stop`) and free the slot.
- *   rerun-timeout  a game check that timed out under load (its load factor was above 1: the B-17 timeout line) runs once
- *                  more at the cap, STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) x its base; never past the cap
- *                  (harness/game-gates.mjs asks timeoutRerun).
+ *   rerun-timeout  a game check that timed out under load (its load factor was above 1: the B-17 timeout line), or
+ *                  (2.65.1) with no quiet passing run recorded for it yet while the floor is on, runs once more at the
+ *                  cap, STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR (3) x its base; never past the cap (harness/game-gates.mjs
+ *                  asks timeoutRerun).
  *   switch-tool    the supervisor halted because two sessions ended with exit 127/9009 (the tool isn't on PATH): when
  *                  another tool of the budget order is on PATH and not out of quota, the missing one is marked out for
  *                  onceHours (budget.mjs's quota file, so pickTool takes the next) and the halt is cleared as
@@ -91,21 +92,30 @@ export function declineFix(fix, cause, why, { root = REPO_ROOT, now = Date.now()
 // ---- rerun-timeout (asked by harness/game-gates.mjs) ----
 
 /**
- * A game check timed out: run it once more? { rerun, ms, why }. Only under load (timing.factor > 1: the B-17 line
- * printed it) and only up to the cap (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x base): a check that already ran at the cap
- * gets nothing longer. Records the fix (once per check per onceHours) when it says yes.
+ * A game check timed out: run it once more? { rerun, ms, why, reason }. Under load (timing.factor > 1: the B-17 line
+ * printed it), or (2.65.1) with no quiet passing run recorded for the check yet while the floor is on
+ * (timing.quiet === null and timing.floorMult > 0, from heavy.mjs scaledTimeout): a suite whose quiet time is near its
+ * base would otherwise time out at the base every time and never get a floor. Only up to the cap
+ * (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x base): a check that already ran at the cap gets nothing longer. Records the
+ * fix (once per check per onceHours) when it says yes.
  */
 export function timeoutRerun({ gate, timing, base, root = REPO_ROOT, env = process.env, now = Date.now() } = {}) {
   const cfg = readTriage(env);
   if (!fixOn('rerun-timeout', cfg)) return { rerun: false, why: STUDIO_OFF(cfg, 'rerun-timeout') };
-  if (!(Number(timing?.factor) > 1)) return { rerun: false, why: 'it timed out with no load measured (load factor 1): not a load timeout' };
+  const loaded = Number(timing?.factor) > 1;
+  const firstRun = !loaded && timing?.quiet === null && Number(timing?.floorMult) > 0;
+  if (!loaded && !firstRun) return { rerun: false, why: 'it timed out with no load measured (load factor 1): not a load timeout' };
+  const reason = loaded ? 'under load' : 'no quiet run recorded yet';
   const cap = Math.round(Number(base) * Math.max(1, num(env.STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR, 3)));
-  if (!(cap > Number(timing.ms))) return { rerun: false, why: `it already ran at the cap (${Math.round(cap / 1000)} s, STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base)` };
+  if (!(cap > Number(timing.ms))) return { rerun: false, reason, why: `it already ran at the cap (${Math.round(cap / 1000)} s, STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base)` };
   const cause = String(gate || 'game check');
   const may = mayApply('rerun-timeout', cause, { root, now, cfg });
-  if (!may.ok) { declineFix('rerun-timeout', cause, may.why, { root, now, cfg }); return { rerun: false, why: may.why }; }
-  recordFix('rerun-timeout', cause, { root, now, msg: `${cause} timed out after ${Math.round(timing.ms / 1000)} s under load (factor ${timing.factor}${timing.why ? `: ${String(timing.why).slice(0, 160)}` : ''}); running it once more at the cap, ${Math.round(cap / 1000)} s`, meta: { gate: cause, timeoutMs: timing.ms, rerunMs: cap, baseMs: Number(base), factor: timing.factor } });
-  return { rerun: true, ms: cap, why: `self-triage: timed out under load (factor ${timing.factor}); once more at the cap, ${Math.round(cap / 1000)} s` };
+  if (!may.ok) { declineFix('rerun-timeout', cause, may.why, { root, now, cfg }); return { rerun: false, reason, why: may.why }; }
+  const what = loaded
+    ? `under load (factor ${timing.factor}${timing.why ? `: ${String(timing.why).slice(0, 160)}` : ''})`
+    : 'with no quiet run recorded yet (load factor 1): its time is recorded when it passes, for the floor';
+  recordFix('rerun-timeout', cause, { root, now, msg: `${cause} timed out after ${Math.round(timing.ms / 1000)} s ${what}; running it once more at the cap, ${Math.round(cap / 1000)} s`, meta: { gate: cause, timeoutMs: timing.ms, rerunMs: cap, baseMs: Number(base), factor: timing.factor, reason } });
+  return { rerun: true, ms: cap, reason, why: loaded ? `self-triage: timed out under load (factor ${timing.factor}); once more at the cap, ${Math.round(cap / 1000)} s` : `self-triage: timed out with no quiet run recorded yet; once more at the cap, ${Math.round(cap / 1000)} s` };
 }
 
 // ---- switch-tool (a supervisor halt) ----
