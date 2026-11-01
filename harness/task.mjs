@@ -1586,6 +1586,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '' });
       emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
       console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
+      // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
+      try {
+        const tr = await import('./train.mjs');
+        const c = await tr.laneTier(mainRoot(), { head: pre.head });
+        console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
+        if (c.tier === 'C') {
+          tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
+          emitEvent({ type: 'task.train.held', agent: whoAmI(flags), task: pre.id, to: 'producer', status: 'blocked', msg: `${pre.id} needs the owner (tier C): ${c.why.join('; ')}`.slice(0, 600), meta: { tier: 'C', why: c.why } });
+          console.log(`${pre.id} needs the owner: tier C never lands by itself. It waits in the queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); you can stop here (task pause ${pre.id} --note "…").`);
+        }
+        if (c.needs.goldenReason.length) console.log(`${pre.id}: note: it moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer: the train hands it back unless a commit says why.`);
+        if (c.needs.pinMoves.length) console.log(`${pre.id}: note: it changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer: the train hands it back unless a commit declares them.`);
+      } catch (err) { console.warn(`[task done] note: could not work out the lane's tier (${err.message}); the train will`); }
       (await import('./hotspots.mjs')).warnAt('train-queue', { task: pre.id, agent: whoAmI(flags) }); // 2.60.0: lines another lane changes too
       process.exit(0);
     }
@@ -1609,10 +1622,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         if (!pre || pre.error) done = pre;
         else {
           const { runTrain } = await import('./train.mjs');
-          const r = await runTrain({ root: mainRoot(), lanes: [{ task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, prechecked: true, note: typeof flags.note === 'string' ? flags.note : '' }], oneLane: true, by: whoAmI(flags) || 'task-done', waitMs: Number(process.env.STUDIO_TRAIN_WAIT_MIN ?? 120) * 60000, deps: trainDeps(busyMod, { forDone: true }) });
-          if (r.landed.includes(pre.id) && !r.unclosed?.length) done = r.closed?.[0] || { id: pre.id, status: 'done' };
-          else {
-            const why = r.unclosed?.[0]?.why || r.dropped[0]?.why || r.deferred[0]?.why || (r.landed.includes(pre.id) ? 'it landed but stays open: its copy gained commits after the check (they land with the next task done)' : r.message);
+          // 2.63.0: it rides along with lanes already queued for the next train (one verify for all); only this lane's
+          // result is the caller's. How long it waits for a running train: STUDIO_TRAIN_LOCK_WAIT_MIN (before 2.63.0
+          // STUDIO_TRAIN_WAIT_MIN, still read when the new one is unset), 120.
+          const lockWait = Number([process.env.STUDIO_TRAIN_LOCK_WAIT_MIN, process.env.STUDIO_TRAIN_WAIT_MIN].map((v) => String(v ?? '').trim()).find((v) => v !== '' && Number.isFinite(Number(v))) ?? 120);
+          const r = await runTrain({ root: mainRoot(), lanes: [{ task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, prechecked: true, note: typeof flags.note === 'string' ? flags.note : '' }], oneLane: true, rideAlong: !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_TRAIN_RIDE_ALONG || '')), by: whoAmI(flags) || 'task-done', waitMs: lockWait * 60000, deps: trainDeps(busyMod, { forDone: true }) });
+          const others = r.landed.filter((t) => t !== pre.id);
+          if (others.length) console.error(`[task done] ${others.join(', ')} rode along in the same train (queued lanes) and landed too.`);
+          const mine = (list) => (list || []).find((x) => x.task === pre.id);
+          const unclosed = mine(r.unclosed);
+          if (r.landed.includes(pre.id) && !unclosed) done = (r.closed || []).find((t) => t?.id === pre.id) || { id: pre.id, status: 'done' };
+          else if (mine(r.held)) {
+            const h = mine(r.held);
+            done = { error: 'held', message: `${pre.id} is not done: it needs the owner (tier ${h.tier}: ${h.why}). It waits in the train queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); then the next train lands it. You can stop here: npm run task -- pause ${pre.id} --note "waits for the owner's release".` };
+          } else {
+            const why = unclosed?.why || mine(r.dropped)?.why || mine(r.deferred)?.why || (r.landed.includes(pre.id) ? 'it landed but stays open: its copy gained commits after the check (they land with the next task done)' : r.message);
             emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: pre.id, status: 'blocked', msg: `${pre.id} not done yet: ${String(why).split('\n')[0].slice(0, 300)}` });
             done = { error: 'not-delivered', message: `${pre.id} is not done: ${why}` };
           }
@@ -1641,15 +1665,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const tr = await import('./train.mjs');
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
-      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
       process.exit(0);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--max N] [--dry-run] [--by <name>] [--wait <min>] | train status'); process.exit(1); }
+    // 2.63.0: a person (or an agent with a person's direct permission; never a worker) releases a lane held for the owner.
+    if (arg1 === 'release') {
+      const tid = flags._[2];
+      if (!tid || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train release <TASK_ID> --by <the person> [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = tr.releaseLane(mainRoot(), tid, { by: flags.by, permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
-    const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+    const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
     (r.ok ? console.log : console.error)(r.message);
-    console.log(JSON.stringify({ train: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+    console.log(JSON.stringify({ train: r.id, ...(r.trains ? { trains: r.trains } : {}), landed: r.landed, dropped: r.dropped, deferred: r.deferred, ...(r.held?.length ? { held: r.held.map(({ fresh, ...h }) => h) } : {}), ...(r.tiers && Object.keys(r.tiers).length ? { tiers: r.tiers } : {}), verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
     process.exit(r.ok ? 0 : 1);
   }
 

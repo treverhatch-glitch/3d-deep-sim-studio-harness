@@ -101,13 +101,40 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   (or the lane's own green verify of that tree reused), then main moves. Unlike the old path, a lane main has moved
   past is merged (not rebased) and main + lane gets a full verify before main moves (the old path re-checked only
   what main brought in). `STUDIO_TRAIN=off`, `--force`, or a copy with no commits of its own use the old path.
-- One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_WAIT_MIN`, 120, for a
-  running one; `task train` doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
+- One train at a time (`.studio/locks/train.lock`; `task done` waits up to `STUDIO_TRAIN_LOCK_WAIT_MIN`, 120, for a
+  running one (before 2.63.0 this was `STUDIO_TRAIN_WAIT_MIN`, still read when the new name is unset); `task train`
+  doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
-  `.pin_refresh`, `.pin_refresh_red`, `.done`.
+  `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
+- Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
+  its head) and its own commits' trailers, by code, never by a model's confidence. The tier and why are printed by
+  `task done --train`, in the train log and in a `task.train.tier` event.
+  - **C, needs the owner** (a closed lane, not a threshold): a protected file (`studio/protected.json` at main's tip
+    plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
+    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`). It is held in the queue
+    (`task.train.held`, `task train status` says NEEDS THE OWNER) and lands only after
+    `npm run task -- train release <ID> --by <name> [--permission "<their words or a link>"]`: a person in their own
+    terminal, or a Producer/Director session or an agent outside the harness recording a person's direct permission
+    (`harness/permission.mjs`); a worker never; with an owner key, only the owner's own terminal. The release is
+    recorded (`task.train.released`, in the queue entry) for the lane's head at that moment: new commits need a new one.
+  - **B, checks plus history**: the game's sim paths, goldens, declared pin moves or pin files, shared utilities, the
+    registry/barrel, a changed test, any file no rule names. The train verifies with `--all`; a golden changed with no
+    `Golden-Reason:` trailer, or a pin file (`pins.files`) with no `Pin-Moves:`, is handed back; a task handed back
+    more than `STUDIO_TRAIN_MAX_HANDBACKS` (3) times is held for a person like tier C.
+  - **A, contained**: docs, added tests, the game's tools folders, assets, UI outside the sim paths. The normal verify.
+  The rules are a table in `harness/tiers.mjs`; a game extends or changes them only through its protected manifest
+  ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.
+- Batching (2.63.0): `task train` waits up to `STUDIO_TRAIN_WAIT_MIN` (10, from when the oldest lane was queued; poll
+  `STUDIO_TRAIN_POLL_S`, 15) for `STUDIO_TRAIN_MIN` (1) lanes that aren't held, then runs with what is queued
+  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too).
+  A lane the manifest marks "runAlone" (more than `maxFiles` files, or a file under its `paths`) gets a train of its
+  own: the oldest lane decides, the rest wait and `task train` runs the next train right after (`trains` in its
+  output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
+  one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
+  `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
 
 ### When a command is killed halfway (2.58.0)
 
