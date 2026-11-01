@@ -16,7 +16,8 @@
  *   - A prompt given as an argument that can't travel on the command line (longer than Windows takes, or a line
  *     break through cmd.exe) is replaced by a one-line instruction to read the kickoff file; the log says so.
  * A custom command (STUDIO_<ROLE>_CMD, STUDIO_AGENT_CMD) is the user's own command line and still runs in the shell;
- * the values filled into its {kickoff} {agent} {model} {role} {task} are quoted for that shell (fillCommand).
+ * the values filled into its {kickoff} {agent} {model} {role} {task} {mainRoot} {addDirs} are quoted for that shell
+ * (fillCommand).
  *
  * The quoting follows the documented rules: a Windows program splits its command line by the MSVCRT /
  * CommandLineToArgvW rules (quoteWinArg); cmd.exe expands %VAR% first (even inside quotes), then removes a ^ before
@@ -287,10 +288,37 @@ function cmdValue(v, quote, next) {
 }
 
 /**
+ * H-9 (2.58.5): a custom command started in a lane copy names its scripts relative to the main checkout
+ * (`node tools/my-wrapper.mjs {kickoff}`); one that isn't committed isn't in the copy. Each bare word of the line that
+ * is a relative path to a file in the main checkout but not in the copy becomes a placeholder for that file's absolute
+ * path, quoted by fillCommand like any value. Returns { template, values, moved } (moved: the words changed).
+ */
+export function localizeCommand(template, { from, to, fs: fsx = fs } = {}) {
+  const t = String(template || '');
+  const values = {};
+  const moved = [];
+  if (!from || !to || path.resolve(from) === path.resolve(to)) return { template: t, values, moved };
+  const isFile = (f) => { try { return fsx.statSync(f).isFile(); } catch { return false; } };
+  let k = 0;
+  // Bare words only: no quotes, no placeholders, no shell characters, not absolute, not an option or VAR=x.
+  const out = t.replace(/(^|[ \t])([A-Za-z0-9_.@+][A-Za-z0-9_.@+\/\\-]*)(?=$|[ \t])/g, (all, sp, word) => {
+    if (!/[\/\\]|\.[A-Za-z0-9]+$/.test(word) || path.isAbsolute(word) || path.win32.isAbsolute(word)) return all;
+    const rel = word.split(/[\/\\]/).join(path.sep);
+    if (rel.split(path.sep).includes('..') || !isFile(path.join(from, rel)) || isFile(path.join(to, rel))) return all;
+    const key = `__main${k++}`;
+    values[key] = path.join(from, rel);
+    moved.push(word);
+    return `${sp}{${key}}`;
+  });
+  return { template: out, values, moved };
+}
+
+/**
  * A custom command line with its placeholders filled, each value quoted for the shell that runs it (cmd.exe on
  * Windows, sh elsewhere) and for where it stands in the line: bare, or inside the line's own '…' or "…". Values that
  * need no quoting are filled as they are, and an empty value as nothing, as before.
- * values: { kickoff, agent, model, role, task }.
+ * values: { kickoff, agent, model, role, task, mainRoot, addDirs }; a list (addDirs: ['--add-dir', <dir>, …], empty
+ * outside a lane copy) fills as one quoted argument per item.
  */
 export function fillCommand(template, values, { platform = process.platform } = {}) {
   const win = platform === 'win32';
@@ -302,8 +330,16 @@ export function fillCommand(template, values, { platform = process.platform } = 
     const key = t[i] === '{' ? keys.find((k) => t.startsWith(`{${k}}`, i)) : null;
     if (key) {
       const end = i + key.length + 2;
-      const v = String(values[key] ?? '');
-      out += win ? cmdValue(v, quote, t[end]) : shValue(v, quote);
+      const raw = values[key];
+      if (Array.isArray(raw)) {
+        // H-9 (2.58.5): a list ({addDirs}) fills as several arguments, each quoted on its own; it can't stand inside
+        // the line's own quotes, where it would become one argument.
+        if (quote) throw new LaunchError(`{${key}} fills in several arguments: write it outside quotes in the custom command`);
+        out += raw.map((x) => (win ? cmdValue(String(x), null, ' ') : shValue(String(x), null))).join(' ');
+      } else {
+        const v = String(raw ?? '');
+        out += win ? cmdValue(v, quote, t[end]) : shValue(v, quote);
+      }
       i = end;
       continue;
     }

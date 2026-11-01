@@ -3729,6 +3729,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.5 (crew report 2026-11-01, H-9 H-2 H-2b H-1 H-8): a custom tool command gets the lane copy and {mainRoot}
+// {addDirs}; agy's prompt on stdin; agy's approved rule set; nim never runs the role's model, a gone model says so;
+// the NIM key survives aider's .env loading (qa/selftest-2585r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2585R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585r.mjs')).href);
+  await selftest2585R({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
