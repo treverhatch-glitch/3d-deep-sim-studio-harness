@@ -18,13 +18,15 @@
  * landings and lane merges in the window; bugs fixed: those whose board title starts "Bug" or that were added as
  * --type bug. Unity: the last Unity land gate (.studio/gates/unity-last.json). Blockers: a halted supervisor, a
  * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
- * holds machine:heavy. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
+ * holds machine:heavy. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
+ * when it has more than 6 lanes. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { recordAlive } from './proc-identity.mjs';
+import { readTrainStatus, trainStatusLine } from './train-status.mjs';
 
 export const BRIEF_MAX_WORDS = 99;
 export const BRIEF_MARK = () => path.join(STUDIO_STATE_DIR, 'brief-status.json');
@@ -88,7 +90,9 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   const freeGb = Math.round(((test !== undefined && test !== '' ? Number(test) * 1024 * 1024 : os.freemem()) / 1024 ** 3) * 10) / 10;
   let heavy = [];
   try { heavy = (await import('./heavy.mjs')).heavyHolders(root).map((h) => ({ label: h.label || 'heavy work', owner: h.owner || null })); } catch {}
-  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy };
+  let train = null;
+  try { train = readTrainStatus(root); } catch {}
+  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -101,6 +105,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     L.push(f.workers.length ? `Workers (${f.workers.length}): ${cut(f.workers.map((w) => `${w.role}${w.task ? ` ${w.task}` : ''}`), k)}.` : 'Workers: none running.');
     L.push(`Landed (${f.landed.length})${f.landed.length ? `: ${cut(f.landed, k)}` : ''}. Bugs fixed (${f.bugs.length})${f.bugs.length ? `: ${cut(f.bugs, k)}` : ''}.`);
     L.push(f.unity ? `Unity: land ${f.unity.status}${f.unity.at ? ` ${String(f.unity.at).slice(11, 16)}` : ''}${f.unity.task ? ` (${cut(String(f.unity.task).split(','), Math.max(1, Math.min(k, 2)))})` : ''}.` : 'Unity: no land run recorded.');
+    if (f.train) L.push(`${trainStatusLine(f.train, { short: true }).replace(/^Train \S+/, 'Train')}${Number(f.train.lanes) > 6 ? ' (STUDIO_TRAIN_MAX caps lanes)' : ''}.`);
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
     L.push(`PC: ${f.freeGb} GB free; heavy: ${f.heavy.length ? cut(f.heavy.map((h) => `${h.label}${h.owner ? ` (${h.owner})` : ''}`), Math.max(1, Math.min(k, 2))) : 'free'}.`);
     return L.join('\n');

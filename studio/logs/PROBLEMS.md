@@ -908,3 +908,13 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** a seeded fuzz run (research pass, 2026-11-02) broke DUPLICATE_ID at tick 2 in 0.6 s; the soak never sends caller-given ids.
 - **Why:** `spawn` didn't check a caller-given id.
 - **Fix:** refused like an unaffordable spawn. qa/regressions/example-duplicate-spawn-id.json.
+
+### P-154 — a red merge train took over an hour to find the lane that broke it (B-43) · fixed in 2.65.3
+- **Evidence:** the crew's train 6 (9 lanes): 1 verify, then 6+ re-checks of about 10 min each, all the whole game check; the combinations looked random and nothing said what each decided or how long was left.
+- **Why:** re-checks ran the whole failing gate; after each culprit a new round verified the rest and bisected the reduced set without saying so.
+- **Fix:** focused re-checks (failing test files only, whole-gate fallback), each step in words with an ETA, the green prefix landed early. qa/selftest-2653a.mjs.
+
+### P-155 — Unity Hub's background `Unity.exe ... serve` counted as an editor outside the lock (B-44) · fixed in 2.65.3
+- **Evidence:** the crew's 2.65.0 gates: "timeout 1800 s (600 s x 3: unity.exe ... running outside the machine:heavy lock)" while only Hub's 27-hour-old serve process ran.
+- **Why:** implicitHolders matched the program name only.
+- **Fix:** command lines of the matches are read (processArgs) and STUDIO_HEAVY_IGNORE_ARGS skips background services. qa/selftest-2653a.mjs.

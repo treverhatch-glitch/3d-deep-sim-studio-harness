@@ -66,7 +66,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, sameProcess } from './proc-identity.mjs';
+import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, sameProcess, processArgs } from './proc-identity.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { landingWaiters } from './merge-lane.mjs';
@@ -538,7 +538,21 @@ export function implicitHolders(root, { env = process.env, procs = null, listPro
   const covered = new Set();
   for (const h of heavyHolders(root, { env })) { try { for (const m of holderTree(h, list, { self: -1 }).members) covered.add(m); } catch {} }
   for (let p = self, k = 0; p && k < 64; k += 1) { covered.add(p); const rec = byPid.get(p); if (!rec || Number(rec.ppid) === p) break; p = Number(rec.ppid); }
-  return list.filter((p) => isHeavy(p) && !covered.has(Number(p.pid)) && !(isHeavy(byPid.get(Number(p.ppid))))).map((p) => ({ pid: Number(p.pid), cmd: p.cmd, start: p.start || null }));
+  const found = list.filter((p) => isHeavy(p) && !covered.has(Number(p.pid)) && !(isHeavy(byPid.get(Number(p.ppid)))));
+  // 2.65.3 (B-44): a heavy program's background service is not an editor at work: Unity Hub keeps a `Unity.exe ...
+  // serve` process alive for days. Those whose command line matches STUDIO_HEAVY_IGNORE_ARGS (a regex; default the
+  // `serve` word; off: none) don't count. A command line that can't be read still counts, as before.
+  const ignore = heavyIgnoreArgs(env);
+  const args = ignore && found.length ? processArgs(found.map((p) => p.pid), { procs: procs || null }) : {};
+  return found.filter((p) => !(ignore && typeof args[Number(p.pid)] === 'string' && ignore.test(args[Number(p.pid)]))).map((p) => ({ pid: Number(p.pid), cmd: p.cmd, start: p.start || null }));
+}
+
+/** STUDIO_HEAVY_IGNORE_ARGS: a heavy program whose command line matches this (case-insensitive) is a background service, not counted; default `(^|\s)-?-?serve(\s|$)` (also when empty); off: none. A bad regex counts as the default. */
+export function heavyIgnoreArgs(env = process.env) {
+  const v = env.STUDIO_HEAVY_IGNORE_ARGS;
+  const def = '(^|\\s)-?-?serve(\\s|$)';
+  if (v !== undefined && off(String(v))) return null;
+  try { return new RegExp(v === undefined || String(v).trim() === '' ? def : String(v), 'i'); } catch { return new RegExp(def, 'i'); }
 }
 export const describeImplicit = (p) => `${p.cmd} (pid ${p.pid}${p.start ? `, for ${span(Date.now() - Number(p.start))}` : ''})`;
 

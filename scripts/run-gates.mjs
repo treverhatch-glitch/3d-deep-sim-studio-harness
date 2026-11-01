@@ -69,6 +69,10 @@ const FULL_FILE = path.join(VERIFY_DIR, 'full.json'); // 2.59.0 (#11b): the chec
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));
 }
 const only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+// 2.65.3 (B-43): a merge train's focused re-check (STUDIO_GATE_FOCUS, harness/train-focus.mjs) is read only by an
+// --only run, which stands for no verify; any other run drops it, so a verify always runs the whole game check.
+const focusRun = Boolean(only && String(process.env.STUDIO_GATE_FOCUS || '').trim());
+if (!only) delete process.env.STUDIO_GATE_FOCUS;
 const tier = argv.includes('--tier') ? argv[argv.indexOf('--tier') + 1] : null;
 const isMergeTier = tier === 'merge';
 const isFastTier = tier === 'fast';
@@ -206,7 +210,7 @@ for (const gate of gates) {
   let key;
   // Only the in-session fast tier reads the cache; everyday verify, --deep and the merge tier always run.
   // 2.30h (#6): a gate with cacheDeep (the HUD check) also reuses its last pass in a --deep run; the merge tier still always runs it.
-  if (useCache && cacheable && (isFastTier || (gate.cacheDeep && !isMergeTier))) {
+  if (useCache && cacheable && !focusRun && (isFastTier || (gate.cacheDeep && !isMergeTier))) {
     key = getKey(gate);
     const cached = get(gate, key);
     if (cached) {
@@ -235,7 +239,7 @@ for (const gate of gates) {
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name });
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
 
-  if (cacheable && !isMergeTier) {
+  if (cacheable && !isMergeTier && !focusRun) {
     if (ok) set(gate, ms);
     else del(gate);
   }
@@ -265,7 +269,7 @@ try {
   const headNow = headAtStart;
   const dirtyEnd = treeDirty();
   const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
-  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
+  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;
