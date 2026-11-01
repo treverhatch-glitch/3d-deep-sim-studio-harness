@@ -39,10 +39,18 @@ Producer, Director and planner. Sources, each line tagged with its source id:
 
 | Source | Id | Counted as |
 | --- | --- | --- |
-| Lessons in `studio/memory/failures.md` (their "How to avoid it next time" rule) | `failures.md#<ID>` | 1, plus every repeat of a failure that matches it (a lesson that didn't stick) |
+| Lessons in `studio/memory/failures.md` (their "How to avoid it next time" rule) **that a person accepted** (`npm run lessons -- accept <ID> --by <person> --why "…"`, kept in `studio/decisions/accepted-lessons.json`) | `failures.md#<ID>` | 1, plus every repeat of a failure that matches it (a lesson that didn't stick) |
 | The same failure on two or more days (`.studio/events.jsonl`, as `npm run learn`) with no lesson yet | `repeat:<kind>#<id>` | its count |
 | Causes a person accepted (`npm run causes -- accept`) | `cause:<n>` | the tasks forced past it |
 | Retro suggestions the Producer ticked (`- [x]` in `studio/memory/retros/`) | `retro:<date>` | the retros that raised it |
+
+Lessons are written by agents, and planning prompts become the next sessions' plans, so a lesson reaches this block
+only after a person accepted that exact text (an edit drops it again until it is re-accepted). A worker can't accept
+one, and an agent outside the harness or a Producer/Director session can only on a person's permission
+(`--permission "…"`, as for `task type`). Lessons not yet accepted are named by id only, with the accept command;
+worker briefs still show related lessons inside the marked block. `npm run lessons` lists each lesson's state. Text
+written by agents or people loses zero-width and bidi characters, tag characters and HTML comments before any brief
+or prompt shows it (`harness/untrusted.mjs`).
 
 Ranked by count × 0.5^(age / half-life). Settings: `STUDIO_CONSTRAINTS_K` (lines, default 5),
 `STUDIO_CONSTRAINTS_LINE` (characters per line, default 200), `STUDIO_CONSTRAINTS_HALFLIFE_DAYS` (default 14). The

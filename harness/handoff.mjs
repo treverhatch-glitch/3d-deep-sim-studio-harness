@@ -310,7 +310,9 @@ export function renderHandoff(h) {
   add(`- ${hn.well.length} things that worked and ${hn.upgrade.length} upgrade ideas on file. Add yours: npm run notes -- add --kind well|bad|workaround|upgrade|eval "…"`);
 
   head('Lessons (studio/memory/failures.md)');
-  add(...(h.lessons.length ? h.lessons.map((l) => `- ${l}`) : ['- None recorded.']));
+  // 2.61: lesson headings are written by agents: shown inside the marked block (hidden characters stripped), never as
+  // the harness's own lines. Only lessons a person accepted reach the constraints block above as planning rules.
+  add(...(h.lessons.length ? [untrustedBlock([{ label: 'The newest lesson headings (written by agents)', text: h.lessons.map((l) => `- ${l}`).join('\n') }]).trimEnd()] : ['- None recorded.']));
   if (h.pitfallsMd) {
     head('Pitfalls for the Producer (studio/PITFALLS.md, scoped to your role)');
     add(h.pitfallsMd.trimEnd());
