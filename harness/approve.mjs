@@ -50,6 +50,8 @@ export const DEFAULT_PROTECTED = [
   'qa/controls-check.mjs', 'qa/protected-check.mjs', 'harness/approve.mjs',
   '**/tools/controls.gd', '**/tools/gate.gd', '.github/workflows/**',
   'scripts/hooks/**', 'harness/hook-stamp.mjs', 'harness/test-weakening.mjs',
+  // 2.62.0: the replay bench's cases and graders (harness/bench.mjs).
+  'studio/bench/**',
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
