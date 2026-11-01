@@ -3641,6 +3641,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.3 (P-069): claude's -p is --print, not a profile, and with no profiles set up a Producer or Director starts while a
+// builder runs (qa/selftest-2583p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583p.mjs')).href);
+  await selftest2583P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
