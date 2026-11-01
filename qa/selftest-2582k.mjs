@@ -20,7 +20,8 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
-  const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
+  // A file git restored comes back with CRLF on Windows (core.autocrlf); edits match LF text, and git stores LF either way.
+  const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n');
   const edit = (rel, from, to) => { const t = read(rel); if (!t.includes(from)) throw new Error(`${rel}: no "${from}"`); write(rel, t.replace(from, to)); };
   const ownerKey = path.join(tmpRoot, `owner-2582k-${process.pid}.pem`);
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_GAME_GATES: 'skip',
