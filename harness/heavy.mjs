@@ -180,6 +180,27 @@ export function holderTree(h, procs, { self = process.pid } = {}) {
       members.add(Number(c.pid));
       walk(Number(c.pid), st);
     }
+    // 2.60.0 (#5, Windows): the holder's own children are recorded (tree.children). When the holder dies, Node's job
+    // object takes its direct child (the shell) with it, but the shell's children broke away and live on, naming the
+    // dead shell as their parent: they are found through the recorded child, as the root's orphans are through it.
+    for (const [cpRaw, cRec] of Object.entries(h?.tree?.children || {})) {
+      const cp = Number(cpRaw);
+      if (!Number.isInteger(cp) || cp <= 0 || cp === root) continue;
+      const cur2 = byPid.get(cp);
+      const same = cur2 && !cur2.zombie ? sameProcess(cRec, cur2) : false;
+      const cStart = Number(cRec?.start) || 0;
+      if (cur2 && !cur2.zombie && same !== false) {
+        if (!(cStart && startOf(cur2) && startOf(cur2) < cStart - TREE_TOL_MS)) { members.add(cp); walk(cp, startOf(cur2) || cStart); }
+        continue;
+      }
+      const reused2 = cur2 ? startOf(cur2) : 0;
+      for (const c of kids.get(cp) || []) {
+        const st = startOf(c);
+        if (c.zombie || (st && cStart && st < cStart - TREE_TOL_MS) || (st && reused2 && st >= reused2)) continue;
+        members.add(Number(c.pid));
+        walk(Number(c.pid), st);
+      }
+    }
   }
   const groups = [];
   for (const g of [...new Set((h?.tree?.groups || []).map(Number).filter((x) => Number.isInteger(x) && x > 0))]) {
@@ -659,6 +680,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // started even after this process is killed; on Windows taskkill /T from this process covers it.
     const posix = process.platform !== 'win32';
     const child = spawn(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: 'inherit', windowsHide: true, detached: posix });
+    // On Windows the shell itself is recorded: it dies with this process (Node's job object), its children don't.
+    if (!posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), children: { ...(cur.tree?.children || {}), [child.pid]: spawnedIdentity(child.pid, 'cmd') } } }));
     if (posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), groups: [...new Set([...(cur.tree?.groups || []), child.pid])], groupIds: { ...(cur.tree?.groupIds || {}), [child.pid]: spawnedIdentity(child.pid, 'sh') }, kill: 'the process groups' } }));
     const fwd = (sig) => () => { try { if (posix) process.kill(-child.pid, sig); else child.kill(sig); } catch {} };
     for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, fwd(s));

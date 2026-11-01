@@ -33,7 +33,8 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
   const g = (cwd, args, e = {}) => run(cwd, `git -c core.autocrlf=false ${args}`, { ...env, ...e });
   const sg = (args, e = {}) => g(S, args, e);
   const upgrade = (args, e = {}) => run(S, `node harness/upgrade-guard.mjs ${args}`, { ...env, ...e });
-  const head = (rev = 'HEAD') => sg(`rev-parse ${rev}`).stdout.trim();
+  // Quoted: cmd.exe (Windows) treats ^ as its escape character, so HEAD^2 would reach git as HEAD2.
+  const head = (rev = 'HEAD') => sg(`rev-parse "${rev}"`).stdout.trim();
   const body = (rev = 'HEAD') => sg(`log -1 --format=%B ${rev}`).stdout;
   const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const read = (rel) => fs.readFileSync(path.join(S, rel), 'utf8');
