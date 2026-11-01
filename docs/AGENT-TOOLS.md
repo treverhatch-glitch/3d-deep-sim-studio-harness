@@ -154,6 +154,29 @@ npm run agent -- start --role builder --agent nim-1 --tool nim --model <nim mode
   Without a NIM key: "NVIDIA_API_KEY is not set". NIM's free tier runs one session at a time
   (`STUDIO_NIM_MAX_SESSIONS`).
 
+## One key per agent or role (`STUDIO_KEYMAP_…`, 2.59.0)
+
+The owner can give one launched agent (or every agent of a role) a key under another name, for example so one lane
+bills to its own Anthropic key. In `.env` (or the shell that starts the supervisor):
+
+```bash
+STUDIO_KEYMAP_BUILDER=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_LANE          # every builder: ANTHROPIC_API_KEY := $ANTHROPIC_API_KEY_LANE
+STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builder-s3 only (beats the role's for that name)
+```
+
+- Format: `TARGET:SOURCE[,TARGET:SOURCE]`; the agent's name in capitals with `-` as `_`. For the same TARGET the agent's
+  mapping wins over the role's. Only that child's environment changes; the `STUDIO_KEYMAP_` settings aren't passed on.
+- Both names must be key names: capitals ending in `_API_KEY` or `_TOKEN`, with an optional suffix (`_LANE`, `_2`).
+  Never `STUDIO_…`, `HUB_…` (`HUB_TOKEN` writes to the War Room) or the owner key. Anything else is refused, and the
+  launch goes on without that entry.
+- A SOURCE that isn't set leaves TARGET unset for that session (the agent doesn't quietly fall back to the shared key).
+  With `--tool nim`, a mapping for `OPENAI_API_KEY` also sets `AIDER_OPENAI_API_KEY`.
+- The agent's log gets one `[launcher] key map …` line per entry and an `agent.keymap` event names them (a person sees
+  it when something was refused or unset). Values are never printed or written to the log, events or session record,
+  and a refused entry is echoed only when it is plainly a variable's name.
+- Inside a launched session (an agent hiring an agent) a mapping counts only as written in the studio's `.env`; one set
+  in the session's own shell is refused.
+
 ## Best practices for a run
 
 - **Let the launcher make the copies.** Don't use a tool's own worktree mode (`claude -w`): the studio's queue,

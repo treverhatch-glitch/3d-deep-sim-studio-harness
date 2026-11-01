@@ -3742,6 +3742,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0 (final brief 2026-11-01, #15 #14 #8): npm run studio:resume clears a halt by a person's name (not an agent's,
+// not inside a launched session); the owner's per-agent key mapping (names logged, values never); the launcher holds no
+// too-broad lane as a session lock (lane copy: unheld; main checkout: refused unless a person kept it wide)
+// (qa/selftest-259e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259e.mjs')).href);
+  await selftest259E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

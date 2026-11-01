@@ -64,6 +64,7 @@
     "studio:start": "node harness/supervisor.mjs",
     "studio:stop": "node harness/supervisor.mjs stop",
     "studio:status": "node harness/supervisor.mjs status",
+    "studio:resume": "node harness/supervisor.mjs resume",
     "budget": "node harness/budget.mjs",
     "tokens": "node harness/tokens.mjs",
     "help": "node harness/help.mjs",
