@@ -49,6 +49,12 @@ Policies are pure functions of `(state, tick)`; they run inside replays and gold
   same check: a warning by default, a failure when `cartridge.json` says `"detMath": "required"` (new games start
   that way). Use a `detMath` module instead (docs/3D-DEEP-SIM.md, "Deterministic math").
 - Every game cartridge has golden files in `qa/golden/` and a `start-to-win` scenario that wins.
+- `cartridge.json` can set `"tickBudgetMs"`: the cartridge's own tick budget for `scripts/check-tick-budget.mjs`
+  (otherwise `TICK_BUDGET_MS_PER_TICK`, else 1 ms). A cartridge that drives a real game's sim takes a few ms a tick.
+- A studio game with its own checks (`game/<name>/studio.gates.json`) can still have real cartridges beside it, for
+  example a replay cartridge over the game's sim: those get the gates that check every cartridge (purity, isolation,
+  golden, golden-py, regressions, vertical-slice, soak, tick-budget). Never name such a cartridge after the studio
+  game: a cartridge with the game's own name switches the game's own checks off.
 - Changing sim behaviour changes hashes: run `npm run golden -- --update` and commit the new hashes
   in the same commit as the change.
 

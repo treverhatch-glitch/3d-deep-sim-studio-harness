@@ -18,6 +18,8 @@
 6. **Commit the fix** with `STUDIO_LOCK_OWNER` set, so the hook tags it with this task. The done-check
    replays your regression on the commit before the fix; it must fail there, or it guards nothing
    (`node qa/fails-before.mjs qa/regressions/<bug-id>.json <fix>^` to see it yourself).
+   It has to actually play the old code: a cartridge that isn't there yet at that commit, a build that fails
+   there, or a run that times out is an error, not a pass, so land the cartridge before the fix that relies on it.
 7. **Lesson.** Four bullets in `studio/memory/failures.md` (what broke, why, the fix, how to spot it
    next time), plus `- **Role**: <role>` if one role should learn it. `node scripts/distill-bug.mjs`
    starts it.
