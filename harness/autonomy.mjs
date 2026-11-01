@@ -5,6 +5,9 @@
  *   npm run autonomy                     the last 7 days, with daily buckets and the level badge
  *   npm run autonomy -- --days 14 --json
  *   npm run autonomy -- --now 2026-11-08T00:00:00Z   the window ending then (a replay of an older week)
+ *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   2.65.0: set the level (setLevel)
+ * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
+ * person's round-trips per landed task and orchestrator interventions (conductor.note events).
  *
  * A script over .studio/events.jsonl (no model, no tokens). It measures, over the window:
  *   - hours of supervisor running (minus halted time) per UNPLANNED person intervention: a person resuming a halted
@@ -30,7 +33,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 
 export const AUTONOMY_REL = 'studio/autonomy.json';
 export const DEFAULT_AUTONOMY = Object.freeze({
@@ -46,6 +49,25 @@ export const DEFAULT_AUTONOMY = Object.freeze({
   }),
 });
 const DAY = 86400000;
+/**
+ * 2.65.0: an optional price table, studio/prices.json (none ships): { "models": { "<model or tool>": { "in": usd,
+ * "out": usd, "cacheRead": usd } } } per million tokens. Without it the scorecard's cost is in tokens only.
+ */
+export const PRICES_REL = 'studio/prices.json';
+export function readPrices(root = REPO_ROOT) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(root, PRICES_REL), 'utf8')); return j?.models && typeof j.models === 'object' ? j.models : null; } catch { return null; }
+}
+/** Dollars for session-end events at a price table (by the event's model, else its tool): { usd, unpriced }. */
+export function dollarsOf(ends, prices) {
+  let usd = 0; let unpriced = 0;
+  for (const e of ends) {
+    const p = prices[e.model] || prices[e.meta?.tool] || null;
+    const tin = Number(e.tokensIn) || 0; const tout = Number(e.tokensOut) || 0; const cr = Number(e.meta?.cacheRead ?? e.cacheRead) || 0;
+    if (!p) { if (tin + tout + cr) unpriced += 1; continue; }
+    usd += (tin * (Number(p.in) || 0) + tout * (Number(p.out) || 0) + cr * (Number(p.cacheRead) || 0)) / 1e6;
+  }
+  return { usd, unpriced };
+}
 const ESCAPE_DAYS = 7;
 const ts = (e) => Date.parse(e?.ts) || 0;
 const round = (x, d = 2) => (x === null || x === undefined || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);
@@ -60,7 +82,7 @@ export function readAutonomyConfig(root = REPO_ROOT) {
 }
 
 // The harness's own scripts and accounts: never a person.
-const SYSTEM = /^(watchdog|train|supervisor|launcher|harness|hub|system|ci|ci-watch|rescue|router|gamedev|director-flow|scheduler|null|undefined|unknown)$/i;
+const SYSTEM = /^(watchdog|train|supervisor|launcher|harness|hub|system|ci|ci-watch|rescue|router|gamedev|director-flow|scheduler|self-triage|done-check|digest|null|undefined|unknown)$/i;
 let classifier = null;
 /** A person's name? The harness's existing rules (verdict.mjs isPerson + reclassify.mjs isAgentName), cached per name. */
 export async function personClassifier() {
@@ -153,7 +175,7 @@ function runningMs(a, b, runs, halts) {
  * The scorecard. events: the log (any order); now: the window's end; days: its length.
  * isPersonName: a name -> bool function (personClassifier()); attempts: rows from metrics.mjs attemptRows (optional).
  */
-export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null } = {}) {
+export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null, prices = null } = {}) {
   if (typeof isPersonName !== 'function') throw new Error('buildAutonomy needs isPersonName (await personClassifier())');
   const sorted = [...events].map((e, i) => [ts(e), i, e]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map((x) => x[2]);
   const from = now - days * DAY;
@@ -255,6 +277,26 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
 
   // Tokens per landed task.
   const tokens = win.filter((e) => e.type === 'agent.session.end').reduce((s, e) => s + weight(e), 0);
+  // 2.65.0: cost per merged change, this window and the one before (the trend). Tokens as the tools reported them;
+  // dollars only from a price table in config (none ships: tokens only, and the card says so).
+  const prevFrom = from - days * DAY;
+  const inPrev = (t) => t >= prevFrom && t < from;
+  const prevTokens = sorted.filter((e) => e.type === 'agent.session.end' && inPrev(ts(e))).reduce((s, e) => s + weight(e), 0);
+  const prevLanded = new Set();
+  for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
+  const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
+  if (prices && typeof prices === 'object') {
+    const d = dollarsOf(win.filter((e) => e.type === 'agent.session.end'), prices);
+    Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, note: `at the prices in ${PRICES_REL}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
+  }
+  // 2.65.0: orchestrator interventions: conductor notes (event conductor.note, an outside orchestrator's rulings in a
+  // task's record), counted by type so they show once the conductor tools write them; and a person's round-trips
+  // (planned and unplanned interventions) per landed task.
+  const notes = win.filter((e) => e.type === 'conductor.note');
+  const byWho = {};
+  for (const e of notes) { const w = String(e.meta?.by || e.agent || 'unknown'); byWho[w] = (byWho[w] || 0) + 1; }
+  const orchestrator = { conductorNotes: notes.length, by: byWho, perLanded: n ? round(notes.length / n, 2) : null };
+  const roundTripsPerLanded = n ? round((unplanned.length + planned.length) / n, 2) : null;
 
   // Risk tiers (2.63): a landing that names tier C without a signature. n/a while no landing carries a tier.
   const tiered = win.filter((e) => landingsOf(e).length && e.meta?.tier);
@@ -289,6 +331,9 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     verdicts,
     tokens: Math.round(tokens),
     tokensPerLanded: n ? Math.round(tokens / n) : null,
+    cost,
+    orchestrator,
+    roundTripsPerLanded,
     tierCUnsigned: tierC,
     tasks: landed.map((l) => ({ task: l.task, landed: new Date(l.at).toISOString(), handsFree: l.handsFree, forced: l.forced, escaped: l.escaped, viaTrain: l.viaTrain, people: [...l.people] })),
     buckets,
@@ -320,8 +365,8 @@ export function levelBadge(card, cfg = DEFAULT_AUTONOMY) {
   const level = cfg.level || 'L2';
   const rank = (l) => Number(String(l).slice(1)) || 0;
   let suggestion = { kind: null, text: '' };
-  if (meets === 'L3' && rank(level) < 3) suggestion = { kind: 'promote', text: `Every L3 bar held for ${cfg.days} days${checks.some((c) => c.na) ? ` (${checks.filter((c) => c.na).map((c) => c.id).join(', ')}: n/a)` : ''}. Suggestion for the owner: move to L3. Your call: set "level": "L3" in ${AUTONOMY_REL} and sign it; nothing changes on its own.` };
-  else if (rank(level) >= 3 && failing.length) suggestion = { kind: 'demote', text: `The studio is at ${level} but ${failing.map((c) => `${c.id} ${c.value} (bar: ${c.bar})`).join('; ')}. Suggestion for the owner: back to L2 until the numbers hold again (set "level": "L2" in ${AUTONOMY_REL}).` };
+  if (meets === 'L3' && rank(level) < 3) suggestion = { kind: 'promote', text: `Every L3 bar held for ${cfg.days} days${checks.some((c) => c.na) ? ` (${checks.filter((c) => c.na).map((c) => c.id).join(', ')}: n/a)` : ''}. Suggestion for the owner: move to L3. Your call: npm run autonomy -- level L3 --by <you> (a person, a Producer/Director session or an outside agent on your word); nothing changes on its own.` };
+  else if (rank(level) >= 3 && failing.length) suggestion = { kind: 'demote', text: `The studio is at ${level} but ${failing.map((c) => `${c.id} ${c.value} (bar: ${c.bar})`).join('; ')}. Suggestion for the owner: back to L2 until the numbers hold again (npm run autonomy -- level L2 --by <you>).` };
   return { level, meets, checks, suggestion };
 }
 
@@ -329,7 +374,53 @@ export function levelBadge(card, cfg = DEFAULT_AUTONOMY) {
 export function autonomyLine(card, badge) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 100)}%`);
   const sug = badge.suggestion.kind ? ` · ${badge.suggestion.kind === 'promote' ? 'suggest L3 (your call)' : 'suggest back to L2'}` : '';
-  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task`}${sug}`;
+  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${sug}`;
+}
+
+/**
+ * 2.65.0: `npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]`. Sets "level" in
+ * studio/autonomy.json, set once; agents then make every decision that level allows, and the scorecard only suggests.
+ * Who (the owner's rule, harness/permission.mjs): a person in their own terminal; a launched Producer or Director
+ * session; an agent outside the harness on a person's direct permission (--permission, 10+ characters). A worker
+ * (a launched builder, qa, ... session, or a worker's name in STUDIO_LOCK_OWNER or --by) never. One autonomy.level
+ * event names who and why. Returns { ok, message, from, to }.
+ */
+export async function setLevel(level, { by, why = '', permission = '', env = process.env, root = REPO_ROOT } = {}) {
+  const to = String(level || '').toUpperCase();
+  if (!/^L[1-4]$/.test(to)) return { ok: false, message: 'Usage: npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "<the person\'s words or a link>"]' };
+  const who = String(by || '').trim();
+  if (!who) return { ok: false, message: 'Say who sets it: --by <name>.' };
+  const { agentOnPermission, WORKER_NAME, DECIDER_ROLES, AGENT_SHELL } = await import('./permission.mjs');
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const tail = 'The level is set by a person, a Producer or Director session, or an agent outside the harness on a person\'s permission; never by a worker.';
+  if (role && !DECIDER_ROLES.test(role)) return { ok: false, message: `Refused: a launched ${role} session can't set the autonomy level. ${tail}` };
+  const worker = [owner, who].find((x) => x && WORKER_NAME.test(x));
+  if (worker) return { ok: false, message: `Refused: ${worker} is a worker agent. ${tail}` };
+  const marker = AGENT_SHELL.find((k) => String(env[k] || '').trim());
+  let rec = { via: 'person' };
+  if (role) rec = { via: role.toLowerCase(), recordedBy: owner || `a ${role.toLowerCase()} session` };
+  else if (marker || owner) {
+    const p = agentOnPermission({ permission, env });
+    if (!p.ok) return { ok: false, message: `Refused: an agent outside the harness sets the level only on a person's direct permission: ${p.why}. ${tail}` };
+    rec = { via: 'outside agent', recordedBy: p.recordedBy, permission: String(permission).trim().slice(0, 500) };
+  } else {
+    let agentish = false;
+    try { agentish = (await import('./reclassify.mjs')).isAgentName(who); } catch {}
+    if (agentish) return { ok: false, message: `Refused: "${who}" is an agent's name; --by is the person setting the level (or run it from that agent's own Producer/Director session).` };
+  }
+  const file = path.join(root, AUTONOMY_REL);
+  let raw = {};
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { raw = {}; }
+  const from = /^L[0-4]$/.test(String(raw.level || '')) ? raw.level : DEFAULT_AUTONOMY.level;
+  const note = String(why || '').trim().slice(0, 300);
+  const set = { by: who.slice(0, 60), at: new Date().toISOString(), from, ...(note ? { why: note } : {}), via: rec.via, ...(rec.recordedBy ? { recordedBy: rec.recordedBy } : {}), ...(rec.permission ? { permission: rec.permission } : {}) };
+  const next = { ...(Object.keys(raw).length ? raw : { note: 'The autonomy level and the bar for L3 (npm run autonomy; docs/AUTONOMY.md).', days: DEFAULT_AUTONOMY.days, l3: { ...DEFAULT_AUTONOMY.l3 } }), level: to, levelSet: set };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+  const how = rec.recordedBy ? (rec.permission ? ` (recorded by ${rec.recordedBy} on ${who}'s permission: "${rec.permission.slice(0, 120)}")` : ` (a ${rec.via} session: ${rec.recordedBy})`) : '';
+  emitEvent({ type: 'autonomy.level', agent: (rec.recordedBy || who).slice(0, 60), to: 'producer', msg: `Autonomy level ${from} -> ${to} by ${who}${how}${note ? `: ${note}` : ''}`.slice(0, 600), meta: { by: who.slice(0, 60), from, to, why: note || null, via: rec.via, ...(rec.recordedBy ? { recordedBy: rec.recordedBy } : {}), ...(rec.permission ? { permission: rec.permission } : {}) } });
+  return { ok: true, from, to, message: `Autonomy level ${from} -> ${to} in ${AUTONOMY_REL}, set by ${who}${how}${note ? ` (${note})` : ''}. Commit ${AUTONOMY_REL} so the change is on record.` };
 }
 
 /** Is studio/autonomy.json in the protected list (so only the owner's signed change moves the bar)? */
@@ -351,7 +442,7 @@ export async function autonomyReport({ now = Date.now(), days = null, events = n
   if (withAttempts) { try { attempts = (await import('./metrics.mjs')).attemptRows(evs, { now }); } catch {} }
   let weigh = null;
   try { const { weightedTokens } = await import('./budget.mjs'); weigh = (e) => weightedTokens(e); } catch {}
-  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh });
+  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices() });
   const badge = levelBadge(card, { ...cfg, days: d });
   return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, protected: await configProtected() } };
 }
@@ -371,6 +462,11 @@ export async function autonomyCard({ now = Date.now() } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+  if (argv[0] === 'level') {
+    const r = await setLevel(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
   const at = flag('now') ? Date.parse(flag('now')) : Date.now(); // --now <ISO>: score a past window (a replay)
   if (!Number.isFinite(at)) { console.error('Usage: npm run autonomy [-- --days 7] [--now <ISO time>] [--json]'); process.exit(1); }
   const r = await autonomyReport({ days: flag('days'), now: at });
@@ -385,6 +481,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Halts: ${c.haltWait.count}${c.haltWait.open ? ` (${c.haltWait.open} still waiting)` : ''}, waited ${c.haltWait.totalMin ?? 0} min in all (median ${c.haltWait.medianMin ?? '-'}, longest ${c.haltWait.maxMin ?? '-'}).`);
   console.log(`Gate catches: ${c.gateCatches.trainReds} train reds, ${c.gateCatches.notDone} done-check refusals (${c.gateCatches.perLanded ?? '-'} per landed task).`);
   console.log(`Away verdicts: ${c.verdicts.great} great, ${c.verdicts.redo} redo, ${c.verdicts.comment} comment (Redo ${pct(c.verdicts.redoRate)}). Tokens: ${c.tokens.toLocaleString()} (${c.tokensPerLanded === null ? '-' : c.tokensPerLanded.toLocaleString()} per landed task).`);
+  if (c.cost) console.log(`Cost per landed task: ${c.cost.tokensPerLanded === null ? '-' : `${c.cost.tokensPerLanded.toLocaleString()} tokens`}${c.cost.previousTokensPerLanded ? ` (the ${r.card.window.days} days before: ${c.cost.previousTokensPerLanded.toLocaleString()})` : ''}${c.cost.priced ? `, $${c.cost.dollarsPerLanded ?? '-'} (${c.cost.note})` : ` (${c.cost.note})`}.`);
+  console.log(`Person round-trips per landed task: ${c.roundTripsPerLanded ?? '-'}. Orchestrator interventions: ${c.orchestrator.conductorNotes} conductor note(s)${c.orchestrator.conductorNotes ? ` (${Object.entries(c.orchestrator.by).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}.`);
   console.log('Days:');
   for (const b of c.buckets) console.log(`  ${b.day}: supervisor ${b.supervisorHours} h, ${b.unplanned} unplanned / ${b.planned} planned, ${b.landed} landed (${b.handsFree} hands-free, ${b.forced} forced)`);
   console.log(`L3 bar (${r.config.file}${r.config.exists ? '' : ', defaults: no file'}${r.config.protected ? '; protected: owner-signed changes only' : '; set by a person, a Producer or Director session or an outside agent, never a worker'}):`);
