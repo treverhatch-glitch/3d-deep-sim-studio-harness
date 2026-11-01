@@ -1716,7 +1716,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
         process.exit(1);
       }
-      updateHolds((all2) => { all2[arg1] = { ...(all2[arg1] || {}), lane }; });
+      // 2.59.0 (#8): --wide "<why>" (a person's) lets a broad lane launch in the main checkout; any other lane change drops it.
+      const laneWide = lane && typeof flags.wide === 'string' ? { lane, why: flags.wide, by, ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } : undefined;
+      updateHolds((all2) => { all2[arg1] = { ...(all2[arg1] || {}), lane, laneWide }; });
       emitEvent({ type: 'task.lane', agent: by, task: arg1, msg: `${by}: ${arg1} works in ${lane || 'the whole game'}` });
       console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.`);
     }
@@ -1833,6 +1835,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
         ...(typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
         ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneList(flags.paths) } : {}),
+        // 2.59.0 (#8): a person keeps a broad lane for a launch in the main checkout: --wide "<why>" (harness/agent.mjs).
+        ...(typeof flags.wide === 'string' && (typeof flags.lane === 'string' || typeof flags.paths === 'string') ? { laneWide: { lane: laneList(typeof flags.paths === 'string' && laneList(flags.paths).length ? flags.paths : flags.lane).join(','), why: flags.wide, by: typeof flags.by === 'string' ? flags.by : actor(), ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } } : {}),
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
         ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),

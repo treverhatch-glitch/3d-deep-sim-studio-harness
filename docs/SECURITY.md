@@ -27,6 +27,15 @@
 - A marked block lowers the odds an agent obeys planted text; it doesn't make that impossible. Keep keys out of agents'
   reach (`harness/agent-env.mjs`) and keep the protected files and gates in place.
 
+## Keys in launched agents
+- An agent sees the system basics, the studio's settings and its own tool's credentials only (`harness/agent-env.mjs`);
+  never `HUB_TOKEN` or `STUDIO_OWNER_KEY` unless the owner passes them by name.
+- (2.59.0) `STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>` = `TARGET:SOURCE` give one child a key under another name
+  (docs/AGENT-TOOLS.md). Only key names (`…_API_KEY`, `…_TOKEN`; never `STUDIO_`, `HUB_` or the owner key), names in the
+  log and never values, and a mapping set from inside a launched session counts only if the studio's `.env` says the
+  same. An agent in the main checkout can read `.env` itself; lane copies and the filter above narrow that, they don't
+  make it impossible.
+
 ## Locks
 - Use `node harness/lock.mjs claim <key> --owner <agent>` before editing shared files or starting a task.
 - `node harness/task.mjs start <ID> --agent <unique>` refuses a task that is already claimed; `done` only works for its owner.
@@ -35,6 +44,11 @@
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
 - (2.58.5) Claim files, not whole trees: a by-hand claim on a game's folder or source root (`game|web|engine/<name>`,
   `…/<name>/src`) or a folder of more than `STUDIO_LOCK_MAX_FILES` (50) tracked files needs `--wide "<why>"`.
+- (2.59.0) The launcher doesn't hold a too-broad lane (the same rule) as a 6-hour session lock either. In the agent's
+  own copy the session starts without that lock (`lane.unlocked` event; overlaps are caught when the lane lands). In
+  the main checkout the launch is refused with how to narrow the lane (`npm run task -- lane <ID> <files> --by <you>`),
+  unless a person kept that exact lane wide: `task add … --lane <folder> --wide "<why>" --by <name>` or
+  `npm run task -- lane <ID> <folder> --wide "<why>" --by <name>` (not an agent's name, not from a launched session).
 - (2.58.5) In a lane copy (`.lanes/<name>`) another agent's path lock is a note at commit, not a refusal: that agent
   edits its own copy, and overlapping edits are caught when the lane lands (task done rebases and stops on a
   conflict). A lock in the lane's own name still refuses; `STUDIO_LANE_LOCKS=block` restores the old refusal. The main

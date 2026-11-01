@@ -8,6 +8,7 @@
  *   npm run studio:start -- --uninstall
  *   npm run studio:stop                                  stop the supervisor (agents finish their task)
  *   npm run studio:status
+ *   npm run studio:resume -- --by <your name> [--why "…"]   clear a halt ("Fixed it: try again" without the War Room)
  *
  * Every minute it:
  *   1. keeps the War Room hub up (restarts it, and logs how long it was down);
@@ -40,6 +41,39 @@ const readJson = (f, d = null) => {
   }
 };
 export const readStatus = () => readJson(STATUS_FILE);
+/** "Try again" on a halted supervisor: the War Room (hub) or `npm run studio:resume` writes it; the next pass reads it. */
+const RESUME = path.join(STUDIO_STATE_DIR, 'supervisor-resume');
+function readResume() {
+  let text = '';
+  try { text = fs.readFileSync(RESUME, 'utf8').trim(); } catch { return {}; }
+  try { const j = JSON.parse(text); if (j && typeof j === 'object') return { by: String(j.by || '').slice(0, 60), why: String(j.why || '').slice(0, 300), via: String(j.via || '').slice(0, 20) }; } catch {}
+  return { by: text.slice(0, 60), via: 'war-room' };
+}
+
+/**
+ * 2.59.0 (#15): `npm run studio:resume -- --by <name> [--why "…"]`: what the War Room's "Fixed it: try again" does, from a
+ * terminal, without the hub token. A person decides to retry after two sessions failed the same way, so it refuses
+ * inside a launched agent session and for agents' names. Not halted (or no supervisor running): says so, does nothing.
+ * STUDIO_RESUME_BY (off by default): a comma-separated list of the names allowed to resume; when set, any other is refused.
+ */
+export async function resumeCli({ by = null, why = null, env = process.env } = {}) {
+  const { agentLikeName, launchedSession } = await import('./agent-env.mjs');
+  const who = String(by || '').trim();
+  const inSession = launchedSession(env);
+  if (inSession) return { code: 1, text: `Not resumed: ${inSession}. After two sessions failed the same way, a person decides to try again: npm run studio:resume -- --by <your name> in your own terminal, or "Fixed it: try again" in the War Room.` };
+  if (!who) return { code: 1, text: 'Who is asking? npm run studio:resume -- --by <your name> [--why "what you fixed"]' };
+  if (agentLikeName(who, { stateDir: STUDIO_STATE_DIR })) return { code: 1, text: `Not resumed: "${who}" is an agent's name. A person decides to try again after repeated failures: --by <your name>.` };
+  const allow = String(env.STUDIO_RESUME_BY || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (allow.length && !allow.includes(who.toLowerCase())) return { code: 1, text: `Not resumed: "${who}" isn't in STUDIO_RESUME_BY (the names the owner allows to resume the supervisor).` };
+  const s = readStatus();
+  if (!s || s.status !== 'running' || !alive(s)) return { code: 0, text: `Not halted: no supervisor is running${s?.status === 'running' ? ' (its process is gone)' : ''}, so there is nothing to clear. npm run studio:start starts a fresh one.` };
+  if (!s.halted) return { code: 0, text: 'Not halted: the supervisor is starting agents; nothing to clear.' };
+  const note = String(why || '').trim().slice(0, 300);
+  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  fs.writeFileSync(RESUME, `${JSON.stringify({ by: who.slice(0, 60), why: note, via: 'cli', at: new Date().toISOString() })}\n`);
+  emitEvent({ type: 'supervisor.resume_asked', agent: who.slice(0, 60), to: 'supervisor', msg: `${who} asked the supervisor to try again${note ? `: ${note}` : ''} (it stopped: ${s.halted.why || 'see npm run studio:status'})`.slice(0, 600), meta: { by: who.slice(0, 60), why: note || null, via: 'cli', cleared: s.halted.why || null } });
+  return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
+}
 // PU-17 (P-039, P-045): a status record's supervisor is alive while its pid is in use (no OS query); on Linux the
 // /proc start written at its start must match too, so a status file left "running" by a crash or a reboot that
 // names a reused number reads as not running.
@@ -95,10 +129,11 @@ export async function supervise(opts, state, now = Date.now()) {
   if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
   // Two sessions in a row ending the same bad way (exit 127: the tool isn't on PATH) means starting
   // more won't help: stop starting, and ask a person once (Needs you). "Try again" clears it.
-  const RESUME = path.join(STUDIO_STATE_DIR, 'supervisor-resume');
   if (fs.existsSync(RESUME)) {
+    // Who asked: the War Room writes the person's name; `npm run studio:resume` (2.59.0, #15) writes { by, why }.
+    const asked = readResume();
     fs.rmSync(RESUME, { force: true });
-    if (state.halted) emitEvent({ type: 'supervisor.resumed', agent: 'supervisor', to: 'producer', msg: 'Supervisor starting agents again' });
+    if (state.halted) emitEvent({ type: 'supervisor.resumed', agent: 'supervisor', to: 'producer', msg: `Supervisor starting agents again${asked.by ? ` (${asked.by} asked${asked.why ? `: ${asked.why}` : ''})` : ''}`, meta: { by: asked.by || null, why: asked.why || null, via: asked.via || null, cleared: state.halted.why || null } });
     state.halted = null;
     state.haltCheckFrom = now;
   }
@@ -463,6 +498,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     console.log('Supervisor stopping. Agents that are running finish their task; nothing new starts.');
     process.exit(0);
+  }
+  if (argv[0] === 'resume') {
+    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const r = await resumeCli({ by: flag('by'), why: flag('why') });
+    (r.code ? console.error : console.log)(r.text);
+    process.exit(r.code);
   }
   if (argv[0] === 'status') {
     const s = readStatus();
