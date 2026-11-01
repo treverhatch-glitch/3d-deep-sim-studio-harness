@@ -286,7 +286,6 @@ const CANNOT = { selftest: 'this file' };
   await new Promise((r) => child.on('exit', r)).catch(() => {});
   try { console.log('[debug] supervisor out:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.log'), 'utf8').slice(-3000) + '\n[debug] err:\n' + fs.readFileSync(path.join(tmpRoot, 'sup-lanes.err'), 'utf8').slice(-3000)); } catch (e) { console.log('[debug] no log', e.message); }
   try { console.log('[debug] events:\n' + fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8').split('\n').filter((l) => /lane|session|agent\./.test(l)).slice(-30).map((l) => l.slice(0, 300)).join('\n')); } catch {}
-  await new Promise((r) => child.on('exit', r));
   for (const s of fs.readdirSync(path.join(dir, '.studio/agents')).filter((f) => f.endsWith('.json'))) run(dir, `node harness/agent.mjs stop ${s.replace(/\.json$/, '')}`, env);
   // Quota: a tool that ran out is skipped until its reset; its lanes go to the next tool.
   fs.writeFileSync(path.join(dir, 'q.mjs'), "import { markExhausted, pickTool, exhaustedUntil } from './harness/budget.mjs';\nmarkExhausted('claude', \"You've hit your usage limit. Try again at 6:12 AM.\");\nconsole.log(JSON.stringify({ until: exhaustedUntil('claude'), next: pickTool('claude') }));\n");
