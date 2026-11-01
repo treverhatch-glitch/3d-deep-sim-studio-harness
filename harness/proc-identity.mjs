@@ -278,3 +278,90 @@ export function sameProcess(recorded, cur, tolMs = START_TOLERANCE_MS) {
   if (!Number.isFinite(a) || !Number.isFinite(b) || !recorded.start || !cur.start) return null;
   return b >= a - (recorded.self ? Math.max(tolMs, SELF_SLACK_MS) : tolMs) && b <= a + tolMs;
 }
+
+// ---- 2.60.0 (#5): the whole process table, for killing a machine:heavy holder's tree ----
+
+/** Linux: /proc/<pid>/stat as { ppid, pgid, ticks, zombie } (fields 4, 5, 22 and the state), or null. */
+function linuxStat(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return { state: f[0], ppid: Number(f[1]), pgid: Number(f[2]), ticks: Number(f[19]) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The process group a pid leads or belongs to (POSIX), or null (Windows has none; unreadable). Linux reads /proc;
+ * macOS asks ps once.
+ */
+export function processGroup(pid = process.pid) {
+  if (process.platform === 'win32') return null;
+  if (process.platform === 'linux') return linuxStat(pid)?.pgid ?? null;
+  const r = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: READ_TIMEOUT_MS });
+  const g = Number(String(r.stdout || '').trim());
+  return Number.isInteger(g) && g > 0 ? g : null;
+}
+
+/**
+ * Windows: the lines of one Get-CimInstance Win32_Process listing ("pid|ppid|creation ms|name", plus "self|<pid>"),
+ * as [{ pid, ppid, start, cmd }], with the same time-zone shift correction as winStartsFrom.
+ */
+export function winProcsFrom(stdout, t0 = Date.now()) {
+  const out = [];
+  let self = null;
+  for (const line of String(stdout || '').split(/\r?\n/)) {
+    const me = line.match(/^self\|(\d+)$/);
+    if (me) self = Number(me[1]);
+    const m = line.match(/^(\d+)\|(\d+)\|(\d*)\|(.*)$/);
+    if (m) out.push({ pid: Number(m[1]), ppid: Number(m[2]), pgid: null, start: m[3] ? Number(m[3]) : null, cmd: progName(m[4]) });
+  }
+  const ref = self ? out.find((p) => p.pid === self) : null;
+  const skew = ref?.start ? t0 - ref.start : 0;
+  if (Math.abs(skew) > 10 * 60000) {
+    const fix = Math.round(skew / 900000) * 900000;
+    for (const p of out) if (p.start) p.start += fix;
+  }
+  return out.filter((p) => p.pid !== self);
+}
+
+/**
+ * Every process now, in one OS query: [{ pid, ppid, pgid, start, proc?, cmd, zombie? }]. Linux reads /proc; macOS
+ * runs one ps; Windows one PowerShell Get-CimInstance (Windows keeps a child's ParentProcessId after its parent ends,
+ * so orphans still name their dead parent; there is no process group). Throws when the OS can't be asked.
+ * STUDIO_PROC_LIST_STUB=<file.json> answers with that array instead (tests).
+ */
+export function listProcesses() {
+  const stub = process.env.STUDIO_PROC_LIST_STUB;
+  if (stub) return JSON.parse(fs.readFileSync(stub, 'utf8'));
+  if (process.platform === 'linux') {
+    let up = null;
+    try { up = Number(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]); } catch {}
+    const out = [];
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(name)) continue;
+      const s = linuxStat(name);
+      if (!s) continue;
+      let cmd = null;
+      try { cmd = progName(fs.readFileSync(`/proc/${name}/cmdline`, 'utf8').split('\0')[0]); } catch {}
+      out.push({ pid: Number(name), ppid: s.ppid, pgid: s.pgid, start: Number.isFinite(up) ? Math.round(Date.now() - (up - s.ticks / USER_HZ) * 1000) : null, proc: procTag(s.ticks), cmd, ...(s.state === 'Z' ? { zombie: true } : {}) });
+    }
+    return out;
+  }
+  if (process.platform === 'win32') {
+    const script = `'self|' + $PID; Get-CimInstance Win32_Process | ForEach-Object { $ms = ''; if ($_.CreationDate) { $ms = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }; '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $ms, $_.Name }`;
+    const t0 = Date.now();
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+    if (r.error || r.status !== 0) throw new Error(r.error?.code || `powershell exit ${r.status}`);
+    return winProcsFrom(r.stdout, t0);
+  }
+  const r = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'lstart=', '-o', 'comm='], { encoding: 'utf8', timeout: READ_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
+  if (r.error || r.status !== 0) throw new Error(r.error?.code || `ps exit ${r.status}`);
+  const out = [];
+  for (const line of String(r.stdout || '').split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}:\d{2}:\d{2})\s+(\d{4})\s?(.*)$/);
+    if (m) out.push({ pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]), start: Date.parse(`${m[5]} ${m[6]}, ${m[8]} ${m[7]} UTC`), cmd: progName(m[9]), ...(m[4].startsWith('Z') ? { zombie: true } : {}) });
+  }
+  return out;
+}
