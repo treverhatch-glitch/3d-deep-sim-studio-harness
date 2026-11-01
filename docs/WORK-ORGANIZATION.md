@@ -115,6 +115,13 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
   (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
   `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.
+- `studio/` in a lane copy is the main checkout's (a link, 2.60.1, B-40): only the board commands (`npm run task`,
+  lock, proof ...) write there, and a lane's commits can never carry studio config. A config change (`studio/*.json`,
+  `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
+  a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
+  (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
+  config changed uncommitted while the task was worked. Planned (2.64): a config proposal file in the lane that the
+  train applies to main's studio/ in the same landing.
 
 ### When a command is killed halfway (2.58.0)
 

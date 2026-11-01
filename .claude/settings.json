@@ -7,7 +7,8 @@
       { "matcher": "", "hooks": [{ "type": "command", "command": "node scripts/pre-compact.mjs" }] }
     ],
     "PreToolUse": [
-      { "matcher": "Read|Grep|Glob|Bash", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-paths.mjs\"", "timeout": 10 }] }
+      { "matcher": "Read|Grep|Glob|Bash", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-paths.mjs\"", "timeout": 10 }] },
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lane-studio-guard.mjs\"", "timeout": 10 }] }
     ],
     "PostToolUse": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/trim-output.mjs\"", "timeout": 10 }] }
