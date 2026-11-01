@@ -231,7 +231,7 @@ export async function checkWeakening({ env = process.env } = {}) {
   if (falsy(env.STUDIO_WEAKENED_TESTS)) return { ok: true, off: true, enforced: false, findings: [], why: 'off (STUDIO_WEAKENED_TESTS=off): tests are not checked for weakening' };
   const { base: b, findings } = await findWeakenings({ env });
   if (!b) return { ok: true, enforced: false, findings: [], why: 'no base branch to compare with, so no change to check' };
-  const { ownerPublicKey, readApprovals, verifyApproval, OWNER_PUB_REL } = await import('./approve.mjs');
+  const { ownerPublicKey, readApprovals, verifyApproval, OWNER_PUB_REL, OWNER_KEY_HOWTO } = await import('./approve.mjs');
   const pub = ownerPublicKey(b.base);
   const enforced = truthy(env.STUDIO_WEAKENED_TESTS) || Boolean(pub);
   let approved = [];
@@ -242,7 +242,7 @@ export async function checkWeakening({ env = process.env } = {}) {
     open = findings.filter((x) => !ok.has(x.id));
   }
   const why = open.length
-    ? `${open.length} weakened test(s) since ${b.ref} without the owner's approval${enforced ? '' : `; a warning only: ${b.ref} has no owner key (${OWNER_PUB_REL}), so nobody can approve them yet (npm run approve -- keygen on the owner's machine; STUDIO_WEAKENED_TESTS=on enforces)`}`
+    ? `${open.length} weakened test(s) since ${b.ref} without the owner's approval${enforced ? '' : `; a warning only: ${b.ref} has no owner key (${OWNER_PUB_REL}), so nobody can approve them yet (STUDIO_WEAKENED_TESTS=on enforces); ${OWNER_KEY_HOWTO}`}`
     : `no weakened test since ${b.ref}${approved.length ? ` (${approved.length} change(s) approved by the owner)` : ''}`;
   return { ok: !open.length || !enforced, enforced, base: b.ref, baseSha: b.base, findings: open, approved, why };
 }

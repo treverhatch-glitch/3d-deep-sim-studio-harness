@@ -339,7 +339,7 @@ export function fixText(open) {
     `  git reset --soft ${oldest.sha.slice(0, 12)}~1`,
     '  git commit -C ORIG_HEAD',
     '  (one commit with everything since; just the last commit: the same with HEAD~1)',
-    'Hooks not installed? npm run hooks:install first. A commit the owner accepts as it is: on the owner\'s machine, npm run approve -- hooks --note "why".',
+    'Hooks not installed? npm run hooks:install first. A commit the owner accepts as it is: on the owner\'s own device (one no agent runs on), npm run approve -- hooks --note "why". No owner key yet? npm run approve -- show says how the owner makes one; an agent never runs keygen.',
   ];
 }
 

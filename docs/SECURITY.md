@@ -57,6 +57,10 @@
   wider tolerances (`toBeCloseTo` precision lowered; eps, tol, atol, an `abs()` bound, an `AreEqual` delta raised), a
   condition on a literal seed (or a tick that returns or skips), deleted test files, and golden or snapshot files changed
   by a commit without a `Golden-Reason` trailer.
+- The owner key (2.58.5, every "no owner key" note says this): the owner makes it once on a device no agent runs on (not
+  the crew's PC), with `npm run approve -- keygen`, commits only `studio/keys/owner-ed25519.pub.pem` and merges it to the
+  studio's main branch. The private key never goes to the agents' PC; approvals are signed on that device. An agent
+  asked to run keygen on the agents' PC refuses.
 - It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
   `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
   --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.
