@@ -3752,6 +3752,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0 (final brief H-13 H-12 #6): a clean rebase near a commit's hunks keeps its hook stamp (Studio-Patch-U0);
+// task done's rebase and `npm run hooks -- restamp` re-commit stale stamps through the real hooks; Studio-Task names one
+// task; a lane copy behind a harness change on main refuses its gates (qa/selftest-259b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259b.mjs')).href);
+  await selftest259B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

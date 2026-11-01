@@ -54,6 +54,11 @@
  * hooks refuse stops it and the lane goes back to where it was. task done runs it (--auto) after its own rebase when a
  * commit's stamp was valid before the rebase and isn't after it (STUDIO_HOOKS_RESTAMP=off: never).
  *
+ * Lane harness (2.59.0, #6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed
+ * files there since the lane branched, `check` refuses (it would judge with the old code: T-061 failed the hooks gate
+ * again after the fix had landed) and names the files and the fix: rebase on the studio's branch. STUDIO_LANE_HARNESS=own
+ * runs the lane's own copy anyway. The hooks only print that note at commit; they never block on it.
+ *
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
  *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
@@ -493,8 +498,10 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, why };
 }
 
-// ---- 2.59.0: lane copies ----
+// ---- 2.59.0 (#6): a lane copy whose harness is older than the studio's branch ----
 
+/** Folders that hold the harness a lane copy runs (its gates, hooks and task done). */
+export const LANE_HARNESS_DIRS = ['harness', 'scripts'];
 const realOrResolved = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 const samePath = (a, b) => { const n = (p) => (process.platform === 'win32' ? realOrResolved(p).toLowerCase() : realOrResolved(p)); return n(a) === n(b); };
 
@@ -521,6 +528,31 @@ export function laneOf(root = ROOT, env = process.env) {
     if (branch) return { root, main, branch };
   }
   return null;
+}
+
+/**
+ * The harness files the studio's branch changed since this lane copy branched from it (files the lane doesn't have):
+ * { lane, branch, base, files } or null outside a lane copy (or when it can't tell). Files the lane changed itself
+ * (a harness task) don't count: that is the lane's own work, judged by its own copy and then on landing.
+ */
+export function laneHarnessDrift(root = ROOT, env = process.env) {
+  const lane = laneOf(root, env);
+  if (!lane) return null;
+  const tip = git(['rev-parse', '-q', '--verify', `refs/heads/${lane.branch}^{commit}`], { cwd: root }).stdout.trim();
+  const base = tip ? git(['merge-base', 'HEAD', tip], { cwd: root }).stdout.trim() : '';
+  if (!isSha(tip) || !isSha(base)) return null;
+  if (base === tip) return { lane, branch: lane.branch, base, tip, files: [] };
+  const d = git(['diff', '--name-only', '--no-renames', base, tip, '--', ...LANE_HARNESS_DIRS], { cwd: root });
+  if (d.status !== 0) return null;
+  return { lane, branch: lane.branch, base, tip, files: d.stdout.split('\n').map((s) => s.trim()).filter(Boolean) };
+}
+
+export const laneHarnessOwn = (env = process.env) => /^own$/i.test(String(env.STUDIO_LANE_HARNESS || ''));
+
+/** The refusal (or note) for a lane copy running an older harness than the studio's branch. */
+export function laneDriftText(d) {
+  const shown = d.files.slice(0, 6).join(', ') + (d.files.length > 6 ? ` and ${d.files.length - 6} more` : '');
+  return `this lane copy runs its own harness, and ${d.branch} has changed ${d.files.length} harness file(s) since the lane branched from it (${shown}), so its checks would judge with the old code. Rebase on it: git rebase ${d.branch} (then npm run hooks -- restamp if the hooks gate lists commits). STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
 }
 
 // ---- 2.59.0: re-stamp a lane's commits through the real hooks ----
@@ -644,9 +676,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } catch (e) {
       console.error(`[commit-msg] note: could not stamp this commit (${e.message}); the hooks gate will list it.`);
     }
+    // 2.59.0 (#6): a note, never a refusal: the commit is the agent's work and must not be lost to a stale copy.
+    try { const d = laneHarnessOwn() ? null : laneHarnessDrift(process.cwd()); if (d?.files.length) console.error(`[commit-msg] note: ${laneDriftText(d)}`); } catch {}
     process.exit(0);
   }
   if (cmd === 'check') {
+    // 2.59.0 (#6): an older harness in a lane copy doesn't judge the lane's commits; the studio's branch has the fix.
+    if (!falsy(process.env.STUDIO_HOOKS_CHECK)) {
+      let d = null;
+      try { d = laneHarnessDrift(); } catch {}
+      if (d?.files.length && laneHarnessOwn()) console.error(`[hooks] note: STUDIO_LANE_HARNESS=own: judging with this lane copy's own harness, ${d.files.length} file(s) behind ${d.branch}`);
+      else if (d?.files.length) {
+        const why = laneDriftText(d);
+        if (process.argv.includes('--json')) console.log(JSON.stringify({ ok: false, staleHarness: d.files, open: [], why }));
+        else console.error(`[hooks] FAIL ${why}`);
+        process.exit(1);
+      }
+    }
     let r;
     try { r = await checkHookStamps(); } catch (e) {
       if (process.argv.includes('--json')) console.log(JSON.stringify({ ok: false, error: e.message, open: [], why: `could not check the commits: ${e.message}` }));
