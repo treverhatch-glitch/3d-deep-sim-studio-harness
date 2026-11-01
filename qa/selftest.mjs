@@ -3782,6 +3782,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.59.0: a render task on a game that isn't a Godot project captures with the game's own command (its manifest's
+// "visual": { "capture": ... }); task done's hint names the right route (qa/selftest-259f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259f.mjs')).href);
+  await selftest259F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

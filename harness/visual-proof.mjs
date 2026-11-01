@@ -20,9 +20,16 @@
  * --cams (or the project's studio.cameras list, or every camera in the group "studio_capture").
  *
  *   node harness/visual-proof.mjs capture <TASK> before|after --godot <project> [--cams a,b] [--frames 30]
+ *   node harness/visual-proof.mjs capture <TASK> before|after [--cams a,b]   (the game's own capture command)
  *   node harness/visual-proof.mjs check <TASK> [--json]           exit 1 when the visual proof fails
  *   node harness/visual-proof.mjs stats <file.png>                  blank-frame numbers for one image
  *   node harness/visual-proof.mjs diff <a.png> <b.png>              mean change between two images
+ *
+ * 2.59.0: a game that isn't a Godot project (a web game, any engine) names its own capture command in its check
+ * manifest, <game root>/studio.gates.json: "visual": { "capture": "node tools/capture.mjs {out} {cams}" }. The
+ * command writes one <camera>.png per camera into {out}; the same before/after check applies. The manifest is a
+ * protected file, so the owner approves the command once. Placeholders: {out} (absolute folder), {cams} (comma
+ * list, may be empty), {task}, {phase} (before|after).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +38,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { decodePng } from './png.mjs';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { gameCapture } from './visual-capture.mjs';
 
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export const visualLimits = (env = process.env) => ({
@@ -208,6 +216,23 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
   return { ok: !err, files, why: err ? err.trim() : '', log };
 }
 
+const quoteArg = (v) => (process.platform === 'win32' ? `"${String(v).replace(/"/g, '""')}"` : `'${String(v).replace(/'/g, `'\\''`)}'`);
+
+/** 2.59.0: run the game's own capture command into outDir. Returns { ok, files, why, log } like captureGodot. */
+export function captureWithCommand(template, outDir, { cams = [], task = '', phase = '', timeoutMs = num(process.env.STUDIO_VISUAL_CAPTURE_TIMEOUT_MS, 300000) } = {}) {
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const f of pngs(outDir)) fs.rmSync(path.join(outDir, f));
+  const vals = { out: path.resolve(outDir), cams: cams.join(','), task, phase };
+  const cmd = template.replace(/\{(out|cams|task|phase)\}/g, (_, k) => (vals[k] === '' ? '""' : quoteArg(vals[k])));
+  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+  const log = `${r.stdout || ''}${r.stderr || ''}`;
+  const files = pngs(outDir);
+  if (r.error) return { ok: false, files, why: `capture command failed: ${r.error.code || r.error.message}`, log };
+  if (r.status !== 0) return { ok: false, files, why: `capture command exited ${r.status}`, log };
+  if (!files.length) return { ok: false, files, why: 'the capture command saved no .png in {out}', log };
+  return { ok: true, files, why: '', log };
+}
+
 /** Record the visual result in the task's split verdict. */
 export async function recordVisual(task, res) {
   const { setPart } = await import('./verdict-split.mjs');
@@ -226,6 +251,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     if (!res.ok && res.log) console.log(res.log.split('\n').slice(-15).join('\n'));
     process.exit(res.ok ? 0 : 1);
   }
+  if (cmd === 'capture' && x && /^(before|after)$/.test(y || '') && !opt('--godot')) {
+    const g = gameCapture();
+    if (!g.capture) {
+      console.log(`[visual] FAIL ${y} for ${x}: no capture command. ${g.godot ? `This is a Godot project: add --godot ${g.root}.` : g.manifest ? `The owner adds "visual": { "capture": "..." } to ${g.manifest}.` : 'Pass --godot <project>, or set the game (studio/game.json) and its capture command.'}`);
+      process.exit(1);
+    }
+    const res = captureWithCommand(g.capture, path.join(proofDir(x), y), { cams: String(opt('--cams', '')).split(',').filter(Boolean), task: x, phase: y });
+    console.log(`[visual] ${res.ok ? 'captured' : 'FAIL'} ${y} for ${x}: ${res.files.join(', ') || 'nothing'}${res.why ? ` (${res.why})` : ''}`);
+    if (!res.ok && res.log) console.log(res.log.split('\n').slice(-15).join('\n'));
+    process.exit(res.ok ? 0 : 1);
+  }
   if (cmd === 'check' && x) {
     const res = checkVisualProof(x);
     await recordVisual(x, res);
@@ -234,6 +270,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}`);
     process.exit(res.ok ? 0 : 1);
   }
-  console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after --godot <project> [--cams a,b] | check <TASK> | stats <png> | diff <a> <b>');
+  console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after [--godot <project>] [--cams a,b] | check <TASK> | stats <png> | diff <a> <b>');
   process.exit(2);
 }
