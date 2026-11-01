@@ -336,6 +336,40 @@ export function laneCopyName(root = REPO_ROOT) {
 }
 
 /**
+ * 2.59.0 (H-12): the task a commit is for, for the commit-msg hook's Studio-Task trailer. It used to list every task the
+ * agent held ("Studio-Task: T-089, T-090, T-092, T-093, T-094, T-095" on a T-093 commit), so done-check counted that
+ * commit as a change for all six. Now, in order:
+ *   1. in a lane copy, the lane's own task: the task whose branch (.studio/lane-branches.json) is this copy's branch, or
+ *      the launcher's session record for the lane (.studio/agents/<lane>.json: its task, with this branch);
+ *   2. the subject's leading task id ("T-093: …"), when the agent holds that task;
+ *   3. the agent's only task lock, when it holds exactly one;
+ *   4. otherwise none, with a note saying how to name it (several tasks held and nothing says which).
+ * Returns { tasks: [ids], from: 'lane'|'subject'|'only-lock'|null, note }.
+ */
+export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subject = '', root = REPO_ROOT, locks = null } = {}) {
+  const held = owner ? (locks || listLocks()).filter((l) => l.owner === owner && l.key.startsWith('task:')).map((l) => l.key.slice(5)) : [];
+  const lane = laneCopyName(root);
+  if (lane) {
+    let branch = '';
+    try { branch = execFileSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+    const found = new Set();
+    const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+    if (branch) {
+      const b = readJson(path.join(REPO_ROOT, '.studio', 'lane-branches.json')) || {};
+      for (const [k, v] of Object.entries(b)) if (!k.includes(':') && v === branch) found.add(k);
+      const s = readJson(path.join(REPO_ROOT, '.studio', 'agents', `${lane}.json`));
+      if (s?.task && s.copy?.branch === branch) found.add(String(s.task));
+    }
+    if (found.size === 1) return { tasks: [...found], from: 'lane', note: null };
+  }
+  const lead = String(subject || '').match(/^\s*\[?([A-Z]+-\d+)\b/);
+  if (lead && held.includes(lead[1])) return { tasks: [lead[1]], from: 'subject', note: null };
+  if (held.length === 1) return { tasks: held, from: 'only-lock', note: null };
+  if (!held.length) return { tasks: [], from: null, note: null };
+  return { tasks: [], from: null, note: `no Studio-Task trailer: ${owner} holds ${held.length} tasks (${held.join(', ')}) and nothing says which this commit is for. Start the subject with its id ("${held[0]}: …"), or add the trailer yourself (git commit -m "…" -m "Studio-Task: ${held[0]}").` };
+}
+
+/**
  * For pre-commit: staged files locked by another owner fail; STUDIO_LOCK_STRICT=1 also requires your own lock.
  * 2.58.5 (H-10): in a lane copy (.lanes/<name>, its own working copy), another agent's path lock is a warning, not a
  * refusal: that agent edits its own copy, so the two can't collide here, and overlapping edits are caught when the
