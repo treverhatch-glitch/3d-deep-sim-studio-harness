@@ -4,6 +4,32 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.65.3] — 2026-11-02
+2.65.3: the crew's B-43, a red merge train took over an hour to find the lane that broke it (P-154).
+### Fixed
+- **A red train re-checks only the failing test files (B-43 a).** The game checks print their failing test files
+  (vitest, jest, `node --test`, plain "FAIL <file>"; Windows backslashes read as forward slashes). Re-checks pass them
+  in `STUDIO_GATE_FOCUS`, which run-gates honours only in an `--only` run (it stands for no verify), through the gate's
+  `focus` command or by appending them to a command that clearly runs vitest, jest or `node --test`. Anything else runs
+  the whole check, and the log says why. A test that fails only together with others makes the train search again
+  with the whole gate instead of calling the red flaky.
+- **Every step says what it decides (B-43 b).** The red event names the failing tests; each re-check states its
+  question ("re-check 3 of about 4: ... is the break in lane 3 (T-x)?"); a new round says what it is. The current step
+  is in `.studio/train/<id>/status.json`, shown by `npm run lanes` and `status --brief` (with a STUDIO_TRAIN_MAX note
+  for trains of more than 6 lanes).
+- **The green prefix lands early (B-43 c).** Once a culprit is named, main plus the lanes before it are verified in full
+  and land; the culprit is handed back and the lanes after it go in the next train, which runs at once
+  (`STUDIO_TRAIN_LAND_PREFIX`, default on; off = 2.65.2's behaviour). qa/selftest-260a.mjs check 4 now runs its train
+  with the setting off, its assertions unchanged (they describe the old order).
+- **ETA (B-43 d)** on each re-check line, in the status file and the event meta, from the train's own timings
+  ("ETA unknown (no timing yet)" before any).
+
+### Untested
+- Real vitest/jest runs on Windows and quoting the files on a cmd.exe command line (parsing is tested on synthetic
+  Windows output).
+
+---
+
 ## [2.65.2] — 2026-11-02
 2.65.2: measurement fixes from the 2026-11-02 research pass, and the first bug a fuzz run found (P-150 to P-153).
 ### Fixed
