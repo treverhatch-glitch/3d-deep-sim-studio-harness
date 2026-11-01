@@ -504,7 +504,7 @@ const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
  * P1 task to run it.
  */
-export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false } = {}) {
+export function completeTask(taskId, note = '', agent = null, { force = false, reason = '', acceptedBy = '', noop = '', checkOnly = false, trainCheck = false, unityTrainCheck = false } = {}) {
   // 2.59.0: trainCheck runs every check task done runs before the game's checks (board, done-check, the committed lane
   // copy, protected files, secrets, hooks, weakened tests) and stops there: nothing is closed or landed. The merge train
   // (harness/train.mjs) lands the lane after ONE full verify of main + the lanes, which stands for the game's checks and
@@ -758,6 +758,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
+  // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.
+  if (unityTrainCheck) return force ? { error: 'train-force', message: 'A forced done never goes through the Unity train.' } : { unityReady: true, id: target.id, type: check.type };
   // 2.59.0 (#16): a task on the Unity track (task add --track engine:unity) lands through the studio's Unity gate
   // (harness/unity-gate.mjs: its configured land command, under the machine:heavy lock); it closes only on a pass.
   if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track === 'engine:unity') {
@@ -878,12 +881,14 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
  * ran in the train's lane check (trainCheck) and the train's verify. Returns the task, null (not on the board) or
  * { error, message }.
  */
-export function closeTrainTask(taskId, agent, { train, head, laneHead, record = null, note = '' } = {}) {
+export function closeTrainTask(taskId, agent, { train, head, laneHead, record = null, note = '', repo = null, target: landTarget = null } = {}) {
   const lock = lockStatus(`task:${taskId}`);
   if (lock.locked && lock.lock.owner !== agent) return { error: 'locked', message: `${taskId} is claimed by ${lock.lock.owner} now, not ${agent}` };
   const root = mainRoot();
-  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: root }).status === 0;
-  const mainTip = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  // 2.63.0: a Unity train's branch landed in the Unity repo (repo) on its target branch, not in the studio's branch.
+  const gitRoot = repo || root;
+  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: gitRoot }).status === 0;
+  const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   // The train's verify: clean and full, with no red required check but one already red when this task was claimed.
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
@@ -917,7 +922,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
     close: (lane, ctx) => {
-      const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '' });
+      const t = closeTrainTask(lane.task, lane.agent, { train: ctx.train, head: ctx.head, laneHead: lane.head, record: ctx.record, note: lane.note || '', repo: ctx.repo || null, target: ctx.target || null });
       return t?.error ? { ok: false, message: t.message } : t ? { ok: true, target: t } : { ok: false, message: `${lane.task} is not on the board` };
     },
     handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
@@ -1538,7 +1543,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'done') {
     const targetId = arg1 || q.inProgress[0]?.id;
     if (!targetId) {
-      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--train] [--note "..."] [--force --reason "<10+ chars>"]');
+      console.error('Usage: node harness/task.mjs done <TASK_ID> --agent <owner> [--check] [--train [--branch <Unity branch>]] [--note "..."] [--force --reason "<10+ chars>"]');
       process.exit(1);
     }
     // 2.32.0: once the studio has an owner key (harness/approve.mjs), a forced done needs the owner's signed
@@ -1579,6 +1584,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.59.0: --train: check the lane now and queue it for the next merge train (npm run task -- train lands it).
     if (flags.train) {
       if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
+      // 2.63.0: a Unity-track task queues its Unity branch for the Unity merge train (harness/unity-train.mjs).
+      if (process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && (await import('./unity-gate.mjs')).taskTrack(targetId) === 'engine:unity') {
+        const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
+        if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
+        if (pre.error) { console.error(pre.message); process.exit(1); }
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { task: pre.id, agent: whoAmI(flags), branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
+        (r.ok ? console.log : console.error)(r.message);
+        process.exit(r.ok ? 0 : 1);
+      }
       const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       if (pre.error) { console.error(pre.message); process.exit(1); }
@@ -1677,9 +1691,20 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.59.0: the merge train (harness/train.mjs): land the queued lanes on one full verify.
   if (cmd === 'train') {
     const tr = await import('./train.mjs');
+    // 2.63.0: the Unity merge train (harness/unity-train.mjs): `train --unity` (or --track engine:unity).
+    if (flags.unity || flags.track === 'engine:unity') {
+      const ut = await import('./unity-train.mjs');
+      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot())); process.exit(0); }
+      const busyMod = await import('./busy.mjs');
+      const r = await ut.runUnityTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+      (r.ok ? console.log : console.error)(r.message);
+      console.log(JSON.stringify({ unityTrain: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+      process.exit(r.ok ? 0 : r.refused ? 3 : 1);
+    }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
       console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
       process.exit(0);
     }
     // 2.63.0: a person (or an agent with a person's direct permission; never a worker) releases a lane held for the owner.
@@ -1690,7 +1715,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });

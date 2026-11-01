@@ -26,6 +26,15 @@
  * `task done` runs it for a task on the Unity track (task add --track engine:unity) once the task's other checks
  * pass; the task closes only on a pass, and a refusal leaves it in progress with "try again later".
  * Each run is recorded: .studio/gates/unity-last.json, an engine.land event, and a line in studio/engine/LOG.md.
+ *
+ * 2.63.0: the Unity merge train (harness/unity-train.mjs) lands several queued branches on ONE land run. The contract
+ * gains (all optional; docs/UNITY-TRACK.md "The Unity merge train"):
+ *   {branches}   the branches to land, in order, separated by spaces (a land command that can land a list);
+ *   "landMany"   a second command for a list ({branches}), when "land" itself takes one {branch};
+ *   {target}     "target", the branch the land script lands on (the train needs it: it checks the branches against it);
+ *   "gateWorktree"  the land script's own worktree: the harness never touches its files (only the land script does).
+ * A branch or task name that a shell could read as more than a name (anything but letters, digits, . _ / - and a
+ * leading letter or digit) is refused before any command runs: the command line goes through a shell.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -51,8 +60,18 @@ export function unityConfig(root = REPO_ROOT) {
   return u && typeof u.land === 'string' && u.land.trim() ? u : null;
 }
 
+/** 2.63.0: a branch (or task) name safe to put on a shell command line as it is. */
+export const safeRefName = (s) => typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(s) && !s.includes('..') && !s.endsWith('.lock') && !s.endsWith('/');
+
+/** 2.63.0: the command that lands a list of branches ({branches}): "landMany", else "land" when it takes {branches}; else null. */
+export function landManyCommand(cfg) {
+  if (!cfg) return null;
+  if (typeof cfg.landMany === 'string' && cfg.landMany.includes('{branches}')) return cfg.landMany;
+  return typeof cfg.land === 'string' && cfg.land.includes('{branches}') ? cfg.land : null;
+}
+
 /** The Unity track (engine/<game>/engine.json with engine "unity"), or null. */
-function unityTrack() {
+export function unityTrack() {
   try {
     const t = readTrack();
     return t?.engine === 'unity' ? t : null;
@@ -79,7 +98,7 @@ export function mapUnityExit(code, { signal = null, timedOut = false, timeoutMin
  * Run the Unity landing gate. { status: pass|red|conflict|refused|error|skipped, ok, code, why, ms, log }.
  * onlyUnityTask: a `task` not on the Unity track is skipped (notUnity). A busy lock is a refusal, never a throw.
  */
-export async function runUnityGate({ task = null, branch = null, env = process.env, log = () => {}, onlyUnityTask = false } = {}) {
+export async function runUnityGate({ task = null, branch = null, branches = null, label = null, env = process.env, log = () => {}, onlyUnityTask = false } = {}) {
   const t0 = Date.now();
   if (task && onlyUnityTask) {
     const track = taskTrack(task);
@@ -90,26 +109,36 @@ export async function runUnityGate({ task = null, branch = null, env = process.e
   if (!cfg) return { status: 'skipped', ok: true, why: `no Unity land command is configured (studio/game.json "engines": { "unity": { "land": "<command>" } })${track ? '' : ' and there is no Unity track'}: nothing to run` };
   const folder = track?.folder ? path.resolve(REPO_ROOT, track.folder) : null;
   const cwd = cfg.cwd ? path.resolve(REPO_ROOT, cfg.cwd) : folder && fs.existsSync(folder) ? folder : REPO_ROOT;
-  let br = branch;
-  if (!br && /\{branch\}/.test(cfg.land)) {
+  // 2.63.0: a list of branches (the Unity merge train) goes to the command that lands a list.
+  const many = Array.isArray(branches) ? branches : null;
+  let br = null;
+  const template = many ? landManyCommand(cfg) : cfg.land;
+  if (many && !template) return finish({ status: 'error', ok: false, code: null, why: 'the land command takes one {branch}, not a list: set "landMany" (a command with {branches}) in studio/game.json engines.unity, or land one branch at a time' });
+  for (const name of [...(many || []), ...(branch ? [branch] : []), ...(task ? String(task).split(',') : [])]) {
+    if (!safeRefName(name)) return finish({ status: 'error', ok: false, code: null, why: `"${String(name).slice(0, 80)}" is not a plain branch or task name (letters, digits, . _ / - only): it is not put on a command line` });
+  }
+  br = many ? (many.length === 1 ? many[0] : null) : branch;
+  if (!many && !br && /\{branch\}/.test(cfg.land)) {
     const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder && fs.existsSync(folder) ? folder : cwd, encoding: 'utf8' });
     br = r.status === 0 && r.stdout.trim() !== 'HEAD' ? r.stdout.trim() : null;
     if (!br) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {branch} and none is known: pass --branch <name>' });
+    if (!safeRefName(br)) return finish({ status: 'error', ok: false, code: null, why: `the Unity folder's branch "${br.slice(0, 80)}" is not a plain branch name (letters, digits, . _ / - only): pass --branch <name>` });
   }
-  if (/\{task\}/.test(cfg.land) && !task) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {task}: pass --task <ID>' });
+  if (/\{task\}/.test(template) && !task) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {task}: pass --task <ID>' });
+  if (/\{target\}/.test(template) && !safeRefName(cfg.target)) return finish({ status: 'error', ok: false, code: null, why: 'the land command needs {target}: set "target" (the branch it lands on) in studio/game.json engines.unity' });
   const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
-  const cmd = cfg.land.replaceAll('{branch}', br ? q(br) : '').replaceAll('{task}', task ? q(task) : '').replaceAll('{folder}', folder ? q(folder) : '');
+  const cmd = template.replaceAll('{branches}', many ? many.join(' ') : '').replaceAll('{branch}', br ? q(br) : '').replaceAll('{task}', task ? q(task) : '').replaceAll('{target}', cfg.target ? q(cfg.target) : '').replaceAll('{folder}', folder ? q(folder) : '');
   const timeoutMin = Number(cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
   let lk;
   try {
-    lk = acquireHeavy(await heavyRoot(), `unity land${task ? ` (${task})` : ''}`, { log, env });
+    lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env });
   } catch (err) {
     if (err.code !== 'HEAVY_BUSY') throw err;
     return finish({ status: 'refused', ok: false, code: 3, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
   }
   let r;
   try {
-    log(`[unity-gate] running the studio's Unity land command${task ? ` for ${task}` : ''}${br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
+    log(`[unity-gate] running the studio's Unity land command${task ? ` for ${task}` : ''}${many ? ` (branches ${many.join(' ')})` : br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
     r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
   } finally {
     lk.release();
@@ -123,9 +152,9 @@ export async function runUnityGate({ task = null, branch = null, env = process.e
   return finish({ ...m, ok: m.status === 'pass', code: r.status, log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
-    const full = { ...res, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), at: new Date().toISOString() };
+    const full = { ...res, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', 'unity-last.json'), JSON.stringify(full, null, 2)); } catch {}
-    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task || undefined, track: 'engine:unity', status: full.ok ? 'ok' : full.status === 'refused' ? 'warn' : 'blocked', msg: `Unity land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { status: full.status, code: full.code ?? null, ms: full.ms } }); } catch {}
+    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: 'engine:unity', status: full.ok ? 'ok' : full.status === 'refused' ? 'warn' : 'blocked', msg: `Unity land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { status: full.status, code: full.code ?? null, ms: full.ms, ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
     try { logEngine(`unity land${task ? ` ${task}` : ''}: ${full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
     return full;
   }
