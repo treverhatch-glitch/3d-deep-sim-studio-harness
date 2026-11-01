@@ -4069,6 +4069,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.66.0 (d): a Fix: line under every gate failure (an entry for every gate and game check kind), and the generated
+// settings map with its ratchet on new undocumented STUDIO_* names (qa/selftest-266d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest266D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266d.mjs')).href);
+  await selftest266D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
