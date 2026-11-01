@@ -5,10 +5,12 @@
  *         timeout is never below 1.5 x the check's last quiet run (capped, printed whenever it isn't the base).
  *   B-35: the editor's runs in harness/unity.mjs (gate, build) take machine:heavy; a heavy take waits (bounded) and
  *         then refuses under the memory floor; `heavy.mjs status` lists an editor outside the lock.
+ *   B-41: the Unity land gate lands from the task's own Unity branch (never the folder's checked-out one), takes
+ *         {folder} from studio/game.json engines.unity.folder, and reads exit codes by the script's own contract.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export async function selftest2601M({ dir, run, report, tmpRoot }) {
@@ -35,6 +37,7 @@ export async function selftest2601M({ dir, run, report, tmpRoot }) {
   const sleepF = path.join(tmpRoot, `sleep-2601m-${process.pid}.mjs`);
   fs.writeFileSync(sleepF, 'setTimeout(() => {}, Number(process.argv[2] || 1000));\n');
   const kids = [];
+  const spawnGit = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
   const holder = (ms, label = 'holder-2601m') => {
     const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
@@ -219,6 +222,77 @@ else console.log('[build] PASS stand-in');
         JSON.stringify({ up: h.up, busyBuild: out(busyBuild).slice(-500), busyGate: out(busyGate).slice(-400), ranWhileBusy, build: out(build).slice(-300), gate: out(gate).slice(-400), lines }).slice(0, 2500)]);
       fs.rmSync(path.join(dir, proj), { recursive: true, force: true });
       for (const f of [seenF, fake]) fs.rmSync(f, { force: true });
+    }
+
+    // ---------- B-41: the Unity land gate's branch, folder and exit meanings ----------
+    {
+      const gameJson = path.join(dir, 'studio', 'game.json');
+      const gameBefore = fs.existsSync(gameJson) ? fs.readFileSync(gameJson, 'utf8') : null;
+      const setUnity = (unity) => fs.writeFileSync(gameJson, JSON.stringify({ ...(gameBefore ? JSON.parse(gameBefore) : {}), engines: { unity } }, null, 2));
+      try {
+        // The Unity checkout: a git repo on main, with its own land script under tools/.
+        const uf = path.join(tmpRoot, `unity-repo-2601m-${process.pid}`);
+        fs.mkdirSync(path.join(uf, 'tools'), { recursive: true });
+        fs.writeFileSync(path.join(uf, 'tools', 'land.mjs'), `console.log('land branch=' + process.argv[2] + ' cwd=' + process.cwd().split(/[\\\\/]/).pop());\nprocess.exit(Number(process.env.UNITY_STUB_CODE ?? 0));\n`);
+        spawnGit(uf, 'init', '-q', '-b', 'main'); spawnGit(uf, 'add', '-A'); spawnGit(uf, 'commit', '-qm', 'unity');
+        const land = 'node "{folder}/tools/land.mjs" {branch}';
+        const denv = { STUDIO_DONE_GAME_GATES: 'skip', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off', STUDIO_HEAVY_WAIT_MIN: '1' };
+        const add = (title, extra = '') => (run(dir, `node harness/task.mjs add "${title}" --role engine-porter --track engine:unity ${extra}`, { ...base, ...denv }).stdout.match(/"id":\s*"(T-\d+)"/) || [])[1];
+        const done = (id, env = {}) => run(dir, `node harness/task.mjs done ${id} --agent porter-2601m`, { ...base, ...denv, ...env });
+        setUnity({ land, folder: uf });
+        const withBranch = add('Plan the Unity port of the pier rules', '--branch unity/pier-rules');
+        const noBranch = add('Plan the Unity port of the pier lights');
+        for (const t of [withBranch, noBranch]) run(dir, `node harness/task.mjs start ${t} --agent porter-2601m`, { ...base, ...denv });
+        const lastF = path.join(dir, '.studio', 'gates', 'unity-last.json');
+        const landed = done(withBranch);
+        const landedRec = readJson(lastF);
+        const refused = done(noBranch);
+        const bad = run(dir, `node harness/unity-gate.mjs branch ${noBranch} "x;echo"`, base);
+        const set = run(dir, `node harness/unity-gate.mjs branch ${noBranch} unity/pier-lights`, base);
+        const landed2 = done(noBranch);
+        const landed2Rec = readJson(lastF);
+        guard('B-41: task done on a Unity task lands from the task\'s own Unity branch (task add --branch, or unity-gate branch <ID> <b>); with none it refuses, naming how to set it, and never uses the Unity folder\'s checked-out main; a branch name with shell characters is refused (2.60.0: {branch} fell back to main, landing main into itself)', () => [
+          withBranch && landed.status === 0 && landedRec?.status === 'pass' && landedRec.branch === 'unity/pier-rules' && landedRec.task === withBranch
+            && noBranch && refused.status !== 0 && new RegExp(`no Unity branch is known for ${noBranch}`).test(out(refused)) && /checked-out branch \(main\) is not used/.test(out(refused)) && !/land branch=main/.test(out(refused))
+            && bad.status === 2 && /not a branch name/.test(out(bad)) && set.status === 0 && landed2.status === 0 && landed2Rec?.status === 'pass' && landed2Rec.branch === 'unity/pier-lights',
+          JSON.stringify({ withBranch, noBranch, landed: out(landed).slice(-400), refused: out(refused).slice(-500), bad: out(bad), set: out(set), landed2: out(landed2).slice(-300), landedRec, landed2Rec }).slice(0, 2500)]);
+
+        // {folder} from engines.unity.folder (relative to the studio here), and a missing one.
+        const ugate = (env = {}, args = '--branch unity/pier --json') => {
+          const r = run(dir, `node harness/unity-gate.mjs ${args}`, { ...base, ...env });
+          let j = null;
+          try { j = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {}
+          return { code: r.status, j, text: out(r) };
+        };
+        setUnity({ land, folder: path.relative(dir, uf) });
+        const rel = ugate({ UNITY_STUB_CODE: '1' });
+        setUnity({ land, folder: 'no-such-unity-2601m' });
+        const missing = ugate();
+        guard('B-41: {folder} (and the land command\'s directory) comes from studio/game.json engines.unity.folder, relative to the studio or absolute; a folder that doesn\'t exist is an error naming the setting, never a guess (2.60.0: only the track\'s folder, a sibling clone without the land script)', () => [
+          rel.j?.status === 'red' && new RegExp(`land branch=unity/pier cwd=${path.basename(uf)}`).test(rel.j.tail || '')
+            && missing.code === 1 && missing.j?.status === 'error' && /no-such-unity-2601m.*engines\.unity\.folder.*doesn't exist/.test(missing.j.why || ''),
+          JSON.stringify({ rel: rel.j, missing: missing.j }).slice(0, 1500)]);
+
+        // Exit meanings from the script's own contract.
+        setUnity({ land, folder: uf, exits: { 1: { status: 'red', why: 'a test or the build failed' }, 3: { status: 'error', why: 'bad branch: no such branch in the Unity repo' } } });
+        const own3 = ugate({ UNITY_STUB_CODE: '3' });
+        const own5 = ugate({ UNITY_STUB_CODE: '5' });
+        const own0 = ugate({ UNITY_STUB_CODE: '0' });
+        const t3 = add('Plan the Unity port of the pier crane', '--branch unity/no-such');
+        run(dir, `node harness/task.mjs start ${t3} --agent porter-2601m`, { ...base, ...denv });
+        const done3 = done(t3, { UNITY_STUB_CODE: '3' });
+        setUnity({ land, folder: uf });
+        const def3 = ugate({ UNITY_STUB_CODE: '3' });
+        guard('B-41: studio/game.json engines.unity.exits is the land script\'s own contract: its exit 3 "bad branch" is an error saying so with the last lines (CLI exit 1; task done says error, not busy), a code it doesn\'t list is an error naming the code, 0 passes; without it the default contract stands (3 refused) and says how to change it (2.60.0: a bad branch was worded "busy")', () => [
+          own3.code === 1 && own3.j?.status === 'error' && /exited 3: bad branch: no such branch/.test(own3.j.why || '') && /land branch=unity\/pier/.test(own3.j.tail || '')
+            && own5.j?.status === 'error' && /exited 5, which the land script's contract .* doesn't name/.test(own5.j.why || '') && own0.code === 0 && own0.j?.status === 'pass'
+            && done3.status !== 0 && /the Unity gate says error: exited 3: bad branch/.test(out(done3)) && !/is busy/.test(out(done3))
+            && def3.code === 3 && def3.j?.status === 'refused' && /engines\.unity\.exits/.test(def3.j.why || ''),
+          JSON.stringify({ own3: own3.j, own5: own5.j?.why, own0: own0.j?.status, done3: out(done3).slice(-500), def3: def3.j }).slice(0, 2500)]);
+        fs.rmSync(uf, { recursive: true, force: true });
+      } finally {
+        if (gameBefore === null) fs.rmSync(gameJson, { force: true }); else fs.writeFileSync(gameJson, gameBefore);
+      }
     }
   } finally {
     for (const c of kids) { try { c.kill('SIGKILL'); } catch {} }

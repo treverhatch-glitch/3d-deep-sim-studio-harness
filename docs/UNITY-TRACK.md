@@ -169,12 +169,29 @@ changes it and a branch can't swap it for one that always passes):
 { "engines": { "unity": { "land": "<the Unity repo's land command> {branch}", "cwd": "<folder>", "timeoutMin": 120 } } }
 ```
 
-`{branch}` is `--branch`, else the Unity folder's current branch; `{task}` the task ID; `{folder}` the Unity
-track's folder. It runs in `cwd` (relative to the studio), else the Unity track's folder.
+`{branch}` is `--branch`, else the task's Unity branch: `task add "<title>" --track engine:unity --branch <b>`, or
+later `node harness/unity-gate.mjs branch <ID> <b>`. With neither the gate refuses and says how to set it; it never
+uses the Unity folder's checked-out branch (2.60.1: that was main, which would land main into itself). `{task}` is
+the task ID; `{folder}` is `"folder"` in the same settings (relative to the studio, or absolute) when set, else the
+Unity track's folder; a folder that doesn't exist is an error. It runs in `cwd` (relative to the studio), else that
+folder.
+
+If the land script has its own exit codes, write them down with it, so the harness never guesses what a code means:
+
+```json
+{ "engines": { "unity": { "land": "node \"{folder}/tools/land.mjs\" {branch}", "folder": "../my-game-unity",
+  "exits": { "1": { "status": "red", "why": "a test or the build failed" },
+             "3": { "status": "error", "why": "bad branch: no such branch in the Unity repo" } } } } }
+```
+
+`status` is pass, red, conflict, refused (busy: try again later) or error. With `exits` set, a code it doesn't list
+is an error naming the code; without it the contract below applies. The output's last lines come with every
+result that isn't a pass.
 
 - `node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]` runs it under the `machine:heavy`
   lock (a Unity editor run never overlaps a full verify or a browser playtest; it waits, naming the holder).
-- The exit code decides: 0 pass (landed), 1 red, 2 conflict, 3 refused (busy: not a failure of the work), 4 error;
+- The exit code decides (the default contract, when `exits` isn't set): 0 pass (landed), 1 red, 2 conflict,
+  3 refused (busy: not a failure of the work), 4 error;
   anything else, a signal or a timeout (`timeoutMin`, `STUDIO_UNITY_GATE_TIMEOUT_MIN`, 120) is an error.
 - `task done` runs it for a task added with `--track engine:unity`, after the task's other checks; the task closes
   only on a pass, and a refusal leaves it in progress ("run task done again later"). `STUDIO_DONE_UNITY_GATE=skip`
