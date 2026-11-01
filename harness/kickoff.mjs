@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
+import { constraintsBlock } from './learning-edge.mjs';
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -72,6 +73,9 @@ export function launchLine(tool, { agent, model }) {
   return { name: t.name, line: `STUDIO_LOCK_OWNER=${agent} STUDIO_AGENT_MODEL=${model} ${t.line(file, model)}`, note: t.note };
 }
 
+/** Roles that plan and cut the work (2.61: their kickoff carries the constraints from past failures). */
+export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
+
 export function kickoff(opts) {
   const { stable, volatile } = kickoffParts(opts, { named: true });
   return volatile ? `${stable}\n${volatile}` : stable;
@@ -98,6 +102,14 @@ export function kickoffParts(opts, { named = false } = {}) {
     const min = Math.ceil((last.rows || []).reduce((n, r) => n + (Number(r.ms) || 0), 0) / 60000);
     if (min) volatile = `Run \`npm run verify\` in the foreground: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min.\n`;
   } catch {}
+  // 2.61 (the learning edge): the roles that plan and cut work start with the constraints from past failures. They
+  // change as failures happen, so they go in the volatile part, never in the cached prefix.
+  if (PLANNING_ROLES.has(String(opts.role || '').toLowerCase())) {
+    try {
+      const c = constraintsBlock({ heading: '', for: opts.role === 'director' ? 'director' : 'planning' });
+      if (c) volatile += `\n${c}\n`;
+    } catch {}
+  }
   return { stable: text, volatile };
 }
 

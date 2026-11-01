@@ -123,6 +123,14 @@ Without the gh CLI, it says "CI not checked", never "green".
 when a script doesn't parse, and they name the file and Godot's error, even when the engine's own run exited
 0. `npm run gdscript:parse -- <project>` runs it by hand.
 
+## 8. Constraints from past failures (2.61)
+
+The Director's brief has a "Constraints from past failures" section: the top lessons that didn't stick, repeated
+failures, causes a person accepted and retro suggestions the Producer accepted, one line each with its source id
+(`failures.md#…`, `repeat:…`, `cause:<n>`, `retro:<date>`), ranked by repeats × recency. Use them when you point the
+Producer at the next work: which task carries each (a check first, a split that keeps a lane away from it). How they are
+built and the settings: [MEMORY.md](MEMORY.md) section 4.
+
 ## Also
 
 `npm run release` sets package-lock.json's version to match package.json (`scripts/lock-version.mjs`)
