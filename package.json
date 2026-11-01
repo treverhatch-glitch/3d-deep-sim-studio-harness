@@ -143,6 +143,7 @@
     "prefix": "node harness/prompt-layout.mjs stability",
     "verdict-note": "node harness/verdict-notes.mjs",
     "soak": "node qa/soak.mjs --seeds 8 --ticks 600",
+    "fuzz": "node qa/fuzz.mjs",
     "hub:smoke": "node qa/hub-smoke.mjs",
     "lock": "node harness/lock.mjs",
     "hub:build": "cd hub && npm install --no-audit --no-fund && npx vite build && npx tsc -p tsconfig.check.json",

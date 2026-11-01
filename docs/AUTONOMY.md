@@ -127,7 +127,10 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   event, written by the watchdog once a day at or after `STUDIO_DIGEST_HOUR` (9, local time; `STUDIO_DIGEST=off`
   stops the daily run). Under 200 words, only what needs a person: lanes held for a person's release (tier C) and
   protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
-  self-triage can't fix; then the scorecard line and what self-triage fixed. Nothing waiting: one line says so.
+  self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then the
+  scorecard line, what self-triage fixed and how many fuzz bug tasks were filed. Nothing waiting: one line says so.
+- **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
+  (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
 
 ## Drift checks (Check cards to the Producer)
 

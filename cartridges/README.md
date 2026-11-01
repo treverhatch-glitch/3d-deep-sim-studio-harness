@@ -26,6 +26,8 @@ gate run prints which game it tested. Folders starting with `_` are templates, n
 | `invariants(state)` | no | `[{ id, severity: 'P0'\|'P1'\|'P2', summary }]`. The harness adds a NaN/Infinity check for free. |
 | `outcome(state)` | no | `'won'`, `'lost'` or `null`. Defaults to `state.won` / `state.lost`. |
 | `TUNING` | no | Every balance number in one frozen table. `scripts/balance-sweep.mjs` sweeps it. |
+| `actions(state, rand)` | no | 2.66.0: one random player action (or an array, or `null`) for `npm run fuzz`, from the seeded `rand` passed in (`rand()`, `rand.int(n)`, `rand.pick(list)`). May live in `qa.mjs` instead (that one wins). |
+| `actionTypes` | no | Without `actions()`: `['hire', { type: 'spawn', kind: ['a', 'b'], x: { min: 0, max: 9 } }]`; arrays are choices (`null` leaves the field out), `{ min, max }` an integer range. |
 | `hashState(state)` | no | The display hash; defaults to FNV-1a 64 in `harness/hash.mjs`. Goldens and regressions are verified with the harness's own SHA-256 of the state, whatever this returns (`docs/HASH.md`). |
 
 `cartridges/<name>/qa.mjs` (optional, but `start-to-win` is required by the vertical-slice gate)
@@ -39,6 +41,29 @@ export const scenarios = {
 ```
 
 Policies are pure functions of `(state, tick)`; they run inside replays and goldens.
+
+## Fuzz (`npm run fuzz`, qa/fuzz.mjs, 2.66.0, advisory)
+
+Seeded random play for every game cartridge: `STUDIO_FUZZ_SEEDS` runs (20) of `STUDIO_FUZZ_TICKS` ticks (500), each
+tick asking `actions()` (or the `actionTypes` generator) for an action with chance `rate` (0.25). A cartridge with
+neither is skipped with a note. Checked: `invariants()` and a throwing `step()` every tick; every `saveEvery` (50)
+ticks a save/load round trip (the state through JSON must step to the same SHA-256 as the live one); determinism (the
+recorded run played again ends on the same SHA-256; one state stepped twice agrees). A failure is shrunk (ddmin) to the
+fewest actions that still fail the same way and written to `.studio/fuzz/findings/<id>.json` in the regression format
+(cartridge, seed, tick, actions: copy it into `qa/regressions/` when you fix it); the id hashes the cartridge, the
+check and the shrunk actions' types, so reruns update the same file. `npm run fuzz -- --replay <file>` replays one.
+
+Filing is hands-off with a shadow week (`studio/fuzz.json`): `"mode": "suggest"` (default) writes new findings to
+`.studio/fuzz/suggestions.md` and a `fuzz.finding` event the daily digest lists; `"mode": "file"`, or any run after
+`"autoFileAfter"` (the first run sets it to first run + 7 days; `null` never), files one `Fix fuzz finding <id>` bug
+task per new id through the board, never twice. `npm run fuzz -- file <id> --by <you>` files a suggestion now.
+`studio/fuzz.ignore.json` (`[{ "id": "F-…", "why": "…" }]`) lists intended behaviour; an entry with no why is not
+honoured. It should be on the protected list (owner's approval) so an agent can't silence a finding.
+
+Not a gate yet. To join the soak tier later, the owner adds to `studio/gates.json`
+`{ "id": "fuzz", "cartridge": true, "command": "node qa/fuzz.mjs --check --seeds 5 --ticks 300", "required": false }`
+(`--check` writes nothing and exits 1 on any finding not ignored), then makes it required once a few weeks of runs
+stay clean.
 
 ## Rules the gates enforce
 
