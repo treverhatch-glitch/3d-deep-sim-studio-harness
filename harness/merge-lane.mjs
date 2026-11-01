@@ -194,13 +194,17 @@ const held = new Map();
  * dead process, or older than the stale limit, doesn't count.
  */
 const LANDING_WAIT = /^gate-slot-landing-(\d+)\.wait$/;
-/** Live landing markers other than this process's: [{ pid, label }]. */
-export function landingWaiters(dir, { staleMs = 120 * 60000, self = process.pid } = {}) {
+/**
+ * Live landing markers other than this process's: [{ pid, label }]. 2.59.0 (#11): `prefix` names another slot class
+ * with the same markers (machine-heavy: harness/heavy.mjs); the default is the gate slots'.
+ */
+export function landingWaiters(dir, { staleMs = 120 * 60000, self = process.pid, prefix = 'gate-slot' } = {}) {
   const out = [];
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return out; }
+  const re = prefix === 'gate-slot' ? LANDING_WAIT : new RegExp(`^${prefix.replace(/[^\w]/g, '\\$&')}-landing-(\\d+)\\.wait$`);
   for (const n of names) {
-    const m = n.match(LANDING_WAIT);
+    const m = n.match(re);
     if (!m || Number(m[1]) === self) continue;
     const f = path.join(dir, n);
     try {

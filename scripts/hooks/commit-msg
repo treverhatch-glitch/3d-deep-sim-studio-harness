@@ -25,12 +25,19 @@ fi
 # them (--no-verify) is found afterwards by the hooks gate. Never blocks the commit.
 node "$ROOT/harness/hook-stamp.mjs" stamp "$MSG_FILE" || true
 [ -n "${STUDIO_LOCK_OWNER:-}" ] || exit 0
-TASKS="$(cd "$ROOT" && node -e "
-import('./harness/lock.mjs').then(({ listLocks }) => {
-  const mine = listLocks().filter((l) => l.owner === process.env.STUDIO_LOCK_OWNER && l.key.startsWith('task:'));
-  process.stdout.write(mine.map((l) => l.key.slice(5)).join(', '));
+# 2.59.0 (H-12): the task this commit is for, not every task the agent holds: the lane copy's own task, else the
+# subject's leading task id when the agent holds it, else its only task lock; several and nothing says which: none
+# (with a note). harness/lock.mjs commitTasks.
+TASKS="$(cd "$ROOT" && STUDIO_MSG_FILE="$MSG_FILE" node -e "
+import('./harness/lock.mjs').then(({ commitTasks }) => {
+  const fs = require('node:fs');
+  let subject = '';
+  try { subject = fs.readFileSync(process.env.STUDIO_MSG_FILE, 'utf8').split(/\r?\n/).find((l) => l.trim() && !l.startsWith('#')) || ''; } catch {}
+  const r = commitTasks({ owner: process.env.STUDIO_LOCK_OWNER, subject });
+  if (r.note) process.stderr.write('[commit-msg] note: ' + r.note + '\n');
+  process.stdout.write(r.tasks.join(', '));
 }).catch(() => {});
-" 2>/dev/null || true)"
+" || true)"
 EXPS="$(cd "$ROOT" && STUDIO_TASKS="$TASKS" node -e "
 import('./harness/event.mjs').then(({ readRecentEvents }) => {
   const held = new Set((process.env.STUDIO_TASKS || '').split(', ').filter(Boolean));

@@ -2,6 +2,8 @@
 /**
  * qa/check-regressions.mjs — every fixed bug keeps a replay in qa/regressions/ that must still match.
  * A regression with no hash fails: an unpinned regression proves nothing.
+ * 2.59.0: a "kind": "test" regression (a seeded game unit test; qa/regressions/README.md) runs with the studio's test
+ * runner ("regressionTest" in studio/game.json or the game's studio.gates.json) and must pass; nothing to pin.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, loadCartridge, replay } from '../harness/cartridge.mjs';
 import { hash64, isSha256 } from '../harness/hash.mjs';
 import { checkRecordingId, gameIdFor } from '../harness/game-id.mjs';
+import { regressionKind, runRegressionTest } from './fails-before.mjs';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'regressions');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : [];
@@ -22,6 +25,16 @@ let failed = 0;
 for (const file of files) {
   const full = path.join(dir, file);
   const spec = JSON.parse(fs.readFileSync(full, 'utf8'));
+  if (regressionKind(spec) === 'test') {
+    const t = runRegressionTest(spec);
+    if (t.ran && t.passed) console.log(`[regressions] PASS ${file} (test "${spec.test?.name}" in ${spec.test?.file}, seed ${spec.seed})`);
+    else if (update) console.log(`[regressions] ${file} is a game test: nothing to pin (${t.why})`);
+    else {
+      console.error(`[regressions] FAIL ${file}: ${t.ran ? `the test fails: ${t.why}` : t.why}`);
+      failed += 1;
+    }
+    continue;
+  }
   const name = spec.cartridge || defaultCartridgeName();
   if (!carts.has(name)) carts.set(name, await loadCartridge(name));
   const result = replay(carts.get(name), { seed: spec.seed, tick: spec.tick, actions: spec.actions || [], tuning: spec.tuning });

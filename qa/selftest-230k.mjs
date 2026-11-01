@@ -42,5 +42,7 @@ console.log(JSON.stringify([a.ok !== false, b.ok !== false, d.ok === false]));`)
   report('2.30k: task add takes --paths, and task done refuses uncommitted changes in the claimed files',
     /flags\.paths/.test(src) && /error: 'uncommitted'/.test(src));
   const ag = fs.readFileSync(path.join(dir, 'harness', 'agent.mjs'), 'utf8');
-  report('2.30k: the launcher claims each file of the lane and lets go of all of them', /for \(const \[i, p\] of lanePaths\.entries\(\)\)/.test(ag) && /for \(const p of lanePaths\) release/.test(ag));
+  // 2.59.0 (#8): the loop skips a too-broad path left unheld in a lane copy and lets go of the ones it held so far.
+  report('2.30k: the launcher claims each file of the lane and lets go of all of them',
+    /for \(const p of lanePaths\) \{[\s\S]{0,120}const c = claim\(`path:\$\{p\}`, agent/.test(ag) && /for \(const q of held\) release\(`path:\$\{q\}`, agent\)/.test(ag) && /for \(const p of lanePaths\) release/.test(ag));
 }

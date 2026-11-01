@@ -47,6 +47,34 @@ rows and that morning's NEXT.md tasks, uncommitted. A finished task reopened and
    committed, `git stash apply <sha>` (three-way), keep both sides' rows, commit; drop the entry only after.
 6. `npm run verify`, then `npm run task -- drain off --by <you>`.
 
+### Taking 2.59.0 with live lanes (migration note)
+
+2.59.0 changes how lanes land (the merge train), what a hook stamp records (`Studio-Patch-U0`) and refuses a lane's
+gates while its harness is behind main. Do it once, in this order:
+
+1. Drain: `npm run task -- drain on --by <you>`, then `npm run task -- drain wait`.
+2. One-shot board snapshot, then commit the board: `npm run upgrade -- --snapshot` (copies the board files to
+   `.studio/board-snapshots/<time>/` and checks), commit what it names, and run `npm run upgrade -- --check` until it
+   passes. Never stash the board.
+3. Back up main (`git branch backup/pre-2.59.0 main`), merge the harness's main. A studio that patched a harness file
+   locally (for example its own fix for the hooks gate) takes upstream's version of that file: 2.58.5 and 2.59.0
+   replace such patches.
+4. `npm run verify -- --all` on main must be green before any lane lands.
+5. Each live lane copy (`.lanes/<agent>`): bring main in (`git merge main`, or `git rebase main`), then re-stamp:
+   `npm run hooks -- restamp` in the lane. It re-commits the lane's commits through the real hooks, keeps
+   `backup/<lane>-pre-restamp-<time>`, and refuses with uncommitted changes. Until a lane has main's harness,
+   `npm run verify` and the hooks check in it refuse and say so (`STUDIO_LANE_HARNESS=own` runs the lane's own copy).
+6. `npm run task -- drain off --by <you>`. Lanes then land through trains: `task done <ID>` in a lane is a one-lane
+   train; `task done <ID> --train` queues it and `npm run task -- train` lands every queued lane on one full verify.
+   `STUDIO_TRAIN=off` keeps the old one-at-a-time path.
+
+New settings to know: `STUDIO_HEAVY_SLOTS` (1: full verifies, Unity landings and wrapped playtests run one at a
+time), `STUDIO_RAM_FLOOR_GB` (3: no new agent below it), `STUDIO_RESUME_BY` (who may run `npm run studio:resume`),
+`STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>` (a key per role or agent), `studio/game.json`
+`engines.unity.land` (the Unity landing command), a game manifest's `"visual": { "capture": ... }` (render tasks on
+non-Godot games). A task's type can be changed only by a person in their own terminal:
+`npm run task -- type <ID> <type> --by <name> --why "..."`.
+
 ## What 2.30c changed for agents
 
 - **Short output.** `task start` prints the brief's path and a 10-line summary; its JSON carries `carryForward` (the newest hand-off notes, at most 3k characters) instead of the whole history (`studio/handoffs/<ID>.md` keeps it). `npm run handoff` prints at most 3k characters; `npm run handoff -- --full` prints all of it (always saved to `.studio/briefs/producer.md`).

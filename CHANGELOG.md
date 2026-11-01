@@ -4,6 +4,37 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.59.0] — 2026-11-01
+2.59.0: opus-bot's final brief of 2026-11-01 (items 1-16; 2.58.5 had already closed 7, 9, 10, 12, 13) and one gap found
+in the crew's logs (P-098 to P-111). Migration note for live lanes: docs/RELEASE.md, "Taking 2.59.0 with live lanes".
+### Added
+- **Merge train (P-098, brief #1).** `npm run task -- train` lands queued lanes (`task done <ID> --train`) on one full
+  verify of main + the lanes, built in a scratch copy. Lanes are merged, not rebased, so hook stamps hold. Main moves
+  only to the verified tree. A red train hands back the lane that fails alone; conflicting lanes wait for the next
+  train; a red main hands nobody back. `task done` in a lane copy is a one-lane train; `STUDIO_TRAIN=off` keeps the old
+  path. qa/selftest-259a.mjs.
+- **Owner reclassification and test regressions (P-102, #5).** `npm run task -- type <ID> <type> --by <owner> --why`,
+  refused for agents, launched sessions and coding-agent shells; recorded in `studio/task-types.json` without an owner
+  key (ignored if an agent's commit set it), signed in `studio/approvals/` with one. A bug's regression can be a seeded
+  game unit test (`"kind": "test"`, run with the studio's own `regressionTest` command), proven to fail before the fix
+  and pass after it; a test that never ran is an error. qa/selftest-259c.mjs.
+- **Heavy work and memory (P-105 to P-107, #11).** A box-wide `machine:heavy` lock (`STUDIO_HEAVY_SLOTS`, 1) for full
+  verifies, the Unity gate and wrapped playtests (`node harness/heavy.mjs run --label <what> -- <command>`); a second
+  full verify of one checkout is refused; the supervisor starts no agent under `STUDIO_RAM_FLOOR_GB` (3).
+- **Unity landing gate (P-110, #16).** `studio/game.json` `engines.unity.land`; `task done` runs it for Unity-track tasks.
+- **`npm run studio:resume -- --by <name>` (P-109, #15)**, people only (`STUDIO_RESUME_BY` narrows who); **per-agent key
+  mapping (P-108, #14)**, `STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>`, names logged, values never.
+  qa/selftest-259d.mjs, qa/selftest-259e.mjs.
+### Fixed
+- **Hook stamps survive a clean rebase (P-100, H-13).** commit-msg adds `Studio-Patch-U0` (the patch-id without context);
+  task done re-commits stale-stamped lane commits through the real hooks after its rebase; `npm run hooks -- restamp`
+  by hand in a lane. **`Studio-Task` names one task (P-101, H-12).** **A lane behind main's harness refuses its gates
+  (P-103, #6).** qa/selftest-259b.mjs.
+- **Game check timeouts scale with load (P-099, #2)**, up to x3, printed, never shorter.
+- **The launcher holds no too-broad lane lock (P-104, #8).**
+- **Render tasks on non-Godot games (P-111).** A game's manifest names its own capture command
+  (`"visual": { "capture": ... }`); task done's hint names the right route. qa/selftest-259f.mjs.
+
 ## [2.58.5] — 2026-11-01
 2.58.5: fixes from opus-bot's crew report of 2026-11-01 (H-1 to H-11; P-084 to P-096).
 ### Fixed

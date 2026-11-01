@@ -90,7 +90,7 @@ export function laneShareDirs(root = mainRoot()) {
   });
 }
 
-const mainBranch = (root = mainRoot()) => git(root, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
+export const mainBranch = (root = mainRoot()) => git(root, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
 
 function readBranches() {
   try {
@@ -320,6 +320,29 @@ export function laneDiff() {
 }
 
 /**
+ * Uncommitted work in a lane copy, as task done judges it: { dirty: porcelain lines, eol: line-ending-only files }.
+ * 2.31.0: no trim() before slice(3) (it ate the first letter of the first path: "odot/..."), and engine cache files
+ * (.godot/, *.import, *.uid) that every headless Godot run rewrites don't count. 2.58.3 (O3, crew P-035): a tracked
+ * file that differs only in line endings isn't uncommitted work (deliver sets it aside with the engine cache).
+ * 2.59.0: shared with the merge train's lane check (harness/train.mjs).
+ */
+export function laneDirty(dir = REPO_ROOT) {
+  const dirtyAll = (git(dir, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
+    .filter((l) => !/(^|\/)\.godot\/|\.import$|\.(uid|tmp)$|(^|\/)\.import\//.test(l.slice(3).replace(/^"|"$/g, '')));
+  const { real, eol } = splitEolOnly(dir, dirtyAll);
+  return { dirty: real, eol };
+}
+
+/** A task's lane branch (and the earlier agents' branches it carried) are in the studio's branch now: forget them. */
+export function forgetLanded(taskId, branch, root = mainRoot()) {
+  const b = readBranches();
+  for (const old of b[`${taskId}:carried`] || []) git(root, 'branch', '-D', old);
+  delete b[`${taskId}:carried`];
+  if (b[taskId] === branch) delete b[taskId];
+  writeBranches(b);
+}
+
+/**
  * Task done in a lane copy: the work must be committed; it is rebased on the studio's branch and then
  * the studio's branch fast-forwards to it. Returns null when not in a lane copy, { ok: true, merged }
  * or { ok: false, message }.
@@ -333,13 +356,7 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   if (!inLaneCopy()) return null;
   const root = mainRoot();
   const main = mainBranch(root);
-  // 2.31.0: no trim() before slice(3) (it ate the first letter of the first path: "odot/..."), and engine
-  // cache files (.godot/, *.import, *.uid) that every headless Godot run rewrites don't block a landing.
-  const dirtyAll = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
-    .filter((l) => !/(^|\/)\.godot\/|\.import$|\.(uid|tmp)$|(^|\/)\.import\//.test(l.slice(3).replace(/^"|"$/g, '')));
-  // 2.58.3 (O3, crew P-035): a tracked file that differs only in line endings isn't uncommitted work; it is set aside
-  // with the engine cache below (a named stash) so the rebase can run.
-  const { real: dirty, eol } = splitEolOnly(REPO_ROOT, dirtyAll);
+  const { dirty, eol } = laneDirty(REPO_ROOT);
   if (eol.length) {
     console.warn(`[task done] note: ${eolNote(eol)}`);
     emitEvent({ type: 'task.eol_ignored', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, status: 'warn', msg: `${taskId}: ${eolNote(eol)}`.slice(0, 400) });
@@ -364,6 +381,10 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
         git(REPO_ROOT, 'rebase', '--abort');
         return { ok: false, message: `The studio's branch (${main}) changed files you changed too. Merge it into your copy (git merge ${main}), resolve the conflicts, commit, run npm run verify, then task done again.` };
       }
+      // 2.59.0 (H-13): a commit whose hook stamp was valid before this rebase and isn't after it is re-committed through
+      // the real hooks (harness/hook-stamp.mjs restamp --auto), never stamped by hand; if the hooks refuse it, it doesn't land.
+      const rs = restampAfterRebase(taskId, { tip, before, preHead });
+      if (!rs.ok) return { ok: false, message: rs.message };
       const head = git(REPO_ROOT, 'rev-parse', 'HEAD').stdout.trim();
       if (runChecks) {
         const incoming = changedSince(REPO_ROOT, before, tip);
@@ -412,16 +433,34 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
     }
     if (res.retry) continue;
     if (!res.ok || !res.merged) return res;
-    // The task's branch and any earlier agents' branches it carried are in the studio's branch now.
-    const b = readBranches();
-    for (const old of b[`${taskId}:carried`] || []) git(root, 'branch', '-D', old);
-    delete b[`${taskId}:carried`];
-    if (b[taskId] === branch) delete b[taskId];
-    writeBranches(b);
+    forgetLanded(taskId, branch, root);
     if (res.merged) emitEvent({ type: 'lane.merged', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${branch} added to ${main}` });
     return res;
   }
   return { ok: false, message: `${main} kept moving while ${taskId} was landing (${tries} tries). Run task done again.` };
+}
+
+/**
+ * 2.59.0 (H-13): after deliver's rebase, re-commit through the hooks the lane commits whose stamps the rebase made stale
+ * (only when every stamp was valid before it). STUDIO_HOOKS_RESTAMP=off skips it (the hooks gate then lists them).
+ * Returns { ok, message, replayed }.
+ */
+export function restampAfterRebase(taskId, { tip, before, preHead }) {
+  if (/^(off|0|false|no)$/i.test(process.env.STUDIO_HOOKS_RESTAMP || '')) return { ok: true, replayed: 0 };
+  const script = path.join(REPO_ROOT, 'harness', 'hook-stamp.mjs');
+  if (!fs.existsSync(script)) return { ok: true, replayed: 0 };
+  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
+  let j = null;
+  try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch {}
+  if (j?.ok) {
+    if (j.replayed) {
+      console.log(`[deliver] ${taskId}: ${j.why} after the rebase (their stamps no longer matched)`);
+      emitEvent({ type: 'hooks.restamped', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${j.why} after task done's rebase` });
+    }
+    return { ok: true, replayed: j.replayed || 0 };
+  }
+  const why = j?.why || `${(r.stderr || r.stdout || '').trim().split('\n').slice(-3).join(' ') || `exit ${r.status}`}`;
+  return { ok: false, message: `Your work was rebased on the latest studio branch, and its commits' hook stamps no longer match, so they were re-committed through the hooks, which failed: ${why}. Fix it in your copy and commit (or npm run hooks -- restamp), then task done again.` };
 }
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -507,7 +546,8 @@ export function landFastForward(root, main, branch, { taskId = '' } = {}) {
 export function laneCopies(root = mainRoot()) {
   const d = path.join(root, LANES_DIR);
   if (!fs.existsSync(d)) return [];
-  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => {
+  // 2.59.0: a merge train's scratch copy (.lanes/_train-<id>, harness/train.mjs) is no agent's: the train removes it.
+  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_train-')).map((e) => {
     const dir = path.join(d, e.name);
     const branch = git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() || null;
     return { agent: e.name, dir, branch, unmerged: branch ? unmerged(branch, root) : 0, dirty: Boolean((git(dir, 'status', '--porcelain').stdout || '').trim()) };

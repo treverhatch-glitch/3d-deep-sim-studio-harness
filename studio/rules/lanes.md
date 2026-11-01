@@ -26,6 +26,13 @@ Parallel work is capped by file layout. One 900-line renderer file means one ren
 - Needs git 2.42 or newer. On older git, or with `STUDIO_WORKTREES=off`, everyone shares one checkout, as
   before; preflight says which.
 - Board lanes (`studio/...`) and builders without a lane work in the main checkout.
+- A copy runs its own committed `harness/` and `scripts/` (2.59.0). When the studio's branch changed them after the
+  copy branched, `npm run verify` and `task done` there refuse and name the files: rebase on the studio's branch
+  (`git rebase main`), then `npm run hooks -- restamp` if the hooks check lists commits. `STUDIO_LANE_HARNESS=own`
+  runs the copy's own harness anyway.
+- Hook stamps survive a clean rebase (2.59.0). `task done`'s own rebase re-commits through the hooks any commit whose
+  stamp it made stale; by hand, `npm run hooks -- restamp` does the same (it keeps a `backup/<lane>-pre-restamp-<time>`
+  branch). A commit in a copy is tagged `Studio-Task` with the copy's own task.
 
 ## Size (2.29)
 

@@ -123,7 +123,9 @@ function copyRepo() {
 if (templateTree().dir) gates = JSON.parse(fs.readFileSync(path.join(templateTree().dir, 'studio', 'gates.json'), 'utf8')).gates;
 const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readFileSync(path.join(dir, rel), 'utf8')));
 // A clean environment: nothing from the shell or .env (agent names, cartridge, keys, folders) leaks into a test.
-const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k)));
+// 2.59.0: the supervisor starts no agent under STUDIO_RAM_FLOOR_GB free memory; checks run with it off so a busy test
+// machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0' };
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
@@ -3739,6 +3741,64 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest2585R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585r.mjs')).href);
   await selftest2585R({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0 (helper a, brief item 1): the merge train: queued lanes land on one full verify of main + the lanes; a red train
+// hands back the lane that fails alone; conflicting lanes aren't trained together; the hooks gate still judges every
+// lane's commits; task done in a lane copy is a one-lane train (qa/selftest-259a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259a.mjs')).href);
+  await selftest259A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0 (final brief H-13 H-12 #6): a clean rebase near a commit's hunks keeps its hook stamp (Studio-Patch-U0);
+// task done's rebase and `npm run hooks -- restamp` re-commit stale stamps through the real hooks; Studio-Task names one
+// task; a lane copy behind a harness change on main refuses its gates (qa/selftest-259b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259b.mjs')).href);
+  await selftest259B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0 (crew brief item 5): the owner reclassifies a task's type (task type, recorded or signed; agents refused), and
+// a bug's regression can be a seeded game unit test proven by fails-before (qa/selftest-259c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259c.mjs')).href);
+  await selftest259C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0 (final brief 2026-11-01, #15 #14 #8): npm run studio:resume clears a halt by a person's name (not an agent's,
+// not inside a launched session); the owner's per-agent key mapping (names logged, values never); the launcher holds no
+// too-broad lane as a session lock (lane copy: unheld; main checkout: refused unless a person kept it wide)
+// (qa/selftest-259e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259e.mjs')).href);
+  await selftest259E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0: a render task on a game that isn't a Godot project captures with the game's own command (its manifest's
+// "visual": { "capture": ... }); task done's hint names the right route (qa/selftest-259f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259f.mjs')).href);
+  await selftest259F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.59.0 (#11, #2, #16): the machine:heavy lock, one full verify per checkout, the supervisor's RAM floor, a game
+// check's timeout scaled for load, and the Unity engine-track landing gate (qa/selftest-259d.mjs).
+{
+  const dir = copyRepo();
+  const { selftest259D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259d.mjs')).href);
+  await selftest259D({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

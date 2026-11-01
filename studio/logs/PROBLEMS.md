@@ -628,3 +628,73 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** PR #43's Windows CI: both PU-19 usage-limit end-to-end checks saw a second session start before the first hit its limit; reproduced on Linux by slowing the lane copy 4 s (both fail, as on Windows).
 - **Why:** the detached launcher clears the placeholder its parent wrote (so its own checks don't count it) and wrote its real record only after the lane copy; on Windows or in a big repo `git worktree add` takes seconds, and a supervisor pass in that gap saw the role under its cap. H-9 (custom commands get copies) made it show in this test; built-in tools had the same gap.
 - **Fix:** harness/agent.mjs holds a "starting" record from the launcher's checks until the real record, and takes it back if the session never starts. qa/selftest-2585r.mjs (a post-checkout hook that sleeps makes the copy slow).
+
+### P-098 — Serial landing forced rebases and repeated verifies (brief #1) · added in 2.59.0
+- **Evidence:** lanes opus-12 to opus-37; backup branches *-pre-rebase*, *-preland-*, *-merged; about 10 rebases, 3 integrator runs and 1-2 h of serial verifies in one day.
+- **Why:** each task done moved main, so every other lane rebased and verified again.
+- **Fix:** the merge train: queued lanes merged onto main in a scratch copy, one full verify of that tree, main moves only to it; a red train is bisected; `task done` is a one-lane train (`STUDIO_TRAIN=off` keeps the old path). qa/selftest-259a.mjs.
+
+### P-099 — A fixed 600 s game-check timeout failed under load (brief #2) · fixed in 2.59.0
+- **Evidence:** T-060 "FAIL game:test: exit null: Error: timed out after 600 s"; v60d e2e "Test timed out in 120000ms".
+- **Why:** the timeout ignored other heavy work on the machine.
+- **Fix:** the timeout scales with live heavy holders, other running game checks and load average, up to x3, printed and recorded, never shorter. qa/selftest-259d.mjs.
+
+### P-100 — A clean rebase invalidated hook stamps (H-13) · fixed in 2.59.0
+- **Evidence:** T-093 on opus-29: "its stamp doesn't match its content" after a conflict-free `git rebase main`; reproduced in qa/selftest-259b.mjs.
+- **Why:** the stamp's patch-id hashes 3 lines of context, which change when main edits nearby lines.
+- **Fix:** commit-msg also records `Studio-Patch-U0` (patch-id without context); the gate accepts a match on it (old stamps keep the old rule; any changed line still fails); task done re-commits stale-stamped commits through the real hooks after its rebase; `npm run hooks -- restamp`.
+
+### P-101 — Studio-Task listed every task the agent held (H-12) · fixed in 2.59.0
+- **Evidence:** commit trailers such as "Studio-Task: T-077, T-085, T-086, T-087" (13 commits) in the crew's history.
+- **Why:** the commit-msg hook read all of the agent's task locks.
+- **Fix:** the lane's own task, else the subject's leading id it holds, else its only lock, else none with a note. qa/selftest-259b.mjs.
+
+### P-102 — Bug tasks with no cartridge coverage couldn't close; retitling was the only way out (brief #5) · fixed in 2.59.0
+- **Evidence:** T-057, T-058, T-059, T-067 parked or forced; T-068 (a toolchain fix titled "Bug:") forced without a regression.
+- **Why:** the type came only from the title, and only a cartridge replay satisfied the bug check.
+- **Fix:** `npm run task -- type` (people only; recorded, or signed with an owner key) and `"kind": "test"` regressions proven by fails-before. qa/selftest-259c.mjs.
+
+### P-103 — Lanes ran their own stale copy of the harness (brief #6) · fixed in 2.59.0
+- **Evidence:** T-061 failed hooks again after the hooks fix landed on main.
+- **Why:** a lane runs the harness/ committed on its branch.
+- **Fix:** verify and the hooks check refuse in a lane whose branch point is behind a harness change on main and say `git rebase main` (`STUDIO_LANE_HARNESS=own` overrides); commits only get a note. qa/selftest-259b.mjs.
+
+### P-104 — The launcher held too-broad lane locks (brief #8) · fixed in 2.59.0
+- **Evidence:** 2.58.5 (P-090) covered by-hand claims; the launcher claimed a task's lane with no breadth check. (The report's builder-s45/s51 claims were by hand, already fixed.)
+- **Why:** runAgent claimed `path:<lane>` for 6 h whatever its breadth.
+- **Fix:** in a lane copy a too-broad lane isn't held as a lock (`lane.unlocked`); in the main checkout the launch is refused unless a person kept the lane `--wide`. qa/selftest-259e.mjs.
+
+### P-105 — Heavy jobs overlapped on one machine (brief #11) · fixed in 2.59.0
+- **Evidence:** full verifies, a Unity editor (6-7 GB) and browser playtesters (~5 GB each) together: e2e timeouts and 2.6 GB free.
+- **Why:** gate slots only spread single game checks.
+- **Fix:** a box-wide `machine:heavy` lock (`STUDIO_HEAVY_SLOTS`, 1) for full verifies, the Unity gate and wrapped playtests; waiters name the holder. qa/selftest-259d.mjs.
+
+### P-106 — A second full verify ran beside the first (brief #11) · fixed in 2.59.0
+- **Evidence:** a stopped background verify loop's child ran a second full verify concurrently.
+- **Why:** the running-verify record was per owner and only for detached runs.
+- **Fix:** `.studio/verify-running/full.json`; a second full run is refused naming the holder; a dead holder is ignored. qa/selftest-259d.mjs.
+
+### P-107 — Agents started with almost no free memory (brief #11) · fixed in 2.59.0
+- **Evidence:** RAM down to 2.6 GB free while new sessions started.
+- **Why:** the supervisor's caps ignored memory.
+- **Fix:** no new agent under `STUDIO_RAM_FLOOR_GB` (3); one line per pass and a throttled event. qa/selftest-259d.mjs.
+
+### P-108 — No supported way to give one agent its own API key (brief #14) · added in 2.59.0
+- **Evidence:** planned in 2.58.5 (P-092).
+- **Why:** the env filter only worked by tool prefix.
+- **Fix:** `STUDIO_KEYMAP_<ROLE>` / `STUDIO_KEYMAP_AGENT_<NAME>` (`TARGET:SOURCE`, key-like names only); names logged, values never. qa/selftest-259e.mjs.
+
+### P-109 — Clearing a halted supervisor needed the hub token (brief #15) · added in 2.59.0
+- **Evidence:** the War Room's Try again needs the token from .env, which agents can't read.
+- **Why:** the halt could only be cleared through the hub.
+- **Fix:** `npm run studio:resume -- --by <name> [--why]`, refused for agents and launched sessions; `STUDIO_RESUME_BY` narrows who. qa/selftest-259e.mjs.
+
+### P-110 — No gate for the Unity engine track (brief #16) · added in 2.59.0
+- **Evidence:** the Unity lane's proposal: work branches merged by hand, tests run when a bot remembered.
+- **Why:** the harness had no Unity landing step.
+- **Fix:** `harness/unity-gate.mjs` runs `studio/game.json` `engines.unity.land` under the heavy lock (exit 0 pass, 1 red, 2 conflict, 3 refused, other error); `task done` runs it for Unity-track tasks. qa/selftest-259d.mjs.
+
+### P-111 — Render tasks on a non-Godot game couldn't produce their visual proof · fixed in 2.59.0
+- **Evidence:** found in the crew's events while checking this release: "a render task needs a visual result: capture ... --godot <project>" 7 times on a web game (T-028 parked; others forced).
+- **Why:** the visual proof could only capture a Godot project.
+- **Fix:** a game's manifest names its own capture command (`"visual": { "capture": ... }`, protected); `npm run visual -- capture` runs it; the same checks apply; task done's hint names the route. qa/selftest-259f.mjs.

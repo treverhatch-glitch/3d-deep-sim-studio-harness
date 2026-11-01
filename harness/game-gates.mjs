@@ -32,6 +32,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
+import { scaledTimeout } from './heavy.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -222,7 +223,18 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // snapshots during a verify (on Windows each verify rewrote a snapshot's line endings on main). Updating
     // snapshots is a deliberate run with -u. STUDIO_GAME_GATE_CI=off leaves CI as it is.
     const env = /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' };
-    const runOnce = (cmd) => slot(cmdLabel, () => spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }));
+    // 2.59.0 (#2): the timeout is scaled for load, judged once the check has its slot (harness/heavy.mjs
+    // scaledTimeout): other heavy work running (a full verify, the Unity gate, a browser playtest), other game checks,
+    // a high load average. Never below STUDIO_GAME_GATE_TIMEOUT_MS (600 s), at most STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
+    // (3) times it; the value used is printed and kept in the check's row, so a real hang still fails, just later.
+    const baseTimeout = Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000);
+    let timing = { ms: baseTimeout, base: baseTimeout, factor: 1, why: '' };
+    const runOnce = (cmd) => slot(cmdLabel, () => {
+      timing = scaledTimeout(baseTimeout, slotRoot);
+      if (timing.factor > 1) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${Math.round(baseTimeout / 1000)} s x ${timing.factor}: ${timing.why}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
+      if (timing.factor > 1) emitEvent({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${Math.round(baseTimeout / 1000)} s x ${timing.factor}): ${timing.why}`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor } });
+      return spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
+    });
     for (const g of gates) {
       cmdLabel = g.id;
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
@@ -230,7 +242,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       const cmd = related ? g.related.replace('{files}', existing.map(q).join(' ')) : g.command;
       if (related) log(`[game-gates] ${g.id}: only the tests related to the ${existing.length} changed file(s) (the whole suite runs in the whole-game check after landing)`);
       let r = runOnce(cmd);
-      if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS)`;
+      if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''})`;
       // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
       // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.
       let flaky = null;
@@ -251,7 +263,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
       // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(timing.factor > 1 ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: timing.why } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

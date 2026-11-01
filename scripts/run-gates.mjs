@@ -23,6 +23,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
 import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
+import { selfIdentity, pidAlive as idAlive } from '../harness/proc-identity.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
@@ -39,6 +40,7 @@ const argv = process.argv.slice(2);
 const SCRIPT = fileURLToPath(import.meta.url);
 const VERIFY_DIR = path.join(root, '.studio', 'verify-running');
 const verifyOwner = /^[\w.-]+$/.test(process.env.STUDIO_LOCK_OWNER || '') ? process.env.STUDIO_LOCK_OWNER : '_default';
+const FULL_FILE = path.join(VERIFY_DIR, 'full.json'); // 2.59.0 (#11b): the checkout's running full verify
 {
   const stage = argv.indexOf('--verify-stage');
   if (stage >= 0) process.exit(await verifyStage(argv[stage + 1], argv[stage + 2]));
@@ -46,6 +48,22 @@ const verifyOwner = /^[\w.-]+$/.test(process.env.STUDIO_LOCK_OWNER || '') ? proc
   const detach = !argv.includes('--no-detach') && !process.env.STUDIO_VERIFY_RUN && !/^(off|0|false|no)$/i.test(detachEnv)
     && (argv.includes('--detach') || /^(on|1|true|yes)$/i.test(detachEnv) || process.env.npm_lifecycle_event === 'verify');
   const wait = argv.includes('--wait') && !process.env.STUDIO_VERIFY_RUN;
+  // 2.59.0 (#6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed them since
+  // the lane branched, its gates would judge with the old code (T-061 failed the hooks gate again after the fix had
+  // landed on main): refuse and name the files and the fix (rebase). The studio's branch holds the reviewed harness; a
+  // lane's own harness edits (a harness task) don't count. STUDIO_LANE_HARNESS=own runs the lane's copy anyway.
+  if (!wait) {
+    let d = null;
+    try { d = (await import('../harness/hook-stamp.mjs')).laneHarnessDrift(root); } catch {}
+    if (d?.files.length) {
+      const { laneDriftText, laneHarnessOwn } = await import('../harness/hook-stamp.mjs');
+      if (laneHarnessOwn()) console.log(`[gates] note: STUDIO_LANE_HARNESS=own: running this lane copy's own harness, ${d.files.length} file(s) behind ${d.branch}`);
+      else {
+        console.error(`[gates] FAIL not run: ${laneDriftText(d)}`);
+        process.exit(1);
+      }
+    }
+  }
   if (wait || detach) process.stdout.on('error', () => {}); // a reader that went away (| head) never stops the run
   if (wait) process.exit(await flushed(await waitForVerify()));
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));
@@ -118,7 +136,40 @@ if (changedFiles?.length) {
   if (!process.env.STUDIO_GATE_PATHS) process.env.STUDIO_GATE_PATHS = changedFiles.join(',');
   console.log(`[gates] scoped to the ${changedFiles.length} file(s) this lane changed${changedBase ? ` since ${changedBase.slice(0, 8)}` : ''}; game checks outside them are skipped (--all runs everything)`);
 }
+// 2.59.0: the owner's task reclassifications in force (harness/reclassify.mjs), shown like approvals, and any on file
+// that doesn't count (unsigned with an owner key, set by an agent's commit, not committed).
+if (fs.existsSync(path.join(root, 'studio', 'task-types.json')) || fs.existsSync(path.join(root, 'studio', 'approvals'))) {
+  try {
+    const { typeRecordLines } = await import('../harness/reclassify.mjs');
+    for (const l of typeRecordLines()) console.log(`[gates] ${l.ok ? 'owner type:' : 'WARN owner type:'} ${l.line}`);
+  } catch { /* the list is a help, never a failure */ }
+}
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
+// 2.59.0 (#11b): one full verify per checkout. A stopped background verify loop's shell child survived and ran a
+// second full verify of the same checkout beside the first (the per-owner record above only keeps one owner's
+// detached runs apart). The process that runs the gates records itself in .studio/verify-running/full.json (pid and
+// start identity, harness/proc-identity.mjs); a second full run here while that process lives is refused, naming
+// it. A record whose process is gone (its shell was killed) is stale and ignored. Partial runs (--only, --tier fast)
+// don't take or check it.
+const fullRun = !only && !isFastTier;
+if (fullRun) claimFullVerify();
+// 2.59.0 (#11a): heavy work takes the machine:heavy lock (harness/heavy.mjs) for the whole run: the full set, or a
+// run with a heavy gate in it (the studio game's checks, browser-play, or a gate marked "heavy": true). It waits,
+// naming the holder, and fails clearly past STUDIO_HEAVY_WAIT_MIN; its gates (children) don't wait for it again.
+{
+  const isHeavy = (g) => g.heavy === true || (g.heavy !== false && ((g.id === 'game' && sg) || g.id === 'browser-play'));
+  if (fullRun || gates.some(isHeavy)) {
+    const { acquireHeavy, heavyRoot } = await import('../harness/heavy.mjs');
+    try {
+      const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null });
+      process.on('exit', () => lk.release());
+    } catch (err) {
+      if (err.code !== 'HEAVY_BUSY') throw err;
+      console.error(err.message);
+      process.exit(1);
+    }
+  }
+}
 // 2.58.0 (PU-34): the commit and tree the gates start on are the ones they test, so the record names HEAD from
 // before the first gate, and the tree counts as dirty if it was dirty then or is at the end (an edit made while the
 // gates ran). Engine cache files a gate rewrites (.godot/, *.import, *.uid) don't count. task done trusts a verify
@@ -269,6 +320,34 @@ function changedTracked(before, after) {
   for (const [f, v] of after) if (before.get(f) !== v) out.add(f);
   for (const f of before.keys()) if (!after.has(f)) out.add(f);
   return [...out].sort();
+}
+
+// ---- 2.59.0 (#11b): one full verify per checkout ----
+
+/** The live full verify of this checkout other than this process: its record, or null (none, or stale). */
+function liveFullVerify() {
+  const rec = readJsonFile(FULL_FILE);
+  if (!rec?.pid || rec.pid === process.pid) return null;
+  return idAlive(rec.pid, rec.identity) && Date.now() - Date.parse(rec.startedAt || 0) < Number(process.env.STUDIO_VERIFY_MAX_MIN || 360) * 60000 ? rec : null;
+}
+
+/** Record this process as the checkout's full verify, or refuse (exit 1) while another one lives. */
+function claimFullVerify() {
+  fs.mkdirSync(VERIFY_DIR, { recursive: true });
+  const holder = statusLock('full', () => {
+    const live = liveFullVerify();
+    if (live) return live;
+    const st = process.env.STUDIO_VERIFY_RUN ? readJsonFile(verifyFiles().status) : null;
+    writeAtomic(FULL_FILE, JSON.stringify({ pid: process.pid, identity: selfIdentity(), owner: verifyOwner, args: argv, startedAt: new Date().toISOString(), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN, log: st?.runId === process.env.STUDIO_VERIFY_RUN ? relPath(st.log) : null } : {}) }, null, 2));
+    return null;
+  });
+  if (holder) {
+    console.error(`[verify] refused: a full verify of this checkout is already running: ${holder.owner || '_default'}'s (pid ${holder.pid}, ${holder.args?.length ? holder.args.join(' ') : 'no options'}, started ${ago(holder.startedAt)} ago${holder.log ? `, log ${holder.log}` : ''}). Two full runs on one checkout share its files and slow each other into timeouts. Wait for it instead: npm run verify -- --wait (shows it and its result). Nothing was run and no verify record was written.`);
+    process.exit(1);
+  }
+  process.on('exit', () => {
+    try { if (readJsonFile(FULL_FILE)?.pid === process.pid) fs.rmSync(FULL_FILE, { force: true }); } catch {}
+  });
 }
 
 // ---- 2.58.0 (F1): the detached run ----
@@ -496,6 +575,20 @@ async function waitForVerify() {
   const files = verifyFiles();
   const st = readJsonFile(files.status);
   const state = runState(st, files);
+  // 2.59.0 (#11b): a full verify someone else runs in this checkout (the one a refused verify named) is shown too.
+  const other = state === 'running' ? null : liveFullVerify();
+  if (other) {
+    const ofiles = verifyFiles(other.owner || '_default');
+    const ost = readJsonFile(ofiles.status);
+    console.log(`[verify] the full verify running in this checkout is ${other.owner || '_default'}'s (pid ${other.pid}, started ${ago(other.startedAt)} ago); showing it until it ends`);
+    if (other.verifyRun && ost?.runId === other.verifyRun && ost.log) return follow(ost, await printTail(ost.log));
+    // Run in its shell's own process (not apart): no log to show here; wait for it to end, then read its record.
+    while (liveFullVerify()?.pid === other.pid) await nap(1000);
+    const rec = readJsonFile(path.join(root, '.studio', 'gates-last-full.json'));
+    const failedIds = (rec?.rows || []).filter((r) => !r.ok && r.required).map((r) => r.id);
+    console.log(`[verify] it ended${rec ? `: ${failedIds.length ? `FAIL ${failedIds.join(', ')}` : 'all required gates green'} (recorded ${ago(rec.at)} ago)` : ' (no record found)'}`);
+    return rec && !failedIds.length ? 0 : 1;
+  }
   if (state === 'none') {
     console.log(`[verify] no verify has run apart for ${verifyOwner} in this checkout yet (${relPath(files.status)}); npm run verify starts one`);
     return 1;

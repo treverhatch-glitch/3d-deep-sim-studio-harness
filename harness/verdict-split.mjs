@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { captureHint } from './visual-capture.mjs';
 
 export const PARTS = ['build', 'logic', 'runtime', 'visual', 'viewport'];
 const file = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'verdict.json');
@@ -61,7 +62,7 @@ export function summarize(task, t = {}, v = readVerdict(task)) {
   const render = isRenderTask(t);
   const blocks = [];
   if (failed.length) blocks.push(`failed: ${failed.map((p) => `${p}${v.parts[p].why ? ` (${v.parts[p].why.slice(0, 160)})` : ''}`).join(', ')}`);
-  if (render && process.env.STUDIO_VISUAL_GATE !== 'off' && v.parts.visual?.ok !== true) blocks.push(v.parts.visual ? 'the visual result failed' : `a render task needs a visual result: capture before/after (npm run visual -- capture ${task} before|after --godot <project>) and run npm run visual -- check ${task}`);
+  if (render && process.env.STUDIO_VISUAL_GATE !== 'off' && v.parts.visual?.ok !== true) blocks.push(v.parts.visual ? 'the visual result failed' : `a render task needs a visual result: ${captureHint(task, t)}`);
   return { task, render, passed, failed, unchecked, ok: blocks.length === 0, why: blocks.join('; ') };
 }
 

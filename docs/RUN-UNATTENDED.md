@@ -23,6 +23,11 @@ window, past `--until`, or past the budget. The Ops view shows "Running unattend
 report has a section for it. `--install` uses launchd (macOS), systemd --user (Linux) or Task
 Scheduler (Windows); `--uninstall` removes it.
 
+- **A memory floor (2.59.0).** No new agent starts while free memory is under `STUDIO_RAM_FLOOR_GB` (3; `0`
+  turns it off): a Unity editor and browser playtests beside a full verify took a PC down to 2.6 GB free. The
+  pass says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never
+  stopped. The watcher's and the Director's auto-start use the same pass; an agent a person starts is not held.
+
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
@@ -30,7 +35,13 @@ Scheduler (Windows); `--uninstall` removes it.
   Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
 - **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
   found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then press "Fixed it: try again". A session someone stopped or paused (`agent stop`, Pause, Stop all)
+  cause, then press "Fixed it: try again", or from a terminal (2.59.0, no hub token needed):
+  `npm run studio:resume -- --by <your name> [--why "what you fixed"]`. It prints the halt it cleared, and the next
+  pass's `supervisor.resumed` event names who asked (`meta.by`, `meta.why`). Not halted: it says so and does nothing.
+  A person decides to retry after repeated failures, so it refuses inside a launched agent session (`STUDIO_ROLE` set)
+  and for agents' names (`builder-s3`, `claude-a`, `opus-bot`, any name the launcher handed out). A chat bot that isn't
+  launched by the harness can still type a person's name: to narrow who may resume, set `STUDIO_RESUME_BY=<name>[,<name>]`
+  in `.env` (off by default). A session someone stopped or paused (`agent stop`, Pause, Stop all)
   never counts: the stop is written down before the kill, so its end reads "stopped by <name>"
   (`meta.stoppedBy`), not "exit 1", and its hand-back says "a stop, not a failure" (no park, breaker or tier-up).
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock

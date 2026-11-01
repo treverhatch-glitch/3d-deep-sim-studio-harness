@@ -49,15 +49,15 @@ import { kickoffParts } from './kickoff.mjs';
 import { layoutPrompt, recordPrefix, cacheStats, LONG_CACHE_ROLES, volatileLeaks } from './prompt-layout.mjs';
 import { parseNextQueue, pauseTask, readStop, nextFor } from './task.mjs';
 import { taskType } from './done-check.mjs';
-import { listLocks, release, claim, renewOwner } from './lock.mjs';
+import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { savePatch } from './wip.mjs';
-import { laneList } from './task-hold.mjs';
-import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch } from './worktree.mjs';
+import { laneList, readHolds } from './task-hold.mjs';
+import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
-import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL } from './agent-env.mjs';
+import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL, agentLikeName } from './agent-env.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
@@ -577,6 +577,32 @@ export function launchStop({ role, tool, model, agent = null, task = null }, now
   return st;
 }
 
+/**
+ * 2.59.0 (#8): a launch in the main checkout with a too-broad lane: null when a person kept that exact lane wide (task add
+ * --lane/--paths … --wide "<why>" or task lane … --wide, by a name that isn't an agent's and not from inside a launched
+ * session), else the refusal, which says how to narrow it (one launch.skipped event per task per STUDIO_SKIP_LOG_MIN).
+ */
+function broadLaneRefusal({ agent, role, task, lane, broad }) {
+  const want = laneList(lane).join(',');
+  const added = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop() : null;
+  const hold = task ? readHolds()[task] : null;
+  const ok = (w) => w && typeof w.why === 'string' && w.why.trim() && laneList(w.lane || '').join(',') === want && !w.inSession && !agentLikeName(w.by);
+  if (ok(hold?.laneWide) || (!(hold && 'lane' in hold) && ok(added?.meta?.laneWide))) return null;
+  const list = broad.map((x) => `${x.p} (${x.why})`).join(', ');
+  const fix = task ? `npm run task -- lane ${task} <the folders or files it changes, a.js,b.js> --by <you>` : 'start it with a narrower --lane';
+  const message = `Not started: lane ${list} is too broad to hold for a whole session in the main checkout: it would block every other agent's commits there. Narrow the task's lane: ${fix}. A person who means it: npm run task -- lane ${task || '<ID>'} ${want} --wide "<why>" --by <you>.`;
+  const f = path.join(STUDIO_STATE_DIR, 'launch-skips.json');
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+  const k = `broad|${task || agent}|${want}`;
+  if (!(Date.now() - (seen[k] || 0) < Number(process.env.STUDIO_SKIP_LOG_MIN ?? 10) * 60000)) {
+    seen[k] = Date.now();
+    try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(seen, null, 2)}\n`); } catch {}
+    emitEvent({ type: 'launch.skipped', agent, to: 'human', task: task || undefined, status: 'warn', msg: `${agent} (${role}): ${message}`.slice(0, 600), meta: { role, lane: want, broad: broad.map((x) => x.p) } });
+  }
+  return { ok: false, skipped: true, message };
+}
+
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
   const opts2 = { refreshes };
@@ -589,12 +615,26 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // A lane is a folder this agent owns for the session, so two agents never edit the same files.
   // 2.30k: a lane can be several files (a,b,c); each is claimed, and all are let go if one is taken.
   const lanePaths = laneList(lane);
-  for (const [i, p] of lanePaths.entries()) {
+  // 2.59.0 (#8): a too-broad lane path (a game's folder or source root, or more than STUDIO_LOCK_MAX_FILES tracked files:
+  // lock.mjs tooBroad, the by-hand rule of 2.58.5 P-090) isn't held as a 6-hour session lock. In the agent's own copy
+  // overlapping edits are caught when the lane lands; in the main checkout the launch is refused unless a person kept
+  // the lane wide (task add --lane … --wide "<why>", or task lane <ID> <folder> --wide "<why>" --by <you>).
+  const broad = lanePaths.map((p) => ({ p, why: tooBroad(p) })).filter((x) => x.why);
+  const copyLikely = broad.length > 0 && laneWantsCopy(lane) && !process.env.STUDIO_MAIN_ROOT && worktreeSupport().ok;
+  if (broad.length && !copyLikely) {
+    const refused = broadLaneRefusal({ agent, role, task, lane, broad });
+    if (refused) return refused;
+  }
+  const unheld = new Set(copyLikely ? broad.map((x) => x.p) : []);
+  const held = [];
+  for (const p of lanePaths) {
+    if (unheld.has(p)) continue;
     const c = claim(`path:${p}`, agent, 6 * 3600);
     if (c && c.ok === false) {
-      for (const q of lanePaths.slice(0, i)) release(`path:${q}`, agent);
+      for (const q of held) release(`path:${q}`, agent);
       return { ok: false, message: `Lane ${p} is taken: ${c.message || `claimed by ${c.lock?.owner || 'another agent'}`}` };
     }
+    held.push(p);
   }
   // A code lane gets its own working copy (2.29), so half-done work never leaks into another agent's
   // tests or commits. Not possible here (old git, STUDIO_WORKTREES=off): the shared checkout, as before.
@@ -626,6 +666,19 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const c = createLaneCopy(agent, { task });
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = { ...c, laneless };
+  }
+  // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
+  // copy couldn't be made; otherwise say once that they aren't locked.
+  if (unheld.size && !copy) {
+    const refused = broadLaneRefusal({ agent, role, task, lane, broad });
+    if (refused) {
+      for (const q of held) release(`path:${q}`, agent);
+      dropStarting(agent);
+      return refused;
+    }
+    for (const p of unheld) claim(`path:${p}`, agent, 6 * 3600);
+  } else if (unheld.size) {
+    emitEvent({ type: 'lane.unlocked', agent, task: task || undefined, msg: `${agent}: lane ${[...unheld].join(', ')} not held as a session lock (${broad.map((x) => x.why).join('; ')}): ${agent} works in its own copy, and overlaps with other lanes are caught when the lane lands`, meta: { paths: [...unheld] } });
   }
   // 2.30g: cache-friendly order. The fixed part (role kickoff, rules, the map tip, pitfalls) comes first
   // and never names this agent, its model or the time, so every session of a role starts with the same
@@ -682,7 +735,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
   // 2.33.0: the agent sees only its own tool's credentials and the studio's settings (harness/agent-env.mjs).
-  const env = agentEnv({ tool: custom ? 'custom' : tool, role, model, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  // 2.59.0 (#14): the owner's key mapping (STUDIO_KEYMAP_<ROLE>, STUDIO_KEYMAP_AGENT_<NAME>): names in the log, never values.
+  const keyNotes = [];
+  const env = agentEnv({ tool: custom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  if (keyNotes.length) {
+    for (const n of keyNotes) fs.writeSync(out, `[launcher] ${n}\n`);
+    const refusedKeys = keyNotes.filter((n) => /refused|not set/.test(n));
+    emitEvent({ type: 'agent.keymap', agent, task: task || undefined, to: refusedKeys.length ? 'human' : undefined, status: refusedKeys.length ? 'warn' : 'ok', msg: `${agent}: ${keyNotes.join('; ')}`.slice(0, 600) });
+  }
   // Claude Code stops a shell command after 2 minutes by default, so agents sent a long verify to the
   // background and their session ended with it (test #3). Give commands 10 minutes unless set.
   env.BASH_DEFAULT_TIMEOUT_MS ||= '600000';

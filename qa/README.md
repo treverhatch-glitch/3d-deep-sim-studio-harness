@@ -45,3 +45,15 @@ npm run selftest
 # Accessibility-first visual check against a local URL
 node qa/visual-check.mjs http://127.0.0.1:5173/?playtest=1
 ```
+
+## Render tasks: visual proof (`npm run visual`)
+
+A render task (a builder task about graphics, a scene, a model, or one marked `visual: on`) finishes only with
+before/after pictures from fixed cameras that are not blank and not unchanged (`harness/visual-proof.mjs`).
+
+- A Godot project: `npm run visual -- capture <T> before|after --godot <project> [--cams a,b]`.
+- Any other game (2.59.0): the game's check manifest, `<game root>/studio.gates.json`, names its own capture command,
+  `"visual": { "capture": "<your capture command> {out} {cams} {phase}" }`. It writes one `<camera>.png` per camera
+  into `{out}`; `npm run visual -- capture <T> before|after [--cams a,b]` runs it. The manifest is a protected file,
+  so the owner approves the command once. Placeholders: `{out}`, `{cams}`, `{task}`, `{phase}`.
+- Then `npm run visual -- check <T>`. `task done` names the right capture route for the studio's game.

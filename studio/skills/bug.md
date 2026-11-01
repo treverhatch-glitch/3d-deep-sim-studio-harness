@@ -20,6 +20,12 @@
    (`node qa/fails-before.mjs qa/regressions/<bug-id>.json <fix>^` to see it yourself).
    It has to actually play the old code: a cartridge that isn't there yet at that commit, a build that fails
    there, or a run that times out is an error, not a pass, so land the cartridge before the fix that relies on it.
+   **No cartridge covers it?** (UI, a part of the game the replay cartridge doesn't model.) Pin it with a seeded
+   unit test of the game instead: `qa/regressions/<bug-id>.json` with `"kind": "test"`, the test file, the test name
+   and the seed (format in `qa/regressions/README.md`). The command is the studio's own (`"regressionTest"` in
+   `studio/game.json` or the game's `studio.gates.json`; ask the owner to add it if it's missing). The done-check
+   then proves the test fails on the commit before the fix and passes now; a test that can't even load on the old
+   code proves nothing and is an error.
 7. **Lesson.** Four bullets in `studio/memory/failures.md` (what broke, why, the fix, how to spot it
    next time), plus `- **Role**: <role>` if one role should learn it. `node scripts/distill-bug.mjs`
    starts it.
@@ -33,9 +39,16 @@ there (read the page with Playwright, compare with `sim`). `npm run play:browser
 build after playing start-to-win. Then add screenshots with `npm run proof` (below). `--part both`
 needs both kinds of regression.
 
-**Done means.** A regression with seed, tick and a pinned SHA-256 that fails on the code before the
-fix, the fix committed with the task's tag, a lesson whose heading names the task or bug, and a full
-verify after your last change.
+**Done means.** A regression that fails on the code before the fix (a replay with seed, tick and a pinned
+SHA-256, or a seeded game unit test, `"kind": "test"`, that passes with the fix), the fix committed with the
+task's tag, a lesson whose heading names the task or bug, and a full verify after your last change.
 
-**Never.** Close a bug with no seed and tick that reproduce it. Delete or re-pin a regression to make
+**Not really a bug?** The title decides the type ("Fix: …" is a bug). Don't retitle a task to get past the check:
+hand it back and ask the owner. Only the owner reclassifies it, in their own terminal:
+`npm run task -- type <ID> change --by <owner> --why "<reason>"` (refused for agents and in agent sessions). It is
+recorded in `studio/task-types.json` and committed, or signed once the studio has an owner key; the done and verify
+output show it.
+
+**Never.** Close a bug with no seed that reproduces it (and a tick, for a replay). Retitle a task, or run
+`task type`, to change its type yourself. Delete or re-pin a regression to make
 the gate pass. Commit the fix with `--no-verify` (it loses the tag the check needs).
