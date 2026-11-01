@@ -265,6 +265,8 @@ export function toolNamed(line = '') {
   if (/\bgrokbot\b/i.test(l)) return 'grokbot';
   if (/AGY_ERROR|antigravity|\bagy\b/i.test(l)) return 'agy';
   if (/gemini/i.test(l)) return (readBudget().order || []).includes('gemini') ? 'gemini' : 'agy';
+  // 2.58.3 (M4): a NIM session (aider on NVIDIA's OpenAI-compatible endpoint) is nim's, not codex's.
+  if (/integrate\.api\.nvidia|\bnvidia\b|\bnim\b/i.test(l)) return 'nim';
   if (/\bcodex\b|chatgpt|openai/i.test(l)) return 'codex';
   if (/\bclaude\b|anthropic/i.test(l)) return 'claude';
   if (/\bgrok\b|x\.ai\b/i.test(l)) return 'grok';

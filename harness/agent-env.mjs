@@ -8,7 +8,9 @@
  *   - the studio's own settings (STUDIO_, AGENT_, PLAYTEST_, PLAYWRIGHT_, NODE_, npm_ names), minus
  *     STUDIO_OWNER_KEY,
  *   - the credentials of the tool it runs on and nothing else (claude: ANTHROPIC_ and CLAUDE_
- *     names, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_, aider: OLLAMA_),
+ *     names, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_, aider: OLLAMA_;
+ *     nim (2.58.3, aider on NVIDIA NIM): only OPENAI_API_KEY, set from NVIDIA_API_KEY (the first key of a list, else
+ *     NVIDIA_API_KEY_2), never the owner's own OPENAI_ names, which would go to NVIDIA's endpoint),
  *     (a custom launcher gets its model family's: a gemini model gets GEMINI_ and GOOGLE_, a grok model XAI_ and GROK_),
  *   - names listed in STUDIO_AGENT_ENV_PASS (comma-separated, for every agent) or STUDIO_<ROLE>_ENV
  *     (for one role; a custom launcher lists what its command needs here).
@@ -25,6 +27,7 @@ const TOOL_KEYS = {
   gemini: /^(GEMINI_|GOOGLE_)/,
   cursor: /^CURSOR_/,
   aider: /^OLLAMA_/,
+  nim: /(?!)/, // nothing by prefix: nimMapped() below sets OPENAI_API_KEY alone
 };
 const roleKey = (role) => String(role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 
@@ -33,7 +36,7 @@ const FAMILY = [[/^(claude|anthropic)/i, 'claude'], [/^(gpt|o\d|codex|openai)/i,
 /** The environment a launched agent gets. extra: values the launcher sets for this session. A custom
  * launcher's credentials follow its model's family (a gemini-3.1-pro model gets the GEMINI_ and GOOGLE_ names). */
 export function agentEnv({ tool = null, role = null, model = null, extra = {}, env = process.env } = {}) {
-  if (/^full$/i.test(env.STUDIO_AGENT_ENV || '')) return { ...env, ...extra };
+  if (/^full$/i.test(env.STUDIO_AGENT_ENV || '')) return nimMapped({ ...env, ...extra }, String(tool || '').toLowerCase(), env);
   const pass = new Set([...String(env.STUDIO_AGENT_ENV_PASS || '').split(','), ...String(env[`STUDIO_${roleKey(role)}_ENV`] || '').split(',')].map((s) => s.trim()).filter(Boolean));
   let t = String(tool || '').toLowerCase();
   if (!TOOL_KEYS[t] && model) t = (FAMILY.find(([re]) => re.test(String(model))) || [])[1] || t;
@@ -44,8 +47,27 @@ export function agentEnv({ tool = null, role = null, model = null, extra = {}, e
     if (NEVER.test(k) && !pass.has(k)) continue;
     if (BASICS.test(k) || STUDIO.test(k) || pass.has(k) || (toolRe && toolRe.test(k))) out[k] = v;
   }
-  return { ...out, ...extra };
+  return nimMapped({ ...out, ...extra }, t, env);
 }
+
+/** M4 (2.58.3): the NIM key a `nim` session uses: NVIDIA_API_KEY (first of a comma-separated list), else NVIDIA_API_KEY_2. */
+export function nimKey(env = process.env) {
+  for (const k of ['NVIDIA_API_KEY', 'NVIDIA_API_KEY_2']) {
+    const v = String(env[k] || '').split(',').map((x) => x.trim()).find(Boolean);
+    if (v) return v;
+  }
+  return null;
+}
+/** A `nim` child's environment: aider reads OPENAI_API_KEY for an openai/ model, so it is the NIM key or nothing. */
+function nimMapped(out, tool, env) {
+  if (tool !== 'nim') return out;
+  for (const k of Object.keys(out)) if (/^OPENAI_/.test(k)) delete out[k];
+  const key = nimKey(env);
+  if (key) out.OPENAI_API_KEY = key;
+  return out;
+}
+/** True when a `nim` child's environment (agentEnv's result) has no key to use. */
+export const nimKeyMissing = (childEnv = {}) => !childEnv.OPENAI_API_KEY;
 
 /** Names the launcher held back from an agent (for the log; values never printed). */
 export function heldBack(args) {
