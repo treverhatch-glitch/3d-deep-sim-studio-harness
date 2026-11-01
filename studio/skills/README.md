@@ -61,6 +61,23 @@ print the type and its source. `none` can't be set this way: closing without a c
 A bug's regression is a cartridge replay or, where no cartridge covers the bug, a seeded game unit test
 (`"kind": "test"`, `qa/regressions/README.md`).
 
+**Evidence front matter (optional, 2.61.0).** A skill may start with the footprints its required steps leave in a
+session's log, so the scorecard can tell whether sessions follow it (`npm run scorecard`: skills given, loaded,
+followed, unknown, per model). Telemetry only: it never blocks or approves anything.
+
+```markdown
+---
+evidence:
+  - fails-before | check-regressions
+  - /npm run verify\b/
+---
+# Skill: bug
+```
+
+Each entry is one required step; ` | ` separates ways the log may show it; `/…/` is a regular expression, anything else
+a case-insensitive substring. A session "followed" the skill when its log shows every step. No `evidence:` list: the
+skill counts as "unknown". "Loaded" means the log opened the skill's file or the task brief that carries its steps.
+
 **Stopping early.** Any skill: if you run out of usage or are swapped, `task pause <ID> --note "…"`
 hands the task back with a note the next agent sees. The watcher (run by the HUB every 5 minutes and
 at session start) catches agents that stop without a word.

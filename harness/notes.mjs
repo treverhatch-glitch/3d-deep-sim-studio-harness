@@ -8,12 +8,14 @@
  *   (eval: the overseer's evaluation of a session or run: what worked, what didn't, a score, what to change)
  *   npm run notes -- list [--kind bad]
  *   npm run notes -- export          markdown to bring back upstream (harness only: no game code or data)
+ *                                    2.61.0: with the change records' verdicts (kept / no effect / regressed, studio/changes/)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, actor, emitEvent } from './event.mjs';
 import { RULE, addPitfall } from './pitfalls.mjs';
+import { readChanges, changeLine } from './changes.mjs';
 
 export const NOTES_FILE = path.join(REPO_ROOT, 'studio', 'harness-notes', 'NOTES.md');
 export const KINDS = { well: 'Worked well', bad: "Didn't work", workaround: 'Workarounds in use', upgrade: 'Upgrade ideas', eval: 'Overseer evaluations' };
@@ -58,10 +60,19 @@ export function addNote(kind, text, agent = actor(), track = process.env.STUDIO_
 
 export function exportNotes() {
   const n = readNotes();
+  // 2.61.0: what each recorded harness, skill, pitfall or rule change did, measured by npm run learn (no game content:
+  // the record's title, kind, verdict and per-type rates).
+  let changes = [];
+  try {
+    changes = readChanges();
+  } catch {
+    changes = [];
+  }
   return [
     '## Harness feedback from a studio run',
     '',
     ...Object.entries(KINDS).flatMap(([k, title]) => (n[k].length ? [`### ${title}`, ...n[k].map((l) => `- ${l.replace(/^\[[^\]]*\]\s*/, '')}`), ''] : [])),
+    ...(changes.length ? ['### Change records (measured before and after)', ...changes.map((c) => `- ${changeLine(c)}`), ''] : []),
   ].join('\n');
 }
 
