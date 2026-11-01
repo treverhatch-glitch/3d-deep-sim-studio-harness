@@ -554,3 +554,19 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Opus gaps over 15 min:** 9, mostly waits on a 4–7 minute verify (e.g. 23:06→23:25, 00:11→00:29); 2.58's detached verify (`verify -- --wait`) covers a killed shell.
 - **No low-memory guard events** in the studio logs; the harness has no memory guard of its own. Launcher sessions peaked at 3 at once; extra Claude processes come from verify's test workers and the crew's own bots.
 - **P-036 (crew) / P-066:** still present in the logs (node/npm commands blocked 205 times) because the studio runs 2.56.0; 2.58.1 fixes the quoting (Windows CI proof). Real installed claude.cmd/agy.cmd stay UNTESTED until the studio updates.
+
+## Building the Hatchfield replay cartridge, 2026-11-01 (a side job for Hatch, in a copy of the studio)
+
+### P-081 — "Fails before the fix" passed when the old code never ran · fixed in 2.58.4
+- **Evidence:** the HEAD control for the cartridge's first regression: `node qa/fails-before.mjs <reg> HEAD` said "PASS … the old code throws (HATCHFIELD_BUILD_FAILED: …)" on the fixed commit itself; the bundle couldn't build in the worktree, which has no node_modules.
+- **Why:** qa/fails-before.mjs counted any throw, a missing cartridge, a failed import and a timeout (empty output) as "fails before".
+- **Fix:** those are `known: false` with the reason, not cached. qa/selftest-2584a.mjs. (The cartridge's own build was fixed to work in a worktree too.)
+
+### P-082 — A studio game with its own checks left a real cartridge with no gates · fixed in 2.58.4
+- **Evidence:** in studio-hatchfield (game "hatchfield" owns its checks), `npm run verify` and `-- --all` printed "the cartridge gates are skipped": purity, golden, golden-py, regressions, vertical-slice, soak and tick-budget never ran for cartridges/hatchfield-replay.
+- **Fix:** non-template cartridges keep the every-cartridge gates; playtest and browser-play stay skipped. qa/selftest-2584b.mjs.
+
+### P-083 — One global tick budget for every cartridge · added in 2.58.4
+- **Evidence:** the Hatchfield sim takes about 3–5 ms a tick (9.4 ms on a 2-core cloud box) against the 1 ms default, and `TICK_BUDGET_MS_PER_TICK` applies to every cartridge.
+- **Change:** `cartridge.json` `"tickBudgetMs"`. Note: cartridge.json isn't a protected file, so an agent could loosen it; protecting it needs the owner key and would get in the way of new-game ID minting.
+

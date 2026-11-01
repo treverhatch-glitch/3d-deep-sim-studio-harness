@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.58.4] — 2026-11-01
+2.58.4: three gaps found while building a game's first real replay cartridge (P-081 to P-083).
+### Fixed
+- **"Fails before the fix" counts only a run that played the old code (P-081).** A cartridge missing at that commit, a
+  failed build or import (a dependency such as node_modules missing in the worktree) and a timeout or kill are now an
+  error (`known: false`, with the reason), never "the old code throws", and aren't cached. A real difference still
+  passes; the HEAD control still fails. `STUDIO_FAILS_BEFORE_TIMEOUT_MS` sets the limit. qa/selftest-2584a.mjs.
+- **Real cartridges beside a studio game keep their gates (P-082).** A studio game with its own checks no longer
+  switches off the gates that check every cartridge (purity, isolation, golden, golden-py, regressions, vertical-slice,
+  soak, tick-budget) for a non-template cartridge beside it; playtest and browser-play stay skipped.
+### Added
+- **A cartridge's own tick budget (P-083).** `cartridge.json` `"tickBudgetMs"`, else `TICK_BUDGET_MS_PER_TICK`, else
+  1 ms; the gate names where the budget came from. qa/selftest-2584b.mjs.
+
 ## [2.58.3] — 2026-11-01
 2.58.3: fixes from a read-only dive into the crew's studio logs (P-069 to P-080; crew P-034, P-035, P-037, P-039 to P-041).
 ### Fixed
