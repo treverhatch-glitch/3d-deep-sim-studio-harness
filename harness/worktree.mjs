@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock } from './merge-lane.mjs';
+import { PLANNING_ROLES } from './stall.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -59,6 +60,34 @@ export function worktreeSupport(root = mainRoot()) {
 
 /** A lane in the code (not the board, not the whole game) gets its own copy. */
 export const laneWantsCopy = (lane) => Boolean(lane) && !/^(studio|\.studio)(\/|$)/.test(lane);
+
+/**
+ * M2 (2.58.3, crew P-039): roles that work on the board, not the game's code, and so stay in the main checkout when
+ * their task has no lane (the planning roles of harness/stall.mjs, plus the liaison and a person).
+ */
+export const MAIN_CHECKOUT_ROLES = new Set([...PLANNING_ROLES, 'liaison', 'human']);
+/**
+ * A session on a task with no lane gets its own copy too when its role writes code (builder, rnd, art, qa-playtester,
+ * reviewer, …): builders on laneless tasks left staged test files in the main checkout and blocked six other tasks'
+ * `task done` for 3 hours. STUDIO_LANELESS=shared keeps the old shared checkout; STUDIO_WORKTREES=off turns copies off.
+ */
+export function lanelessWantsCopy({ role, lane = null, task = null, env = process.env } = {}) {
+  if (lane || !task || !role) return false;
+  if (/^shared$/i.test(env.STUDIO_LANELESS || '') || /^(off|0|false|no)$/i.test(env.STUDIO_WORKTREES || '')) return false;
+  return !MAIN_CHECKOUT_ROLES.has(String(role).toLowerCase());
+}
+
+/**
+ * M1 (2.58.3): the main checkout's real studio/ and .studio/ folders, which a lane copy links to. A tool started in the
+ * copy (cwd .lanes/<agent>) is told it may use them (Claude Code: --add-dir), since it resolves the links and would
+ * otherwise refuse their targets as "outside the allowed working directories".
+ */
+export function laneShareDirs(root = mainRoot()) {
+  return ['studio', '.studio'].map((d) => {
+    const p = path.join(root, d);
+    try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
+  });
+}
 
 const mainBranch = (root = mainRoot()) => git(root, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
 

@@ -48,12 +48,18 @@ export const TOOLS = {
   agy: {
     name: 'Antigravity CLI (replaced Gemini CLI for personal accounts)',
     line: (f) => `agy -p "$(cat ${f})" --print-timeout 900s < /dev/null`,
-    note: 'Needs --print-timeout and stdin closed, or it exits before the work is written (run #1). In a frozen test clone, add --dangerously-skip-permissions (the launcher does with STUDIO_AGY_BYPASS=1). Reads AGENTS.md; GEMINI.md wins if both exist.',
+    note: 'Needs --print-timeout and stdin closed, or it exits before the work is written (run #1). Add --settings .studio/agy-settings.json once the owner ran npm run agent -- allow agy (the launcher does). In a frozen test clone, add --dangerously-skip-permissions (the launcher does with STUDIO_AGY_BYPASS=1). Reads AGENTS.md; GEMINI.md wins if both exist.',
   },
   aider: {
     name: 'Aider (free local dry run with Ollama)',
     line: (f, model) => `aider --model ollama_chat/${model} --message-file ${f} --yes`,
     note: 'One instruction, then exits: best for single small tasks. Start Ollama with OLLAMA_CONTEXT_LENGTH=32768 or more; its 2k default silently drops context.',
+  },
+  nim: {
+    name: 'Aider on NVIDIA NIM',
+    // The key is named, never written out: the launcher sets OPENAI_API_KEY from NVIDIA_API_KEY for the child only.
+    line: (f, model) => `OPENAI_API_KEY="$NVIDIA_API_KEY" aider --model openai/${model && model !== 'unknown' ? String(model).replace(/^openai\//, '') : '$STUDIO_NIM_MODEL'} --openai-api-base https://integrate.api.nvidia.com/v1 --message-file ${f} --yes-always`,
+    note: 'One instruction, then exits, like aider on Ollama. Needs aider (pip install aider-chat, with the owner\'s OK) and NVIDIA_API_KEY; the model is --model or STUDIO_NIM_MODEL.',
   },
 };
 
