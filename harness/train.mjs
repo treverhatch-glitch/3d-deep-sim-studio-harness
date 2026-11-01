@@ -47,6 +47,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot } from './merge-lane.mjs';
@@ -875,7 +876,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       }
       if (!verdict) break;
       // (d) Green: main moves to exactly the verified tree, then each task closes.
-      const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res });
+      const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res, unionFiles });
       if (landed === 'moved') {
         ev('moved', id, `${main} moved while the train was verified; building it again on the new ${main}`, { agent: by, status: 'warn' });
         continue;
@@ -892,16 +893,78 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   return res;
 }
 
+// ---- 2.60.1 (B-29): main moved only by board/record files -----------------------------------------------
+
+/** The board/record paths a move of main may touch without a new verify (harness/train-board.json "boardPaths"). */
+export function boardPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(j.boardPaths) ? j.boardPaths.map((x) => String(x).trim()).filter(Boolean) : []; } catch { return []; }
+}
+
+/**
+ * Did main move from `tip` to `now` by board/record files only? { ok, files } or { ok: false, why }. `now` must be a
+ * descendant of `tip`, and every path changed in tip..now must be on the list, added or modified (a delete or a
+ * rename never counts: --no-renames shows a rename as a delete).
+ */
+export function boardOnlyMove(root, tip, now, list = boardPaths()) {
+  if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
+  if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
+  const r = git(root, 'diff', '--name-status', '--no-renames', '-z', tip, now);
+  if (r.status !== 0) return { ok: false, why: 'git diff failed' };
+  const parts = String(r.stdout || '').split('\0').filter(Boolean);
+  const files = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const [st, f] = [parts[i], parts[i + 1]];
+    if (!/^[AM]$/.test(st)) return { ok: false, why: `it ${st === 'D' ? 'deletes' : `changes (${st})`} ${f}` };
+    if (!matchAny(f, list)) return { ok: false, why: `it changes ${f}, which is not a board or record file` };
+    files.push(f);
+  }
+  return files.length ? { ok: true, files } : { ok: false, why: 'no file changed' };
+}
+
+/**
+ * Main moved by board files only while the train was verified (called under the land lock): merge the train's lanes
+ * again onto the new tip and keep the verify when, checked with git, the new tree is the verified tree with exactly
+ * those board files as main has them now. Returns { ok, built, files } or { ok: false, why } (the caller then does as
+ * before: build again on the new main and verify again).
+ */
+function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
+  const move = boardOnlyMove(root, tip, now);
+  if (!move.ok) return move;
+  const last = built.included[built.included.length - 1];
+  if (!last || last.after !== built.head) return { ok: false, why: 'the verified train has a commit after its lanes (a pin refresh)' };
+  const again = buildIntegration(sc, now, built.included, { id, unionFiles });
+  const same = again.included.length === built.included.length && again.included.every((l, k) => l.task === built.included[k].task && JSON.stringify(l.union || []) === JSON.stringify(built.included[k].union || []));
+  if (!same || again.deferred.length || again.conflictMain.length) return { ok: false, why: 'the lanes no longer merge onto it exactly as before' };
+  const d = git(root, 'diff-tree', '-r', '--name-only', '--no-renames', '-z', built.tree, again.tree);
+  if (d.status !== 0) return { ok: false, why: 'could not compare the trees' };
+  const diff = String(d.stdout || '').split('\0').filter(Boolean);
+  const blob = (rev, f) => out(git(root, 'rev-parse', '-q', '--verify', `${rev}:${f}`));
+  const odd = diff.find((f) => !move.files.includes(f) || blob(again.tree, f) !== blob(now, f));
+  if (odd) return { ok: false, why: `the new tree differs from the verified one in ${odd}, not only by ${mainBranch(root)}'s board files` };
+  return { ok: true, built: again, files: move.files };
+}
+
 /**
  * Under the land lock: if main is still at `tip`, move it to the verified head (compare-and-swap, the main checkout's
  * files follow) and close each lane's task. A lane whose copy gained commits after its check lands as checked (its
  * content is in the verified tree) but stays queued with its new commits. Returns 'moved', or nothing.
  */
-function landTrain(root, sc, main, tip, { built, v }, { id, by, deps, log, res }) {
+function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, log, res, unionFiles = [] }) {
   let out1;
+  let built = verified;
+  let board = null;
   try {
     out1 = withLandLock(root, () => {
-      if (out(git(root, 'rev-parse', `refs/heads/${main}`)) !== tip) return 'moved';
+      const now = out(git(root, 'rev-parse', `refs/heads/${main}`));
+      if (now !== tip) {
+        // 2.60.1 (B-29): a board-only commit on main (a task type record, NEXT.md) restarted the whole verify (~9 min).
+        const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
+        if (!re.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}`); return 'moved'; }
+        built = re.built;
+        board = { from: tip, to: now, files: re.files };
+        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused`);
+        ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
+      }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };
       const ff = landFastForward(root, main, sc.branch, { taskId: `train ${id}` });
       if (!ff.ok) return { ok: false, message: ff.message };
@@ -929,14 +992,15 @@ function landTrain(root, sc, main, tip, { built, v }, { id, by, deps, log, res }
   }
   if (out1 === 'moved') return 'moved';
   if (!out1.ok) { res.ok = false; res.message = `The train's verify was green but ${main} didn't move: ${out1.message}. Nothing was closed; run the train again.`; log(`[train] ${id}: ${res.message}`); return undefined; }
-  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}): ${res.landed.join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed, reused: Boolean(v.reused) } });
+  if (board) res.boardMove = board;
+  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}${board ? `; the verify of ${verified.tree.slice(0, 8)} reused across a board-only move of ${main} (${board.files.join(', ')})` : ''}): ${res.landed.join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed, reused: Boolean(v.reused), ...(board ? { boardMove: board, verifiedTree: verified.tree } : {}) } });
   return undefined;
 }
 
-const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}) });
+const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}) });
 function summary(res) {
   const parts = [];
-  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
+  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   return parts.join('. ') || 'nothing to land';
