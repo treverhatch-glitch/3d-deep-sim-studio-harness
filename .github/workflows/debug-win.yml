@@ -1,0 +1,19 @@
+name: debug-win
+on:
+  push:
+    branches: [claude/win-debug]
+permissions:
+  contents: read
+jobs:
+  win:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: node qa/debug-win.mjs
+        env:
+          DEBUG_ONLY: 260c,260d
