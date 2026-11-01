@@ -281,8 +281,8 @@ const i = c.argv.indexOf('--allowedTools');
 const tail = c.argv.slice(i + 1);
 const list = tail.slice(0, tail.findIndex((a) => a.startsWith('--')));
 const p = { agy: toolCommand('agy', { model: 'm', prompt: 'P R' }), cursor: toolCommand('cursor', { model: 'm', prompt: 'P R' }), grok: toolCommand('grok', { model: 'm', prompt: 'P R' }) };
-console.log(JSON.stringify({ list, want: ALLOWED.map(([, q]) => 'Bash(' + q + ')'), stdin: c.stdin, bypass: c.argv.includes('--dangerously-skip-permissions'), at: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.argv[v.promptAt]])) }));`);
-    report('P-066: toolCommand gives Claude Code each allowed-tools pattern as its own argument (no permission bypass), its prompt on stdin, and says where agy\'s, cursor\'s and grok\'s one-argument prompt is', same(t.list, t.want) && t.list?.length === 15 && t.stdin === 'x' && t.bypass === false && t.at?.agy === 'P R' && t.at?.cursor === 'P R' && t.at?.grok === 'P R', JSON.stringify(t).slice(0, 1500));
+console.log(JSON.stringify({ list, want: ALLOWED.map(([, q]) => 'Bash(' + q + ')'), stdin: c.stdin, bypass: c.argv.includes('--dangerously-skip-permissions'), at: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.promptAt === undefined ? 'stdin:' + v.stdin : v.argv[v.promptAt]])) }));`);
+    report('P-066: toolCommand gives Claude Code each allowed-tools pattern as its own argument (no permission bypass), its prompt on stdin, and says where cursor\'s and grok\'s one-argument prompt is (agy\'s goes on stdin since 2.58.5, H-2)', same(t.list, t.want) && t.list?.length === 15 && t.stdin === 'x' && t.bypass === false && t.at?.agy === 'stdin:P R' && t.at?.cursor === 'P R' && t.at?.grok === 'P R', JSON.stringify(t).slice(0, 1500));
   }
 
   // ---------- end to end: `agent start` with stand-in programs first on PATH ----------
@@ -365,8 +365,8 @@ console.log(JSON.stringify({ want: ALLOWED.map(([, q]) => 'Bash(' + q + ')') }))
   {
     const s = start(dir, ['--role', 'builder', '--agent', 'h259-agy', '--tool', 'agy', '--model', 'm-1', '--note', NOTE, '--by', 'h259']);
     const g = got('agy');
-    report('P-066 (crew P-036) end to end: `agent start --tool agy` (an npm .cmd shim on Windows): the prompt arrives as ONE argument with the note\'s quotes, parentheses, &, %PATH%, ^, < | > and non-ASCII text unchanged, then --print-timeout 900s; no "unexpected argument"',
-      g?.argv?.length === 4 && g.argv[0] === '-p' && g.argv[1].includes(NOTE) && g.argv[1].includes('\n') && same(g.argv.slice(2), ['--print-timeout', '900s']),
+    report('P-066 (crew P-036) end to end: `agent start --tool agy` (an npm .cmd shim on Windows): the prompt arrives whole, with the note\'s quotes, parentheses, &, %PATH%, ^, < | > and non-ASCII text and its line breaks unchanged (on stdin since 2.58.5, H-2), and the arguments are just --print-timeout 900s; no "unexpected argument"',
+      same(g?.argv, ['--print-timeout', '900s']) && g.stdin.includes(NOTE) && g.stdin.includes('\n'),
       `${JSON.stringify(g?.argv?.map((a) => a.slice(0, 200)) || null)}\n${out(s).slice(-800)}\n${logOf(dir, 'h259-agy').slice(-800)}`);
   }
   {

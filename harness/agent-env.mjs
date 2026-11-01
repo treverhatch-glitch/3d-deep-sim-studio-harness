@@ -10,7 +10,10 @@
  *   - the credentials of the tool it runs on and nothing else (claude: ANTHROPIC_ and CLAUDE_
  *     names, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_, aider: OLLAMA_;
  *     nim (2.58.3, aider on NVIDIA NIM): only OPENAI_API_KEY, set from NVIDIA_API_KEY (the first key of a list, else
- *     NVIDIA_API_KEY_2), never the owner's own OPENAI_ names, which would go to NVIDIA's endpoint),
+ *     NVIDIA_API_KEY_2), never the owner's own OPENAI_ names, which would go to NVIDIA's endpoint; H-8 (2.58.5): also
+ *     AIDER_OPENAI_API_KEY, the same key, because aider loads .env files (home, repo, current folder; a lane copy has a
+ *     copy of the studio's .env) over the environment, and the template's empty `OPENAI_API_KEY=` blanked the key,
+ *     while aider applies AIDER_OPENAI_API_KEY (its --openai-api-key) after those files),
  *     (a custom launcher gets its model family's: a gemini model gets GEMINI_ and GOOGLE_, a grok model XAI_ and GROK_),
  *   - names listed in STUDIO_AGENT_ENV_PASS (comma-separated, for every agent) or STUDIO_<ROLE>_ENV
  *     (for one role; a custom launcher lists what its command needs here).
@@ -50,6 +53,26 @@ export function agentEnv({ tool = null, role = null, model = null, extra = {}, e
   return nimMapped({ ...out, ...extra }, t, env);
 }
 
+/**
+ * H-1 (2.58.5): the NIM model a `nim` session runs when neither --model nor STUDIO_NIM_MODEL names one. The 2.58.3
+ * default (qwen/qwen3-coder-480b-a35b-instruct) answered 410 Gone (end of life 2026-06-11). UNVERIFIED from here: taken
+ * from NIM's public model list as the crew read it on 2026-11-01 (moonshotai/kimi-k2.6, deepseek-ai/deepseek-v4.1-flash,
+ * z-ai/glm-5.3-flash); check `npm run models:check` and set STUDIO_NIM_MODEL.
+ */
+export const NIM_DEFAULT_MODEL = 'moonshotai/kimi-k2.6';
+/** A NIM model id is `<org>/<model>` (an `openai/` prefix, aider's provider, is dropped). */
+export const isNimModelId = (m) => /^[\w.-]+\/[\w.:+-]+$/.test(String(m || '').trim().replace(/^openai\//, ''));
+/**
+ * The model a `nim` session runs. H-1: never a role's or Claude's model: without --model the launcher passed the role
+ * model (STUDIO_BUILDER_MODEL=claude-sonnet-5-5), and aider asked NIM for openai/claude-sonnet-5-5. So a model that
+ * isn't a NIM id (`<org>/<model>`) gives way to STUDIO_NIM_MODEL, else NIM_DEFAULT_MODEL.
+ */
+export function nimModel(m, env = process.env) {
+  const own = String(m || '').trim().replace(/^openai\//, '');
+  if (isNimModelId(own)) return own;
+  return String(env.STUDIO_NIM_MODEL || '').trim().replace(/^openai\//, '') || NIM_DEFAULT_MODEL;
+}
+
 /** M4 (2.58.3): the NIM key a `nim` session uses: NVIDIA_API_KEY (first of a comma-separated list), else NVIDIA_API_KEY_2. */
 export function nimKey(env = process.env) {
   for (const k of ['NVIDIA_API_KEY', 'NVIDIA_API_KEY_2']) {
@@ -58,12 +81,20 @@ export function nimKey(env = process.env) {
   }
   return null;
 }
-/** A `nim` child's environment: aider reads OPENAI_API_KEY for an openai/ model, so it is the NIM key or nothing. */
+/**
+ * A `nim` child's environment: aider reads OPENAI_API_KEY for an openai/ model, so it is the NIM key or nothing.
+ * H-8 (2.58.5): any OPENAI_ or AIDER_OPENAI_ name in any letter case goes first (on Windows `OpenAI_Api_Key` and
+ * `OPENAI_API_KEY` are one variable, and which of two the child sees is up to the OS), then the key is set twice:
+ * OPENAI_API_KEY, and AIDER_OPENAI_API_KEY, which aider applies after loading .env files that would otherwise blank it.
+ */
 function nimMapped(out, tool, env) {
   if (tool !== 'nim') return out;
-  for (const k of Object.keys(out)) if (/^OPENAI_/.test(k)) delete out[k];
+  for (const k of Object.keys(out)) if (/^(AIDER_)?OPENAI_/i.test(k)) delete out[k];
   const key = nimKey(env);
-  if (key) out.OPENAI_API_KEY = key;
+  if (key) {
+    out.OPENAI_API_KEY = key;
+    out.AIDER_OPENAI_API_KEY = key;
+  }
   return out;
 }
 /** True when a `nim` child's environment (agentEnv's result) has no key to use. */

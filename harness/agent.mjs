@@ -15,8 +15,8 @@
  *   npm run agent -- list          who is running, last heartbeat, task, tool, model
  *   npm run agent -- stop <agent>  end one agent (it is cleaned up like any other exit)
  *   npm run agent -- fill          start agents for waiting tasks, within the mode's caps (the watcher runs this)
- *   npm run agent -- allow agy [--dry-run] | --by <owner> [--scope user]   the owner writes agy's headless allow-rules
- *                                  (the harness list) into .studio/agy-settings.json, which the launcher passes to agy
+ *   npm run agent -- allow agy [--dry-run] | --by <owner> [--scope user] [--all] [--prune]   the owner writes agy's
+ *                                  headless allow-rules (the approved set) into .studio/agy-settings.json, which the launcher passes to agy
  *                                  with --settings (--scope user: agy's own settings.json instead; harness/agy-allow.mjs)
  *
  * What a start does:
@@ -37,7 +37,7 @@
  */
 import fs from 'node:fs';
 import { allowedToolsList } from './allowlist.mjs';
-import { fillCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
+import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -57,7 +57,7 @@ import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
 import { sessionLimits, heartbeatCheck, readFlag, clearFlag, HANDOFF_TEMPLATE } from './session-cap.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
-import { agentEnv, nimKeyMissing } from './agent-env.mjs';
+import { agentEnv, nimKeyMissing, nimModel, NIM_DEFAULT_MODEL } from './agent-env.mjs';
 import { rescueOf, rescueModelFor } from './rescue.mjs';
 import { cooldown } from './task-hold.mjs';
 import { mapStale, writeMap } from './map.mjs';
@@ -136,10 +136,21 @@ const IS = { win: process.platform === 'win32', mac: process.platform === 'darwi
 
 /** M4 (2.58.3): NVIDIA NIM's OpenAI-compatible endpoint (the same base harness/models.config.mjs uses for route.mjs). */
 export const NIM_API_BASE = 'https://integrate.api.nvidia.com/v1';
-/** The NIM model a `nim` session runs when neither --model nor STUDIO_NIM_MODEL names one. UNVERIFIED: picked as a
- * coding model listed on build.nvidia.com; not run against the endpoint from here. */
-export const NIM_DEFAULT_MODEL = 'qwen/qwen3-coder-480b-a35b-instruct';
-export const nimModel = (m, env = process.env) => String(m || env.STUDIO_NIM_MODEL || NIM_DEFAULT_MODEL).replace(/^openai\//, '');
+/** H-1 (2.58.5): the NIM default model and the rule that a `nim` session never runs a role's or Claude's model live in
+ * harness/agent-env.mjs (the kickoff's launch line uses them too); re-exported here as before. */
+export { NIM_DEFAULT_MODEL, nimModel };
+/**
+ * H-1 (2.58.5): a NIM answer that the model is gone (410, "reached its end of life") or unknown (404) as one clear line,
+ * else null. aider retries such an answer for a minute or two, then exits, and the log holds only litellm's retries.
+ */
+export function nimModelTrouble(log, model = null) {
+  const lines = String(log || '').split(/\r?\n/).slice(-400).join(' ');
+  const m = lines.match(/Error code: (410|404)\b[^\n]{0,600}/);
+  if (!m) return null;
+  const named = (m[0].match(/model '([^']+)'/) || m[0].match(/model[: ]+"?([\w.-]+\/[\w.:+-]+)/) || [])[1] || model || 'the model';
+  const what = m[1] === '410' ? 'is gone (410: past its end of life)' : 'was not found (404)';
+  return `NIM says ${named} ${what}: start with --model <a model NIM lists now> or set STUDIO_NIM_MODEL (npm run models:check lists what your key can use; the default is ${NIM_DEFAULT_MODEL}).`;
+}
 /** Whether a program is on this PATH (env: the agent's). Windows: the launcher's own PATH x PATHEXT lookup. */
 export function onPath(name, env = process.env, platform = process.platform) {
   if (platform === 'win32') return resolveCommand(name, { env, platform }).mode !== 'missing';
@@ -155,12 +166,20 @@ export function toolPreflight(tool, env = process.env, platform = process.platfo
   return null;
 }
 
+/** H-2: the settings file as agy's argument. A path with a space (C:\\Users\\Jo Ann\\…) would split as the prompt did, so
+ * it is given relative to the agent's folder then (.studio/ is the main checkout's, linked in a lane copy). */
+function agySettingsArg(file) {
+  if (!file || !/\s/.test(file)) return file;
+  const rel = path.relative(REPO_ROOT, file);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) && !/\s/.test(rel) ? rel : file;
+}
+
 /**
  * How each tool is started: an argv, the prompt on stdin (stdin) or as one argument (promptAt, its index in argv).
  * P-066 (crew P-036): harness/launch.mjs starts the argv with no shell on every OS, so each element arrives as one
- * argument. The prompt goes on stdin where the tool reads it there (claude -p with no prompt argument, codex's -);
- * agy, cursor and grok take it as one argument (agy also needs stdin closed), and a prompt too long for the command
- * line becomes an instruction to read the kickoff file.
+ * argument. The prompt goes on stdin where the tool reads it there (claude -p with no prompt argument, codex's -, and
+ * since 2.58.5 agy); cursor and grok take it as one argument, and a prompt too long for the command line becomes an
+ * instruction to read the kickoff file.
  */
 export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] }) {
   const m = model && model !== 'unknown' ? model : null;
@@ -197,8 +216,15 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] })
       const bypass = process.env.STUDIO_AGY_BYPASS === '1' && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'));
       // M3 (2.58.3, crew P-037 addendum): agy takes a session settings file (--settings <file>); the studio's own
       // (.studio/agy-settings.json, written by `npm run agent -- allow agy`) is passed when it exists.
-      const settings = agyStudioSettings();
-      return { argv: ['agy', '-p', prompt, '--print-timeout', '900s', ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])], promptAt: 2 };
+      const settings = agySettingsArg(agyStudioSettings());
+      const tail = ['--print-timeout', '900s', ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
+      // H-2 (2.58.5): on Windows agy.exe got `-p <prompt>` as one argument (started directly, no shell, quoted by the
+      // rules every Windows program reads) and still said `unexpected argument "are"`: the prompt ("You are …") was split
+      // at its spaces after it reached agy.exe. agy reads a prompt from stdin too ("Prompts are read only from -p/--print,
+      // -i/--prompt-interactive, or stdin"), so the kickoff goes there and no argument has a space to split.
+      // STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` (UNTESTED on real agy: which of the two works for your agy).
+      if (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')) return { argv: ['agy', '-p', prompt, ...tail], promptAt: 2 };
+      return { argv: ['agy', ...tail], stdin: prompt };
     }
     case 'cursor':
       return { argv: ['agent', '-p', '--force', '--output-format', 'text', prompt], promptAt: 5 };
@@ -208,9 +234,11 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [] })
       return { argv: ['aider', '--model', `ollama_chat/${m || process.env.OLLAMA_MODEL || 'qwen2.5-coder:14b'}`, '--message-file', file, '--yes'] };
     case 'nim':
       // M4 (2.58.3, crew P-040): aider on NVIDIA NIM's OpenAI-compatible endpoint, so a NIM model can edit files and run
-      // commands (route.mjs only chats). Same shape as the Ollama case (aider's own commits stay on, as there). The key
+      // commands (route.mjs only chats). Same shape as the Ollama case, without aider's own commits. The key
       // never goes in argv: the child gets OPENAI_API_KEY from NVIDIA_API_KEY (harness/agent-env.mjs).
-      return { argv: ['aider', '--model', `openai/${nimModel(m)}`, '--openai-api-base', NIM_API_BASE, '--message-file', file, '--yes-always'] };
+      // H-1 (2.58.5): nimModel() never takes a role's or Claude's model. H-8: --no-auto-commits, the owner's condition
+      // for NIM (aider's own commits skipped the studio's hooks and task flow; the crew set AIDER_AUTO_COMMITS=false).
+      return { argv: ['aider', '--model', `openai/${nimModel(m)}`, '--openai-api-base', NIM_API_BASE, '--message-file', file, '--yes-always', '--no-auto-commits'] };
     default:
       return null;
   }
@@ -552,6 +580,8 @@ export function launchStop({ role, tool, model, agent = null, task = null }, now
 /** Run one agent to the end, with heartbeats. Resolves with the cleanup result. */
 export async function runAgent({ role, agent, tool, model, fallback = [], task = null, lane = null, oneTask = false, division = null, note = '', by = null, refreshes = 0 }) {
   const opts2 = { refreshes };
+  // H-1 (2.58.5): a nim session runs a NIM model (--model, STUDIO_NIM_MODEL or the default), never the role's.
+  if (tool === 'nim') model = nimModel(model);
   // 2.30q (#7): every start path (first start, refresh relaunch, failover) checks the budget stop first.
   { const st = launchStop({ role, tool, model, agent, task }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // 2.31.0: a task that used its own budget (harness/task-budget.mjs) gets no new session, refresh or failover.
@@ -573,16 +603,20 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // STUDIO_TOOL_<TOOL>_CMD. It wins over the role's command, so a takeover changes the program too.
   const viaTool = toolCmd(tool);
   let custom = viaTool || process.env[`STUDIO_${roleKey(role)}_CMD`] || (tool === 'custom' ? process.env.STUDIO_AGENT_CMD : null);
+  let rehearsal = false;
   if (process.env.STUDIO_REHEARSAL === '1' && !custom) {
     custom = `node harness/rehearsal-agent.mjs {agent} {task} ok`;
+    rehearsal = true;
   }
   // M2 (2.58.3, crew P-039): a code-writing role on a task with no lane gets its own copy too (no path claims), so its
   // staged or half-done files never sit in the main checkout where they block every other task's `task done`.
-  // Producer, Director, planner and liaison stay in the main checkout; STUDIO_LANELESS=shared turns it off. Built-in
-  // tools only: the launcher gives those the main checkout's studio/ and .studio/ (--add-dir); a custom command is the
-  // user's own line (it may name a script that isn't committed, or a tool that refuses the links), so it stays shared.
+  // Producer, Director, planner and liaison stay in the main checkout; STUDIO_LANELESS=shared turns it off.
+  // H-9 (2.58.5): a custom command too (STUDIO_<ROLE>_CMD, STUDIO_TOOL_<TOOL>_CMD, STUDIO_AGENT_CMD): 2.58.3 left it in
+  // the main checkout, and a wrapper session staged game code there that the pre-commit hook refused. It runs in the
+  // copy (cwd), with STUDIO_MAIN_ROOT set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the
+  // built-in claude gets) to pass the main checkout's folders on. The rehearsal agent stays in the main checkout.
   let copy = null;
-  const laneless = !laneWantsCopy(lane) && !custom && lanelessWantsCopy({ role, lane, task });
+  const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
   if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
     const c = createLaneCopy(agent, { task });
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
@@ -661,7 +695,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let line = null;
   let plan = null;
   try {
-    if (custom) line = fillCommand(custom, { kickoff: file, agent, model, role, task: task || '' });
+    if (custom) {
+      // H-9: in a copy, a script the line names that isn't committed is run from the main checkout (absolute path).
+      const loc = copy ? localizeCommand(custom, { from: REPO_ROOT, to: copy.dir }) : { template: custom, values: {}, moved: [] };
+      if (loc.moved.length) fs.writeSync(out, `[launcher] not in this agent's copy, run from the main checkout: ${loc.moved.join(', ')}\n`);
+      line = fillCommand(loc.template, { kickoff: file, agent, model, role, task: task || '', mainRoot: REPO_ROOT, addDirs: copy ? laneShareDirs().flatMap((d) => ['--add-dir', d]) : [], ...loc.values });
+    }
     else if (toolPreflight(tool, env)) throw new Error(toolPreflight(tool, env));
     else plan = launchPlan(cmd.argv, { env, cwd, promptAt: cmd.promptAt, promptFile: file });
   } catch (err) {
@@ -675,6 +714,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const said = describePlan(plan);
   if (said) fs.writeSync(out, `[launcher] ${said}\n`);
+  if (custom && copy) fs.writeSync(out, `[launcher] the custom command runs in this agent's own copy (${path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/')}); the main checkout is $STUDIO_MAIN_ROOT, {mainRoot} in the command; {addDirs} gives the --add-dir pair for its studio/ and .studio/\n`);
   const child = custom
     ? spawn(line, { cwd, shell: true, env, stdio: ['ignore', out, out] })
     : spawnPlan(plan, { cwd, env, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
@@ -755,6 +795,14 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   clearInterval(beat);
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
+  // H-1 (2.58.5): a NIM model that is gone (410) or unknown (404) gets one clear line in the log and for a person.
+  if (session.tool === 'nim') {
+    const gone = nimModelTrouble(log, model);
+    if (gone) {
+      try { fs.appendFileSync(logFile, `\n[launcher] ${gone}\n`); } catch {}
+      emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
+    }
+  }
   const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null });
   if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
@@ -1230,6 +1278,8 @@ export function startAgent(opts, { detach = false } = {}) {
       emitEvent({ type: rr.applied ? 'model.rerouted' : 'model.reroute_suggested', agent: 'director', to: 'producer', task: opts.task, msg: `${opts.task}: ${rr.fromModel} (${rr.fromFamily}) replied with reasoning only; ${rr.applied ? `rerouted to ${rr.model}${rr.tool ? ` on ${rr.tool}` : ''}` : 'route it to another model family (set STUDIO_REROUTE_MODELS, e.g. codex:gpt-5)'}`, meta: rr });
     }
   }
+  // H-1 (2.58.5): a nim session never inherits the role's (or a rescue's, escalation's, reroute's) non-NIM model.
+  if (tool === 'nim') model = nimModel(model);
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
   // 2.30i: NIM's free tier serves one session at a time (Marina: parallel NIM sessions all got 429).
   if (isNim(model, tool)) {
