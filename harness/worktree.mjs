@@ -25,7 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
-import { changedSince, readPass, recordPass, canReuse, withLandLock } from './merge-lane.mjs';
+import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
 import { PLANNING_ROLES } from './stall.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 
@@ -376,10 +376,11 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
         } else {
           const changed = changedSince(REPO_ROOT, tip, head);
           console.log(`[deliver] ${taskId}: checks re-run after rebase: ${reuse.why}`);
-          const env = { ...process.env, ...(changed.length ? { STUDIO_GATE_CHANGED: changed.join(','), STUDIO_GATE_PATHS: process.env.STUDIO_GATE_PATHS || changed.join(',') } : {}) };
+          // 2.58.5 (H-3): with the lane's pass recorded for its pre-rebase commit, only the game checks whose inputs main changed run again.
+          const env = { ...process.env, ...(changed.length ? { STUDIO_GATE_CHANGED: changed.join(','), STUDIO_GATE_PATHS: process.env.STUDIO_GATE_PATHS || changed.join(',') } : {}), ...landingRecheckEnv(root, taskId, rec, { preHead, incoming }) };
           const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
           if (g.status !== 0) {
-            const red = (g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]).slice(0, 4).join(', ');
+            const red = [...new Set((g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]))].slice(0, 4).join(', ');
             return { ok: false, message: `Your work was rebased on the latest ${main}, and the checks now fail${red ? ` (${red})` : ''}. Fix it in your copy, commit, run npm run verify, then task done again.` };
           }
           if (rec) recordPass(root, taskId, { ...rec, head, base: tip });
