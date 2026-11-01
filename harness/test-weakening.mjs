@@ -69,8 +69,11 @@ const SKIP = [
 const ONLY = [/\b(it|test|describe|context|suite|specify)\.only\b/, /\b(fit|fdescribe|fcontext)\s*\(/];
 const SEED = [
   /\bseed\w*\s*(===?|!==?)\s*-?\d/i, /-?\d+\s*(===?|!==?)\s*\w*seed\b/i, /\[[\d,\s]+\]\.includes\(\s*\w*seed/i,
-  /\bseed\w*\s+(not\s+)?in\s*[[(]/i, /\bswitch\s*\(\s*\w*seed\w*\s*\)/i, /\bmatch\s+\w*seed\w*\s*:/i,
+  /(?<!\bfor\s+)\bseed\w*\s+(not\s+)?in\s*[[(]/i, /\bswitch\s*\(\s*\w*seed\w*\s*\)/i, /\bmatch\s+\w*seed\w*\s*:/i,
 ];
+// 2.58.5: an assertion about the seed itself (`expect(sim.seed !== 0).toBe(true)`, `assert seed != 0`) checks it, it
+// doesn't special-case it; with a branch on the same line (if, a ternary, return/continue/skip) it still counts.
+const assertsOnSeed = (t) => ASSERT.test(t) && !/\b(if|elif|else|unless|when|switch|match|return|continue|break|skip\w*)\b/.test(t) && !/(?<![?])\?(?![?.])/.test(t);
 const TICK = /\b(tick|frame|step|turn)\w*\s*(===?|!==?|==|<=?|>=?)\s*\d+|\b\d+\s*(===?|!==?)\s*\w*(tick|frame|step)\b/i;
 const NUM = /(?<![\w.])-?\d[\d_]*(\.\d+)?(e[-+]?\d+)?(?![\w])/gi;
 const nums = (s) => [...s.matchAll(NUM)].map((m) => Number(m[0].replace(/_/g, '')));
@@ -147,7 +150,7 @@ export function weakeningsInDiff(files) {
       const rem = removed.filter((r) => hit(r.text));
       if (add.length > rem.length) for (const a of add) out.push(finding(kind, f.file, a.line, a.text, kind === 'only-added' ? 'every other test in the file stops running' : 'a test no longer runs'));
     }
-    const seedHit = (t) => SEED.some((p) => p.test(t)) || (TICK.test(t) && /\b(return|continue|break|skip\w*)\b/.test(t));
+    const seedHit = (t) => (SEED.some((p) => p.test(t)) && !assertsOnSeed(t)) || (TICK.test(t) && /\b(return|continue|break|skip\w*)\b/.test(t));
     const sAdd = unmatched(added.filter((a) => seedHit(a.text)), removedAll);
     const sRem = removed.filter((r) => seedHit(r.text));
     if (sAdd.length > sRem.length) for (const a of sAdd) out.push(finding('seed-special-case', f.file, a.line, a.text, 'the test behaves differently for one seed or tick'));
