@@ -166,18 +166,18 @@ same import list:
 {
   "gates": [{ "id": "unit", "command": "npm test" }],
   "pins": {
-    "tests": ["runwayCapacity", "curbWindow", "replays/start-*"],
+    "tests": ["throughput", "queueWindow", "replays/start-*"],
     "report": "node game/mygame/pins.mjs report --out {out}",
     "refresh": "node game/mygame/pins.mjs refresh --in {in}",
-    "invariants": ["goAroundCap", "stuckCheck"]
+    "invariants": ["retryCap", "stuckCheck"]
   },
   "unionFiles": ["src/game/modules.ts"]
 }
 ```
 
 - **pins.tests**: the game's pin tests (exact numbers from a seeded run, recordings), as names or `*` globs. A failing
-  test is a pin test when an entry matches its name whole or as a token (`runwayCapacity` matches
-  `pins > runwayCapacity` and `runwayCapacity: expected 10, got 11`). The game's checks name their failing tests in
+  test is a pin test when an entry matches its name whole or as a token (`throughput` matches
+  `pins > throughput` and `throughput: expected 10, got 11`). The game's checks name their failing tests in
   the log (lines like `FAIL <name>`, `× <name>`, `not ok N - <name>`): a check that fails without naming its tests is
   never treated as pins-only.
 - **pins.report**: a command (run from the repo root of the tree being checked, `CI=true`) that runs the pins and
@@ -187,8 +187,8 @@ same import list:
   the expectation files; the train commits whatever it changes, then runs the full verify again.
 - **pins.invariants**: pin names (or `*` globs) that are never refreshed: a red line, a cap, a "no divert", a
   stuck/gridlock check. A lane that moves one is handed back. Keep their expectations in protected files too.
-- A lane declares the pins it means to move with a commit trailer on its own commits: `Pin-Moves: runwayCapacity,
-  curbWindow` (globs allowed). `git commit -m "T-12: wider taxiway" -m "Pin-Moves: runwayCapacity"`.
+- A lane declares the pins it means to move with a commit trailer on its own commits: `Pin-Moves: throughput,
+  queueWindow` (globs allowed). `git commit -m "T-12: wider taxiway" -m "Pin-Moves: throughput"`.
 - **unionFiles**: repo-relative paths (or globs) of files that hold ONE import or re-export per line, in no particular
   order (an import barrel). When two lanes (or a lane and main) conflict only inside these files, the train merges
   them with git's union driver: both sides' added lines are kept, the train's side first. Never list a file whose
