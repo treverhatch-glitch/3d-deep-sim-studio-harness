@@ -19,6 +19,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+
+const spawnSyncSleep = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`]);
 
 // A made-up value: the checks look for it where it must not be.
 const FAKE_KEY = 'fake-nim-key-for-selftest-2585r';
@@ -145,6 +148,40 @@ console.log(JSON.stringify({
     report('H-9: fillCommand fills a list placeholder ({addDirs}) as one quoted argument per item for sh and for cmd.exe, an empty list as nothing, and refuses it inside the line\'s own quotes; {mainRoot} fills like any value',
       t.sh === "w '/k/a b.md' --add-dir '/m/st dio' --add-dir /m/.studio --root 'C:\\Main Root'" && t.win === 'w "/k/a b.md" --add-dir "/m/st dio" --add-dir /m/.studio --root "C:\\Main Root"\\x.mjs' && t.empty === "w  '/k/a b.md'" && t.refused === true,
       JSON.stringify(t).slice(0, 1200));
+  }
+
+  // ---------- 2.58.5: a session counts as running while its lane copy is made ----------
+  // A post-checkout hook that sleeps makes the copy slow (as on Windows or in a big repo), with no harness change.
+  // Before, the detached launcher cleared its placeholder at once and wrote its record only after the copy, so a
+  // supervisor pass in between saw the role under its cap (PU-19 failed on Windows CI: a second session started
+  // before the first hit its usage limit).
+  if (lanesOk) {
+    const hooks = path.join(repo, '.git', 'hooks');
+    fs.mkdirSync(hooks, { recursive: true });
+    const hook = path.join(hooks, 'post-checkout');
+    fs.writeFileSync(hook, '#!/bin/sh\nnode -e "setTimeout(() => {}, 3000)"\n');
+    try { fs.chmodSync(hook, 0o755); } catch {}
+    const ts = add(repo, 'Slow copy');
+    g('add -A');
+    g('commit -qm slow-copy');
+    const d = start(repo, `--role builder --agent h9-slow --task ${ts} --tool claude --model m-1 --detach`, { STUDIO_TOOL_CLAUDE_CMD: 'node .wrapper-2585r.cjs {kickoff}' });
+    const samples = [];
+    const t0 = Date.now();
+    let seen = null;
+    while (Date.now() - t0 < 25000) {
+      seen = probe(repo, `import fs from 'node:fs';
+import { sessions } from ${u(repo, 'harness/agent.mjs')};
+import { readRecentEvents } from ${u(repo, 'harness/event.mjs')};
+const ev = readRecentEvents(5000).filter((e) => e.agent === 'h9-slow');
+console.log(JSON.stringify({ running: sessions().some((x) => x.agent === 'h9-slow' && x.running), copying: fs.existsSync('.lanes/h9-slow') && !ev.some((e) => e.type === 'lane.copy'), started: ev.some((e) => e.type === 'agent.session.start'), ended: ev.some((e) => e.type === 'agent.session.end') }));`);
+      if (seen.copying) samples.push(seen.running);
+      if (seen.ended) break;
+      spawnSyncSleep(250);
+    }
+    fs.rmSync(hook, { force: true });
+    report('2.58.5: a session counts as running for the whole time its lane copy is being made (a slow copy, here a post-checkout hook that sleeps 3 s), so a supervisor pass can\'t start a second session under the role\'s cap in that gap',
+      d.status === 0 && samples.length > 0 && samples.every(Boolean) && seen?.started === true,
+      `detach (${d.status}): ${out(d).slice(-300)}\nsamples while copying (running?): ${JSON.stringify(samples)}\nlast: ${JSON.stringify(seen)}`);
   }
 
   // ---------- H-2: agy's prompt on stdin ----------

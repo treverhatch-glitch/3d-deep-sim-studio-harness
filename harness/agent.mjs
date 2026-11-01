@@ -615,6 +615,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // the main checkout, and a wrapper session staged game code there that the pre-commit hook refused. It runs in the
   // copy (cwd), with STUDIO_MAIN_ROOT set, and its line may use {mainRoot} and {addDirs} (the --add-dir pair the
   // built-in claude gets) to pass the main checkout's folders on. The rehearsal agent stays in the main checkout.
+  // 2.58.5: from here until the real record (below) this session counts as running. The detached launcher clears the
+  // placeholder its parent wrote (so its own checks don't count it), and making the lane copy can take seconds (on
+  // Windows, or a big repo); in that gap a supervisor pass saw the role under its cap and started a second session,
+  // before the first could hit a usage limit (PU-19 failed on Windows CI once custom commands got copies, H-9).
+  holdStarting({ agent, role, tool, model, task, lane });
   let copy = null;
   const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
   if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
@@ -668,6 +673,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.writeFileSync(file, prompt);
   const effort = { 'every-build': 'high', systems: 'medium' }[effectiveMode().review] || null;
   const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: copy ? laneShareDirs() : [] });
+  if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
@@ -709,6 +715,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     fs.closeSync(out);
     if (copy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
     for (const p of lanePaths) release(`path:${p}`, agent);
+    dropStarting(agent);
     emitEvent({ type: 'launch.skipped', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent} not started (${role} on ${custom ? 'a custom command' : tool}): ${err.message}`.slice(0, 400), meta: { role, tool } });
     return { ok: false, message: `${agent} not started: ${err.message}` };
   }
@@ -871,6 +878,18 @@ function stopChild(child) {
 // clock (Date.now() - process.uptime()). Never an OS query.
 let LAUNCHER_ID = null;
 const launcherIdentity = () => LAUNCHER_ID || (LAUNCHER_ID = selfIdentity());
+/** 2.58.5: a "starting" record for this launcher (its pid and spawn time), unless another live session holds the name. */
+function holdStarting({ agent, role, tool, model, task, lane }) {
+  try {
+    if (sessions().some((x) => x.agent === agent && x.running && !(x.starting && x.supervisor === process.pid))) return;
+    fs.mkdirSync(AGENTS_DIR, { recursive: true });
+    fs.writeFileSync(sessionFile(agent), JSON.stringify({ agent, role, tool, model, task: task || null, lane: lane || null, status: 'running', starting: true, supervisor: process.pid, identity: { supervisor: launcherIdentity() }, startedAt: new Date().toISOString() }, null, 2));
+  } catch {}
+}
+/** Takes back this launcher's own "starting" record when the session never starts. */
+function dropStarting(agent) {
+  try { const p = readJson(sessionFile(agent)); if (p?.starting && p.supervisor === process.pid) fs.rmSync(sessionFile(agent), { force: true }); } catch {}
+}
 
 /**
  * PU-17 (P-039, P-045): what a stop does with a session's process, decided at kill time. `cur` is what the OS says

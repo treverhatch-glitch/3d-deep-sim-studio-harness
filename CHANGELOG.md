@@ -27,6 +27,8 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
   `moonshotai/kimi-k2.6`, says when a model is gone, passes the key so aider's `.env` can't blank it, and runs with
   `--no-auto-commits`. qa/selftest-2585r.mjs. UNTESTED against real agy, aider or NIM.
 - **Owner-key notes say how to make the key (P-087, H-11)**; the seed rule no longer flags loops over seeds (P-088).
+- **A session making its lane copy counts against the role's cap (P-097).** Before, a slow copy (Windows, a big repo)
+  left a gap where the supervisor could start a second session under the cap. Found by this PR's Windows CI.
 
 ## [2.58.4] — 2026-11-01
 2.58.4: three gaps found while building a game's first real replay cartridge (P-081 to P-083).

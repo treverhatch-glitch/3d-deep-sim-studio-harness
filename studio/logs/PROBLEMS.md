@@ -623,3 +623,8 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-096 — `--tool nim` child got no Authorization header (crew report H-8) · fixed in 2.58.5 (untested against real aider)
 - **Why:** not the env filter (that passed `OPENAI_API_KEY`): aider loads `.env` files over the environment, and the lane copy's `.env` has the template's empty `OPENAI_API_KEY=`.
 - **Fix:** the child also gets `AIDER_OPENAI_API_KEY`, applied after `.env`; other-cased `OPENAI_` names are dropped; aider runs with `--no-auto-commits`. qa/selftest-2585r.mjs.
+
+### P-097 — A session making its lane copy didn't count against the role's cap · fixed in 2.58.5
+- **Evidence:** PR #43's Windows CI: both PU-19 usage-limit end-to-end checks saw a second session start before the first hit its limit; reproduced on Linux by slowing the lane copy 4 s (both fail, as on Windows).
+- **Why:** the detached launcher clears the placeholder its parent wrote (so its own checks don't count it) and wrote its real record only after the lane copy; on Windows or in a big repo `git worktree add` takes seconds, and a supervisor pass in that gap saw the role under its cap. H-9 (custom commands get copies) made it show in this test; built-in tools had the same gap.
+- **Fix:** harness/agent.mjs holds a "starting" record from the launcher's checks until the real record, and takes it back if the session never starts. qa/selftest-2585r.mjs (a post-checkout hook that sleeps makes the copy slow).
