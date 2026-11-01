@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock } from './merge-lane.mjs';
+import { splitEolOnly, eolNote } from './eol-only.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -305,15 +306,22 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   const main = mainBranch(root);
   // 2.31.0: no trim() before slice(3) (it ate the first letter of the first path: "odot/..."), and engine
   // cache files (.godot/, *.import, *.uid) that every headless Godot run rewrites don't block a landing.
-  const dirty = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
+  const dirtyAll = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
     .filter((l) => !/(^|\/)\.godot\/|\.import$|\.(uid|tmp)$|(^|\/)\.import\//.test(l.slice(3).replace(/^"|"$/g, '')));
+  // 2.58.3 (O3, crew P-035): a tracked file that differs only in line endings isn't uncommitted work; it is set aside
+  // with the engine cache below (a named stash) so the rebase can run.
+  const { real: dirty, eol } = splitEolOnly(REPO_ROOT, dirtyAll);
+  if (eol.length) {
+    console.warn(`[task done] note: ${eolNote(eol)}`);
+    emitEvent({ type: 'task.eol_ignored', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, status: 'warn', msg: `${taskId}: ${eolNote(eol)}`.slice(0, 400) });
+  }
   if (dirty.length) return { ok: false, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
   // Tracked engine cache files the gates just rewrote would stop the rebase ("unstaged changes"): set them
   // aside in a named stash (recoverable with git stash list / pop; nothing is deleted).
   const churn = (git(REPO_ROOT, 'status', '--porcelain', '--untracked-files=no').stdout || '').split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, ''));
   if (churn.length) {
     git(REPO_ROOT, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'stash', 'push', '-m', `studio land ${taskId}: engine cache set aside`, '--', ...churn);
-    emitEvent({ type: 'land.stashed', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${churn.length} engine cache file(s) set aside before landing (git stash list)` });
+    emitEvent({ type: 'land.stashed', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${churn.length} engine cache or line-ending-only file(s) set aside before landing (git stash list)` });
   }
   const branch = git(REPO_ROOT, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
   const tries = Number(process.env.STUDIO_LAND_TRIES || 6);
