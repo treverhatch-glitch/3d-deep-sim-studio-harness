@@ -3869,6 +3869,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.62.0: the sealed replay bench (npm run bench: cases at a commit, k tries by real agents in clean copies, code
+// graders, pass@1 / pass^k, a paired compare) and the component-removal review (--without) (qa/selftest-262g.mjs).
+{
+  const dir = copyRepo();
+  const { selftest262G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262g.mjs')).href);
+  await selftest262G({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
