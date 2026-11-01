@@ -43,15 +43,15 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
   ] }, null, 2)}\n`);
   write(dir, 'game/demo/studio.gates.json', `${JSON.stringify({
     gates: [{ id: 'check', command: 'node game/demo/check.mjs' }],
-    pins: { tests: ['pin:*'], report: 'node game/demo/pins.mjs report {out}', refresh: 'node game/demo/pins.mjs refresh {in}', invariants: ['goAroundCap'] },
+    pins: { tests: ['pin:*'], report: 'node game/demo/pins.mjs report {out}', refresh: 'node game/demo/pins.mjs refresh {in}', invariants: ['retryCap'] },
     unionFiles: ['game/demo/barrel.txt'],
   }, null, 2)}\n`);
   // The pins: three numbers, base + the numbers in game/demo/tune/<prefix>-*.txt. The expectations file keeps a blank
   // line between keys, so two lanes re-pinning different pins don't touch neighbouring lines.
   write(dir, 'game/demo/pins.mjs', [
     "import fs from 'node:fs'; import path from 'node:path';",
-    "const base = { curbWindow: 15, goAroundCap: 2, runwayCapacity: 10 };",
-    "const from = { curbWindow: 'curb', goAroundCap: 'cap', runwayCapacity: 'runway' };",
+    "const base = { queueWindow: 15, retryCap: 2, throughput: 10 };",
+    "const from = { queueWindow: 'queue', retryCap: 'cap', throughput: 'flow' };",
     "export function actual() {",
     "  const v = { ...base }; const d = 'game/demo/tune';",
     "  if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) for (const [k, p] of Object.entries(from)) if (f.startsWith(`${p}-`)) v[k] += Number(fs.readFileSync(path.join(d, f), 'utf8').trim() || 0);",
@@ -74,7 +74,7 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
     "if (notes.includes('clash-a.md') && notes.includes('clash-b.md')) { console.log('FAIL interaction: clash-a and clash-b together'); bad += 1; }",
     "if (bad) process.exit(1);",
     "console.log('demo ok');", ''].join('\n'));
-  write(dir, 'game/demo/pins.expected.json', '{\n  "curbWindow": 15,\n\n  "goAroundCap": 2,\n\n  "runwayCapacity": 10\n}\n');
+  write(dir, 'game/demo/pins.expected.json', '{\n  "queueWindow": 15,\n\n  "retryCap": 2,\n\n  "throughput": 10\n}\n');
   write(dir, 'game/demo/barrel.txt', 'import base\n');
   write(dir, 'game/demo/notes/shared.md', '# Shared\n\nline one\n');
   g(dir, 'init', '-q', '-b', 'main'); g(dir, 'config', 'core.autocrlf', 'false');
@@ -98,7 +98,7 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   /** A lane that moves pins: +1 on each named pin, its own expectations re-pinned against the main it started from. */
-  const pinLane = (agent, title, moves, trailers) => lane(agent, title, Object.fromEntries(moves.map((p) => [`game/demo/tune/${{ runwayCapacity: 'runway', curbWindow: 'curb', goAroundCap: 'cap' }[p]}-${agent}.txt`, '1\n'])), {
+  const pinLane = (agent, title, moves, trailers) => lane(agent, title, Object.fromEntries(moves.map((p) => [`game/demo/tune/${{ throughput: 'flow', queueWindow: 'queue', retryCap: 'cap' }[p]}-${agent}.txt`, '1\n'])), {
     trailers,
     edit: (ld) => {
       const f = path.join(ld, 'game/demo/pins.expected.json');
@@ -112,36 +112,36 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
   const pinsRecords = () => { const d = path.join(dir, '.studio', 'train'); const outR = []; try { for (const n of fs.readdirSync(d)) { const f = path.join(d, n, 'pins.json'); if (fs.existsSync(f)) outR.push(JSON.parse(fs.readFileSync(f, 'utf8'))); } } catch {} return outR; };
 
   // ---- 1. two lanes each moving a declared pin: one Pin-Refresh commit, correct attribution, both land ----
-  const a = pinLane('pin-a', 'Tune: runway a', ['runwayCapacity'], ['Pin-Moves: runwayCapacity']);
-  const b = pinLane('pin-b', 'Tune: runway and curb b', ['runwayCapacity', 'curbWindow'], ['Pin-Moves: runwayCapacity, curbWindow']);
+  const a = pinLane('pin-a', 'Tune: flow a', ['throughput'], ['Pin-Moves: throughput']);
+  const b = pinLane('pin-b', 'Tune: flow and queue b', ['throughput', 'queueWindow'], ['Pin-Moves: throughput, queueWindow']);
   const qa = queueIt(a); const qb = queueIt(b);
   const t1 = train();
   const rec1 = pinsRecords().find((r) => r.refreshed && r.lanes.map((l) => l.task).join(',') === `${a.id},${b.id}`);
   const refreshCommits = mainLog().split('\0').filter((m) => /pin refresh/.test(m));
   const e1 = expected();
-  report('2.60.0 (#1): two lanes that each re-pinned runwayCapacity (and one curbWindow) against the same main, each declaring it (Pin-Moves:), land in one train with ONE extra "pin refresh" commit (Pin-Refresh: both lanes) whose expectations are the combined values; the report (.studio/train/<id>/pins.json) attributes runwayCapacity to both lanes and curbWindow to the second (fails on 2.59.1: the second lane waited for the next train with stale pins)',
+  report('2.60.0 (#1): two lanes that each re-pinned throughput (and one queueWindow) against the same main, each declaring it (Pin-Moves:), land in one train with ONE extra "pin refresh" commit (Pin-Refresh: both lanes) whose expectations are the combined values; the report (.studio/train/<id>/pins.json) attributes throughput to both lanes and queueWindow to the second (fails on 2.59.1: the second lane waited for the next train with stale pins)',
     a.ok && b.ok && qa.status === 0 && qb.status === 0 && t1.status === 0 && isDone(a.id) && isDone(b.id) && refreshCommits.length === 1 && new RegExp(`^Pin-Refresh: ${a.id}, ${b.id}$`, 'm').test(refreshCommits[0] || '')
-      && e1.runwayCapacity === 12 && e1.curbWindow === 16 && e1.goAroundCap === 2 && rec1?.moved?.runwayCapacity?.by?.join(',') === `${a.id},${b.id}` && rec1?.moved?.curbWindow?.by?.join(',') === b.id
-      && rec1?.before?.runwayCapacity === 10 && rec1?.after?.runwayCapacity === 12 && evs().some((e) => e.type === 'task.train.pin_refresh'),
+      && e1.throughput === 12 && e1.queueWindow === 16 && e1.retryCap === 2 && rec1?.moved?.throughput?.by?.join(',') === `${a.id},${b.id}` && rec1?.moved?.queueWindow?.by?.join(',') === b.id
+      && rec1?.before?.throughput === 10 && rec1?.after?.throughput === 12 && evs().some((e) => e.type === 'task.train.pin_refresh'),
     `${a.log.slice(-300)}\n${out(qa).slice(-300)}\n${out(qb).slice(-300)}\n${out(t1).slice(-2500)}\nexpected=${JSON.stringify(e1)} commits=${refreshCommits.length}\nrec=${JSON.stringify(rec1?.moved)}`);
 
   // ---- 2. an undeclared move: the train stays red on it and hands back the lane that moved it (the first one) ----
-  const d = pinLane('pin-d', 'Tune: runway d, undeclared', ['runwayCapacity'], []);
-  const c = pinLane('pin-c', 'Tune: runway c', ['runwayCapacity'], ['Pin-Moves: runwayCapacity']);
+  const d = pinLane('pin-d', 'Tune: flow d, undeclared', ['throughput'], []);
+  const c = pinLane('pin-c', 'Tune: flow c', ['throughput'], ['Pin-Moves: throughput']);
   queueIt(d); queueIt(c);
   const t2 = train();
   const noteD = handBack(d.id);
-  report('2.60.0 (#1): a lane that moves a pin without declaring it (no Pin-Moves: runwayCapacity) is handed back with a note naming the pin, even when it is not the last lane; the declaring lane lands with no pin refresh (fails on 2.59.1: the last lane waited and the undeclared move landed)',
-    d.ok && c.ok && dropped(d.id) && !isDone(d.id) && /runwayCapacity/.test(noteD) && /Pin-Moves/.test(noteD) && isDone(c.id) && mainLog().split('\0').filter((m) => /pin refresh/.test(m)).length === 1 && expected().runwayCapacity === 13 && queue().length === 0,
+  report('2.60.0 (#1): a lane that moves a pin without declaring it (no Pin-Moves: throughput) is handed back with a note naming the pin, even when it is not the last lane; the declaring lane lands with no pin refresh (fails on 2.59.1: the last lane waited and the undeclared move landed)',
+    d.ok && c.ok && dropped(d.id) && !isDone(d.id) && /throughput/.test(noteD) && /Pin-Moves/.test(noteD) && isDone(c.id) && mainLog().split('\0').filter((m) => /pin refresh/.test(m)).length === 1 && expected().throughput === 13 && queue().length === 0,
     `${out(t2).slice(-2500)}\nnote: ${noteD.slice(-600)}\nexpected=${JSON.stringify(expected())}`);
 
   // ---- 3. an invariant pin is never refreshed, even when declared ----
-  const e = pinLane('pin-e', 'Tune: go-around cap e', ['goAroundCap'], ['Pin-Moves: goAroundCap']);
-  const f = pinLane('pin-f', 'Tune: go-around cap f', ['goAroundCap'], ['Pin-Moves: goAroundCap']);
+  const e = pinLane('pin-e', 'Tune: go-around cap e', ['retryCap'], ['Pin-Moves: retryCap']);
+  const f = pinLane('pin-f', 'Tune: go-around cap f', ['retryCap'], ['Pin-Moves: retryCap']);
   queueIt(e); queueIt(f);
   const t3 = train();
-  report('2.60.0 (#1): an invariant pin (pins.invariants: goAroundCap) moved by two lanes that both declare it is never refreshed: no refresh commit, main\'s expectation unchanged, both lanes handed back with a note saying it is an invariant (fails on 2.59.1: the first lane landed its cap change)',
-    e.ok && f.ok && !mainHas(`game/demo/tune/cap-pin-e.txt`) && !mainHas(`game/demo/tune/cap-pin-f.txt`) && expected().goAroundCap === 2 && dropped(e.id) && dropped(f.id) && /invariant/.test(handBack(e.id)) && /invariant/.test(handBack(f.id))
+  report('2.60.0 (#1): an invariant pin (pins.invariants: retryCap) moved by two lanes that both declare it is never refreshed: no refresh commit, main\'s expectation unchanged, both lanes handed back with a note saying it is an invariant (fails on 2.59.1: the first lane landed its cap change)',
+    e.ok && f.ok && !mainHas(`game/demo/tune/cap-pin-e.txt`) && !mainHas(`game/demo/tune/cap-pin-f.txt`) && expected().retryCap === 2 && dropped(e.id) && dropped(f.id) && /invariant/.test(handBack(e.id)) && /invariant/.test(handBack(f.id))
       && mainLog().split('\0').filter((m) => /pin refresh/.test(m)).length === 1,
     `${out(t3).slice(-2500)}\nexpected=${JSON.stringify(expected())}`);
 
@@ -198,7 +198,7 @@ const only = pinsOnlyRed(log(['[game-gates] FAIL game:check: exit 1: FAIL pin:a'
 const mixed = pinsOnlyRed(log(['[game-gates] FAIL game:check: exit 1', '[game-gates] failing tests in game:check: ["pin:a: x", "notes: BROKEN"]']), { failGates: ['game'], tests: ['pin:*'] });
 const otherGate = pinsOnlyRed(log(['[game-gates] FAIL game:check: exit 1', '[game-gates] failing tests in game:check: ["pin:a: x"]']), { failGates: ['game', 'hooks'], tests: ['pin:*'] });
 const unnamed = pinsOnlyRed(log(['[game-gates] FAIL game:check: exit 1']), { failGates: ['game'], tests: ['pin:*'] });
-console.log(JSON.stringify({ pinsOff: s.pins === null, notes: s.notes.length, union: s.unionFiles, tok: isPinTest('suite > runwayCapacity holds', ['runwayCapacity']), notTok: isPinTest('runwayCapacityX', ['runwayCapacity']), glob: pinNameMatches('replays/start-2', ['replays/*']), only: only.ok, mixed: mixed.ok, otherGate: otherGate.ok, unnamed: unnamed.ok, alone: bisectMode({ STUDIO_TRAIN_BISECT: 'alone' }), prefix: bisectMode({}) }));`);
+console.log(JSON.stringify({ pinsOff: s.pins === null, notes: s.notes.length, union: s.unionFiles, tok: isPinTest('suite > throughput holds', ['throughput']), notTok: isPinTest('throughputX', ['throughput']), glob: pinNameMatches('replays/start-2', ['replays/*']), only: only.ok, mixed: mixed.ok, otherGate: otherGate.ok, unnamed: unnamed.ok, alone: bisectMode({ STUDIO_TRAIN_BISECT: 'alone' }), prefix: bisectMode({}) }));`);
   const pr = run(dir, `node "${probe}"`, env);
   let pj = {};
   try { pj = JSON.parse(String(pr.stdout).trim().split('\n').pop()); } catch {}

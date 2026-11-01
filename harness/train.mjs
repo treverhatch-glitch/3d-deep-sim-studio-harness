@@ -233,8 +233,8 @@ const esc = (s) => String(s).replace(/[.+^${}()|[\]\\?]/g, '\\$&');
 export const pinNameMatches = (name, globs = []) => globs.some((g) => new RegExp(`^${esc(g).replace(/\*/g, '.*')}$`).test(String(name)));
 /**
  * A failing test is a pin test when a pins.tests entry matches its name whole or as a token bounded by non-word
- * characters (`*` matching within the token): "runwayCapacity" matches "pins > runwayCapacity" and
- * "runwayCapacity: expected 10, got 11"; "replays/start-*" matches "replays/start-2 drifted".
+ * characters (`*` matching within the token): "throughput" matches "pins > throughput" and
+ * "throughput: expected 10, got 11"; "replays/start-*" matches "replays/start-2 drifted".
  */
 export const isPinTest = (name, tests = []) => tests.some((t) => new RegExp(`(^|[^\\w])${esc(t).replace(/\*/g, '\\S*')}($|[^\\w])`).test(String(name)));
 
