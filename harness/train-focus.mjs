@@ -23,7 +23,9 @@ const FILE_EXT = /\.[A-Za-z0-9]{1,6}$/;
 export function normTestPath(p) {
   let s = String(p || '').trim().replace(/^['"]|['"]$/g, '');
   if (/^file:\/\//i.test(s)) { s = s.replace(/^file:\/\//i, ''); try { s = decodeURIComponent(s); } catch {} if (/^\/[A-Za-z]:\//.test(s)) s = s.slice(1); }
-  s = s.replace(/\\/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
+  // A YAML-escaped Windows path (TAP: 'C:\\\\a\\\\b.mjs') doubles its backslashes: collapse repeated slashes (a UNC path's
+  // leading // is kept).
+  s = s.replace(/\\/g, '/').replace(/(?!^)\/{2,}/g, '/').replace(/:\d+(?::\d+)?$/, '').replace(/^\.\//, '');
   return s;
 }
 
