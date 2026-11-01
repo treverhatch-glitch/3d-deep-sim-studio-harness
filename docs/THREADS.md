@@ -47,8 +47,23 @@ With either `respond` or `candidate`, an event that matches no task goes to the 
 `studio/producer/INBOX.md`, which the Producer reads at its next start. Entries under `types` override the
 source's policy for a single event type. Defaults: a CI failure responds and a CI green is ignored. For the
 train, a dropped or partial lane responds, while a red train, a deferred lane, a red `main` and a flaky
-train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Hub, Discord
-and GitHub are candidates.
+train are candidates. Every other train event (start, verify, pins, landed, done) is ignored. Hub is a
+candidate; Discord and GitHub respond only for listed senders (below), else candidate.
+
+### Who may make a post respond (`"senders"`, 2.65.0)
+
+```json
+"senders": { "discord": { "owner": [], "trusted": [] }, "github": { "owner": [] } }
+```
+
+A `discord` or `github` event responds only when its author id is listed as `owner` or `trusted` (GitHub logins
+compare without case). Any other author's event, another bot's, or one with no `--author` is **at most a
+candidate**, never respond, live or in shadow mode (the `thread.would_route` / `thread.routed` event and the post's
+output say so; the shadow report shows the sender). The shipped lists are empty, so every Discord and GitHub post
+is a candidate until the owner adds ids; the shipped policy for both is `respond` for that reason. The harness
+can't verify a Discord or GitHub identity itself: the bot passes the author id it got from Discord or GitHub
+(`--author`), and the harness applies the owner's lists to it. The table is protected, so only the owner changes
+the lists.
 
 Sources: `ci` (ci-watch), `train` (`task.train.*`), `hub` (the War Room's `/api/inbox` with a task, ask
 answers, away verdicts), and `discord` and `github` (`npm run thread -- post`).
@@ -78,7 +93,7 @@ npm run thread -- resolve <key>                  # which task a key belongs to
 npm run thread -- inbox T-123 [--peek]           # read a task's inbox (marks it read)
 npm run thread -- link discord:<id> T-123 --by <name>
 npm run thread -- unlink discord:<id> --by <name>
-npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>]
+npm run thread -- post <key> "<text>" --source discord|github|hub --by <name> [--ref <id>] [--author <sender id>]
 npm run thread -- shadow-report [--sample 50]
 ```
 

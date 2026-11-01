@@ -180,9 +180,14 @@ export function holderTree(h, procs, { self = process.pid } = {}) {
       members.add(Number(c.pid));
       walk(Number(c.pid), st);
     }
+  }
+  {
     // 2.60.0 (#5, Windows): the holder's own children are recorded (tree.children). When the holder dies, Node's job
     // object takes its direct child (the shell) with it, but the shell's children broke away and live on, naming the
     // dead shell as their parent: they are found through the recorded child, as the root's orphans are through it.
+    // 2.65.0: also while the holder still runs (a full verify's gate shell that ended and left children running:
+    // scripts/run-gates.mjs records each gate's shell, harness/gate-spawn.mjs); a live recorded child is already in the
+    // walk above then.
     for (const [cpRaw, cRec] of Object.entries(h?.tree?.children || {})) {
       const cp = Number(cpRaw);
       if (!Number.isInteger(cp) || cp <= 0 || cp === root) continue;
@@ -668,6 +673,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
     let lk;
+    const t0Run = Date.now();
     try {
       lk = acquireHeavy(root, label, { log: (m) => console.error(m) });
     } catch (err) {
@@ -690,6 +696,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       child.on('exit', (c, sig) => resolve(c ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1)));
     });
     lk.release();
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) for a heavy run.
+    try { (await import('./jobs.mjs')).jobDone({ kind: 'heavy', id: label, code, ms: Date.now() - t0Run, extra: { command: cmd.join(' ').slice(0, 200) } }); } catch {}
     process.exit(code);
   }
   if (argv[0] === 'stop') {

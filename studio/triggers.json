@@ -1,5 +1,5 @@
 {
-  "note": "2.64.0 trigger table (harness/threads.mjs, docs/THREADS.md). Per source a policy applied by code: respond (a matched event goes to the task's inbox and the session holding the task is told at its next tool call), candidate (to the task's inbox, no notice), ignore (dropped). An event with no thread goes to the Producer's inbox. Per-type entries override the source's policy. mode: shadow logs thread.would_route / trigger.would_drop only; on routes the sources in live (the others stay in shadow); off does nothing. STUDIO_THREADS overrides mode. Pass-through never adds a task or edits the board.",
+  "note": "2.64.0 trigger table (harness/threads.mjs, docs/THREADS.md). Per source a policy applied by code: respond (a matched event goes to the task's inbox and the session holding the task is told at its next tool call), candidate (to the task's inbox, no notice), ignore (dropped). An event with no thread goes to the Producer's inbox. Per-type entries override the source's policy. mode: shadow logs thread.would_route / trigger.would_drop only; on routes the sources in live (the others stay in shadow); off does nothing. STUDIO_THREADS overrides mode. Pass-through never adds a task or edits the board. 2.65.0: senders lists, per source, the author ids (as Discord or GitHub gave them to the bot, which passes them with --author; the harness can't verify them) whose events may respond; any other author's discord or github event is at most a candidate. Empty lists: every discord and github event is a candidate.",
   "mode": "shadow",
   "live": ["ci", "train"],
   "sources": {
@@ -16,7 +16,11 @@
       }
     },
     "hub": { "policy": "candidate" },
-    "discord": { "policy": "candidate" },
-    "github": { "policy": "candidate" }
+    "discord": { "policy": "respond" },
+    "github": { "policy": "respond" }
+  },
+  "senders": {
+    "discord": { "owner": [], "trusted": [] },
+    "github": { "owner": [] }
   }
 }

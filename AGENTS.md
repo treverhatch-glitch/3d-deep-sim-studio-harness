@@ -76,9 +76,12 @@ Logging `editing` is not enough. Use the lock helper.
 - Stay inside what you claimed.
 - Do not edit files locked by someone else.
 - In a lane copy (`.lanes/<agent>`) `studio/` is the main checkout's (a link): only the board commands (`npm run task`,
-  lock, proof ...) write there. Studio config (`studio/*.json`, `studio/bible/*.json`, keys, approvals, presets) is
-  changed on main by the owner or the Producer: hand the task back with a note naming the change. A Claude Code hook
-  refuses the edit in a lane copy, and task done in a lane warns when main's studio config changed uncommitted.
+  lock, proof ...) write there, and a Claude Code hook refuses an edit of studio config there. A lane changes top-level
+  `studio/*.json` config through a proposal it commits, `studio-proposals/<ID>.json` (`{ "changes": [ { "file":
+  "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ], "why": "…" }`), which the landing applies to main
+  (2.65.0, docs/WORK-ORGANIZATION.md); a protected file in it makes the lane tier C and waits for the owner. Other studio
+  config (`studio/bible/*.json`, keys, approvals, presets) is changed on main by the owner or the Producer: hand the task
+  back with a note naming the change. task done in a lane warns when main's studio config changed uncommitted.
 
 ### When finished
 - `node harness/lock.mjs release <key> --owner cursor-win2`

@@ -3975,6 +3975,45 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.0 (helper p): the conductor's tools: npm run lanes (the lane table), lanes refresh (merge main, re-stamp, targeted
+// tests; refuses workers and busy lanes; stops on a conflict), status --brief (under 100 words), task note (conductor
+// rulings in the task's record and brief), job.done events and npm run events -- wait (qa/selftest-265p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265p.mjs')).href);
+  await selftest265P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.65.0 (helper r): conflict prediction at task done --train (B-34: after a queued lane, refused against main, union
+// files), --after honoured by the train, drift Checks for no heartbeat and borrowed commits, trigger senders
+// (qa/selftest-265r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265r.mjs')).href);
+  await selftest265R({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.65.0 (helper s): studio config proposals a lane carries (studio-proposals/<ID>.json) applied when it lands, under
+// the protected-file rules; the visual proof's per-camera noise baseline; a full verify's gate shells recorded in the
+// machine:heavy holder's tree on Windows (qa/selftest-265s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265s.mjs')).href);
+  await selftest265S({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.65.0 (hands-off by default): a bug task's type from its diff, the self-triage list, the daily digest, the autonomy
+// level command, cost per merged change on the scorecard (qa/selftest-265t.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265t.mjs')).href);
+  await selftest265T({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -52,6 +52,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
+import { jobDone } from './jobs.mjs';
 import { acquireHeavy, heavyRoot } from './heavy.mjs';
 import { readTrack, logEngine } from './engine.mjs';
 
@@ -209,6 +210,8 @@ export async function runUnityGate({ task = null, branch = null, branches = null
     const full = { ...res, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', 'unity-last.json'), JSON.stringify(full, null, 2)); } catch {}
     try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: 'engine:unity', status: full.ok ? 'ok' : full.status === 'refused' ? 'warn' : 'blocked', msg: `Unity land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { status: full.status, code: full.code ?? null, ms: full.ms, ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) beside engine.land.
+    if (full.status !== 'skipped') jobDone({ kind: 'unity-gate', id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
     try { logEngine(`unity land${task ? ` ${task}` : ''}: ${full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
     return full;
   }

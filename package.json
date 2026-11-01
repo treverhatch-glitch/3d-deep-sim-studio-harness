@@ -1,6 +1,6 @@
 {
   "name": "3d-deep-sim-studio-harness",
-  "version": "2.64.0",
+  "version": "2.65.0",
   "description": "Agent-agnostic, file-based workflow harness for deep simulation games: pure sim cartridges, seed + tick replay, 64-bit golden hashes, locks, gates, a closed QA loop and a zero-token War Room.",
   "type": "module",
   "license": "UNLICENSED",
@@ -98,6 +98,7 @@
     "logs": "node harness/logs.mjs",
     "metrics": "node harness/metrics.mjs",
     "autonomy": "node harness/autonomy.mjs",
+    "digest": "node harness/digest.mjs",
     "vfx": "node harness/vfx.mjs",
     "public-guard": "node harness/public-guard.mjs",
     "engine:build": "node harness/unity.mjs build",
@@ -152,6 +153,8 @@
     "models:limits": "node harness/model-limits.mjs",
     "ci:watch": "node harness/ci-watch.mjs",
     "thread": "node harness/threads.mjs",
+    "lanes": "node harness/lanes.mjs",
+    "events": "node harness/jobs.mjs",
     "gdscript:parse": "node harness/gdscript-parse.mjs"
   },
   "devDependencies": {

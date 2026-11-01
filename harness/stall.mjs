@@ -28,6 +28,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './even
 import { doneRunning } from './busy.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
+import { boardStates } from './train-deps.mjs';
 
 export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -174,9 +175,14 @@ export function logStall(session, v) {
  *                   before (files dated after a verify or rewritten by it are "unknown", never "unchanged")
  *   out-of-scope    a file it edited (uncommitted, or committed under its own Studio-Agent trailer) outside its task's
  *                   lane and its claimed paths. No lane and no claim (the whole game) is not judged.
+ * 2.65.0 (crew feedback 5) adds two:
+ *   no-heartbeat      listed running, but its record has no heartbeat at all STUDIO_DRIFT_NOHEARTBEAT_MIN (5) minutes
+ *                     after it started (a session whose tool never started, e.g. not on PATH)
+ *   borrowed-commits  its lane holds commits of another OPEN task's unlanded lane (it merged that lane wholesale, or
+ *                     carries commits tagged Studio-Task: <that task>): its own work now depends on unlanded work
  * STUDIO_DRIFT=off turns them off. State: .studio/drift/<agent>.json.
  */
-export const DRIFT_SIGNALS = ['gate-loop', 'verify-no-diff', 'out-of-scope'];
+export const DRIFT_SIGNALS = ['gate-loop', 'verify-no-diff', 'out-of-scope', 'no-heartbeat', 'borrowed-commits'];
 // Files the harness writes for any task (the board, hand-offs, notes), and regression replays: never "out of scope".
 export const DRIFT_SCOPE_ALWAYS = ['studio/NEXT.md', 'studio/DONE.md', 'studio/CURRENT_TASK.md', 'studio/handoffs', 'studio/notes', 'studio/daily', 'studio/logs', 'studio/producer', 'qa/regressions'];
 const DRIFT_DIR = path.join(STUDIO_STATE_DIR, 'drift');
@@ -271,6 +277,17 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
     raised.push({ signal, why, detail });
   };
 
+  // 2.65.0: listed running (agent.mjs sessions(): running) with no heartbeat ever (the launcher's record writes one at
+  // once; a "starting" placeholder that never became a session has none).
+  const nobeat = num(env.STUDIO_DRIFT_NOHEARTBEAT_MIN, 5);
+  const ranMin = (now - (Date.parse(session.startedAt) || now)) / 60000;
+  if (nobeat > 0 && session.running === true && !session.lastBeat && ranMin >= nobeat) raise('no-heartbeat', `it is listed running but has never sent a heartbeat ${Math.round(ranMin)} min after it started (limit ${nobeat}); its tool may never have started (not on PATH, a crash at launch)`, { minutes: Math.round(ranMin) });
+  // 2.65.0: commits of another open task's unlanded lane in this one.
+  if (!st.raised['borrowed-commits'] && scope.task) {
+    const b = borrowedCommits(cwd, scope.task);
+    if (b.length) raise('borrowed-commits', `its lane holds commits of ${b.map((x) => `${x.task}'s`).join(', ')} unlanded lane (${b.map((x) => `${x.task}: ${x.commits.length} commit(s)${x.via === 'trailer' ? ', tagged' : ', merged'}`).join('; ')}): its work now depends on work that hasn't landed. Land ${b.map((x) => x.task).join(', ')} first (--after), or take those commits out`, { borrowed: b.map((x) => ({ task: x.task, commits: x.commits.slice(0, 10), via: x.via })) });
+  }
+
   // (a) and (b): the session's own verify runs since the last observation.
   const mine = events.filter((e) => e.type === 'gates.run' && e.agent === session.agent && (Date.parse(e.ts) || 0) > st.seen).sort((x, y) => Date.parse(x.ts) - Date.parse(y.ts));
   for (const v of mine) {
@@ -303,6 +320,46 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
   fs.mkdirSync(DRIFT_DIR, { recursive: true });
   fs.writeFileSync(driftFile(session.agent), `${JSON.stringify(st, null, 2)}\n`);
   return raised;
+}
+
+/**
+ * 2.65.0: commits in this lane (not on main, not on its own first-parent line) that belong to another OPEN task's
+ * lane: shared with that task's branch (.studio/lane-branches.json) or queued head (.studio/train/queue.json), or
+ * tagged Studio-Task: <that task> and not this one. Returns [{ task, commits: [sha], via: 'branch'|'trailer' }].
+ */
+export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardRoot = REPO_ROOT } = {}) {
+  const g = (...a) => { const r = spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
+  const board = boardStates(boardRoot);
+  if (!board) return [];
+  const common = g('rev-parse', '--path-format=absolute', '--git-common-dir');
+  const mainDir = common && path.basename(common) === '.git' ? path.dirname(common) : boardRoot;
+  const mr = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: mainDir, encoding: 'utf8' });
+  const main = mr.status === 0 ? mr.stdout.trim() : '';
+  if (!main || !g('rev-parse', '--verify', '-q', `refs/heads/${main}`)) return [];
+  const mine = new Set(g('rev-list', `refs/heads/${main}..HEAD`).split('\n').filter(Boolean));
+  if (!mine.size) return [];
+  const own = new Set(g('rev-list', '--first-parent', `refs/heads/${main}..HEAD`).split('\n').filter(Boolean));
+  const others = new Map();
+  const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+  for (const [k, v] of Object.entries(readJson(path.join(stateDir, 'lane-branches.json'), {}))) if (/^[A-Z]+-\d+$/.test(k) && typeof v === 'string' && v) others.set(k, [...(others.get(k) || []), `refs/heads/${v}`]);
+  for (const e of readJson(path.join(stateDir, 'train', 'queue.json'), [])) if (e?.task && /^[0-9a-f]{40}$/.test(String(e.head || ''))) others.set(e.task, [...(others.get(e.task) || []), e.head]);
+  const found = new Map();
+  const add = (t, c, via) => { const f = found.get(t) || { task: t, commits: [], via }; if (!f.commits.includes(c)) f.commits.push(c); found.set(t, f); };
+  for (const [t, heads] of others) {
+    if (t === task || !board.open.has(t)) continue;
+    for (const h of heads) {
+      if (!g('rev-parse', '--verify', '-q', `${h}^{commit}`)) continue;
+      for (const c of g('rev-list', `${h}`, `^refs/heads/${main}`).split('\n').filter(Boolean)) if (mine.has(c) && !own.has(c)) add(t, c, 'branch');
+    }
+  }
+  const log = g('log', '--no-merges', '--format=%x1e%H%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', `refs/heads/${main}..HEAD`);
+  for (const block of log.split('\x1e').filter(Boolean)) {
+    const [sha, tags = ''] = block.trim().split('\t');
+    const ids = tags.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x));
+    if (!ids.length || ids.includes(task)) continue;
+    for (const t of ids) if (board.open.has(t) && !found.has(t)) add(t, sha, 'trailer');
+  }
+  return [...found.values()];
 }
 
 // The CLI loads agent.mjs (which imports this file) without a top-level await, so the import cycle can settle.

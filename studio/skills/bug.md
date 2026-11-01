@@ -1,6 +1,8 @@
 # Skill: bug
 
 **When.** A task titled `Bug…` or `Fix…`, including the `Fix BUG-…` tasks the closed loop queues.
+2.65.0: if your fix turns out to change only tests, docs or config (a flaky test, a timeout setting), done-check judges
+the task a "change" from its diff and asks no replay (`type: change (evidence: …)`); any game-logic file keeps the replay.
 
 **Steps.**
 1. **Triage.** Read the report and say how bad it is: P0 (crash, lost save, broken determinism),

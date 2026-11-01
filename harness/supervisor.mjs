@@ -19,6 +19,9 @@
  *      a session ends, the next minute starts the next one. With --budget and the plan under its target
  *      (studio/budget.json), it allows up to two extra agents; over the target, none;
  *   4. skips a tool that ran out of quota until its reset and uses the next tool in the budget's order.
+ * 2.65.0: a halt (two sessions in a row ending the same bad way) whose cause is on the self-triage list
+ * (harness/self-triage.mjs: the tool isn't on PATH and another tool is) is fixed and cleared by "self-triage";
+ * any other halt still waits for a person (studio:resume or the War Room).
  * With --lanes auto, tasks that name a lane (task add --lane game/x/src/floors) get one agent per lane,
  * each holding that folder, so builders never edit the same files.
  * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
@@ -160,8 +163,18 @@ export async function supervise(opts, state, now = Date.now()) {
     // A program that isn't on the PATH: exit 127 (9009, or 1 under cmd.exe on Windows), or one `which` can't find.
     const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' }).status !== 0);
     const hint = missing ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
-    state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}` };
+    state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}`, ...(metaTool === 'custom' ? { custom: true } : {}), ...(missing ? { missing: true } : {}) };
     emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
+    // 2.65.0: a halt whose cause is on the self-triage list (harness/self-triage.json: the tool isn't on PATH and another
+    // tool is) is fixed and cleared as studio:resume would, by "self-triage"; the next pass resumes. Unknown causes,
+    // and a cause already fixed once in the window, wait for a person as before.
+    if (!opts.dryRun) {
+      try {
+        const { triageHalt } = await import('./self-triage.mjs');
+        const t = await triageHalt(state.halted, { now });
+        if (t.fixed) state.halted.selfTriage = t.why;
+      } catch { /* the halt stands */ }
+    }
     return { started: [], why: [`halted: ${state.halted.why}`] };
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).

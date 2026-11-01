@@ -106,6 +106,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
   `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
   again, as before.
+- Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
+  `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
+  each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
+  or refresh the lane with the `lanes refresh` command). A conflict only with a queued lane queues it marked `after: <that task>`
+  (`train status` shows it): the train leaves it out (no check, no verify; the `task.train.deferred` event once per
+  reason) until that task has landed or left the queue. Conflicts only in the manifest's `unionFiles` count as none.
+  Event `task.train.predicted_conflict`. Git older than 2.38, or `STUDIO_TRAIN_PREDICT=off`: no prediction (the
+  queue says so) and the line-overlap warning stays the only hint.
+- Dependencies (2.65.0, feedback 3.3, `harness/train-deps.mjs`): the train reads `--after` / `task block --until
+  T-x` (`studio/task-holds.json`), which before only gated a start. A lane whose dependency is done, or queued in the
+  same train, goes, and within a train lanes merge in dependency order; if that dependency drops out of the train,
+  the lane leaves with it. A dependency still open and not in the train: the lane waits for a later train (says
+  which). A dependency dropped from the board or not on it: the lane is handed back with a note (`npm run task --
+  unblock <ID>` clears the dependency if the Producer decides so), never left waiting. Tasks the planner or a
+  proposal adds keep their `--after` (addTask and `proposed promote` carry `meta.after`); nothing else writes tasks
+  with dependencies.
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
@@ -159,8 +175,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
   a note naming it. A Claude Code hook (`.claude/hooks/lane-studio-guard.mjs`) refuses such an edit in a lane copy
   (`STUDIO_LANE_STUDIO_GUARD=off` turns it off), and task done in a lane warns, naming the files, when main's studio
-  config changed uncommitted while the task was worked. Planned (2.64): a config proposal file in the lane that the
-  train applies to main's studio/ in the same landing.
+  config changed uncommitted while the task was worked.
+- Config proposals (2.65.0, B-40): the sanctioned route for a lane's studio config change. The lane commits
+  `studio-proposals/<ID>.json`, `{ "changes": [ { "file": "studio/<name>.json", "set": { "<a.b or /a/b>": <value> } } ],
+  "why": "…" }` (top-level `studio/*.json` only, not the board's records; keys are set, nothing is deleted). When the lane
+  lands (the merge train, or the old one-lane `task done` with `STUDIO_TRAIN=off`), the harness applies it to main in the
+  next commit (`Config-From: <ID>`, `Studio-Harness: config-from`; the hooks gate exempts exactly such a commit: only
+  `studio/*.json` and `studio-proposals/`) and removes the file; the main checkout's files follow; event `config.applied`.
+  A key main changed since the lane started (and not already to the proposed value) hands the lane back with a note naming
+  the key and both values; a proposal that can't be read or names another file is handed back too. A proposal for a
+  protected file (`studio/protected.json` at main's tip plus the shipped list) makes the lane tier C (rule
+  `config-proposal-protected`; the hold names the keys and values): without an owner key the person's release is the
+  decision and the protected part applies with it; with an owner key it applies only with the owner's signed approval of
+  exactly that part (`npm run approve -- proposal <ID> --note "…"` on the owner's device, the approval committed to main).
+  Otherwise that part is held: it stays on main in the proposal file (`"held"` says why), event `config.held` goes to a
+  person, and `npm run task -- train config <ID> [--by <name>]` applies it once settled. Nothing is dropped silently. The
+  train's verify can't see the config first (a train copy's studio/ is main's live folder); the next verify does.
 
 ### When a command is killed halfway (2.58.0)
 

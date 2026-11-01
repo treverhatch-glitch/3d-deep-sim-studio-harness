@@ -45,6 +45,8 @@ export const higher = (a, b) => (rank(b) > rank(a) ? b : a);
  *   from      a manifest key whose globs are added to `paths` (simPaths, shared, unionFiles, registry, ui, irreversible)
  *   status    'A' added, 'M' changed, 'D' deleted (a rename is R: neither added nor deleted)
  *   kind      'test' (harness/test-weakening.mjs isTestPath), 'golden' (isGoldenPath), 'protected' (the protected list)
+ *           'proposal-protected' (2.65.0: a studio-proposals/ file whose targets, classifyLane's `proposals`, match the
+ *           protected list, or can't be read)
  * or lane-wide by `trailer` (a key in the lane's own commits' trailers). Every condition given must hold.
  */
 export const DEFAULT_TIER_RULES = [
@@ -55,7 +57,11 @@ export const DEFAULT_TIER_RULES = [
   { id: 'regression-deleted', tier: 'C', locked: true, paths: ['qa/regressions/**'], status: 'D', why: 'it deletes a regression replay' },
   { id: 'irreversible', tier: 'C', locked: true, from: 'irreversible', why: 'a file the game declares irreversible (manifest "irreversible": a save or schema format)' },
   { id: 'upgrade', tier: 'C', locked: true, trailer: 'Upgrade-Ref', why: 'a harness upgrade merge (Upgrade-Ref: trailer)' },
+  // 2.65.0 (B-40): a config proposal (studio-proposals/<ID>.json, harness/config-proposal.mjs) for a protected studio
+  // file is the owner's decision like the file itself; one the harness can't read counts as protected.
+  { id: 'config-proposal-protected', tier: 'C', locked: true, kind: 'proposal-protected', paths: ['studio-proposals/**'], why: 'a config proposal for a protected studio file (studio-proposals/): only the owner decides it' },
   { id: 'golden', tier: 'B', kind: 'golden', why: 'it moves a golden or snapshot (behaviour)' },
+  { id: 'config-proposal', tier: 'B', paths: ['studio-proposals/**'], why: 'a studio config proposal (studio-proposals/): it changes main\'s studio/ config when it lands' },
   { id: 'pins', tier: 'B', trailer: 'Pin-Moves', why: 'it declares pin moves (Pin-Moves: trailer)' },
   { id: 'pin-files', tier: 'B', from: 'pinFiles', why: 'it changes pinned expectations (manifest pins.files)' },
   { id: 'sim', tier: 'B', paths: ['game/*/sim/**', 'web/*/sim/**', 'cartridges/**'], from: 'simPaths', why: 'the game\'s sim (behaviour)' },
@@ -115,10 +121,11 @@ export function tierRules(manifestTiers = null) {
  *             registry, ui, irreversible, pins.files, tiers, runAlone
  *   protectedGlobs  studio/protected.json "globs" at main's tip (the shipped list is always added)
  *   addOnly   protected globs where a NEW file is fine (a new regression replay)
+ *   proposals 2.65.0: { 'studio-proposals/<ID>.json': [target files] | null (unreadable) } for the lane's proposals
  * Returns { tier, why: [reasons for the tier], files: [{ path, status, tier, rules }], rules: [ids], needs: {...},
  *           runAlone: { yes, why }, notes }.
  */
-export function classifyLane({ files = [], trailers = {}, settings = {}, protectedGlobs = [], addOnly = ['qa/regressions/**'] } = {}) {
+export function classifyLane({ files = [], trailers = {}, settings = {}, protectedGlobs = [], addOnly = ['qa/regressions/**'], proposals = {} } = {}) {
   const { rules, fallback, notes } = tierRules(settings.tiers);
   const prot = [...new Set([...SHIPPED_PROTECTED, ...strs(protectedGlobs)])];
   const extra = (key) => {
@@ -133,6 +140,11 @@ export function classifyLane({ files = [], trailers = {}, settings = {}, protect
     if (r.kind === 'test' && !isTestPath(f.path)) return false;
     if (r.kind === 'golden' && !isGoldenPath(f.path)) return false;
     if (r.kind === 'protected' && !(matchAny(f.path, prot) && !(String(f.status).startsWith('A') && matchAny(f.path, addOnly)))) return false;
+    if (r.kind === 'proposal-protected') {
+      if (String(f.status).startsWith('D') || !Object.prototype.hasOwnProperty.call(proposals || {}, f.path)) return false;
+      const targets = proposals[f.path];
+      if (Array.isArray(targets) && !targets.some((t) => matchAny(t, prot))) return false;
+    }
     const g = ruleGlobs(r);
     if (g.length) return matchAny(f.path, g);
     return Boolean(r.kind || r.status);

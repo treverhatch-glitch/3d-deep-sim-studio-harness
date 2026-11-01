@@ -80,7 +80,22 @@ const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_P
 export const TRAILER = 'Studio-Hooks';
 export const HARNESS_TRAILER = 'Studio-Harness';
 /** Commits the harness itself makes without the hooks: the kind, and a trailer such a commit always carries too. */
-export const HARNESS_KINDS = { 'experiment-drop': /^Studio-Experiment-Drop:\s*\S/m };
+export const HARNESS_KINDS = { 'experiment-drop': /^Studio-Experiment-Drop:\s*\S/m, 'config-from': /^Config-From:\s*\S/m };
+/**
+ * 2.65.0 (B-40): what a harness commit of each kind may change. A config-from commit (harness/config-proposal.mjs, made
+ * on main right after a lane landed) changes only top-level studio/*.json and studio-proposals/*.json, one parent: any
+ * other file, and the trailer exempts nothing.
+ */
+const HARNESS_FILES = { 'config-from': /^(studio\/[^/]+\.json|studio-proposals\/[^/]+\.json)$/ };
+function harnessExempt(kind, c, cwd) {
+  if (!kind || !HARNESS_KINDS[kind]?.test(c.msg)) return false;
+  const rx = HARNESS_FILES[kind];
+  if (!rx) return true;
+  if ((c.parents || []).length !== 1) return false;
+  const r = git(['diff-tree', '--no-commit-id', '--name-only', '-r', '--no-renames', c.sha], cwd ? { cwd } : {});
+  const files = r.status === 0 ? r.stdout.split('\n').map((x) => x.trim()).filter(Boolean) : [];
+  return files.length > 0 && files.every((f) => rx.test(f));
+}
 const HOOK_FILES = ['pre-commit', 'commit-msg', 'prepare-commit-msg'];
 const HOOK_REL = 'scripts/hooks/commit-msg';
 const MARKER = 'hook-stamp.mjs'; // a commit-msg hook that calls this file stamps commits
@@ -319,7 +334,7 @@ async function headChecked(cwd) {
   const pids = pidStore(cwd);
   if ((await pids.validate([{ c: h, parentTree }]))[0].ok) return { ok: true };
   const kind = (h.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
-  if (kind && HARNESS_KINDS[kind]?.test(h.msg)) return { ok: true };
+  if (harnessExempt(kind, h, cwd)) return { ok: true };
   if (!h.parents[0] || !hookStamps(git(['rev-parse', '-q', '--verify', `${h.parents[0]}:${HOOK_REL}`], { cwd }).stdout.trim(), cwd)) return { ok: true };
   const g = readGrandfather(cwd);
   if (g.pids.size) await pids.need([h.sha], 'p');
@@ -515,7 +530,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
     if (!stamped(c)) { exempt++; continue; }
     if (maybeOld(c) && grandfathered(g, c.sha, pids.get(c.sha, 'p'))) { exempt++; continue; }
     const kind = (c.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
-    if (kind && HARNESS_KINDS[kind]?.test(c.msg)) { exempt++; continue; }
+    if (harnessExempt(kind, c)) { exempt++; continue; }
     judged.push({ c, kind, parentTree: parentTree(c) });
   }
   const verdicts = await pids.validate(judged);

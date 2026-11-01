@@ -21,7 +21,8 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
+import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
@@ -834,7 +835,15 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const hadPriority = process.env.STUDIO_GATE_PRIORITY;
     process.env.STUDIO_GATE_PRIORITY = 'landing';
     let d;
-    try { d = deliver(taskId, { onLanded: writeBoard }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
+    // 2.65.0 (B-40): the lane's config proposal (studio-proposals/<ID>.json) is judged before it lands and applied
+    // right after it does (harness/train.mjs applyLandedConfig), as the merge train does.
+    const lp = (() => { try { return laneConfigBefore(mainRoot(), { task: taskId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward, by: agent || target.role || 'task-done' }); } catch (e) { return { has: false, error: e.message }; } })();
+    if (lp.refuse) {
+      emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${lp.refuse.split('.')[0]}`.slice(0, 400) });
+      return { error: 'not-delivered', message: `${target.id} is not done: ${lp.refuse}` };
+    }
+    const landed2 = lp.has ? () => { lp.apply(); writeBoard(); } : writeBoard;
+    try { d = deliver(taskId, { onLanded: landed2 }); } finally { if (hadPriority === undefined) delete process.env.STUDIO_GATE_PRIORITY; else process.env.STUDIO_GATE_PRIORITY = hadPriority; }
     if (d && !d.ok) {
       emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${d.message.split('.')[0]}` });
       return { error: 'not-delivered', message: d.message };
@@ -945,6 +954,26 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   return target;
 }
 
+/**
+ * 2.65.0 (B-34): conflict prediction when a lane is queued (harness/train-predict.mjs): { refuse } for a conflict
+ * with main, else { after, lines }. Never throws: a prediction that can't run queues as before, with a note.
+ */
+async function predictAtQueue(pre, agent) {
+  try {
+    const root = mainRoot();
+    const tr = await import('./train.mjs');
+    const tp = await import('./train-predict.mjs');
+    const { mainBranch } = await import('./worktree.mjs');
+    const main = mainBranch(root);
+    const tip = spawnSync('git', ['rev-parse', `refs/heads/${main}`], { cwd: root, encoding: 'utf8' }).stdout?.trim() || '';
+    const settings = await tr.trainManifest(root, tip);
+    const p = tp.predictLane(root, { lane: { task: pre.id, head: pre.head }, queue: tr.readQueue(root), tip, unionFiles: settings.unionFiles || [] });
+    return tp.queueVerdict(p, { task: pre.id, agent, head: pre.head, main, lane: pre.branch || '', emit: emitEvent });
+  } catch (err) {
+    return { after: null, lines: [`${pre.id}: note: the conflict prediction didn't run (${err.message}); the train finds conflicts when it merges.`] };
+  }
+}
+
 /** 2.59.0: what the merge train needs from the board (harness/train.mjs never imports this module). */
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
@@ -954,6 +983,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     },
     handBack: (lane, note) => pauseTask(lane.task, lane.agent, note, { force: true }),
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
+    // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
+    taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1642,8 +1673,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
       if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
       if (pre.error) { console.error(pre.message); process.exit(1); }
+      const predicted = await predictAtQueue(pre, whoAmI(flags));
+      if (predicted.refuse) { console.error(predicted.refuse); process.exit(1); }
       const { enqueue } = await import('./train.mjs');
-      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '' });
+      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}) });
+      for (const l of predicted.lines || []) console.log(l);
       emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
       console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
       // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
@@ -1685,7 +1719,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const { tierLine } = await import('./tiers.mjs');
         let tier = null;
         try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
-        if (tier?.tier === 'C') {
+        // 2.65.0 (B-40): a config proposal that can't be applied (or conflicts with main) is the first thing to fix.
+        let cpBad = null;
+        try { const lb = laneConfigBefore(mainRoot(), { task: targetId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward }); if (lb.refuse) cpBad = lb.refuse; } catch {}
+        if (cpBad) {
+          emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: ${cpBad.split('.')[0]}`.slice(0, 400) });
+          done = { error: 'not-delivered', message: `${targetId} is not done: ${cpBad}` };
+        } else if (tier?.tier === 'C') {
           emitEvent({ type: 'task.not_done', agent: whoAmI(flags), task: targetId, status: 'blocked', msg: `${targetId} not done: tier C lands only through the merge train after a person releases it` });
           done = { error: 'tier-c', message: `${targetId} is not done: this lane is ${tierLine(tier)}. A tier C lane lands only through the merge train once a person releases it: npm run task -- done ${targetId} --train, then npm run task -- train release ${targetId} --by <person> [--permission "<their words or a link>"]. STUDIO_TRAIN=off, --force and --accepted-by don't skip that.` };
         }
@@ -1749,7 +1789,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
-      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
       { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
       process.exit(0);
     }
@@ -1761,7 +1801,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"]'); process.exit(1); }
+    // 2.65.0 (B-40): apply a config proposal held on main (its protected part waited for the owner, or main moved a key).
+    if (arg1 === 'config') {
+      const tid = flags._[2];
+      if (!tid) { console.error('Usage: npm run task -- train config <TASK_ID> [--by <the person> [--permission "<their words or a link>"]]'); process.exit(1); }
+      const r = tr.applyHeldConfig(mainRoot(), tid, { by: typeof flags.by === 'string' ? flags.by : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train config <ID> [--by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
@@ -1798,6 +1846,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   // 2.60.1 (B-39): a lane held for landing on purpose (a conductor's hand-built merge chain): no claim clock, no rescue.
+  // 2.65.0: a conductor's ruling kept in the task's record (harness/conductor.mjs); never from a worker.
+  if (cmd === 'note') {
+    const { addConductorNote } = await import('./conductor.mjs');
+    const ids = new Set([...q.inProgress, ...q.backlog, ...q.done].map((x) => x.id));
+    const r = addConductorNote(arg1, flags._.slice(2).join(' ') || (typeof flags.note === 'string' ? flags.note : ''), { by: typeof flags.by === 'string' ? flags.by : '', known: (id) => ids.has(id) });
+    if (!r.ok) { console.error(r.why); process.exit(r.why.startsWith('Refused') ? 3 : 1); }
+    console.log(`Noted on ${arg1} (studio/handoffs/${arg1}.conductor.md): ${r.line.replace(/^- /, '')}`);
+    process.exit(0);
+  }
+
   if (cmd === 'hold' || cmd === 'unhold') {
     const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
     const by = typeof flags.by === 'string' ? flags.by.trim() : '';
@@ -2040,5 +2098,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }

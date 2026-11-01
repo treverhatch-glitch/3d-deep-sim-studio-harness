@@ -164,11 +164,14 @@ if (fullRun) claimFullVerify();
 // 2.59.0 (#11a): heavy work takes the machine:heavy lock (harness/heavy.mjs) for the whole run: the full set, or a
 // run with a heavy gate in it (the studio game's checks, browser-play, or a gate marked "heavy": true). It waits,
 // naming the holder, and fails clearly past STUDIO_HEAVY_WAIT_MIN; its gates (children) don't wait for it again.
+// 2.65.0: the slot's handle, so each gate's shell is recorded in its tree on Windows (harness/gate-spawn.mjs).
+let heavyLock = null;
 {
   if (fullRun || gates.some(isHeavyGate)) {
     const { acquireHeavy, heavyRoot } = await import('../harness/heavy.mjs');
     try {
       const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null });
+      heavyLock = lk;
       process.on('exit', () => lk.release());
     } catch (err) {
       if (err.code !== 'HEAVY_BUSY') throw err;
@@ -192,6 +195,7 @@ const treeAtStart = headAtStart ? gitOut(['rev-parse', 'HEAD^{tree}'])?.trim() |
 const gatePathsAtStart = String(process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
 const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsOn();
 const dirtyAtStart = treeDirty();
+const { runGateCommand } = await import('../harness/gate-spawn.mjs');
 const rows = [];
 let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
@@ -217,7 +221,9 @@ for (const gate of gates) {
   // 2.30q (#8): compact output (STUDIO_COMPACT_OUTPUT=on, set for launched sessions): a gate's own output goes to
   // .studio/gates/out/<gate>.log and only a failure's last lines are printed, so an agent's context doesn't
   // carry every passing gate's log into every later turn (verify was ~3k chars a call in the Marina run).
-  const res = compact ? spawnSync(gate.command, { cwd: root, shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) : spawnSync(gate.command, { cwd: root, shell: true, stdio: 'inherit' });
+  // 2.65.0: on Windows, while this run holds machine:heavy, the gate's shell is recorded in the holder's tree so its
+  // children that outlive it are found by `heavy stop` and the next take; POSIX runs exactly as before (spawnSync).
+  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock });
   if (compact) {
     const text = `${res.stdout || ''}${res.stderr || ''}`;
     try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
@@ -280,6 +286,12 @@ try {
 try {
   const { emitEvent } = await import('../harness/event.mjs');
   emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
+  if (!only && !isFastTier) {
+    const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);
+    const owner = process.env.STUDIO_LOCK_OWNER;
+    (await import('../harness/jobs.mjs')).jobDone({ kind: 'verify', id: process.env.STUDIO_VERIFY_RUN || owner || (headAtStart ? String(headAtStart).slice(0, 8) : null), code: !rows.length || failedIds.length ? 1 : 0, ms: Date.now() - runStarted, tail: failedIds.length ? `failed: ${failedIds.join(', ')}` : !rows.length ? 'no gate ran' : '', log: owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : '.studio/gates-last-full.json', extra: { scoped: Boolean(changedFiles?.length), head: headAtStart || null } });
+  }
 } catch {
   // the event log is a help, never a blocker
 }

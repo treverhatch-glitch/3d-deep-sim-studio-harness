@@ -68,6 +68,7 @@ import { mapStale, writeMap } from './map.mjs';
 import { pitfallsForPrompt } from './pitfalls.mjs';
 import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
+import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
@@ -326,6 +327,8 @@ export function markGone() {
     const at = new Date().toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
     emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone' } });
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
+    jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
     if (s.copy) {
       const mine = listLocks().filter((l) => l.owner === s.agent);
@@ -496,6 +499,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
   emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}`, meta: { role, tool, code, reason, handed, finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  jobDone({ kind: 'session', id: agent, agent, task: s0.task || tasks[0] || null, code: code ?? null, result: stop ? (stop.kind === 'pause' ? 'paused' : 'stopped') : bad ? 'fail' : 'pass', ms: Date.parse(s0.startedAt) ? Date.now() - Date.parse(s0.startedAt) : null, tail: reason, log: s0.log || null, extra: { role: role || null, handed: handed.map((h) => h.task) } });
   // 2.61.0: which skills and pitfall lines this session was given, and whether its log shows it used them (telemetry only).
   try { recordFollow({ agent, model, role, task: s0.task || tasks[0] || null, log }); } catch { /* telemetry, never a blocker */ }
   const s = readJson(sessionFile(agent)) || {};
@@ -1174,6 +1178,7 @@ function endAsDead(s, v, by) {
   for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
   if (cur.copy) removeLaneCopy(s.agent, { keepBranch: unmerged(cur.copy.branch) > 0, ifIdle: true });
   emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: stop ? 'stopped' : 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: String(what || '').slice(0, 300), log: s.log || null, extra: { role: s.role || null, handed: held } });
   if (v.kind === 'reused' || v.kind === 'stale') {
     emitEvent({ type: 'agent.pid_reused', agent: by, status: 'warn', msg: `${s.agent}: ${v.why}; its session is marked ended${held.length ? ` and ${held.join(', ')} handed back` : ''}`, meta: { session: s.agent, pid: v.pid, target: v.target, verified: v.kind === 'reused', now: v.cmd || undefined } });
   }

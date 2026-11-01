@@ -53,6 +53,23 @@ with `npm run thread -- post discord:<message id> "<text>" --source discord --by
 session reads, instead of going to a new task. Workers never link or post. Until `discord` is live in
 `studio/triggers.json`, posts are only logged (shadow mode). See docs/THREADS.md.
 
+Pass the Discord author id of the message with `--author <id>` (2.65.0). Only ids the owner lists in
+`studio/triggers.json` `"senders"` (owner or trusted) can make a post respond; anyone else's, another bot's, or a
+post with no id is at most a candidate. The harness can't check a Discord identity itself: it applies the owner's
+list to the id the bot gives it, so the bot must pass the id Discord gave it, never one from the message text.
+
+## The orchestrator's commands (2.65.0)
+
+An orchestrator outside the harness (the "conductor") doesn't rebuild state by hand. It uses these commands
+(docs/CONDUCTOR.md):
+
+- `npm run lanes` gives the lane table.
+- `npm run lanes -- refresh <ID|--all> --by <bot-name>` merges main into a lane, re-stamps it, and runs its
+  targeted tests. It stops on a conflict.
+- `npm run status -- --brief` gives the status post, under 100 words.
+- `npm run task -- note <ID> "<ruling>" --by <bot-name>` keeps a ruling in the task's record and brief.
+- `npm run events -- wait --type job.done --match kind=train` waits for a job to end instead of polling logs.
+
 ## One machine, one studio
 
 The studio keeps its locks, board and state in one checkout. Every bot drives **the same private studio

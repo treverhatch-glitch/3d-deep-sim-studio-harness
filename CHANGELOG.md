@@ -4,6 +4,46 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.65.0] — 2026-11-02
+2.65.0: hands-off by default, and the crew orchestrator's own tools. The owner's direction (2026-11-01): fewer human
+steps, not easier ones; the harness decides routine questions from evidence and logs why, and a person is needed only
+for safety-gate changes, Bible/phase changes and money (P-140 to P-147). Studio changes to make first: none; read
+docs/CONDUCTOR.md (orchestrators) and docs/AUTONOMY.md.
+### Added
+- **Conductor tools (docs/CONDUCTOR.md, P-140).** `npm run lanes` (every lane: ahead/behind, stamps, harness drift,
+  queue/tier/hold, last test, Pin-Moves, merge-tree conflicts, age; `--json`). `npm run lanes -- refresh <lane|--all>
+  --by <name>` merges main (never a rebase), re-stamps and runs the lane's targeted tests; stops on a conflict; refuses
+  workers and busy lanes. `npm run status -- --brief` (under 100 words). `npm run task -- note <ID> "<ruling>" --by`
+  keeps a ruling in the task's record and brief. A uniform `job.done` event for verify, trains, game checks, heavy
+  runs, Unity runs and session ends, and `npm run events -- wait --type job.done [--match k=v] [--timeout min]`.
+- **Conflicts predicted at queue time (B-34, P-141).** `task done --train` runs git merge-tree against main and every
+  queued lane: a conflict with main refuses the queue with file:line; one with a queued lane queues it after that lane,
+  and the train skips it without spending a verify. Union files don't count.
+- **Task order in the train (P-142).** `--after` / `task block --until` are honoured: dependencies merge first, a lane
+  waits for one that hasn't landed, one depending on a dropped or unknown task is handed back.
+- **Config proposals (B-40 full, P-143).** A lane commits `studio-proposals/<ID>.json`; the landing (train or one-lane
+  `task done`) applies it to main's `studio/*.json` in a `Config-From:` commit. A key main changed meanwhile hands the
+  lane back; a protected target makes the lane tier C (the person's release decides; with an owner key a signed
+  `approve -- proposal`); a held part is applied later with `npm run task -- train config <ID>`.
+- **Hands-off by default (P-144).** A "bug" task whose diff is only tests, docs or config closes as a change (evidence
+  logged; an owner record outranks it; sim changes keep their replay; `STUDIO_TYPE_EVIDENCE=off`). Self-triage fixes
+  routine stops from a fixed list (`harness/self-triage.json`: a dead heavy holder's orphans, a game check timed out
+  under load re-run once at the cap, a tool not on PATH, hub down, rescues of landed tasks), at most once per cause per
+  6 h; anything else still stops for a person. `npm run digest` writes one daily summary of what needs a person
+  (`studio/digest/<date>.md`, also at `STUDIO_DIGEST_HOUR`). `npm run autonomy -- level <L1..L4> --by <name>` (person,
+  Producer/Director, outside agent on permission; never a worker). The scorecard adds tokens per landed task, person
+  round-trips per landed task and conductor notes.
+- **Drift checks (P-145):** `no-heartbeat` (a session listed running that never beat) and `borrowed-commits` (a lane
+  holding another open task's unlanded commits). Check events only.
+- **Trigger admission by sender (P-146).** `studio/triggers.json` `"senders"`: a Discord/GitHub post responds only for
+  listed author ids (`npm run thread -- post … --author <id>`); anyone else is at most a candidate. The harness trusts
+  the id the bot passes; it can't verify a Discord identity itself.
+- **Visual noise baseline (P-147).** "Before" is captured twice per camera; a change must reach max(1%, 2× the
+  camera's noise) (`STUDIO_VISUAL_NOISE_K`), capped at 5% ("too noisy to judge").
+### Fixed
+- **Windows: a full verify's gates leave no orphans (P-147).** On Windows each gate's shell is recorded in the verify's
+  machine:heavy tree (`harness/gate-spawn.mjs`), so `heavy stop` and the next take find what a gate left running.
+
 ## [2.64.0] — 2026-11-01
 2.64.0 lands everything built for 2.60.1 through 2.64 in one release, so a studio upgrades once: the crew's bugs B-17 to
 B-41 from the operator report of 2026-11-01 (P-124 to P-139), the learning edge (2.61), the sealed bench and acceptance
