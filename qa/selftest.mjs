@@ -3641,6 +3641,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.3 (helper o): what task done asks for, from the crew's logs: "Fix: … see <file>.md" is code, anonymous functions
+// keep their identity in the size ratchet and every item is listed, line-ending-only files don't block, strays on the
+// main checkout don't refuse unrelated tasks, and a stale verify says what is stale (qa/selftest-2583o.mjs).
+{
+  const dir = copyRepo();
+  if (fs.existsSync(path.join(root, 'node_modules', 'typescript')) && !fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  const { selftest2583O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583o.mjs')).href);
+  await selftest2583O({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
