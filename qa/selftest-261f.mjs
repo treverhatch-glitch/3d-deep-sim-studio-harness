@@ -61,8 +61,11 @@ export async function selftest261F({ dir, run, report }) {
     brief0.status === 0 && !/Cut queue refill/.test(d0) && /lesson[s]? not yet accepted for planning[^\n]*failures\.md#BUG-QUEUE-7/.test(outsideBlocks(d0)) && /npm run lessons -- accept/.test(d0)
       && wAcc.status !== 0 && /can't accept a lesson on its own/.test(out(wAcc)) && nameAcc.status !== 0 && /not an agent's name/.test(out(nameAcc)) && !accepted0,
     `${d0.slice(-1500)}\n--- worker:\n${out(wAcc)}\n--- name:\n${out(nameAcc)}`);
-  const lacc = sh('node harness/learning-edge.mjs accept BUG-QUEUE-7 --by hatch --why "plan queue and timing work apart"', person);
-  if (lacc.status !== 0) report('2.61 (lesson quarantine): a person accepts the lesson', false, out(lacc));
+  // A launched Producer session reviews it (no person needed for routine lessons).
+  const lacc = sh('node harness/learning-edge.mjs accept BUG-QUEUE-7 --by producer-s4 --why "plan queue and timing work apart"', { ...person, STUDIO_ROLE: 'producer', STUDIO_LOCK_OWNER: 'producer-s4' });
+  const lrec = JSON.parse(read('studio/decisions/accepted-lessons.json') || '{"accepted":[]}').accepted.find((a) => a.id === 'BUG-QUEUE-7') || {};
+  report('2.61 (lesson quarantine): a launched Producer session accepts a worker\'s lesson on its own review (recorded as reviewed by producer-s4), without a person',
+    lacc.status === 0 && lrec.reviewedBy === 'producer' && lrec.recordedBy === 'producer-s4' && Boolean(lrec.hash), `${out(lacc)}\n${JSON.stringify(lrec)}`);
   const brief = sh('node harness/director.mjs brief', climits);
   const dmd = read('.studio/briefs/director.md');
   const ho = sh('node harness/handoff.mjs', climits);
