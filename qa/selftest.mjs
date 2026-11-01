@@ -3975,6 +3975,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.65.0 (helper p): the conductor's tools: npm run lanes (the lane table), lanes refresh (merge main, re-stamp, targeted
+// tests; refuses workers and busy lanes; stops on a conflict), status --brief (under 100 words), task note (conductor
+// rulings in the task's record and brief), job.done events and npm run events -- wait (qa/selftest-265p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest265P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265p.mjs')).href);
+  await selftest265P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
