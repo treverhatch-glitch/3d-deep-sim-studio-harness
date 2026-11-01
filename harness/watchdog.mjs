@@ -16,6 +16,8 @@
  *   4. (2.64.0) raises drift Checks for running sessions (harness/stall.mjs driftCheck: the same gate failing the
  *      same way 3 times, verify runs with no new diff, edits outside the task's lane and claims). A Check is an event
  *      to the Producer, once per session per signal; nothing is stopped. `npm run watchdog -- drift` lists them.
+ *   5. (2.65.0) runs the self-triage list (harness/self-triage.mjs) and, once a day at STUDIO_DIGEST_HOUR (9, local
+ *      time), writes the daily digest (harness/digest.mjs): what still needs a person, in under 200 words.
  * Every action is an event with "watchdog" as the agent, so the morning report shows what it did.
  */
 import fs from 'node:fs';
@@ -186,6 +188,15 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
   } catch (e) {
     actions.push({ kind: 'error', msg: `task budgets: ${e.message}` });
   }
+  // 2b'. 2.65.0: self-triage (harness/self-triage.mjs, a fixed list in harness/self-triage.json): a supervisor halt whose
+  // cause is on the list, a dead heavy holder's leftover processes, a hub that stopped answering, rescues of landed
+  // tasks. Each fix is a selftriage.<fix> event, at most once per cause per window; anything else waits for a person.
+  try {
+    const { selfTriagePass } = await import('./self-triage.mjs');
+    actions.push(...(await selfTriagePass({ now })));
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `self-triage: ${e.message}` });
+  }
   // 2c. 2.35.0: the rescue ladder (harness/rescue.mjs). A task stopped by its budget gets a rescue on a
   // different model family; a stuck rescue (own budget, or unclaimed for an hour) moves it to a split
   // rescue on the next model; after that it is shelved for the morning report. Nothing waits on it.
@@ -213,6 +224,14 @@ export async function watchdogPass(now = Date.now(), { events = readRecentEvents
     checks = await driftPass(now, { events });
   } catch (e) {
     actions.push({ kind: 'error', msg: `drift checks: ${e.message}` });
+  }
+  // 5. 2.65.0: the daily digest (harness/digest.mjs), once per local date at or after STUDIO_DIGEST_HOUR.
+  try {
+    const { digestIfDue } = await import('./digest.mjs');
+    const d = await digestIfDue({ now });
+    if (d) actions.push({ kind: 'digest', msg: `wrote the daily digest ${d.file}: ${d.need.length ? `${d.need.length} thing(s) need a person` : 'nothing needs a person'}` });
+  } catch (e) {
+    actions.push({ kind: 'error', msg: `digest: ${e.message}` });
   }
   const logged = logActions(actions, { now });
   return { on: true, auto, actions, checks, quieted: actions.length - logged.length };

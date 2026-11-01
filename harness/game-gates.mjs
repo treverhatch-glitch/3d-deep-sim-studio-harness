@@ -21,6 +21,8 @@
  * game's test config to raise its per-test timeouts by (slowTestsOf, testTimeoutScale).
  * 2.60.1 (B-17): a check's timeout is never below 1.5 x its last quiet run (harness/heavy.mjs scaledTimeout), and
  * the timeout line is printed whenever the value differs from the base.
+ * 2.65.0 (self-triage): a check that timed out under load (load factor above 1) runs once more at the cap
+ * (STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR x the base), once per check per window (harness/self-triage.mjs timeoutRerun).
  *
  * 2.30p: a gate may declare "paths" (globs) and "track"; the manifest may declare "shared" globs. With
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
@@ -37,6 +39,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
 import { scaledTimeout, recordGateTime } from './heavy.mjs';
+import { timeoutRerun } from './self-triage.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -270,8 +273,10 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     let curRelated = false;
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : ''].filter(Boolean).join('; ');
-    const runOnce = (cmd) => slot(cmdLabel, () => {
+    const runOnce = (cmd, forceMs = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated ? null : timeKey() });
+      // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
+      if (forceMs) timing = { ...timing, ms: Math.max(timing.ms, forceMs), rerun: true };
       const changedT = timing.ms !== baseTimeout;
       if (changedT) console.error(`[game-gates] ${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)}; STUDIO_GAME_GATE_TIMEOUT_SCALE=off keeps ${Math.round(baseTimeout / 1000)} s)`);
       if (changedT) emitEvent({ type: 'gate.timeout_scaled', agent: process.env.STUDIO_LOCK_OWNER || 'gates', msg: `${cmdLabel}: timeout ${Math.round(timing.ms / 1000)} s (${timingWhy(timing)})`.slice(0, 400), meta: { gate: cmdLabel, timeoutMs: timing.ms, baseMs: baseTimeout, factor: timing.factor, ...(timing.floor ? { floorFromMs: timing.floor.lastMs } : {}) } });
@@ -294,7 +299,21 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       curRelated = related;
       if (related) log(`[game-gates] ${g.id}: only the tests related to the ${existing.length} changed file(s) (the whole suite runs in the whole-game check after landing)`);
       let r = runOnce(cmd);
-      if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) r.stderr = `${r.stderr || ''}\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last quiet run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''})`;
+      const timedOut = (x) => x.error?.code === 'ETIMEDOUT' || (x.status === null && x.signal);
+      const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last quiet run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
+      if (timedOut(r)) r.stderr = `${r.stderr || ''}${timeoutLine()}`;
+      // 2.65.0 (self-triage, rerun-timeout): a check that timed out under load (factor > 1) runs once more at the cap,
+      // once per check per window (harness/self-triage.json); a timeout with no load, or at the cap, stands.
+      if (timedOut(r) && !curRelated) {
+        const tr = timeoutRerun({ gate: timeKey(), timing, base: baseTimeout, root: slotRoot });
+        if (tr.rerun) {
+          console.error(`[game-gates] ${g.id}: ${tr.why}`);
+          const first = String(r.stderr || '').trim().split('\n').pop();
+          r = runOnce(cmd, tr.ms);
+          // Both attempts are named when the re-run times out too: the first timeout line, then the re-run's.
+          if (timedOut(r)) r.stderr = `${first}\n${r.stderr || ''}${timeoutLine()}`;
+        } else if (timing.factor > 1) console.error(`[game-gates] ${g.id}: no re-run (${tr.why})`);
+      }
       // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
       // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.
       let flaky = null;
