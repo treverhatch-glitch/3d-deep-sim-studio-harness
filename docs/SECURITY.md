@@ -33,6 +33,15 @@
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
+- (2.58.5) Claim files, not whole trees: a by-hand claim on a game's folder or source root (`game|web|engine/<name>`,
+  `…/<name>/src`) or a folder of more than `STUDIO_LOCK_MAX_FILES` (50) tracked files needs `--wide "<why>"`.
+- (2.58.5) In a lane copy (`.lanes/<name>`) another agent's path lock is a note at commit, not a refusal: that agent
+  edits its own copy, and overlapping edits are caught when the lane lands (task done rebases and stops on a
+  conflict). A lock in the lane's own name still refuses; `STUDIO_LANE_LOCKS=block` restores the old refusal. The main
+  checkout is judged as before. A merge commit is judged only on the files it doesn't take unchanged from the branch
+  merged in (its own diff and resolved conflicts), so `git merge main` isn't refused for what main brought.
+- (2.58.5) `task add "<title>" --start --agent <you>` queues a task and claims it in one step (no moment where it waits
+  unclaimed for another agent to pick).
 
 ## Skipped hooks and weakened tests (2.58.2, PU-29)
 - A hook can't stop `git commit --no-verify`, so the hooks leave a stamp and a gate checks for it afterwards. When
