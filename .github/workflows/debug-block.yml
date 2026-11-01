@@ -1,0 +1,17 @@
+name: debug-block
+on:
+  push:
+    branches: [claude/dbg-263l]
+permissions:
+  contents: read
+jobs:
+  win:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: node qa/debug-block.mjs

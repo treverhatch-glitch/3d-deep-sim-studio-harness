@@ -16,6 +16,7 @@ import { allowedNote, allowedTools } from './allowlist.mjs';
 import { nimModel, NIM_DEFAULT_MODEL } from './agent-env.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inboxForBrief } from './threads.mjs';
 import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
@@ -102,12 +103,21 @@ export function kickoffParts(opts, { named = false } = {}) {
     const min = Math.ceil((last.rows || []).reduce((n, r) => n + (Number(r.ms) || 0), 0) / 60000);
     if (min) volatile = `Run \`npm run verify\` in the foreground: your session ends when you stop, and the task goes back to the queue; the last full verify here took about ${min} min.\n`;
   } catch {}
+<<<<<<< HEAD
   // 2.61 (the learning edge): the roles that plan and cut work start with the constraints from past failures. They
   // change as failures happen, so they go in the volatile part, never in the cached prefix.
   if (PLANNING_ROLES.has(String(opts.role || '').toLowerCase())) {
     try {
       const c = constraintsBlock({ heading: '', for: opts.role === 'director' ? 'director' : 'planning' });
       if (c) volatile += `\n${c}\n`;
+=======
+  // 2.64.0: follow-ups already routed to the task this session starts on (harness/threads.mjs): a count and the
+  // command, never the text (that is quoted, marked as untrusted, in the task's brief).
+  if (opts.task) {
+    try {
+      const box = inboxForBrief(opts.task, { max: 0 });
+      if (box) volatile += `${opts.task}'s inbox has ${box.total} follow-up(s) (${box.unread} unread: CI or merge-train results, messages tied to the task). Read them first: npm run thread -- inbox ${opts.task}\n`;
+>>>>>>> 72d0bb7 (2.64.0 (l) #2: per-task inbox (studio/handoffs/<ID>.inbox.md) in the brief and the kickoff's volatile part; heartbeat sweeps; PostToolUse hook tells the holding session)
     } catch {}
   }
   return { stable: text, volatile };
