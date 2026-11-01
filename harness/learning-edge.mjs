@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { untrustedBlock } from './untrusted.mjs';
 
@@ -57,7 +58,10 @@ const oneLine = (s) => String(s || '').replace(/\*\*/g, '').replace(/\s+/g, ' ')
 const shortHash = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 6);
 const day = (ts) => String(ts || '').slice(0, 10);
 
-/** Lessons from fixed bugs: { id, source, heading, date, rule, words }. */
+/** A lesson's text, normalised, as a short hash: an acceptance covers this exact text (an edit needs a new one). */
+export const lessonHash = (text) => crypto.createHash('sha256').update(String(text || '').replace(/\r\n?/g, '\n').replace(/\s+$/g, '').trim()).digest('hex').slice(0, 16);
+
+/** Lessons from fixed bugs: { id, source, heading, date, rule, words, hash }. */
 export function readLessons() {
   const parts = (read('studio/memory/failures.md').split('## Recorded Distilled Notes')[1] || '').split(/^### /m).slice(1);
   return parts.map((l, i) => {
@@ -66,7 +70,7 @@ export function readLessons() {
     const id = (heading.replace(/\[[^\]]*\]\s*/, '').match(/^([A-Za-z][\w.-]*-[\w.-]+)\s/) || [])[1] || `L${i + 1}`;
     const avoid = (l.match(/^- \*\*How to avoid it next time\*\*:\s*(.+)$/m) || [])[1];
     const title = heading.replace(/\[[^\]]*\]\s*/, '').replace(/^[\w.-]+\s+[—-]\s+/, '');
-    return { id, source: `failures.md#${id}`, heading, date, rule: oneLine(avoid || title), words: keywords(l) };
+    return { id, source: `failures.md#${id}`, heading, date, rule: oneLine(avoid || title), words: keywords(l), hash: lessonHash(l) };
   });
 }
 
@@ -83,6 +87,55 @@ export function readRepeats(events) {
     groups.set(sig, g);
   }
   return [...groups.values()].filter((g) => g.days.size >= 2).map((g) => ({ ...g, days: [...g.days].sort(), words: keywords(g.sample) }));
+}
+
+/**
+ * 2.61: lessons a person accepted for planning (studio/decisions/accepted-lessons.json, `npm run lessons -- accept`).
+ * Lessons are written by agents (a fixer's "How to avoid it next time"), and planning prompts (Director, Producer,
+ * planner) are read as plans by the next sessions, so a lesson reaches them only once a person accepted that exact
+ * text (the CSA note of 2026-08 on agent-written text loaded later as instructions). Worker briefs still show related
+ * lessons inside the marked block, as before. { [id]: { hash, by, why, at, permission?, recordedBy? } }
+ */
+export const ACCEPTED_LESSONS = 'studio/decisions/accepted-lessons.json';
+export function readAcceptedLessons() {
+  try {
+    const list = JSON.parse(read(ACCEPTED_LESSONS)).accepted || [];
+    return new Map(list.filter((a) => a && a.id && a.hash).map((a) => [String(a.id), a]));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Accept a lesson for planning: { ok, message }. A person (--by, their name), or a Producer/Director session or an
+ * outside agent on a person's permission (harness/permission.mjs, the 2.59.1 rule). A worker never; an agent's name in
+ * --by never.
+ */
+export async function acceptLesson(id, { by, why = '', permission = '', env = process.env } = {}) {
+  const { agentOnPermission, WORKER_NAME } = await import('./permission.mjs');
+  const name = String(by || '').trim();
+  if (!name) return { ok: false, message: 'Say who accepts it: --by <person> --why "…".' };
+  if (WORKER_NAME.test(name) || /^(producer|director|opus|claude|codex|gemini|bot)\b/i.test(name) || /-s\d+$/.test(name)) return { ok: false, message: `--by is the person who accepts the lesson, not an agent's name (${name}).` };
+  if (!String(why).trim()) return { ok: false, message: 'Say why: --why "…" (what the lesson should change in planning).' };
+  const marker = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'].some((k) => String(env[k] || '').trim());
+  const asAgent = marker || String(env.STUDIO_ROLE || '').trim() || String(env.STUDIO_LOCK_OWNER || '').trim();
+  let rec = null;
+  if (asAgent) {
+    rec = agentOnPermission({ permission, env });
+    if (!rec.ok) return { ok: false, message: `An agent can't accept a lesson on its own: ${rec.why}.` };
+  }
+  const lesson = readLessons().find((l) => l.id === id || l.source === id || `failures.md#${l.id}` === id);
+  if (!lesson) return { ok: false, message: `No lesson ${id} in studio/memory/failures.md (ids are the ones shown as failures.md#<id>).` };
+  const file = path.join(REPO_ROOT, ACCEPTED_LESSONS);
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(file, 'utf8')).accepted || []; } catch {}
+  list = list.filter((a) => a && a.id !== lesson.id);
+  const entry = { id: lesson.id, hash: lesson.hash, by: name, why: String(why).trim().slice(0, 300), at: new Date().toISOString() };
+  if (rec) Object.assign(entry, { permission: String(permission).trim().slice(0, 500), recordedBy: rec.recordedBy });
+  list.push(entry);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({ accepted: list }, null, 2)}\n`);
+  return { ok: true, message: `Accepted ${lesson.source} for planning (by ${name}${rec ? `, recorded by ${rec.recordedBy} on ${name}'s permission` : ''}). It covers this text only: an edit to the lesson needs a new acceptance. Commit ${ACCEPTED_LESSONS}.` };
 }
 
 /** Causes a person accepted with `npm run causes -- accept` (read here, never written). */
@@ -133,7 +186,11 @@ export function buildConstraints({ events = null, now = Date.now(), env = proces
   const set = { ...constraintSettings(env), ...over };
   const ev = events || readRecentEvents(50000);
   const items = [];
-  const lessons = readLessons();
+  const accepted = readAcceptedLessons();
+  const all = readLessons();
+  // 2.61: only lessons a person accepted (this exact text) reach planning; the rest are counted and named by id only.
+  const lessons = all.filter((l) => accepted.get(l.id)?.hash === l.hash);
+  const pending = all.filter((l) => accepted.get(l.id)?.hash !== l.hash).map((l) => ({ id: l.id, edited: Boolean(accepted.get(l.id)) }));
   const byLesson = new Map(lessons.map((l) => [l.id, { source: l.source, text: l.rule, count: 1, last: l.date || '' }]));
   for (const r of readRepeats(ev)) {
     const lesson = lessons.map((l) => ({ l, hits: r.words.filter((w) => l.words.includes(w)).length })).filter((x) => x.hits >= 2).sort((a, b) => b.hits - a.hits)[0]?.l;
@@ -154,7 +211,7 @@ export function buildConstraints({ events = null, now = Date.now(), env = proces
     it.score = Math.round(it.count * 0.5 ** (age / set.halfLifeDays) * 1000) / 1000;
   }
   items.sort((a, b) => b.score - a.score || String(b.last).localeCompare(String(a.last)) || a.source.localeCompare(b.source));
-  return { total: items.length, settings: set, items: items.slice(0, set.k) };
+  return { total: items.length, settings: set, items: items.slice(0, set.k), pending };
 }
 
 /** One line per constraint, inside the line budget: "[source · N× · last date] text". */
@@ -172,13 +229,37 @@ export function constraintLines(c) {
  */
 export function constraintsBlock({ heading = '##', for: who = 'planning', ...opts } = {}) {
   const c = buildConstraints(opts);
-  if (!c.items.length) return '';
+  const pend = pendingLine(c);
+  if (!c.items.length) return pend ? `${heading ? `${heading} Constraints from past failures` : '**Constraints from past failures**'}\n${pend}` : '';
   const title = `Constraints from past failures (top ${c.items.length} of ${c.total}, by repeats × recency)`;
   const how = who === 'director'
     ? 'Cut the next work around these: say which task carries each one (a check first, or a split that keeps a lane away from it) when you point the Producer at the next work.'
     : 'Plan and cut work so these can\'t happen again: give a repeated one its own check task first, keep a lane that would trip one apart, and name the constraint in the task that touches it.';
-  return [heading ? `${heading} ${title}` : `**${title}**`, how, 'Source ids: failures.md#<lesson>, repeat:<event kind>#<id> (npm run learn), cause:<n> (npm run causes), retro:<date> (a ticked retro suggestion).', '', untrustedBlock([{ label: 'Lessons, repeated failures, accepted causes and accepted retro suggestions (written by agents and people)', text: constraintLines(c).join('\n') }]).trimEnd()].join('\n');
+  return [heading ? `${heading} ${title}` : `**${title}**`, how, 'Source ids: failures.md#<lesson>, repeat:<event kind>#<id> (npm run learn), cause:<n> (npm run causes), retro:<date> (a ticked retro suggestion).', '', untrustedBlock([{ label: 'Accepted lessons, repeated failures, accepted causes and accepted retro suggestions (written by agents and people)', text: constraintLines(c).join('\n') }]).trimEnd(), ...(pend ? ['', pend] : [])].join('\n');
+}
+
+/** The harness's own line about lessons not yet accepted for planning: a count and their ids, never their text. */
+export function pendingLine(c) {
+  const p = c?.pending || [];
+  if (!p.length) return '';
+  const ids = p.slice(0, 8).map((x) => `failures.md#${String(x.id).replace(/[^\w.-]/g, '').slice(0, 40)}${x.edited ? ' (edited since accepted)' : ''}`);
+  return `${p.length} lesson${p.length === 1 ? '' : 's'} not yet accepted for planning (their text stays out of this brief): ${ids.join(', ')}${p.length > 8 ? ', …' : ''}. A person accepts one with: npm run lessons -- accept <id> --by <person> --why "…".`;
 }
 
 /** For JSON consumers (handoff --json): the ranked items without the block. */
 export const constraintsData = (opts = {}) => buildConstraints(opts);
+
+// npm run lessons -- list | accept <id> --by <person> --why "…" [--permission "…"]
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const argv = process.argv.slice(2);
+  const flag = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : undefined; };
+  if (argv[0] === 'accept') {
+    const r = await acceptLesson(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
+    console.log(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+  const acc = readAcceptedLessons();
+  const ls = readLessons();
+  console.log(ls.length ? ls.map((l) => `${acc.get(l.id)?.hash === l.hash ? '[accepted]' : acc.get(l.id) ? '[edited since accepted]' : '[not accepted]'} ${l.source}: ${l.rule.slice(0, 120)}`).join('\n') : 'No lessons in studio/memory/failures.md.');
+  console.log('Accept one for planning: npm run lessons -- accept <id> --by <person> --why "…"');
+}

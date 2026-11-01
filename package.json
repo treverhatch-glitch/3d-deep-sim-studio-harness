@@ -49,6 +49,7 @@
     "vision": "node qa/vision-check.mjs",
     "ledger": "node harness/ledger.mjs",
     "learn": "node harness/learn.mjs",
+    "lessons": "node harness/learning-edge.mjs",
     "data": "node harness/data-consent.mjs",
     "preflight": "node scripts/preflight.mjs",
     "run-report": "node harness/run-report.mjs",
