@@ -285,12 +285,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(`[unity] PASS sim: ${r.total} test(s) passed with .NET (no editor needed)`);
   } else if (cmd === 'gate') {
     const pf = flag('platform');
+    const t0 = Date.now();
     const r = gate(dir, { platforms: pf ? [pf] : undefined, heavyRoot });
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) for the editor's tests.
+    try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
     if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
   } else if (cmd === 'build') {
     // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
+    const t0 = Date.now();
     const r = build(dir, flag('target') || track?.buildTarget || 'windows', { out: flag('out'), heavyRoot });
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) for a build.
+    try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-build', id: `${r.target || flag('target') || 'build'} ${folder}`, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | '), log: r.out || null }); } catch {}
     if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
     console.log(`[unity] PASS ${r.target} build: ${r.out}${r.target === 'WebGL' ? ' (the Arcade\'s engine tab plays it; or serve the folder and open index.html)' : ''}`);
   } else {

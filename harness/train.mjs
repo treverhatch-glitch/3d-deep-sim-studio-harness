@@ -64,6 +64,7 @@ import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
+import { jobDone } from './jobs.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -851,6 +852,7 @@ export async function runTrain(opts = {}) {
   const deps = opts.deps || {};
   const id = `${stamp()}-${process.pid}`;
   const by = opts.by || process.env.STUDIO_LOCK_OWNER || 'human';
+  const t0 = Date.now();
   const stopped = deps.stopped?.();
   if (stopped) return { ok: false, id, message: `The studio is stopped (${stopped}); no train runs until npm run task -- resume.`, landed: [], dropped: [], deferred: [] };
   if (!opts.dryRun && deps.waitForDrain) {
@@ -885,7 +887,17 @@ export async function runTrain(opts = {}) {
     locked.message = summary(locked);
   }
   if (trains.length > 1) locked.trains = trains;
+  if (!opts.dryRun) trainJobDone(locked, t0);
   return locked;
+}
+
+/** 2.65.0: the uniform job.done (harness/jobs.mjs) for a train that ran (not a dry run, not one that found another running). */
+function trainJobDone(res, t0) {
+  try {
+    const result = res.landed?.length ? 'landed' : res.held?.length && !res.dropped?.length ? 'held' : res.dropped?.length ? 'fail' : res.ok ? 'nothing' : 'fail';
+    const tail = [res.landed?.length ? `landed ${res.landed.join(', ')}` : '', res.dropped?.length ? `handed back ${res.dropped.map((d) => d.task).join(', ')}` : '', res.deferred?.length ? `deferred ${res.deferred.map((d) => d.task).join(', ')}` : '', res.held?.length ? `held ${res.held.map((h) => h.task).join(', ')}` : ''].filter(Boolean).join('; ') || String(res.message || '').slice(0, 300);
+    jobDone({ kind: 'train', id: res.id, code: res.ok ? 0 : 1, result, ms: Date.now() - t0, tail, log: path.join(TRAIN_DIR, String(res.id || '')).split(path.sep).join('/'), extra: { landed: res.landed || [], dropped: (res.dropped || []).map((d) => d.task), deferred: (res.deferred || []).map((d) => d.task), held: (res.held || []).map((h) => h.task) } });
+  } catch {}
 }
 
 /** Scratch copies and train/* branches a killed train left (only called while holding the train lock). */

@@ -351,7 +351,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     console.log(JSON.stringify({ game: p.game?.name || null, gates: [...p.gates.map((g) => g.id), ...(p.layout ? ['game:layout'] : []), ...p.engine.map((e) => e.id)], skipped: p.skipped, scope: p.scope }));
     process.exit(0);
   }
+  const t0 = Date.now();
   const res = await runGameGates({ paths, changed: ch.length ? ch : null, incoming: readIncoming(), quiet: a.includes('--json') });
+  // 2.65.0: the uniform job.done (harness/jobs.mjs) for a run of the game's checks.
+  try { (await import('./jobs.mjs')).jobDone({ kind: 'game-gates', id: res.game || null, code: res.ok ? 0 : 1, ms: Date.now() - t0, tail: res.failed.map((f) => `${f.id}: ${String(f.why || '').slice(0, 160)}`).join(' | '), task: process.env.STUDIO_JOB_TASK || null, extra: { ran: res.rows.map((r) => r.id), skipped: res.skipped.map((x) => x.id) } }); } catch {}
   if (a.includes('--json')) console.log(JSON.stringify(res));
   process.exit(res.ok ? 0 : 1);
 }

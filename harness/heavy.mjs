@@ -668,6 +668,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
     let lk;
+    const t0Run = Date.now();
     try {
       lk = acquireHeavy(root, label, { log: (m) => console.error(m) });
     } catch (err) {
@@ -690,6 +691,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       child.on('exit', (c, sig) => resolve(c ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1)));
     });
     lk.release();
+    // 2.65.0: the uniform job.done (harness/jobs.mjs) for a heavy run.
+    try { (await import('./jobs.mjs')).jobDone({ kind: 'heavy', id: label, code, ms: Date.now() - t0Run, extra: { command: cmd.join(' ').slice(0, 200) } }); } catch {}
     process.exit(code);
   }
   if (argv[0] === 'stop') {

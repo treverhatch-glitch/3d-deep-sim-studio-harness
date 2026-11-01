@@ -280,6 +280,12 @@ try {
 try {
   const { emitEvent } = await import('../harness/event.mjs');
   emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
+  if (!only && !isFastTier) {
+    const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);
+    const owner = process.env.STUDIO_LOCK_OWNER;
+    (await import('../harness/jobs.mjs')).jobDone({ kind: 'verify', id: process.env.STUDIO_VERIFY_RUN || owner || (headAtStart ? String(headAtStart).slice(0, 8) : null), code: !rows.length || failedIds.length ? 1 : 0, ms: Date.now() - runStarted, tail: failedIds.length ? `failed: ${failedIds.join(', ')}` : !rows.length ? 'no gate ran' : '', log: owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : '.studio/gates-last-full.json', extra: { scoped: Boolean(changedFiles?.length), head: headAtStart || null } });
+  }
 } catch {
   // the event log is a help, never a blocker
 }

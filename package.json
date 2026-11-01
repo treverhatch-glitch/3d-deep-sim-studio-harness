@@ -152,6 +152,8 @@
     "models:limits": "node harness/model-limits.mjs",
     "ci:watch": "node harness/ci-watch.mjs",
     "thread": "node harness/threads.mjs",
+    "lanes": "node harness/lanes.mjs",
+    "events": "node harness/jobs.mjs",
     "gdscript:parse": "node harness/gdscript-parse.mjs"
   },
   "devDependencies": {

@@ -58,12 +58,20 @@ export function formatAlert(event) {
   return { title, body };
 }
 
-export function shouldAlert(event, cfg) {
+/**
+ * 2.65.0: a finished merge train or full verify (job.done, harness/jobs.mjs) can alert too, for a person or an
+ * orchestrator away from the screen. Off by default: STUDIO_ALERT_JOBS=on in .env (or "jobs": true in alerts.json).
+ */
+export const JOB_ALERT_KINDS = ['train', 'verify'];
+export const jobAlertsOn = (cfg = {}, env = process.env) => cfg.jobs === true || /^(on|1|true|yes)$/i.test(String(env.STUDIO_ALERT_JOBS || ''));
+
+export function shouldAlert(event, cfg, env = process.env) {
+  if (event?.type === 'job.done') return Boolean(cfg.on) && jobAlertsOn(cfg, env) && JOB_ALERT_KINDS.includes(event.meta?.kind);
   return cfg.on && (cfg.kinds || ALERT_KINDS).includes(event.type);
 }
 
 export async function sendAlert(event, { cfg = readAlerts(), env = process.env, fetchImpl = globalThis.fetch, dryRun = false } = {}) {
-  if (!shouldAlert(event, cfg)) return { sent: false, reason: 'Alert condition not met.' };
+  if (!shouldAlert(event, cfg, env)) return { sent: false, reason: 'Alert condition not met.' };
 
   const { title, body } = formatAlert(event);
   const ntfyTopic = env.STUDIO_NTFY_TOPIC || cfg.topic;
