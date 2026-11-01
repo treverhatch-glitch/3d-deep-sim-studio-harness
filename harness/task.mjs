@@ -1798,6 +1798,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   // 2.60.1 (B-39): a lane held for landing on purpose (a conductor's hand-built merge chain): no claim clock, no rescue.
+  // 2.65.0: a conductor's ruling kept in the task's record (harness/conductor.mjs); never from a worker.
+  if (cmd === 'note') {
+    const { addConductorNote } = await import('./conductor.mjs');
+    const ids = new Set([...q.inProgress, ...q.backlog, ...q.done].map((x) => x.id));
+    const r = addConductorNote(arg1, flags._.slice(2).join(' ') || (typeof flags.note === 'string' ? flags.note : ''), { by: typeof flags.by === 'string' ? flags.by : '', known: (id) => ids.has(id) });
+    if (!r.ok) { console.error(r.why); process.exit(r.why.startsWith('Refused') ? 3 : 1); }
+    console.log(`Noted on ${arg1} (studio/handoffs/${arg1}.conductor.md): ${r.line.replace(/^- /, '')}`);
+    process.exit(0);
+  }
+
   if (cmd === 'hold' || cmd === 'unhold') {
     const t = [...q.inProgress, ...q.backlog].find((x) => x.id === arg1);
     const by = typeof flags.by === 'string' ? flags.by.trim() : '';
@@ -2040,5 +2050,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
 
-  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+  console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
 }
