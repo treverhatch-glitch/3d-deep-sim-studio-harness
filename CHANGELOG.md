@@ -4,6 +4,26 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.65.2] — 2026-11-02
+2.65.2: measurement fixes from the 2026-11-02 research pass, and the first bug a fuzz run found (P-150 to P-153).
+### Fixed
+- **Cache writes are priced as billed (P-150).** `dollarsOf` charged cache writes at the plain input price and ignored
+  the cost the tool reported. Writes now cost 1.25x input (5-minute cache) or 2x (1-hour), by the split Claude reports
+  (`cache_creation`), else the TTL the launcher asked for, else 5 minutes. The multipliers live in `studio/prices.json`
+  `"multipliers"`. A session's reported cost (`costUsd`) is preferred when present. A model with no cache-read price
+  reads at 0.1x its input price instead of $0. The scorecard says how many sessions used a reported cost.
+- **The autonomy scorecard weighs tokens like the budget meter, whoever calls it (P-151).** `buildAutonomy` without a
+  weighting counted cache reads at full weight. The weighting moved to `harness/token-weight.mjs`.
+- **A plain OpenAI-format usage report counts cached tokens once (P-152).** They now come off the input.
+- **example-sim refuses a spawn whose id is already in use (P-153).** Found by a fuzz run; a new regression replay,
+  `qa/regressions/example-duplicate-spawn-id.json`, fails on 2.65.1. Goldens are unchanged.
+
+### Untested
+- Windows (CI runs it); nothing here is shell-specific.
+- The 1-hour / 5-minute split relies on Claude Code reporting `cache_creation`; older versions fall back to the TTL asked.
+
+---
+
 ## [2.65.1] — 2026-11-02
 2.65.1: the crew's 2.65.1 hitlist, the parts 2.64.0 and 2.65.0 didn't already cover (P-148, P-149).
 ### Fixed
