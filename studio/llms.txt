@@ -55,7 +55,7 @@
   Bugs and slips per model (per 10 points of task size). Bugs without `--caused-by` are traced through commit trailers to the commit and model that last touched the fixed code. Daily retrospective with suggestions in `studio/memory/retros/` (scripts, no tokens; the HUB writes one a day).
 - `npm run studio:reset -- --name "<game>" [--yes]`
   Fresh plan, log and queue for a new game in your own copy; the old project's notes are archived to `.studio/archive/`.
-- `npm run kickoff -- --role <role> --agent <unique> --model <model> [--tool claude|codex|cursor|grok|agy|aider]`
+- `npm run kickoff -- --role <role> --agent <unique> --model <model> [--tool claude|codex|cursor|grok|agy|aider|nim]`
   Paste-ready opening prompt for any agent tool: who it is, its env, its role and the work loop. `--tool` adds a headless launch line (`docs/AGENT-TOOLS.md`).
 - `npm run brief -- <ID> [--model] [--template] [--force]`
   Cheap prepare, strong act: a 300-word brief from a bounded window of the task's history. With `--model` a local or free model drafts it and a script checks it (sections, word cap, real files and task IDs). Skips the model when the history is short. Writes `.studio/briefs/<ID>.prepared.md`.
@@ -105,10 +105,10 @@
 - `npm run tokens [-- --since 5h|24h|today|all] [--by role|model|agent|tool] [--json]` — measured token use from each session's own report; sessions whose tool reported nothing are listed as not measured
 - `npm run map -- find <name> [--harness]` — where a function, constant or TUNING key is, with its arguments and line range, in one call (a real parse); prefer it to reading the map and then the file
 - `node scripts/check-function-size.mjs` — game functions over 80 lines and files over 400 lines or 30 KB (STUDIO_FN_MAX_LINES, STUDIO_FILE_MAX_LINES, STUDIO_FILE_MAX_KB); a task can't finish if it made one bigger
-- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout
+- Lane copies (2.29): an agent the launcher starts with a code lane works in `.lanes/<agent>/` on its own branch (studio/ and .studio/ shared); `task done` there rebases and adds its commits to the studio's branch; git 2.42+, STUDIO_WORKTREES=off to share one checkout. 2.58.3: a code-writing role (not producer, director, planner, liaison) on a task with no lane gets a copy too (STUDIO_LANELESS=shared: the old shared checkout); Claude (and Codex) in a copy get `--add-dir` for the main checkout's studio/ and .studio/
 - `npm run help [-- --all]` — the everyday commands on one screen (Lite: ten)
 - `npm run verify [-- --deep | --full]` — everyday verify skips the harness self-checks (selftest, hub-smoke, hud); --deep runs them (release and CI do); --full runs every gate in Lite scope
-- `npm run agent -- start --role <r> --agent <name> --tool claude|codex|agy|cursor|grok|aider|custom --model <m> [--fallback tool:model,…] [--detach] | list | stop <name> | fill` — the launcher: heartbeats, caps, cleans up a dead agent's task, claims and work
+- `npm run agent -- start --role <r> --agent <name> --tool claude|codex|agy|cursor|grok|aider|nim|custom --model <m> [--fallback tool:model,…] [--detach] | list | stop <name> | fill` — the launcher: heartbeats, caps, cleans up a dead agent's task, claims and work
 - `npm run ask -- "<question>" --options "a,b" --default a --timeout 4h --why "…" | answer <id> <answer> --by <person> | reverse <id> <answer> --by <person> | list`
 - Asset studio (War Room view 4; docs/ART-DEPARTMENT.md): `npm run art -- propose <file> --title "…" [--pack p] [--round-of 4] [--generated tool:model --prompt f --terms "…"]`, `approve 4`, `changes 4 "…"`, `say "#4 is clunky"`, `ref <file> --label "…" --kind look|use`; staging → assets/approved/; the Producer approves provisionally after the pace's wait
 - `npm run asset -- add|update|import-manifest` — the ledger: in place or namespaced, author/source/licence/credit/rights/madeBy/generated

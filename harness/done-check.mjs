@@ -27,6 +27,7 @@ import { wavesOn, waveFor, nextWaveId, joinWave } from './waves.mjs';
 import { reachMode, unreached } from './reachability.mjs';
 import { judgeRed, readBaseline } from './baseline.mjs';
 import { inLaneCopy, mainRoot } from './worktree.mjs';
+import { isEolOnlyLine } from './eol-only.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -48,6 +49,15 @@ const CHORE_FIX = new RegExp(String.raw`^fix(es|ed|ing)?\b[\s:]*((the|a)\s+)?((c
 /** A [chore] tag in the title, or "type: chore" in the task's detail (the board keeps none; callers may pass one). */
 const choreTagged = (task) => /\[chore(:[^\]]*)?\]/i.test(String(task?.title || '')) || /(^|\n)\s*type\s*:\s*chore\b/im.test(String(task?.detail || ''));
 
+/**
+ * 2.58.3 (crew P-041): the subject of a "Fix …"/"Bug …" title, the part that says what is being fixed: the title up
+ * to the first separator (" — ", " – ", " - ", ";", "(", "[") or reference word (see, per, ref, refs, cf, via). The
+ * crew's "Fix: bug batch 3 … see qa/reports/kept/known-bugs-….md" was typed docs because of the file it pointed at;
+ * its subject is "Fix: bug batch 3 …". "Fix: typo in docs/X.md" keeps the .md in its subject and stays docs.
+ */
+export const docsFixSubject = (title) => String(title || '').split(/\s+[—–-]\s+|\s*[;([]|\b(?:see|per|refs?|cf|via)\b/i)[0];
+const isDocsFix = (title) => /^(bug|fix)\b/i.test(title) && /\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i.test(docsFixSubject(title));
+
 const PREFIX = [
   // 2.35.0: a rescue of a task stopped by its budget (harness/rescue.mjs).
   [/^rescue:/i, 'rescue'],
@@ -55,8 +65,9 @@ const PREFIX = [
   [/^whole-game check red\b/i, 'whole'],
   [/^check forced done\b/i, 'none'],
   // A bug in the docs (the docs gate, a .md file) closes like a docs task, not with a sim replay
-  // (Jed's run: docs-gate bugs could only close with --force).
-  [/^(bug|fix)\b.*\b(docs?[- ]gate|check-docs|[\w/-]+\.md)\b/i, 'docs'],
+  // (Jed's run: docs-gate bugs could only close with --force). 2.58.3 (crew P-041): only when the docs are what
+  // is being fixed, named in the title's subject (docsFixSubject), not a "see <file>.md" reference.
+  [{ test: (title) => isDocsFix(title) }, 'docs'],
   // 2.58.0: "Fix the build", "Fix CI", "Fix toolchain", "Fix deps" are chores, not bugs: no regression to replay
   // (a crew report: toolchain tasks titled "Fix …" had to be retitled to close). Other "Fix …" stays a bug.
   [CHORE_FIX, 'chore'],
@@ -192,7 +203,12 @@ function walkSince(rel, since, out, depth = 0) {
 /** Evidence that work happened for this task: commits tagged with it (any time), untagged commits since the start, or edits on disk. */
 export function taskChanges(taskId, since) {
   const files = new Set();
+  const committed = new Set();
   let lastAt = 0;
+  // 2.58.3 (O5): what the newest change was, so a stale verify can say what made it stale.
+  let last = null;
+  const bump = (at, what) => { if (at >= lastAt) { lastAt = at; last = { at, ...what }; } };
+  const eolSkipped = [];
   const base = taskBase(taskId);
   const afterBase = base ? new Set((git('rev-list', `${base}..HEAD`) || '').split('\n').filter(Boolean)) : null;
   const log = git('log', `--since=${Math.floor(since / 1000) - 1}`, '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', '--name-only');
@@ -210,8 +226,8 @@ export function taskChanges(taskId, since) {
       const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
       if (!touched.length) continue;
       commits.push({ hash, at: Number(ct) * 1000, tagged: tagged.includes(taskId) });
-      touched.forEach((n) => files.add(n));
-      lastAt = Math.max(lastAt, Number(ct) * 1000);
+      touched.forEach((n) => { files.add(n); committed.add(n); });
+      bump(Number(ct) * 1000, { kind: 'commit', hash, file: touched[0], tagged: tagged.includes(taskId) });
     }
     // Work committed for this task before its latest start (handed back, then picked up) still counts.
     const seen = new Set(commits.map((c) => c.hash));
@@ -223,8 +239,8 @@ export function taskChanges(taskId, since) {
       const touched = names.filter((n) => n && !BOOKKEEPING.test(n));
       if (!touched.length) continue;
       commits.push({ hash, at: Number(ct) * 1000, tagged: true, earlier: true });
-      touched.forEach((n) => files.add(n));
-      lastAt = Math.max(lastAt, Number(ct) * 1000);
+      touched.forEach((n) => { files.add(n); committed.add(n); });
+      bump(Number(ct) * 1000, { kind: 'commit', hash, file: touched[0], tagged: true });
     }
     const status = git('status', '--porcelain') || '';
     // Another agent's uncommitted work in its own claimed folder isn't this task's change (Jed's run: a
@@ -238,8 +254,10 @@ export function taskChanges(taskId, since) {
       if (held && held.owner !== mine) continue;
       const m = mtime(f);
       if (m >= since) {
+        // 2.58.3 (O3, crew P-035): a tracked file whose only difference is line endings isn't a change.
+        if (isEolOnlyLine(REPO_ROOT, line)) { eolSkipped.push(f); continue; }
         files.add(f);
-        lastAt = Math.max(lastAt, m);
+        bump(m, { kind: 'file', file: f });
       }
     }
   } else {
@@ -248,10 +266,10 @@ export function taskChanges(taskId, since) {
     for (const d of WORK_DIRS) walkSince(d, since, out);
     out.forEach((f) => {
       files.add(f);
-      lastAt = Math.max(lastAt, mtime(f));
+      bump(mtime(f), { kind: 'file', file: f });
     });
   }
-  return { files: [...files], commits, lastAt };
+  return { files: [...files], committed: [...committed], commits, lastAt, last, eolSkipped };
 }
 /** The commit a task started from (recorded on its first task.start since it was last finished or reopened). */
 export function taskBase(taskId) {
@@ -296,6 +314,28 @@ export function sizeBase(taskId) {
 }
 
 /**
+ * 2.58.3 (crew P-034): an anonymous function is named by its line ("(anonymous, line 120)"), so lines inserted above
+ * an unchanged one made it look new. It is matched with the old version by its stable key (codeindex: the describe/it
+ * titles and calls around it, nth occurrence), else by the most lines in common (half of the old body at least).
+ */
+function matchAnonymous(x, was, used, nowText, beforeText) {
+  const olds = was.filter((y) => y.kind === 'function' && y.key && !used.has(y));
+  let old = olds.find((y) => y.key === x.key);
+  if (!old && beforeText !== null) {
+    const body = (text, a, b) => text.split('\n').slice(a - 1, b).map((l) => l.trim()).filter(Boolean);
+    const mine = new Set(body(nowText, x.start, x.end));
+    let best = 0;
+    for (const y of olds) {
+      const theirs = body(beforeText, y.start, y.end);
+      const share = theirs.length ? theirs.filter((l) => mine.has(l)).length / theirs.length : 0;
+      if (share >= 0.5 && share > best) { best = share; old = y; }
+    }
+  }
+  if (old) used.add(old);
+  return old || null;
+}
+
+/**
  * The size ratchet (2.29): game functions and files over the limit (scripts/check-function-size.mjs) that
  * this task made bigger, or created. Ones that were already that big and didn't grow are left to a split
  * task. Null when the start commit isn't known (a task started before 2.29). 2.58.0: compared with sizeBase
@@ -319,12 +359,27 @@ export function sizeGrowth(taskId, files) {
       out.push(`${f}: the size check ${err.message}`);
       continue;
     }
+    const used = new Set();
     for (const x of now) {
-      const old = was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
-      if (!old || x.size > old.size) out.push(`${f}${x.kind === 'function' ? ` ${x.name}()` : ''} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}`);
+      const old = x.key ? matchAnonymous(x, was, used, fs.readFileSync(abs(f), 'utf8'), before) : was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
+      if (!old || x.size > old.size) out.push(`${f}${x.kind === 'function' ? ` ${x.key ? `${x.name.replace(/\)$/, '')}: ${x.key})` : `${x.name}()`}` : ''} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}`);
     }
   }
   return out;
+}
+
+/** The size-growth items for a message: all of them up to 10; past that, 10, "and N more", and where the full list is. */
+export function sizeList(taskId, grew, max = 10) {
+  if (grew.length <= max) return `${grew.length > 1 ? `${grew.length} items: ` : ''}${grew.join('; ')}`;
+  const rel = `.studio/size-growth/${String(taskId).replace(/[^\w.-]/g, '_')}.txt`;
+  let written = true;
+  try {
+    fs.mkdirSync(path.dirname(abs(rel)), { recursive: true });
+    fs.writeFileSync(abs(rel), `${grew.join('\n')}\n`);
+  } catch {
+    written = false;
+  }
+  return `${grew.length} items: ${grew.slice(0, max).join('; ')}; and ${grew.length - max} more${written ? ` (the full list: ${rel})` : ''}`;
 }
 
 /** The last time game code changed (cartridges/, src/): reports older than this describe an old build. */
@@ -345,25 +400,83 @@ export function lastFullRecord() {
   }
 }
 
-export function gatesAfter(at, files = null, taskId = null) {
+const hhmm = (ms) => `${new Date(ms).toISOString().slice(11, 16)} UTC`;
+/** 2.58.3 (O5): who ran the studio-wide full verify: the owner whose own record (.studio/gates/<owner>-full.json) is the same run. */
+function studioRecordOwner(rec) {
+  try {
+    for (const f of fs.readdirSync(abs('.studio/gates')).filter((n) => n.endsWith('-full.json'))) {
+      const r = readJson(`.studio/gates/${f}`);
+      if (r && r.at === rec.at && (r.head || null) === (rec.head || null)) return f.slice(0, -'-full.json'.length);
+    }
+  } catch {
+    // no owner records
+  }
+  return null;
+}
+/** Other tasks finished (landed) after `ms`: [{ task, at }], oldest first. */
+function landedSince(ms, taskId) {
+  return readRecentEvents(20000).filter((e) => (e.type === 'task.done' || e.type === 'task.forced') && e.task && e.task !== taskId && (Date.parse(e.ts) || 0) > ms).map((e) => ({ task: e.task, at: Date.parse(e.ts) }));
+}
+const landedText = (l) => `${l.slice(-2).map((x) => `${x.task} landed at ${hhmm(x.at)}`).join(', ')}${l.length > 2 ? ` and ${l.length - 2} more` : ''}`;
+/**
+ * 2.58.3 (O5): why the verify record doesn't cover this task, in words that say what is stale (a crew report: "no full
+ * verify after your last change" came back unchanged after a full verify had run, because main had moved and the
+ * verify was under another name of the same bot). The rule is unchanged: only the reason is named.
+ */
+function staleVerifyWhy(run, at, taskId, ch, usedOwn) {
+  const me = process.env.STUDIO_LOCK_OWNER;
+  const runAt = Date.parse(run.at) || 0;
+  if (usedOwn) {
+    const studio = readJson('.studio/gates-last-full.json');
+    const sAt = Date.parse(studio?.at) || 0;
+    const by = studio ? studioRecordOwner(studio) : null;
+    if (studio && !studio.partial && sAt > runAt && sAt >= at && by !== me) return `no full \`npm run verify\` of yours after your last change: the last full verify (${hhmm(sAt)}) was by ${by || 'another name'}, not you (STUDIO_LOCK_OWNER=${me}); yours was at ${hhmm(runAt)}. A verify counts for the name that ran it: run \`npm run verify\` as ${me}`;
+  }
+  const last = ch?.last;
+  const landed = taskId ? landedSince(runAt, taskId) : [];
+  if (last && last.kind === 'commit' && !last.tagged && landed.length) return `no full \`npm run verify\` after main moved: main moved since your last verify (${landedText(landed)}), and this task's own files haven't changed since it (${hhmm(runAt)}); run \`npm run verify\` again`;
+  if (last) return `no full \`npm run verify\` after your last change: your files changed after it (${last.file}${last.kind === 'commit' ? ` in commit ${String(last.hash).slice(0, 8)}` : ''} at ${hhmm(last.at)}; the last full verify was at ${hhmm(runAt)}); run it again`;
+  return `no full \`npm run verify\` after your last change (the last full verify was at ${hhmm(runAt)}); run it again`;
+}
+/** 2.58.3 (O5): the studio's full verify of this very commit, when it was run under another name. */
+function otherOwnerOnHead(head) {
+  const me = process.env.STUDIO_LOCK_OWNER;
+  const studio = readJson('.studio/gates-last-full.json');
+  if (!studio || studio.partial || studio.head !== head) return '';
+  const by = studioRecordOwner(studio);
+  return by === me ? '' : `: the full verify of this commit (${hhmm(Date.parse(studio.at) || 0)}) was by ${by || 'another name'}, not you (STUDIO_LOCK_OWNER=${me}); a verify counts for the name that ran it, so run it as ${me}`;
+}
+/** 2.58.3 (O5): what moved HEAD since the commit the verify ran on. */
+function movedHeadWhy(run, head, taskId) {
+  if (!isSha(run.head) || !isAncestor(run.head, head)) return '';
+  const tags = (git('log', '--format=%(trailers:key=Studio-Task,valueonly,separator=%x2C)', `${run.head}..${head}`) || '').split('\n');
+  const mine = tags.filter((t) => t.split(',').map((x) => x.trim()).includes(taskId)).length;
+  if (mine) return `: your ${mine} commit${mine === 1 ? '' : 's'} came after it`;
+  const landed = taskId ? landedSince(Date.parse(run.at) || 0, taskId) : [];
+  return landed.length ? `: main moved since your last verify (${landedText(landed)})` : ': commits from elsewhere came in since it';
+}
+
+export function gatesAfter(at, files = null, taskId = null, ch = null) {
   let run = null;
+  let usedOwn = false;
   try {
     // The agent's own full run first (2.29: in its own copy, the studio-wide record is someone else's code).
     const owner = process.env.STUDIO_LOCK_OWNER;
     const own = owner && /^[\w.-]+$/.test(owner) ? `.studio/gates/${owner}-full.json` : null;
-    const file = own && fs.existsSync(abs(own)) ? own : fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json';
+    usedOwn = Boolean(own && fs.existsSync(abs(own)));
+    const file = usedOwn ? own : fs.existsSync(abs('.studio/gates-last-full.json')) ? '.studio/gates-last-full.json' : '.studio/gates-last.json';
     run = JSON.parse(fs.readFileSync(abs(file), 'utf8'));
   } catch {
     return 'no full `npm run verify` has been recorded';
   }
   if (run.partial) return 'the last verify was a partial run (--only); run the full `npm run verify`';
-  if ((Date.parse(run.at) || 0) < at) return 'no full `npm run verify` after your last change; run it again';
+  if ((Date.parse(run.at) || 0) < at) return staleVerifyWhy(run, at, taskId, ch, usedOwn);
   // 2.58.0 (PU-34, P-047): only a verify of this very commit on a clean tree counts. The time and the rows alone
   // could be an older commit's run, or a record written by hand. (Not a git checkout: no commit to compare.)
   const head = (git('rev-parse', 'HEAD') || '').trim();
   if (isSha(head)) {
     if (!run.head) return 'the last verify record names no commit (it is older than 2.43.0, or was written by hand); run `npm run verify` again';
-    if (run.head !== head) return `the last verify ran on commit ${String(run.head).slice(0, 8)}, not on this one (${head.slice(0, 8)}); run \`npm run verify\` again`;
+    if (run.head !== head) return `the last verify ran on commit ${String(run.head).slice(0, 8)}, not on this one (${head.slice(0, 8)})${(usedOwn && otherOwnerOnHead(head)) || movedHeadWhy(run, head, taskId)}; run \`npm run verify\` again`;
     if (run.dirty) return 'the last verify ran with uncommitted changes, so it tested something other than this commit; commit your work, then run `npm run verify` again';
   }
   // 2.31.0: a verify scoped to a lane's changes (scripts/run-gates.mjs) counts as full when its scope holds
@@ -449,11 +562,13 @@ export function checkDone(task, since = startedAt(task.id)) {
     const ch = taskChanges(task.id, since);
     const relevant = docsOnly ? ch.files.filter((f) => f.endsWith('.md')) : ch.files;
     check(docsOnly ? 'Docs changed for this task' : 'Changes exist for this task', relevant.length, docsOnly ? 'no changed .md file since this task started' : `no changes found for ${task.id}: no commit tagged Studio-Task: ${task.id} and no edits since it started`);
-    const why = gatesAfter(Math.max(since, ch.lastAt), relevant, task.id);
+    const why = gatesAfter(Math.max(since, ch.lastAt), relevant, task.id, ch);
     check('Full verify green after the last change', !why, why);
     if (!docsOnly) {
       const grew = sizeGrowth(task.id, ch.files);
-      if (grew !== null) check('No function or file grown past the size limit', !grew.length, `${grew.slice(0, 3).join('; ')}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
+      // 2.58.3 (crew P-034): every item, not the first 3 (fixing them one by one kept turning up the next ones); past
+      // 10, the first 10 and the full list in .studio/size-growth/<task>.txt.
+      if (grew !== null) check('No function or file grown past the size limit', !grew.length, `${sizeList(task.id, grew)}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
     }
   };
 

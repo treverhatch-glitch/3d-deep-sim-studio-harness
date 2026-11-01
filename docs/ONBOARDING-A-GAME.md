@@ -65,7 +65,9 @@ npm run onboard -- --sync [--ref <branch>]
 ```
 
 brings its newer commits into `game/<slug>/` as one commit. It refuses while the studio has changes it
-hasn't exported yet (export first), so nothing is lost or sent twice.
+hasn't exported yet (export first), so nothing is lost or sent twice. A file under `game/<slug>/` that differs only in line endings (a
+test snapshot rewritten on Windows) doesn't refuse it: it is named in a note and put back to its committed version
+first (2.58.3); any other uncommitted change still refuses.
 
 **Faster verifies for a big test suite.** With `STUDIO_WHOLE_GAME=on`, a lane's verify runs only the tests
 related to the change (an adopted Vitest or Jest game's test check declares `related`), and the whole suite

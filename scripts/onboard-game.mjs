@@ -44,6 +44,8 @@ if (flag('sync')) {
   const r = syncGame({ ref: opt('ref'), force: flag('force'), commit: !flag('no-commit'), dryRun: flag('dry-run') });
   if (r.error) { console.error(`[onboard] ${r.error}`); process.exit(1); }
   if (r.upToDate) { console.log(`[onboard] up to date with ${r.to.slice(0, 8)}`); process.exit(0); }
+  // 2.58.3 (O3, crew P-035): files that differed only in line endings didn't refuse the sync.
+  if (r.eolOnly?.length) { const { eolNote } = await import('../harness/eol-only.mjs'); console.log(`[onboard] note: ${eolNote(r.eolOnly)}${r.dryRun ? '' : '; put back to their committed version before the sync'}`); }
   if (r.dryRun) {
     console.log(`[onboard] dry run: --sync would bring in ${r.commits.length} commit(s) (${r.files.length} file(s)) from ${r.ref}: ${r.from.slice(0, 8)}..${r.to.slice(0, 8)}. Nothing was written or committed.`);
     for (const c of r.commits.slice(0, 15)) console.log(`  ${c}`);

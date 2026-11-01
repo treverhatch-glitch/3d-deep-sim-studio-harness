@@ -177,7 +177,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     console.log(`Director pinged: ${res.task}. Brief: ${res.brief}. ${res.start.started ? 'A Director agent was started.' : `Not started automatically (${res.start.why}).`}`);
-    if (!res.start.started && res.start.why.startsWith('STUDIO_DIRECTOR_CMD')) console.log('Start one: npm run kickoff -- --role director --agent director-1 --tool <claude|codex|cursor|grok|agy|aider>');
+    if (!res.start.started && res.start.why.startsWith('STUDIO_DIRECTOR_CMD')) console.log('Start one: npm run kickoff -- --role director --agent director-1 --tool <claude|codex|cursor|grok|agy|aider|nim>');
     process.exit(0);
   }
   if (cmd === 'review') {

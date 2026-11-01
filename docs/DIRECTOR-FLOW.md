@@ -50,7 +50,11 @@ The Director owns the flow. A flow pass runs every minute: in the War Room hub's
 default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. Each pass:
 
 0. frees the locks of agents whose process is gone (agents with a launcher session record only; never a person's);
-1. hands back a claim that ran out: a task in progress that nobody holds and that has no running session;
+1. hands back a claim that ran out: a task in progress that nobody holds and that has no running session. Not
+   while its `task done` runs or its lane waits to land, and (2.58.3) not while the owner of that claim (an agent
+   working outside the launcher, claiming with `task start`) was heard from within `STUDIO_CLAIM_ACTIVE_MIN` (30)
+   minutes or its lane copy changed in that time: the pass says "kept T-… (busy: …'s owner … is still working on
+   it)". The watcher's requeue follows the same rule, and the supervisor won't give such a task to a new agent;
 2. counts idle builder slots against ready work across the whole board, every role and lane, minus held and
    parked tasks (breaker parks included) and minus failing tasks: a task whose last hand-back was a failure is
    never re-fed by the flow; the circuit breaker or a person decides what happens to it;

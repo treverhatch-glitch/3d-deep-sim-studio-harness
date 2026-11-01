@@ -49,7 +49,7 @@ const lastCode = (lines, from, to) => {
   return from;
 };
 
-/** { functions: [{ name, kind, params, start, end, lines }], names: [{ name, kind, start, keys? }] } */
+/** { functions: [{ name, kind, params, start, end, lines, key? }], names: [{ name, kind, start, keys? }] } (key: anonymous only) */
 export function indexFile(file, text = fs.readFileSync(file, 'utf8')) {
   if (/\.gd$/i.test(file)) return { functions: indexGd(text), names: [] };
   if (!JS.test(file)) return { functions: [], names: [] };
@@ -69,13 +69,35 @@ export function indexFile(file, text = fs.readFileSync(file, 'utf8')) {
     if (p && t.isBinaryExpression(p)) return p.left.getText(sf).slice(0, 40);
     return null;
   };
+  // 2.58.3 (crew P-034): a key for an anonymous function that survives lines inserted above it: the calls and named
+  // functions it sits in (a test's describe/it titles), the call it is an argument to, else its first line's text.
+  // A repeat of the same key in one file gets "#2", "#3"… in file order.
+  const fnLike = (n) => t.isFunctionDeclaration(n) || t.isMethodDeclaration(n) || t.isFunctionExpression(n) || t.isArrowFunction(n) || t.isGetAccessor(n) || t.isSetAccessor(n) || t.isConstructorDeclaration(n);
+  const callLabel = (call) => {
+    const a0 = call.arguments[0];
+    const label = a0 && (t.isStringLiteral(a0) || t.isNoSubstitutionTemplateLiteral(a0)) ? JSON.stringify(a0.text.slice(0, 80)) : '';
+    return `${call.expression.getText(sf).replace(/\s+/g, '').slice(0, 40)}(${label})`;
+  };
+  const keysSeen = new Map();
+  const anonKey = (node, start) => {
+    const own = node.parent && t.isCallExpression(node.parent) && node.parent.arguments.includes(node) ? callLabel(node.parent) : (text.split('\n')[start - 1] || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    const outer = [];
+    for (let a = node.parent && t.isCallExpression(node.parent) ? node.parent.parent : node.parent; a && a !== sf; a = a.parent) {
+      if (fnLike(a) && (t.isConstructorDeclaration(a) || nameOf(a))) outer.unshift(t.isConstructorDeclaration(a) ? 'constructor' : nameOf(a));
+      else if (t.isCallExpression(a) && a.arguments.some((x) => fnLike(x)) && a.arguments[0] && (t.isStringLiteral(a.arguments[0]) || t.isNoSubstitutionTemplateLiteral(a.arguments[0]))) outer.unshift(callLabel(a));
+    }
+    const base = [...outer, own].join(' > ');
+    const n = (keysSeen.get(base) || 0) + 1;
+    keysSeen.set(base, n);
+    return n > 1 ? `${base} #${n}` : base;
+  };
   const visit = (node) => {
     if (t.isFunctionDeclaration(node) || t.isMethodDeclaration(node) || t.isFunctionExpression(node) || t.isArrowFunction(node) || t.isGetAccessor(node) || t.isSetAccessor(node) || t.isConstructorDeclaration(node)) {
       const start = line(node.getStart(sf));
       const end = line(node.getEnd());
       const name = t.isConstructorDeclaration(node) ? 'constructor' : nameOf(node);
       // Small anonymous callbacks are noise in a lookup; long ones still count for the size check.
-      if (name || end - start + 1 > 20) functions.push({ kind: 'function', name: name || `(anonymous, line ${start})`, params: params(node), start, end, lines: end - start + 1 });
+      if (name || end - start + 1 > 20) functions.push({ kind: 'function', name: name || `(anonymous, line ${start})`, params: params(node), start, end, lines: end - start + 1, ...(name ? {} : { key: anonKey(node, start) }) });
     }
     if (t.isClassDeclaration(node) && node.name) names.push({ kind: 'class', name: node.name.text, start: line(node.getStart(sf)), end: line(node.getEnd()) });
     t.forEachChild(node, visit);

@@ -61,20 +61,26 @@ export async function selftest259I({ dir, run, report, tmpRoot }) {
   }
 
   // ---------- the user-level file needs --scope user, --by, and a person ----------
+  // 2.58.3 (M3): without --scope the rules go to the studio's own .studio/agy-settings.json (agy --settings), so
+  // that case now succeeds there, and the user file is still untouched.
   {
     const h = home(userSettings);
+    const studioFile = path.join(dir, '.studio', 'agy-settings.json');
+    const noScope = allow(h, '--by owner-ana');
+    const toStudio = noScope.status === 0 && fs.existsSync(studioFile);
+    fs.rmSync(studioFile, { force: true });
     const tries = {
-      noScope: allow(h, '--by owner-ana'),
+      ...(toStudio ? {} : { noScope }),
       project: allow(h, '--by owner-ana --scope project'),
       noBy: allow(h, '--scope user'),
       agentName: allow(h, '--by builder-1 --scope user'),
       launched: allow(h, '--by owner-ana --scope user', { STUDIO_ROLE: 'builder' }),
     };
     const bad = Object.entries(tries).filter(([, r]) => r.status === 0).map(([k]) => k);
-    const scopeSaid = /--scope user/.test(out(tries.noScope)) && /--scope user/.test(out(tries.project));
-    report('P-067: agy\'s user-level settings are written only with --scope user said out loud (agy has no project-level file: the default and --scope project write nothing and say so), only with --by <owner>, and never under an agent\'s name or from inside a launched session',
+    const scopeSaid = toStudio && /--scope user/.test(out(tries.project));
+    report('P-067: agy\'s user-level settings are written only with --scope user said out loud (agy has no project-level file: --scope project writes nothing and says so; since 2.58.3 the default writes the studio\'s .studio/agy-settings.json instead), only with --by <owner>, and never under an agent\'s name or from inside a launched session',
       !bad.length && scopeSaid && bytes(fileOf(h)) === userSettings && !backups(h).length,
-      `not refused: ${bad.join(', ') || 'none'}; scope named: ${scopeSaid}\n${Object.entries(tries).map(([k, r]) => `${k} (${r.status}): ${out(r).slice(-300)}`).join('\n')}`);
+      `not refused: ${bad.join(', ') || 'none'}; default to the studio file: ${toStudio}; scope named: ${scopeSaid}\n${out(noScope).slice(-300)}\n${Object.entries(tries).map(([k, r]) => `${k} (${r.status}): ${out(r).slice(-300)}`).join('\n')}`);
   }
 
   // ---------- a real run merges, keeps everything else, backs up; a second run adds nothing ----------

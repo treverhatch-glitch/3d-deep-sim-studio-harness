@@ -26,6 +26,8 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock } from './merge-lane.mjs';
+import { PLANNING_ROLES } from './stall.mjs';
+import { splitEolOnly, eolNote } from './eol-only.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -59,6 +61,34 @@ export function worktreeSupport(root = mainRoot()) {
 
 /** A lane in the code (not the board, not the whole game) gets its own copy. */
 export const laneWantsCopy = (lane) => Boolean(lane) && !/^(studio|\.studio)(\/|$)/.test(lane);
+
+/**
+ * M2 (2.58.3, crew P-039): roles that work on the board, not the game's code, and so stay in the main checkout when
+ * their task has no lane (the planning roles of harness/stall.mjs, plus the liaison and a person).
+ */
+export const MAIN_CHECKOUT_ROLES = new Set([...PLANNING_ROLES, 'liaison', 'human']);
+/**
+ * A session on a task with no lane gets its own copy too when its role writes code (builder, rnd, art, qa-playtester,
+ * reviewer, …): builders on laneless tasks left staged test files in the main checkout and blocked six other tasks'
+ * `task done` for 3 hours. STUDIO_LANELESS=shared keeps the old shared checkout; STUDIO_WORKTREES=off turns copies off.
+ */
+export function lanelessWantsCopy({ role, lane = null, task = null, env = process.env } = {}) {
+  if (lane || !task || !role) return false;
+  if (/^shared$/i.test(env.STUDIO_LANELESS || '') || /^(off|0|false|no)$/i.test(env.STUDIO_WORKTREES || '')) return false;
+  return !MAIN_CHECKOUT_ROLES.has(String(role).toLowerCase());
+}
+
+/**
+ * M1 (2.58.3): the main checkout's real studio/ and .studio/ folders, which a lane copy links to. A tool started in the
+ * copy (cwd .lanes/<agent>) is told it may use them (Claude Code: --add-dir), since it resolves the links and would
+ * otherwise refuse their targets as "outside the allowed working directories".
+ */
+export function laneShareDirs(root = mainRoot()) {
+  return ['studio', '.studio'].map((d) => {
+    const p = path.join(root, d);
+    try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
+  });
+}
 
 const mainBranch = (root = mainRoot()) => git(root, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
 
@@ -305,15 +335,22 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   const main = mainBranch(root);
   // 2.31.0: no trim() before slice(3) (it ate the first letter of the first path: "odot/..."), and engine
   // cache files (.godot/, *.import, *.uid) that every headless Godot run rewrites don't block a landing.
-  const dirty = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
+  const dirtyAll = (git(REPO_ROOT, 'status', '--porcelain').stdout || '').split('\n').filter((l) => l.length > 3)
     .filter((l) => !/(^|\/)\.godot\/|\.import$|\.(uid|tmp)$|(^|\/)\.import\//.test(l.slice(3).replace(/^"|"$/g, '')));
+  // 2.58.3 (O3, crew P-035): a tracked file that differs only in line endings isn't uncommitted work; it is set aside
+  // with the engine cache below (a named stash) so the rebase can run.
+  const { real: dirty, eol } = splitEolOnly(REPO_ROOT, dirtyAll);
+  if (eol.length) {
+    console.warn(`[task done] note: ${eolNote(eol)}`);
+    emitEvent({ type: 'task.eol_ignored', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, status: 'warn', msg: `${taskId}: ${eolNote(eol)}`.slice(0, 400) });
+  }
   if (dirty.length) return { ok: false, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
   // Tracked engine cache files the gates just rewrote would stop the rebase ("unstaged changes"): set them
   // aside in a named stash (recoverable with git stash list / pop; nothing is deleted).
   const churn = (git(REPO_ROOT, 'status', '--porcelain', '--untracked-files=no').stdout || '').split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^"|"$/g, ''));
   if (churn.length) {
     git(REPO_ROOT, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'stash', 'push', '-m', `studio land ${taskId}: engine cache set aside`, '--', ...churn);
-    emitEvent({ type: 'land.stashed', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${churn.length} engine cache file(s) set aside before landing (git stash list)` });
+    emitEvent({ type: 'land.stashed', agent: process.env.STUDIO_LOCK_OWNER || null, task: taskId, msg: `${taskId}: ${churn.length} engine cache or line-ending-only file(s) set aside before landing (git stash list)` });
   }
   const branch = git(REPO_ROOT, 'symbolic-ref', '--short', 'HEAD').stdout.trim();
   const tries = Number(process.env.STUDIO_LAND_TRIES || 6);

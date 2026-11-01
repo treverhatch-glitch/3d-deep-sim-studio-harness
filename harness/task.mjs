@@ -9,7 +9,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks } from './lock.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt } from './done-check.mjs';
+import { splitEolOnly, eolNote } from './eol-only.mjs';
+import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict } from './verdict-split.mjs';
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
@@ -466,6 +468,9 @@ export function whoAmI(flags = {}, root = REPO_ROOT, env = process.env) {
   return env.STUDIO_LOCK_OWNER || null;
 }
 
+/** 2.58.3 (O4): task types that are code work; their uncommitted game files are refused even with no claimed paths. */
+const CODE_TYPES = ['change', 'chore', 'bug', 'system', 'whole', 'balance', 'fun'];
+
 /**
  * Only the lock owner can finish a claimed task, and only once the done-check for its type passes
  * (harness/done-check.mjs). force skips both; a skipped check is logged and the Producer gets a
@@ -563,13 +568,36 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (!force && !inLaneCopy() && process.env.STUDIO_DONE_UNCOMMITTED !== 'allow') {
     const owner = lock.locked ? lock.lock.owner : agent;
     let scope = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
+    const claimedPaths = scope.length > 0;
     if (!scope.length) {
       const f = gameFolders();
       scope = [f.renderer, f.sim].filter(Boolean);
     }
     if (scope.length) {
       const st = spawnSync('git', ['status', '--porcelain', '--', ...scope], { cwd: REPO_ROOT, encoding: 'utf8' });
-      const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).map((l) => l.slice(3)).filter((f) => !isEngineChurn(f)) : [];
+      const lines = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !isEngineChurn(l.slice(3))) : [];
+      // 2.58.3 (O3, crew P-035): a tracked file whose only difference is line endings (a test snapshot rewritten on
+      // Windows) isn't uncommitted work: named in a note, never a refusal. Content changes, new and deleted files still are.
+      const { real, eol } = splitEolOnly(REPO_ROOT, lines);
+      if (eol.length) {
+        console.warn(`[done] note: ${eolNote(eol)}`);
+        if (!checkOnly) emitEvent({ type: 'task.eol_ignored', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: ${eolNote(eol)}`.slice(0, 400), meta: { files: eol.slice(0, 20) } });
+      }
+      let dirty = real.map((l) => l.slice(3));
+      // 2.58.3 (O4): with no claimed paths the check falls back to the game folders, where files another agent left on
+      // the main checkout refused tasks that changed only studio/ docs. A task that isn't code work, claimed no paths
+      // and whose own commits touch no game code is not refused for them: the Producer gets a note and an event.
+      if (dirty.length && !claimedPaths && !CODE_TYPES.includes(check.type)) {
+        const inScope = (f) => isGameCode(f) || scope.some((s0) => f === s0.replace(/\/+$/, '') || f.startsWith(`${s0.replace(/\/+$/, '')}/`));
+        let ownGame = null;
+        try { ownGame = taskChanges(target.id, startedAt(target.id)).committed.filter(inScope); } catch { ownGame = null; }
+        if (ownGame && !ownGame.length) {
+          const strays = `${dirty.length} uncommitted file${dirty.length === 1 ? '' : 's'} in the game folders (${dirty.slice(0, 3).join(', ')}${dirty.length > 3 ? ` and ${dirty.length - 3} more` : ''}) left by someone else on the main checkout`;
+          console.warn(`[done] note: ${strays}; not ${target.id}'s (it claimed no paths and its commits touch no game code), so it isn't refused. The Producer is told.`);
+          if (!checkOnly) emitEvent({ type: 'checkout.strays', agent: agent || target.role, task: target.id, to: 'producer', status: 'warn', msg: `${target.id} closed past ${strays}: find whose they are (git status), then have them committed or set aside`.slice(0, 400), meta: { files: dirty.slice(0, 20) } });
+          dirty = [];
+        }
+      }
       if (dirty.length) {
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} (${dirty.slice(0, 3).join(', ')})` });
         return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them (git add <files> && git commit -m "${target.id}: …"), then run task done again.` };

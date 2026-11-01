@@ -3641,6 +3641,45 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.58.3 (M1-M5): Claude in a lane copy gets --add-dir for studio/ and .studio/; a code-writing role on a laneless
+// task gets its own copy; agy's rules go to .studio/agy-settings.json (agy --settings); a nim tool (aider on NVIDIA
+// NIM, key mapped, never printed); the kickoff says one command per Bash call (qa/selftest-2583m.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583m.mjs')).href);
+  await selftest2583M({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.3 (N1-N4): a person's stop is a stop, not a crash; a live owner's expired claim isn't handed back; the watchdog
+// honours an unpark and parks once; rescues nobody can pick up don't escalate (qa/selftest-2583n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583n.mjs')).href);
+  await selftest2583N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.3 (helper o): what task done asks for, from the crew's logs: "Fix: … see <file>.md" is code, anonymous functions
+// keep their identity in the size ratchet and every item is listed, line-ending-only files don't block, strays on the
+// main checkout don't refuse unrelated tasks, and a stale verify says what is stale (qa/selftest-2583o.mjs).
+{
+  const dir = copyRepo();
+  if (fs.existsSync(path.join(root, 'node_modules', 'typescript')) && !fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  const { selftest2583O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583o.mjs')).href);
+  await selftest2583O({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.58.3 (P-069): claude's -p is --print, not a profile, and with no profiles set up a Producer or Director starts while a
+// builder runs (qa/selftest-2583p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2583P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583p.mjs')).href);
+  await selftest2583P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

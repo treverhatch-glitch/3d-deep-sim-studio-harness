@@ -20,7 +20,7 @@ export const GAME_ROOTS = ['cartridges', 'game', 'web', 'src', 'engine'];
 // The templates ship with the harness; they aren't the game's to split.
 const isTemplate = (f) => /^(cartridges\/(_template|example-sim)|engine\/_(?:godot|unity))\//.test(f);
 
-/** What's over the limits in one file's text: [{ kind: 'function'|'file', name, size, limit, unit, start? }]. */
+/** What's over the limits in one file's text: [{ kind: 'function'|'file', name, size, limit, unit, start?, end?, key? }] (key: an anonymous function's stable key, harness/codeindex.mjs). */
 export function overLimits(file, text, limits = LIMITS()) {
   const out = [];
   const lines = text.split('\n').length;
@@ -28,7 +28,7 @@ export function overLimits(file, text, limits = LIMITS()) {
   if (lines > limits.lines) out.push({ kind: 'file', name: file, size: lines, limit: limits.lines, unit: 'lines' });
   else if (kb > limits.kb) out.push({ kind: 'file', name: file, size: Math.round(kb), limit: limits.kb, unit: 'KB' });
   const seen = new Set();
-  for (const f of indexFile(file, text).functions) if (f.lines > limits.fn && !seen.has(`${f.name}@${f.start}`) && seen.add(`${f.name}@${f.start}`)) out.push({ kind: 'function', name: f.name, size: f.lines, limit: limits.fn, unit: 'lines', start: f.start });
+  for (const f of indexFile(file, text).functions) if (f.lines > limits.fn && !seen.has(`${f.name}@${f.start}`) && seen.add(`${f.name}@${f.start}`)) out.push({ kind: 'function', name: f.name, size: f.lines, limit: limits.fn, unit: 'lines', start: f.start, end: f.end, ...(f.key ? { key: f.key } : {}) });
   return out;
 }
 

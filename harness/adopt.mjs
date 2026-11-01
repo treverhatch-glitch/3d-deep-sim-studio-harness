@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT } from './event.mjs';
+import { splitEolOnly } from './eol-only.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', 'Build', 'Builds', '.godot', '.import', 'Library', 'Temp', 'obj', 'bin', 'target', '.venv', 'venv', '__pycache__', 'coverage', '.next', '.turbo', '.cache']);
 const git = (cwd, ...a) => spawnSync('git', ['-C', cwd, ...a], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
@@ -193,7 +194,10 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   const pending = git(root, 'log', '--format=%h %s', `${since}..HEAD`, '--', o.path, `:(exclude)${o.path}/studio.gates.json`, `:(exclude)${o.path}/studio.browser.json`).stdout.trim().split('\n').filter(Boolean);
   if (pending.length && !force) return { error: `${pending.length} commit(s) to ${o.path} since it was last synced haven't been sent back yet (${pending.slice(0, 3).join('; ')}): npm run onboard -- --export first, or --force to sync anyway`, pending };
   // Tracked changes only: an untracked file (a build output, a cache) isn't touched by the patch.
-  const dirty = git(root, 'status', '--porcelain', '--untracked-files=no', '--', o.path).stdout.trim().split('\n').filter(Boolean);
+  // 2.58.3 (O3, crew P-035): a file that differs only in line endings (a test snapshot rewritten on Windows) doesn't
+  // refuse the sync; it is put back to its committed version first (only its line endings change), so the patch
+  // applies and the sync commit doesn't carry it. Named in the result (eolOnly) and by the CLI.
+  const { real: dirty, eol: eolOnly } = splitEolOnly(root, git(root, 'status', '--porcelain', '--untracked-files=no', '--', o.path).stdout.split('\n').filter((l) => l.length > 3));
   if (dirty.length) return { error: `${o.path} has uncommitted changes (${dirty.slice(0, 3).map((l) => l.trim()).join('; ')}${dirty.length > 3 ? ' …' : ''}): commit or set them aside first` };
   const want = ref || o.ref || 'HEAD';
   if (git(o.source, 'remote').stdout.trim()) git(o.source, 'fetch', '-q', 'origin', want);
@@ -204,7 +208,8 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   const commits = git(o.source, 'log', '--format=%h %s', `${o.sha}..${tip}`).stdout.trim().split('\n').filter(Boolean);
   const files = git(o.source, 'diff', '--name-only', o.sha, tip).stdout.trim().split('\n').filter(Boolean);
   // 2.55.0 (P-030): --dry-run lists what would come in and writes nothing (no patch, no ORIGIN.json, no commit).
-  if (dryRun) return { ok: true, dryRun: true, from: o.sha, to: tip, ref: want, commits, files };
+  if (dryRun) return { ok: true, dryRun: true, from: o.sha, to: tip, ref: want, commits, files, eolOnly };
+  if (eolOnly.length) git(root, 'checkout', 'HEAD', '--', ...eolOnly);
   const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json', ':(exclude)studio.browser.json');
   if (diff.status !== 0) return { error: `git diff in ${o.source} failed: ${(diff.stderr || '').trim()}` };
   if (diff.stdout.trim()) {
@@ -227,5 +232,5 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
     committed = c.status === 0;
     if (!committed) commitError = `${c.stderr || c.stdout || ''}`.trim().split('\n').slice(-2).join(' | ');
   }
-  return { ok: true, from: o.sha, to: tip, commits, files, committed, commitError };
+  return { ok: true, from: o.sha, to: tip, commits, files, committed, commitError, eolOnly };
 }
