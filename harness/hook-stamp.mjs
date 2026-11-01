@@ -644,47 +644,52 @@ export async function restamp({ cwd = ROOT, auto = false, all = false, base: giv
   }
   const dirty = g(['status', '--porcelain', '--untracked-files=no']).stdout.split('\n').filter((l) => l.length > 3);
   if (dirty.length) return { ok: false, why: `uncommitted changes (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}${dirty.length > 3 ? ` +${dirty.length - 3}` : ''}): commit or set them aside first` };
-  const mainBranch = lane?.branch || (await import('./approve.mjs')).resolveBase(env)?.ref || null;
-  const base = givenBase || (mainBranch ? g(['merge-base', 'HEAD', mainBranch]).stdout.trim() : '');
+  // 2.60.1 (B-32): the same base as the hooks check (changeBase: approve.mjs resolveBase, which in a lane copy is the
+  // main checkout's local branch). Restamp took the lane's local main while the check took a stale origin/main, so it
+  // said "nothing to do" while the check failed on main's own commits.
+  const cb = givenBase ? null : await changeBase(env);
+  const mainBranch = cb?.ref || lane?.branch || null;
+  const base = givenBase || cb?.base || '';
   if (!isSha(base)) return { ok: false, why: 'no studio branch to re-stamp from (set STUDIO_MAIN_ROOT to the main checkout)' };
+  const baseInfo = { baseRef: givenBase ? givenBase.slice(0, 8) : mainBranch, baseSha: base };
   const head = g(['rev-parse', 'HEAD']).stdout.trim();
   const branch = g(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
-  if (!branch) return { ok: false, why: 'HEAD is detached: check out the lane\'s branch first' };
+  if (!branch) return { ...baseInfo, ok: false, why: 'HEAD is detached: check out the lane\'s branch first' };
   const list = g(['rev-list', '--reverse', '--topo-order', '--parents', `${base}..HEAD`]).stdout.split('\n').map((l) => l.trim().split(' ')).filter((a) => isSha(a[0]));
-  if (!list.length) return { ok: true, replayed: 0, why: `no commits since ${mainBranch || base.slice(0, 8)}` };
+  if (!list.length) return { ...baseInfo, ok: true, replayed: 0, why: `no commits since ${mainBranch || base.slice(0, 8)}` };
   const judgeEnv = { ...env, STUDIO_HOOKS_CHECK: 'on' };
-  if (auto && !hooksEnforced(base, env)) return { ok: true, replayed: 0, skipped: true, why: 'the hooks gate is not enforced here' };
+  if (auto && !hooksEnforced(base, env)) return { ...baseInfo, ok: true, replayed: 0, skipped: true, why: 'the hooks gate is not enforced here' };
   const now0 = await checkHookStamps({ env: judgeEnv, range: { base, head } });
   if (auto) {
-    if (!now0.open.length) return { ok: true, replayed: 0, why: 'every stamp still matches' };
-    if (!was || !isSha(was.base) || !isSha(was.head)) return { ok: true, replayed: 0, skipped: true, why: 'no record of the lane before the rebase' };
+    if (!now0.open.length) return { ...baseInfo, ok: true, replayed: 0, why: 'every stamp still matches' };
+    if (!was || !isSha(was.base) || !isSha(was.head)) return { ...baseInfo, ok: true, replayed: 0, skipped: true, why: 'no record of the lane before the rebase' };
     const before = await checkHookStamps({ env: judgeEnv, range: was });
-    if (before.open.length) return { ok: true, replayed: 0, skipped: true, why: `${before.open.length} commit(s) had no valid stamp before the rebase either; not re-committed (the hooks gate lists them)` };
+    if (before.open.length) return { ...baseInfo, ok: true, replayed: 0, skipped: true, why: `${before.open.length} commit(s) had no valid stamp before the rebase either; not re-committed (the hooks gate lists them)` };
   }
   const openSet = new Set(now0.open.map((o) => o.sha));
   const first = all ? 0 : list.findIndex(([sha]) => openSet.has(sha));
-  if (first < 0) return { ok: true, replayed: 0, why: 'every stamp matches its commit; nothing to re-stamp (--all re-commits them anyway)' };
+  if (first < 0) return { ...baseInfo, ok: true, replayed: 0, why: 'every stamp matches its commit; nothing to re-stamp (--all re-commits them anyway)' };
   const todo = list.slice(first);
   const merges = todo.filter((a) => a.length > 2);
-  if (merges.length) return { ok: false, why: `${merges[0][0].slice(0, 8)} is a merge commit: rebase on ${mainBranch || 'the studio\'s branch'} first (git rebase flattens merges), then restamp` };
+  if (merges.length) return { ...baseInfo, ok: false, why: `${merges[0][0].slice(0, 8)} is a merge commit: rebase on ${mainBranch || 'the studio\'s branch'} first (git rebase flattens merges), then restamp` };
   const hooksDir = path.join(cwd, 'scripts', 'hooks');
   let commitMsgHook = '';
   try { commitMsgHook = fs.readFileSync(path.join(hooksDir, 'commit-msg'), 'utf8'); } catch {}
-  if (!commitMsgHook.includes(MARKER)) return { ok: false, why: `scripts/hooks/commit-msg in this checkout doesn't stamp commits; nothing to re-stamp with` };
+  if (!commitMsgHook.includes(MARKER)) return { ...baseInfo, ok: false, why: `scripts/hooks/commit-msg in this checkout doesn't stamp commits; nothing to re-stamp with` };
   const laneName = (lane ? path.basename(cwd) : branch).replace(/[^\w.-]+/g, '-');
   const t = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
   let backup = `backup/${laneName}-pre-restamp-${t}`;
   for (let i = 2; g(['rev-parse', '-q', '--verify', `refs/heads/${backup}`]).status === 0; i += 1) backup = `backup/${laneName}-pre-restamp-${t}-${i}`;
   const mk = g(['branch', backup, head]);
-  if (mk.status !== 0) return { ok: false, why: `could not keep the old head as ${backup}: ${(mk.stderr || '').trim()}` };
+  if (mk.status !== 0) return { ...baseInfo, ok: false, why: `could not keep the old head as ${backup}: ${(mk.stderr || '').trim()}` };
   const kept = auto ? null : backup; // task done's own run drops its backup again (success or not)
   const ident = auto || !g(['config', 'user.email']).stdout.trim() ? ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local'] : [];
   // Back to where the lane was (nothing of it changed).
   const restore = () => { g(['reset', '-q', '--hard', head]); if (auto) g(['branch', '-D', backup]); };
   const startAt = todo[0][1] || null;
-  if (!startAt) return { ok: false, why: 'the lane\'s first commit is a root commit; nothing to re-stamp onto' };
+  if (!startAt) return { ...baseInfo, ok: false, why: 'the lane\'s first commit is a root commit; nothing to re-stamp onto' };
   const rs = g(['reset', '-q', '--hard', startAt]);
-  if (rs.status !== 0) { restore(); return { ok: false, backup: kept, why: `git reset failed: ${(rs.stderr || '').trim()}` }; }
+  if (rs.status !== 0) { restore(); return { ...baseInfo, ok: false, backup: kept, why: `git reset failed: ${(rs.stderr || '').trim()}` }; }
   const treeOf = (rev) => g(['rev-parse', `${rev}^{tree}`]).stdout.trim();
   let n = 0;
   for (const [sha, parent] of todo) {
@@ -692,7 +697,7 @@ export async function restamp({ cwd = ROOT, auto = false, all = false, base: giv
     const rt = g(['read-tree', '-m', '-u', 'HEAD', sha]);
     if (rt.status !== 0 || g(['write-tree']).stdout.trim() !== want) {
       restore();
-      return { ok: false, backup: kept, why: `could not bring ${sha.slice(0, 8)}'s files back: ${(rt.stderr || '').trim().split('\n').pop() || 'its tree differs'}` };
+      return { ...baseInfo, ok: false, backup: kept, why: `could not bring ${sha.slice(0, 8)}'s files back: ${(rt.stderr || '').trim().split('\n').pop() || 'its tree differs'}` };
     }
     const empty = parent && treeOf(parent) === want;
     const prevHead = g(['rev-parse', 'HEAD']).stdout.trim();
@@ -702,19 +707,19 @@ export async function restamp({ cwd = ROOT, auto = false, all = false, base: giv
     const out = `${c.stdout || ''}${c.stderr || ''}`.trim();
     if (c.status !== 0 || !after || after.sha === prevHead || after.parents[0] !== prevHead) {
       restore();
-      return { ok: false, backup: kept, why: `the hooks refused ${sha.slice(0, 8)} (${(commitInfo(sha, cwd)?.msg || '').split('\n')[0].slice(0, 60)}): ${out.split('\n').slice(-6).join(' | ') || `exit ${c.status}`}. The lane is back where it was; fix what they refuse and commit, or ask the owner.` };
+      return { ...baseInfo, ok: false, backup: kept, why: `the hooks refused ${sha.slice(0, 8)} (${(commitInfo(sha, cwd)?.msg || '').split('\n')[0].slice(0, 60)}): ${out.split('\n').slice(-6).join(' | ') || `exit ${c.status}`}. The lane is back where it was; fix what they refuse and commit, or ask the owner.` };
     }
     if (after.tree !== want || !parseStamps(after.msg).length) {
       restore();
-      return { ok: false, backup: kept, why: `${sha.slice(0, 8)} was re-committed but ${after.tree !== want ? 'its files differ' : `the hooks gave it no stamp (${out.split('\n').filter((l) => /commit-msg/.test(l)).pop() || 'see the commit-msg output'})`}; the lane is back where it was` };
+      return { ...baseInfo, ok: false, backup: kept, why: `${sha.slice(0, 8)} was re-committed but ${after.tree !== want ? 'its files differ' : `the hooks gave it no stamp (${out.split('\n').filter((l) => /commit-msg/.test(l)).pop() || 'see the commit-msg output'})`}; the lane is back where it was` };
     }
     n += 1;
   }
-  if (treeOf('HEAD') !== treeOf(head)) { restore(); return { ok: false, backup: kept, why: 'the re-committed lane\'s files differ from before; the lane is back where it was' }; }
+  if (treeOf('HEAD') !== treeOf(head)) { restore(); return { ...baseInfo, ok: false, backup: kept, why: 'the re-committed lane\'s files differ from before; the lane is back where it was' }; }
   const check = await checkHookStamps({ env: judgeEnv, range: { base, head: g(['rev-parse', 'HEAD']).stdout.trim() } });
-  if (check.open.length) { restore(); return { ok: false, backup: kept, why: `after re-committing, ${check.open.length} commit(s) still have no valid stamp (${check.open[0].why}); the lane is back where it was` }; }
+  if (check.open.length) { restore(); return { ...baseInfo, ok: false, backup: kept, why: `after re-committing, ${check.open.length} commit(s) still have no valid stamp (${check.open[0].why}); the lane is back where it was` }; }
   if (auto) g(['branch', '-D', backup]);
-  return { ok: true, replayed: n, backup: kept, head: g(['rev-parse', 'HEAD']).stdout.trim(), from: head, why: `${n} commit(s) re-committed through the hooks${auto ? '' : `; the old head is kept as ${backup}`}` };
+  return { ...baseInfo, ok: true, replayed: n, backup: kept, head: g(['rev-parse', 'HEAD']).stdout.trim(), from: head, why: `${n} commit(s) re-committed through the hooks${auto ? '' : `; the old head is kept as ${backup}`}` };
 }
 
 /** How to fix it, in commands that work in cmd, PowerShell and bash. */
@@ -765,6 +770,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
     if (r.off) { console.log(`[hooks] ${r.why}`); process.exit(0); }
     const list = r.open.map((o) => `  ${o.sha.slice(0, 8)} ${o.subject} — ${o.why}`);
+    // 2.60.1 (B-32): which base was judged from, the same line restamp prints.
+    if (r.baseSha) (r.ok ? console.log : console.error)(`[hooks] base ${r.base} ${String(r.baseSha).slice(0, 8)}`);
     if (!r.ok) {
       console.error(`[hooks] FAIL ${r.why}:`);
       console.error(list.join('\n'));
@@ -789,6 +796,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     let r;
     try { r = await restamp({ auto, all: process.argv.includes('--all'), base: flag('--base'), was }); } catch (e) { r = { ok: false, why: e.message }; }
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
+    if (r.baseSha) (r.ok ? console.log : console.error)(`[restamp] base ${r.baseRef} ${String(r.baseSha).slice(0, 8)}`);
     if (!r.ok) { console.error(`[restamp] FAIL ${r.why}${r.backup ? ` (old head kept as ${r.backup})` : ''}`); process.exit(1); }
     console.log(`[restamp] ${r.replayed ? 'PASS' : 'nothing to do'}: ${r.why}`);
     process.exit(0);

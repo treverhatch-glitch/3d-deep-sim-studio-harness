@@ -81,25 +81,64 @@ export function ownerPublicKey(base = null) {
 }
 
 /**
+ * 2.60.1 (B-30): the studio's branch when this checkout is a lane copy: STUDIO_MAIN_ROOT's branch (as before), else the
+ * main checkout's branch found from the copy itself (a git worktree at <main>/.lanes/<x> of the same repository, as
+ * hook-stamp.mjs laneOf finds it; not imported from there: hook-stamp.mjs imports this file while its own top level
+ * still runs), so a sub-agent started without STUDIO_MAIN_ROOT judges against the same local branch. Null elsewhere.
+ */
+function studioBranchOfLane(env = process.env) {
+  if (env.STUDIO_MAIN_ROOT) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) return b; }
+  try {
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
+    const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8', env: clean }).stdout.trim();
+    const real = (p) => { try { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; } catch { return path.resolve(p); } };
+    const gd = g(['rev-parse', '--absolute-git-dir'], ROOT);
+    const cd = g(['rev-parse', '--git-common-dir'], ROOT);
+    if (!gd || !cd || real(gd) === real(path.resolve(ROOT, cd))) return null; // the main checkout itself
+    const m = String(ROOT).replace(/\\/g, '/').match(/^(.*)\/\.lanes\/[^/]+\/?$/);
+    if (!m) return null;
+    const main = path.resolve(m[1]);
+    const mc = g(['rev-parse', '--git-common-dir'], main);
+    if (!mc || real(path.resolve(main, mc)) !== real(path.resolve(ROOT, cd))) return null;
+    return g(['symbolic-ref', '-q', '--short', 'HEAD'], main) || null;
+  } catch { return null; }
+}
+
+/**
  * Which branch to compare with: STUDIO_PROTECT_BASE, the PR's base in CI, the lane's studio branch, else origin/main.
  * PU-20: a base at HEAD itself (nothing committed since, or just pushed) is still used, so uncommitted edits are
  * judged; with no other branch at all (no remote, on the studio's own branch) the base is the last commit that
  * set the owner key, and changes since then are judged by the approvals' recorded hashes ({ byHash: true }).
+ *
+ * 2.60.1 (B-30, B-32): this is THE base for every check that judges "since the base": the protected and weakened-tests
+ * gates, the hooks gate and `npm run hooks -- restamp` (hook-stamp.mjs changeBase), and task done (which runs those).
+ * Restamp used the lane's local main while the hooks check took a stale origin/main, so restamp said "nothing to do"
+ * while the check flagged main's own commits. Now:
+ *   - in a lane copy (STUDIO_MAIN_ROOT, or a worktree at <main>/.lanes/<x>: hook-stamp.mjs laneOf), the main
+ *     checkout's own branch, local, even when the lane is at its tip (a stale origin/main never wins there);
+ *   - elsewhere, local main before origin/main when origin/main is an ancestor of it (main is ahead: origin is only
+ *     stale), unless HEAD is on main itself (there origin/main still names what isn't pushed yet).
+ * Which commits count as stamped is unchanged; only the base is.
  */
 export function resolveBase(env = process.env) {
   const tries = [];
+  const decisive = new Set([env.STUDIO_PROTECT_BASE].filter(Boolean));
   if (env.STUDIO_PROTECT_BASE) tries.push(env.STUDIO_PROTECT_BASE);
   if (env.GITHUB_BASE_REF) tries.push(`origin/${env.GITHUB_BASE_REF}`);
-  if (env.STUDIO_MAIN_ROOT) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) tries.push(b); }
-  tries.push('origin/main', 'main');
+  const laneBranch = studioBranchOfLane(env);
+  if (laneBranch) { tries.push(laneBranch); decisive.add(laneBranch); }
+  const own = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
+  const sha = (ref) => git(['rev-parse', '-q', '--verify', `${ref}^{commit}`]).stdout.trim();
+  const localFirst = own !== 'main' && /^[0-9a-f]{40}$/.test(sha('main')) && /^[0-9a-f]{40}$/.test(sha('origin/main'))
+    && git(['merge-base', '--is-ancestor', 'origin/main', 'main']).status === 0;
+  tries.push(...(localFirst ? ['main', 'origin/main'] : ['origin/main', 'main']));
   const head = git(['rev-parse', 'HEAD']).stdout.trim();
   if (!/^[0-9a-f]{40}$/.test(head)) return null;
-  const own = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
   let atHead = null;
   for (const t of tries) {
     const mb = git(['merge-base', 'HEAD', t]).stdout.trim();
     if (!/^[0-9a-f]{40}$/.test(mb)) continue;
-    if (mb !== head || t === env.STUDIO_PROTECT_BASE) return { ref: t, base: mb };
+    if (mb !== head || decisive.has(t)) return { ref: t, base: mb };
     if (!atHead && t !== own) atHead = { ref: t, base: mb };
   }
   if (atHead) return atHead;
