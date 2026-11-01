@@ -32,6 +32,7 @@ import { reachMode, unreached } from './reachability.mjs';
 import { judgeRed, readBaseline } from './baseline.mjs';
 import { inLaneCopy, mainRoot } from './worktree.mjs';
 import { isEolOnlyLine } from './eol-only.mjs';
+import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -365,12 +366,18 @@ function matchAnonymous(x, was, used, nowText, beforeText) {
  * task. Null when the start commit isn't known (a task started before 2.29). 2.58.0: compared with sizeBase
  * (the merge-base with the studio's main branch once the task took main in), not always the start commit.
  */
-export function sizeGrowth(taskId, files) {
+export function sizeGrowth(taskId, files, info = null) {
   const base = sizeBase(taskId);
   if (!base) return null;
   const limits = LIMITS();
   const out = [];
+  // 2.60.0: the game's "sizeRule" (harness/size-rule.mjs), as committed on the studio's main branch, else at the base.
+  const ruleRef = studioMainBranches().find((b) => git('rev-parse', '--verify', '--quiet', `${b}^{commit}`)) || base;
+  const cache = new Map();
+  const ignored = new Set();
   for (const f of files.filter((x) => isGameCode(x) && /\.(m?js|cjs|jsx|tsx?|gd)$/i.test(x) && fs.existsSync(abs(x)))) {
+    const rule = sizeRuleFor(f, ruleRef, limits, cache);
+    for (const w of rule.ignored) ignored.add(w);
     let before = null;
     const r = spawnSync('git', ['show', `${base}:${f}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     if (r.status === 0) before = r.stdout;
@@ -384,11 +391,36 @@ export function sizeGrowth(taskId, files) {
       continue;
     }
     const used = new Set();
+    let free = null;
     for (const x of now) {
       const old = x.key ? matchAnonymous(x, was, used, fs.readFileSync(abs(f), 'utf8'), before) : was.find((y) => y.kind === x.kind && y.name === x.name && y.unit === x.unit);
+      if (x.kind === 'file' && (rule.exempt || rule.importLinesFree)) {
+        // 2.60.0: an exempt file has a hard cap instead of the no-growth rule; import-only lines added don't count.
+        const text = fs.readFileSync(abs(f), 'utf8');
+        const lines = text.split('\n').length;
+        const kb = Buffer.byteLength(text) / 1024;
+        if (rule.exempt) {
+          const over = lines > rule.cap.lines ? `${lines} lines, over the hard cap of ${rule.cap.lines}` : kb > rule.cap.kb ? `${Math.round(kb)} KB, over the hard cap of ${rule.cap.kb} KB` : null;
+          const wasLines = before === null ? 0 : before.split('\n').length;
+          if (over && (lines > wasLines || before === null)) out.push(`${f} is ${over} for a file exempt from the no-growth rule (${rule.source} "sizeRule"): split it (one module per entry, studio/rules/lanes.md)`);
+          else if (info) info.push(`${f} is exempt from the no-growth rule (${rule.source}): ${lines} of at most ${rule.cap.lines} lines`);
+          continue;
+        }
+        if (free === null) free = freeImportLines(base, f);
+        if (free.lines || free.bytes) {
+          const size = x.unit === 'lines' ? x.size - free.lines : Math.round((Buffer.byteLength(text) - free.bytes) / 1024);
+          if (size <= x.limit || (old && size <= old.size)) {
+            if (info) info.push(`${f}: ${free.lines} added import line(s) not counted (${rule.source} "sizeRule": importLinesFree)`);
+            continue;
+          }
+          if (!old || size > old.size) out.push(`${f} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}, ${size} without the ${free.lines} added import line(s) ${rule.source} lets through`);
+          continue;
+        }
+      }
       if (!old || x.size > old.size) out.push(`${f}${x.kind === 'function' ? ` ${x.key ? `${x.name.replace(/\)$/, '')}: ${x.key})` : `${x.name}()`}` : ''} is ${x.size} ${x.unit}${old ? ` (was ${old.size})` : ''}, over the limit of ${x.limit}`);
     }
   }
+  if (out.length && ignored.size) out.push(...[...ignored].map((w) => `note: ${w}`));
   return out;
 }
 
@@ -590,10 +622,11 @@ export function checkDone(task, since = startedAt(task.id)) {
     const why = gatesAfter(Math.max(since, ch.lastAt), relevant, task.id, ch);
     check('Full verify green after the last change', !why, why);
     if (!docsOnly) {
-      const grew = sizeGrowth(task.id, ch.files);
+      const sizeInfo = [];
+      const grew = sizeGrowth(task.id, ch.files, sizeInfo);
       // 2.58.3 (crew P-034): every item, not the first 3 (fixing them one by one kept turning up the next ones); past
-      // 10, the first 10 and the full list in .studio/size-growth/<task>.txt.
-      if (grew !== null) check('No function or file grown past the size limit', !grew.length, `${sizeList(task.id, grew)}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
+      // 10, the first 10 and the full list in .studio/size-growth/<task>.txt. 2.60.0: what the game's "sizeRule" let through, in the label.
+      if (grew !== null) check(`No function or file grown past the size limit${sizeInfo.length && !grew.length ? ` (${sizeInfo.slice(0, 3).join('; ')})` : ''}`, !grew.length, `${sizeList(task.id, grew)}. Split it first (move a part into its own function or file), or ask the Producer for a split task (npm run task -- add "Split …")`);
     }
   };
 
