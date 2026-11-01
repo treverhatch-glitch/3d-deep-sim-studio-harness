@@ -97,6 +97,7 @@
     "engine:sim": "node harness/unity.mjs sim",
     "logs": "node harness/logs.mjs",
     "metrics": "node harness/metrics.mjs",
+    "autonomy": "node harness/autonomy.mjs",
     "vfx": "node harness/vfx.mjs",
     "public-guard": "node harness/public-guard.mjs",
     "engine:build": "node harness/unity.mjs build",
