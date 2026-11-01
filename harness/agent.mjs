@@ -393,7 +393,17 @@ export function tokensFrom(log) {
       codex.out += u.output_tokens || 0;
     } else if (o.usage && (o.usage.input_tokens != null || o.usage.prompt_tokens != null)) {
       // Another tool's (or a script's) single usage report: the last one counts.
-      plain = { in: (o.usage.input_tokens ?? o.usage.prompt_tokens) || 0, cacheRead: o.usage.cache_read_input_tokens || o.usage.cached_input_tokens || 0, out: (o.usage.output_tokens ?? o.usage.completion_tokens) || 0 };
+      // 2.65.2: in the OpenAI shapes the cached tokens are part of prompt_tokens / input_tokens
+      // (prompt_tokens_details.cached_tokens, input_tokens_details.cached_tokens, cached_input_tokens), so they come
+      // off the input, as the Codex path does; before, they were counted as fresh input (and cached_input_tokens twice).
+      // In Anthropic's shape input_tokens excludes cache reads, and cache writes are added as the Claude path adds them.
+      const u = o.usage;
+      if (u.cache_read_input_tokens != null || u.cache_creation_input_tokens != null) {
+        plain = { in: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), cacheRead: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 };
+      } else {
+        const cached = Number(u.cached_input_tokens ?? u.input_tokens_details?.cached_tokens ?? u.prompt_tokens_details?.cached_tokens) || 0;
+        plain = { in: Math.max(0, ((u.input_tokens ?? u.prompt_tokens) || 0) - cached), cacheRead: cached, out: (u.output_tokens ?? u.completion_tokens) || 0 };
+      }
     }
   }
   const r = claude || (codex.seen ? { in: codex.in, cacheRead: codex.cached, out: codex.out, turns: codex.turns } : plain);
