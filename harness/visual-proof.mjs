@@ -11,7 +11,8 @@
  *
  * The check fails when a capture is missing, a frame is blank (almost no luminance variation, or almost
  * fully transparent), or a before/after pair is near-identical (mean luminance change below
- * STUDIO_VISUAL_DIFF_MIN, 0.01 = 1%). The result is written as the `visual` part of the task's verdict
+ * STUDIO_VISUAL_DIFF_MIN, 0.01 = 1%; 2.65.0: or STUDIO_VISUAL_NOISE_K times the camera's measured noise, see
+ * visualLimits). The result is written as the `visual` part of the task's verdict
  * (harness/verdict-split.mjs).
  *
  * Godot capture (a real frame, not an editor check): import headless, then run the main scene with a
@@ -41,11 +42,29 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { gameCapture } from './visual-capture.mjs';
 
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
+/**
+ * 2.65.0: the noise baseline. Two captures of unchanged code differed by 0.58-0.68% (the crew's web game), against the
+ * 1% "near-identical" line: a small real change might not clear the noise. So "before" is captured twice per camera
+ * (before/ and before-noise/), and a camera's change must reach max(diffMin, noiseK x its measured noise)
+ * (STUDIO_VISUAL_NOISE_K, 2). That bar is capped (STUDIO_VISUAL_NOISE_CAP, 0.05): a camera whose bar would pass the
+ * cap is too noisy to judge, an error naming it, never a pass. A camera with no second before capture is judged
+ * against diffMin as before (and the check says no noise was measured).
+ */
 export const visualLimits = (env = process.env) => ({
   diffMin: num(env.STUDIO_VISUAL_DIFF_MIN, 0.01),
   blankStd: num(env.STUDIO_VISUAL_BLANK_STD, 0.02),
   minOpaque: num(env.STUDIO_VISUAL_MIN_OPAQUE, 0.5),
+  noiseK: Math.max(1, num(env.STUDIO_VISUAL_NOISE_K, 2)),
+  noiseCap: Math.min(0.5, Math.max(0.001, num(env.STUDIO_VISUAL_NOISE_CAP, 0.05))),
 });
+/** The second "before" capture, for the noise baseline. */
+export const NOISE_SIDE = 'before-noise';
+/** The change a camera must show: { need, noise, tooNoisy }. noise null: not measured. */
+export function noiseBar(noise, limits = visualLimits()) {
+  if (noise === null || noise === undefined || !Number.isFinite(noise)) return { need: limits.diffMin, noise: null, tooNoisy: false };
+  const need = Math.max(limits.diffMin, limits.noiseK * noise);
+  return { need: +need.toFixed(5), noise, tooNoisy: need > limits.noiseCap };
+}
 
 export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'visual');
 
@@ -112,14 +131,39 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
         const B = load(path.join(dir, 'before', f));
         row.before = imageStats(B, limits);
         row.diff = imageDiff(B, A);
-        if (row.diff < limits.diffMin) problems.push(`${cam}: before and after are near-identical (change ${(row.diff * 100).toFixed(2)}% < ${(limits.diffMin * 100).toFixed(2)}%)`);
+        // 2.65.0: the camera's own noise (two captures of the same code), when a second before capture exists.
+        const nf = path.join(dir, NOISE_SIDE, f);
+        const bar = noiseBar(fs.existsSync(nf) ? imageDiff(B, load(nf)) : null, limits);
+        row.noise = bar.noise;
+        row.need = bar.need;
+        const pct = (x) => `${(x * 100).toFixed(2)}%`;
+        const barWords = bar.noise === null ? `${pct(bar.need)}; no noise measured: no ${NOISE_SIDE} capture` : `${pct(bar.need)}: ${bar.need > limits.diffMin ? `${limits.noiseK} x its noise ${pct(bar.noise)}` : `the minimum; its noise is ${pct(bar.noise)}`}`;
+        row.bar = barWords;
+        if (bar.tooNoisy) { row.tooNoisy = true; problems.push(`${cam}: the scene is too noisy to judge: two captures of the same code differ by ${pct(bar.noise)}, so a change would have to reach ${pct(bar.need)}, over the cap ${pct(limits.noiseCap)} (STUDIO_VISUAL_NOISE_CAP); make the capture steady (fixed seed, time and animation) and capture before again`); }
+        else if (row.diff < bar.need) problems.push(`${cam}: before and after are near-identical (change ${pct(row.diff)} < ${barWords})`);
       }
     } catch (e) {
       problems.push(`${cam}: unreadable capture (${e.message})`);
     }
     cameras.push(row);
   }
-  return { ok: problems.length === 0, cameras, problems, why: problems.join('; ') };
+  const noise = cameras.filter((c) => c.noise !== undefined).map((c) => `${c.camera}: change ${c.diff === undefined ? 'n/a' : `${(c.diff * 100).toFixed(2)}%`}, needs ${c.bar}`);
+  return { ok: problems.length === 0, cameras, problems, why: problems.join('; '), noise };
+}
+
+/**
+ * 2.65.0: capture "before" for the noise baseline: the capture into before/, then the same again into before-noise/.
+ * capture(outDir) -> { ok, files, why, log }. The second run failing leaves no noise folder (the check then says no
+ * noise was measured), never a failed before.
+ */
+export function captureBeforeTwice(capture, dir) {
+  const first = capture(path.join(dir, 'before'));
+  const nd = path.join(dir, NOISE_SIDE);
+  try { fs.rmSync(nd, { recursive: true, force: true }); } catch {}
+  if (!first.ok || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_VISUAL_NOISE || ''))) return { ...first, noise: false };
+  const second = capture(nd);
+  if (!second.ok) { try { fs.rmSync(nd, { recursive: true, force: true }); } catch {} }
+  return { ...first, noise: second.ok, noiseWhy: second.ok ? '' : second.why };
 }
 
 /** The GDScript that captures named cameras; written fresh each run (harness-owned, not the game's). */
@@ -236,7 +280,8 @@ export function captureWithCommand(template, outDir, { cams = [], task = '', pha
 /** Record the visual result in the task's split verdict. */
 export async function recordVisual(task, res) {
   const { setPart } = await import('./verdict-split.mjs');
-  return setPart(task, 'visual', { ok: res.ok, why: res.why || '', evidence: res.cameras?.map((c) => `${c.camera}: change ${c.diff ?? 'n/a'}`) || [] });
+  // 2.65.0: each camera's noise and the bar it had to clear go into the verdict (the proof JSON) too.
+  return setPart(task, 'visual', { ok: res.ok, why: res.why || (res.noise?.length ? `noise baseline: ${res.noise.join('; ')}` : ''), evidence: res.cameras?.map((c) => `${c.camera}: change ${c.diff ?? 'n/a'}${c.noise !== undefined ? `, noise ${c.noise ?? 'not measured'}, needs ${c.need}${c.tooNoisy ? ' (too noisy to judge)' : ''}` : ''}`) || [] });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
@@ -246,7 +291,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   if (cmd === 'stats' && x) { console.log(JSON.stringify(imageStats(load(x)))); process.exit(0); }
   if (cmd === 'diff' && x && y) { console.log(JSON.stringify({ diff: imageDiff(load(x), load(y)) })); process.exit(0); }
   if (cmd === 'capture' && x && /^(before|after)$/.test(y || '') && opt('--godot')) {
-    const res = captureGodot(opt('--godot'), path.join(proofDir(x), y), { cams: String(opt('--cams', '')).split(',').filter(Boolean), frames: num(opt('--frames'), 30) });
+    const cap = (d) => captureGodot(opt('--godot'), d, { cams: String(opt('--cams', '')).split(',').filter(Boolean), frames: num(opt('--frames'), 30) });
+    const res = y === 'before' ? captureBeforeTwice(cap, proofDir(x)) : cap(path.join(proofDir(x), y));
+    if (y === 'before' && res.ok) console.log(`[visual] noise baseline: ${res.noise ? `captured before twice (${NOISE_SIDE}/)` : `no second capture${res.noiseWhy ? ` (${res.noiseWhy})` : ''}; the check uses the plain ${(visualLimits().diffMin * 100).toFixed(2)}%`}`);
     console.log(`[visual] ${res.ok ? 'captured' : 'FAIL'} ${y} for ${x}: ${res.files.join(', ') || 'nothing'}${res.why ? ` (${res.why})` : ''}`);
     if (!res.ok && res.log) console.log(res.log.split('\n').slice(-15).join('\n'));
     process.exit(res.ok ? 0 : 1);
@@ -257,7 +304,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
       console.log(`[visual] FAIL ${y} for ${x}: no capture command. ${g.godot ? `This is a Godot project: add --godot ${g.root}.` : g.manifest ? `The owner adds "visual": { "capture": "..." } to ${g.manifest}.` : 'Pass --godot <project>, or set the game (studio/game.json) and its capture command.'}`);
       process.exit(1);
     }
-    const res = captureWithCommand(g.capture, path.join(proofDir(x), y), { cams: String(opt('--cams', '')).split(',').filter(Boolean), task: x, phase: y });
+    const cap = (d) => captureWithCommand(g.capture, d, { cams: String(opt('--cams', '')).split(',').filter(Boolean), task: x, phase: y });
+    const res = y === 'before' ? captureBeforeTwice(cap, proofDir(x)) : cap(path.join(proofDir(x), y));
+    if (y === 'before' && res.ok) console.log(`[visual] noise baseline: ${res.noise ? `captured before twice (${NOISE_SIDE}/)` : `no second capture${res.noiseWhy ? ` (${res.noiseWhy})` : ''}; the check uses the plain ${(visualLimits().diffMin * 100).toFixed(2)}%`}`);
     console.log(`[visual] ${res.ok ? 'captured' : 'FAIL'} ${y} for ${x}: ${res.files.join(', ') || 'nothing'}${res.why ? ` (${res.why})` : ''}`);
     if (!res.ok && res.log) console.log(res.log.split('\n').slice(-15).join('\n'));
     process.exit(res.ok ? 0 : 1);
@@ -267,7 +316,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     await recordVisual(x, res);
     emitEvent({ type: res.ok ? 'visual.pass' : 'visual.fail', agent: process.env.STUDIO_LOCK_OWNER || 'harness', task: x, msg: `${x} visual proof ${res.ok ? 'passed' : `failed: ${res.why}`}`.slice(0, 400) });
     if (a.includes('--json')) console.log(JSON.stringify(res));
-    else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}`);
+    else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}${res.ok && res.noise?.length ? ` (noise baseline: ${res.noise.join('; ')})` : ''}`);
     process.exit(res.ok ? 0 : 1);
   }
   console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after [--godot <project>] [--cams a,b] | check <TASK> | stats <png> | diff <a> <b>');

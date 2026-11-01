@@ -25,7 +25,7 @@ import { parseNextQueue } from './task.mjs';
 import { parseReview, readIdea } from './bible.mjs';
 import { failsBefore, regressionKind } from '../qa/fails-before.mjs';
 import { ownerType, ownerTypeWords } from './reclassify.mjs';
-import { renderDecision } from './verdict-split.mjs';
+import { renderDecision, readVerdict } from './verdict-split.mjs';
 import { modelFamily } from './families.mjs';
 import { proofStatus } from './proof.mjs';
 import { listLocks, coveringLock } from './lock.mjs';
@@ -839,6 +839,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     else if (d.why) console.log(`  visual proof: ${d.render ? 'needed' : 'not needed'} (${d.why})`);
     if (d.warn) console.log(`  WARN ${d.warn}`);
     if (d.ignored) console.log(`  note: ${d.ignored}`);
+    // 2.65.0: the visual result on file, with each camera's noise baseline (harness/visual-proof.mjs).
+    const vp = readVerdict(task.id)?.parts?.visual;
+    if (vp) console.log(`  visual result: ${vp.ok ? 'PASS' : 'FAIL'}${vp.why ? ` (${vp.why.slice(0, 300)})` : ''}${(vp.evidence || []).length ? ` [${vp.evidence.join('; ').slice(0, 300)}]` : ''}`);
   } catch { /* no verdict module */ }
   for (const c of res.checks) console.log(`  [${c.ok ? 'x' : ' '}] ${c.label}${c.ok ? '' : `: ${c.why}`}`);
   for (const n of res.notes || []) console.log(`  note: ${n}${/^studio\/contracts\//.test(n) ? '' : ' (STUDIO_REACHABILITY=fail makes this a failing check)'}`);
