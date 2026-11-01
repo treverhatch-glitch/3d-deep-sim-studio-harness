@@ -104,6 +104,14 @@ const gates = all.filter((g) => {
   return true;
 });
 
+// 2.60.0 (#5): a run that takes machine:heavy runs as the leader of a process group of its own (POSIX; a re-run of
+// this script that this one waits for), so `node harness/heavy.mjs stop` and a later take kill every gate it started
+// (npm, node, vitest workers), even after this process is gone. Windows: taskkill /T from the holder covers it.
+const isHeavyGate = (g) => g.heavy === true || (g.heavy !== false && ((g.id === 'game' && sg) || g.id === 'browser-play'));
+if ((!only && !isFastTier) || gates.some(isHeavyGate)) {
+  const code = await (await import('../harness/heavy.mjs')).heavyOwnGroup();
+  if (code !== null) process.exit(code);
+}
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
 console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); ${realCartridges.length ? `its cartridge${realCartridges.length === 1 ? '' : 's'} (${realCartridges.join(', ')}) get${realCartridges.length === 1 ? 's' : ''} the cartridge gates that check every cartridge, the rest are skipped` : 'the cartridge gates are skipped'}` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
@@ -157,8 +165,7 @@ if (fullRun) claimFullVerify();
 // run with a heavy gate in it (the studio game's checks, browser-play, or a gate marked "heavy": true). It waits,
 // naming the holder, and fails clearly past STUDIO_HEAVY_WAIT_MIN; its gates (children) don't wait for it again.
 {
-  const isHeavy = (g) => g.heavy === true || (g.heavy !== false && ((g.id === 'game' && sg) || g.id === 'browser-play'));
-  if (fullRun || gates.some(isHeavy)) {
+  if (fullRun || gates.some(isHeavyGate)) {
     const { acquireHeavy, heavyRoot } = await import('../harness/heavy.mjs');
     try {
       const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null });

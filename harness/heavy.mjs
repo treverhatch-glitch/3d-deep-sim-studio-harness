@@ -23,15 +23,33 @@
  *
  *   node harness/heavy.mjs status                       who holds machine:heavy now (JSON with --json)
  *   node harness/heavy.mjs run --label <what> -- <cmd>  run a command under the lock; exits with its code
+ *   node harness/heavy.mjs stop [--label <x> | --all] --by <name>
+ *                                                       kill a holder's whole process tree and free its slot
+ *
+ * 2.60.0 (#5): killing a bash landing loop on Windows left `npm run verify` and its vitest workers running (Git Bash
+ * can't kill a process group there; the crew used taskkill /T /F by hand). So a holder also records its process tree
+ * ("tree": its root pid and start, the POSIX process groups it runs its work in, and how it is killed: taskkill /T /F
+ * on Windows, the process group elsewhere). `stop` lists the processes once (harness/proc-identity.mjs
+ * listProcesses), kills the holder's tree (the root, its descendants, every process left in its groups), checks
+ * they are gone, frees the slot and records a heavy.stop event; it is refused in a worker session (harness/
+ * permission.mjs: a launched non-Producer/Director role, or a worker agent's name). A holder whose root is gone
+ * frees its slot on the next take as before, and processes its tree left running (orphans: a killed parent's
+ * children) are found and killed first (POSIX: still in its group; Windows: they still name the dead parent's pid
+ * and started after it), so the next heavy job doesn't run on top of them (STUDIO_HEAVY_REAP=off only names them).
+ * `heavy.mjs run` runs its command in a process group of its own (POSIX) and records it; a full verify
+ * (scripts/run-gates.mjs) re-runs itself as the leader of a new group (heavyOwnGroup), so a stop gets its gates.
+ * A live holder past STUDIO_HEAVY_STALE_MIN loses its slot as before but is never killed by a take.
  *
  * Test hook: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one).
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { selfIdentity, pidAlive } from './proc-identity.mjs';
+import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, sameProcess } from './proc-identity.mjs';
+import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
+import { emitEvent } from './event.mjs';
 import { landingWaiters } from './merge-lane.mjs';
 
 const PREFIX = 'machine-heavy';
@@ -75,6 +93,240 @@ export function heavyHolders(root, { env = process.env } = {}) {
   return out;
 }
 
+// ---- 2.60.0 (#5): a holder's process tree, and killing it ----
+
+const TREE_TOL_MS = 3000;
+const off = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
+
+/** This process as a tree root: its pid, its POSIX process group when it leads one, and how its tree is killed. */
+export function selfTree({ platform = process.platform, group = undefined } = {}) {
+  const g = group !== undefined ? group : platform === 'win32' ? null : processGroup(process.pid);
+  const own = g === process.pid ? g : null;
+  return { root: process.pid, groups: own ? [own] : [], kill: platform === 'win32' ? 'taskkill /T /F <root>' : own ? 'the process group' : 'the root and its descendants' };
+}
+
+/** The holder's root process has ended (or its number is another program's now, or it is a zombie). */
+export function holderGone(h) {
+  return !h?.pid || !pidAlive(h.pid, h.identity) || zombie(h.pid);
+}
+
+/**
+ * Which processes in `procs` (listProcesses) belong to holder `h`'s tree: { members: [pid], top: [pid] (members whose
+ * parent isn't one: what taskkill /T is pointed at), groups: [pgid] (POSIX groups with members left), rootLive }.
+ *  - root alive and the same process (start identity): it and every descendant (a child started before its parent
+ *    can't be one: a reused parent number);
+ *  - root gone, or its number reused: its orphans. Windows keeps a child's ParentProcessId after the parent ends, so
+ *    those still naming the root's pid that started after the root (and before a reusing process) and their
+ *    descendants; POSIX re-parents orphans, so there:
+ *  - the recorded process groups: every live member that started after the root, and its descendants (a group's
+ *    number isn't reused while it has members; a group whose leader number is now another program is skipped).
+ * Never this process or its ancestors (a stop run from inside the tree).
+ */
+export function holderTree(h, procs, { self = process.pid } = {}) {
+  const list = (procs || []).filter((p) => p && Number.isInteger(Number(p.pid)));
+  const byPid = new Map(list.map((p) => [Number(p.pid), p]));
+  const kids = new Map();
+  for (const p of list) {
+    const k = Number(p.ppid);
+    if (!kids.has(k)) kids.set(k, []);
+    kids.get(k).push(p);
+  }
+  const root = Number(h?.tree?.root || h?.pid);
+  const recId = h?.tree?.root && Number(h.tree.root) !== Number(h.pid) ? h.tree.rootIdentity : h?.identity;
+  const cur = byPid.get(root);
+  const sameAs = cur && !cur.zombie ? sameProcess(recId, cur) : false;
+  const rootLive = Boolean(cur && !cur.zombie && sameAs !== false);
+  const rootStart = Number(recId?.start) || 0;
+  const earliest = rootStart ? rootStart - (recId?.self ? 10000 : TREE_TOL_MS) : 0;
+  const reusedAt = cur && !rootLive ? Number(cur.start) || 0 : 0;
+  const members = new Set();
+  const startOf = (p) => Number(p.start) || 0;
+  const walk = (pid, parentStart) => {
+    for (const c of kids.get(pid) || []) {
+      const cp = Number(c.pid);
+      if (members.has(cp) || c.zombie || cp === pid) continue;
+      if (parentStart && startOf(c) && startOf(c) < parentStart - TREE_TOL_MS) continue;
+      members.add(cp);
+      walk(cp, startOf(c) || parentStart);
+    }
+  };
+  if (rootLive) {
+    members.add(root);
+    walk(root, rootStart);
+  } else {
+    for (const c of kids.get(root) || []) {
+      const st = startOf(c);
+      if (c.zombie || (st && earliest && st < earliest) || (st && reusedAt && st >= reusedAt)) continue;
+      members.add(Number(c.pid));
+      walk(Number(c.pid), st);
+    }
+  }
+  const groups = [];
+  for (const g of [...new Set((h?.tree?.groups || []).map(Number).filter((x) => Number.isInteger(x) && x > 0))]) {
+    const leader = byPid.get(g);
+    if (g === root && cur && !rootLive) continue; // the root's number is another program's now
+    const leaderRec = g === root ? recId : h?.tree?.groupIds?.[g];
+    if (g !== root && leader && leaderRec && sameProcess(leaderRec, leader) === false) continue;
+    const inG = list.filter((p) => Number(p.pgid) === g && !p.zombie && !(earliest && startOf(p) && startOf(p) < earliest));
+    if (!inG.length) continue;
+    groups.push(g);
+    for (const p of inG) {
+      members.add(Number(p.pid));
+      walk(Number(p.pid), startOf(p));
+    }
+  }
+  // Never this process or the processes it runs under.
+  for (let p = self, n = 0; p && n < 64; n += 1) {
+    members.delete(p);
+    const rec = byPid.get(p);
+    if (!rec || Number(rec.ppid) === p) break;
+    p = Number(rec.ppid);
+  }
+  const selfGroup = byPid.get(self)?.pgid;
+  const top = [...members].filter((pid) => !members.has(Number(byPid.get(pid)?.ppid)));
+  return { members: [...members].sort((a, b) => a - b), top, groups: groups.filter((g) => Number(g) !== Number(selfGroup)), rootLive };
+}
+
+const safeEvent = (e) => { try { emitEvent(e); } catch {} };
+const defaultSignal = (pid, sig) => { try { process.kill(pid, sig); return true; } catch { return false; } };
+const defaultExec = (cmd, args) => spawnSync(cmd, args, { stdio: 'ignore', windowsHide: true, timeout: 30000 });
+
+/**
+ * Kill holder `h`'s tree and check it is gone: { members, killed, survivors, commands, rootLive }. Windows: taskkill
+ * /T /F for each top member (the root while it lives, else each orphan). POSIX: SIGTERM to each group and each other
+ * member, then after STUDIO_HEAVY_STOP_GRACE_MS (3000) SIGKILL to what is left. Injectable for tests: listProcs
+ * (listProcesses), exec(cmd, args) (taskkill), signal(pid, sig) (process.kill), platform.
+ */
+export function killHolderTree(h, { listProcs = listProcesses, exec = defaultExec, signal = defaultSignal, platform = process.platform, graceMs = num(process.env.STUDIO_HEAVY_STOP_GRACE_MS, 3000), self = process.pid } = {}) {
+  const t = holderTree(h, listProcs(), { self });
+  const commands = [];
+  if (!t.members.length) return { ...t, killed: [], survivors: [], commands };
+  // The same process as before the kill (not a new one given its number): same /proc start, else start within 2 s.
+  const before = new Map();
+  const same = (a, b) => (a.proc && b.proc ? a.proc === b.proc : !a.start || !b.start || Math.abs(Number(a.start) - Number(b.start)) < 2000);
+  const alive = () => {
+    let now;
+    try { now = listProcs(); } catch { return t.members; }
+    const m = new Map(now.map((p) => [Number(p.pid), p]));
+    return t.members.filter((pid) => { const p = m.get(pid); return p && !p.zombie && (!before.has(pid) || same(before.get(pid), p)); });
+  };
+  try { for (const p of listProcs()) if (t.members.includes(Number(p.pid))) before.set(Number(p.pid), p); } catch {}
+  if (platform === 'win32') {
+    for (const pid of t.top) { commands.push(['taskkill', '/T', '/F', '/PID', String(pid)]); exec('taskkill', ['/T', '/F', '/PID', String(pid)]); }
+  } else {
+    for (const g of t.groups) { commands.push(['kill', '-TERM', `-${g}`]); signal(-g, 'SIGTERM'); }
+    for (const pid of t.members) { commands.push(['kill', '-TERM', String(pid)]); signal(pid, 'SIGTERM'); }
+  }
+  let left = alive();
+  for (const t0 = Date.now(); left.length && Date.now() - t0 < graceMs; left = alive()) sleep(100);
+  if (left.length) {
+    if (platform === 'win32') for (const pid of left) { commands.push(['taskkill', '/T', '/F', '/PID', String(pid)]); exec('taskkill', ['/T', '/F', '/PID', String(pid)]); }
+    else {
+      for (const g of t.groups) { commands.push(['kill', '-KILL', `-${g}`]); signal(-g, 'SIGKILL'); }
+      for (const pid of left) { commands.push(['kill', '-KILL', String(pid)]); signal(pid, 'SIGKILL'); }
+    }
+    for (const t0 = Date.now(); left.length && Date.now() - t0 < 5000; left = alive()) sleep(100);
+  }
+  return { ...t, killed: t.members.filter((p) => !left.includes(p)), survivors: left, commands };
+}
+
+/** A gone holder's leftovers, at a take (acquireHeavy): killed (STUDIO_HEAVY_REAP=off: only named). Never throws. */
+function reapOrphans(h, { log = () => {}, env = process.env, ...opts } = {}) {
+  try {
+    if (off(env.STUDIO_HEAVY_REAP)) {
+      const t = holderTree(h, (opts.listProcs || listProcesses)());
+      if (t.members.length) log(`[heavy] ${describeHolder(h)} left ${t.members.length} process(es) running (pids ${t.members.join(', ')}); STUDIO_HEAVY_REAP=off: not stopped (node harness/heavy.mjs stop --all --by <name> stops them)`);
+      return null;
+    }
+    const r = killHolderTree(h, opts);
+    if (r.members.length) {
+      log(`[heavy] ${describeHolder(h)} left ${r.members.length} process(es) of its tree running (pids ${r.members.join(', ')}): stopped ${r.killed.length}${r.survivors.length ? `, still running: ${r.survivors.join(', ')}` : ''}`);
+      safeEvent({ type: 'heavy.reap', agent: env.STUDIO_LOCK_OWNER || 'heavy', status: r.survivors.length ? 'warn' : 'ok', msg: `machine:heavy: ${h.label || 'heavy work'} (pid ${h.pid}) was gone; ${r.killed.length} leftover process(es) of its tree stopped${r.survivors.length ? `, ${r.survivors.length} still running` : ''}`, meta: { label: h.label || null, pid: h.pid, killed: r.killed, survivors: r.survivors } });
+    }
+    return r;
+  } catch (err) {
+    log(`[heavy] couldn't check what ${describeHolder(h)} left running: ${String(err.message || err).slice(0, 120)}`);
+    return null;
+  }
+}
+
+/** Every machine:heavy slot record, live or not: [{ ...record, file, live }]. */
+export function heavyRecords(root, { env = process.env } = {}) {
+  const dir = heavyDir(root);
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  return names.filter((n) => SLOT_RE.test(n)).sort().map((n) => ({ h: readJson(path.join(dir, n)), n })).filter((x) => x.h?.pid).map(({ h, n }) => ({ ...h, file: n, live: holderLive(h, { staleMs: staleOf(env) }) }));
+}
+
+/** A worker session may not stop heavy work: why not, or '' (harness/permission.mjs's worker test). */
+export function stopRefusal(env = process.env) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (role && !DECIDER_ROLES.test(role)) return `a launched ${role} session can't stop heavy work; a person, a Producer or Director session, or an agent outside the harness can`;
+  if (owner && WORKER_NAME.test(owner)) return `${owner} is a worker agent; a person, a Producer or Director session, or an agent outside the harness can stop heavy work`;
+  return '';
+}
+
+/**
+ * `heavy.mjs stop`: kill each chosen holder's tree, free its slot once its root is gone, record heavy.stop.
+ * Returns { ok, code, lines, stopped: [{ label, pid, killed, survivors, freed }] }.
+ */
+export function stopHeavy(root, { label = null, all = false, by = '', env = process.env, ...opts } = {}) {
+  const lines = [];
+  const refused = stopRefusal(env);
+  if (refused) return { ok: false, code: 3, lines: [`[heavy] stop refused: ${refused}`], stopped: [] };
+  if (!String(by || '').trim()) return { ok: false, code: 2, lines: ['[heavy] stop: say who stops it: --by <name>'], stopped: [] };
+  let list;
+  try { list = opts.listProcs ? opts.listProcs() : listProcesses(); } catch (err) { return { ok: false, code: 1, lines: [`[heavy] stop: couldn't list the processes: ${String(err.message || err).slice(0, 120)}`], stopped: [] }; }
+  const recs = heavyRecords(root, { env }).map((r) => ({ r, t: holderTree(r, list, { self: opts.self || process.pid }) })).filter(({ r, t }) => r.live || t.members.length);
+  const want = label ? String(label).toLowerCase() : null;
+  let pick = want ? recs.filter(({ r }) => String(r.label || '').toLowerCase() === want) : recs;
+  if (want && !pick.length) pick = recs.filter(({ r }) => String(r.label || '').toLowerCase().includes(want));
+  const shown = (xs) => xs.map(({ r }) => `${describeHolder(r)}${r.live ? '' : ' (gone; its tree still runs)'}`).join('; ');
+  if (!pick.length) return { ok: false, code: 1, lines: [recs.length ? `[heavy] stop: no machine:heavy holder matches "${label}"; holding: ${shown(recs)}` : '[heavy] stop: machine:heavy is free; nothing to stop'], stopped: [] };
+  if (pick.length > 1 && !all) return { ok: false, code: 1, lines: [`[heavy] stop: ${pick.length} holders match (${shown(pick)}); name one with --label or stop them all with --all`], stopped: [] };
+  const stopped = [];
+  for (const { r } of pick) {
+    const k = killHolderTree(r, { ...opts, listProcs: opts.listProcs || (() => listProcesses()) });
+    let freed = false;
+    if (holderGone(r)) {
+      const f = path.join(heavyDir(root), r.file);
+      try { const cur = readJson(f); if (cur?.pid === r.pid && cur.at === r.at) fs.rmSync(f, { force: true }); freed = !fs.existsSync(f) || readJson(f)?.pid !== r.pid; } catch {}
+    }
+    stopped.push({ label: r.label || null, pid: r.pid, killed: k.killed, survivors: k.survivors, freed, commands: k.commands });
+    lines.push(`[heavy] stopped ${describeHolder(r)} for ${by}: ${k.killed.length} process(es) of its tree killed (${r.tree?.kill || 'its root and descendants'})${k.killed.length ? `: pids ${k.killed.join(', ')}` : ''}${k.survivors.length ? `; still running: ${k.survivors.join(', ')}` : ''}; ${freed ? 'its machine:heavy slot is free' : 'its slot is still held'}`);
+    safeEvent({ type: 'heavy.stop', agent: by, status: k.survivors.length ? 'warn' : 'ok', msg: `machine:heavy: ${by} stopped ${r.label || 'heavy work'} (pid ${r.pid}): ${k.killed.length} process(es) killed${k.survivors.length ? `, ${k.survivors.length} still running` : ''}${freed ? ', slot freed' : ''}`.slice(0, 400), meta: { by, recordedBy: env.STUDIO_LOCK_OWNER || null, label: r.label || null, pid: r.pid, owner: r.owner || null, killed: k.killed, survivors: k.survivors, freed } });
+  }
+  const bad = stopped.filter((x) => x.survivors.length || !x.freed);
+  return { ok: !bad.length, code: bad.length ? 1 : 0, lines, stopped };
+}
+
+/**
+ * POSIX: run this script again as the leader of a process group of its own and wait for it (its exit code), so
+ * every process it starts can be killed with its group, even after it is killed itself (a full verify: npm, node,
+ * vitest workers). null when that isn't needed: Windows (taskkill /T walks the tree, and orphans keep their parent's
+ * pid), already a group leader, inside a parent's machine:heavy hold, STUDIO_HEAVY_SLOTS=0, or
+ * STUDIO_HEAVY_OWN_GROUP=off. Signals this process gets (Ctrl+C, a SIGTERM) go on to the group.
+ */
+export async function heavyOwnGroup({ env = process.env, argv = process.argv.slice(1) } = {}) {
+  if (process.platform === 'win32' || !(heavySlots(env) > 0) || off(env.STUDIO_HEAVY_OWN_GROUP)) return null;
+  if (env.STUDIO_HEAVY_REEXEC && env.STUDIO_HEAVY_REEXEC === String(process.ppid)) return null;
+  if (heldByParent(heavyDir(await heavyRoot()), env)) return null;
+  const g = processGroup(process.pid);
+  if (g === null || g === process.pid) return null;
+  const child = spawn(process.execPath, [...process.execArgv, ...argv], { stdio: 'inherit', detached: true, env: { ...env, STUDIO_HEAVY_REEXEC: String(process.pid) } });
+  const fwd = (sig) => () => { try { process.kill(-child.pid, sig); } catch {} };
+  const sigs = ['SIGINT', 'SIGTERM', 'SIGHUP'].map((s) => [s, fwd(s)]);
+  for (const [s, f] of sigs) process.on(s, f);
+  return new Promise((resolve) => {
+    child.on('error', () => resolve(1));
+    child.on('exit', (code, sig) => {
+      for (const [s, f] of sigs) process.off(s, f);
+      resolve(code ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1));
+    });
+  });
+}
+
 /** STUDIO_HEAVY_HELD="<lock file>:<pid>": a parent of this process holds machine:heavy (and still does). */
 function heldByParent(dir, env) {
   const m = String(env.STUDIO_HEAVY_HELD || '').match(/^(machine-heavy-\d+\.lock):(\d+)$/);
@@ -90,7 +342,7 @@ function heldByParent(dir, env) {
  */
 export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null } = {}) {
   const n = heavySlots(env);
-  const none = { release: () => {}, held: null, waitedMs: 0 };
+  const none = { release: () => {}, update: () => false, held: null, waitedMs: 0 };
   if (!(n > 0)) return { ...none, skipped: true };
   const dir = heavyDir(root);
   fs.mkdirSync(dir, { recursive: true });
@@ -118,12 +370,14 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
           // Stale (dead holder, reused pid, too old) or unreadable for more than a moment: take it over.
           if (h || Date.now() - (fs.statSync(f, { throwIfNoEntry: false })?.mtimeMs || 0) > 5000) {
             if (h) log(`[heavy] ${describeHolder(h)} is gone: its machine:heavy slot is free again`);
+            // 2.60.0 (#5): what its tree left running (a killed parent's children) goes first.
+            if (h && holderGone(h)) reapOrphans(h, { log, env });
             try { fs.rmSync(f, { force: true }); } catch {}
           } else continue;
         }
         if (ahead.length) continue;
         try {
-          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
+          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
           mine = f;
         } catch (err) {
           if (err.code !== 'EEXIST') throw err;
@@ -156,7 +410,17 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
     try { if (readJson(mine)?.pid === process.pid) fs.rmSync(mine, { force: true }); } catch {}
     if (process.env.STUDIO_HEAVY_HELD === token) { if (prevEnv === undefined) delete process.env.STUDIO_HEAVY_HELD; else process.env.STUDIO_HEAVY_HELD = prevEnv; }
   };
-  return { release, held: path.basename(mine), waitedMs };
+  // 2.60.0 (#5): add to the record while held (heavy.mjs run adds its command's process group to the tree).
+  const update = (fn) => {
+    if (released) return false;
+    try {
+      const cur = readJson(mine);
+      if (cur?.pid !== process.pid) return false;
+      fs.writeFileSync(mine, JSON.stringify(fn(cur)));
+      return true;
+    } catch { return false; }
+  };
+  return { release, update, held: path.basename(mine), waitedMs };
 }
 
 /** Run fn under machine:heavy (a returned promise is waited for before the slot is freed). */
@@ -219,26 +483,48 @@ export function scaledTimeout(base, root, { env = process.env, ...rest } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const root = await heavyRoot();
+  const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   if (argv[0] === 'run') {
     const sep = argv.indexOf('--');
-    const label = argv.includes('--label') ? argv[argv.indexOf('--label') + 1] : 'heavy command';
+    const label = opt('--label') || 'heavy command';
     const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
-    let code = 1;
+    let lk;
     try {
-      withHeavy(root, label, () => {
-        // One command line, run by the shell as written (no glob of ours; quoting is the caller's).
-        const r = spawnSync(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: 'inherit' });
-        code = r.status ?? 1;
-      }, { log: (m) => console.error(m) });
+      lk = acquireHeavy(root, label, { log: (m) => console.error(m) });
     } catch (err) {
       if (err.code !== 'HEAVY_BUSY') throw err;
       console.error(err.message);
-      code = 3;
+      process.exit(3);
     }
+    // One command line, run by the shell as written (no glob of ours; quoting is the caller's). 2.60.0 (#5): in a
+    // process group of its own on POSIX (recorded in the holder's tree), so `stop` and a later take find what it
+    // started even after this process is killed; on Windows taskkill /T from this process covers it.
+    const posix = process.platform !== 'win32';
+    const child = spawn(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: 'inherit', windowsHide: true, detached: posix });
+    if (posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), groups: [...new Set([...(cur.tree?.groups || []), child.pid])], groupIds: { ...(cur.tree?.groupIds || {}), [child.pid]: spawnedIdentity(child.pid, 'sh') }, kill: 'the process groups' } }));
+    const fwd = (sig) => () => { try { if (posix) process.kill(-child.pid, sig); else child.kill(sig); } catch {} };
+    for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, fwd(s));
+    const code = await new Promise((resolve) => {
+      child.on('error', (e) => { console.error(`[heavy] could not run ${label}: ${e.message}`); resolve(1); });
+      child.on('exit', (c, sig) => resolve(c ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1)));
+    });
+    lk.release();
     process.exit(code);
   }
-  const holders = heavyHolders(root);
-  if (argv.includes('--json')) console.log(JSON.stringify({ slots: heavySlots(), holders }));
-  else console.log(holders.length ? `machine:heavy (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}): ${holders.map(describeHolder).join('; ')}` : `machine:heavy is free (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+  if (argv[0] === 'stop') {
+    const res = stopHeavy(root, { label: opt('--label'), all: argv.includes('--all'), by: opt('--by') || '' });
+    for (const l of res.lines) (res.ok ? console.log : console.error)(l);
+    process.exit(res.code);
+  } else {
+    const holders = heavyHolders(root);
+    // 2.60.0 (#5): a gone holder whose tree still runs (only then are the processes listed).
+    const left = [];
+    for (const r of heavyRecords(root).filter((x) => !x.live && holderGone(x))) {
+      try { const t = holderTree(r, listProcesses()); if (t.members.length) left.push({ ...r, orphans: t.members }); } catch {}
+    }
+    for (const r of left) console.error(`[heavy] ${describeHolder(r)} is gone but ${r.orphans.length} process(es) of its tree still run (pids ${r.orphans.join(', ')}): the next heavy take stops them, or node harness/heavy.mjs stop --all --by <name>`);
+    if (argv.includes('--json')) console.log(JSON.stringify({ slots: heavySlots(), holders, orphaned: left }));
+    else console.log(holders.length ? `machine:heavy (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+  }
 }
