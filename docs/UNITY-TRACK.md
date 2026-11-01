@@ -258,6 +258,8 @@ A Unity editor run takes 6-7 GB, so it shares the `machine:heavy` lock with full
 - An editor someone opened by hand is outside the lock. `node harness/heavy.mjs status` lists it as an implicit
   holder and game checks scale their timeouts for it; heavy jobs still start beside it, so close it before a long
   verify. `STUDIO_HEAVY_PROGRAMS` (default `Unity.exe,Unity`) names the programs counted this way.
+  A background service of one (Unity Hub's `Unity.exe ... serve`, alive for days) doesn't count: a command line
+  matching `STUDIO_HEAVY_IGNORE_ARGS` (a regex, default the word `serve`; `off`: none) is skipped (2.65.3, B-44).
 
 ## Settings
 

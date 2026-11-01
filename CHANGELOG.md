@@ -5,7 +5,7 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 ---
 
 ## [2.65.3] — 2026-11-02
-2.65.3: the crew's B-43, a red merge train took over an hour to find the lane that broke it (P-154).
+2.65.3: the crew's B-43, a red merge train took over an hour to find the lane that broke it (P-154), and B-44 (P-155).
 ### Fixed
 - **A red train re-checks only the failing test files (B-43 a).** The game checks print their failing test files
   (vitest, jest, `node --test`, plain "FAIL <file>"; Windows backslashes read as forward slashes). Re-checks pass them
@@ -21,6 +21,10 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
   and land; the culprit is handed back and the lanes after it go in the next train, which runs at once
   (`STUDIO_TRAIN_LAND_PREFIX`, default on; off = 2.65.2's behaviour). qa/selftest-260a.mjs check 4 now runs its train
   with the setting off, its assertions unchanged (they describe the old order).
+- **Unity Hub's background service is not an editor at work (B-44, P-155).** A heavy program whose command line
+  matches `STUDIO_HEAVY_IGNORE_ARGS` (a regex, default the word `serve`; `off`: none) is not counted outside the
+  machine:heavy lock: Hub's `Unity.exe ... serve`, alive for days, tripled every check's timeout. An unreadable command
+  line still counts.
 - **ETA (B-43 d)** on each re-check line, in the status file and the event meta, from the train's own timings
   ("ETA unknown (no timing yet)" before any).
 

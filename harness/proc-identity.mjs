@@ -365,3 +365,31 @@ export function listProcesses() {
   }
   return out;
 }
+
+/**
+ * 2.65.3 (B-44): the full command lines of a few processes, { [pid]: 'args' }; a pid whose command line can't be read
+ * is left out (so the caller keeps counting it). Procs given with an `args` field (a test's stub) are used as they are.
+ * Linux reads /proc/<pid>/cmdline; Windows asks Win32_Process for just these pids; macOS uses ps -o args=. Never throws.
+ */
+export function processArgs(pids, { procs = null } = {}) {
+  const want = [...new Set((pids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const out = {};
+  if (!want.length) return out;
+  if (procs) { for (const p of procs) if (want.includes(Number(p.pid)) && typeof p.args === 'string') out[Number(p.pid)] = p.args; return out; }
+  try {
+    if (process.platform === 'linux') {
+      for (const pid of want) { try { out[pid] = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' '); } catch {} }
+      return out;
+    }
+    if (process.platform === 'win32') {
+      const filter = want.map((p) => `ProcessId=${p}`).join(' or ');
+      const script = `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }`;
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: READ_TIMEOUT_MS * 2, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      for (const line of String(r.stdout || '').split(/\r?\n/)) { const m = line.match(/^(\d+)\|(.*)$/); if (m && m[2].trim()) out[Number(m[1])] = m[2].trim(); }
+      return out;
+    }
+    const r = spawnSync('ps', ['-o', 'pid=', '-o', 'args=', '-p', want.join(',')], { encoding: 'utf8', timeout: READ_TIMEOUT_MS });
+    for (const line of String(r.stdout || '').split('\n')) { const m = line.match(/^\s*(\d+)\s+(.*)$/); if (m) out[Number(m[1])] = m[2].trim(); }
+  } catch {}
+  return out;
+}

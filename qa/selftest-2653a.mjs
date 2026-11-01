@@ -225,5 +225,25 @@ console.log(JSON.stringify({
     /Train fake-2653a \(9 lanes\): re-check 3 of about 5: lanes 1-9; .*is the break in lanes 3-5\?; ETA ~25 min/.test(out(o9)) && /note: this train has 9 lanes.*STUDIO_TRAIN_MAX/.test(out(o9))
       && /Train \(9 lanes\): re-check 3 of about 5: lanes 1-9; ETA ~25 min \(STUDIO_TRAIN_MAX caps lanes\)\./.test(out(o9b)),
     `${out(o9).slice(-1500)}\n---\n${out(o9b).slice(-800)}`);
+  // ---- 10. B-44: Unity Hub's background `Unity.exe ... serve` is not an editor outside the lock ----
+  const hp = path.join(tmpRoot, `heavy-2653a-${process.pid}.mjs`);
+  fs.writeFileSync(hp, `import { implicitHolders, loadFactor } from ${JSON.stringify(pathToFileURL(path.join(dir, 'harness', 'heavy.mjs')).href)};
+const procs = [
+  { pid: 9001, ppid: 1, cmd: 'Unity.exe', args: '"C:\\\\Program Files\\\\Unity\\\\Hub\\\\Editor\\\\6000.0.1f1\\\\Editor\\\\Unity.exe" -batchMode -noUpm serve --port 52130', start: Date.now() - 27 * 3600000 },
+  { pid: 9002, ppid: 1, cmd: 'Unity.exe', args: 'Unity.exe -projectPath C:/games/demo -useHub -hubIPC', start: Date.now() - 600000 },
+  { pid: 9003, ppid: 1, cmd: 'Unity.exe', start: Date.now() - 600000 },
+];
+const pick = (env) => implicitHolders(process.cwd(), { procs, self: -1, env: { ...process.env, ...env } }).map((p) => p.pid);
+const onlyServe = [procs[0]];
+const lf = loadFactor(process.cwd(), { procs: onlyServe, cpuBusy: 0, env: { ...process.env, STUDIO_HEAVY_IGNORE_ARGS: '' } });
+console.log(JSON.stringify({ def: pick({ STUDIO_HEAVY_IGNORE_ARGS: '' }), off: pick({ STUDIO_HEAVY_IGNORE_ARGS: 'off' }), custom: pick({ STUDIO_HEAVY_IGNORE_ARGS: 'useHub' }), factor: lf.factor, why: lf.why }));
+`);
+  const hr = run(dir, `node "${hp}"`, { ...env, STUDIO_HEAVY_IGNORE_ARGS: '' });
+  let hj = {};
+  try { hj = JSON.parse(String(hr.stdout).trim().split('\n').pop()); } catch {}
+  report('2.65.3 (B-44): a Unity.exe whose command line is a background service (Unity Hub\'s "... serve", alive 27 h) is not counted as an editor outside the machine:heavy lock (so it no longer triples a check\'s timeout); an editor with -projectPath, and one whose command line can\'t be read, still count; STUDIO_HEAVY_IGNORE_ARGS=off counts all, a custom pattern replaces the default (fails on 2.65.2: the serve process counted and the factor was 2)',
+    JSON.stringify(hj.def) === '[9002,9003]' && JSON.stringify(hj.off) === '[9001,9002,9003]' && JSON.stringify(hj.custom) === '[9001,9003]' && hj.factor === 1,
+    out(hr).slice(-1500));
+  try { fs.rmSync(hp, { force: true }); } catch {}
   for (const p of [laneProbe, probe, ranLog]) { try { fs.rmSync(p, { force: true }); } catch {} }
 }
