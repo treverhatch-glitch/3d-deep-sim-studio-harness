@@ -100,6 +100,7 @@ function readBranches() {
   }
 }
 function writeBranches(b) {
+  pruneUnknownTasks(b);
   fs.mkdirSync(path.dirname(BRANCHES()), { recursive: true });
   fs.writeFileSync(BRANCHES(), `${JSON.stringify(b, null, 2)}\n`);
 }
@@ -150,6 +151,12 @@ export function nodeModuleDirs(root) {
  * on this task's branch is merged in.
  */
 export function createLaneCopy(agent, { task = null } = {}) {
+  // 2.60.0 (#6): a task id that isn't on the board (studio/NEXT.md or DONE.md) is refused before anything is made or
+  // written: a guessed id (T-115) used to leave a stale key in .studio/lane-branches.json.
+  if (task) {
+    const known = taskOnBoard(task);
+    if (known === false) return { error: `${task} is not on the board (studio/NEXT.md, studio/DONE.md): no lane copy made for it. Check the id (node harness/task.mjs next), or add the task first` };
+  }
   const root = mainRoot();
   const sup = worktreeSupport(root);
   if (!sup.ok) return { error: sup.why };
@@ -192,6 +199,43 @@ export function createLaneCopy(agent, { task = null } = {}) {
   const carried = task ? carryTaskBranch(task, dir) : null;
   emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}` });
   return { dir, branch, carried };
+}
+
+/**
+ * 2.60.0 (#6): every write of .studio/lane-branches.json (a lane copy made, a session's branch remembered, a landed
+ * task forgotten) drops the keys of task ids the board doesn't have (a guessed id's key from before 2.60.0); their
+ * branches are kept. Nothing is dropped when the board can't be read or lists no task. Returns the keys dropped.
+ */
+export function pruneUnknownTasks(b) {
+  const ids = boardIds();
+  if (!ids?.size) return [];
+  const gone = Object.keys(b).filter((k) => { const id = k.split(':')[0]; return /^[A-Z]+-\d+$/.test(id) && !ids.has(id); });
+  for (const k of gone) delete b[k];
+  if (gone.length) emitEvent({ type: 'lane.branches_pruned', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `.studio/lane-branches.json: dropped ${gone.length} key(s) for task ids not on the board (${gone.join(', ')}); their branches are kept`.slice(0, 400) });
+  return gone;
+}
+
+/**
+ * The task ids on the board: every task line ("- [ ] **T-123** ...") in studio/NEXT.md and studio/DONE.md, open or
+ * done; null when neither file can be read. Read here rather than through task.mjs's parseNextQueue: task.mjs imports
+ * modules that import this one, and a static import back would deadlock the CLIs that wait on a top-level await
+ * (heavy.mjs, game-gates.mjs).
+ */
+export function boardIds(root = mainRoot()) {
+  const ids = new Set();
+  let read = 0;
+  for (const f of ['NEXT.md', 'DONE.md']) {
+    let text;
+    try { text = fs.readFileSync(path.join(root, 'studio', f), 'utf8'); read += 1; } catch { continue; }
+    for (const m of text.matchAll(/^\s*[-*]\s+\[[ xX>~]\]\s+\*\*([A-Z]+-\d+)\*\*/gm)) ids.add(m[1]);
+  }
+  return read ? ids : null;
+}
+
+/** Is this task id on the board (open or done)? true / false, or null when the board can't be read. */
+export function taskOnBoard(task) {
+  const ids = boardIds();
+  return ids ? ids.has(String(task)) : null;
 }
 
 /**
