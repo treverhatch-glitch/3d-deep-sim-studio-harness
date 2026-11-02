@@ -173,7 +173,7 @@ console.log(JSON.stringify({ checks: r.checks.length, paused, mode: r.mode }));`
     const rs = evs().filter((e) => e.type === 'studio.winddown_resumed').pop();
     await guard('268o winddown: when the usage resets the supervisor resumes and links the restart log', () => [
       rs?.meta?.restartLog === '.studio/restart-log.md' && /restart-log\.md/.test(rs.msg) && (back.started || []).length > 0 && !fs.existsSync(path.join(dir, '.studio', 'winddown.json')),
-      JSON.stringify({ back, rs }).slice(0, 1500)]);
+      `${JSON.stringify({ rs: rs ? { msg: rs.msg, meta: rs.meta } : null, winddown: fs.existsSync(path.join(dir, '.studio', 'winddown.json')) })}\n--- back: ${JSON.stringify(back).slice(0, 1500)}`]);
     const worker = run(dir, 'node harness/winddown.mjs --now --by builder-s2', env);
     const now1 = run(dir, 'node harness/winddown.mjs --now --by tester --why "the owner travels"', env);
     const p5 = pass();
