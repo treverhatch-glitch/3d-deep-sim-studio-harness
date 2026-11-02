@@ -4087,6 +4087,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (f): the proactive chain-tail fixer: a stacked chain's touched tests and pins run before the train's verify;
+// red: one chain-tail task stacked on its last lane; a verify red on exactly those tests defers the chain for its
+// tail instead of bisecting it; chain + tail land together (qa/selftest-267f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267f.mjs')).href);
+  await selftest267F({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

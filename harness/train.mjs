@@ -48,6 +48,10 @@
  *      round says what it is, the step is in .studio/train/<id>/status.json; once a culprit at position k > 1 is named
  *      the green prefix is verified in full and lands at once, the lanes after it go in the next train, run right away
  *      (landPrefixEarly; STUDIO_TRAIN_LAND_PREFIX=off keeps 2.65.2).
+ *  12. chain tails (2.67.0, harness/train-tail.mjs, STUDIO_TRAIN_CHAIN_TAIL): before the verify, a stacked chain (or a
+ *      lane declaring pin moves) is built alone in a second scratch copy and its touched tests and pins run there; red:
+ *      ONE "chain tail" builder task stacked on its last lane. A verify red on exactly those tests defers the whole
+ *      chain "waiting for its tail" (no bisection, nobody handed back); chain + tail land together once it is queued.
  *
  * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
  * was built on (if main moved meanwhile, the train is rebuilt and verified again); one train at a time
@@ -75,6 +79,7 @@ import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './t
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 import { withFacts } from './handback-facts.mjs';
+import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -1150,6 +1155,168 @@ function sweepScratch(root, log) {
   for (const b of out(git(root, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/train/')).split('\n').filter(Boolean)) git(root, 'branch', '-D', b);
 }
 
+// ---- 2.67.0 (f): the proactive chain-tail fixer (harness/train-tail.mjs) -----------------------------------------
+
+/**
+ * Chain lanes whose tail (filed by an earlier train, the chain deferred for it) is open on the board and not in this
+ * train: they wait, before anything is spent on them ([{ lane, kind: 'tail', key, why }], as laneWaits).
+ */
+export function chainTailWaits(root, lanes, deps = {}) {
+  if (!chainTailOn()) return [];
+  const recs = readTails(root).filter((r) => r.waiting && r.tail);
+  if (!recs.length) return [];
+  const ctx = depContext(root, deps);
+  const here = new Set(lanes.map((l) => l.task));
+  const out = [];
+  for (const r of recs) {
+    if (ctx.done.has(r.tail) || !ctx.states.open.has(r.tail) || here.has(r.tail)) continue;
+    for (const l of lanes) if ((r.chain || []).includes(l.task) && !out.some((w) => w.lane === l)) out.push({ lane: l, kind: 'tail', key: `tail:${r.tail}`, why: tailWaitWhy(r) });
+  }
+  return out;
+}
+
+/** The game's checks as its manifest lists them on main's tip ([{ id, command, focus? }]). */
+function manifestGates(root, tip, rel) {
+  if (!rel) return [];
+  let text = tip ? out(git(root, 'show', `${tip}:${rel}`)) : '';
+  if (!text) { try { text = fs.readFileSync(path.join(root, rel), 'utf8'); } catch {} }
+  try { return (JSON.parse(text).gates || []).filter((g) => g && g.id && g.command); } catch { return []; }
+}
+
+/** Run only the game checks on these test files (run-gates --only, STUDIO_GATE_FOCUS: a partial run, no verify). */
+function tailRun(sc, { id, n, focus, changed, log }) {
+  const root = sc.root;
+  const owner = `train-${id}-tail`;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify(focus) };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+  if (changed.length) { env.STUDIO_GATE_CHANGED = changed.join(','); env.STUDIO_GATE_PATHS = changed.join(','); }
+  const gates = gameGateIds(root);
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  const logFile = path.join(root, TRAIN_DIR, `${id}-chain-tail-${n}.log`);
+  try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
+  for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  log(`[train] ${id}: chain-tail check ${n}: ${r.status === 0 ? 'green' : 'red'} in ${Math.round((Date.now() - t0) / 1000)} s`);
+  return { ok: r.status === 0, text, log: path.relative(root, logFile).split(path.sep).join('/') };
+}
+
+/**
+ * Before the verify: each chain of this train (train-tail.mjs trainChains) built alone on main in a second scratch
+ * copy, its touched test files run (focused) and the pins' report taken on main and on it; red (and not fixed by the
+ * pin refresh the train would make): ONE tail task stacked on its last lane (deduped by chain + failure signature).
+ * res.chainTails: the chains red here, with their tail. Never throws; a check that can't run says why and is skipped.
+ */
+async function chainTailCheck({ root, id, tip, set, settings, depInfo, log, res, by, deps, main }) {
+  res.chainTails = [];
+  if (!chainTailOn() || !set.length) return;
+  const records = readTails(root);
+  const pinsOf = (l) => pinMoves(root, out(git(root, 'merge-base', tip, l.head)) || tip, l.head);
+  const chains = trainChains(set, depInfo.map, { pinsOf, tails: records });
+  if (!chains.length) return;
+  const gameRoot = settings.gameRoot || null;
+  const gates = manifestGates(root, tip, settings.manifest);
+  const sid = `${id}-tail`;
+  writeTrainStatus(root, id, { step: 'chain-tail', text: `chain-tail check before the verify: ${chains.map((c) => c.tasks.join(' + ')).join('; ')}`, lanes: res.trainLanes || null, round: 1, eta: null });
+  const sc2 = makeScratch(root, sid, tip);
+  if (sc2.error) { log(`[train] ${id}: no chain-tail check (the second scratch copy: ${sc2.error})`); return; }
+  try {
+    const cache = new Map();
+    let base = null;
+    if (settings.pins) {
+      const b0 = buildIntegration(sc2, tip, [], { id: sid });
+      base = pinReport(sc2, settings.pins, { id: sid, k: 'main', tree: b0.tree, cache, log });
+      if (base.error) log(`[train] ${id}: chain-tail check: no pin diff (${base.error})`);
+    }
+    let n = 0;
+    for (const ch of chains) {
+      const names = ch.tasks.join(', ');
+      const b = buildIntegration(sc2, tip, ch.lanes, { id: sid, unionFiles: settings.unionFiles || [] });
+      if (b.included.length !== ch.lanes.length) { log(`[train] ${id}: chain-tail check: ${names} doesn't merge alone onto ${main}; not checked (the train's build says why)`); continue; }
+      const changed = changedVs(sc2.dir, tip, b.head);
+      const tests = touchedTests(changed.filter((f) => fs.existsSync(path.join(sc2.dir, f))), gameRoot);
+      const fx = chainFocus(gates, tests, gameRoot);
+      for (const s of fx.skipped) log(`[train] ${id}: chain-tail check: ${s.id} not run on single files (${s.why})`);
+      // The pin diff: the pins' report on main and on main + the chain, each move checked against the chain's Pin-Moves.
+      let moved = [];
+      let rep = null;
+      if (settings.pins && base && !base.error) {
+        rep = pinReport(sc2, settings.pins, { id: sid, k: `chain-${n + 1}`, tree: b.tree, cache, log });
+        if (rep.error) log(`[train] ${id}: chain-tail check: no pin diff for ${names} (${rep.error})`);
+        else {
+          const keys = [...new Set([...Object.keys(base.report), ...Object.keys(rep.report)])].sort();
+          moved = keys.filter((p) => stable(base.report[p]) !== stable(rep.report[p])).map((p) => ({ pin: p, from: short(base.report[p] ?? null), to: short(rep.report[p] ?? null), declaredBy: Object.entries(ch.pins).filter(([, g]) => pinNameMatches(p, g)).map(([t]) => t), invariant: pinNameMatches(p, settings.pins.invariants) }));
+        }
+      }
+      if (!fx.focus) { log(`[train] ${id}: chain-tail check: ${names}: ${tests.length ? 'no game check can run single test files' : 'touches no test file'}; ${moved.length ? `pin diff only: ${pinDiffLines(moved).join('; ')}` : 'nothing to run'}`); continue; }
+      n += 1;
+      log(`[train] ${id}: chain-tail check ${n}: ${main} + ${ch.tasks.join(' + ')} in a second copy, before the verify: ${tests.length} touched test file(s) (${tests.slice(0, 4).join(', ')}${tests.length > 4 ? ' ...' : ''})${settings.pins ? `, pin diff: ${moved.length ? pinDiffLines(moved).join('; ') : 'none'}` : ''}`);
+      let run = tailRun(sc2, { id, n, focus: fx.focus, changed, log });
+      if (run.ok) { log(`[train] ${id}: chain ${names} is green on its touched tests: no tail needed`); continue; }
+      const failing = failingTests(run.text);
+      // Pins only, every move declared, no invariant: the train's own pin refresh may fix it; try it in this copy.
+      if (settings.pins && rep && !rep.error && moved.length && failing.tests.length && failing.tests.every((t) => isPinTest(t, settings.pins.tests)) && moved.every((m) => m.declaredBy.length && !m.invariant)) {
+        const cmd = settings.pins.refresh.split('{in}').join(`"${rep.file}"`);
+        const env = mergeEnv();
+        const rr = spawnSync(cmd, { cwd: sc2.dir, shell: true, encoding: 'utf8', env: /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? env : { ...env, CI: 'true' }, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
+        if (rr.status === 0) {
+          const again = tailRun(sc2, { id, n: `${n}-refreshed`, focus: fx.focus, changed, log });
+          if (again.ok) {
+            log(`[train] ${id}: chain ${names}: red only on declared pins, and the pin refresh makes it green: the train's pin refresh covers it, no tail`);
+            ev('chain_tail', id, `chain ${names}: red only on declared pins (${pinDiffLines(moved).join('; ')}); the pin refresh makes its tests green, so no tail is filed`, { agent: by, status: 'ok', meta: { action: 'pin_refresh', chain: ch.core, tests: failing.tests, pins: moved } });
+            continue;
+          }
+          run = { ...run, refreshTried: true };
+        }
+      }
+      const sig = tailSignature(failing.tests, failing.checks);
+      const known = records.find((r) => r.key === ch.key && r.sig === sig);
+      const tests1 = failing.tests.length ? failing.tests : failing.checks;
+      if (known) {
+        res.chainTails.push({ key: ch.key, sig, tail: known.tail, chain: ch.core, lanes: ch.tasks, tests: known.tests?.length ? known.tests : tests1, known: true });
+        log(`[train] ${id}: chain ${names} is red on ${tests1.slice(0, 3).join('; ')}; its tail ${known.tail} (train ${known.train}) is already filed for this failure: not filed again`);
+        ev('chain_tail', id, `chain ${names}: red again on the same tests; its tail ${known.tail} is already filed (not filed again)`, { task: known.tail, agent: by, status: 'warn', meta: { action: 'known', chain: ch.core, tail: known.tail, sig, tests: tests1 } });
+        continue;
+      }
+      const lanesInfo = ch.lanes.filter((l) => ch.core.includes(l.task)).map((l) => ({ task: l.task, head: l.head }));
+      const title = tailTitle(ch.core, failing.tests, failing.checks);
+      let t = null;
+      try { t = deps.fileTask ? deps.fileTask({ title, after: ch.last.task, chain: ch.core, train: id }) : null; } catch (e) { log(`[train] ${id}: chain-tail task not filed: ${e.message}`); }
+      if (!t?.id || t.error || t.proposed) { log(`[train] ${id}: chain ${names} is red on ${tests1.slice(0, 3).join('; ')}, but no tail task was filed (${t?.message || 'no board here'})`); continue; }
+      try {
+        const f = path.join(root, 'studio', 'handoffs', `${t.id}.md`);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.appendFileSync(f, tailNote({ tail: t.id, train: id, chain: lanesInfo, tests: failing.tests, checks: failing.checks, pins: moved, log: run.log, main, pinsRun: Boolean(settings.pins) }));
+      } catch {}
+      const rec = { key: ch.key, sig, tail: t.id, chain: ch.core, last: ch.last.task, tests: tests1, pins: moved, train: id, at: new Date().toISOString(), log: run.log };
+      updateTails(root, (list) => { list.push(rec); });
+      records.push(rec);
+      res.chainTails.push({ key: ch.key, sig, tail: t.id, chain: ch.core, lanes: ch.tasks, tests: tests1 });
+      log(`[train] ${id}: chain ${names} fails ${tests1.slice(0, 3).join('; ')}${tests1.length > 3 ? ` (+${tests1.length - 3} more)` : ''} on the combined tree: opened ${t.id} (chain tail, builder, stacked on ${ch.last.task}${t.duplicate ? ', already on the board' : ''}); its note: studio/handoffs/${t.id}.md. If the verify fails on exactly these tests, the chain waits for ${t.id} instead of being bisected`);
+      ev('chain_tail', id, `chain ${names} is red on its touched tests before the verify (${tests1.slice(0, 3).join('; ')}${moved.length ? `; pin diff: ${pinDiffLines(moved).join('; ')}` : ''}): opened ${t.id}, a builder task stacked on ${ch.last.task}`, { task: t.id, agent: by, to: 'builder', status: 'warn', meta: { action: 'opened', chain: ch.core, tail: t.id, last: ch.last.task, sig, tests: tests1, pins: moved, log: run.log } });
+    }
+  } finally {
+    removeScratch(sc2);
+  }
+}
+
+/**
+ * After a red verify: are its failing tests exactly those of chain(s) found red before it (res.chainTails)? Then
+ * { tails, lanes } (the lanes of those chains in this set, tails included); else null (handled as before).
+ */
+function chainTailDefer(ctx, { set, v, text }) {
+  const { root, res } = ctx;
+  if (!chainTailOn() || !res.chainTails?.length) return null;
+  const games = gameGateIds(root);
+  if (!v.gates?.length || v.gates.some((g) => !games.includes(g))) return null;
+  const vt = failingTests(text).tests;
+  const tails = tailsExplaining(vt, res.chainTails);
+  if (!tails.length) return null;
+  const names = new Set(tails.flatMap((t) => t.lanes));
+  const lanes = set.filter((l) => names.has(l.task));
+  return lanes.length ? { tails, lanes, tests: vt } : null;
+}
+
 async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false }) {
   const res = { ok: true, id, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
   sweepScratch(root, log);
@@ -1170,6 +1337,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   // 2.65.0 (B-34, 3.3): lanes queued after a predicted conflict, or whose --after dependencies haven't landed, wait
   // here: before any check, tier or verify is spent on them (laneWaits; deferral logged once per reason).
   const waits = laneWaits(root, lanes, deps);
+  // 2.67.0 (f): a chain deferred for its tail waits until the tail is queued (harness/train-tail.mjs).
+  waits.push(...chainTailWaits(root, lanes.filter((l) => !waits.some((w) => w.lane === l)), deps));
   lanes = lanes.filter((l) => !waits.some((w) => w.lane === l));
   if (maxLanes > 0) lanes = lanes.slice(0, maxLanes);
   if (!lanes.length && waits.length) { waitActions(root, waits, { id, by, dryRun, res, log, deps }); res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
@@ -1290,6 +1459,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         return res;
       }
       if (!set.length) break;
+      // 2.67.0 (f): before the verify, each stacked chain's touched tests and pins on its own combined tree; red: a tail.
+      if (!res.chainTailChecked) { res.chainTailChecked = true; await chainTailCheck({ root, id, tip, set, settings, depInfo, log, res, by, deps, main }); }
       const all = set.some((l) => l.all);
       // (c) ONE full verify of the final tree; (e) red: find who fails alone.
       let verdict = null;
@@ -1319,6 +1490,20 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         const redEta = bisectMode() === 'prefix' && set.length > 1 ? etaFor(1 + stepsLeft(0, set.length)) : null;
         if (ft.list.length) log(`[train] ${id}: verify ${res.verifies} red; failing tests: ${ft.list.join('; ')}${ft.more ? ` (+${ft.more} more)` : ''}`);
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
+        // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
+        // waits for its tail, nobody handed back, no bisection; the other lanes go on without it.
+        const th = chainTailDefer({ root, res }, { set, v, text: redText });
+        if (th) {
+          const tailIds = [...new Set(th.tails.map((t) => t.tail))];
+          for (const l of th.lanes) defer(l, tailWaitWhy({ chain: th.tails.flatMap((t) => t.chain), tail: tailIds.join(', '), tests: th.tests }));
+          updateTails(root, (list) => { for (const r of list) if (th.tails.some((t) => t.key === r.key && t.sig === r.sig)) r.waiting = { train: id, at: new Date().toISOString() }; });
+          log(`[train] ${id}: the verify is red on exactly the tests the chain-tail check found (${th.tests.slice(0, 3).join('; ')}${th.tests.length > 3 ? ` (+${th.tests.length - 3} more)` : ''}): ${th.lanes.map((l) => l.task).join(', ')} wait for ${tailIds.join(', ')} (not bisected, nobody handed back)${set.length > th.lanes.length ? `; the other lanes go on without them` : ''}`);
+          ev('chain_tail', id, `the verify is red on exactly the chain's tests: ${th.lanes.map((l) => l.task).join(', ')} deferred, waiting for ${tailIds.join(', ')}; not bisected, nobody handed back`, { agent: by, status: 'warn', meta: { action: 'deferred', lanes: th.lanes.map((l) => l.task), tails: tailIds, tests: th.tests } });
+          set = set.filter((l) => !th.lanes.includes(l));
+          res.roundWithout.push(...th.lanes.map((l) => l.task));
+          if (set.length) log(`[train] ${id}: round ${res.round + 1}: ${set.length} lane(s) left without ${res.roundWithout.join(', ')} (${set.map((l) => l.task).join(', ')}); verify, then bisect again if red`);
+          continue;
+        }
         // 2.60.0: prefix bisection on the failing checks only, and pin refresh (redPlan). STUDIO_TRAIN_BISECT=alone, or
         // a plan that can't name the failing checks: the 2.59 way below.
         if (bisectMode() === 'prefix' && !(oneLane && set.length === 1 && !settings.pins)) {
