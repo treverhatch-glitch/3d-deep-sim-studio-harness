@@ -4,6 +4,50 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.69.0] — 2026-11-02
+2.69.0, "less repeated work": the merge train stops re-running what it already knows, runs on its own, and tells a
+flaky test from a broken one (from the hardware findings and the overseer's duties 3, 8 and 13; P-181 to P-186).
+### Added
+- **Verify reuse and related tests first (p).** Clean full verifies are kept by tree (`.studio/gates/trees/`). A train
+  of one lane reuses the lane's green verify of the same tree, including a scoped verify for a tier-B `--all` train
+  when every game check ran for its files anyway; a refused record says why. Lanes already green on main's tip go
+  first (`STUDIO_TRAIN_GREEN_FIRST`). Multi-lane trains run each lane's related tests on the combined tree first and
+  hand back a lane red there and green on main, with no full verify or bisection (`STUDIO_TRAIN_RELATED_FIRST`).
+- **Slow tier (p).** A game can mark test globs or whole checks slow (`slowTests`, `"tier": "slow"`): verifies and
+  trains skip them (`STUDIO_TEST_EXCLUDE`), and `npm run gates -- --tier slow` runs them nightly from the supervisor
+  (`STUDIO_SLOW_HOUR`), filing one bug task per new failure.
+- **Parallel prefix search (q).** A red train checks up to K prefixes at once, each in its own scratch copy and with
+  only the test workers its few files need (`STUDIO_TRAIN_BISECT_PARALLEL`, sized by the machine budget).
+- **Optional remote verify (q).** `STUDIO_VERIFY_REMOTE=github` (public repos only): the safety gates always run locally
+  on the train's tree; only the game's checks may come from the CI check run named by `STUDIO_VERIFY_REMOTE_CHECK`
+  (default `release-gate`, success only). Both must pass; `.studio/train/split/` records which gate came from where,
+  kept apart from the records verify reuse reads. Anything else runs the local verify.
+- **Train daemon (r).** While a supervisor runs (`STUDIO_TRAIN_AUTO`, default on) it starts a train when lanes are ready
+  and the machine budget admits a verify, never beside another train, while halted or winding down. Handed-back
+  lanes go back on the board with their facts. `npm run task -- train auto on|off --by` (never a worker).
+- **Flake triager (r).** A red verify or re-check re-runs each failing test file alone, then alone at low load, and
+  labels it real / seed-flake / load-flake / intermittent (`.studio/flakes.jsonl`); labels only. Flaky 3 times in 7
+  days: a *proposed* entry in `studio/quarantine.json` (tier C) with its evidence and one fix task; it is skipped
+  (`STUDIO_TEST_QUARANTINE`) only after `npm run flakes -- confirm <test> --by` (decider rules), or at once with
+  `"autoQuarantine": true` in that file or the game's manifest. In a parallel search the triage runs after all
+  prefixes finish, one at a time.
+- **Overlaps, queue depth, upgrade watch (s).** `task add` and `task start` name lanes in flight that already change
+  the task's files (file:lines), open tasks in the same folders and near-duplicate titles (advisory unless
+  `STUDIO_OVERLAP=block`). The supervisor asks the Producer when fewer builder tasks can start than
+  `STUDIO_QUEUE_DEPTH` (default the session cap); it never adds tasks. `npm run upgrade -- watch` finds a newer
+  harness and checks its CI; with auto-upgrade switched on (`studio/upgrade.json`, who is recorded; delegable as
+  `upgrade-auto`), green CI, inside `STUDIO_UPGRADE_WINDOW` and nothing running, it merges, refreshes lanes and files
+  one task per conflicted lane.
+
+### Untested
+- Windows: the slow-tier supervisor start, the scoped-for-`--all` judgement, parallel re-checks in scratch copies,
+  git fetch timeouts in the upgrade watch, local-time window maths. The live GitHub API (remote verify, upgrade
+  watch) was tested with fake clients only. A real protected-file change under remote verify is held at tier C before
+  any verify; the test uses a stand-in gate.
+- After an auto-upgrade the running supervisor keeps the old harness until restarted (the event says so).
+
+---
+
 ## [2.68.0] — 2026-11-02
 2.68.0, "fit the machine": the harness measures the computer it runs on and sizes its work to it (the owner's ask;
 P-174 to P-180).
