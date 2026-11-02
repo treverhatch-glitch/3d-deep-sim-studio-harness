@@ -1043,6 +1043,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
       if (t?.id && !t.error && !t.proposed && !t.duplicate) setHold(t.id, { chainTail: { chain, train, after } });
       return t;
     },
+    // 2.69.0 (r): ONE fix task per test the flake triager quarantined (harness/flakes.mjs; the board dedupes by title).
+    fileFlakeTask: ({ title, test, label }) => addTask({ title, role: 'builder', priority: 'P1', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', flake: { test, label } } }),
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1882,6 +1884,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
+    // 2.69.0 (r): the train daemon's switch (harness/train-daemon.mjs; decider rules: a person, never a worker).
+    if (arg1 === 'auto') {
+      const want = flags._[2];
+      const td = await import('./train-daemon.mjs');
+      if (!want) { console.log(td.autoStatusText(mainRoot())); process.exit(0); }
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
     // 2.65.0 (B-40): apply a config proposal held on main (its protected part waited for the owner, or main moved a key).
     if (arg1 === 'config') {
       const tid = flags._[2];
@@ -1890,7 +1902,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>]'); process.exit(1); }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
