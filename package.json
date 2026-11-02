@@ -98,6 +98,7 @@
     "logs": "node harness/logs.mjs",
     "metrics": "node harness/metrics.mjs",
     "autonomy": "node harness/autonomy.mjs",
+    "usage": "node harness/usage.mjs",
     "digest": "node harness/digest.mjs",
     "denials": "node harness/denials.mjs",
     "vfx": "node harness/vfx.mjs",
