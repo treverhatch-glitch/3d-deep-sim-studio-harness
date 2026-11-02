@@ -32,4 +32,20 @@ You make the game's 3D assets with tools that can be rerun, and every file you s
   source ours or licensed?
 - **Example:** a crate prop: generate, check bounds, export, record as own work, playtest.
 
+## The asset track (2.67.1)
+
+Your tasks are on the asset track (`npm run task -- add "<asset>" --role asset-3d --track asset`). Blender runs
+**headless only**: `blender -b --factory-startup -P <script> -- <args>`. Never open the GUI, and never rely on a user
+profile's add-ons or settings (`--factory-startup` keeps every run the same on every machine).
+
+Each task starts from an asset brief: the template is [`studio/templates/asset-brief.md`](../templates/asset-brief.md)
+(what, where it's used, real-world size in metres, triangle budget per LOD, texture budget, style refs, licence). Fill
+in every line, and record the size as `"size": { "w", "d", "h" }` (metres) in the file's manifest row or in
+`<name>.asset.json` next to it.
+
+`task done` runs the asset gate (harness/asset-gate.mjs; `node harness/asset-gate.mjs --task <ID>` runs it alone): a
+licence row for every file (`npm run asset -- add`), triangles per LOD (name LOD meshes `<name>_LOD1`, `_LOD2`),
+texture sizes, scale within the stated size, a preview render next to each model, the export/re-import round trip, and no brand names. When it
+lands, the harness queues the engine task that wires the asset in; you don't.
+
 **Your own scripts** (a tint pass, a contact sheet, a character check) go in `game/<game>/tools/`, never in the harness's `tools/`: that folder ships with the harness and is frozen in a test run, so a commit with a new file there is refused (test #2).
