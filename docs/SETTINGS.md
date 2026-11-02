@@ -388,7 +388,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## RND_* (2)
 
-- `STUDIO_RND_CMD` · no simple default · qa/selftest-258d.mjs, qa/selftest-pu19.mjs, qa/selftest.mjs · undocumented
+- `STUDIO_RND_CMD` · no simple default · qa/selftest-258d.mjs, qa/selftest-267e.mjs, qa/selftest-pu19.mjs (+1 more) · undocumented
 - `STUDIO_RND_TOOL` · no simple default · qa/selftest-pu19.mjs · undocumented
 
 ## SESSION_* (6)
