@@ -108,7 +108,10 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   // 2.70.0 (t): the latest playable build and clip made after a landing (harness/landing-build.mjs).
   let build = '';
   try { build = (await import('./landing-build.mjs')).landingLine(evs, { max: 2 }); } catch { build = ''; }
-  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(build ? { build } : {}) };
+    // 2.70.0 (w): stale lane copies the janitor proposed (harness/lane-disk.mjs).
+  let staleLanes = '';
+  try { staleLanes = (await import('./lane-disk.mjs')).staleLanesLine({ root, now }); } catch { staleLanes = ''; }
+  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(build ? { build } : {}), ...(staleLanes ? { staleLanes } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -125,6 +128,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
     if (f.machine) L.push(`${f.machine}.`);
     if (f.build) L.push(`${f.build}.`);
+    if (f.staleLanes) L.push(`Lanes: ${f.staleLanes}.`);
     L.push(`PC: ${f.freeGb} GB free; heavy: ${f.heavy.length ? cut(f.heavy.map((h) => `${h.label}${h.owner ? ` (${h.owner})` : ''}`), Math.max(1, Math.min(k, 2))) : 'free'}.`);
     return L.join('\n');
   };

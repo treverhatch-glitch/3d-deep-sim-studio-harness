@@ -43,9 +43,10 @@ import { agentLikeName, launchedSession } from './agent-env.mjs';
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
  * The owner actions a delegation can cover. `hold` covers hold and unhold; `upgrade-auto` (2.69.0) the auto-upgrade
- * switch; `asset-review` (2.70.0) answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs).
+ * switch; `asset-review` (2.70.0) answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs);
+ * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes).
  */
-export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review'];
+export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
 const FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
@@ -64,6 +65,8 @@ export const ACTION_COMMANDS = {
   'upgrade-auto': [],
   // 2.70.0 (v): `npm run asset -- review` (harness/asset-review.mjs); not a task command, so no allow rule.
   'asset-review': [],
+  // 2.70.0 (w): `npm run janitor -- --lanes --yes --by <agent>` (harness/janitor.mjs); not a task command, so no allow rule.
+  'janitor-lanes': [],
 };
 
 /**

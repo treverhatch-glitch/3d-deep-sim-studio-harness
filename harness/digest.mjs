@@ -137,6 +137,8 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   let diskLine = ''; // 2.68.0 (m): the studio's disk under STUDIO_DISK_MIN_FREE_GB in the last 24 h
   try { diskLine = (await import('./machine.mjs')).diskDigestLine(ev, now); } catch { diskLine = ''; }
   // 2.68.0: the latest harness upgrade's verdict, once enough data exists on both sides (harness/impact.mjs).
+  let lanesLine = ''; // 2.70.0 (w): stale lane copies the janitor proposed (harness/lane-disk.mjs), never deleted here
+  try { const l = (await import('./lane-disk.mjs')).staleLanesLine({ root, now }); lanesLine = l ? `${l[0].toUpperCase()}${l.slice(1)}.` : ''; } catch { lanesLine = ''; }
   let impactLine = '';
   try { impactLine = (await import('./impact.mjs')).impactDigestLine({ events: ev, now, root }); } catch { impactLine = ''; }
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
@@ -150,7 +152,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   try { quarLine = (await import('./flakes.mjs')).quarantineDigestLine(ev, { now, root }); } catch { quarLine = ''; }
   let buildLine = ''; // 2.70.0 (t): the latest playable build and clip after a landing in the last 24 h
   try { const l = (await import('./landing-build.mjs')).landingLine(ev, { since: now - DAY }); buildLine = l ? `${l} (npm run play).` : ''; } catch { buildLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
