@@ -65,6 +65,7 @@ export const GATE_FIXES = {
   engine: 'the engine track\'s headless tests or smoke run failed (engine/<game>/engine.json "gate"): npm run engine:gate and fix the SCRIPT ERROR or test it logs',
   parity: 'the web game and its engine port disagree on a seed\'s outcome or tick: npm run parity names the seed; replay it on both and fix the side that drifted',
   vision: 'a screenshot scored below the art reference: compare the task\'s proof shots with the reference and fix the look (opt-in check, STUDIO_VISION=1)',
+  asset: 'an asset check failed (the [asset-gate] FAIL line names the check and file): node harness/asset-gate.mjs --files <file> shows it alone; fix the asset, never the limits (studio/game.json "assets" is the owner\'s)',
   reviewer: 'a code review in studio/reviews/ lacks model-family and implementer-family, or the reviewer\'s model family matches the implementer\'s: get a cross-family review with npm run review -- <TASK_ID>',
 };
 
@@ -80,6 +81,29 @@ export const GAME_GATE_FIXES = {
   'game:*': 'a check from the game\'s studio.gates.json failed: run its "command" from the repo root, fix the failing tests it names (the [game-gates] failing tests line lists them)',
   'engine:*': 'Godot\'s headless import or tools/gate.gd failed in this project: fix the script on the SCRIPT ERROR / Parse Error line above (STUDIO_GODOT names the Godot binary)',
 };
+
+/**
+ * 2.67.1 (j): the asset gate's checks (harness/asset-gate.mjs, run at task done for asset work), by check. {file} is
+ * the asset. Nothing here lets an agent approve: a share-alike yes is a game dev's, the limits are the owner's.
+ */
+export const ASSET_FIXES = {
+  licence: 'record the file with its source and licence (npm run asset -- add {file} --use game --licence "<licence>" --source "<where from>" --by <person>); a licence off the allow list or a non-commercial / no-derivatives one can\'t ship: replace the asset with an allowed one (the allow/ask/block lists in studio/game.json "assets" are the owner\'s)',
+  'licence-ask': 'a share-alike licence ships only on a game dev\'s yes (tier C): hand the task back with a note naming {file} and its licence; a person (or a Producer/Director/outside agent on a person\'s words) records it with node harness/asset-gate.mjs allow {file} --by <person> --permission "<their words>"; a worker never records it',
+  credit: 'add the credit line the licence asks for to the file\'s row (npm run asset -- add {file} ... --credit "<title> by <author>, <licence>, <link>")',
+  triangles: 'the mesh is over its triangle budget for that LOD: decimate it in a headless Blender script (blender -b --factory-startup -P <script>), name LOD meshes <name>_LOD1, _LOD2, and export again; the budget is studio/game.json assets.triangleBudget (the owner\'s)',
+  texture: 'the texture is bigger than the budget: downscale it (npm run adapt, or a headless Blender bake) to studio/game.json assets.textureMaxPx on the longest side and export again',
+  scale: 'the model\'s bounding box is not the size its brief states (or no size is recorded): fix the scale in the Blender script (real metres, applied transforms: bpy.ops.object.transform_apply(scale=True)) and export again, or record the brief\'s size as "size": { "w", "d", "h" } in {file}\'s manifest row or <name>.asset.json; the tolerance is studio/game.json assets.sizeTolerance (the owner\'s)',
+  preview: 'render a preview next to the model ({file} -> <name>.preview.png) with a headless Blender script (blender -b --factory-startup -P <script>), never the GUI',
+  roundtrip: 'the export/re-import command failed on {file}: run the command in studio/game.json assets.roundTrip yourself, fix what its last lines name (scale, missing textures, a broken export) and export again',
+  brand: 'a brand name is in {file}\'s name, a glTF node/material/texture name or its manifest row: rename it to a generic name (and remove the brand mark from the model\'s textures); the brand list is studio/game.json assets.brandNames',
+  name: 'rename {file} to letters, digits, . _ - and spaces only (a command line could misread it)',
+};
+
+/** The Fix text for one asset-gate check on one file. */
+export function assetFix(check, file = '<file>') {
+  const t = ASSET_FIXES[check] || 'read the [asset-gate] FAIL line above and fix that file, then node harness/asset-gate.mjs --files {file} runs the checks again';
+  return `${t.replaceAll('{file}', file)}; then node harness/asset-gate.mjs --files ${file} checks it again`;
+}
 
 const TIMEOUT = /\btimed out\b|\bETIMEDOUT\b|\bSIGTERM\b.*\btimeout\b/i;
 
@@ -107,6 +131,9 @@ export function gateFix(gate, { output = '', compact = false } = {}) {
   if (typeof g.fix === 'string' && g.fix.trim()) return { text: `${g.fix.trim()}; ${rerun}`, source: 'gates.json' };
   const sub = text.match(/\[game-gates\] FAIL (\S+?)(?::\s|:?$|\s)/m);
   if (sub && gameKindFix(sub[1])) return { text: `${sub[1]}: ${gameKindFix(sub[1])}; ${rerun}`, source: 'game-check' };
+  // 2.67.1 (j): a failing asset check (harness/asset-gate.mjs) names its check and file.
+  const asub = text.match(/\[asset-gate\] FAIL (\S+) (\S+?):/m);
+  if (asub) return { text: `asset ${asub[1]}: ${assetFix(asub[1], asub[2])}`, source: 'asset-check' };
   if (TIMEOUT.test(text)) return { text: `it timed out, which is often load rather than a wrong result: check what else is running (npm run status), wait for heavy work to finish, ${rerun}; a timeout on a quiet machine is a slow check to fix (${log})`, source: 'timeout' };
   if (GATE_FIXES[id]) return { text: `${GATE_FIXES[id]}; ${rerun}${compact ? ` (full log: ${log})` : ''}`, source: 'table' };
   const kind = gameKindFix(id);
