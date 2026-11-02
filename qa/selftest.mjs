@@ -4134,6 +4134,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.1 (k): Unity streamlining: warm Library cache, Play Mode flake retry, code-only steps (qa/selftest-2671k.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2671K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671k.mjs')).href);
+  await selftest2671K({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
