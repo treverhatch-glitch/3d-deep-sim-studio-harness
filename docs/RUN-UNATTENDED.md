@@ -171,6 +171,16 @@ as above). One `janitor.run` event. After each train or verify job it runs `--ye
 `STUDIO_JANITOR_EVERY_MIN` (30) minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` gives a
 disk-low warning its "the janitor can free N GB" line.
 
+**Stale-lane proposals surfaced (2.70.0).** A lane copy whose work has landed (its task is done in `studio/DONE.md`,
+or a `lane.merged` event names it) is stale after `STUDIO_JANITOR_LANDED_H` (6) hours instead of 24. The supervisor
+runs the janitor's lane proposals as a dry run (it never deletes) at most every `STUDIO_JANITOR_LANES_MIN` (360)
+minutes (`off` or 0: never), in a detached child (`harness/lane-disk.mjs`), with the lane disk report; the digest,
+`status --brief` and the War Room snapshot (`staleLanes`) then show "N stale lane copies (X GB) proposed: npm run
+janitor -- --lanes --yes --by <name>" (one `janitor.lanes_proposed` event). Deleting stays a decider's action: a
+person, a Producer/Director session or outside agent on a person's permission, or an agent under the owner's
+delegation for `janitor-lanes` (`npm run delegate -- grant <agent> --actions janitor-lanes …`; a `hold` delegation no
+longer covers it).
+
 ## What the owner sees
 
 - Ops: "Running unattended" (since when, sessions, tasks done, tokens, why nothing started), the
