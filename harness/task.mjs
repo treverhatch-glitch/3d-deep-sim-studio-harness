@@ -1647,8 +1647,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     // 2.69.0 (s): the task against the work in flight (its lane, its own diff once it has one, near-duplicate titles).
     const startOv = (() => { const t = q.backlog.find((x) => x.id === targetId) || q.inProgress.find((x) => x.id === targetId); return t ? overlapCheck({ id: t.id, title: t.title, role: t.role, phase: 'start', agent: whoAmI(flags), board: q }) : null; })();
-    for (const l of startOv?.lines || []) console.error(l);
+    // Advice is printed after the start succeeds (below), so a refused or failed start says its own reason first;
+    // a blocking overlap is the refusal itself and is printed here.
     if (startOv?.block) {
+      for (const l of startOv.lines || []) console.error(l);
       emitEvent({ type: 'task.start_refused', agent: whoAmI(flags) || undefined, task: targetId, status: 'blocked', msg: `overlap (STUDIO_OVERLAP=block): ${startOv.found.map((f) => f.with).join(', ')}`.slice(0, 400) });
       process.exit(1);
     }
@@ -1668,6 +1670,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
+    for (const l of startOv?.lines || []) console.error(l); // 2.69.0 (s): overlap advice, once the task is started
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
     await startDiskWarning(); // 2.68.0 (m)
     const { handoff, ...rest } = started;

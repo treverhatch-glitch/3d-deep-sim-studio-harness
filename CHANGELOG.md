@@ -39,6 +39,11 @@ flaky test from a broken one (from the hardware findings and the overseer's duti
   `upgrade-auto`), green CI, inside `STUDIO_UPGRADE_WINDOW` and nothing running, it merges, refreshes lanes and files
   one task per conflicted lane.
 
+### Fixed
+- `task start` prints overlap advice after the task is started, so a refused or failed start says its own reason
+  first; an overlap record is not proof the claim's owner is working (the claim watcher ignores it). Found by the
+  2.58 P-054/P-055 checks on the combined tree.
+
 ### Untested
 - Windows: the slow-tier supervisor start, the scoped-for-`--all` judgement, parallel re-checks in scratch copies,
   git fetch timeouts in the upgrade watch, local-time window maths. The live GitHub API (remote verify, upgrade

@@ -1061,3 +1061,9 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-186 — overlapping tasks were found only at merge; the queue ran dry; upgrades waited · fixed in 2.69.0
 - **Evidence:** the overseer's duties 13 and others; overlaps found by conflicts in trains.
 - **Fix:** overlap checks at add/start, the queue-depth ask, the upgrade watch. qa/selftest-269s.mjs.
+
+### P-187 — overlap advice hid a failed start and kept an expired claim alive · fixed in 2.69.0
+- **Evidence:** the combined 2.69.0 tree failed 2.58's P-054 (the watcher kept T-101: "active 0 min ago (task.overlap)")
+  and P-055 (the "claim was released" line came after the overlap lines).
+- **Fix:** the advice prints after a successful start; claimActive ignores task.overlap for that task.
+  qa/selftest-258b.mjs.
