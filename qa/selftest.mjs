@@ -4087,6 +4087,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (h): test hygiene and upgrade friction: a seeded test on the shared Math.random or an unseeded game (B-48),
+// upgrade --merge refreshes the lanes (B-49), board-only commits keep a train's verify (B-29), an owner type outranks the
+// title (B-38) (qa/selftest-267h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267h.mjs')).href);
+  await selftest267H({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
