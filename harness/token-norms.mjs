@@ -13,10 +13,13 @@ import { readRecentEvents } from './event.mjs';
 
 function getTaskTypes(events) {
   const taskTypes = new Map();
+  const retyped = new Set();
   for (const e of events) {
     if (e.type === 'task.added' && e.task) {
-      if (e.meta?.type) taskTypes.set(e.task, e.meta.type);
+      if (e.meta?.type && !retyped.has(e.task)) taskTypes.set(e.task, e.meta.type);
     }
+    // 2.67.0 (B-38): an owner's reclassification outranks the type the task was queued with.
+    if (e.type === 'task.retyped' && e.task && e.meta?.to) { taskTypes.set(e.task, e.meta.to); retyped.add(e.task); }
   }
   return taskTypes;
 }

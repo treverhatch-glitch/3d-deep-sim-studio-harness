@@ -136,7 +136,11 @@ export function addChange({ kind, target, signatures = [], expect, risk, revert,
 /** The type of a task as the board says (injected by learn.mjs), else what its task.added event carried. */
 function fallbackTypes(events) {
   const m = new Map();
-  for (const e of events) if (e.type === 'task.added' && e.task && e.meta?.type) m.set(e.task, e.meta.type);
+  // 2.67.0 (B-38): an owner's reclassification (task.retyped) outranks the type the task was queued with.
+  for (const e of events) {
+    if (e.type === 'task.added' && e.task && e.meta?.type && !m.has(`r:${e.task}`)) m.set(e.task, e.meta.type);
+    if (e.type === 'task.retyped' && e.task && e.meta?.to) { m.set(e.task, e.meta.to); m.set(`r:${e.task}`, true); }
+  }
   return (id) => m.get(id) || 'unknown';
 }
 

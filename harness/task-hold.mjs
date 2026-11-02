@@ -25,6 +25,7 @@ import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
+import { ownerType } from './reclassify.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -132,7 +133,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
   if (q && !q.inProgress?.some((t) => t.id === taskId)) {
     const t = [...(q.backlog || [])].find((x) => x.id === taskId);
-    if (t && t.role === 'builder' && !isFixTask(t)) {
+    if (t && t.role === 'builder' && !isFixTask(t, ownerType)) {
       const tr = trunkState();
       if (tr.red) return `the game's trunk is red (${tr.why}); only fix tasks start until it is green (npm run task -- trunk green --by <name>)`;
     }
