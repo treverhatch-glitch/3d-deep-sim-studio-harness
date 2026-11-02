@@ -31,7 +31,8 @@
  *               textureMaxPx.
  *   preview     a preview render next to each model when previewRequired.
  *   roundtrip   the configured export/re-import command (a Blender script; a Unity batchmode run if the studio puts
- *               one in it) runs under machine:heavy and must exit 0. No command, or its program isn't installed: skipped
+ *               one in it) runs under machine:heavy (2.70.0: a Blender command in the GPU area when the scan shows a GPU,
+ *               one harness Blender job at a time, with -t <n> threads: harness/blender-job.mjs) and must exit 0. No command, or its program isn't installed: skipped
  *               with a note. {file} runs it once per model, else once with {files}.
  *   scale       (owner, 11:30) the model's bounding box in metres (LOD 0 meshes' POSITION min/max through their nodes'
  *               world transforms) within the expected size ("size": { "w", "d", "h" } in its manifest row, else in
@@ -351,7 +352,7 @@ export function programInstalled(cmd, env = process.env) {
 
 const PLAIN_NAME = /^[A-Za-z0-9._/ -]+$/;
 
-async function runRoundTrip(root, cfg, models, { env, log }) {
+export async function runRoundTrip(root, cfg, models, { env, log }) {
   const rt = cfg.roundTrip;
   if (!rt) return { skipped: true, note: 'no round-trip command is configured (studio/game.json "assets": { "roundTrip": { "command": "blender -b --factory-startup -P <script> -- {file}" } }): export/re-import not checked' };
   if (!models.length) return { skipped: true, note: 'no model file in the change: the round trip has nothing to run' };
@@ -361,9 +362,21 @@ async function runRoundTrip(root, cfg, models, { env, log }) {
   const cmds = rt.command.includes('{file}') ? models.map((f) => ({ f, cmd: rt.command.replaceAll('{file}', q(f)).replaceAll('{files}', q(f)) })) : [{ f: models.join(', '), cmd: rt.command.replaceAll('{files}', models.map(q).join(' ')) }];
   const timeoutMin = Number(rt.timeoutMin || 20);
   const { acquireHeavy, heavyRoot } = await import('./heavy.mjs');
+  // 2.70.0 (t): the claim follows the program (Blender: the GPU area when the scan shows a GPU; Unity: the Unity cap),
+  // and a Blender command gets -t <n> render threads (harness/blender-job.mjs).
+  const hroot = await heavyRoot();
+  const bj = await import('./blender-job.mjs');
+  const kind = bj.blenderKind(rt.command, 'asset-roundtrip');
+  if (bj.isBlenderCommand(rt.command)) {
+    let profile = null;
+    try { profile = (await import('./heavy-budget.mjs')).machineProfile(hroot, { env }); } catch {}
+    const th = bj.blenderThreads({ env, profile });
+    for (const c of cmds) c.cmd = bj.withBlenderThreads(c.cmd, th.n);
+    log(`[asset-gate] Blender render threads: ${th.n} (${th.why}) unless the command sets its own -t`);
+  }
   let lk;
   try {
-    lk = acquireHeavy(await heavyRoot(), 'asset round trip', { log, env, kind: 'asset-roundtrip' });
+    lk = acquireHeavy(hroot, 'asset round trip', { log, env, kind });
   } catch (err) {
     if (err.code !== 'HEAVY_BUSY') throw err;
     return { busy: true, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` };
