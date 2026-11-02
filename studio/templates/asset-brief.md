@@ -14,9 +14,12 @@ Asset brief
 - Texture budget: <max px on the longest side, count of maps>   (limit: "assets".textureMaxPx)
 - Style refs: <files in the reference library or the style sheet>
 - Licence: own work | <licence of the source, with its credit line> | generated (<tool>, <plan/terms>)
-- Files: <assets/... paths it will add, plus <name>.preview.png next to each model>
+- Files: <assets/... paths it will add, plus three preview renders next to each model:
+  <name>.preview-front.png, <name>.preview-34.png, <name>.preview-top.png (512 px square, studio/asset-review.json)>
 ```
 
 Done means the asset gate passes (`node harness/asset-gate.mjs --task <ID>`; docs/BLENDER.md "Asset track"): a licence
 row for every file, triangles per LOD, texture sizes, scale within the stated size, a preview render, the round trip,
-no brand names. The engine task that wires the asset in is queued by the harness when it lands.
+no brand names, and the preview checks (not blank, black, white, untextured magenta, clipped or tiny). Then a session
+that can view images reviews the previews (a review task the harness files; you can't pass your own) and the asset
+lands. The engine task that wires the asset in is queued by the harness when it lands.

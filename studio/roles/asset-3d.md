@@ -48,4 +48,9 @@ licence row for every file (`npm run asset -- add`), triangles per LOD (name LOD
 texture sizes, scale within the stated size, a preview render next to each model, the export/re-import round trip, and no brand names. When it
 lands, the harness queues the engine task that wires the asset in; you don't.
 
+Previews: render three views next to each model, `<name>.preview-front.png`, `<name>.preview-34.png` and
+`<name>.preview-top.png` (512 px square). The gate checks them (not blank, black, white, untextured magenta, clipped or
+tiny); when they pass, `task done` files a review for a session that can view images and refuses until it is answered.
+Pause meanwhile; you can't pass your own review. A failed review comes back as a fix task with the reviewer's words.
+
 **Your own scripts** (a tint pass, a contact sheet, a character check) go in `game/<game>/tools/`, never in the harness's `tools/`: that folder ships with the harness and is frozen in a test run, so a commit with a new file there is refused (test #2).

@@ -175,7 +175,8 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
   Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in
   `studio/fuzz.json`). An entry in `studio/fuzz.ignore.json` silences a finding, so a lane that adds one (directly or
-  by a config proposal) is tier C: a game dev releases it, or an outside agent records their permission.
+  by a config proposal) is tier C: a game dev releases it, or an outside agent records their permission. The same holds
+  for `studio/quarantine.json` (2.69.0) and `studio/asset-review.json` (2.70.0: the asset preview checks' thresholds).
 - **The blocked-command log (2.66.0)** (`npm run denials [-- --days 7] [--json]`, harness/denials.mjs). At session
   end the launcher reads Claude Code's `permission_denials` from every `{"type":"result"}` line of the session's log
   (the crew's logs carry the field on every result line) into `.studio/denials.jsonl`: task, agent, role, tool, a
@@ -202,7 +203,8 @@ actions without the owner's words for each one, for a time the owner sets (harne
   signature by that key (the grant signs it where the private key is; a changed file is ignored); without one only when
   the commit that set it isn't an agent's (no `Studio-Agent` trailer).
 - **What it covers:** `train-release`, `type`, `visual`, `yes`, `hold` (hold and unhold), `upgrade-auto` (2.69.0: the
-  auto-upgrade switch, `npm run upgrade -- watch auto on`, recorded for the owner), at most 72 hours. The named
+  auto-upgrade switch, `npm run upgrade -- watch auto on`, recorded for the owner), `asset-review` (2.70.0: answering
+  an asset's preview review, `npm run asset -- review`, docs/BLENDER.md), at most 72 hours. The named
   agent runs them with `--by <agent>` and no `--permission`; each use is recorded for the owner by the agent "under
   delegation <at> by <owner>" (the release, the task-types entry, the yes relay, the hold) plus one `delegation.used`
   event, and the daily digest counts them. Never covered: `npm run approve` (signing protected files, tests, hooks,

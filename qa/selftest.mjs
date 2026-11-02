@@ -4235,6 +4235,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.70.0 (v): a vision check on asset previews before an asset lands: deterministic preview checks (blank, black,
+// white, magenta, clipped, small; an up-axis warning), then ONE review request and task, answered by someone other
+// than the maker (npm run asset -- review), before the asset lands (qa/selftest-270v.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270V } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270v.mjs')).href);
+  await selftest270V({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
