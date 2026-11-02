@@ -38,6 +38,7 @@ import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
+import { reviewsAtDone } from './asset-review.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -943,11 +944,22 @@ function assetGateAtDone(target, { agent = null, checkOnly = false } = {}) {
   const text = assetGateText(res);
   if (res.status === 'skipped') return null;
   if (!checkOnly) emitEvent({ type: 'asset.gate', agent: agent || target.role, task: target.id, status: res.ok ? 'ok' : res.status === 'busy' ? 'warn' : 'blocked', msg: `${target.id} asset gate: ${res.status}${res.failures?.length ? ` (${res.failures.map((f) => `${f.check} ${f.file}`).join(', ')})` : ''}`.slice(0, 500), meta: { status: res.status, files: res.files, failures: (res.failures || []).map((f) => ({ check: f.check, file: f.file })), steamDisclosure: res.steamDisclosure || [] } });
-  if (res.ok) { if (text) console.log(text); return null; }
+  if (res.ok) { if (text) console.log(text); return assetReviewAtDone(target, res, { agent, checkOnly }); }
   if (res.status === 'busy') return { error: 'asset-busy', asset: res, message: `${target.id} is not done: the asset gate's round trip is waiting for the machine:heavy lock: ${res.why}\nRun task done again later; nothing is wrong with the work.` };
   emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the asset gate failed (${res.failures.map((f) => f.check).join(', ')})`.slice(0, 400) });
   if (!checkOnly) recordGateRefusal(target.id, { gates: [{ id: 'asset', ok: false }], text: `${text}\n[gates] FAIL asset`, log: '.studio/gates/asset-last.json' });
   return { error: 'asset-gate', asset: res, message: `${target.id} is not done: the asset gate fails.\n${text}\nFix it, commit, and run task done again (node harness/asset-gate.mjs --task ${target.id}${base ? ` --base ${String(base).slice(0, 12)}` : ''} runs it).` };
+}
+
+/**
+ * 2.70.0 (v): the checks passed; the asset still needs a look (harness/asset-review.mjs reviewsAtDone): the request
+ * and ONE review task are filed, and task done refuses until the review passes. null = reviewed (or no review asked).
+ */
+function assetReviewAtDone(target, res, { agent = null, checkOnly = false } = {}) {
+  const rv = reviewsAtDone({ task: target.id, res, agent, checkOnly, addTask, root: REPO_ROOT });
+  if (!rv) return null;
+  if (rv.note) { console.log(rv.note); return null; }
+  return rv;
 }
 
 /** 2.67.1 (j): a landed asset task files its one engine-track task (harness/asset-gate.mjs fileAssetHandoff). Never throws. */

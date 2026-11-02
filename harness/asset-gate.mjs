@@ -30,6 +30,10 @@
  *   texture     PNG/JPEG headers (loose files, and images embedded in a .glb or a data: URI): longest side within
  *               textureMaxPx.
  *   preview     a preview render next to each model when previewRequired.
+ *   preview-*   2.70.0 (v): the preview checks (harness/asset-review.mjs): blank, black, white, magenta, clipped, small;
+ *               an up-axis warning. When every check passes, `review` in the result lists each model with its
+ *               previews' numbers and checksums: task done asks a session that can view images for a look and lands
+ *               the asset only once it is answered (npm run asset -- review <asset> --pass|--fail "why" --by <name>).
  *   roundtrip   the configured export/re-import command (a Blender script; a Unity batchmode run if the studio puts
  *               one in it) runs under machine:heavy and must exit 0. No command, or its program isn't installed: skipped
  *               with a note. {file} runs it once per model, else once with {files}.
@@ -65,7 +69,8 @@ import { agentOnPermission } from './permission.mjs';
 export const MODEL_EXT = ['.glb', '.gltf', '.fbx', '.obj', '.blend', '.dae', '.usd', '.usdz'];
 export const IMAGE_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.tga', '.ktx2', '.exr', '.hdr'];
 const ASSET_EXT = [...MODEL_EXT, ...IMAGE_EXT, '.bin'];
-const PREVIEW_RE = /[._-]preview\.(png|jpe?g|webp)$/i;
+// 2.70.0 (v): one view per file too (<name>.preview-front.png, -34, -top: harness/asset-review.mjs VIEWS).
+const PREVIEW_RE = /[._-]preview(?:-(?:front|34|top))?\.(png|jpe?g|webp)$/i;
 
 export const ASSET_DEFAULTS = {
   paths: ['assets', 'public/assets'],
@@ -403,6 +408,7 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
   const failures = [];
   const steam = [];
   const fail = (check, file, why) => failures.push({ check, file, why, fix: assetFix(check, file) });
+  const review = { required: false, items: [] }; // 2.70.0 (v)
   if (!all.length) return { status: 'skipped', ok: true, files: [], failures, notes: [`no asset file under ${cfg.paths.join(', ')} in the change`], task };
   const rows = manifestRows(root, cfg);
   const brands = cfg.brandNames.map((b) => ({ b, n: normBrand(b) })).filter((x) => x.n.length >= 2);
@@ -471,9 +477,10 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
     }
     if (isModel(rel) && cfg.previewRequired) {
       const stem = rel.slice(0, -ext.length);
-      const found = ['.preview', '_preview', '-preview'].flatMap((s) => ['.png', '.jpg', '.jpeg', '.webp'].map((e) => `${stem}${s}${e}`)).some((p) => fs.existsSync(path.join(root, p)));
-      if (!found) fail('preview', rel, `no preview render next to it (${path.basename(stem)}.preview.png)`);
+      const found = ['.preview', '_preview', '-preview', '.preview-front', '.preview-34', '.preview-top'].flatMap((s) => ['.png', '.jpg', '.jpeg', '.webp'].map((e) => `${stem}${s}${e}`)).some((p) => fs.existsSync(path.join(root, p)));
+      if (!found) fail('preview', rel, `no preview render next to it (${path.basename(stem)}.preview.png, or one per view: .preview-front.png, .preview-34.png, .preview-top.png)`);
     }
+    if (isModel(rel)) await previewReview(rel, ext);
   }
   for (const f of steam) notes.push(`${f}: AI-made, list it in the Steam AI disclosure (pre-generated content)`);
   const models = all.filter((f) => isModel(f) && PLAIN_NAME.test(f));
@@ -485,8 +492,30 @@ export async function runAssetGate({ root = REPO_ROOT, files = null, task = null
   } else notes.push('round trip not run (task done --check); task done runs it');
   return finish({ status: failures.length ? 'fail' : 'pass', ok: !failures.length });
 
+  /** 2.70.0 (v): the preview checks for one model, and (when they pass) its entry for the review a person or agent answers. */
+  async function previewReview(rel, ext) {
+    const ar = await import('./asset-review.mjs');
+    const rcfg = ar.reviewConfig(root);
+    review.required = rcfg.review;
+    const pv = ar.checkPreviews(root, rel, rcfg);
+    for (const f of pv.failures) fail(f.check, f.file, f.why);
+    notes.push(...pv.notes, ...pv.warnings.map((w) => `WARNING ${w}`));
+    if (pv.failures.length || !pv.previews.length) return;
+    const row = rows.get(rel) || null;
+    let info = null;
+    if (ext === '.glb' || ext === '.gltf') { try { info = gltfInfo(fs.readFileSync(path.join(root, rel)), ext); } catch { /* the triangles check reported it */ } }
+    const side = readJson(path.join(root, `${rel.slice(0, -ext.length)}.asset.json`));
+    const added = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop() : null;
+    const title = String(added?.msg || '').replace(/^Queued [A-Z]+-\d+ \[\w+\] \([\w-]+\): /, '');
+    const hashes = { [rel]: sha(path.join(root, rel)) };
+    for (const p of pv.previews) hashes[p.file] = p.sha256;
+    const asset = ar.assetSlug(rel, cfg.paths);
+    review.items.push({ asset, state: ar.reviewState(root, asset, hashes), model: rel, previews: pv.previews, warnings: pv.warnings, notes: pv.notes, hashes, row, facts: ar.briefFacts(root, { model: rel, row, side, info, task, title }) });
+  }
+
   function finish(res) {
-    const full = { ...res, files: all, failures, notes, steamDisclosure: steam, ...(task ? { task } : {}), at: new Date().toISOString() };
+    review.pending = review.required ? review.items.filter((it) => it.state !== 'passed').map((it) => it.asset) : [];
+    const full = { ...res, files: all, failures, notes, steamDisclosure: steam, review, ...(task ? { task } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(root, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'asset-last.json'), JSON.stringify(full, null, 2)); } catch { /* evidence only */ }
     return full;
   }
@@ -499,6 +528,14 @@ export function assetGateText(res) {
   for (const n of res.notes || []) lines.push(`[asset-gate] note: ${n}`);
   if (res.status === 'busy') lines.push(`[asset-gate] BUSY: ${res.why}`);
   if (res.status === 'pass') lines.push(`[asset-gate] PASS ${res.files.length} asset file(s)`);
+  // 2.70.0 (v): the checks pass; a look is still due before it lands.
+  if (res.status === 'pass' && res.review?.required) {
+    for (const it of res.review.items || []) {
+      if (it.state === 'passed') lines.push(`[asset-gate] review ${it.asset}: passed (its current files)`);
+      else if (it.state === 'failed') lines.push(`[asset-gate] REVIEW ${it.asset}: failed, and the files haven't changed since: fix what the reviewer said`);
+      else lines.push(`[asset-gate] REVIEW ${it.asset}: the checks pass; it lands after a look by a session that can view images (task done files the request: npm run asset -- review ${it.asset} --pass|--fail "why" --by <name>)`);
+    }
+  }
   if (res.status === 'skipped') lines.push('[asset-gate] SKIP no asset file in the change');
   return lines.join('\n');
 }
