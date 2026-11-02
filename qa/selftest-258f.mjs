@@ -109,8 +109,9 @@ console.log(' Tests  1 passed (1)');
     const runC = readJson('.studio/verify-running/f2.json')?.runId;
     // 2.59.0+: a game check prints its load-scaled timeout only while the machine is busy, so that one line can differ
     // between two runs; it is information, not output to compare. 2.65.1: so is the load probe's reading, printed for
-    // every check ("[game-gates] <check>: load factor ..."): its CPU sample differs from run to run.
-    const norm = (t) => t.replace(/\r/g, '').split('\n').filter((l) => !l.startsWith('[verify]') && !/^\[game-gates\] \S+: timeout \d+ s \(/.test(l) && !/^\[game-gates\] \S+: load factor /.test(l)).map((l) => l.replace(/\d+ ms/, 'N ms').replace(/\s+/g, ' ')).join('\n').trim();
+    // every check ("[game-gates] <check>: load factor ..."): its CPU sample differs from run to run. 2.68.0: so is the
+    // test-worker line ("[game-gates] <check>: N test workers (... claim (1.9 GB))"): sized to the free memory of that moment.
+    const norm = (t) => t.replace(/\r/g, '').split('\n').filter((l) => !l.startsWith('[verify]') && !/^\[game-gates\] \S+: timeout \d+ s \(/.test(l) && !/^\[game-gates\] \S+: load factor /.test(l) && !/^\[game-gates\] \S+: \d+ test workers? \(/.test(l)).map((l) => l.replace(/\d+ ms/, 'N ms').replace(/\s+/g, ' ')).join('\n').trim();
     report('2.58.0 (F1): `npm run verify` runs the gates apart by default with the same output and exit codes (0 green, 1 red); --no-detach, and harness callers of the script, run in-process as before',
       pass.code === 0 && failRun.code === 1 && /^\[verify\] the gates run in a process of their own/.test(pass.text) && /\[gates\] 1\/1 passed/.test(pass.text) && /\[gates\] 1 required gate\(s\) failed: game/.test(failRun.text)
         && runA && runB && runA !== runB && noDetach.status === 0 && direct.status === 0 && runC === runB && !/\[verify\]/.test(out(noDetach) + out(direct)) && norm(pass.text) === norm(out(direct)),

@@ -72,6 +72,8 @@ P-174 to P-180).
 - **Release impact report (o).** `npm run autonomy -- impact` compares the days before and after each upgrade.
 ### Fixed
 - The supervisor records a two-bad-ends halt even on the pass that finds `--until` reached (CI Windows).
+- The 2.58 verify-output check ignores the new test-worker line, which is sized to the free memory of that moment
+  (CI: the detached and in-process runs printed different GB figures).
 
 ### Untested
 - Windows: the PowerShell scan for real, OOM exit codes, the detached janitor. macOS/Linux scans are tested on
