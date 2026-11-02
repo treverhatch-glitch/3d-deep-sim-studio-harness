@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { weightedTokens, cacheReadWeight } from './token-weight.mjs';
 import { buildAttempts } from './metrics.mjs';
 
@@ -71,6 +71,35 @@ export function readPrices(root = REPO_ROOT) {
   const j = readPriceFile(root);
   return j?.models && typeof j.models === 'object' ? j.models : null;
 }
+/**
+ * 2.67.0: where the prices come from, for the card: { file, checked, placeholder } or null with no table. The file
+ * ships with defaults for the Claude families ("opus", "sonnet", "haiku") and a "checked" date the owner sets after
+ * comparing them with the provider's price page ("UNVERIFIED" until then).
+ */
+export function readPriceInfo(root = REPO_ROOT) {
+  const j = readPriceFile(root);
+  if (!(j?.models && typeof j.models === 'object')) return null;
+  const checked = String(j.checked ?? '').trim().slice(0, 40) || null;
+  return { file: PRICES_REL, checked, placeholder: !checked || /unverified|placeholder/i.test(checked) };
+}
+/**
+ * 2.67.0: the price row for a session: its model's own row, else its tool's, else the longest family key the model
+ * names as a word ("claude-opus-4-5" -> "opus"), so the shipped family rows price full model ids.
+ */
+export function priceFor(prices, model, tool) {
+  if (!prices || typeof prices !== 'object') return null;
+  if (model && prices[model]) return prices[model];
+  if (tool && prices[tool]) return prices[tool];
+  const m = String(model || '').toLowerCase();
+  if (!m || m === 'unknown') return null;
+  let best = null;
+  for (const k of Object.keys(prices)) {
+    const kk = k.toLowerCase();
+    if (kk.length < 3 || !prices[k] || typeof prices[k] !== 'object') continue;
+    if (new RegExp(`(?<![a-z0-9])${kk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`).test(m) && (!best || kk.length > best.length)) best = k;
+  }
+  return best ? prices[best] : null;
+}
 /** 2.65.2: the price file's "multipliers" over DEFAULT_PRICE_MULTIPLIERS (a value that isn't a number >= 0 is ignored). */
 export function readPriceMultipliers(root = REPO_ROOT) {
   const m = readPriceFile(root)?.multipliers;
@@ -88,13 +117,14 @@ const num = (x) => (x === null || x === undefined || x === '' || !Number.isFinit
  */
 export function dollarsOf(ends, prices, multipliers = DEFAULT_PRICE_MULTIPLIERS) {
   const mult = { ...DEFAULT_PRICE_MULTIPLIERS, ...(multipliers || {}) };
-  let usd = 0; let unpriced = 0; let reported = 0;
+  let usd = 0; let unpriced = 0; let reported = 0; let priced = 0;
   for (const e of ends) {
     const tin = Number(e.tokensIn) || 0; const tout = Number(e.tokensOut) || 0; const cr = Number(e.meta?.cacheRead ?? e.cacheRead) || 0;
     const cost = num(e.meta?.costUsd);
     if (cost !== null && cost >= 0 && (cost > 0 || !(tin + tout + cr))) { usd += cost; reported += 1; continue; }
-    const p = (prices && (prices[e.model] || prices[e.meta?.tool])) || null;
+    const p = priceFor(prices, e.model, e.meta?.tool);
     if (!p) { if (tin + tout + cr) unpriced += 1; continue; }
+    if (tin + tout + cr) priced += 1;
     const w1hSplit = num(e.meta?.cacheWrite1h); const w5mSplit = num(e.meta?.cacheWrite5m);
     const cw = Math.min(tin, num(e.meta?.cacheWrite) ?? ((w1hSplit || 0) + (w5mSplit || 0)));
     let w1h;
@@ -105,7 +135,7 @@ export function dollarsOf(ends, prices, multipliers = DEFAULT_PRICE_MULTIPLIERS)
     const price = (k) => num(p[k]) ?? pin * mult[k];
     usd += ((tin - cw) * pin + w5m * price('cacheWrite5m') + w1h * price('cacheWrite1h') + tout * (Number(p.out) || 0) + cr * price('cacheRead')) / 1e6;
   }
-  return { usd, unpriced, reported };
+  return { usd, unpriced, reported, priced };
 }
 const ESCAPE_DAYS = 7;
 const ts = (e) => Date.parse(e?.ts) || 0;
@@ -387,7 +417,7 @@ export function actorOf(e, isPersonName) {
 }
 
 const UNPLANNED = new Set(['supervisor.resumed', 'task.forced', 'agent.stopped', 'task.reopened', 'task.dropped', 'task.reordered', 'task.unblocked', 'studio.stopped', 'task.retyped']);
-const PLANNED = new Set(['playtest.verdict', 'intent.confirmed', 'task.dev_yes', 'bible.signed', 'golden.approved', 'approval.protected']);
+const PLANNED = new Set(['playtest.verdict', 'intent.confirmed', 'task.dev_yes', 'bible.signed', 'golden.approved', 'approval.protected', 'supervisor.halt_cleared']);
 /** 'unplanned' | 'planned' | null for one event, given its actor. */
 export function interventionKind(e, actor) {
   if (!actor.person) return null;
@@ -417,16 +447,136 @@ function supervisorSpans(events, end) {
   if (from !== null) spans.push([from, Math.min(end, events.length ? ts(events[events.length - 1]) : end)]);
   return spans;
 }
-/** Spans the supervisor was halted (supervisor.halted to supervisor.resumed), each with its wait. */
+/**
+ * Spans the supervisor was halted, each with its wait: supervisor.halted to supervisor.resumed, or (2.67.0) to
+ * supervisor.halt_cleared (studio:resume clearing a stale halt whose supervisor isn't running), supervisor.stop or a
+ * new supervisor.start (a halt lives in the supervisor's own state: a stopped one waits on nothing, a new one starts
+ * unhalted). An open span carries its halted event.
+ */
+const HALT_ENDS = new Set(['supervisor.resumed', 'supervisor.halt_cleared', 'supervisor.stop', 'supervisor.start']);
 function haltSpans(events, end) {
   const spans = [];
-  let from = null;
+  let from = null; let ev = null;
   for (const e of events) {
-    if (e.type === 'supervisor.halted' && from === null) from = ts(e);
-    else if (e.type === 'supervisor.resumed' && from !== null) { spans.push({ from, to: ts(e), open: false }); from = null; }
+    if (e.type === 'supervisor.halted' && from === null) { from = ts(e); ev = e; }
+    else if (HALT_ENDS.has(e.type) && from !== null) { spans.push({ from, to: Math.max(from, ts(e)), open: false, endedBy: e.type }); from = null; ev = null; }
   }
-  if (from !== null) spans.push({ from, to: end, open: true });
+  if (from !== null) spans.push({ from, to: Math.max(from, end), open: true, event: ev });
   return spans;
+}
+/** 2.67.0: hours after which an open halt whose supervisor isn't running is stale (STUDIO_HALT_STALE_H, default 24). */
+export function haltStaleHours(env = process.env) {
+  const v = env.STUDIO_HALT_STALE_H;
+  return v !== undefined && v !== '' && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 24;
+}
+/**
+ * 2.67.0: the open halt in an event log, or null: { at, who, cause, ageH, stale, supervisorRunning, clear }.
+ * supervisorRunning: from the log (a supervisor.start with no stop after it), or the caller's `running` (the status file).
+ */
+export function openHaltOf(events, { now = Date.now(), running = null, staleH = haltStaleHours(), zone = null } = {}) {
+  const sorted = [...events].filter((e) => e && e.ts).sort((a, b) => ts(a) - ts(b));
+  const h = haltSpans(sorted, now).find((x) => x.open);
+  if (!h) return null;
+  let up = null;
+  for (const e of sorted) { if (e.type === 'supervisor.start') up = true; else if (e.type === 'supervisor.stop') up = false; }
+  const supervisorRunning = typeof running === 'boolean' ? running : Boolean(up);
+  const ageH = round((now - h.from) / 3600000, 1);
+  const stale = ageH >= staleH && !supervisorRunning;
+  const cause = String(h.event?.msg || '').replace(/^Supervisor stopped starting agents:\s*/i, '').slice(0, 300) || 'no cause recorded';
+  const zn = typeof zone === 'string' && zone ? zone : (zone || studioZone()).zone;
+  const clear = supervisorRunning
+    ? 'fix the cause, then npm run studio:resume -- --by <your name> [--why "what you fixed"] (or "Fixed it: try again" in the War Room)'
+    : stale
+      ? `its supervisor isn't running and it is older than STUDIO_HALT_STALE_H (${staleH} h): npm run studio:resume -- --by <your name> --why "stale halt" clears it (an outside agent adds --permission "<the person's words>")`
+      : `its supervisor isn't running, so nothing waits on it; a new npm run studio:start starts unhalted, and npm run studio:resume clears it once it is ${staleH} h old`;
+  return { at: new Date(h.from).toISOString(), atLocal: localStamp(h.from, zn), who: String(h.event?.agent || 'supervisor'), cause, ageH, stale, supervisorRunning, staleH, clear };
+}
+
+/**
+ * 2.67.0: the studio's time zone for daily rows and landing times: STUDIO_TZ (an IANA name this Node knows), else UTC
+ * (as before). { zone, source, machine } (machine: this computer's zone, from TZ or the system, for the card's hint
+ * "set STUDIO_TZ=<zone>"). TZ alone doesn't switch the card: TZ is often set machine-wide, and the days (and the
+ * replays scored on them) would then change with whichever computer printed them.
+ */
+const zoneOk = (z) => { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch { return false; } };
+export function studioZone(env = process.env) {
+  for (const k of ['STUDIO_TZ']) {
+    const z = String(env[k] || '').trim().replace(/^:/, '');
+    if (z && zoneOk(z)) return { zone: z, source: k };
+  }
+  let machine = null;
+  try { machine = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch {}
+  const tz = String(env.TZ || '').trim().replace(/^:/, '');
+  if (tz && zoneOk(tz)) machine = tz;
+  return { zone: 'UTC', source: 'default', machine };
+}
+const ZFMT = new Map();
+function zoneParts(ms, zone) {
+  const k = zone || 'UTC';
+  if (!ZFMT.has(k)) ZFMT.set(k, new Intl.DateTimeFormat('en-US', { timeZone: k, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }));
+  const p = Object.fromEntries(ZFMT.get(k).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return { y: Number(p.year), mo: Number(p.month) - 1, d: Number(p.day), h: Number(p.hour) % 24, mi: Number(p.minute), s: Number(p.second) };
+}
+/** Minutes the zone is ahead of UTC at `ms`. */
+export function zoneOffsetMin(ms, zone) {
+  const w = zoneParts(ms, zone);
+  return Math.round((Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000) / 60000);
+}
+/** The instant of local midnight starting the local day y-mo-d (day overflow rolls on, as Date.UTC does). */
+function localMidnight(y, mo, d, zone) {
+  const guess = Date.UTC(y, mo, d);
+  const first = guess - zoneOffsetMin(guess, zone) * 60000;
+  return guess - zoneOffsetMin(first, zone) * 60000;
+}
+const pad = (x) => String(x).padStart(2, '0');
+/** "YYYY-MM-DD" of `ms` in the zone. */
+export const localDate = (ms, zone) => { const w = zoneParts(ms, zone); return `${w.y}-${pad(w.mo + 1)}-${pad(w.d)}`; };
+/** "YYYY-MM-DD HH:MM +07:00" (UTC: "… UTC"). */
+export function localStamp(ms, zone) {
+  const w = zoneParts(ms, zone); const off = zoneOffsetMin(ms, zone);
+  const o = off === 0 ? 'UTC' : `${off > 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+  return `${w.y}-${pad(w.mo + 1)}-${pad(w.d)} ${pad(w.h)}:${pad(w.mi)} ${o}`;
+}
+/** Local calendar days covering [from, now]: [{ day, b0, b1 }] (the first and last may be partial). */
+export function localDays(from, now, zone) {
+  const out = [];
+  let w = zoneParts(from, zone);
+  let start = localMidnight(w.y, w.mo, w.d, zone);
+  for (let guard = 0; start < now && guard < 400; guard++) {
+    w = zoneParts(start + 12 * 3600000, zone);
+    const next = localMidnight(w.y, w.mo, w.d + 1, zone);
+    const b0 = Math.max(from, start); const b1 = Math.min(now, next);
+    if (b1 > b0) out.push({ day: `${w.y}-${pad(w.mo + 1)}-${pad(w.d)}`, b0, b1 });
+    start = next;
+  }
+  return out;
+}
+
+/**
+ * 2.67.0: orchestrator interventions. An outside orchestrator's own steps, besides its conductor notes: train releases
+ * it recorded, lanes refreshes, holds, a stale halt cleared, and the person-only steps (reopen, drop, reorder, force,
+ * resume, …) it took. Planned: notes, releases (recorded approvals), refreshes, halt clears, the card's planned types.
+ * Unplanned: holds and the card's unplanned types. Its actor: who recorded it (meta.recordedBy), else the event's agent;
+ * an outside agent is neither the harness, a worker, a launched Producer/Director session, nor a person acting alone.
+ */
+const LAUNCHED_DECIDER = /^(producer|director)(-|_|\d|$)/i;
+const WORKER_RE = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
+export function orchestratorKind(e) {
+  const t = String(e?.type || '');
+  if (t === 'conductor.note' || t === 'task.train.released' || t === 'supervisor.halt_cleared' || t.startsWith('lanes.refresh.')) return t === 'lanes.refresh.refused' ? null : 'planned';
+  if (t === 'task.hold' || t === 'supervisor.resume_asked' || UNPLANNED.has(t)) return 'unplanned';
+  if (PLANNED.has(t)) return 'planned';
+  return null;
+}
+export function orchestratorOf(e, isPersonName) {
+  const kind = orchestratorKind(e);
+  if (!kind) return null;
+  const rec = String(e.meta?.recordedBy || '').trim();
+  const who = rec || String(e.agent || '').trim();
+  if (!who || SYSTEM.test(who) || WORKER_RE.test(who) || LAUNCHED_DECIDER.test(who) || /^a (producer|director) session$/i.test(who)) return null;
+  // A conductor note counts whoever wrote it (2.65.0); the other steps only an agent's (a person's own are interventions).
+  if (e.type !== 'conductor.note' && !rec && who !== 'conductor' && isPersonName(who)) return null;
+  return { who, kind, type: e.type };
 }
 const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
 /** Supervisor running time (minus halts) inside [a, b], in ms. */
@@ -445,7 +595,7 @@ function runningMs(a, b, runs, halts) {
  * The scorecard. events: the log (any order); now: the window's end; days: its length.
  * isPersonName: a name -> bool function (personClassifier()); attempts: rows from metrics.mjs attemptRows (optional).
  */
-export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null, prices = null, priceMultipliers = null, keepDays = null, minSample = DEFAULT_MIN_SAMPLE, reverts = [], typeOfTask = null, judgedAt = null } = {}) {
+export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOMY.days, isPersonName, attempts = null, weigh = null, prices = null, priceMultipliers = null, keepDays = null, minSample = DEFAULT_MIN_SAMPLE, reverts = [], typeOfTask = null, judgedAt = null, priceInfo = null, zone = null, supervisorRunning = null } = {}) {
   if (typeof isPersonName !== 'function') throw new Error('buildAutonomy needs isPersonName (await personClassifier())');
   const sorted = [...events].map((e, i) => [ts(e), i, e]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map((x) => x[2]);
   const from = now - days * DAY;
@@ -487,6 +637,7 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
       if (!inWin(ts(e))) continue;
       const cur = landedAt.get(t) || { at: ts(e), forced: false, viaTrain: false, people: new Set() };
       if (e.type === 'task.forced') cur.forced = true;
+      if (e.meta?.tier && !cur.tier) { cur.tier = String(e.meta.tier).toUpperCase(); cur.signed = Boolean(e.meta.signed || e.meta.signature || e.meta.approval || e.meta.released); }
       if (e.type === 'task.train.landed' || e.type === 'lane.merged') cur.viaTrain = true;
       landedAt.set(t, cur);
     }
@@ -536,7 +687,9 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   // Halt wait: halts that started in the window.
   const hw = halts.filter((h) => inWin(h.from)).map((h) => ({ ...h, min: round((h.to - h.from) / 60000, 1) }));
   const waits = hw.map((h) => h.min).sort((a, b) => a - b);
-  const haltWait = { count: hw.length, open: hw.filter((h) => h.open).length, totalMin: round(waits.reduce((s, x) => s + x, 0), 1), medianMin: waits.length ? waits[Math.floor((waits.length - 1) / 2)] : null, maxMin: waits.length ? waits[waits.length - 1] : null };
+  const z = zone && typeof zone === 'object' ? zone : typeof zone === 'string' && zone ? { zone, source: 'given' } : studioZone();
+  const oh = hw.some((h) => h.open) ? openHaltOf(sorted, { now, zone: z.zone, running: supervisorRunning }) : null;
+  const haltWait = { ...(oh ? { openHalt: oh } : {}), count: hw.length, open: hw.filter((h) => h.open).length, totalMin: round(waits.reduce((s, x) => s + x, 0), 1), medianMin: waits.length ? waits[Math.floor((waits.length - 1) / 2)] : null, maxMin: waits.length ? waits[waits.length - 1] : null };
 
   // Gate catches per landed task.
   const trainReds = win.filter((e) => e.type === 'task.train.red' || e.type === 'task.train.red_main').length;
@@ -559,8 +712,13 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
   const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
   if (prices && typeof prices === 'object') {
+    // 2.67.0: "prices from <file>, checked <date>"; with a table but no session it can price (or that reported its
+    // cost) in the window, the card stays in tokens and says why instead of showing $0.
+    const src = `prices from ${priceInfo?.file || PRICES_REL}${priceInfo?.checked ? `, checked ${priceInfo.checked}` : priceInfo ? ', never checked' : ''}${priceInfo?.placeholder ? ' (placeholders: confirm them against the provider\'s price page and set "checked" to that date)' : ''}`;
     const d = dollarsOf(win.filter((e) => e.type === 'agent.session.end'), prices, priceMultipliers || DEFAULT_PRICE_MULTIPLIERS);
-    Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, reportedSessions: d.reported, note: `at the prices in ${PRICES_REL}${d.reported ? ` (${d.reported} session(s) at the cost their tool reported)` : ''}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
+    cost.priceSource = { file: priceInfo?.file || PRICES_REL, checked: priceInfo?.checked || null, placeholder: Boolean(priceInfo?.placeholder) };
+    if (d.priced + d.reported > 0) Object.assign(cost, { priced: true, dollars: round(d.usd, 2), dollarsPerLanded: n ? round(d.usd / n, 2) : null, unpricedSessions: d.unpriced, reportedSessions: d.reported, note: `${src}${d.reported ? ` (${d.reported} session(s) at the cost their tool reported)` : ''}${d.unpriced ? `; ${d.unpriced} session(s) of a model or tool not in the table are not counted in dollars` : ''}` });
+    else Object.assign(cost, { unpricedSessions: d.unpriced, note: `tokens only: no session in the window has a model or tool in the table (${src})` });
   }
   // 2.65.0: orchestrator interventions: conductor notes (event conductor.note, an outside orchestrator's rulings in a
   // task's record), counted by type so they show once the conductor tools write them; and a person's round-trips
@@ -568,20 +726,47 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const notes = win.filter((e) => e.type === 'conductor.note');
   const byWho = {};
   for (const e of notes) { const w = String(e.meta?.by || e.agent || 'unknown'); byWho[w] = (byWho[w] || 0) + 1; }
-  const orchestrator = { conductorNotes: notes.length, by: byWho, perLanded: n ? round(notes.length / n, 2) : null };
+  // 2.67.0: and the orchestrator's other steps (orchestratorOf): releases, lanes refreshes, holds, halt clears and
+  // person-only steps it recorded, split planned / unplanned; plus the work it reported (npm run usage: outside sessions).
+  const steps = win.map((e) => orchestratorOf(e, isPersonName)).filter(Boolean);
+  const byType = {}; const stepWho = {};
+  for (const s of steps) { byType[s.type] = (byType[s.type] || 0) + 1; stepWho[s.who] = (stepWho[s.who] || 0) + 1; }
+  const outsideEnds = win.filter((e) => e.type === 'agent.session.end' && e.meta?.outside);
+  const outsideBy = {};
+  for (const e of outsideEnds) { const w = String(e.agent || 'unknown'); outsideBy[w] = (outsideBy[w] || 0) + Math.round(weight(e)); }
+  const outsideTokens = outsideEnds.reduce((s, e) => s + weight(e), 0);
+  const orchestrator = { conductorNotes: notes.length, by: byWho, perLanded: n ? round(notes.length / n, 2) : null,
+    interventions: steps.length, planned: steps.filter((s) => s.kind === 'planned').length, unplanned: steps.filter((s) => s.kind === 'unplanned').length, byType, who: stepWho,
+    usage: { sessions: outsideEnds.length, tokens: Math.round(outsideTokens), share: tokens > 0 ? round(outsideTokens / tokens, 4) : null, by: outsideBy } };
   const roundTripsPerLanded = n ? round((unplanned.length + planned.length) / n, 2) : null;
 
   // Risk tiers (2.63): a landing that names tier C without a signature. n/a while no landing carries a tier.
-  const tiered = win.filter((e) => landingsOf(e).length && e.meta?.tier);
-  const tierC = tiered.length ? tiered.filter((e) => String(e.meta.tier).toUpperCase() === 'C' && !(e.meta.signed || e.meta.signature || e.meta.approval)).length : null;
+  // 2.67.0: the train records a lane's tier on its own task.train.tier event (meta.tier, meta.released) before the
+  // landing, not on task.train.landed, so the old check read n/a forever. A landed task's tier: its landing event's
+  // meta.tier, else its latest tier event since its previous landing; a tier-C landing is signed when that tier event
+  // names a release or a task.train.released (the owner's release, or one recorded on their permission) came between.
+  const tierRows = [];
+  for (const l of landed) {
+    const mine = byTask.get(l.task) || [];
+    const prevLand = (landingsByTask.get(l.task) || []).filter((t) => t < l.at).pop() ?? -Infinity;
+    const since = (e) => ts(e) > prevLand && ts(e) <= l.at;
+    let tier = l.tier || null; let signed = Boolean(l.signed); let by = null;
+    if (!tier) { const te = mine.filter((e) => e.type === 'task.train.tier' && e.meta?.tier && since(e)).pop(); if (te) { tier = String(te.meta.tier).toUpperCase(); if (te.meta.released) { signed = true; by = String(te.meta.released); } } }
+    if (tier && !signed) { const re = mine.filter((e) => e.type === 'task.train.released' && since(e)).pop(); if (re) { signed = true; by = String(re.meta?.by || re.agent || ''); } }
+    if (tier) tierRows.push({ task: l.task, tier, signed, ...(by ? { releasedBy: by } : {}) });
+  }
+  const tierC = tierRows.length ? tierRows.filter((r) => r.tier === 'C' && !r.signed).length : null;
+  const tiers = { A: tierRows.filter((r) => r.tier === 'A').length, B: tierRows.filter((r) => r.tier === 'B').length, C: tierRows.filter((r) => r.tier === 'C').length, untiered: n - tierRows.length, cUnsigned: tierC, rows: tierRows.filter((r) => r.tier === 'C') };
 
   // Daily buckets: 24 h slices ending at `now`, oldest first.
+  // 2.67.0: calendar days in the studio's zone (studioZone: STUDIO_TZ, else TZ, else UTC), each with its UTC span
+  // when the zone isn't UTC; an event at a day's first instant is that day's, and the window's end is the last day's.
   const buckets = [];
-  for (let i = Math.ceil(days); i >= 1; i--) {
-    const b0 = Math.max(from, now - i * DAY); const b1 = Math.min(now, now - (i - 1) * DAY);
-    const inB = (t) => t > b0 && t <= b1;
+  for (const { day, b0, b1 } of localDays(from, now, z.zone)) {
+    const inB = (t) => t >= b0 && (t < b1 || (b1 === now && t === now));
     const bl = landed.filter((l) => inB(l.at));
-    buckets.push({ day: new Date(b0 + DAY / 2).toISOString().slice(0, 10), from: new Date(b0).toISOString(), supervisorHours: round(runningMs(b0, b1, runs, halts) / 3600000, 2), unplanned: unplanned.filter((x) => inB(x.at)).length, planned: planned.filter((x) => inB(x.at)).length, landed: bl.length, handsFree: bl.filter((l) => l.handsFree).length, forced: bl.filter((l) => l.forced).length, tokens: Math.round(win.filter((e) => e.type === 'agent.session.end' && inB(ts(e))).reduce((s, e) => s + weight(e), 0)) });
+    const off0 = zoneOffsetMin(b0, z.zone); const off1 = zoneOffsetMin(Math.max(b0, b1 - 1), z.zone);
+    buckets.push({ day, zone: z.zone, ...(off0 || off1 ? { utc: `${new Date(b0).toISOString().slice(0, 16).replace('T', ' ')} to ${new Date(b1).toISOString().slice(0, 16).replace('T', ' ')} UTC` } : {}), from: new Date(b0).toISOString(), supervisorHours: round(runningMs(b0, b1, runs, halts) / 3600000, 2), unplanned: unplanned.filter((x) => inB(x.at)).length, planned: planned.filter((x) => inB(x.at)).length, landed: bl.length, handsFree: bl.filter((l) => l.handsFree).length, forced: bl.filter((l) => l.forced).length, tokens: Math.round(win.filter((e) => e.type === 'agent.session.end' && inB(ts(e))).reduce((s, e) => s + weight(e), 0)) });
   }
 
   // 2.66.0: tokens that do work (effective-token ratio, cost per kept change, the waste split).
@@ -611,8 +796,10 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
     orchestrator,
     roundTripsPerLanded,
     tierCUnsigned: tierC,
+    tiers,
+    zone: z,
     tokenWork: work,
-    tasks: landed.map((l) => ({ task: l.task, landed: new Date(l.at).toISOString(), handsFree: l.handsFree, forced: l.forced, escaped: l.escaped, viaTrain: l.viaTrain, people: [...l.people] })),
+    tasks: landed.map((l) => ({ task: l.task, landed: new Date(l.at).toISOString(), landedLocal: localStamp(l.at, z.zone), ...(localDate(l.at, z.zone) !== new Date(l.at).toISOString().slice(0, 10) ? { landedUtcDate: new Date(l.at).toISOString().slice(0, 10) } : {}), handsFree: l.handsFree, forced: l.forced, escaped: l.escaped, viaTrain: l.viaTrain, people: [...l.people] })),
     buckets,
   };
 }
@@ -627,7 +814,7 @@ export function l3Checks(card, l3 = DEFAULT_AUTONOMY.l3, days = DEFAULT_AUTONOMY
     { id: 'handsFreeLandRate', ok: card.handsFreeLandRate !== null && card.handsFreeLandRate >= l3.handsFreeLandRate, value: pct(card.handsFreeLandRate), bar: `at least ${pct(l3.handsFreeLandRate)}` },
     { id: 'reopenRate', ok: card.reopenRate !== null && card.reopenRate <= l3.reopenRate, value: pct(card.reopenRate), bar: `at most ${pct(l3.reopenRate)}` },
     { id: 'redoRate', ok: card.verdicts.redoRate === null || card.verdicts.redoRate <= l3.redoRate, na: card.verdicts.redoRate === null, value: pct(card.verdicts.redoRate), bar: `at most ${pct(l3.redoRate)}` },
-    { id: 'tierCUnsigned', ok: card.tierCUnsigned === null || card.tierCUnsigned <= l3.tierCUnsigned, na: card.tierCUnsigned === null, value: card.tierCUnsigned === null ? 'n/a (no risk tiers yet)' : String(card.tierCUnsigned), bar: `at most ${l3.tierCUnsigned}` },
+    { id: 'tierCUnsigned', ok: card.tierCUnsigned === null || card.tierCUnsigned <= l3.tierCUnsigned, na: card.tierCUnsigned === null, value: card.tierCUnsigned === null ? 'n/a (no landing in the window carries a risk tier)' : `${card.tierCUnsigned}${card.tiers ? ` (tiers of ${card.tiers.A + card.tiers.B + card.tiers.C} landing(s): A ${card.tiers.A}, B ${card.tiers.B}, C ${card.tiers.C}${card.tiers.C ? `, released: ${card.tiers.C - card.tiers.cUnsigned}` : ''})` : ''}`, bar: `at most ${l3.tierCUnsigned}` },
   ];
 }
 
@@ -651,7 +838,7 @@ export function levelBadge(card, cfg = DEFAULT_AUTONOMY) {
 export function autonomyLine(card, badge) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 100)}%`);
   const sug = badge.suggestion.kind ? ` · ${badge.suggestion.kind === 'promote' ? 'suggest L3 (your call)' : 'suggest back to L2'}` : '';
-  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${sug}`;
+  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.interventions ? ` · ${card.orchestrator.interventions} orchestrator interventions (${card.orchestrator.conductorNotes} conductor notes)` : card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${card.orchestrator?.usage?.sessions ? ` · outside work ${Math.round(card.orchestrator.usage.tokens / 1000)}k tokens` : ''}${sug}`;
 }
 
 /** 2.66.0: the CLI's short "Tokens" block (lines). */
@@ -743,7 +930,13 @@ export async function autonomyReport({ now = Date.now(), days = null, since = nu
   let typeOfTask = null;
   try { const dc = await import('./done-check.mjs'); typeOfTask = (t) => dc.typeOf({ id: t.id, title: t.title, role: t.role }).type; } catch {}
   const reverts = revertCommits(root, now - d * DAY);
-  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices(root), priceMultipliers: readPriceMultipliers(root), keepDays: cfg.keepDays, minSample: cfg.minSample, reverts, typeOfTask });
+  // 2.67.0: is a supervisor running now (its status file and a live pid)? An open halt whose supervisor is gone is stale.
+  let supervisorRunning = false;
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'supervisor.json'), 'utf8'));
+    if (st?.status === 'running' && st.pid) { const { pidAlive } = await import('./proc-identity.mjs'); supervisorRunning = Boolean(pidAlive(st.pid, st.identity, { eperm: false })); }
+  } catch {}
+  const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices(root), priceMultipliers: readPriceMultipliers(root), priceInfo: readPriceInfo(root), keepDays: cfg.keepDays, minSample: cfg.minSample, reverts, typeOfTask, zone: studioZone(), supervisorRunning });
   const badge = levelBadge(card, { ...cfg, days: round(d, 2) });
   return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, keepDays: cfg.keepDays, minSample: cfg.minSample, protected: await configProtected() } };
 }
@@ -783,13 +976,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`Landed ${c.landed}: ${c.handsFree} hands-free (${pct(c.handsFreeLandRate)}), ${c.forced} forced (${pct(c.forcedRate)}), ${c.escaped} reopened or caused a bug within 7 days (${pct(c.reopenRate)}).`);
   if (c.handBacks) console.log(`Hand-backs: ${c.handBacks.count} of ${c.handBacks.attempts} attempts (${pct(c.handBacks.rate)})${Object.keys(c.handBacks.byLabel).length ? `: ${Object.entries(c.handBacks.byLabel).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}.`);
   console.log(`Halts: ${c.haltWait.count}${c.haltWait.open ? ` (${c.haltWait.open} still waiting)` : ''}, waited ${c.haltWait.totalMin ?? 0} min in all (median ${c.haltWait.medianMin ?? '-'}, longest ${c.haltWait.maxMin ?? '-'}).`);
+  const oh = c.haltWait.openHalt;
+  if (oh) console.log(`  Open halt: since ${oh.atLocal} (${oh.ageH} h), by ${oh.who}: ${oh.cause}. ${oh.stale ? 'Stale: ' : ''}${oh.clear}.`);
   console.log(`Gate catches: ${c.gateCatches.trainReds} train reds, ${c.gateCatches.notDone} done-check refusals (${c.gateCatches.perLanded ?? '-'} per landed task).`);
   console.log(`Away verdicts: ${c.verdicts.great} great, ${c.verdicts.redo} redo, ${c.verdicts.comment} comment (Redo ${pct(c.verdicts.redoRate)}). Tokens: ${c.tokens.toLocaleString()} (${c.tokensPerLanded === null ? '-' : c.tokensPerLanded.toLocaleString()} per landed task).`);
   if (c.cost) console.log(`Cost per landed task: ${c.cost.tokensPerLanded === null ? '-' : `${c.cost.tokensPerLanded.toLocaleString()} tokens`}${c.cost.previousTokensPerLanded ? ` (the ${r.card.window.days} days before: ${c.cost.previousTokensPerLanded.toLocaleString()})` : ''}${c.cost.priced ? `, $${c.cost.dollarsPerLanded ?? '-'} (${c.cost.note})` : ` (${c.cost.note})`}.`);
-  console.log(`Person round-trips per landed task: ${c.roundTripsPerLanded ?? '-'}. Orchestrator interventions: ${c.orchestrator.conductorNotes} conductor note(s)${c.orchestrator.conductorNotes ? ` (${Object.entries(c.orchestrator.by).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}.`);
+  const o = c.orchestrator;
+  console.log(`Person round-trips per landed task: ${c.roundTripsPerLanded ?? '-'}. Orchestrator interventions: ${o.conductorNotes} conductor note(s)${o.conductorNotes ? ` (${Object.entries(o.by).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}${o.interventions ? `; ${o.interventions} step(s) in all by an outside agent or in a conductor note, ${o.planned} planned, ${o.unplanned} unplanned (${Object.entries(o.byType).map(([k, v]) => `${k} ${v}`).join(', ')}; ${Object.entries(o.who).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}.`);
+  console.log(o.usage.sessions ? `Outside work (npm run usage): ${o.usage.sessions} session(s), ${o.usage.tokens.toLocaleString()} weighted tokens (${pct(o.usage.share)} of the window's), counted in the tokens and cost above (${Object.entries(o.usage.by).map(([k, v]) => `${k} ${v.toLocaleString()}`).join(', ')}).` : 'Outside work: none recorded (an orchestrator outside the harness records its sessions with npm run usage -- import <its .jsonl> or usage -- add).');
+  if (c.tiers && c.tierCUnsigned !== null) console.log(`Risk tiers of landings: A ${c.tiers.A}, B ${c.tiers.B}, C ${c.tiers.C} (${c.tiers.rows.map((x) => `${x.task} ${x.signed ? `released${x.releasedBy ? ` by ${x.releasedBy}` : ''}` : 'NOT released'}`).join(', ') || 'none'}), ${c.tiers.untiered} without a tier.`);
   for (const l of tokenBlock(c.tokenWork)) console.log(l);
-  console.log('Days:');
-  for (const b of c.buckets) console.log(`  ${b.day}: supervisor ${b.supervisorHours} h, ${b.unplanned} unplanned / ${b.planned} planned, ${b.landed} landed (${b.handsFree} hands-free, ${b.forced} forced)`);
+  console.log(c.zone.source === 'default' ? `Days (UTC${c.zone.machine && c.zone.machine !== 'UTC' && !/^Etc\/(UTC|GMT)$/.test(c.zone.machine) ? `; this computer is on ${c.zone.machine}: set STUDIO_TZ=${c.zone.machine} for local days` : ''}):` : `Days (local, ${c.zone.zone}, from ${c.zone.source}):`);
+  for (const b of c.buckets) console.log(`  ${b.day}${b.utc ? ` (${b.utc})` : ''}: supervisor ${b.supervisorHours} h, ${b.unplanned} unplanned / ${b.planned} planned, ${b.landed} landed (${b.handsFree} hands-free, ${b.forced} forced)`);
   console.log(`L3 bar (${r.config.file}${r.config.exists ? '' : ', defaults: no file'}${r.config.protected ? '; protected: owner-signed changes only' : '; set by a person, a Producer or Director session or an outside agent, never a worker'}):`);
   for (const k of r.badge.checks) console.log(`  ${k.ok ? 'ok  ' : 'MISS'} ${k.id}: ${k.value} (bar: ${k.bar})${k.na ? ' n/a' : ''}`);
   if (r.badge.suggestion.kind) console.log(r.badge.suggestion.text);

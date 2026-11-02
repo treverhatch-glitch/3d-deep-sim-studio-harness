@@ -4087,6 +4087,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (helper i): the scorecard's gaps from the crew's day one: outside work (npm run usage add / import) and an
+// outside orchestrator's steps count, default prices with a checked stamp, risk tiers from the train's tier events, a
+// stale halt named and cleared by studio:resume, local days (qa/selftest-267i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267i.mjs')).href);
+  await selftest267I({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

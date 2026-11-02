@@ -1,4 +1,4 @@
-# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0, 2.66.0)
+# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0, 2.66.0, 2.67.0)
 
 Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
 read files and the event log only: no model, no tokens. Neither changes how the studio runs.
@@ -24,13 +24,44 @@ Autonomy card (read from `GET /api/autonomy`, cached 5 minutes on the hub).
 | Forced-done rate | landed tasks forced past a check |
 | Reopen/escape rate | landed tasks reopened, or named by a bug added `--caused-by`, within 7 days of landing |
 | Hand-backs by label | attempts that didn't end done, by the failure labels in `docs/METRICS.md` |
-| Halt wait | minutes from `supervisor.halted` to `supervisor.resumed` (an open halt counts up to now) |
+| Halt wait | minutes from `supervisor.halted` to `supervisor.resumed` (an open halt counts up to now). 2.67.0: a halt also ends at `supervisor.halt_cleared`, `supervisor.stop` or a new `supervisor.start` (a halt lives in the supervisor's own state); the card names an open one (who, when, cause, its age) and how to clear it (see below) |
 | Gate catches | merge-train reds and done-check refusals, per landed task: the gates catching it, not the agents improving |
 | Your verdicts | away cards marked great / redo / comment; Redo rate = redo over all three |
 | Tokens per landed task | session tokens in the window (counted as the overnight page counts them) over landed tasks |
-| Cost per landed task (2.65) | the tokens per landed task, and the same for the window before (the trend). Dollars only with a price table, `studio/prices.json` (`{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million tokens); none ships, so the card says "tokens only". 2.65.2: cache writes (inside `tokensIn`) are priced by TTL, 1.25x input for 5-minute writes and 2x for 1-hour ones (the split from Claude's usage, else the TTL the launcher asked for); a model with no `cacheRead` price reads at 0.1x input; the file's top-level `"multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }` changes them. A session whose tool reported its cost (`meta.costUsd`) counts at that cost. Tokens are counted as the budget meter counts them, whoever calls the scorecard |
+| Cost per landed task (2.65) | the tokens per landed task, and the same for the window before (the trend). Dollars only with a price table, `studio/prices.json` (`{ "models": { "<model or tool>": { "in": 3, "out": 15, "cacheRead": 0.3 } } }`, USD per million tokens). 2.67.0: the file ships with family rows (`opus`, `sonnet`, `haiku`: a full model id such as `claude-opus-4-5` is priced by the family it names, after its own row and its tool's) and a `"checked"` stamp; the card says "prices from studio/prices.json, checked <date>", and stays in tokens (saying why) while no session in the window has a model it can price. The shipped prices are placeholders (`"checked": "UNVERIFIED"`): compare them with the provider's price page, fix any that differ (add a row under a full model id for a model that costs more than its family) and set `"checked"` to that date. 2.65.2: cache writes (inside `tokensIn`) are priced by TTL, 1.25x input for 5-minute writes and 2x for 1-hour ones (the split from Claude's usage, else the TTL the launcher asked for); a model with no `cacheRead` price reads at 0.1x input; the file's top-level `"multipliers": { "cacheWrite5m": 1.25, "cacheWrite1h": 2, "cacheRead": 0.1 }` changes them. A session whose tool reported its cost (`meta.costUsd`) counts at that cost. Tokens are counted as the budget meter counts them, whoever calls the scorecard |
 | Person round-trips per landed task (2.65) | a person's planned and unplanned interventions over landed tasks |
-| Orchestrator interventions (2.65) | `conductor.note` events (an outside orchestrator's rulings in a task's record), by who wrote them |
+| Orchestrator interventions (2.65) | `conductor.note` events (an outside orchestrator's rulings in a task's record), by who wrote them. 2.67.0: also the orchestrator's other steps: train releases it recorded, `lanes refresh`, holds, a stale halt cleared and any person-only step it recorded (who: `meta.recordedBy`, else the event's agent, when that is an agent outside the harness: not the harness's own scripts, a worker, a launched Producer/Director session or a person acting alone). Planned: notes, releases, refreshes, halt clears and the card's planned types; unplanned: holds and the card's unplanned types |
+| Outside work (2.67) | sessions recorded with `npm run usage` (`meta.outside`): counted in the tokens, the cost and the budget like any session, and shown apart with their share |
+
+### Outside work, risk tiers, stale halts and local days (2.67.0)
+
+```bash
+npm run usage -- add --agent opus-bot --tokens-in 120000 --tokens-out 8000 --cache-read 900000 --cache-write 40000 --why "integrated train 14"
+npm run usage -- import <a Claude Code session .jsonl, or the folder of a project's sessions> --agent opus-bot
+```
+
+- **Outside work.** An orchestrator outside the harness (a Claude Code session and its subagents) records its usage:
+  `add` appends one `agent.session.end` marked `meta.outside` (`--cost-usd`, `--task`, `--model`, `--tool` optional;
+  cache writes go into `tokensIn` as the launcher records them). `import` reads Claude Code transcripts (a folder is
+  walked, `subagents/` files included) and records each session per model once: a key (session id, plus the agent id
+  for a subagent file, and the model) already imported with the same last message id is skipped, one that grew since
+  is recorded for the growth only. Only usage numbers, ids, model names and times are read; no message text is kept or
+  printed. A launched worker session is refused (its launcher already counts it). The crew's first card (2026-11-02)
+  showed 13M tokens over 7 days while about 50 orchestrator subagents went uncounted: this is what closes that gap.
+- **Risk tiers.** The train records a lane's tier on its own `task.train.tier` event (2.63), not on the landing, so
+  `tierCUnsigned` read n/a. A landed task's tier is now its latest tier event since its previous landing (or the
+  landing's own `meta.tier`); a tier-C landing counts as signed when the tier event names a release or a
+  `task.train.released` came between. The bar shows the A / B / C counts.
+- **Stale halts.** A halt left open by a supervisor that is gone (it crashed, the PC restarted) kept "still waiting"
+  counting. The card names it and says how to clear it. `npm run studio:resume -- --by <name>` (a person; or a
+  Producer/Director session or an outside agent with `--permission "<the person's words>"`, never a worker) clears a
+  halt older than `STUDIO_HALT_STALE_H` hours (default 24) whose supervisor isn't running: one
+  `supervisor.halt_cleared` event (a planned review on the card), and the card stops counting it. A younger one is
+  left alone (nothing waits on it; a new supervisor starts unhalted).
+- **Local days.** With `STUDIO_TZ` (an IANA zone, e.g. `Asia/Bangkok`) the daily rows are that zone's calendar days,
+  each with its UTC span, and the landing times in `--json` (`tasks[].landedLocal`) are local, with `landedUtcDate`
+  when the UTC date differs. Without it the days stay UTC (as before) and the card names this computer's zone as a
+  hint; `TZ` alone doesn't switch them, so a replay scores the same days on every computer.
 
 ### Tokens that do work (2.66.0)
 
