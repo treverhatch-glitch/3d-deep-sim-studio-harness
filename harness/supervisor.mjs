@@ -213,8 +213,13 @@ export async function supervise(opts, state, now = Date.now()) {
   const mode = effectiveMode();
   const extra = opts.budget && under ? 2 : 0;
   const live = sessions().filter((s) => s.running);
-  let room = Math.min(12, mode.maxAgents + extra) - live.length;
-  if (room <= 0) return { started: [], why: [`${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  const configured = Math.min(12, mode.maxAgents + extra);
+  // 2.68.0 (n): the session cap by RAM (harness/heavy-budget.mjs sessionCap): the RAM budget less the heavy jobs' claims,
+  // STUDIO_SESSION_RAM_GB (0.6) a session; no machine scan: the pace's cap as before.
+  const ramCap = await sessionCapNow(configured);
+  let room = ramCap.cap - live.length;
+  if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
   const held = [];
@@ -368,6 +373,16 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   if (!groups.size) why.push('no waiting tasks for agents');
   return { started, why };
+}
+
+/** 2.68.0 (n): the session cap by RAM, { cap, why }; the configured cap when anything fails. */
+async function sessionCapNow(configured) {
+  try {
+    const hb = await import('./heavy-budget.mjs');
+    const h = await import('./heavy.mjs');
+    const root = await h.heavyRoot();
+    return hb.sessionCap({ configured, profile: hb.machineProfile(root), holders: h.heavyHolders(root), root: REPO_ROOT });
+  } catch { return { cap: configured, why: '' }; }
 }
 
 // 2.59.0 (#11c) ramCheck lives in harness/ram.mjs (2.64.0: heavy.mjs uses it too, and importing this module from
