@@ -20,7 +20,8 @@
  * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
  * holds machine:heavy. 2.68.0 (m): a "Machine: RAM …, CPU …, GPU …, disk … free" line (harness/machine.mjs); 2.68.0 (o): blockers also name roles
  * the crew watchdog paused and a usage wind-down. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
- * when it has more than 6 lanes. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
+ * when it has more than 6 lanes. 2.70.0 (t): the latest playable build and clip after a landing ("Playable build <id>
+ * (T-1, T-2); clip <file>", harness/landing-build.mjs). Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -101,7 +102,10 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   // 2.68.0 (m): the machine line (the last scan, or a new one when it is older than 2 x STUDIO_MACHINE_SAMPLE_S).
   let machine = '';
   try { const m = await import('./machine.mjs'); machine = m.machineLine(m.readMachine({ root, env })); } catch { machine = ''; }
-  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}) };
+  // 2.70.0 (t): the latest playable build and clip made after a landing (harness/landing-build.mjs).
+  let build = '';
+  try { build = (await import('./landing-build.mjs')).landingLine(evs, { max: 2 }); } catch { build = ''; }
+  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(build ? { build } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -117,6 +121,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     if (f.train) L.push(`${trainStatusLine(f.train, { short: true }).replace(/^Train \S+/, 'Train')}${Number(f.train.lanes) > 6 ? ' (STUDIO_TRAIN_MAX caps lanes)' : ''}.`);
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
     if (f.machine) L.push(`${f.machine}.`);
+    if (f.build) L.push(`${f.build}.`);
     L.push(`PC: ${f.freeGb} GB free; heavy: ${f.heavy.length ? cut(f.heavy.map((h) => `${h.label}${h.owner ? ` (${h.owner})` : ''}`), Math.max(1, Math.min(k, 2))) : 'free'}.`);
     return L.join('\n');
   };
