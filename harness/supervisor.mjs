@@ -257,6 +257,25 @@ export async function supervise(opts, state, now = Date.now()) {
   // 2.68.0 (n): the session cap by RAM (harness/heavy-budget.mjs sessionCap): the RAM budget less the heavy jobs' claims,
   // STUDIO_SESSION_RAM_GB (0.6) a session; no machine scan: the pace's cap as before.
   const ramCap = await sessionCapNow(configured);
+  // 2.69.0 (s): the queue-depth target (harness/queue-depth.mjs): fewer startable builder tasks than STUDIO_QUEUE_DEPTH
+  // (default this cap) asks the Producer, naming the areas chains and holds block. It never adds a task.
+  if (!opts.watcher) {
+    try {
+      const { queueDepthPass } = await import('./queue-depth.mjs');
+      const { listLocks } = await import('./lock.mjs');
+      const { unmerged } = await import('./worktree.mjs');
+      const qd = await queueDepthPass({ q: parseNextQueue(), cap: ramCap.cap, now, dryRun: opts.dryRun, deps: { locks: listLocks(), unmerged, locked: (id) => lockStatus(`task:${id}`).locked, ...(opts.deps?.wake ? { wake: opts.deps.wake } : {}) } });
+      if (qd.asked) why.push(`queue below its depth target (${qd.ready.length} ready, target ${qd.target}): the Producer was asked`);
+    } catch { /* a nudge, never a crash */ }
+  }
+  // 2.69.0 (s): the upgrade watch (harness/upgrade-watch.mjs), every STUDIO_UPGRADE_WATCH_MIN (60) minutes.
+  if (!opts.watcher) {
+    try {
+      const uw = await import('./upgrade-watch.mjs');
+      const w = await uw.supervisorWatch({ now, dryRun: opts.dryRun });
+      if (w?.line) why.push(w.line);
+    } catch { /* a watch, never a crash */ }
+  }
   let room = ramCap.cap - live.length;
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);

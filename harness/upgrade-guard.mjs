@@ -191,7 +191,7 @@ async function emit(root, event) {
 }
 const versionAt = (root, rev) => { try { return JSON.parse(git(['show', `${rev}:package.json`], root).stdout).version || '?'; } catch { return '?'; } };
 const gitPath = (root, name) => path.resolve(root, out1(git(['rev-parse', '--git-path', name], root)));
-const isMainCheckout = (root) => {
+export const isMainCheckout = (root) => {
   const d = out1(git(['rev-parse', '--absolute-git-dir'], root));
   const c = out1(git(['rev-parse', '--git-common-dir'], root));
   return Boolean(d) && path.resolve(root, d) === path.resolve(root, c);
@@ -451,9 +451,35 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
       'Usage: npm run upgrade -- --check | --snapshot   (before taking a harness update: the board must be committed, never stashed)',
       '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue]',
       '       npm run upgrade -- --restore-stash <sha> --by <person>',
+      '       npm run upgrade -- watch [--json] | watch status | watch auto on --by <person> [--permission "…"] [--ref <remote>/<branch>] | watch auto off',
+      '         (2.69.0, harness/upgrade-watch.mjs: a newer harness on the harness remote, its CI, and STUDIO_UPGRADE_WINDOW)',
       'docs/RELEASE.md "Taking a harness update into a studio" has the steps, and the one-liner for a studio too old to have these.',
     ].join('\n'));
     process.exit(0);
+  }
+  // 2.69.0 (s): the upgrade watch (harness/upgrade-watch.mjs).
+  if (a[0] === 'watch') {
+    const uw = await import(pathToFileURL(path.join(path.dirname(SELF), 'upgrade-watch.mjs')).href);
+    const root = repoRoot();
+    if (!root) { console.error('[upgrade watch] not a git checkout'); process.exit(1); }
+    const self = { repoRoot, isMainCheckout, whoActs, upgradeMerge };
+    if (a[1] === 'auto') {
+      if (!['on', 'off'].includes(a[2])) { console.error('Usage: npm run upgrade -- watch auto on --by <person> [--permission "<their words or a link>"] [--ref <remote>/<branch>] | watch auto off [--by <name>]'); process.exit(1); }
+      const r = await uw.setAuto({ on: a[2] === 'on', by: flag('--by') || '', permission: flag('--permission') || '', ref: flag('--ref') || '', root, commit: !a.includes('--no-commit'), guard: self });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (a[1] === 'status') {
+      const auto = await uw.readAuto(root);
+      const st = uw.readWatchState(root);
+      console.log(`[upgrade watch] auto-upgrade ${auto.on ? `on for ${auto.by}${auto.setBy !== auto.by ? ` (set by ${auto.setBy})` : ''}` : `off (${auto.why})`}; window ${process.env.STUDIO_UPGRADE_WINDOW || 'unset (report only)'}`);
+      console.log(st.lastPoll ? `[upgrade watch] last check ${st.lastPoll}: ${st.line}` : '[upgrade watch] no check yet');
+      process.exit(0);
+    }
+    const r = await uw.upgradeWatch({ root, guard: self });
+    if (a.includes('--json')) console.log(JSON.stringify({ status: r.status, ref: r.ref || null, sha: r.sha || null, ours: r.ours || null, theirs: r.theirs || null, ci: r.ci || null, filed: r.filed || [], lines: r.lines }));
+    else for (const l of r.lines) console.log(l);
+    process.exit(r.status === 'failed' ? 1 : 0);
   }
   if (a.includes('--merge')) {
     show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue') }));
