@@ -10,6 +10,8 @@
  * landed for keepDays, over all judged tokens), the cost per kept change (also per task type) and the waste split
  * (reopened / reverted or redone / handed back / dropped / no task), with pending landings apart; --json: card.tokenWork.
  *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   2.65.0: set the level (setLevel)
+ *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
+ *     (harness/impact.mjs)
  * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
  * person's round-trips per landed task and orchestrator interventions (conductor.note events).
  *
@@ -961,6 +963,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await setLevel(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
+  }
+  // 2.68.0: the release impact report (harness/impact.mjs): the same measures before vs after a harness upgrade.
+  if (argv[0] === 'impact') {
+    const r = await (await import('./impact.mjs')).impactCli(argv.slice(1), { root: REPO_ROOT, autonomy: { buildAutonomy, personClassifier } });
+    (r.code ? console.error : console.log)(r.text);
+    process.exit(r.code);
   }
   const at = flag('now') ? Date.parse(flag('now')) : Date.now(); // --now <ISO>: score a past window (a replay)
   if (!Number.isFinite(at)) { console.error('Usage: npm run autonomy [-- --days 7] [--now <ISO time>] [--json]'); process.exit(1); }
