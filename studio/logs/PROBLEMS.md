@@ -988,3 +988,22 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the crew's 11:17 asks 2(a)-(c).
 - **Why:** no cache, no retry, the whole gate under machine:heavy.
 - **Fix:** harness/unity-cache.mjs, the Play Mode retry, code-only steps first. qa/selftest-2671k.mjs.
+
+### P-170 — a refused verify read as red main (B-50) · fixed in 2.67.2
+- **Evidence:** the crew's train 15: 6 refusals in 118 s ("a full verify of this checkout is already running: builder-s74's"), then redMain.
+- **Why:** one shared verify-running record across linked checkouts; the train counted a refusal as a red run.
+- **Fix:** per-checkout records; harness/train-busy.mjs (wait, then defer). qa/selftest-2672a.mjs.
+
+### P-171 — `task hold` didn't keep a lane out of a train · fixed in 2.67.2
+- **Evidence:** T-146 was held "for landing" and still ran in train 15.
+- **Why:** the train skipped only owner-held queue entries.
+- **Fix:** held tasks are deferred; `train leave`. qa/selftest-2672a.mjs.
+
+### P-172 — sessions ended with no work and were relaunched blindly · fixed in 2.67.2
+- **Evidence:** 20 sessions in 35 min, 1.24M tokens, nothing landed; T-147 ended in 36 s.
+- **Why:** a session that never claimed its task left no hand-back for the loop park to count.
+- **Fix:** harness/session-outcome.mjs; park after STUDIO_NO_WORK_EXITS. qa/selftest-2672a.mjs.
+
+### P-173 — the "Regression saved" refusal was vague · fixed in 2.67.2
+- **Evidence:** T-132 committed a fix and stopped at that refusal.
+- **Fix:** harness/regression-howto.mjs names the file, fields and commands. qa/selftest-2672a.mjs.
