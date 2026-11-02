@@ -141,39 +141,12 @@ export function inWindow(win, now = Date.now()) {
   return a <= b ? mins >= a && mins < b : mins >= a || mins < b;
 }
 
-/** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
-export async function supervise(opts, state, now = Date.now()) {
-  const { parseNextQueue, readStop } = await import('./task.mjs');
-  if (!opts.watcher) {
-    const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
-    if (floorsConfig?.autoOpen) {
-      const { tick: tickFloors } = await import('./floors.mjs');
-      await tickFloors({ by: 'supervisor', silent: true });
-    }
-  }
-  // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
-  const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
-  const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
-  const { effectiveMode } = await import('./mode.mjs');
-  const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil, customKey } = await import('./budget.mjs');
-  const { status: lockStatus } = await import('./lock.mjs');
-  const why = [];
-  // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
-  if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
-  if (opts.until && now >= opts.until) return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
-  if (readStop()) return { started: [], why: ['"Stop all agents" is on in the War Room'] };
-  if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
-  // Two sessions in a row ending the same bad way (exit 127: the tool isn't on PATH) means starting
-  // more won't help: stop starting, and ask a person once (Needs you). "Try again" clears it.
-  if (fs.existsSync(RESUME)) {
-    // Who asked: the War Room writes the person's name; `npm run studio:resume` (2.59.0, #15) writes { by, why }.
-    const asked = readResume();
-    fs.rmSync(RESUME, { force: true });
-    if (state.halted) emitEvent({ type: 'supervisor.resumed', agent: 'supervisor', to: 'producer', msg: `Supervisor starting agents again${asked.by ? ` (${asked.by} asked${asked.why ? `: ${asked.why}` : ''})` : ''}`, meta: { by: asked.by || null, why: asked.why || null, via: asked.via || null, cleared: state.halted.why || null } });
-    state.halted = null;
-    state.haltCheckFrom = now;
-  }
-  if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
+/**
+ * Two sessions in a row ending the same bad way (exit 127 and the like): record the halt (supervisor.halted, Needs you).
+ * Returns true when it halted. 2.68.0: also run when the time is up, so a halt caught by the last pass before --until
+ * is still recorded (on a slow machine the second bad end used to land after the stop and the halt was lost).
+ */
+async function checkBadEnds(opts, state, now) {
   // PU-19: a session that stopped at its usage limit waits for the reset (its tool is marked out); it isn't a bad end.
   // 2.58.3 (N1): nor is a session a person (or the Producer) stopped or paused: killing it ends it with exit 1 on
   // Windows (taskkill /F) and by a signal elsewhere; the launcher records who stopped it (meta.stoppedBy).
@@ -200,8 +173,48 @@ export async function supervise(opts, state, now = Date.now()) {
         if (t.fixed) state.halted.selfTriage = t.why;
       } catch { /* the halt stands */ }
     }
-    return { started: [], why: [`halted: ${state.halted.why}`] };
+    return true;
   }
+  return false;
+}
+
+/** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
+export async function supervise(opts, state, now = Date.now()) {
+  const { parseNextQueue, readStop } = await import('./task.mjs');
+  if (!opts.watcher) {
+    const floorsConfig = readJson(path.join(REPO_ROOT, 'studio', 'floors.json'));
+    if (floorsConfig?.autoOpen) {
+      const { tick: tickFloors } = await import('./floors.mjs');
+      await tickFloors({ by: 'supervisor', silent: true });
+    }
+  }
+  // The watcher passes the launcher's functions in: agent.mjs run as a command can't import itself again.
+  const { sessions, startAgent, launchableRoles, nextAgentName } = opts.deps || (await import('./agent.mjs'));
+  const { holdReason, laneOf, lanesClash, laneList } = await import('./task-hold.mjs');
+  const { effectiveMode } = await import('./mode.mjs');
+  const { budgetStatus, pickTool, quotaMark, probeTool, exhaustedUntil, customKey } = await import('./budget.mjs');
+  const { status: lockStatus } = await import('./lock.mjs');
+  const why = [];
+  // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
+  if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  if (opts.until && now >= opts.until) {
+    if (!state.halted) { try { await checkBadEnds(opts, state, now); } catch { /* the stop stands */ } }
+    return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
+  }
+  if (readStop()) return { started: [], why: ['"Stop all agents" is on in the War Room'] };
+  if (opts.window && !inWindow(opts.window, now)) return { started: [], why: [`outside the window ${opts.window}`] };
+  // Two sessions in a row ending the same bad way (exit 127: the tool isn't on PATH) means starting
+  // more won't help: stop starting, and ask a person once (Needs you). "Try again" clears it.
+  if (fs.existsSync(RESUME)) {
+    // Who asked: the War Room writes the person's name; `npm run studio:resume` (2.59.0, #15) writes { by, why }.
+    const asked = readResume();
+    fs.rmSync(RESUME, { force: true });
+    if (state.halted) emitEvent({ type: 'supervisor.resumed', agent: 'supervisor', to: 'producer', msg: `Supervisor starting agents again${asked.by ? ` (${asked.by} asked${asked.why ? `: ${asked.why}` : ''})` : ''}`, meta: { by: asked.by || null, why: asked.why || null, via: asked.via || null, cleared: state.halted.why || null } });
+    state.halted = null;
+    state.haltCheckFrom = now;
+  }
+  if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
+  if (await checkBadEnds(opts, state, now)) return { started: [], why: [`halted: ${state.halted.why}`] };
   // 2.68.0: the futility cap (harness/futility.mjs): a running session past the p90 of its type's good runs raises a
   // Check (shadow mode by default; STUDIO_FUTILITY=on hands it back, its diff kept).
   if (!opts.watcher) {
