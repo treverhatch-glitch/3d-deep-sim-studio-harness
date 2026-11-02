@@ -76,7 +76,12 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Red (2.60.0, prefix bisection): only the failing checks run again (`run-gates --only`, scoped as the train's verify
   was), first on main, then on cumulative prefixes main+A, main+A+B, ... by binary search (about log2 N targeted
   runs; logs `.studio/train/<id>-recheck-<n>.log`). Red on main: main itself is red, nothing lands and nobody is
-  handed back. Otherwise the lane that turns the first prefix red is handed back (back in the queue, its claim freed,
+  handed back. A verify or re-check that ran no check (2.67.2, B-50: refused because a full verify of the same
+  checkout runs, or `machine:heavy` stayed held past its wait) is busy, never red: the train waits and runs it again
+  (`STUDIO_TRAIN_BUSY_WAIT_MIN`, 20 minutes in all, logged each time), then defers its lanes for the next train
+  (`task.train.no_check`); it never hands anyone back or concludes that main is red from it (`harness/train-busy.mjs`).
+  Each checkout has its own "full verify running" record (`.studio/verify-running/full.json` in the main checkout,
+  `full.<hash>.json` in a lane or train copy), so a lane's verify no longer refuses the train's or another lane's. Otherwise the lane that turns the first prefix red is handed back (back in the queue, its claim freed,
   a hand-back note with the failing checks, the prefix and the log), whether it fails alone or only together with
   the lanes before it (an interaction culprit); the rest train again with one more full verify. When only the
   whole train is red, that red is re-run before anyone is blamed; if it passes, nobody is handed back and the lanes
@@ -183,6 +188,11 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
     registry/barrel, a changed test, any file no rule names. The train verifies with `--all`; a golden changed with no
     `Golden-Reason:` trailer, or a pin file (`pins.files`) with no `Pin-Moves:`, is handed back; a task handed back
     more than `STUDIO_TRAIN_MAX_HANDBACKS` (3) times is held for a person like tier C.
+  - A task held for landing (`npm run task -- hold <ID>`) stays out of every train (queued, riding along or its own
+    `task done --train`): deferred with the hold's reason, `OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in
+    `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the
+    queue on purpose (who may: as for `task hold`; recorded in `.studio/train/left.json` and `task.train.left`; `npm run
+    lanes` shows `left (by …)`); `task done <ID> --train` queues it again.
   - **A, contained**: docs, added tests, the game's tools folders, assets, UI outside the sim paths. The normal verify.
   The rules are a table in `harness/tiers.mjs`; a game extends or changes them only through its protected manifest
   ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.
