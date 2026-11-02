@@ -4,6 +4,30 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.67.1] — 2026-11-02
+2.67.1: the crew's Blender and Unity notes (11:17) and the owner's one asset flow (11:30) (P-167 to P-169).
+### Added
+- **The asset track (j).** harness/asset-gate.mjs checks asset work at `task done` (`--track asset`, or files under
+  the game's declared asset paths): licence rows (NC/ND blocked, CC-BY needs a credit, share-alike on a game dev's yes,
+  AI-made flagged for the Steam disclosure), triangles per LOD, texture sizes, **scale against the brief's size in
+  metres**, preview renders, an export/re-import round trip under machine:heavy (skipped with a note when not set up)
+  and brand names. Limits in studio/game.json "assets". A landed asset task queues one "Wire in" task (on the Unity
+  track when Unity is configured). Brief template: studio/templates/asset-brief.md.
+- **One asset flow (l).** `npm run asset -- need "<what>" --for unity|web --budget <tris>`: the library first (the
+  studio ledger, other ledgers, shared-folder indexes from `asset -- library refresh <dir>`, append-only), "already in
+  library" on a repeat, then the internet scout, then pull + a Unity profile (metres, bottom-centre pivot, collider,
+  prefab stub, licence row; Blender/Unity steps are configured commands, skipped when not installed), else one make
+  task with the asset brief. `asset -- needs` lists them.
+- **Faster Unity checks (k).** Code-only steps run first without machine:heavy (`engines.unity.codeOnly`, else
+  `dotnet test tools/SimTests`); a warm Library cache per project, Unity version, branch base and packages (copied,
+  never linked; `STUDIO_UNITY_LIBRARY_CACHE=off`); one Play Mode retry with a flake record and a digest line
+  (`STUDIO_UNITY_PLAYMODE_RETRY=off`); docs on batching Unity passes as board tasks with `task train --unity`.
+
+### Untested
+- Windows editor runs (the stand-in editor checks are skipped there), real Blender/Unity, and network downloads.
+
+---
+
 ## [2.67.0] — 2026-11-02
 2.67.0: the crew's day-one hitlist from running 2.65 (P-161 to P-166).
 ### Added

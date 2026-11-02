@@ -333,9 +333,13 @@ export function readNeeds() {
 const nextId = () => `N-${String(readNeeds().reduce((x, n) => Math.max(x, Number(n.id.slice(2)) || 0), 0) + 1).padStart(3, '0')}`;
 
 export function briefText(need, cfg = readConfig()) {
-  const tpl = cfg.briefTemplate ? (() => { try { return fs.readFileSync(path.resolve(REPO_ROOT, cfg.briefTemplate), 'utf8'); } catch { return null; } })() : null;
+  // 2.67.1: the asset track's brief template (studio/templates/asset-brief.md) is the default; studio/assets.json briefTemplate overrides it.
+  const tplPath = cfg.briefTemplate || 'studio/templates/asset-brief.md';
+  const tpl = (() => { try { return fs.readFileSync(path.resolve(REPO_ROOT, tplPath), 'utf8'); } catch { return null; } })();
   const vars = { need: need.id, what: need.what, for: need.target, budget: need.budget || 'not set', size: need.size ? `${need.size} m (largest side)` : 'not set', style: need.style || 'none given', tags: (need.tags || []).join(', ') || 'none', licence: 'own work (made in this studio); record it with npm run asset -- add … --by <person>', role: cfg.makeRole || 'asset-3d' };
-  if (tpl) return tpl.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m));
+  const filled = [`# Make asset ${need.id}: ${need.what}`, '', `- Target: ${vars.for}`, `- Triangle budget: ${vars.budget}`, `- Size: ${vars.size}`, `- Style: ${vars.style}`, '- Nothing in the library or online passed the bar; the trail is in `npm run asset -- needs ' + need.id + '`.', ''];
+  // A template with {placeholders} is filled; a fill-in-the-blanks one (the asset track's) follows the need's facts.
+  if (tpl) return /\{(what|budget|size|style|for)\}/.test(tpl) ? tpl.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m)) : `${filled.join('\n')}\n${tpl}`;
   return [`# Make asset ${need.id}: ${need.what}`, '', `- Target: ${vars.for}`, `- Triangle budget: ${vars.budget}`, `- Size: ${vars.size}, real metres, pivot at the bottom centre`, `- Style reference: ${vars.style}`, `- Tags: ${vars.tags}`, `- Licence: ${vars.licence}`,
     '- Nothing in the library or online passed the bar; the trail is in `npm run asset -- needs ' + need.id + '`.', `- How the role works: studio/roles/${vars.role}.md`].join('\n');
 }
