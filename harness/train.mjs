@@ -52,6 +52,9 @@
  *      lane declaring pin moves) is built alone in a second scratch copy and its touched tests and pins run there; red:
  *      ONE "chain tail" builder task stacked on its last lane. A verify red on exactly those tests defers the whole
  *      chain "waiting for its tail" (no bisection, nobody handed back); chain + tail land together once it is queued.
+ *  13. parallel prefixes (2.69.0, harness/train-parallel.mjs): the prefix search re-checks K boundary prefixes at once,
+ *      each in its own scratch copy (K from the machine budget, STUDIO_TRAIN_BISECT_PARALLEL; no scan: 1, as before);
+ *      STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs) lets a green CI run on train/<id> stand for the verify.
  *
  * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
  * was built on (if main moved meanwhile, the train is rebuilt and verified again); one train at a time
@@ -81,6 +84,8 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 import { withFacts } from './handback-facts.mjs';
 import { runGatesWaiting } from './train-busy.mjs';
+import { remoteMode, remoteVerify } from './remote-verify.mjs';
+import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -598,6 +603,27 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   return j;
 }
 
+/**
+ * 2.69.0 (q): STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs): the train's verify on the repo's own CI for a
+ * public repo; a green CI result on exactly this commit stands for the verify. Anything else (off, error, timeout, red:
+ * the local record names the failing checks for the prefix search) runs the local verify, as before. A tree already
+ * verified here (or with a recorded green verify) is not sent out again. deps.remoteClient: a test's fake client.
+ */
+async function verifyRemoteFirst(sc, o, { head, by, deps = {}, res }) {
+  if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all }).ok)) return verifyTree(sc, o);
+  const rv = await remoteVerify({ root: sc.root, id: o.id, sha: head, client: deps.remoteClient || null, log: (m) => o.log(`[train] ${o.id}: ${m}`) });
+  ev('remote_verify', o.id, `${rv.used ? (rv.ok ? 'green' : 'red') : 'not used'}: ${rv.why}`, { agent: by, status: rv.used && rv.ok ? 'ok' : 'warn', meta: { used: rv.used, ok: rv.used ? rv.ok : null, tree: o.tree, runs: rv.runs || null } });
+  if (rv.used && rv.ok) {
+    o.log(`[train] ${o.id}: remote verify of tree ${o.tree.slice(0, 8)} (commit ${String(head).slice(0, 8)}): ${rv.why}; it stands for the verify`);
+    const v = { ok: true, remote: { why: rv.why, runs: rv.runs }, rec: null, gates: [], detail: [], why: '', ms: rv.ms };
+    o.seen.set(o.tree, v);
+    res.remoteVerifies = (res.remoteVerifies || 0) + 1;
+    return v;
+  }
+  o.log(`[train] ${o.id}: remote verify ${rv.used ? `red (${rv.why}): the local verify runs to name the failing checks` : `not used (${rv.why}): the local verify runs`}`);
+  return verifyTree(sc, o);
+}
+
 // ---- 2.60.0: a red train: prefix bisection and pin refresh ------------------------------------------------
 
 /** STUDIO_TRAIN_BISECT: prefix (default) or alone (the 2.59 way). */
@@ -611,11 +637,11 @@ const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDI
  * verify), scoped as the train's verify was (the train's changed files), so the same game checks run on every
  * prefix. Cached by tree and gates. Returns { ok, gates, detail, log }.
  */
-function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, focus = null, question = '', about = 0, eta = null }) {
+function recheckStart(sc, { id, tree, gates, changed, all, cache, log, res, label, focus = null, question = '', about = 0, eta = null, owner: ownerGiven = null, workers = null }) {
   const key = `${tree}:${gates.join(',')}${focus ? `:${JSON.stringify(focus)}` : ''}`;
-  if (cache.has(key)) return cache.get(key);
+  if (cache.has(key)) return { cached: cache.get(key) };
   const root = sc.root;
-  const owner = `train-${id}-re`;
+  const owner = ownerGiven || `train-${id}-re`;
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
   if (!all && changed.length) { env.STUDIO_GATE_CHANGED = changed.join(','); env.STUDIO_GATE_PATHS = changed.join(','); }
@@ -623,6 +649,8 @@ function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, fo
   // STUDIO_GATE_FOCUS on only in this --only run, which stands for no verify.
   delete env.STUDIO_GATE_FOCUS;
   if (focus) env.STUDIO_GATE_FOCUS = JSON.stringify(focus);
+  // 2.69.0 (q): a parallel focused re-check claims (and runs) only the test workers its few files need.
+  if (workers && !(Number(env.STUDIO_TEST_WORKERS) > 0)) env.STUDIO_TEST_WORKERS = String(workers);
   res.rechecks = (res.rechecks || 0) + 1;
   const n = res.rechecks;
   const nFiles = focus ? Object.values(focus).reduce((a, f) => a + f.length, 0) : 0;
@@ -631,16 +659,37 @@ function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, fo
   log(`[train] ${id}: ${line}`);
   writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, recheck: n, eta });
   ev('recheck', id, line, { meta: { n, about: about || null, question, gates, tree, focus: focus || null, eta: eta ? { ms: eta.ms, text: eta.text } : null } });
-  const t0 = Date.now();
-  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `re-check ${n}` });
-  const logFile = path.join(root, TRAIN_DIR, `${id}-recheck-${n}.log`);
+  const args = [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])];
+  return { job: { key, owner, env, n, args, t0: Date.now(), opts: { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 } } };
+}
+
+function recheckEnd(sc, { cache, res }, job, { r, text, busy, noCheck }) {
+  const root = sc.root;
+  const logFile = path.join(root, TRAIN_DIR, `${job.id}-recheck-${job.n}.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
-  for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  for (const f of [`${job.owner}.json`, `${job.owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
   const { gates: failed, detail } = failLines(text);
-  res.recheckMs = [...(res.recheckMs || []), Date.now() - t0];
+  res.recheckMs = [...(res.recheckMs || []), Date.now() - job.t0];
   const c = { ok: r.status === 0, gates: failed, detail, text, log: path.relative(root, logFile).split(path.sep).join('/'), ...(r.status !== 0 && noCheck ? { noCheck: true, busy: busy || null } : {}) };
-  if (!c.noCheck) cache.set(key, c);
+  if (!c.noCheck) cache.set(job.key, c);
   return c;
+}
+
+function recheck(sc, o) {
+  const s = recheckStart(sc, o);
+  if (s.cached) return s.cached;
+  const job = { ...s.job, id: o.id };
+  const w = runGatesWaiting(() => spawnSync(process.execPath, job.args, job.opts), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  return recheckEnd(sc, o, job, w);
+}
+
+/** 2.69.0 (q): recheck, run asynchronously (several prefixes at once, each in its own scratch copy). */
+async function recheckAsync(sc, o) {
+  const s = recheckStart(sc, o);
+  if (s.cached) return s.cached;
+  const job = { ...s.job, id: o.id };
+  const w = await runGatesWaitingAsync(() => spawnCollect(process.execPath, job.args, { cwd: job.opts.cwd, env: job.opts.env }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  return recheckEnd(sc, o, job, w);
 }
 
 /** Run the pins' report on the scratch copy's tree: { report } ({ pin: value }) or { error }. Cached by tree. */
@@ -669,7 +718,7 @@ function pinReport(sc, pins, { id, k, tree, cache, log }) {
  *   flaky        the failing checks pass when run again on the train's own tree: nobody is handed back
  *   alone        no failing check is named (or a prefix doesn't build): the 2.59 way decides
  */
-function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
+async function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   const { sc, tip, set, built, v, id, log, res, settings, all, cache, main } = ctx;
   const unionFiles = settings.unionFiles || [];
   const changed = changedVs(sc.dir, tip, built.head);
@@ -687,11 +736,17 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   // 2.65.3 (B-43): focused re-checks (only the failing test files) and each re-check's question and ETA, in words.
   let fx = focusPlan(ctx, failGates);
   const n = set.length;
-  const about = (res.rechecks || 0) + 1 + stepsLeft(0, n);
+  // 2.69.0 (q): K prefixes per round (harness/train-parallel.mjs): as many focused re-checks as fit the machine now.
+  const nFx = fx ? Object.values(fx).reduce((a, f) => a + f.length, 0) : 0;
+  const width = bisect && n > 2 ? await bisectWidth({ root: sc.root, nFiles: nFx }) : { k: 1, why: '' };
+  const K = Math.min(width.k, Math.max(1, n - 1));
+  // Re-checks (serial) or rounds (parallel: one round takes about one re-check's time) left, for the ETA.
+  const left = (lo, hi, sawRed = true) => (K > 1 ? karyCost(hi - lo, K).rounds + (sawRed ? 0 : 1) : stepsLeft(lo, hi, sawRed));
+  const about = (res.rechecks || 0) + 1 + (K > 1 ? karyCost(n, K).probes : stepsLeft(0, n));
   const ask = recheckWords(ctx, n);
   const check = (k, q = {}) => { const b = prefix(k); if (!b) return null; return { ...recheck(sc, { id, tree: b.tree, gates: failGates, changed, all, cache: cache.checks, log, res, label: label(k), focus: fx, question: q.question || '', about, eta: ctx.eta ? ctx.eta(q.left ?? 0) : null }), b }; };
   const steps = [];
-  const c0 = check(0, { question: ask.main(), left: 1 + stepsLeft(0, n) });
+  const c0 = check(0, { question: ask.main(), left: 1 + left(0, n) });
   if (!c0) return { kind: 'alone', why: `${main} alone doesn't build` };
   if (c0.noCheck) return noCheckPlan(c0, main);
   steps.push({ prefix: [], ok: c0.ok });
@@ -710,14 +765,46 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   let lo = 0;
   let hi = set.length;
   let red = null;
+  // 2.69.0 (q): K > 1: a scratch copy per extra prefix of a round (removed when the plan is made).
+  const copies = [sc];
+  for (let j = 1; j < K; j += 1) {
+    const c = makeScratch(sc.root, `${id}-p${j + 1}`, tip);
+    if (c.error) { log(`[train] ${id}: a scratch copy for a parallel re-check could not be made (${c.error}): ${copies.length} at once`); break; }
+    copies.push(c);
+  }
+  const k = copies.length;
+  if (k > 1) {
+    res.bisectWidth = k;
+    log(`[train] ${id}: the prefix search checks up to ${k} prefixes at once: ${width.why}`);
+  }
+  const probe = async (pts, round, { lo: a, hi: z, sawRed }) => {
+    const line = `bisect round ${round}: checking prefix${pts.length === 1 ? '' : 'es'} ${pts.join(', ')} at once (lanes 1-${n}; ${a ? `green through lane ${a}` : `${main} green`}, red at ${z}${sawRed ? '' : ' (the verify)'})${ctx.eta ? `; ${ctx.eta(left(a, z, sawRed)).text}` : ''}`;
+    log(`[train] ${id}: ${line}`);
+    writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, eta: ctx.eta ? ctx.eta(left(a, z, sawRed)) : null });
+    ev('bisect_round', id, line, { meta: { round, prefixes: pts, lo: a, hi: z, width: k } });
+    const built = pts.map((p, j) => { const b = buildIntegration(copies[j], tip, set.slice(0, p), { id, unionFiles }); return b.included.length === p ? b : null; });
+    const bad = built.findIndex((b) => !b);
+    if (bad >= 0) return pts.map(() => ({ stop: { kind: 'alone', why: `${label(pts[bad])} doesn't build` } }));
+    const rs = await Promise.all(pts.map((p, j) => recheckAsync(copies[j], { id, tree: built[j].tree, gates: failGates, changed, all, cache: cache.checks, log, res, label: label(p), focus: fx, question: ask.mid(a, z, p, sawRed), about, eta: ctx.eta ? ctx.eta(left(a, z, sawRed)) : null, owner: j ? `train-${id}-re${j + 1}` : null, workers: fx ? focusWorkers(nFx) : null })));
+    return rs.map((c, j) => (c.noCheck ? { stop: noCheckPlan(c, label(pts[j])) } : { ...c, b: built[j] }));
+  };
+  try {
   for (;;) {
     lo = 0; hi = set.length; red = null;
+    if (k > 1) {
+      const r = await karySearch({ lo, hi, k, probe });
+      for (const st of r.steps) steps.push({ prefix: set.slice(0, st.k).map((l) => l.task), ok: st.ok, parallel: true });
+      if (r.stop) return r.stop;
+      ({ lo, hi, red } = r);
+      res.bisectRounds = (res.bisectRounds || 0) + r.rounds;
+    }
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
       const c = check(mid, { question: ask.mid(lo, hi, mid, Boolean(red)), left: stepsLeft(lo, hi, Boolean(red)) });
       if (!c) return { kind: 'alone', why: `${label(mid)} doesn't build` };
       if (c.noCheck) return noCheckPlan(c, label(mid));
       steps.push({ prefix: set.slice(0, mid).map((l) => l.task), ok: c.ok });
+      res.bisectRounds = (res.bisectRounds || 0) + 1;
       if (c.ok) lo = mid; else { hi = mid; red = c; }
     }
     if (red) break;
@@ -733,7 +820,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
     if (fx) {
       log(`[train] ${id}: the failing test files pass when run on their own on the train's tree (they fail only together with other tests): searching again with the whole failing gate(s) (${failGates.join(', ')})`);
       fx = null;
-      const w0 = check(0, { question: `${ask.main()} (the whole failing gate(s) this time)`, left: 1 + stepsLeft(0, n) });
+      const w0 = check(0, { question: `${ask.main()} (the whole failing gate(s) this time)`, left: 1 + left(0, n) });
       if (!w0) return { kind: 'alone', why: `${main} alone doesn't build` };
       if (w0.noCheck) return noCheckPlan(w0, main);
       steps.push({ prefix: [], ok: w0.ok, whole: true });
@@ -741,6 +828,9 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
       continue;
     }
     return { kind: 'flaky', steps, why: `${failGates.join(', ')} failed in the train's verify but passed when run again on the same tree` };
+  }
+  } finally {
+    for (const c of copies.slice(1)) removeScratch(c);
   }
   const lane = set[hi - 1];
   const before = set.slice(0, hi - 1).map((l) => l.task);
@@ -1712,8 +1802,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           if (!set.length) break;
         }
         writeTrainStatus(root, id, { step: 'verify', text: `verify ${res.verifies + 1}: lanes 1-${set.length}${res.roundWithout.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}, ${set.map((l) => l.task).join(', ')}`, lanes: ready.length, round: res.round, eta: etaFor(0) });
-        const v = verifyTree(sc, { id, n: res.verifies + 1, tree: built.tree, changed: changedVs(sc.dir, tip, built.head), all, seen, tasks: set.map((l) => l.task), lanes: set, whole: wholeEquiv(root, tip, settings), log });
-        if (!v.cached && !v.reused) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
+        const v = await verifyRemoteFirst(sc, { id, n: res.verifies + 1, tree: built.tree, changed: changedVs(sc.dir, tip, built.head), all, seen, tasks: set.map((l) => l.task), lanes: set, whole: wholeEquiv(root, tip, settings), log }, { head: built.head, by, deps, res });
+        if (!v.cached && !v.reused && !v.remote) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
         if (v.reused) res.reused += 1;
         if (v.ok) { verdict = { built, v }; break; }
         if (v.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `verify ${res.verifies} ${v.why}` }); set = []; break; }
@@ -1743,7 +1833,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         if (bisectMode() === 'prefix' && !(oneLane && set.length === 1 && !settings.pins)) {
           const text = redText;
           const ctx = { sc, tip, set, built, v, id, log, res, settings, all, cache, main, root, text, eta: (left) => etaFor(left), seen, by, deps, unionFiles, defer };
-          let plan = redPlan(ctx, { bisect: !(oneLane && set.length === 1) });
+          let plan = await redPlan(ctx, { bisect: !(oneLane && set.length === 1) });
           if (plan.kind === 'refreshed') {
             const v2 = verifyTree(sc, { id, n: res.verifies + 1, tree: plan.built.tree, changed: changedVs(sc.dir, tip, plan.built.head), all, seen, tasks: set.map((l) => l.task), log });
             if (!v2.cached && !v2.reused) res.verifies += 1;
@@ -1754,7 +1844,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
               break;
             }
             ev('pin_refresh_red', id, `the pin refresh didn't make the train green (${v2.why}); bisecting instead`, { agent: by, status: 'warn', meta: { report: plan.info.report, gates: v2.gates } });
-            plan = redPlan(ctx, { pins: false, bisect: !(oneLane && set.length === 1) });
+            plan = await redPlan(ctx, { pins: false, bisect: !(oneLane && set.length === 1) });
           }
           if (plan.kind === 'noCheck') { deferNoCheck(res, set, defer, { id, log, by, what: plan.why }); set = []; break; }
           if (plan.kind === 'redMain') {
