@@ -25,6 +25,7 @@
     "next": "node harness/task.mjs next",
     "event": "node harness/event.mjs",
     "status": "node harness/status.mjs",
+    "machine": "node harness/machine.mjs",
     "handoff": "node harness/handoff.mjs",
     "overnight": "node harness/overnight.mjs",
     "meeting": "node harness/meeting.mjs",
