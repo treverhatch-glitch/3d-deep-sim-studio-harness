@@ -1,0 +1,14 @@
+{
+  "about": "Asset preview checks and the review before an asset lands (harness/asset-review.mjs, docs/BLENDER.md). This file silences checks: a lane that changes it is tier C (a game dev releases it).",
+  "review": true,
+  "role": "art-director",
+  "previewSize": 512,
+  "blankShare": 0.98,
+  "darkShare": 0.98,
+  "lightShare": 0.98,
+  "magentaMaxShare": 0.1,
+  "minFrameShare": 0.1,
+  "edgeMinPixels": 2,
+  "upWarnRatio": 1.5,
+  "bgTolerance": 48
+}
