@@ -181,7 +181,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--days');
   const days = i >= 0 ? Number(argv[i + 1]) : 7;
-  if (!Number.isFinite(days) || days <= 0 || argv.includes('--help')) { console.log('Usage: npm run denials [-- --days 7] [--json]'); process.exit(argv.includes('--help') ? 0 : 2); }
+  const help = argv.includes('--help') || argv.includes('-h'); // 2.67.0 (B-47): -h too
+  if (!Number.isFinite(days) || days <= 0 || help) { console.log('Usage: npm run denials [-- --days 7] [--json]'); process.exit(help ? 0 : 2); }
   const s = denialSummary({ days });
   console.log(argv.includes('--json') ? JSON.stringify({ ...s, groups: undefined, candidates: s.groups.filter((g) => g.candidate).slice(0, 5), note: NEVER_AUTO }, null, 2) : renderSummary(s));
 }

@@ -95,6 +95,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   is named, main + lanes 1..k-1 get a full verify and, green, land at once (`STUDIO_TRAIN_LAND_PREFIX`, default on;
   `off` keeps 2.65.2); the culprit is handed back and the lanes after it wait for the next train, which runs right
   away (also after a task done's own train). Events `task.train.recheck`, `.prefix_landed`, `.prefix_red`.
+- Chain tails (2.67.0, `harness/train-tail.mjs`, `STUDIO_TRAIN_CHAIN_TAIL`, default on; `off` keeps 2.66.0): when a
+  train starts with a stacked chain (lanes linked by `--after` / `task block --until`) or a lane that declares
+  `Pin-Moves:`, BEFORE its verify it builds main + the chain in a second scratch copy and runs the chain's touched test
+  files there (the focused re-check machinery: the manifest gate's `focus` command, or a clear vitest/jest/`node --test`
+  command) plus the pins' report on main and on the chain (the pin diff). Before rather than beside the verify: the
+  verify holds a gate slot and the machine:heavy lock, so a second suite beside it would wait or double the load; the
+  focused run is short and the tail task is on the board before the verify starts. Red (and not fixed by the pin
+  refresh the train would make, tried in that copy): ONE builder bug task, P0, "Bug: chain tail for <lanes>: <tests>
+  fail only on the combined chain", stacked on the chain's last lane (`--after`; that doesn't hold its start), its
+  hand-off note (`studio/handoffs/<ID>.md`) naming the failing tests, the pin diff and the `git merge` lines that bring
+  the chain into the copy. Never a second one for the same chain and failure signature (`.studio/train/chain-tails.json`).
+  If the verify then fails on exactly those tests, the whole chain is deferred "waiting for its tail <ID>" (no
+  bisection, nobody handed back; the other lanes go on), later trains leave it out before any verify, and once the
+  tail is queued the chain and the tail land together. A red on any other test is handled as before. Event
+  `task.train.chain_tail` (meta.action: opened, known, deferred, pin_refresh); `npm run lanes` notes each chain waiting
+  for its tail. Only test files the chain touches are run early: a pin test in an untouched file shows up in the verify.
 - Pins (2.60.0; the game declares them in its manifest, `docs/ONBOARDING-A-GAME.md`): when the red is only the game's
   pin tests, the pins' report runs on every prefix (main, main+A, ...) and each moved value is attributed to every
   lane whose step changed it. If each of those lanes declared the pin (`Pin-Moves: <pin>` trailer on its own commits)
@@ -115,7 +131,10 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   lands on the same verify, but only when that merge is clean and git shows the new tree is the verified tree plus
   exactly those files as main has them (event `task.train.board_move`; the `landed` event and the log say the verify
   was reused and which files moved). The train's copy never tests `studio/` from its tree (it is sparse-excluded and
-  linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
+  linked to the main checkout's), so these can't change what the verify saw. 2.67.0 (B-29): the task records listed
+  under `"taskRecords"` there (`studio/task-holds.json`, which `task yes` and holds write, and
+  `studio/pending-review.json`) count too, when every entry they change is for a task that is not a lane of this train;
+  an entry of a train lane, another key or an entry without a task still means a new verify. Anything else (`studio/protected.json`,
   `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
   again, as before.
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs

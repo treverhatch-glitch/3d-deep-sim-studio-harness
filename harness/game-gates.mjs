@@ -47,6 +47,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
+import { testRngMode } from './test-rng.mjs';
 import { scaledTimeout, recordGateTime, recordGatePass } from './heavy.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
@@ -79,6 +80,12 @@ export function declaredGates(game) {
     if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
       const { mode } = normMode(j.detMath && typeof j.detMath === 'object' ? j.detMath.mode : j.detMath);
       if (mode !== 'off') list.push({ id: 'game:det-math', command: 'node scripts/check-sim-purity.mjs --det-math-only', required: mode === 'required' });
+    }
+    // 2.67.0 (B-48): "testRandomness" adds the test-randomness check (harness/test-rng.mjs): a seeded game on the shared
+    // Math.random, or an unseeded game, in a test file. Advisory (WARN) unless "mode": "required" or STUDIO_TEST_RNG=required.
+    if (j.testRandomness && typeof j.testRandomness === 'object' && !list.some((x) => x.id === 'game:test-rng')) {
+      const mode = testRngMode(j.testRandomness);
+      if (mode !== 'off') list.push({ id: 'game:test-rng', command: 'node harness/test-rng.mjs', required: mode === 'required' });
     }
     return list;
   }
@@ -421,7 +428,9 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
   // 2.60.0: a failing check's test names, one JSON line, so the merge train can tell a red that is only the game's
   // declared pins (harness/train.mjs pinsOnlyRed) from any other.
   for (const r of rows) {
-    log(`[game-gates] ${r.ok ? 'PASS' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
+    // 2.67.0: an optional check that fails is a WARN (never the gate's FAIL), so the Fix line and the train's focus
+    // read the required check that failed, not an advisory one listed before it.
+    log(`[game-gates] ${r.ok ? 'PASS' : r.required === false ? 'WARN' : 'FAIL'} ${r.id}${r.why ? `: ${r.why}` : ''}`);
     if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
     // 2.65.3 (B-43): the failing test files, for a red merge train's focused re-checks (harness/train-focus.mjs).
     if (!r.ok && r.failingFiles?.length) log(`[game-gates] failing test files in ${r.id}: ${JSON.stringify(r.failingFiles)}`);

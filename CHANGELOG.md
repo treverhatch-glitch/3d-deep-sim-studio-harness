@@ -4,6 +4,41 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.67.0] — 2026-11-02
+2.67.0: the crew's day-one hitlist from running 2.65 (P-161 to P-166).
+### Added
+- **Chain tails (f; the owner's idea).** A train that starts with a stacked chain (or a lane declaring Pin-Moves)
+  first runs the chain's touched tests and the pins' report on main + the chain in a second scratch copy. If they are
+  red and the pin refresh doesn't fix them, it opens one "chain tail" builder task stacked on the chain's last lane
+  (failing tests and pin diff in its note; deduped). If the verify then fails on exactly those tests, the chain waits
+  for its tail instead of being bisected apart, and chain + tail land together. `STUDIO_TRAIN_CHAIN_TAIL=off` keeps 2.66.0.
+- **Owner delegation (g).** `npm run delegate -- grant <agent> --actions train-release,type,yes,hold --hours 12 --by
+  <owner>`, run in the owner's own terminal (refused in agents' shells, lanes and launched sessions; signed with an
+  owner key; at most 72 h), lets one outside agent run those owner actions with `--by <agent>` and no permission words.
+  Every use is recorded "under delegation" and shown in the digest; `list`, `revoke`. `delegate -- claude-settings
+  --write` adds narrow Claude Code allow rules for exactly those commands, never broad ones, never touching deny
+  rules. Protected-file approvals stay the owner's. studio/delegation.json is protected.
+- **Outside work counts on the scorecard (i).** `npm run usage -- add | import` records an outside orchestrator's
+  sessions, Claude Code subagents included, once per session; its releases, refreshes and holds count as orchestrator
+  interventions. studio/prices.json ships default Claude family prices marked "checked: UNVERIFIED" (the owner
+  confirms them); the card names its price source.
+- **Tests on shared randomness (h, B-48/B-45).** harness/test-rng.mjs reads the game's `"testRandomness"` manifest
+  block and flags a seeded game on the shared Math.random, or an unseeded game, in a test file (`game:test-rng`;
+  a warning unless required).
+### Fixed
+- **`--help` never acts (B-47)** on any task subcommand, train, delegate, lanes, denials, fuzz and the supervisor.
+- **`upgrade --merge` refreshes lanes (B-49)** (refreshed / conflicted / red / skipped; `STUDIO_UPGRADE_REFRESH=off`).
+- **Hold and approval records for tasks outside a running train keep its verify (B-29).** The owner's type beats a
+  title on a red trunk, in hand-off bugs and in type stats (B-38).
+- **Scorecard (i):** tierCUnsigned reads the train's tier events (it showed n/a); an open halt is named and
+  `studio:resume` clears a stale one (`STUDIO_HALT_STALE_H`, 24); with `STUDIO_TZ` days and landings are local.
+- A failing optional game check prints WARN, not FAIL, so Fix lines and focused re-checks point at the required one.
+
+### Untested
+- Windows: all of it (CI runs the selftest). Prices: unverified.
+
+---
+
 ## [2.66.0] — 2026-11-02
 2.66.0, "measure and find": from the 2026-11-02 research pass (P-156 to P-160).
 ### Added

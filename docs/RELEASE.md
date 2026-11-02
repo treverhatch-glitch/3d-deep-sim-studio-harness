@@ -74,6 +74,12 @@ which node can't run, so use the line above there.) The guard finds the studio b
    commit's message the same way. The weakened-tests gate judges each of the merged branch's own commits (never the
    merge): a bundle commit that changes or deletes a golden needs its own `Golden-Reason`; one that only adds goldens
    doesn't. Golden changes made in the studio still need their own reason, as always.
+   **Lanes (2.67.0, B-49):** a merged update ends with `npm run lanes -- refresh --all` (the updated harness's), so the
+   next train doesn't hand every lane back as "runs its own harness". The output lists each lane as refreshed (main
+   merged in, targeted tests green), conflicted (merge aborted, files named: its agent merges and resolves), red
+   (targeted tests fail) or skipped (a running session, uncommitted work, a merge in progress: never touched). The
+   upgrade passes either way. `STUDIO_UPGRADE_REFRESH=off` skips the refresh (run it yourself later);
+   `STUDIO_UPGRADE_REFRESH=no-tests` merges without running the lanes' targeted tests.
 5. A stash that did take board changes: `npm run upgrade -- --check` names it. Restore by merge:
    `npm run upgrade -- --restore-stash <sha> --by <you>` (board committed first) three-way merges the stash's board
    files into the board, keeping both sides' rows (conflicting task rows of `studio/NEXT.md` and `studio/DONE.md` are

@@ -25,6 +25,7 @@ import { activeGame, isTemplateCartridge } from './cartridge.mjs';
 import { isFixTask, trunkState } from './baseline.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { WORKER_NAME, DECIDER_ROLES } from './permission.mjs';
+import { ownerType } from './reclassify.mjs';
 
 export const HOLDS_FILE = path.join(REPO_ROOT, 'studio', 'task-holds.json');
 export const STOP_COOLDOWN_MIN = () => Number(process.env.STUDIO_STOP_COOLDOWN_MIN ?? 15);
@@ -132,7 +133,7 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   // 2.54.0 (PU-06): a red trunk starts only fix tasks (work in progress carries on).
   if (q && !q.inProgress?.some((t) => t.id === taskId)) {
     const t = [...(q.backlog || [])].find((x) => x.id === taskId);
-    if (t && t.role === 'builder' && !isFixTask(t)) {
+    if (t && t.role === 'builder' && !isFixTask(t, ownerType)) {
       const tr = trunkState();
       if (tr.red) return `the game's trunk is red (${tr.why}); only fix tasks start until it is green (npm run task -- trunk green --by <name>)`;
     }
@@ -150,7 +151,9 @@ export function holdReason(taskId, q, now = Date.now(), holds = readHolds()) {
   if (h.held && !q?.inProgress?.some((x) => x.id === taskId)) return `${heldWords({ via: 'hold', ...h.held })} (npm run task -- unhold ${taskId} --by <name>)`;
   if (h.needsYes) return `an agent-proposed mechanic; it starts when the dev says yes (npm run task -- yes ${taskId} --by <dev>)`;
   if (h.parked && !parkOver(h.parked.until, done, now)) return `parked by ${h.parked.by}${h.parked.why ? `: ${h.parked.why}` : ''}${h.parked.until ? ` (until ${h.parked.until})` : ''}`;
-  const waiting = (h.after || []).filter((id) => !done.has(id));
+  // 2.67.0 (f): a chain tail (filed by the merge train) is stacked on the chain it fixes, which waits for it: that
+  // --after orders the landing (harness/train-deps.mjs), it doesn't hold the tail's start.
+  const waiting = (h.after || []).filter((id) => !done.has(id) && !(h.chainTail?.chain || []).includes(id));
   if (waiting.length) return `waits for ${waiting.join(', ')}`;
   if (h.until && Date.parse(h.until) > now) return `blocked until ${hhmm(h.until)}${h.why ? `: ${h.why}` : ''}`;
   if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now) return `stopped by ${h.cooldownBy || 'someone'}; can restart after ${hhmm(h.cooldownUntil)}`;
@@ -168,7 +171,7 @@ export function holdOwner(taskId, q, now = Date.now(), holds = readHolds(), hold
   const h = holds[taskId] || {};
   if (h.needsYes) return { owner: 'the dev', why };
   if (h.parked && !parkOver(h.parked.until, doneIds(q), now)) return { owner: h.parked.by || 'the Producer', why };
-  const waiting = (h.after || []).filter((id) => !doneIds(q).has(id));
+  const waiting = (h.after || []).filter((id) => !doneIds(q).has(id) && !(h.chainTail?.chain || []).includes(id));
   if (waiting.length) return { owner: holders.get(waiting[0]) || (q.inProgress.some((t) => t.id === waiting[0]) ? 'its builder' : 'the queue (not started yet)'), why };
   if (h.cooldownUntil && Date.parse(h.cooldownUntil) > now) return { owner: h.cooldownBy || 'the Producer', why };
   return { owner: h.by || 'the clock', why };

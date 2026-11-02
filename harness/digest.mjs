@@ -110,11 +110,14 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const head = `# Studio digest ${d}`;
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
   const fuzzLine = fuzzFiledLine(ev, now);
+  // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
+  let delegLine = '';
+  try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
   // 2.66.0 (c): the top blocked commands (harness/denials.mjs) as allowlist candidates; a person decides, nothing is added.
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
   let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);

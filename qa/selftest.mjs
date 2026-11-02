@@ -4087,6 +4087,53 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (f): the proactive chain-tail fixer: a stacked chain's touched tests and pins run before the train's verify;
+// red: one chain-tail task stacked on its last lane; a verify red on exactly those tests defers the chain for its
+// tail instead of bisecting it; chain + tail land together (qa/selftest-267f.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267f.mjs')).href);
+  await selftest267F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.67.0 (g): the owner's standing delegation to an outside agent (npm run delegate), its Claude Code rules, and
+// --help never acts (B-47) (qa/selftest-267g.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267g.mjs')).href);
+  await selftest267G({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.67.0 (h): test hygiene and upgrade friction: a seeded test on the shared Math.random or an unseeded game (B-48),
+// upgrade --merge refreshes the lanes (B-49), board-only commits keep a train's verify (B-29), an owner type outranks the
+// title (B-38) (qa/selftest-267h.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267h.mjs')).href);
+  await selftest267H({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.67.0 (helper i): the scorecard's gaps from the crew's day one: outside work (npm run usage add / import) and an
+// outside orchestrator's steps count, default prices with a checked stamp, risk tiers from the train's tier events, a
+// stale halt named and cleared by studio:resume, local days (qa/selftest-267i.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267i.mjs')).href);
+  await selftest267I({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.67.0 (e): the supervisor's --help never starts one (qa/selftest-267e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267e.mjs')).href);
+  await selftest267E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

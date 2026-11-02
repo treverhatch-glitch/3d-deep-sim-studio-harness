@@ -42,6 +42,7 @@ import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
 import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, LANES_DIR } from './worktree.mjs';
 import { readQueue, heldNow, pinMoves, trainManifest } from './train.mjs';
 import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';
+import { chainTailNotes } from './train-tail.mjs';
 import { mergeTreeSupport, mergeTree, placesFor } from './merge-tree.mjs';
 import { readPass } from './merge-lane.mjs';
 import { readHolds } from './task-hold.mjs';
@@ -258,6 +259,8 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
   // 2.65.3 (B-43): the running train's current step and ETA (.studio/train/<id>/status.json), and the lane cap.
   const train = readTrainStatus(root);
   { const cn = train ? capNote(train.lanes) : ''; if (cn) notes.push(cn); }
+  // 2.67.0 (f): chains deferred for their chain tail (harness/train-tail.mjs).
+  try { notes.push(...chainTailNotes(root)); } catch {}
   return { main, tip, at: new Date(now).toISOString(), lanes, notes, ...(train ? { train } : {}) };
 }
 
@@ -417,6 +420,8 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
+  // 2.67.0 (B-47): --help / -h prints usage and never acts.
+  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]'); process.exit(0); }
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   const json = argv.includes('--json');
   const root = mainRoot();

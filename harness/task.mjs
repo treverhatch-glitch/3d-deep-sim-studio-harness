@@ -987,6 +987,13 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
     // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
     taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
+    // 2.67.0 (f): the chain-tail task the train files (harness/train-tail.mjs): a builder bug task stacked (--after) on
+    // the chain's last lane; its start isn't held by that --after (task-hold.mjs chainTail), the train's order is.
+    fileTask: ({ title, after, chain = [], train = '' }) => {
+      const t = addTask({ title, role: 'builder', priority: 'P0', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', after: [after], chainTail: { chain, train } } });
+      if (t?.id && !t.error && !t.proposed && !t.duplicate) setHold(t.id, { chainTail: { chain, train, after } });
+      return t;
+    },
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1431,6 +1438,13 @@ function parseFlags(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  // 2.67.0 (B-47): --help / -h prints usage and exits before anything reads the board or acts (train --help ran a train).
+  const help = await import('./task-usage.mjs');
+  if (help.wantsHelp(process.argv.slice(2))) {
+    const first = process.argv.slice(2).find((a) => !a.startsWith('-'));
+    console.log(help.usageFor(first || ''));
+    process.exit(0);
+  }
   const flags = parseFlags(process.argv.slice(2));
   const [cmd = 'next', arg1] = flags._;
   const q = parseNextQueue();
@@ -1872,17 +1886,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     const refused = holdRefusal(by);
     if (refused) { console.error(refused); process.exit(1); }
+    // 2.67.0: under the owner's standing delegation the record says so (harness/delegation.mjs).
+    const dl = await import('./delegation.mjs');
+    const dg = dl.delegationFor({ action: 'hold', by });
+    const under = dg.ok ? ` (${dl.delegationWords({ at: dg.at, by: dg.owner }).slice(0, 160)})` : '';
+    if (dg.ok) dl.recordUse(dg, { action: 'hold', task: t.id, detail: cmd });
     if (cmd === 'unhold') {
       if (!readHolds()[t.id]?.held) { console.log(`${t.id} isn't held.`); process.exit(0); }
       setHold(t.id, { held: null });
-      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again` });
+      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again${under}`, ...(dg.ok ? { meta: { delegation: dg.at, owner: dg.owner } } : {}) });
       console.log(`${t.id} is no longer held: its claim clock runs again.`);
       process.exit(0);
     }
     const why = String(flags.why).trim();
     const was = readHolds()[t.id]?.parked;
-    setHold(t.id, { held: { by, why, at: new Date().toISOString() } });
-    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing: ${why}`.slice(0, 400), meta: { why } });
+    setHold(t.id, { held: { by, why, at: new Date().toISOString(), ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
+    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing${under}: ${why}`.slice(0, 400), meta: { why, ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
     // A stop by the claim clock while it waited to land wasn't a stuck lane: the park is lifted (and the budget count
     // starts again), and its waiting rescues are closed.
     if (was?.budget) setHold(t.id, { parked: null }, { by, msg: `${by} unparked ${t.id}: held for landing, not stuck (${why})`.slice(0, 400) });
@@ -1955,11 +1974,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: npm run task -- yes <TASK_ID> --by <dev> [--quote "…" --source "…" when relayed]');
       process.exit(1);
     }
-    const who = devSays(typeof flags.by === 'string' ? flags.by : null, { quote: flags.quote || '', source: flags.source || '' });
+    // 2.67.0: the owner's standing delegation (harness/delegation.mjs): the named outside agent says yes with --by <agent>.
+    const dl = await import('./delegation.mjs');
+    const dg = dl.delegationFor({ action: 'yes', by: typeof flags.by === 'string' ? flags.by : '' });
+    if (dg.ok) { flags.by = dg.owner; flags.quote = dg.permission; flags.source = dl.DELEGATION_REL; }
+    const who = dg.ok ? { ok: true, relayedBy: dg.agent } : devSays(typeof flags.by === 'string' ? flags.by : null, { quote: flags.quote || '', source: flags.source || '' });
     if (!who.ok) {
-      console.error(who.message);
+      console.error(`${who.message}${dg.why ? ` (${dg.why})` : ''}`);
       process.exit(1);
     }
+    if (dg.ok) dl.recordUse(dg, { action: 'yes', task: arg1 });
     setHold(arg1, { needsYes: null }, { by: flags.by, msg: `${flags.by} said yes to ${arg1}${who.relayedBy ? ` (relayed by ${who.relayedBy}: "${flags.quote}", ${flags.source})` : ''}` });
     emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}`, meta: who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {} });
     console.log(`${arg1} can start.`);

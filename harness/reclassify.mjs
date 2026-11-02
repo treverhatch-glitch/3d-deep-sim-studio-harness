@@ -49,6 +49,7 @@ import { canonicalBytes } from './hash.mjs';
 import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { resolveBase, ownerPublicKey, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO, APPROVALS_REL } from './approve.mjs';
 import { agentOnPermission, permissionText, permittedSetter } from './permission.mjs';
+import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
 export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
@@ -186,6 +187,14 @@ function resolveOwnerDecision(taskId, root, kind) {
   if (pub) {
     const a = signedApproval(taskId, pub, kind);
     if (a) return { ...K.fromApproval(a.approval), by: a.approval.by, why: a.approval.why, at: a.approval.at, source: 'owner-signed', file: a.file };
+    // 2.67.0: an entry an outside agent recorded under the owner's signed delegation (harness/delegation.mjs) carries the
+    // signed delegation; it counts when that signature verifies, covers this action and agent and the entry's time, and
+    // the commit that set the entry is that agent's.
+    const committed = git(root, 'rev-parse', '--verify', 'HEAD').status === 0 ? entryAt(root, 'HEAD', taskId, K.section) : null;
+    if (committed?.delegation && !K.validate(committed) && embeddedDelegationOk(committed.delegation, pub, { action: kind, agent: committed.recordedBy, at: committed.at })) {
+      const setter = setterOf(root, taskId, committed, K.section);
+      if (setter && setter.agent && setter.agent === String(committed.recordedBy || '')) return { ...committed, source: 'owner record', onPermission: true, onDelegation: true, commit: setter.sha.slice(0, 8) };
+    }
     return { ignored: `${TYPE_RECORD_REL} or ${APPROVALS_REL}/ names ${taskId}, but this studio has an owner key, so ${K.what} counts only when it is signed with it (the owner runs ${K.set(taskId)} on the device that holds the key)` };
   }
   const isGit = git(root, 'rev-parse', '--verify', 'HEAD').status === 0;
@@ -263,7 +272,14 @@ function sign(approval, pub) {
  * Returns { ok, message, entry?, files? }.
  */
 /** Who may record an owner decision: a person, or a Producer/Director/outside agent on a person's permission. */
-function callerCheck(by, permission, env) {
+function callerCheck(by, permission, env, action = 'type') {
+  // 2.67.0: the owner's standing delegation to this outside agent (harness/delegation.mjs): --by <agent>, no words.
+  const d = delegationFor({ action, by, env });
+  if (d.ok) return { ok: true, perm: d.permission, onPerm: { ok: true, recordedBy: d.agent, via: 'delegation' }, by: d.owner, delegation: d };
+  const r = callerCheckPlain(by, permission, env);
+  return !r.ok && d.why ? { ...r, message: `${r.message} (${d.why})` } : r;
+}
+function callerCheckPlain(by, permission, env) {
   const perm = permissionText(permission);
   if (perm) {
     const onPerm = agentOnPermission({ permission: perm, env });
@@ -289,9 +305,10 @@ function commitRecord(files, msg, why) {
 }
 
 export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
-  const who = callerCheck(by, permission, env);
+  const who = callerCheck(by, permission, env, 'type');
   if (!who.ok) return { ok: false, message: who.message };
   const { perm, onPerm } = who;
+  if (who.by) by = who.by;
   if (!task?.id) return { ok: false, message: 'No such task on the board.' };
   const target = String(to || '').toLowerCase();
   const auto = target === 'auto' || target === 'title';
@@ -301,9 +318,10 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   const entry = { type: target, from, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
   const files = [TYPE_RECORD_REL];
   const pub = ownerKey();
-  if (pub && onPerm && onPerm.via !== 'person') return { ok: false, message: `This studio has an owner key, so a reclassification is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- type ${task.id} ${target} --by <name> --why "…"` };
+  if (pub && onPerm && onPerm.via !== 'person' && !(who.delegation?.signed)) return { ok: false, message: `This studio has an owner key, so a reclassification is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- type ${task.id} ${target} --by <name> --why "…"` };
+  if (who.delegation) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id)}`;
-  if (pub && !auto) {
+  if (pub && !auto && !who.delegation) {
     const approval = { kind: 'type', task: task.id, from, to: target, title: task.title, by: entry.by, why: entry.why, at };
     let signature;
     try { signature = sign(approval, pub); } catch (e) { return { ok: false, message: e.message }; }
@@ -321,6 +339,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   fs.mkdirSync(path.join(REPO_ROOT, 'studio'), { recursive: true });
   fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
   memo.delete(`type|${task.id}`);
+  if (who.delegation) recordUse(who.delegation, { action: 'type', task: task.id, detail: auto ? 'back to the title\'s type' : `${from} to ${target}` });
   emitEvent({ type: 'task.retyped', agent: entry.by, task: task.id, msg: auto ? `${entry.by} put ${task.id} back to its title's type (${from}): ${entry.why}` : `${entry.by} reclassified ${task.id} from ${from} to ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`.slice(0, 400), meta: { from, to: auto ? from : target, signed: Boolean(pub && !auto), at } });
   const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
@@ -339,9 +358,10 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
  * The same callers as a reclassification (callerCheck), the same file, the same commit, the same signing with an owner key.
  */
 export function setVisual({ task, to, by, why, permission = '', commit = true, env = process.env }) {
-  const who = callerCheck(by, permission, env);
+  const who = callerCheck(by, permission, env, 'visual');
   if (!who.ok) return { ok: false, message: who.message };
   const { perm, onPerm } = who;
+  if (who.by) by = who.by;
   if (!task?.id) return { ok: false, message: 'No such task on the board.' };
   const target = String(to || '').toLowerCase();
   const auto = target === 'auto';
@@ -351,9 +371,10 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   const entry = { visual: target, title: task.title, by: String(by).trim(), why: String(why).trim(), at, ...(onPerm ? { permission: perm.slice(0, 500), recordedBy: onPerm.recordedBy } : {}) };
   const files = [TYPE_RECORD_REL];
   const pub = ownerKey();
-  if (pub && onPerm && onPerm.via !== 'person') return { ok: false, message: `This studio has an owner key, so a visual-proof decision is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- visual ${task.id} ${target} --by <name> --why "…"` };
+  if (pub && onPerm && onPerm.via !== 'person' && !(who.delegation?.signed)) return { ok: false, message: `This studio has an owner key, so a visual-proof decision is signed with it on the owner's device; a permission line isn't a signature. Nothing was recorded. The owner runs: npm run task -- visual ${task.id} ${target} --by <name> --why "…"` };
+  if (who.delegation) entry.delegation = pub ? who.delegation.doc : { at: who.delegation.at, by: who.delegation.owner, until: who.delegation.until };
   const approvalRel = `${APPROVALS_REL}/${approvalName(task.id, 'visual')}`;
-  if (pub && !auto) {
+  if (pub && !auto && !who.delegation) {
     const approval = { kind: 'visual', task: task.id, to: target, title: task.title, by: entry.by, why: entry.why, at };
     let signature;
     try { signature = sign(approval, pub); } catch (e) { return { ok: false, message: e.message }; }
@@ -373,6 +394,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   fs.mkdirSync(path.join(REPO_ROOT, 'studio'), { recursive: true });
   fs.writeFileSync(path.join(REPO_ROOT, TYPE_RECORD_REL), `${JSON.stringify(rec, null, 2)}\n`);
   memo.delete(`visual|${task.id}`);
+  if (who.delegation) recordUse(who.delegation, { action: 'visual', task: task.id, detail: `visual proof ${target}` });
   const words = auto ? `${entry.by} put ${task.id}'s visual proof back to the detection: ${entry.why}` : `${onPerm ? `${onPerm.recordedBy} on ${entry.by}'s permission` : entry.by} set ${task.id}'s visual proof ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`;
   emitEvent({ type: 'task.visual_set', agent: onPerm ? onPerm.recordedBy : entry.by, task: task.id, msg: words.slice(0, 400), meta: { to: target, by: entry.by, signed: Boolean(pub && !auto), at, ...(onPerm ? { permission: entry.permission, recordedBy: entry.recordedBy } : {}) } });
   const msg = auto ? `${task.id}: visual proof back to the detection, by ${entry.by}` : `${task.id}: owner set visual proof ${target} (${entry.by})`;

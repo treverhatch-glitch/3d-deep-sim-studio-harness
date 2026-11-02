@@ -2,7 +2,6 @@
   "note": "STUDIO_* names used in the code and undocumented in docs/ when 2.66.0 froze the debt. This list only shrinks: document a name in docs/ and run node scripts/settings-map.mjs --prune-baseline. A new name is documented in the same change instead of being added here.",
   "undocumented": [
     "STUDIO_5XX_RUNOUT",
-    "STUDIO_AGENT",
     "STUDIO_AGENT_ENV",
     "STUDIO_AGENT_ENV_PASS",
     "STUDIO_AGENT_ROLE",

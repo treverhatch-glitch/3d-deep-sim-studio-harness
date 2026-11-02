@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
+import { taskType } from './done-check.mjs';
 import { parseNextQueue } from './task.mjs';
 import { listLocks } from './lock.mjs';
 import { readLog, addLogNote } from './producer-log.mjs';
@@ -160,7 +161,8 @@ export function buildHandoff() {
   const sheet = read('studio/game/GAME.md');
   const field = (label) => (sheet?.match(new RegExp(`\\*\\*${label}\\*\\*[^:]*:\\s*(.+)`)) || [, null])[1];
   const gameInfo = sheet ? { name: (sheet.match(/^# (.+?):/m) || [, '?'])[1], pitch: field('Pitch'), state: field('State'), engine: field('Engine and tools'), offLimits: field('Off-limits'), updated: mtime('studio/game/GAME.md') } : null;
-  const bugs = [...q.inProgress, ...q.backlog].filter((t) => /^(bug|fix)\b/i.test(t.title));
+  // 2.67.0 (B-38): the task's type (an owner's reclassification outranks the title), not a "Bug:/Fix" title match.
+  const bugs = [...q.inProgress, ...q.backlog].filter((t) => taskType(t) === 'bug');
 
   return {
     generatedAt: new Date().toISOString(),

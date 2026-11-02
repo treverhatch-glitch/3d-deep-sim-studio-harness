@@ -8,5 +8,10 @@
     "studio/memory/**",
     "studio/logs/**",
     "studio/notes/**"
-  ]
+  ],
+  "taskRecordsNote": "2.67.0 (B-29): task records a board move may also change, as path -> the key that holds the entries (a map by task id, or a list of entries with a \"task\" field), only when every entry it changes is for a task that is not a lane of the running train (a `task yes` or a hold for another task). A change to an entry of a lane in the train, to another key, or to an entry without a task still means a new verify.",
+  "taskRecords": {
+    "studio/task-holds.json": "tasks",
+    "studio/pending-review.json": "items"
+  }
 }

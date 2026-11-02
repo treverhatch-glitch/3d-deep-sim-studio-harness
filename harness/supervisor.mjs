@@ -76,7 +76,11 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   const allow = String(env.STUDIO_RESUME_BY || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
   if (allow.length && !allow.includes(who.toLowerCase())) return { code: 1, text: `Not resumed: "${who}" isn't in STUDIO_RESUME_BY (the names the owner allows to resume the supervisor).` };
   const s = readStatus();
-  if (!s || s.status !== 'running' || !alive(s)) return { code: 0, text: `Not halted: no supervisor is running${s?.status === 'running' ? ' (its process is gone)' : ''}, so there is nothing to clear. npm run studio:start starts a fresh one.` };
+  if (!s || s.status !== 'running' || !alive(s)) {
+    const stale = await clearStaleHalt({ who, why, permRec: onPerm && onPerm.via !== 'person' ? { permission: perm.slice(0, 300), recordedBy: onPerm.recordedBy } : {}, env });
+    if (stale) return stale;
+    return { code: 0, text: `Not halted: no supervisor is running${s?.status === 'running' ? ' (its process is gone)' : ''}, so there is nothing to clear. npm run studio:start starts a fresh one.` };
+  }
   if (!s.halted) return { code: 0, text: 'Not halted: the supervisor is starting agents; nothing to clear.' };
   const note = String(why || '').trim().slice(0, 300);
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
@@ -84,6 +88,24 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   fs.writeFileSync(RESUME, `${JSON.stringify({ by: who.slice(0, 60), why: note, via: 'cli', at: new Date().toISOString(), ...permRec })}\n`);
   emitEvent({ type: 'supervisor.resume_asked', agent: who.slice(0, 60), to: 'supervisor', msg: `${who} asked the supervisor to try again${permRec.recordedBy ? ` (recorded by ${permRec.recordedBy} on ${who}'s permission: "${permRec.permission.slice(0, 120)}")` : ''}${note ? `: ${note}` : ''} (it stopped: ${s.halted.why || 'see npm run studio:status'})`.slice(0, 600), meta: { ...permRec, by: who.slice(0, 60), why: note || null, via: 'cli', cleared: s.halted.why || null } });
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
+}
+/**
+ * 2.67.0: a halt left open in the event log by a supervisor that is no longer running (it crashed, or the PC
+ * restarted) kept the scorecard's "still waiting" counting for days, and studio:resume said "nothing to clear". Once
+ * the halt is older than STUDIO_HALT_STALE_H (24) hours, studio:resume (the same people as above: a person, or a
+ * Producer/Director session or an outside agent on a person's recorded permission) records supervisor.halt_cleared,
+ * which ends it on the card. A younger one is left alone (nothing waits on it; a new supervisor starts unhalted).
+ * Returns { code, text } or null (no open halt in the log).
+ */
+async function clearStaleHalt({ who, why, permRec = {}, env = process.env, now = Date.now() }) {
+  const { openHaltOf, haltStaleHours } = await import('./autonomy.mjs');
+  const staleH = haltStaleHours(env);
+  const h = openHaltOf(readRecentEvents(50000), { now, running: false, staleH });
+  if (!h) return null;
+  if (!h.stale) return { code: 0, text: `Not cleared: the open halt (since ${h.atLocal}, by ${h.who}: ${h.cause}) is ${h.ageH} h old, under STUDIO_HALT_STALE_H (${staleH} h). No supervisor is running, so nothing waits on it: npm run studio:start starts a fresh one, unhalted.` };
+  const note = String(why || '').trim().slice(0, 300);
+  emitEvent({ type: 'supervisor.halt_cleared', agent: (permRec.recordedBy || who).slice(0, 60), to: 'producer', msg: `${who} cleared a stale halt (since ${h.at}, ${h.ageH} h; its supervisor isn't running)${permRec.recordedBy ? ` (recorded by ${permRec.recordedBy} on ${who}'s permission: "${permRec.permission.slice(0, 120)}")` : ''}${note ? `: ${note}` : ''} (it stopped: ${h.cause})`.slice(0, 600), meta: { ...permRec, by: who.slice(0, 60), why: note || null, via: 'cli', stale: true, haltAt: h.at, ageH: h.ageH, staleH, cleared: h.cause } });
+  return { code: 0, text: `Cleared a stale halt (since ${h.atLocal}, ${h.ageH} h old; its supervisor isn't running): ${h.cause}. The scorecard no longer counts it as waiting; npm run studio:start starts a fresh supervisor.` };
 }
 // PU-17 (P-039, P-045): a status record's supervisor is alive while its pid is in use (no OS query); on Linux the
 // /proc start written at its start must match too, so a status file left "running" by a crash or a reboot that
@@ -509,6 +531,16 @@ function install(argv, remove = false) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
+  // 2.67.0 (B-47): --help / -h prints usage and never starts, stops or resumes anything.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(['Usage:',
+      '  npm run studio:start [-- --until 23:00 | --until 8h] [--window 09:00-23:00] [--budget 50% | --budget 3000000]',
+      '  npm run studio:start -- --install | --uninstall      start it at login, or stop doing so',
+      '  npm run studio:stop                                  stop the supervisor (agents finish their task)',
+      '  npm run studio:status',
+      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt'].join('\n'));
+    process.exit(0);
+  }
   if (argv[0] === 'stop') {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(STOP_FILE, new Date().toISOString());

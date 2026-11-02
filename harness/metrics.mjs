@@ -147,7 +147,8 @@ export function buildAttempts(events, { now = Date.now() } = {}) {
     }
     if (!task || !open.has(task)) {
       // The claiming agent's session ending closes its open attempt.
-      if (e.type === 'agent.session.end') for (const a of [...open.values()]) if (a.agent === e.agent) close(a, ts(e), 'session-ended', e);
+      // 2.67.0: outside work recorded with npm run usage (meta.outside) is not a session ending.
+      if (e.type === 'agent.session.end' && !e.meta?.outside) for (const a of [...open.values()]) if (a.agent === e.agent) close(a, ts(e), 'session-ended', e);
       continue;
     }
     const a = open.get(task);
