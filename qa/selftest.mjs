@@ -4170,6 +4170,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.68.0 (n): one resource-aware queue for heavy work (RAM/GPU/CPU areas from the machine scan), the out-of-memory
+// retry, test workers sized to the machine, the supervisor's session cap by RAM (qa/selftest-268n.mjs).
+{
+  const dir = copyRepo();
+  const { selftest268N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268n.mjs')).href);
+  await selftest268N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

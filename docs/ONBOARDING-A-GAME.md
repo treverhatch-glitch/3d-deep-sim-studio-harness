@@ -192,6 +192,20 @@ testTimeout: 5000 * scale, hookTimeout: 10000 * scale,
 or only for the slow files, with `{ timeout: 6000 * scale }` on those tests. Outside the gate the variable is unset, so
 the factor is 1. `"timeoutScale": false` turns it off. The manifest is protected: adding this needs the owner's approval.
 
+## Test workers sized to the machine (2.68.0)
+
+The game's checks run with `CI=true` (no snapshot writes), and with `VITEST_MAX_WORKERS` and `STUDIO_TEST_WORKERS`:
+the number of test workers the machine's free memory allows for this run (docs/WORK-ORGANIZATION.md, "Heavy work
+shares the machine by budget"). Read that variable in the test config, not `CI`, for example in `vitest.config.ts`:
+
+```ts
+const workers = Number(process.env.VITEST_MAX_WORKERS) || undefined;
+// in defineConfig({ test: { ... } }):
+maxWorkers: workers,
+```
+
+Outside the gate the variable is unset and Vitest picks its own count.
+
 ## Landing tiers and batching for the merge train (2.63.0)
 
 The merge train gives each lane a blast-radius tier from its diff (`harness/tiers.mjs`; docs/WORK-ORGANIZATION.md):
