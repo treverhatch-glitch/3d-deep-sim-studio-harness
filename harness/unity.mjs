@@ -155,7 +155,7 @@ export const dotnetBin = () => process.env.STUDIO_DOTNET || 'dotnet';
 export function underHeavy(label, fn, { heavy = true, heavyRoot = REPO_ROOT, log = (m) => console.error(m) } = {}) {
   if (heavy === false) return { value: fn() };
   try {
-    return { value: withHeavy(heavyRoot, label, fn, { log }) };
+    return { value: withHeavy(heavyRoot, label, fn, { log, kind: 'unity' }) };
   } catch (err) {
     if (err.code === 'HEAVY_BUSY') return { busy: String(err.message || err).replace(/^\[heavy\]\s*/, '') };
     throw err;

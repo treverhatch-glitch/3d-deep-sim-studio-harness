@@ -54,6 +54,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { jobDone } from './jobs.mjs';
 import { acquireHeavy, heavyRoot } from './heavy.mjs';
+import { oomSignature } from './heavy-budget.mjs';
 import { readTrack, logEngine } from './engine.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
@@ -186,17 +187,31 @@ export async function runUnityGate({ task = null, branch = null, branches = null
   const timeoutMin = Number(cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
   let lk;
   try {
-    lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env });
+    lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env, kind: 'unity' });
   } catch (err) {
     if (err.code !== 'HEAVY_BUSY') throw err;
     return finish({ status: 'refused', ok: false, code: 3, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
   }
   let r;
+  const landOnce = () => spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
   try {
     log(`[unity-gate] running the studio's Unity land command${task ? ` for ${task}` : ''}${many ? ` (branches ${many.join(' ')})` : br ? ` (branch ${br})` : ''} in ${path.relative(REPO_ROOT, cwd) || '.'}; up to ${timeoutMin} min`);
-    r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: process.env.STUDIO_HEAVY_HELD || '' }, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMin * 60000, windowsHide: true });
+    r = landOnce();
   } finally {
     lk.release();
+  }
+  // 2.68.0 (n): a run killed for memory (heavy-budget.mjs oomSignature) queues once more for the budget, with a note.
+  const oom = !/^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? oomSignature(r) : '';
+  if (oom) {
+    log(`[unity-gate] the Unity land command died out of memory (${oom}): queued once more for the machine:heavy budget`);
+    try { emitEvent({ type: 'heavy.oom_retry', agent: env.STUDIO_LOCK_OWNER || 'gates', status: 'warn', msg: `Unity land${task ? ` for ${task}` : ''} died out of memory (${oom}); re-queued once`, meta: { signature: oom } }); } catch {}
+    try {
+      lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env, kind: 'unity' });
+    } catch (err) {
+      if (err.code !== 'HEAVY_BUSY') throw err;
+      return finish({ status: 'refused', ok: false, code: 3, why: `out of memory (${oom}), and the machine:heavy lock stayed busy for its one retry: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
+    }
+    try { r = landOnce(); } finally { lk.release(); }
   }
   const text = `${r.stdout || ''}${r.stderr || ''}`;
   const out = path.join(REPO_ROOT, '.studio', 'gates', 'out', 'unity.log');
