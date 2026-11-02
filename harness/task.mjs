@@ -987,6 +987,13 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     stopped: () => { const s = readStop(); return s ? `by ${s.by}${s.reason ? `: ${s.reason}` : ''}` : null; },
     // 2.65.0 (3.3): which tasks are open and done on the board, for the train's --after ordering.
     taskStates: () => { const q = parseNextQueue(); return { open: new Set([...q.inProgress, ...q.backlog].map((t) => t.id)), done: new Set(q.done.map((t) => t.id)) }; },
+    // 2.67.0 (f): the chain-tail task the train files (harness/train-tail.mjs): a builder bug task stacked (--after) on
+    // the chain's last lane; its start isn't held by that --after (task-hold.mjs chainTail), the train's order is.
+    fileTask: ({ title, after, chain = [], train = '' }) => {
+      const t = addTask({ title, role: 'builder', priority: 'P0', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', after: [after], chainTail: { chain, train } } });
+      if (t?.id && !t.error && !t.proposed && !t.duplicate) setHold(t.id, { chainTail: { chain, train, after } });
+      return t;
+    },
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
