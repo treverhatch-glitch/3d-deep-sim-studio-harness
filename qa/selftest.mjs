@@ -4199,6 +4199,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.69.0 (q): a red train's prefix search checks K prefixes at once (K from the machine budget, each in its own scratch
+// copy), and STUDIO_VERIFY_REMOTE=github uses the repo's CI as the verify, falling back to the local one (qa/selftest-269q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269q.mjs')).href);
+  await selftest269Q({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
