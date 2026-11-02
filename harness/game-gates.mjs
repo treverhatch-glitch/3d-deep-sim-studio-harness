@@ -52,6 +52,7 @@ import { scaledTimeout, recordGateTime, recordGatePass, heldClaim, heavyHolders,
 import { machineProfile, testWorkers, oomSignature } from './heavy-budget.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
+import { quarantineEnvValue } from './flakes.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -341,6 +342,10 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
       const tw = workersNow();
       runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
+      // 2.69.0 (r): the quarantine list (studio/quarantine.json, harness/flakes.mjs) as STUDIO_TEST_QUARANTINE, a JSON
+      // list of test files for the game's runner to skip; unset when nothing is quarantined.
+      const quarantined = quarantineEnvValue(REPO_ROOT);
+      if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${tw.why})`);
       const t0 = Date.now();
       const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });

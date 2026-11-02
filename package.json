@@ -69,6 +69,7 @@
     "studio:status": "node harness/supervisor.mjs status",
     "studio:resume": "node harness/supervisor.mjs resume",
     "studio:winddown": "node harness/winddown.mjs",
+    "flakes": "node harness/flakes.mjs",
     "crew": "node harness/crew-watch.mjs",
     "janitor": "node harness/janitor.mjs",
     "budget": "node harness/budget.mjs",

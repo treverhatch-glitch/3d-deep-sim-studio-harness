@@ -80,6 +80,7 @@ import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './t
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 import { withFacts } from './handback-facts.mjs';
+import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
 import { runGatesWaiting } from './train-busy.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 
@@ -520,6 +521,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lo
   emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0 } });
   const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
+  if (!ok && !res.noCheck) flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r)
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
   return j;
@@ -567,7 +569,41 @@ function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, fo
   res.recheckMs = [...(res.recheckMs || []), Date.now() - t0];
   const c = { ok: r.status === 0, gates: failed, detail, text, log: path.relative(root, logFile).split(path.sep).join('/'), ...(r.status !== 0 && noCheck ? { noCheck: true, busy: busy || null } : {}) };
   if (!c.noCheck) cache.set(key, c);
+  if (!c.ok && !c.noCheck) flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r)
   return c;
+}
+
+// ---- 2.69.0 (r): the flake triager (harness/flakes.mjs) ------------------------------------------------------------
+
+const flakeSeen = new Map();
+/**
+ * After a red verify or re-check: each failing test file runs ALONE on this same tree (run-gates --only the game's
+ * gates, STUDIO_GATE_FOCUS, as a 2.65.3 re-check; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once
+ * per train, and is labelled real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: what
+ * the train does next is decided as before. Never throws.
+ */
+export function flakeTriage(sc, { id, tree, text, log }) {
+  if (!triageOn()) return null;
+  try {
+    const root = sc.root;
+    const gates = gameGateIds(root);
+    if (!gates.length) return null;
+    const base = String(id).replace(/-\d+$/, '');
+    if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
+    let n = 0;
+    const runAlone = ({ check, file, lowLoad }) => {
+      n += 1;
+      const owner = `train-${id}-flake`;
+      const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
+      for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+      if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
+      const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+      try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
+      for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+      return { ok: r.status === 0 };
+    };
+    return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`) });
+  } catch (e) { log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
 }
 
 /** Run the pins' report on the scratch copy's tree: { report } ({ pin: value }) or { error }. Cached by tree. */
@@ -1120,16 +1156,19 @@ export async function runTrain(opts = {}) {
     locked.message = summary(locked);
   }
   if (trains.length > 1) locked.trains = trains;
-  if (!opts.dryRun) trainJobDone(locked, t0);
+  // 2.69.0 (r): ONE fix task per test the triager quarantined (deduped; harness/flakes.mjs).
+  if (!opts.dryRun && deps.fileFlakeTask) { try { locked.flakeTasks = await fileQuarantineTasks(root, deps.fileFlakeTask); } catch {} }
+  // 2.69.0 (r): the train daemon posts its own job.done (with what it re-queued), so the train's own is left out.
+  if (!opts.dryRun && !opts.quietJob) trainJobDone(locked, t0);
   return locked;
 }
 
 /** 2.65.0: the uniform job.done (harness/jobs.mjs) for a train that ran (not a dry run, not one that found another running). */
-function trainJobDone(res, t0) {
+export function trainJobDone(res, t0, more = {}) {
   try {
     const result = res.landed?.length ? 'landed' : res.held?.length && !res.dropped?.length ? 'held' : res.dropped?.length ? 'fail' : res.ok ? 'nothing' : 'fail';
     const tail = [res.landed?.length ? `landed ${res.landed.join(', ')}` : '', res.dropped?.length ? `handed back ${res.dropped.map((d) => d.task).join(', ')}` : '', res.deferred?.length ? `deferred ${res.deferred.map((d) => d.task).join(', ')}` : '', res.held?.length ? `held ${res.held.map((h) => h.task).join(', ')}` : ''].filter(Boolean).join('; ') || String(res.message || '').slice(0, 300);
-    jobDone({ kind: 'train', id: res.id, code: res.ok ? 0 : 1, result, ms: Date.now() - t0, tail, log: path.join(TRAIN_DIR, String(res.id || '')).split(path.sep).join('/'), extra: { landed: res.landed || [], dropped: (res.dropped || []).map((d) => d.task), deferred: (res.deferred || []).map((d) => d.task), held: (res.held || []).map((h) => h.task) } });
+    jobDone({ kind: 'train', id: res.id, code: res.ok ? 0 : 1, result, ms: Date.now() - t0, tail: `${tail}${more.tail ? `; ${more.tail}` : ''}`.slice(0, 600), log: path.join(TRAIN_DIR, String(res.id || '')).split(path.sep).join('/'), extra: { landed: res.landed || [], dropped: (res.dropped || []).map((d) => d.task), deferred: (res.deferred || []).map((d) => d.task), held: (res.held || []).map((h) => h.task), ...(more.extra || {}) } });
   } catch {}
 }
 
