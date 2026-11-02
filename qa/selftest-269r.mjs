@@ -190,21 +190,22 @@ console.log(JSON.stringify({ labels: r?.labels || null, quarantined: r?.quaranti
       && flakeRows.filter((r) => r.train === 'tr-flake').length === 2 && c2.again === 0,
     `${verifyText.slice(-800)}\n${JSON.stringify(c2).slice(0, 2000)}\nran=${JSON.stringify(ran)}`);
   const q = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'quarantine.json'), 'utf8')); } catch { return null; } })();
-  report('2.69.0 (r, d): a test labelled flaky 3 times in 7 days goes on studio/quarantine.json ({ test, label, since, why } with its evidence, by the harness; the label 9 days old doesn\'t count) and a test.quarantined event says so; c, labelled "real" 3 times, is never quarantined (fails on 2.68.0: no quarantine)',
-    Array.isArray(q) && q.length === 1 && q[0].test === 'game/demo/tests/b.test.mjs' && q[0].label === 'load-flake' && q[0].since && /flaky 3 times in 7 days/.test(q[0].why) && q[0].by === 'harness' && q[0].evidence?.length === 3
-      && evs().some((e) => e.type === 'test.quarantined' && e.meta?.test === 'game/demo/tests/b.test.mjs'),
+  report('2.69.0 (r, d): a test labelled flaky 3 times in 7 days goes on studio/quarantine.json as PROPOSED ({ test, label, since, why, status: "proposed" } with its evidence, by the harness; the label 9 days old doesn\'t count) and a test.quarantine_proposed event says so; c, labelled "real" 3 times, is never quarantined (fails on 2.68.0: no quarantine; fails on the first 2.69.0 (r) commit: the entry went active at once)',
+    Array.isArray(q) && q.length === 1 && q[0].test === 'game/demo/tests/b.test.mjs' && q[0].label === 'load-flake' && q[0].status === 'proposed' && q[0].since && /flaky 3 times in 7 days/.test(q[0].why) && q[0].by === 'harness' && q[0].evidence?.length === 3
+      && evs().some((e) => e.type === 'test.quarantine_proposed' && e.meta?.test === 'game/demo/tests/b.test.mjs') && !evs().some((e) => e.type === 'test.quarantined'),
     JSON.stringify(q));
+  const ranNow = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return []; } };
   try { fs.rmSync(ranLog, { force: true }); } catch {}
-  const after = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);
-  const ran2 = (() => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return []; } })();
-  report('2.69.0 (r, d): the game\'s checks get the list as STUDIO_TEST_QUARANTINE (a JSON list of test files) and the game\'s runner skips the quarantined test; the real failure still fails the check (fails on 2.68.0: no such variable)',
-    ran2.length === 2 && ran2.every((x) => x[0] !== 'game/demo/tests/b.test.mjs' && x[2] === 'game/demo/tests/b.test.mjs') && after.status !== 0 && /quarantined test file\(s\) skipped/.test(out(after)),
-    `${out(after).slice(-1200)}\nran=${JSON.stringify(ran2)}`);
+  const before = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);
+  const ran1 = ranNow();
+  report('2.69.0 (r, d): the harness never silences a test on its own authority: a proposed entry is NOT in STUDIO_TEST_QUARANTINE, so the game\'s runner still runs it (fails on the first 2.69.0 (r) commit: the runner skipped it at once)',
+    ran1.length === 3 && ran1.some((x) => x[0] === 'game/demo/tests/b.test.mjs') && ran1.every((x) => x[2] === '') && !/quarantined test file\(s\) skipped/.test(out(before)),
+    `${out(before).slice(-1000)}\nran=${JSON.stringify(ran1)}`);
 
-  // ---- (d) ONE fix task, release by a game dev (never a worker), tier C, the digest ----
+  // ---- (d) the fix task is filed for a proposed entry; the digest lists it; confirm (never a worker); tier C; release ----
   const d = probe('quar', `import path from 'node:path';
 import fs from 'node:fs';
-import { fileQuarantineTasks, releaseQuarantine, readQuarantine, quarantineDigestLine } from ${u('harness/flakes.mjs')};
+import { fileQuarantineTasks, confirmQuarantine, releaseQuarantine, readQuarantine, quarantineDigestLine, quarantineEnvValue, statusText } from ${u('harness/flakes.mjs')};
 import { classifyLane } from ${u('harness/tiers.mjs')};
 import { buildDigest } from ${u('harness/digest.mjs')};
 const root = path.resolve('.');
@@ -216,21 +217,61 @@ r.second = await fileQuarantineTasks(root, fileTask);
 r.filed = filed;
 r.taskOnEntry = readQuarantine(root)[0]?.task || null;
 r.tier = classifyLane({ files: [{ path: 'studio/quarantine.json', status: 'M' }] });
-const ev = fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
-r.line = quarantineDigestLine(ev, { root });
-try { r.digest = (await buildDigest({ root, events: ev })).text; } catch (e) { r.digest = 'ERR ' + e.message; }
-r.worker = await releaseQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'builder-c' });
-r.session = await releaseQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'Dana', env: { ...process.env, STUDIO_ROLE: 'qa', STUDIO_LOCK_OWNER: 'qa-a' } });
-r.stillThere = readQuarantine(root).length;
-r.person = await releaseQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'Dana', why: 'fixed the timer' });
-r.left = readQuarantine(root).length;
+const ev = () => fs.readFileSync(process.env.AGENT_EVENTS_FILE, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
+r.line = quarantineDigestLine(ev(), { root });
+try { r.digest = (await buildDigest({ root, events: ev() })).text; } catch (e) { r.digest = 'ERR ' + e.message; }
+r.status = statusText(root);
+r.envBefore = quarantineEnvValue(root);
+r.workerConfirm = await confirmQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'builder-c' });
+r.sessionConfirm = await confirmQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'Dana', env: { ...process.env, STUDIO_ROLE: 'qa', STUDIO_LOCK_OWNER: 'qa-a' } });
+r.stillProposed = readQuarantine(root)[0]?.status;
+r.confirm = await confirmQuarantine(root, 'game/demo/tests/b.test.mjs', { by: 'Dana', why: 'seen it flake' });
+r.statusAfter = readQuarantine(root)[0]?.status;
+r.envAfter = quarantineEnvValue(root);
 console.log(JSON.stringify(r));
 `);
-  report('2.69.0 (r, d): ONE fix task per quarantined test (filed once, its id kept on the entry; a second pass files nothing); the daily digest shows the harness\'s addition with its evidence; a lane changing studio/quarantine.json is tier C (silencer); a worker (by name or a launched qa session) can\'t release an entry, a game dev can (fails on 2.68.0: no quarantine, and the file was tier B)',
-    d.filed?.length === 1 && /Fix flaky test game\/demo\/tests\/b\.test\.mjs/.test(d.filed[0]) && d.second?.length === 0 && d.taskOnEntry === 'T-77'
-      && d.tier?.tier === 'C' && /quarantined 1 flaky test in 24 h: game\/demo\/tests\/b\.test\.mjs \(load-flake, 3 labels\)/.test(d.line || '') && /quarantined 1 flaky test/.test(d.digest || '')
-      && d.worker?.ok === false && d.session?.ok === false && d.stillThere === 1 && d.person?.ok === true && d.left === 0 && evs().some((e) => e.type === 'test.quarantine_released' && e.meta?.by === 'Dana'),
+  report('2.69.0 (r, d): ONE fix task per proposed entry (filed once, its id kept on the entry; a second pass files nothing); the daily digest and npm run flakes list the proposal with its evidence; a lane changing studio/quarantine.json is tier C (silencer); a worker (by name or a launched qa session) can\'t confirm it, a person can, and then it is active and in STUDIO_TEST_QUARANTINE (fails on 2.68.0: no quarantine, and the file was tier B; fails on the first 2.69.0 (r) commit: no proposals, no confirm)',
+    d.filed?.length === 1 && /Fix flaky test game\/demo\/tests\/b\.test\.mjs/.test(d.filed[0]) && d.second?.length === 0 && d.taskOnEntry === 'T-77' && d.tier?.tier === 'C'
+      && /Proposed for quarantine, still running until you confirm: game\/demo\/tests\/b\.test\.mjs \(load-flake, 3 labels\)/.test(d.line || '') && /Proposed for quarantine/.test(d.digest || '') && /Proposed by the harness, still running until confirmed/.test(d.status || '')
+      && d.envBefore === '' && d.workerConfirm?.ok === false && d.sessionConfirm?.ok === false && d.stillProposed === 'proposed' && d.confirm?.ok === true && d.statusAfter === 'active'
+      && d.envAfter === '["game/demo/tests/b.test.mjs"]' && evs().some((e) => e.type === 'test.quarantined' && e.meta?.confirmedBy === 'Dana'),
     JSON.stringify(d).slice(0, 3000));
+  try { fs.rmSync(ranLog, { force: true }); } catch {}
+  const after = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);
+  const ran2 = ranNow();
+  report('2.69.0 (r, d): once confirmed, the game\'s checks get it as STUDIO_TEST_QUARANTINE (a JSON list of test files) and the game\'s runner skips it; the real failure still fails the check (fails on 2.68.0: no such variable)',
+    ran2.length === 2 && ran2.every((x) => x[0] !== 'game/demo/tests/b.test.mjs' && x[2] === 'game/demo/tests/b.test.mjs') && after.status !== 0 && /quarantined test file\(s\) skipped/.test(out(after)),
+    `${out(after).slice(-1200)}\nran=${JSON.stringify(ran2)}`);
+
+  // ---- (d) autoQuarantine: the owner's or a game dev's choice makes the harness's additions active at once ----
+  const au = probe('auto', `import path from 'node:path';
+import fs from 'node:fs';
+import { maybeQuarantine, readQuarantine, quarantineEnvValue, releaseQuarantine } from ${u('harness/flakes.mjs')};
+const root = path.resolve('.');
+const qf = path.join(root, 'studio', 'quarantine.json');
+const seed = (t) => { for (const d of [1, 2]) fs.appendFileSync(path.join(root, '.studio', 'flakes.jsonl'), JSON.stringify({ at: new Date(Date.now() - d * 86400000).toISOString(), test: t, check: 'game:unit', label: 'seed-flake' }) + '\\n'); };
+const third = (t) => { const row = { at: new Date().toISOString(), test: t, check: 'game:unit', label: 'seed-flake' }; fs.appendFileSync(path.join(root, '.studio', 'flakes.jsonl'), JSON.stringify(row) + '\\n'); return row; };
+const r = {};
+fs.writeFileSync(qf, JSON.stringify({ autoQuarantine: true, tests: readQuarantine(root) }, null, 2));
+seed('game/demo/tests/y.test.mjs');
+r.y = maybeQuarantine(root, third('game/demo/tests/y.test.mjs'));
+r.fileShape = Object.keys(JSON.parse(fs.readFileSync(qf, 'utf8'))).sort().join(',');
+fs.writeFileSync(qf, JSON.stringify(readQuarantine(root), null, 2));
+const mf = path.join(root, 'game', 'demo', 'studio.gates.json');
+const m = JSON.parse(fs.readFileSync(mf, 'utf8'));
+fs.writeFileSync(mf, JSON.stringify({ ...m, autoQuarantine: true }, null, 2));
+seed('game/demo/tests/z.test.mjs');
+r.z = maybeQuarantine(root, third('game/demo/tests/z.test.mjs'));
+fs.writeFileSync(mf, JSON.stringify(m, null, 2));
+r.env = quarantineEnvValue(root);
+r.release = await releaseQuarantine(root, 'game/demo/tests/y.test.mjs', { by: 'Dana' });
+console.log(JSON.stringify(r));
+`);
+  report('2.69.0 (r, d): with "autoQuarantine": true in studio/quarantine.json (its { autoQuarantine, tests } shape kept) or in the game\'s studio.gates.json, the harness\'s entry is active at once, still with its evidence and a test.quarantined event, and in STUDIO_TEST_QUARANTINE; a game dev releases it (fails on the first 2.69.0 (r) commit: no autoQuarantine switch)',
+    au.y?.status === 'active' && au.y.auto === 'studio/quarantine.json' && au.y.evidence?.length === 3 && au.fileShape === 'autoQuarantine,tests' && au.z?.status === 'active' && au.z.auto === 'game/demo/studio.gates.json'
+      && JSON.parse(au.env || '[]').includes('game/demo/tests/y.test.mjs') && JSON.parse(au.env || '[]').includes('game/demo/tests/z.test.mjs') && au.release?.ok === true
+      && evs().some((e) => e.type === 'test.quarantined' && e.agent === 'harness' && e.meta?.test === 'game/demo/tests/z.test.mjs'),
+    JSON.stringify(au).slice(0, 2500));
 
   // ---- (c) the labels themselves: seed-flake and intermittent ----
   const l = probe('labels', `import { labelTest } from ${u('harness/flakes.mjs')};

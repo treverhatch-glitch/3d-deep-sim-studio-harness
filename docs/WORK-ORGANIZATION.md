@@ -220,11 +220,16 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   and again with one test worker → `load-flake`; passes then fails → `intermittent`. Labels go to
   `.studio/flakes.jsonl`; they never change what the train does. A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
   (3) times in `STUDIO_FLAKE_WINDOW_DAYS` (7) goes on `studio/quarantine.json` (`{ test, label, since, why, by,
-  evidence, task }`), the game's runner skips it (`STUDIO_TEST_QUARANTINE`, docs/ONBOARDING-A-GAME.md), and ONE fix
-  task is filed. A real failure is never quarantined. The list silences a check, so a lane changing it is tier C; a
-  game dev releases an entry (`npm run flakes -- release <test> --by <name>`; an outside agent with `--permission`;
-  never a worker). The harness's additions are `test.quarantined` events with their evidence and a line in the daily
-  digest; `npm run flakes` lists the list and the week's labels. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+  status, evidence, task }`) as PROPOSED, and ONE fix task is filed. The harness never silences a test on its own
+  authority: a proposed entry still runs; the digest and `npm run flakes` list it until a person, an agent under the
+  owner's delegation, or an outside agent (or a Producer/Director session) with `--permission` confirms it (`npm run
+  flakes -- confirm <test> --by <name>`; never a worker). Then it is active and the game's runner skips it
+  (`STUDIO_TEST_QUARANTINE`, docs/ONBOARDING-A-GAME.md). `"autoQuarantine": true` in `studio/quarantine.json` (then
+  `{ "autoQuarantine": true, "tests": [...] }`) or in the game's `studio.gates.json` (the owner's or a game dev's
+  choice) makes the harness's entries active at once, still recorded with evidence. A real failure is never
+  quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
+  flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
+  (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
