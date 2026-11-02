@@ -108,6 +108,7 @@ console.log(JSON.stringify({ own, sub, eng, fb, safety }));`);
   fs.rmSync(docFile, { force: true });
   if (blText) fs.writeFileSync(blFile, blText);
   report('2.66.0 (d): the settings baseline only shrinks (init refuses over an existing one; prune drops a newly documented name)',
-    before.includes(known) && init.status === 1 && prune.status === 0 && Array.isArray(after) && !after.includes(known) && after.length === before.length - 1,
+    // Prune drops every documented name, so other names a later release documented may go too: only shrinking counts.
+    before.includes(known) && init.status === 1 && prune.status === 0 && Array.isArray(after) && !after.includes(known) && after.length <= before.length - 1 && after.every((n) => before.includes(n)),
     `${out(init).slice(-300)}\n---\n${out(prune).slice(-300)}`);
 }
