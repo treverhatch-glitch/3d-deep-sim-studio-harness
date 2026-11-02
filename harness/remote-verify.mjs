@@ -3,8 +3,11 @@
  *
  * STUDIO_VERIFY_REMOTE=github: for a PUBLIC GitHub repo, with a token the owner set (GH_TOKEN or GITHUB_TOKEN in the
  * environment; never printed, never put on a command line), the train pushes its integration commit to a throwaway
- * branch train/<id> on origin, waits for the repo's CI on that commit (GitHub REST check-runs) and uses a green result
- * as its verify. Any error, a private repo, no check run starting within STUDIO_VERIFY_REMOTE_START_MIN (10), or no
+ * branch train/<id> on origin, waits for the repo's CI on that commit (GitHub REST check-runs) and lets the NAMED check
+ * run (STUDIO_VERIFY_REMOTE_CHECK, a pattern; default release-gate) stand for the game's own checks only: every
+ * matching run completed with success (skipped or neutral don't count, so a CI that skips the suite can't pass it).
+ * The safety gates never come from the remote: the train runs every non-game, non-engine gate locally on the same
+ * tree (localGateIds; protected, secrets, hooks, weakened-tests, golden, regressions, ...) and both must pass. Any error, a private repo, no check run starting within STUDIO_VERIFY_REMOTE_START_MIN (10), or no
  * result within STUDIO_VERIFY_REMOTE_TIMEOUT_MIN (60): the local verify runs, as before. A red CI result also runs the
  * local verify: its record names the failing checks the prefix search re-checks. Afterwards the train deletes its own
  * train/<id> branch, only that exact name and only when this push created it; no other remote ref is ever touched.
@@ -19,6 +22,22 @@ export const remoteMode = (env = process.env) => (/^github$/i.test(String(env.ST
 export const remoteTimeoutMs = (env = process.env) => Math.max(1, num(env.STUDIO_VERIFY_REMOTE_TIMEOUT_MIN, 60)) * 60000;
 export const remoteStartMs = (env = process.env) => Math.max(1, num(env.STUDIO_VERIFY_REMOTE_START_MIN, 10)) * 60000;
 const pollMs = (env = process.env) => Math.max(1, num(env.STUDIO_VERIFY_REMOTE_POLL_S, 30)) * 1000;
+/** STUDIO_VERIFY_REMOTE_CHECK: the check-run name pattern that stands for the game checks (default release-gate). */
+export function remoteCheckPattern(env = process.env) {
+  const raw = String(env.STUDIO_VERIFY_REMOTE_CHECK ?? '').trim() || 'release-gate';
+  try { return new RegExp(raw, 'i'); } catch { return new RegExp(raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
+}
+
+/**
+ * The gates the train still runs locally when the remote stands for the game checks: every studio gate except the
+ * game's checks (game-gates.mjs ids), the engine gates (engine, engine:*, godot-unit) and heavy ones (heavy: true,
+ * browser-play). gates: studio/gates.json "gates".
+ */
+export function localGateIds(gates = [], gameIds = ['game']) {
+  const heavy = (g) => g.heavy === true || g.id === 'browser-play' || /^engine(:|$)/.test(String(g.id)) || g.id === 'godot-unit' || gameIds.includes(g.id) || /game-gates\.mjs/.test(String(g.command || ''));
+  return (Array.isArray(gates) ? gates : []).filter((g) => g && g.id && !heavy(g)).map((g) => g.id);
+}
+
 const tokenOf = (env) => String(env.GH_TOKEN || env.GITHUB_TOKEN || '').trim();
 /** The only branch name this module pushes or deletes. */
 export const trainBranch = (id) => `train/${id}`;
@@ -82,13 +101,15 @@ export async function remoteVerify({ root, id, sha, env = process.env, client = 
     if (await c.branchExists(branch)) return { used: false, why: `${branch} already exists on origin: not touched` };
     await c.push(sha, branch);
     created = true;
-    log(`remote verify: pushed ${String(sha).slice(0, 8)} to ${branch}; waiting for the repo's CI (up to ${Math.round(remoteTimeoutMs(env) / 60000)} min)`);
+    const pat = remoteCheckPattern(env);
+    log(`remote verify: pushed ${String(sha).slice(0, 8)} to ${branch}; waiting for the repo's CI check ${pat} (up to ${Math.round(remoteTimeoutMs(env) / 60000)} min)`);
     for (;;) {
-      const runs = await c.checkRuns(sha);
+      const all = await c.checkRuns(sha);
+      const runs = all.filter((r) => pat.test(String(r.name || '')));
       const waited = now() - t0;
-      if (!runs.length && waited >= remoteStartMs(env)) return { used: false, why: `no CI check started on ${branch} within ${Math.round(remoteStartMs(env) / 60000)} min (STUDIO_VERIFY_REMOTE_START_MIN; does the workflow run on pushes to any branch?)` };
+      if (!runs.length && (waited >= remoteStartMs(env) || (all.length && all.every((r) => r.status === 'completed')))) return { used: false, why: `no CI check run named ${pat} on ${branch}${all.length ? ` (it ran ${all.map((r) => r.name).slice(0, 5).join(', ')})` : ` within ${Math.round(remoteStartMs(env) / 60000)} min`} (STUDIO_VERIFY_REMOTE_CHECK, STUDIO_VERIFY_REMOTE_START_MIN; does the workflow run on pushes to any branch?)` };
       if (runs.length && runs.every((r) => r.status === 'completed')) {
-        const bad = runs.filter((r) => !['success', 'neutral', 'skipped'].includes(r.conclusion));
+        const bad = runs.filter((r) => r.conclusion !== 'success');
         return { used: true, ok: !bad.length, runs, ms: now() - t0, why: bad.length ? `CI red: ${bad.map((r) => `${r.name} ${r.conclusion}`).join(', ')}` : `CI green: ${runs.map((r) => r.name).join(', ')}` };
       }
       if (waited >= remoteTimeoutMs(env)) return { used: false, why: `no CI result within ${Math.round(remoteTimeoutMs(env) / 60000)} min (STUDIO_VERIFY_REMOTE_TIMEOUT_MIN)` };

@@ -107,16 +107,22 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   scan, live heavy holders, slots, RAM, CPU), capped by `STUDIO_TRAIN_BISECT_PARALLEL` (default 4; `1`/`off`: one at
   a time). No scan: K = 1, the search above unchanged. The log says "bisect round 1: checking prefixes 3, 6 at once";
   event `task.train.bisect_round`.
-- Remote verify (2.69.0, `harness/remote-verify.mjs`, `STUDIO_VERIFY_REMOTE=github`, off by default): for a PUBLIC
-  GitHub repo, with `GH_TOKEN` or `GITHUB_TOKEN` set by the owner (never printed, never on a command line), the train
-  pushes its integration commit to `train/<id>` on origin, waits for the repo's CI check runs on that commit and uses a
-  green result (every run completed: success, neutral or skipped) as its verify. Anything else runs the local verify:
-  any error, a private repo, an existing `train/<id>`, no check run within `STUDIO_VERIFY_REMOTE_START_MIN` (10; the
-  workflow must run on pushes to any branch), no result within `STUDIO_VERIFY_REMOTE_TIMEOUT_MIN` (60; polled every
-  `STUDIO_VERIFY_REMOTE_POLL_S`, 30), and red CI (the local record names the failing checks for the search). The train
-  then deletes its own `train/<id>` branch (only that name, only if its push made it). It trusts the repo's CI to run
-  what `npm run verify` runs. Cost: GitHub's standard runners are free for public repos; a private repo would use paid
-  minutes, so it is never used there. Event `task.train.remote_verify`.
+- Remote verify (2.69.0, `harness/remote-verify.mjs`, `STUDIO_VERIFY_REMOTE=github`, off by default): the remote CI
+  may stand for the game's own checks ONLY, never for a safety gate. The train first runs every other gate locally on
+  its tree (`run-gates --only`, every studio gate but the game checks, engine and heavy ones: protected, secrets,
+  hooks, weakened-tests, golden, regressions, ...; about 10 s). Red there (not excused by a baseline): the verify is
+  red, the remote is not asked, and the prefix search re-checks those gates. Green: for a PUBLIC GitHub repo, with
+  `GH_TOKEN` or `GITHUB_TOKEN` set by the owner (never printed, never on a command line), the train pushes its
+  integration commit to `train/<id>` on origin and waits for the check run named by `STUDIO_VERIFY_REMOTE_CHECK` (a
+  pattern, default `release-gate`): every matching run must complete with success (skipped or neutral is not green;
+  other check runs don't count). Both parts green: the tree counts as verified, and
+  `.studio/train/split/<id>-<n>.json` records which gate came from where. Anything else runs the full local verify:
+  any error, a private repo, an existing `train/<id>`, no run of the named check (`STUDIO_VERIFY_REMOTE_START_MIN`,
+  10; the workflow must run on pushes to any branch), no result within `STUDIO_VERIFY_REMOTE_TIMEOUT_MIN` (60; polled
+  every `STUDIO_VERIFY_REMOTE_POLL_S`, 30), and red CI (the local record names the failing checks for the search). The
+  train then deletes its own `train/<id>` branch (only that name, only if its push made it). Cost: GitHub's standard
+  runners are free for public repos; a private repo would use paid minutes, so it is never used there. Event
+  `task.train.remote_verify`.
 - Chain tails (2.67.0, `harness/train-tail.mjs`, `STUDIO_TRAIN_CHAIN_TAIL`, default on; `off` keeps 2.66.0): when a
   train starts with a stacked chain (lanes linked by `--after` / `task block --until`) or a lane that declares
   `Pin-Moves:`, BEFORE its verify it builds main + the chain in a second scratch copy and runs the chain's touched test
