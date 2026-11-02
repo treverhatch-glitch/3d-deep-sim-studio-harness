@@ -62,6 +62,8 @@
  * the scan; 1 with none, as before). Waiters queue (a landing first, then first come) and say what they wait for. The
  * record keeps its claim; identity, trees, stop and reaping are unchanged. `heavy run --kind/--ram-gb/--vram-gb/
  * --gpu-only` sets a wrapped command's claim, and a command killed for memory runs once more (STUDIO_HEAVY_OOM_RETRY).
+ * 2.70.0 (t): mostly-GPU kinds (browser playtest with GPU flags, Blender, Unity bake/graphics, the landing clip) take the
+ * GPU area beside CPU work when the scan shows a GPU, and say which area they took and why (heavy-budget.mjs).
  *
  * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
  * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
@@ -77,7 +79,7 @@ import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, s
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { ramCheck } from './ram.mjs';
-import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent } from './heavy-budget.mjs';
+import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup } from './heavy-budget.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -459,7 +461,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       const state = budgetState(profile, holders, { env });
       claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly });
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
-      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }) });
+      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }) });
       if (adm.ok && !ram.low) {
         for (let i = 1; i <= n + 16 && !mine; i += 1) {
           const f = path.join(dir, `${PREFIX}-${i}.lock`);
@@ -492,6 +494,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const waitedMs = Date.now() - t0;
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
   if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
+  // 2.70.0 (t): one line naming the area a mostly-GPU job took and why (heavy-budget.mjs gpuAreaClaim).
+  if (claim?.areaWhy) log(`[heavy] ${label} took ${claim.areaWhy}`);
   const token = `${path.basename(mine)}:${process.pid}`;
   const prevEnv = process.env.STUDIO_HEAVY_HELD;
   process.env.STUDIO_HEAVY_HELD = token;
@@ -786,7 +790,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
     const t0Run = Date.now();
     // 2.68.0 (n): the job's claim: --kind (browser-playtest, gpu-playtest, blender-preview, unity, asset-roundtrip,
-    // verify; default heavy), --ram-gb / --vram-gb / --gpu-only to override it.
+    // verify; 2.70.0: unity-bake, unity-visual, build-clip; default heavy), --ram-gb / --vram-gb / --gpu-only to override
+    // it. 2.70.0 (t): a mostly-GPU kind takes the GPU area when the scan shows a GPU (heavy-budget.mjs gpuAreaClaim).
     const claimOpts = { kind: opt('--kind') || 'heavy', ...(opt('--ram-gb') ? { ramGb: Number(opt('--ram-gb')) } : {}), ...(opt('--vram-gb') ? { vramGb: Number(opt('--vram-gb')) } : {}), ...(argv.slice(0, sep >= 0 ? sep : argv.length).includes('--gpu-only') ? { gpuOnly: true } : {}) };
     const runOnce = async () => {
       let lk;
@@ -852,7 +857,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const profile = machineProfile(root);
     const slots = heavySlots(process.env, profile);
     const budget = budgetState(profile, holders);
-    const claimText = (h) => { const c = claimOf(h); return `claims ${c.ramGb} GB RAM${c.gpu?.vramGb ? `, ${c.gpu.vramGb} GB VRAM` : ''}${c.gpuOnly ? ' (GPU only)' : ''}${c.workers ? `, ${c.workers} test workers` : ''}`; };
+    const claimText = (h) => { const c = claimOf(h); return `claims ${c.ramGb} GB RAM${c.gpu?.vramGb ? `, ${c.gpu.vramGb} GB VRAM` : ''}${c.area === 'gpu' ? ' (GPU area)' : c.gpuOnly ? ' (GPU only)' : ''}${c.workers ? `, ${c.workers} test workers` : ''}`; };
     if (argv.includes('--json')) console.log(JSON.stringify({ slots, holders, orphaned: left, implicit, budget }));
     else {
       console.log(holders.length ? `machine:heavy (${slots} slot${slots === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}, ${claimText(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${slots} slot${slots === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
