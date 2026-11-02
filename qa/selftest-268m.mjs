@@ -182,10 +182,13 @@ export async function selftest268M({ dir, run, report, tmpRoot }) {
     fs.mkdirSync(path.dirname(mfile), { recursive: true });
     fs.writeFileSync(mfile, JSON.stringify(p));
     const code = "const { ramCheck } = await import('./harness/ram.mjs'); console.log(JSON.stringify(ramCheck({}, process.env)));";
-    const win = probe('ram-win', code, { STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024) });
-    const off = probe('ram-off', code, { STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024), STUDIO_MACHINE_SCAN: 'off' });
+    // The full selftest runs every check with STUDIO_RAM_FLOOR_GB=0 (CLEAN_ENV); this check is about the 3 GB floor, so it
+    // sets it (CI release-gate 22: floorGb 0 there).
+    const floor = { STUDIO_RAM_FLOOR_GB: '3' };
+    const win = probe('ram-win', code, { ...floor, STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024) });
+    const off = probe('ram-off', code, { ...floor, STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024), STUDIO_MACHINE_SCAN: 'off' });
     fs.writeFileSync(mfile, JSON.stringify({ ...p, os: 'linux' }));
-    const lin = probe('ram-lin', code, { STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024) });
+    const lin = probe('ram-lin', code, { ...floor, STUDIO_TEST_FREEMEM_MB: String(5.8 * 1024) });
     fs.rmSync(mfile, { force: true });
     const { ramCheck } = await imp('harness/ram.mjs');
     const inj = ramCheck({ freemem: () => 5.8 * GB, machine: p }, {});
