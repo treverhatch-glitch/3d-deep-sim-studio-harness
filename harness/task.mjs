@@ -36,6 +36,7 @@ import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './
 import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
+import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -676,6 +677,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (dirty.length) return { error: 'uncommitted', dirty, message: `Commit your work first: ${dirty.length} uncommitted file(s) in your copy (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}). Only committed work reaches the studio. Then run task done again.` };
   }
 
+  // 2.67.1 (j): asset work (--track asset, or files under the game's declared asset paths) passes the asset gate.
+  if (!force) { const ag = assetGateAtDone(target, { agent, checkOnly }); if (ag) return ag; }
+
   if (checkOnly) {
     const verifyNeeded = Boolean(check.checks?.some((c) => !c.ok && c.label === VERIFY_LABEL));
     return { checkOnly: true, ok: true, id: target.id, verifyNeeded, type: check.type, typeSource: check.typeSource, message: `${target.id} (a "${check.type}" task, ${check.typeSource}): every quick check passes.${verifyNeeded ? ' Next: npm run verify (it is scoped to your lane), then task done.' : ' Next: task done (it runs the game checks and lands the work).'}` };
@@ -866,6 +870,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   const nextActive = q.inProgress[0] || null;
   syncCurrentTaskCheckpoint(nextActive, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title}` });
+  assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   // 2.35.0: a finished rescue acts on its decision (retry unparks the stuck task, split keeps it parked, needs-person asks).
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
   else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
@@ -913,6 +918,44 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 }
 
 /**
+ * 2.67.1 (j): the asset gate at task done (harness/asset-gate.mjs, run as its own process: its round trip takes the
+ * machine:heavy lock). Runs for a task on the asset track, or for any task when the game declares asset paths
+ * (studio/game.json "assets"); a change with no asset file is a skip. --check runs every check but the round trip.
+ * null = nothing blocks; else task done's refusal. A refusal is kept for the task's next hand-back facts.
+ */
+function assetGateAtDone(target, { agent = null, checkOnly = false } = {}) {
+  const track = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track || null;
+  if (!assetGateApplies(track, REPO_ROOT)) return null;
+  let files = null;
+  try { if (inLaneCopy()) files = laneDiff()?.changed || null; } catch { /* git below */ }
+  const base = files ? null : taskBase(target.id);
+  const args = [path.join(REPO_ROOT, 'harness', 'asset-gate.mjs'), '--json', '--task', target.id, ...(files ? ['--files', files.join(',')] : []), ...(base ? ['--base', base] : []), ...(checkOnly ? ['--no-round-trip'] : [])];
+  const r = spawnSync(process.execPath, args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
+  let res = null;
+  try { res = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { /* reported below */ }
+  if (!res) return { error: 'asset-gate', message: `${target.id} is not done: the asset gate didn't report (${`${r.stderr || ''}${r.stdout || ''}`.trim().slice(-300) || `exit ${r.status}`}). node harness/asset-gate.mjs --task ${target.id} runs it.` };
+  const text = assetGateText(res);
+  if (res.status === 'skipped') return null;
+  if (!checkOnly) emitEvent({ type: 'asset.gate', agent: agent || target.role, task: target.id, status: res.ok ? 'ok' : res.status === 'busy' ? 'warn' : 'blocked', msg: `${target.id} asset gate: ${res.status}${res.failures?.length ? ` (${res.failures.map((f) => `${f.check} ${f.file}`).join(', ')})` : ''}`.slice(0, 500), meta: { status: res.status, files: res.files, failures: (res.failures || []).map((f) => ({ check: f.check, file: f.file })), steamDisclosure: res.steamDisclosure || [] } });
+  if (res.ok) { if (text) console.log(text); return null; }
+  if (res.status === 'busy') return { error: 'asset-busy', asset: res, message: `${target.id} is not done: the asset gate's round trip is waiting for the machine:heavy lock: ${res.why}\nRun task done again later; nothing is wrong with the work.` };
+  emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: the asset gate failed (${res.failures.map((f) => f.check).join(', ')})`.slice(0, 400) });
+  if (!checkOnly) recordGateRefusal(target.id, { gates: [{ id: 'asset', ok: false }], text: `${text}\n[gates] FAIL asset`, log: '.studio/gates/asset-last.json' });
+  return { error: 'asset-gate', asset: res, message: `${target.id} is not done: the asset gate fails.\n${text}\nFix it, commit, and run task done again (node harness/asset-gate.mjs --task ${target.id}${base ? ` --base ${String(base).slice(0, 12)}` : ''} runs it).` };
+}
+
+/** 2.67.1 (j): a landed asset task files its one engine-track task (harness/asset-gate.mjs fileAssetHandoff). Never throws. */
+function assetHandoffAfterLanding(taskId, agent) {
+  try {
+    const r = fileAssetHandoff({ task: taskId, addTask, root: REPO_ROOT });
+    if (r?.id && !r.already) console.log(`[task done] ${taskId} landed asset files: ${r.id} wires them in${r.track ? ` (${r.track})` : ''}`);
+    else if (r?.refused) console.warn(`[task done] note: ${taskId}'s engine task wasn't queued: ${r.refused}`);
+  } catch (err) {
+    try { emitEvent({ type: 'asset.handoff_refused', agent: agent || 'harness', task: taskId, status: 'warn', to: 'producer', msg: `${taskId}: the asset hand-off failed: ${err.message}`.slice(0, 400) }); } catch { /* evidence only */ }
+  }
+}
+
+/**
  * 2.59.0: close a task a merge train landed (harness/train.mjs): its lane's checked head is in the train's verified
  * head, which main now contains. The board move, the claim, the events and the follow-ups are task done's; its checks
  * ran in the train's lane check (trainCheck) and the train's verify. Returns the task, null (not on the board) or
@@ -950,6 +993,7 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   if (lock.locked) release(`task:${taskId}`, lock.lock.owner);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Completed ${target.id}${note ? `: ${note}` : ''}`);
   emitEvent({ type: 'task.done', agent: agent || target.role, task: target.id, status: 'done', to: 'producer', msg: `Completed ${target.id}: ${target.title} (merge train ${train})`, meta: { train } });
+  assetHandoffAfterLanding(target.id, agent); // 2.67.1 (j)
   if (taskType(target) === 'rescue') { try { applyRescue(target, { by: agent || 'rescue' }); } catch { /* the rescue's own record stays */ } }
   else { try { closeRescuesFor(target.id, { by: agent || target.role || 'harness', why: 'has landed', board: { parseNextQueue, dropTask } }); } catch { /* 2.60.1 (B-39): the watchdog's pass sweeps it */ } }
   joinWaveIfGameplay(target, agent || target.role);

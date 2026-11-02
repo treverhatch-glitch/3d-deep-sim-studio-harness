@@ -4134,6 +4134,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.1 (j): the asset track: the asset gate at task done (licence rows, triangles per LOD, textures, scale, preview,
+// round trip, brand names) and the one engine-track hand-off when an asset task lands (qa/selftest-2671j.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2671J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671j.mjs')).href);
+  await selftest2671J({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
