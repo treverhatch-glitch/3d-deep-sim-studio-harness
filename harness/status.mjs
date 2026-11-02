@@ -16,6 +16,7 @@ import { readRecentEvents, REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
 import { loadAllRoles, loadPresets } from './agents.mjs';
 import { getRouterMatrix } from './route.mjs';
+import { machineCard } from './machine.mjs';
 
 export const USAGE_FILE = process.env.STUDIO_USAGE_FILE
   ? path.resolve(REPO_ROOT, process.env.STUDIO_USAGE_FILE)
@@ -310,8 +311,10 @@ export function buildStudioSnapshot() {
       estimatedDollarsPreserved: Number(usage?.tokenSavers?.estimatedDollarsPreserved || 0),
     },
     recentEvents: events.slice(-40).reverse(),
+    machine: machineCardSafe(), // 2.68.0 (m): the last machine scan for the War Room (never scans here)
   };
 }
+function machineCardSafe() { try { return machineCard(); } catch { return null; } }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   // 2.65.0: the fixed-format brief for a chat channel, under 100 words (harness/brief-status.mjs).

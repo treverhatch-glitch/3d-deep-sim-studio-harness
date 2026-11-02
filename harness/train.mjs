@@ -1071,6 +1071,11 @@ const changedVs = (dir, tip, head) => out(git(dir, 'diff', '--name-only', `${tip
  *   log         progress lines
  * Returns { ok, id, landed: [task], dropped: [{ task, why }], deferred: [{ task, why }], verifies, reused, message }.
  */
+/** 2.68.0 (m): the disk-low warning in the train's output (harness/machine.mjs diskWarning). */
+async function trainDiskWarning(root, log) {
+  try { const w = await (await import('./machine.mjs')).diskWarning({ root }); if (w) log(`[train] warning: ${w}.`); } catch {}
+}
+
 export async function runTrain(opts = {}) {
   const root = opts.root || mainRoot();
   const log = opts.log || ((m) => console.error(m));
@@ -1080,6 +1085,7 @@ export async function runTrain(opts = {}) {
   const t0 = Date.now();
   const stopped = deps.stopped?.();
   if (stopped) return { ok: false, id, message: `The studio is stopped (${stopped}); no train runs until npm run task -- resume.`, landed: [], dropped: [], deferred: [] };
+  if (!opts.dryRun) await trainDiskWarning(root, log); // 2.68.0 (m)
   if (!opts.dryRun && deps.waitForDrain) {
     const w = await deps.waitForDrain();
     if (!w.ok) return { ok: false, id, message: w.message, landed: [], dropped: [], deferred: [] };

@@ -458,6 +458,8 @@ async function main(argv) {
     if (r.started.length) emitEvent({ type: 'supervisor.started', agent: 'supervisor', to: 'producer', msg: `Started ${r.started.join(', ')}` });
     // 2.30h (2): the Director's flow pass sees what the supervisor couldn't start, and why (no model, no tokens).
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
+    // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
+    await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
     save();
     if (r.stop) finish(r.why[0]);
   };

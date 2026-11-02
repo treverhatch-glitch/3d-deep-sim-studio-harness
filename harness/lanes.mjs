@@ -295,6 +295,7 @@ export function tableText(t) {
   if (rows.length) L.push(line(head), ...rows.map(line));
   else L.push('No lane copies, lane branches with unlanded work, or queued lanes.');
   if (t.train) L.push(trainStatusLine(t.train));
+  if (t.machine) L.push(t.machine); // 2.68.0 (m)
   for (const n of t.notes) L.push(`note: ${n}`);
   return L.join('\n');
 }
@@ -454,6 +455,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv[0] && !argv[0].startsWith('--')) { console.error('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests]'); process.exit(2); }
   const t = await laneTable(root, { stamps: !argv.includes('--no-stamps') });
+  // 2.68.0 (m): the machine line (harness/machine.mjs: the last scan, or a new one when stale).
+  try { const m = await import('./machine.mjs'); const line = m.machineLine(m.readMachine({ root })); if (line) t.machine = line; } catch {}
   console.log(json ? JSON.stringify(t) : tableText(t));
   process.exit(0);
 }

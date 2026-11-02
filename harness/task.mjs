@@ -92,6 +92,11 @@ export function parseNextQueue() {
  * Both board files as one consistent snapshot: NEXT.md is read again after DONE.md, and the pair re-read if it
  * changed meanwhile (a reader without the board lock could otherwise see a task in neither file mid-move).
  */
+/** 2.68.0 (m): the disk-low warning on `task start` (harness/machine.mjs diskWarning; '' when the disk is fine). */
+async function startDiskWarning() {
+  try { const w = await (await import('./machine.mjs')).diskWarning(); if (w) console.error(`Warning: ${w}.`); } catch {}
+}
+
 function readBoardFiles() {
   const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   let next = read(NEXT_FILE);
@@ -1647,6 +1652,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
+    await startDiskWarning(); // 2.68.0 (m)
     const { handoff, ...rest } = started;
     console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}) }, null, 2));
     process.exit(0);

@@ -28,6 +28,19 @@ Scheduler (Windows); `--uninstall` removes it.
   pass says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never
   stopped. The watcher's and the Director's auto-start use the same pass; an agent a person starts is not held.
 
+- **The machine scan and resource monitor (2.68.0).** `npm run machine` (`--json`, `--cached`) reads the hardware the
+  studio runs on (harness/machine.mjs): OS, logical and performance/efficiency cores, RAM and (Windows) the commit
+  charge, GPUs with VRAM and busy (nvidia-smi; macOS system_profiler), the studio's disk, the power source and the
+  top 10 processes by memory (names only). Each probe has a timeout (`STUDIO_MACHINE_PROBE_TIMEOUT_MS`, 15000) and
+  fails soft (null + reason). It writes `.studio/machine.json`; `STUDIO_MACHINE_SCAN=off` turns it all off. The
+  supervisor samples it every `STUDIO_MACHINE_SAMPLE_S` (300) into a `machine.sample` event and
+  `.studio/machine-history.jsonl` (kept under `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief`, `npm run lanes`
+  and the War Room's `/api/state` (`machine`) show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB),
+  disk 130 GB free". On Windows the memory floor uses the smaller of free memory and commit headroom.
+  **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits
+  `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
+  what the temp-file janitor can free when it is installed.
+
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME

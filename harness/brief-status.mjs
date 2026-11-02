@@ -18,7 +18,7 @@
  * landings and lane merges in the window; bugs fixed: those whose board title starts "Bug" or that were added as
  * --type bug. Unity: the last Unity land gate (.studio/gates/unity-last.json). Blockers: a halted supervisor, a
  * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
- * holds machine:heavy. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
+ * holds machine:heavy. 2.68.0 (m): a "Machine: RAM …, CPU …, GPU …, disk … free" line (harness/machine.mjs). 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
  * when it has more than 6 lanes. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
  */
 import fs from 'node:fs';
@@ -92,7 +92,10 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   try { heavy = (await import('./heavy.mjs')).heavyHolders(root).map((h) => ({ label: h.label || 'heavy work', owner: h.owner || null })); } catch {}
   let train = null;
   try { train = readTrainStatus(root); } catch {}
-  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}) };
+  // 2.68.0 (m): the machine line (the last scan, or a new one when it is older than 2 x STUDIO_MACHINE_SAMPLE_S).
+  let machine = '';
+  try { const m = await import('./machine.mjs'); machine = m.machineLine(m.readMachine({ root, env })); } catch { machine = ''; }
+  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -107,6 +110,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     L.push(f.unity ? `Unity: land ${f.unity.status}${f.unity.at ? ` ${String(f.unity.at).slice(11, 16)}` : ''}${f.unity.task ? ` (${cut(String(f.unity.task).split(','), Math.max(1, Math.min(k, 2)))})` : ''}.` : 'Unity: no land run recorded.');
     if (f.train) L.push(`${trainStatusLine(f.train, { short: true }).replace(/^Train \S+/, 'Train')}${Number(f.train.lanes) > 6 ? ' (STUDIO_TRAIN_MAX caps lanes)' : ''}.`);
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
+    if (f.machine) L.push(`${f.machine}.`);
     L.push(`PC: ${f.freeGb} GB free; heavy: ${f.heavy.length ? cut(f.heavy.map((h) => `${h.label}${h.owner ? ` (${h.owner})` : ''}`), Math.max(1, Math.min(k, 2))) : 'free'}.`);
     return L.join('\n');
   };
