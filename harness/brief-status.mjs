@@ -18,7 +18,7 @@
  * landings and lane merges in the window; bugs fixed: those whose board title starts "Bug" or that were added as
  * --type bug. Unity: the last Unity land gate (.studio/gates/unity-last.json). Blockers: a halted supervisor, a
  * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
- * holds machine:heavy. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
+ * holds machine:heavy. 2.68.0: blockers also name roles the crew watchdog paused and a usage wind-down. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
  * when it has more than 6 lanes. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
  */
 import fs from 'node:fs';
@@ -85,6 +85,11 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   let asks = [];
   try { asks = fs.readdirSync(path.join(root, 'studio', 'asks')).filter((f) => /^A-\d+\.json$/.test(f)).sort().map((f) => readJson(path.join(root, 'studio', 'asks', f))).filter((a) => a && a.status === 'open').map((a) => a.id); } catch {}
   if (asks.length) blockers.push({ kind: 'asks', ids: asks, text: 'asks' });
+  // 2.68.0: roles the crew watchdog paused (.studio/crew-paused.json) and a usage wind-down (.studio/winddown.json).
+  const crew = Object.keys(readJson(path.join(root, '.studio', 'crew-paused.json'), {})?.roles || {});
+  if (crew.length) blockers.push({ kind: 'crew', ids: crew, text: 'crew paused (sessions, nothing landed)' });
+  const wd = readJson(path.join(root, '.studio', 'winddown.json'));
+  if (wd?.at) blockers.push({ kind: 'winddown', text: `winding down${wd.pct !== null && wd.pct !== undefined ? ` (usage ${Math.round(wd.pct)}%)` : ''}` });
   // PC.
   const test = env.STUDIO_TEST_FREEMEM_MB;
   const freeGb = Math.round(((test !== undefined && test !== '' ? Number(test) * 1024 * 1024 : os.freemem()) / 1024 ** 3) * 10) / 10;
