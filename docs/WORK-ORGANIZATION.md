@@ -279,6 +279,10 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
   `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
   `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
   the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify.
+- **Per kind**: at most one Unity editor run and one browser playtest at a time, whatever the slots (others: no cap
+  within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
+  (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap
+  waits: `waiting: 1 unity job already running (max 1)`.
 - A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
   8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
   alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.

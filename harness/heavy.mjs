@@ -77,7 +77,7 @@ import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, s
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { ramCheck } from './ram.mjs';
-import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature } from './heavy-budget.mjs';
+import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent } from './heavy-budget.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -459,7 +459,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       const state = budgetState(profile, holders, { env });
       claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly });
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
-      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders });
+      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }) });
       if (adm.ok && !ram.low) {
         for (let i = 1; i <= n + 16 && !mine; i += 1) {
           const f = path.join(dir, `${PREFIX}-${i}.lock`);
@@ -474,7 +474,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       if (mine) break;
       if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
       const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `${ahead.some((w) => w.landing) && !landing ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
-      const why = adm.area === 'ram' || adm.area === 'gpu' || adm.area === 'cpu' ? adm.line : '';
+      const why = ['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) ? adm.line : '';
       if (Date.now() - t0 >= waitMs) {
         throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${why ? `${why}; ` : ''}${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders, ...(why ? { area: adm.area } : {}) });
       }
