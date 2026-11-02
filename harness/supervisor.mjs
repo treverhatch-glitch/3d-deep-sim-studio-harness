@@ -222,6 +222,12 @@ export async function supervise(opts, state, now = Date.now()) {
       const { futilityPass } = await import('./futility.mjs');
       futilityPass({ sessions: sessions(), events: readRecentEvents(20000), now, dryRun: opts.dryRun, pause: opts.deps?.pauseAgent || (await import('./agent.mjs')).pauseAgent });
     } catch { /* a check, never a crash */ }
+    // 2.69.0 (p): the nightly slow tier (harness/slow-tier.mjs): once a day from STUDIO_SLOW_HOUR (3), detached, on main.
+    try {
+      const { mainRoot: slowRoot } = await import('./worktree.mjs');
+      const sl = await (opts.deps?.slowTierPass || (await import('./slow-tier.mjs')).slowTierPass)({ root: slowRoot(), now, dryRun: opts.dryRun });
+      if (sl?.started) console.log(`[supervisor] started the nightly slow tier (${sl.why}); output .studio/slow-tier.log`);
+    } catch { /* the slow tier never blocks the supervisor */ }
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);

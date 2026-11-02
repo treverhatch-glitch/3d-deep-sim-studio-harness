@@ -264,6 +264,27 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
   EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
 
+## Less repeated work in the merge train (2.69.0)
+
+- **A lane's green verify stands for a train of one.** When a train holds ONE lane and its integration tree is the tree
+  that lane's verify tested (green, full, clean, same rules as task done's reuse), the train doesn't verify again; the
+  log says `reused <lane>'s green verify of tree <x>`. A clean full verify is now also kept by tree
+  (`.studio/gates/trees/<tree>.json`, the newest 64), so the agent's next verify no longer hides it; a lane copy whose
+  `.studio/` is its own (not the link) is searched too.
+- **Prechecked lanes first.** In a multi-lane train, a lane whose own tree on main's tip (merge-tree of tip and its head)
+  has a green recorded verify goes first (`prechecked first: ...` in the log; the rest keep their order, `--after`
+  order still wins). `STUDIO_TRAIN_GREEN_FIRST=off` keeps queue order.
+- **Related tests first on the combined tree.** Before the full verify of a multi-lane train, each lane's related tests
+  (the game's `related` command on the lane's own changed files, the same machinery as `STUDIO_GATE_RELATED`, with
+  `STUDIO_GATE_RELATED_ONLY=on` so checks without one don't run) run on the combined tree in the scratch copy. A lane
+  red there whose failing tests pass on main's tip is handed back at once, with the failing tests, the log and the
+  facts block: no full verify, no bisection. Red on main's tip too: nobody is dropped, the full verify decides.
+  `STUDIO_TRAIN_RELATED_FIRST=on|off`; unset, it is on when the game's manifest declares a `related` command.
+- **The slow tier.** Checks and test globs the game marks slow (docs/ONBOARDING-A-GAME.md, "The slow tier") are left
+  out of verifies and trains; `npm run gates -- --tier slow` runs only them on main, and the supervisor starts it once a
+  day at `STUDIO_SLOW_HOUR` (local hour, default 3; `off` never). One bug task per new failure (deduped by check and
+  test while its task is open; at most `STUDIO_SLOW_MAX_TASKS`, 10, per run). Landing never waits for it.
+
 ## Heavy work shares the machine by budget (2.68.0)
 
 Full verifies, Unity editor runs, browser playtests, Blender previews and asset round trips take the `machine:heavy`
