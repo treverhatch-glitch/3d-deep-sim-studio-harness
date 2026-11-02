@@ -1373,9 +1373,27 @@ export async function runTrain(opts = {}) {
   if (trains.length > 1) locked.trains = trains;
   // 2.69.0 (r): ONE fix task per test the triager quarantined (deduped; harness/flakes.mjs).
   if (!opts.dryRun && deps.fileFlakeTask) { try { locked.flakeTasks = await fileQuarantineTasks(root, deps.fileFlakeTask); } catch {} }
+  // 2.70.0 (t): a playable build + clip of the landed main, queued (never waited for).
+  if (!opts.dryRun) { const lb = await landingBuildAfterTrain(root, locked, { log, queue: deps.landingBuild }); if (lb) locked.landingBuild = lb; }
   // 2.69.0 (r): the train daemon posts its own job.done (with what it re-queued), so the train's own is left out.
   if (!opts.dryRun && !opts.quietJob) trainJobDone(locked, t0);
   return locked;
+}
+
+/**
+ * 2.70.0 (t): after a train lands, queue ONE low-priority playable build + clip (harness/landing-build.mjs): a file and
+ * a detached worker, so the train never waits for it; STUDIO_LANDING_BUILD=off turns it off. Never throws. Returns
+ * the queue result (or null when nothing landed). queue: deps.landingBuild (tests).
+ */
+export async function landingBuildAfterTrain(root, res, { env = process.env, log = () => {}, queue = null } = {}) {
+  if (!res?.landed?.length) return null;
+  try {
+    const q = queue || (await import('./landing-build.mjs')).queueLandingBuild;
+    return await q({ root, train: res.id || null, tasks: res.landed, env, log: (m) => log(`[train] ${res.id || ''}: ${m}`) });
+  } catch (e) {
+    try { log(`[train] ${res.id || ''}: playable build + clip not queued: ${String(e.message || e).slice(0, 160)}`); } catch {}
+    return null;
+  }
 }
 
 /** 2.65.0: the uniform job.done (harness/jobs.mjs) for a train that ran (not a dry run, not one that found another running). */
