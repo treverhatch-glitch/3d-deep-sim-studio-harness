@@ -43,6 +43,20 @@ export const JOB_KINDS = {
   'asset-roundtrip': { ramGb: 1, cpuThreads: 1, vramGb: 0, gpuOnly: false, what: 'asset export/re-import round trip' },
   heavy: { ramGb: 4, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'heavy command' },
 };
+/** Per-kind concurrency caps (more slots never mean two Unity editors at once unless the owner sets it); others: none. */
+export const MAX_CONCURRENT = { unity: 1, 'browser-playtest': 1 };
+/**
+ * How many jobs of `kind` may run at once: STUDIO_HEAVY_MAX_<KIND> (kind upper-cased, - as _), else
+ * studio/machine-budget.json "maxConcurrent": { "<kind>": n }, else MAX_CONCURRENT. null: no cap (0, off or none).
+ */
+export function maxConcurrent(kind, { root = process.cwd(), env = process.env } = {}) {
+  const v = env[`STUDIO_HEAVY_MAX_${String(kind).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`];
+  const cfg = budgetConfig(root).maxConcurrent;
+  const raw = v !== undefined && v !== '' ? v : cfg && typeof cfg === 'object' && kind in cfg ? cfg[kind] : MAX_CONCURRENT[kind];
+  if (raw === undefined || raw === null || off(raw) || /^none$/i.test(String(raw))) return null;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 export const WORKER_GB = (env = process.env) => Math.max(0.05, num(env.STUDIO_TEST_WORKER_GB, 0.45));
 
 const toMs = (at) => (fin(at) ? at : Number.isFinite(Date.parse(at)) ? Date.parse(at) : NaN);
@@ -193,7 +207,12 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
  * Does `claim` fit now? { ok, area: 'slots'|'ram'|'gpu'|'cpu'|null, line, alone? }. `holders` are the live records,
  * `slots` the holder cap. Without a profile only the slot count decides (2.67).
  */
-export function admit(claim, state, { slots = 1, holders = [] } = {}) {
+export function admit(claim, state, { slots = 1, holders = [], kindMax = null } = {}) {
+  // 2.68.0 (n): a per-kind cap (maxConcurrent), before the areas.
+  if (kindMax && claim.kind) {
+    const same = holders.filter((h) => claimOf(h).kind === claim.kind).length;
+    if (same >= kindMax) return { ok: false, area: 'kind', line: `waiting: ${same} ${claim.kind} job${same === 1 ? '' : 's'} already running (max ${kindMax}; STUDIO_HEAVY_MAX_${String(claim.kind).toUpperCase().replace(/[^A-Z0-9]+/g, '_')} or studio/machine-budget.json "maxConcurrent")` };
+  }
   const slotHolders = state.known ? holders.filter((h) => !claimOf(h).gpuOnly).length : holders.length;
   if (!(state.known && claim.gpuOnly) && slotHolders >= slots) return { ok: false, area: 'slots', line: `all ${slots} machine:heavy slot${slots === 1 ? '' : 's'} are taken (STUDIO_HEAVY_SLOTS)` };
   if (!state.known) return { ok: true, area: null, line: '' };

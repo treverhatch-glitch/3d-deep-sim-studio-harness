@@ -36,7 +36,7 @@ console.log(JSON.stringify({ got, logs }));`;
   // 1. Two claims that fit run together; a third waits, saying what for.
   {
     clearLocks();
-    const p = probe(takes([{ label: 'play A', kind: 'browser-playtest' }, { label: 'play B', kind: 'browser-playtest' }, { label: 'big C', kind: 'heavy', ramGb: 8 }]), { STUDIO_TEST_MACHINE: machine() });
+    const p = probe(takes([{ label: 'play A', kind: 'browser-playtest' }, { label: 'job B', kind: 'heavy', ramGb: 5 }, { label: 'big C', kind: 'heavy', ramGb: 8 }]), { STUDIO_TEST_MACHINE: machine() });
     const [a, b, c] = p.got || [];
     guard('2.68.0 (n): two heavy claims that fit the RAM budget (5 + 5 GB of 14 free) hold machine:heavy together; a third (8 GB) waits with "waiting for RAM: needs 8 GB, 4 free" (2.67.2: one slot, the second waits as busy)', () => [
       a?.ok && b?.ok && a.held !== b.held && c && !c.ok && c.code === 'HEAVY_BUSY' && (p.logs || []).some((l) => /big C waiting for RAM: needs 8 GB, 4 free/.test(l)) && /waiting for RAM: needs 8 GB, 4 free/.test(c.msg),
@@ -128,6 +128,25 @@ if (mode === 'once' && n === 1) { process.exitCode = 137; } else if (mode === 'h
     guard('2.68.0 (n): game checks get STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS beside CI=true: 5 GB free / 0.45 = 11 alone, 5 with another lane check running (its share is half), STUDIO_TEST_WORKERS=3 wins, 2 with no scan (2.67.2: neither variable)', () => [
       seen.length === 4 && seen.map((s) => s.w).join(',') === '11,5,3,2' && seen.every((s) => s.v === s.w && s.ci === 'true') && /suite: 11 test workers/.test(out(alone)) && /shared with 1 other running lane check/.test(out(shared)),
       JSON.stringify({ seen, alone: out(alone).slice(-500), shared: out(shared).slice(-500), forced: out(forced).slice(-200), none: out(none).slice(-200) }).slice(0, 2500)]);
+  }
+
+  // 8. A per-kind cap: more slots never mean two Unity editors at once unless the owner asks.
+  {
+    clearLocks();
+    const big = { STUDIO_TEST_MACHINE: machine({ total: 64, free: 30 }) };
+    const two = probe(takes([{ label: 'unity A', kind: 'unity' }, { label: 'unity B', kind: 'unity' }, { label: 'round trip', kind: 'asset-roundtrip' }]), big);
+    clearLocks();
+    const envUp = probe(takes([{ label: 'unity A', kind: 'unity' }, { label: 'unity B', kind: 'unity' }]), { ...big, STUDIO_HEAVY_MAX_UNITY: '2' });
+    clearLocks();
+    write('studio/machine-budget.json', JSON.stringify({ maxConcurrent: { unity: 2, 'asset-roundtrip': 1 } }));
+    const cfg = probe(takes([{ label: 'unity A', kind: 'unity' }, { label: 'unity B', kind: 'unity' }, { label: 'trip A', kind: 'asset-roundtrip' }, { label: 'trip B', kind: 'asset-roundtrip' }]), big);
+    fs.rmSync(path.join(dir, 'studio', 'machine-budget.json'), { force: true });
+    clearLocks();
+    const ok = (p, i) => p.got?.[i]?.ok === true;
+    guard('2.68.0 (n): two Unity claims that fit the RAM budget (8 + 8 GB of 23.6 free) don\'t run together: the second waits with "waiting: 1 unity job already running (max 1)" while an asset round trip still starts; STUDIO_HEAVY_MAX_UNITY=2 or studio/machine-budget.json "maxConcurrent" lets both run, and caps another kind (before: both Unity runs started)', () => [
+      ok(two, 0) && two.got?.[1]?.ok === false && /waiting: 1 unity job already running \(max 1/.test(two.got[1].msg) && (two.logs || []).some((l) => /unity B waiting: 1 unity job already running \(max 1/.test(l)) && ok(two, 2)
+        && ok(envUp, 0) && ok(envUp, 1) && ok(cfg, 0) && ok(cfg, 1) && ok(cfg, 2) && cfg.got?.[3]?.ok === false && /1 asset-roundtrip job already running \(max 1/.test(cfg.got[3].msg),
+      JSON.stringify({ two, envUp: envUp.got, cfg: cfg.got }).slice(0, 2500)]);
   }
 
   // 7. The supervisor's session cap by RAM.
