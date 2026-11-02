@@ -13,9 +13,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export async function selftest267F({ dir, run, report, tmpRoot }) {
+export async function selftest267F({ dir, run, report, tmpRoot, root }) {
+  // The size rule reads JavaScript with the typescript package: a copy made without node_modules (the full selftest's
+  // copyRepo) gets the harness's own, linked, as selftest-263i does. Without it the tail lane's `task done` was refused
+  // ("the size check can't read JavaScript"), so the tail never queued (CI release-gate, 2.67.0).
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
@@ -140,7 +148,7 @@ export async function selftest267F({ dir, run, report, tmpRoot }) {
   report('2.67.0 (f, 3): the tail starts although its --after lane hasn\'t landed (a chain tail\'s start isn\'t held by the chain it fixes); once it is queued the next train takes the chain and the tail together and lands all four on one verify, nobody handed back (fails on 2.66.0: no tail; lane 1 was handed back)',
     TL.ok && [...C.map((l) => l.id), T].every((id) => isDone(id)) && Boolean(landed3) && [...C.map((l) => l.id), T].every((id) => (landed3.meta?.lanes || []).includes(id)) && !of(ev3, 'task.train.dropped').length
       && !of(ev3, 'task.train.chain_tail', (e) => e.meta?.action === 'opened').length,
-    `${TL.log.slice(-600)}\n${out(q3).slice(-600)}\n${out(t3).slice(-2500)}`);
+    `--- train:\n${out(t3).slice(-700)}\n--- tail lane:\n${TL.log.slice(-500)}\n--- queue it:\n${out(q3).slice(-600)}`);
 
   // ---- 4. STUDIO_TRAIN_CHAIN_TAIL=off: 2.66.0 behaviour (no check, no tail, the chain bisected, lane 1 handed back) ----
   const D = chainOf('d', 2, true);
