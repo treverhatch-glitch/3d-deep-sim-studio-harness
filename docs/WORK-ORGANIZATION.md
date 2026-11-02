@@ -115,7 +115,10 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   lands on the same verify, but only when that merge is clean and git shows the new tree is the verified tree plus
   exactly those files as main has them (event `task.train.board_move`; the `landed` event and the log say the verify
   was reused and which files moved). The train's copy never tests `studio/` from its tree (it is sparse-excluded and
-  linked to the main checkout's), so these can't change what the verify saw. Anything else (`studio/protected.json`,
+  linked to the main checkout's), so these can't change what the verify saw. 2.67.0 (B-29): the task records listed
+  under `"taskRecords"` there (`studio/task-holds.json`, which `task yes` and holds write, and
+  `studio/pending-review.json`) count too, when every entry they change is for a task that is not a lane of this train;
+  an entry of a train lane, another key or an entry without a task still means a new verify. Anything else (`studio/protected.json`,
   `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
   again, as before.
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs

@@ -1445,7 +1445,7 @@ export function boardPaths(file = path.join(path.dirname(fileURLToPath(import.me
  * descendant of `tip`, and every path changed in tip..now must be on the list, added or modified (a delete or a
  * rename never counts: --no-renames shows a rename as a delete).
  */
-export function boardOnlyMove(root, tip, now, list = boardPaths()) {
+export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths() } = {}) {
   if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
   if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
   const r = git(root, 'diff', '--name-status', '--no-renames', '-z', tip, now);
@@ -1455,10 +1455,55 @@ export function boardOnlyMove(root, tip, now, list = boardPaths()) {
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const [st, f] = [parts[i], parts[i + 1]];
     if (!/^[AM]$/.test(st)) return { ok: false, why: `it ${st === 'D' ? 'deletes' : `changes (${st})`} ${f}` };
-    if (!matchAny(f, list)) return { ok: false, why: `it changes ${f}, which is not a board or record file` };
+    if (!matchAny(f, list)) {
+      // 2.67.0 (B-29): a task record (holds, approval cards) counts when no entry it changes is a lane of this train.
+      const rec = Array.isArray(lanes) && records[f] ? recordEntriesChanged(root, tip, now, f, records[f]) : null;
+      if (!rec?.ok) return { ok: false, why: `it changes ${f}, which is not a board or record file${rec?.why ? ` (${rec.why})` : ''}` };
+      const mine = rec.tasks.filter((t) => lanes.includes(t));
+      if (mine.length) return { ok: false, why: `it changes ${f} for ${mine.join(', ')}, a lane of this train` };
+    }
     files.push(f);
   }
   return files.length ? { ok: true, files } : { ok: false, why: 'no file changed' };
+}
+
+/** 2.67.0 (B-29): task records a board move may change for tasks outside the train (train-board.json "taskRecords": path -> key). */
+export function taskRecordPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j.taskRecords && typeof j.taskRecords === 'object' ? j.taskRecords : {}; } catch { return {}; }
+}
+
+/**
+ * The task ids whose entries a task record changed between two commits: { ok, tasks } or { ok: false, why }. The record
+ * is JSON whose `key` holds a map by task id or a list of entries with a "task" field; anything else changed (another
+ * key, an entry without a task, unreadable JSON) refuses.
+ */
+export function recordEntriesChanged(root, from, to, file, key) {
+  const read = (rev) => {
+    const r = git(root, 'show', `${rev}:${file}`);
+    if (r.status !== 0) return {};
+    try { return JSON.parse(r.stdout); } catch { return null; }
+  };
+  const a = read(from);
+  const b = read(to);
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return { ok: false, why: 'not readable JSON' };
+  const others = (o) => JSON.stringify(Object.keys(o).filter((k) => k !== key).sort().map((k) => [k, o[k]]));
+  if (others(a) !== others(b)) return { ok: false, why: `it changes more than "${key}"` };
+  const byTask = (v) => {
+    const m = new Map();
+    if (Array.isArray(v)) {
+      for (const it of v) {
+        if (!it || typeof it !== 'object' || !it.task) return null;
+        m.set(String(it.task), [...(m.get(String(it.task)) || []), it]);
+      }
+    } else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) m.set(k, x);
+    else if (v !== undefined) return null;
+    return m;
+  };
+  const ma = byTask(a[key]);
+  const mb = byTask(b[key]);
+  if (!ma || !mb) return { ok: false, why: `an entry of "${key}" names no task` };
+  const tasks = [...new Set([...ma.keys(), ...mb.keys()])].filter((t) => JSON.stringify(ma.get(t) ?? null) !== JSON.stringify(mb.get(t) ?? null)).sort();
+  return { ok: true, tasks };
 }
 
 /**
@@ -1468,7 +1513,7 @@ export function boardOnlyMove(root, tip, now, list = boardPaths()) {
  * before: build again on the new main and verify again).
  */
 function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
-  const move = boardOnlyMove(root, tip, now);
+  const move = boardOnlyMove(root, tip, now, boardPaths(), { lanes: built.included.map((l) => l.task) });
   if (!move.ok) return move;
   const last = built.included[built.included.length - 1];
   if (!last || last.after !== built.head) return { ok: false, why: 'the verified train has a commit after its lanes (a pin refresh)' };
