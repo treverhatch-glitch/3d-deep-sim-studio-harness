@@ -4235,6 +4235,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.70.0 (w): sparse lanes (laneExclude, widen, the checks never see a partial tree), the lane disk report and the
+// janitor's stale-lane proposals surfaced by the supervisor in the digest, status --brief and the War Room (qa/selftest-270w.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270w.mjs')).href);
+  await selftest270W({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

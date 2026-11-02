@@ -139,3 +139,31 @@ Three things the conductor used to do by eye or by hand:
   elsewhere), and a wake unless `STUDIO_REFILL_WAKE=off`. It never adds a task. One ask per
   `STUDIO_QUEUE_DEPTH_ASK_MIN` (30) minutes while the shortfall lasts; a bigger shortfall asks again.
 - **The upgrade watch**: `npm run upgrade -- watch` (docs/RELEASE.md, "The upgrade watch").
+
+## 7. Sparse lanes and the lane disk report (2.70.0)
+
+Lane copies of a game whose docs and media dwarf its code fill a disk (90-100 GB of lanes on a 1 TB drive). The game
+manifest (`<game>/studio.gates.json`, protected: the owner sets it) can leave paths out of new lane copies:
+
+```json
+{ "laneExclude": ["game/my-game/docs/**", "game/my-game/public/video/**"],
+  "gates": [{ "id": "unit", "command": "…", "paths": ["game/my-game/src/**"], "needs": ["game/my-game/src/**", "game/my-game/test/**"] }] }
+```
+
+- Off unless the manifest declares `laneExclude` or `STUDIO_LANE_EXCLUDE` names globs (comma-separated, repo-relative;
+  `STUDIO_LANE_EXCLUDE=off` turns exclusions off). The harness folders, package files and the manifest are never left
+  out. Only new lane copies change; train scratch copies and the whole-game check stay full trees.
+- A task keeps its declared scope (its lane: `task add --paths/--lane`, `task lane`, the studio paths it names); an
+  asset-track or art task keeps every file.
+- `npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]` puts paths back (logged: `lane.widened`, and
+  `.studio/lanes/<agent>.sparse.json`). Files written into a left-out path (git hides edits there and refuses new
+  files) are found at `task done` and before the checks, and the lane is widened over them.
+- The checks never see a partial tree: before a lane's verify and the game's checks, every left-out file a check about
+  to run reads is put back, and the run says so. What a check reads: its `needs` globs, else a game check's `paths`,
+  else the game's whole folder (so give each game check `needs` to keep lanes lean); harness checks have a built-in
+  list (`harness/lane-sparse.mjs` CHECK_NEEDS). A verify that still leaves files out doesn't write the gate cache.
+
+`npm run lanes -- disk [--top N] [--json]` lists each lane copy's size, the total, and what `laneExclude` would save
+(with none declared, the biggest tracked folders). The machine scan's disk line names the lanes' total from the last
+report. Over `STUDIO_LANES_MAX_GB` (default 25% of the disk) a `lanes.disk_over` warning (at most every 6 h). The
+supervisor refreshes the report with the stale-lane proposals (docs/RUN-UNATTENDED.md).
