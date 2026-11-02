@@ -32,6 +32,7 @@ import { latestFacts, withoutFacts } from './handback-facts.mjs';
 import { untrustedBlock } from './untrusted.mjs';
 import { inboxForBrief } from './threads.mjs';
 import { conductorForBrief } from './conductor.mjs';
+import { regressionHowTo } from './regression-howto.mjs';
 
 const read = (rel) => {
   try {
@@ -143,6 +144,8 @@ export function renderFocus(f) {
   if (f.inbox) L.push('', '## Inbox', `${f.inbox.total} follow-up(s) routed to this task (${f.inbox.unread} unread), quoted in the marked block above. Read them before you start: \`npm run thread -- inbox ${f.task.id}\`. New ones arrive while you work; a Claude Code session is told at its next tool call.`);
   if (f.identity) L.push('', `## Who you are (studio/roles/${f.task.role}.md)`, f.identity);
   L.push('', '## Done means', `${f.check.means}.${f.check.ok ? ' (Already true; confirm before you finish.)' : ''}`);
+  // 2.67.2: a bug task's regression, exactly (the path, the fields, the pin and fails-before commands), as task done asks.
+  if (f.check.type === 'bug') L.push('', '## The regression this bug needs', ...regressionHowTo(f.task.id).map((x) => `- ${x}`));
   if (f.roleRefusals?.length) L.push('', `## Where \`${f.task.role}\` agents get refused most`, ...f.roleRefusals.map((r) => `- ${r.n}x: ${r.why}`), 'Do these before you run done.');
   if (f.skill) {
     const steps = part(f.skill, 'Steps');

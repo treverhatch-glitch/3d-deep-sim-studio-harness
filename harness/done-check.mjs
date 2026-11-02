@@ -44,6 +44,7 @@ import { sizeRuleFor, freeImportLines } from './size-rule.mjs';
 import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
+import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -694,10 +695,13 @@ export function checkDone(task, since = startedAt(task.id)) {
     // its name and the seed; the command is the studio's own, qa/regressions/README.md).
     const replayReg = (j) => regressionKind(j) === 'replay' && Number.isInteger(j.seed) && Number.isInteger(j.tick) && isSha256(j.sha256);
     const testReg = (j) => regressionKind(j) === 'test' && Number.isInteger(j.seed) && typeof j.test?.file === 'string' && j.test.file && typeof j.test?.name === 'string' && j.test.name;
-    const regs = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since)
-      .map((f) => ({ f, j: readJson(f) }))
-      .filter(({ j }) => j && (replayReg(j) || testReg(j)));
-    if (part !== 'renderer') check('Regression saved (a cartridge replay with seed, tick and a pinned hash, or a seeded game test)', regs.length, 'no regression in qa/regressions/ since this task started: a cartridge replay with a seed, a tick and a pinned hash (save the replay, then `node qa/check-regressions.mjs --update`), or, where no cartridge covers the bug, a seeded game unit test ("kind": "test" with test.file, test.name and seed; studio/skills/bug.md)');
+    const cands = newestSince(filesUnder('qa/regressions', (n) => n.endsWith('.json')), since).map((f) => ({ f, j: readJson(f) }));
+    const regs = cands.filter(({ j }) => j && (replayReg(j) || testReg(j)));
+    // 2.67.2: the refusal says exactly what to add: the file path, the fields a file written since the claim still
+    // lacks, the pin command and the fails-before command (harness/regression-howto.mjs; the bug brief says the same).
+    const fix0 = regs.length ? null : firstTaggedCommit(task.id);
+    const lacking = cands.filter(({ j }) => !(j && (replayReg(j) || testReg(j)))).slice(0, 3).map(({ f, j }) => `${String(f).replace(/\\/g, '/')} (missing ${regressionMissing(j).join(', ')})`);
+    if (part !== 'renderer') check('Regression saved (a cartridge replay with seed, tick and a pinned hash, or a seeded game test)', regs.length, `no regression in qa/regressions/ since this task started${lacking.length ? `; written since the claim but not counted: ${lacking.join('; ')}` : ''}. ${regressionHowTo(task.id, { fix: fix0 || null }).join(' ')} (studio/skills/bug.md)`);
     const lessons = fs.existsSync(abs('studio/memory/failures.md')) ? fs.readFileSync(abs('studio/memory/failures.md'), 'utf8').match(/^### .+$/gm) || [] : [];
     const ids = [task.id, ...(task.title.match(/\b(BUG|REG)-[\w-]+/g) || []), ...regs.map(({ j }) => j.id).filter(Boolean)];
     const day = new Date(since).toISOString().slice(0, 10);
