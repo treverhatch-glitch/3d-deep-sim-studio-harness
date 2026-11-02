@@ -4097,6 +4097,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (g): the owner's standing delegation to an outside agent (npm run delegate), its Claude Code rules, and
+// --help never acts (B-47) (qa/selftest-267g.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267g.mjs')).href);
+  await selftest267G({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
