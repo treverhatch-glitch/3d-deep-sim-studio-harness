@@ -68,6 +68,33 @@ export function noiseBar(noise, limits = visualLimits()) {
 
 export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'visual');
 
+/**
+ * 2.70.0 (t): which renderer drew a capture side: <side>/renderer.json, written by a browser capture through
+ * qa/chromium.mjs rendererReport (STUDIO_RENDERER_FILE, set by captureWithCommand), else captureWithCommand's own
+ * record of the browser GPU setting. A renderer change (SwiftShader to a GPU, STUDIO_BROWSER_GPU) shifts pixels, so:
+ *   - the two "before" captures on different renderers: the noise between them is the renderer's, not the scene's;
+ *     the noise baseline is dropped with a note (judged against the minimum, as with no second capture), never
+ *     "too noisy";
+ *   - before and after on different renderers: the pair can't be compared (it would pass or fail on the renderer,
+ *     not the change): a problem naming both that asks for a new before. `capture after` runs with the GPU setting
+ *     the before was taken with (STUDIO_BROWSER_GPU pinned, said in its log), so a changed setting alone doesn't do this.
+ * The tolerance is never loosened: no record on either side compares as before.
+ */
+export const RENDERER_FILE = 'renderer.json';
+export function rendererOf(sideDir) {
+  let r = null;
+  try { r = JSON.parse(fs.readFileSync(path.join(sideDir, RENDERER_FILE), 'utf8')); } catch { return null; }
+  if (!r || typeof r !== 'object') return null;
+  const key = r.renderer ? String(r.renderer) : r.gpu ? `browser GPU flags ${r.gpu}` : null;
+  return key ? { key, gpu: r.gpu || null, renderer: r.renderer || null } : null;
+}
+/** Two sides drew on different renderers: compared by renderer name when both have one, else by GPU setting. */
+const rendererSplit = (a, b) => {
+  if (!a || !b) return false;
+  if (a.renderer && b.renderer) return a.renderer !== b.renderer;
+  return Boolean(a.gpu && b.gpu && a.gpu !== b.gpu);
+};
+
 const lum = (r, g, b) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 
 /** Luminance on a fixed grid (so different sizes compare), plus opacity. */
@@ -117,6 +144,9 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
   const after = pngs(path.join(dir, 'after'));
   const problems = [];
   const cameras = [];
+  const rB = rendererOf(path.join(dir, 'before'));
+  const rN = rendererOf(path.join(dir, NOISE_SIDE));
+  const rA = rendererOf(path.join(dir, 'after'));
   if (!after.length) problems.push(`no after captures in ${path.relative(REPO_ROOT, path.join(dir, 'after')) || dir}`);
   if (!before.length) problems.push(`no before captures in ${path.relative(REPO_ROOT, path.join(dir, 'before')) || dir}`);
   for (const f of after) {
@@ -133,13 +163,17 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
         row.diff = imageDiff(B, A);
         // 2.65.0: the camera's own noise (two captures of the same code), when a second before capture exists.
         const nf = path.join(dir, NOISE_SIDE, f);
-        const bar = noiseBar(fs.existsSync(nf) ? imageDiff(B, load(nf)) : null, limits);
+        // 2.70.0 (t): a second before drawn by another renderer measures the renderer, not the scene: re-baselined.
+        const noiseSplit = fs.existsSync(nf) && rendererSplit(rB, rN);
+        const bar = noiseBar(fs.existsSync(nf) && !noiseSplit ? imageDiff(B, load(nf)) : null, limits);
+        if (noiseSplit) row.rebaselined = `the two before captures ran on different renderers (${rB.key} / ${rN.key}): noise baseline dropped, judged against the minimum; capture before again to measure it`;
         row.noise = bar.noise;
         row.need = bar.need;
         const pct = (x) => `${(x * 100).toFixed(2)}%`;
-        const barWords = bar.noise === null ? `${pct(bar.need)}; no noise measured: no ${NOISE_SIDE} capture` : `${pct(bar.need)}: ${bar.need > limits.diffMin ? `${limits.noiseK} x its noise ${pct(bar.noise)}` : `the minimum; its noise is ${pct(bar.noise)}`}`;
+        const barWords = bar.noise === null ? `${pct(bar.need)}; no noise measured: ${noiseSplit ? 'renderer changed between the before captures' : `no ${NOISE_SIDE} capture`}` : `${pct(bar.need)}: ${bar.need > limits.diffMin ? `${limits.noiseK} x its noise ${pct(bar.noise)}` : `the minimum; its noise is ${pct(bar.noise)}`}`;
         row.bar = barWords;
-        if (bar.tooNoisy) { row.tooNoisy = true; problems.push(`${cam}: the scene is too noisy to judge: two captures of the same code differ by ${pct(bar.noise)}, so a change would have to reach ${pct(bar.need)}, over the cap ${pct(limits.noiseCap)} (STUDIO_VISUAL_NOISE_CAP); make the capture steady (fixed seed, time and animation) and capture before again`); }
+        if (rendererSplit(rB, rA)) { row.rendererChanged = true; problems.push(`${cam}: before was drawn by ${rB.key} and after by ${rA.key}: a renderer change shifts pixels, so this pair can't be compared (it would pass or fail on the renderer, not the change); capture before again on ${rA.key} (the commit before the change, npm run visual -- capture <task> before) and after again`); }
+        else if (bar.tooNoisy) { row.tooNoisy = true; problems.push(`${cam}: the scene is too noisy to judge: two captures of the same code differ by ${pct(bar.noise)}, so a change would have to reach ${pct(bar.need)}, over the cap ${pct(limits.noiseCap)} (STUDIO_VISUAL_NOISE_CAP); make the capture steady (fixed seed, time and animation) and capture before again`); }
         else if (row.diff < bar.need) problems.push(`${cam}: before and after are near-identical (change ${pct(row.diff)} < ${barWords})`);
       }
     } catch (e) {
@@ -148,7 +182,8 @@ export function checkVisualProof(task, { dir = proofDir(task), limits = visualLi
     cameras.push(row);
   }
   const noise = cameras.filter((c) => c.noise !== undefined).map((c) => `${c.camera}: change ${c.diff === undefined ? 'n/a' : `${(c.diff * 100).toFixed(2)}%`}, needs ${c.bar}`);
-  return { ok: problems.length === 0, cameras, problems, why: problems.join('; '), noise };
+  const notes = cameras.filter((c) => c.rebaselined).map((c) => `${c.camera}: ${c.rebaselined}`);
+  return { ok: problems.length === 0, cameras, problems, why: problems.join('; '), noise, notes, renderers: { before: rB?.key || null, beforeNoise: rN?.key || null, after: rA?.key || null } };
 }
 
 /**
@@ -262,14 +297,35 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
 
 const quoteArg = (v) => (process.platform === 'win32' ? `"${String(v).replace(/"/g, '""')}"` : `'${String(v).replace(/'/g, `'\\''`)}'`);
 
+/**
+ * 2.70.0 (t): the capture's environment: STUDIO_RENDERER_FILE (<out>/renderer.json, which qa/chromium.mjs
+ * rendererReport fills), and for an after capture the browser GPU setting its before was taken with. done() writes the
+ * GPU setting alone when the capture recorded no renderer.
+ */
+function rendererEnv(outDir, phase, env = process.env) {
+  const file = path.join(path.resolve(outDir), RENDERER_FILE);
+  try { fs.rmSync(file, { force: true }); } catch {}
+  const e = { ...env, STUDIO_RENDERER_FILE: file };
+  let note = '';
+  const mode = (v) => { const x = String(v || '').trim().toLowerCase(); return /^(on|1|true|yes)$/.test(x) ? 'on' : x === 'auto' ? 'auto' : 'off'; };
+  if (phase === 'after') {
+    const b = rendererOf(path.join(path.dirname(path.resolve(outDir)), 'before'));
+    if (b?.gpu && b.gpu !== mode(env.STUDIO_BROWSER_GPU)) { e.STUDIO_BROWSER_GPU = b.gpu; note = `after is captured with STUDIO_BROWSER_GPU=${b.gpu}, the setting its before was taken with (now ${mode(env.STUDIO_BROWSER_GPU)}), so the pair compares on one renderer`; }
+  }
+  const done = () => { if (!fs.existsSync(file)) { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify({ renderer: null, gpu: mode(e.STUDIO_BROWSER_GPU), at: new Date().toISOString() })}\n`); } catch {} } };
+  return { env: e, note, done };
+}
+
 /** 2.59.0: run the game's own capture command into outDir. Returns { ok, files, why, log } like captureGodot. */
 export function captureWithCommand(template, outDir, { cams = [], task = '', phase = '', timeoutMs = num(process.env.STUDIO_VISUAL_CAPTURE_TIMEOUT_MS, 300000) } = {}) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const f of pngs(outDir)) fs.rmSync(path.join(outDir, f));
   const vals = { out: path.resolve(outDir), cams: cams.join(','), task, phase };
   const cmd = template.replace(/\{(out|cams|task|phase)\}/g, (_, k) => (vals[k] === '' ? '""' : quoteArg(vals[k])));
-  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
-  const log = `${r.stdout || ''}${r.stderr || ''}`;
+  const rv = rendererEnv(outDir, phase);
+  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: rv.env });
+  rv.done();
+  const log = `${rv.note ? `[visual] ${rv.note}\n` : ''}${r.stdout || ''}${r.stderr || ''}`;
   const files = pngs(outDir);
   if (r.error) return { ok: false, files, why: `capture command failed: ${r.error.code || r.error.message}`, log };
   if (r.status !== 0) return { ok: false, files, why: `capture command exited ${r.status}`, log };
@@ -281,7 +337,7 @@ export function captureWithCommand(template, outDir, { cams = [], task = '', pha
 export async function recordVisual(task, res) {
   const { setPart } = await import('./verdict-split.mjs');
   // 2.65.0: each camera's noise and the bar it had to clear go into the verdict (the proof JSON) too.
-  return setPart(task, 'visual', { ok: res.ok, why: res.why || (res.noise?.length ? `noise baseline: ${res.noise.join('; ')}` : ''), evidence: res.cameras?.map((c) => `${c.camera}: change ${c.diff ?? 'n/a'}${c.noise !== undefined ? `, noise ${c.noise ?? 'not measured'}, needs ${c.need}${c.tooNoisy ? ' (too noisy to judge)' : ''}` : ''}`) || [] });
+  return setPart(task, 'visual', { ok: res.ok, why: res.why || [res.noise?.length ? `noise baseline: ${res.noise.join('; ')}` : '', ...(res.notes || [])].filter(Boolean).join('; '), evidence: res.cameras?.map((c) => `${c.camera}: change ${c.diff ?? 'n/a'}${c.noise !== undefined ? `, noise ${c.noise ?? 'not measured'}, needs ${c.need}${c.tooNoisy ? ' (too noisy to judge)' : ''}` : ''}`) || [] });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
@@ -316,7 +372,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     await recordVisual(x, res);
     emitEvent({ type: res.ok ? 'visual.pass' : 'visual.fail', agent: process.env.STUDIO_LOCK_OWNER || 'harness', task: x, msg: `${x} visual proof ${res.ok ? 'passed' : `failed: ${res.why}`}`.slice(0, 400) });
     if (a.includes('--json')) console.log(JSON.stringify(res));
-    else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}${res.ok && res.noise?.length ? ` (noise baseline: ${res.noise.join('; ')})` : ''}`);
+    else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}${res.ok && res.noise?.length ? ` (noise baseline: ${res.noise.join('; ')})` : ''}${res.notes?.length ? ` (re-baselined: ${res.notes.join('; ')})` : ''}`);
     process.exit(res.ok ? 0 : 1);
   }
   console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after [--godot <project>] [--cams a,b] | check <TASK> | stats <png> | diff <a> <b>');
