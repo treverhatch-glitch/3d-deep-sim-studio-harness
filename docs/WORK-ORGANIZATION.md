@@ -227,6 +227,27 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
   one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
   `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
+- The train daemon (2.69.0, `harness/train-daemon.mjs`): while a supervisor runs (`STUDIO_TRAIN_AUTO`, default on),
+  each pass starts a train on its own, in a detached child (`.studio/train/daemon.json`, its log `daemon.log`), when
+  lanes are ready by the batching rules above (`STUDIO_TRAIN_MIN` lanes not held, or the oldest waited
+  `STUDIO_TRAIN_WAIT_MIN`) AND the machine budget admits a verify claim (the machine:heavy admission below); never
+  beside another train (the train lock) or its own last one, never while the supervisor is halted, winding down or
+  "Stop all" is on (`task.train.auto_waiting` says why, once per reason). After it, each handed-back lane whose task
+  has no running session is made sure to be back on the board with the hand-back facts (only what is missing is
+  added), and ONE `job.done` (kind train, `meta.auto`, `requeued`) sums it. `npm run task -- train auto off|on --by
+  <name> [--why "…"]` switches it (a person, the owner's delegation, or a Producer/Director session or an outside agent
+  on a person's `--permission`; never a worker); `npm run task -- train auto` shows it.
+- The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
+  (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
+  fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
+  and again with one test worker → `load-flake`; passes then fails → `intermittent`. Labels go to
+  `.studio/flakes.jsonl`; they never change what the train does. A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
+  (3) times in `STUDIO_FLAKE_WINDOW_DAYS` (7) goes on `studio/quarantine.json` (`{ test, label, since, why, by,
+  evidence, task }`), the game's runner skips it (`STUDIO_TEST_QUARANTINE`, docs/ONBOARDING-A-GAME.md), and ONE fix
+  task is filed. A real failure is never quarantined. The list silences a check, so a lane changing it is tier C; a
+  game dev releases an entry (`npm run flakes -- release <test> --by <name>`; an outside agent with `--permission`;
+  never a worker). The harness's additions are `test.quarantined` events with their evidence and a line in the daily
+  digest; `npm run flakes` lists the list and the week's labels. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or

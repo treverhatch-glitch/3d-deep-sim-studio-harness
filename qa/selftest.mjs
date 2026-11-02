@@ -4217,6 +4217,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.69.0 (r): the train daemon (harness/train-daemon.mjs) and the flake triager with its quarantine (harness/flakes.mjs)
+// (qa/selftest-269r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269r.mjs')).href);
+  await selftest269R({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

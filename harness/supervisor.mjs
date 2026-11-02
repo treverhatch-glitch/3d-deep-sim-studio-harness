@@ -27,6 +27,8 @@
  * 2.68.0: each pass also runs the crew watchdog (harness/crew-watch.mjs: a role launching sessions that land nothing is
  * paused), the futility cap (harness/futility.mjs, shadow mode by default) and the usage wind-down
  * (harness/winddown.mjs, STUDIO_USAGE_WINDDOWN_PCT). Code only: no model, no tokens.
+ * 2.69.0 (r): and the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO, default on): a merge train starts on
+ * its own when lanes are ready and the machine budget has room for a verify (npm run task -- train auto off|on --by).
  * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
  */
 import fs from 'node:fs';
@@ -427,6 +429,19 @@ export async function supervise(opts, state, now = Date.now()) {
   return { started, why };
 }
 
+/**
+ * 2.69.0 (r): one train-daemon pass for the supervisor loop: what it decided goes in state.train (studio:status).
+ * A halt, a wind-down (supervise's result) and "Stop all" keep it from starting a train. Never throws.
+ */
+export async function trainDaemonTick(state, r = {}, opts = {}) {
+  try {
+    const { trainDaemonPass } = await import('./train-daemon.mjs');
+    const d = await trainDaemonPass({ halted: state.halted || null, ...(r.winddown ? { winddown: r.why?.[0] || 'winding down' } : {}), ...opts });
+    state.train = { at: new Date().toISOString(), started: Boolean(d.started), why: d.why, ...(d.pid ? { pid: d.pid } : {}) };
+    return d;
+  } catch (err) { state.train = { at: new Date().toISOString(), started: false, why: `error: ${err.message}` }; return { started: false, why: err.message }; }
+}
+
 /** 2.68.0 (n): the session cap by RAM, { cap, why }; the configured cap when anything fails. */
 async function sessionCapNow(configured) {
   try {
@@ -527,6 +542,9 @@ async function main(argv) {
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
+    // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
+    if (!r.stop) await trainDaemonTick(state, r);
     save();
     if (r.stop) finish(r.why[0]);
   };
