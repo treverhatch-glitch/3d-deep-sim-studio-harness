@@ -63,6 +63,16 @@ npm run usage -- import <a Claude Code session .jsonl, or the folder of a projec
   when the UTC date differs. Without it the days stay UTC (as before) and the card names this computer's zone as a
   hint; `TZ` alone doesn't switch them, so a replay scores the same days on every computer.
 
+### Release impact (2.68.0)
+
+`npm run autonomy -- impact [--release <version>] [--days 3] [--json]` (`harness/impact.mjs`) finds when each harness
+version reached the studio (an `upgrade.merged` event, an `Upgrade-Versions` trailer on the upgrade merge, or a
+`package.json` version bump on the first-parent line) and compares the same measures over the days before and after
+it: landed per hour, train verify minutes p50/p90, red verify %, hand-backs per landed, tokens per kept change, owner
+round-trips per landed and no-work sessions. A measure with fewer than `STUDIO_IMPACT_MIN_N` (30) items on either side
+reads "not enough data"; within 10% is "same". The verdict is better / worse / mixed by the measures judged, and the
+daily digest names the latest upgrade's verdict once one measure has enough data.
+
 ### Tokens that do work (2.66.0)
 
 `npm run autonomy` ends its details with a short **Tokens** block (`--json`: `card.tokenWork`; the War Room card shows
