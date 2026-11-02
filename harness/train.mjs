@@ -54,7 +54,8 @@
  *      chain "waiting for its tail" (no bisection, nobody handed back); chain + tail land together once it is queued.
  *  13. parallel prefixes (2.69.0, harness/train-parallel.mjs): the prefix search re-checks K boundary prefixes at once,
  *      each in its own scratch copy (K from the machine budget, STUDIO_TRAIN_BISECT_PARALLEL; no scan: 1, as before);
- *      STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs) lets a green CI run on train/<id> stand for the verify.
+ *      STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs): the safety gates always run locally; only the game's
+ *      checks may come from the named CI check run on train/<id> (STUDIO_VERIFY_REMOTE_CHECK); both must pass.
  *
  * Safety: main moves only after a green full verify of exactly the tree it ends at, and only from the tip the train
  * was built on (if main moved meanwhile, the train is rebuilt and verified again); one train at a time
@@ -84,7 +85,7 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 import { withFacts } from './handback-facts.mjs';
 import { runGatesWaiting } from './train-busy.mjs';
-import { remoteMode, remoteVerify } from './remote-verify.mjs';
+import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 
@@ -531,24 +532,73 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lo
 }
 
 /**
- * 2.69.0 (q): STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs): the train's verify on the repo's own CI for a
- * public repo; a green CI result on exactly this commit stands for the verify. Anything else (off, error, timeout, red:
- * the local record names the failing checks for the prefix search) runs the local verify, as before. A tree already
- * verified here (or with a recorded green verify) is not sent out again. deps.remoteClient: a test's fake client.
+ * 2.69.0 (q): STUDIO_VERIFY_REMOTE=github (harness/remote-verify.mjs). The remote never stands for a safety gate: the
+ * train first runs every non-game, non-engine gate locally on the tree (localGateIds: protected, secrets, hooks,
+ * weakened-tests, golden, regressions, ...; run-gates --only, ~10 s). Red (and not excused by the tasks' baselines):
+ * the verify is red, the remote is not asked, and the prefix search re-checks those gates. Green: the repo's CI runs
+ * the named check (STUDIO_VERIFY_REMOTE_CHECK) on exactly this commit, and a green result stands for the game's checks
+ * only; both parts are written to .studio/train/split/<id>-<n>.json (which gate came from where). Anything else (off,
+ * busy, error, timeout, red CI) runs the full local verify, as before. A tree already verified here (or with a
+ * recorded green verify) is not sent out again. deps.remoteClient: a test's fake client.
  */
 async function verifyRemoteFirst(sc, o, { head, by, deps = {}, res }) {
   if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all }).ok)) return verifyTree(sc, o);
-  const rv = await remoteVerify({ root: sc.root, id: o.id, sha: head, client: deps.remoteClient || null, log: (m) => o.log(`[train] ${o.id}: ${m}`) });
-  ev('remote_verify', o.id, `${rv.used ? (rv.ok ? 'green' : 'red') : 'not used'}: ${rv.why}`, { agent: by, status: rv.used && rv.ok ? 'ok' : 'warn', meta: { used: rv.used, ok: rv.used ? rv.ok : null, tree: o.tree, runs: rv.runs || null } });
+  const root = sc.root;
+  const games = gameGateIds(root);
+  let gates = [];
+  try { gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates || []; } catch {}
+  const ids = localGateIds(gates, games);
+  const lp = ids.length ? localSafetyGates(sc, o, ids, games) : { ok: true, rows: [], gates: [], log: null };
+  if (lp.noCheck) { o.log(`[train] ${o.id}: the local safety gates ran no check (${lp.busy || 'busy'}): the full local verify runs`); return verifyTree(sc, o); }
+  if (!lp.ok) {
+    o.log(`[train] ${o.id}: remote verify not asked: the local safety gates are red on tree ${o.tree.slice(0, 8)} (${lp.why}); a remote result never stands for them`);
+    ev('remote_verify', o.id, `not asked: the local safety gates are red (${lp.why})`, { agent: by, status: 'blocked', meta: { used: false, local: { ok: false, gates: lp.gates, log: lp.log }, tree: o.tree } });
+    return { ok: false, rec: lp.rec, gates: lp.gates, detail: lp.detail, why: `local safety gates failed: ${lp.gates.join(', ') || lp.why}`, log: lp.log, ms: lp.ms, split: true };
+  }
+  const rv = await remoteVerify({ root, id: o.id, sha: head, client: deps.remoteClient || null, log: (m) => o.log(`[train] ${o.id}: ${m}`) });
+  ev('remote_verify', o.id, `${rv.used ? (rv.ok ? 'green' : 'red') : 'not used'}: ${rv.why}`, { agent: by, status: rv.used && rv.ok ? 'ok' : 'warn', meta: { used: rv.used, ok: rv.used ? rv.ok : null, tree: o.tree, runs: rv.runs || null, local: { ok: true, gates: ids, log: lp.log } } });
   if (rv.used && rv.ok) {
-    o.log(`[train] ${o.id}: remote verify of tree ${o.tree.slice(0, 8)} (commit ${String(head).slice(0, 8)}): ${rv.why}; it stands for the verify`);
-    const v = { ok: true, remote: { why: rv.why, runs: rv.runs }, rec: null, gates: [], detail: [], why: '', ms: rv.ms };
+    const from = { ...Object.fromEntries(lp.rows.map((r) => [r.id, `local (${r.ok ? 'pass' : 'excused by a baseline'})`])), ...Object.fromEntries(games.map((g) => [g, `remote CI: ${rv.runs.map((r) => r.name).join(', ')}`])) };
+    const record = { train: o.id, n: o.n, at: new Date().toISOString(), tree: o.tree, head, from, local: { gates: ids, rows: lp.rows, log: lp.log, excused: lp.excused || [] }, remote: { check: String(remoteCheckPattern()), runs: rv.runs, why: rv.why } };
+    const rel = path.join(TRAIN_DIR, 'split', `${o.id}-${o.n}.json`);
+    try { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), `${JSON.stringify(record, null, 2)}\n`); } catch {}
+    o.log(`[train] ${o.id}: verify of tree ${o.tree.slice(0, 8)} (commit ${String(head).slice(0, 8)}): local safety gates green (${lp.rows.map((r) => r.id).join(', ') || 'none'}), the game's checks from the repo's CI (${rv.why}); both parts in ${rel.split(path.sep).join('/')}`);
+    const v = { ok: true, remote: { why: rv.why, runs: rv.runs, record: rel.split(path.sep).join('/') }, rec: null, gates: [], detail: [], why: '', ms: rv.ms };
     o.seen.set(o.tree, v);
     res.remoteVerifies = (res.remoteVerifies || 0) + 1;
     return v;
   }
   o.log(`[train] ${o.id}: remote verify ${rv.used ? `red (${rv.why}): the local verify runs to name the failing checks` : `not used (${rv.why}): the local verify runs`}`);
   return verifyTree(sc, o);
+}
+
+/** 2.69.0 (q): run-gates --only <the safety gates> on the train's tree: { ok, rec, rows, gates, detail, why, log, excused }. */
+function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games) {
+  const root = sc.root;
+  const owner = `train-${id}-local`;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
+  const t0 = Date.now();
+  log(`[train] ${id}: local safety gates of tree ${tree.slice(0, 8)} (${ids.join(', ')}); the game's checks may come from the repo's CI`);
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `local safety gates ${n}` });
+  const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}-local.log`);
+  try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(path.join(root, '.studio', 'gates', `${owner}.json`), 'utf8')); } catch {}
+  for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  const rel = path.relative(root, logFile).split(path.sep).join('/');
+  if (r.status !== 0 && noCheck) return { ok: false, noCheck: true, busy: busy || null, log: rel };
+  const { gates: failedLines, detail } = failLines(text);
+  const rows = Array.isArray(rec?.rows) ? rec.rows : [];
+  const red = rows.filter((x) => !x.ok && x.required !== false);
+  let fresh = red.map((x) => x.id);
+  if (red.length && tasks.length) {
+    const f = new Set();
+    for (const t of tasks) for (const x of judgeRed(rows.map((y) => ({ ...y, required: y.required !== false })), readBaseline(t) || { red: [] }).fresh) f.add(x.id);
+    fresh = fresh.filter((g) => f.has(g));
+  }
+  const why = !rec ? 'wrote no record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : rec.dirty !== false ? 'the tree was not clean' : !rows.length ? 'ran no gate' : rows.some((x) => games.includes(x.id)) ? 'a game check ran in the safety part' : fresh.length ? `failed: ${fresh.join(', ')}` : r.status !== 0 && !red.length ? `exit ${r.status}` : '';
+  return { ok: !why, rec, rows, gates: fresh.length ? fresh : failedLines, detail, why, log: rel, ms: Date.now() - t0, excused: red.filter((x) => !fresh.includes(x.id)).map((x) => x.id) };
 }
 
 // ---- 2.60.0: a red train: prefix bisection and pin refresh ------------------------------------------------

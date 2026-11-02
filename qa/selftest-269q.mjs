@@ -72,7 +72,8 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
   const ran = () => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => { const [owner, file, start, end] = l.split('\t'); return { owner, file, start: Number(start), end: Number(end) }; }); } catch { return []; } };
   const resetRan = () => { try { fs.rmSync(ranLog, { force: true }); } catch {} };
   write(dir, 'studio/gates.json', `${JSON.stringify({ gates: [
-    { id: 'protected', command: 'node qa/protected-check.mjs', required: true, lite: true },
+    // A stand-in for qa/protected-check.mjs (a real violation is held at tier C before any verify): red when a note says VIOLATES-PROTECTED.
+    { id: 'protected', command: 'node game/demo/protected-sim.mjs', required: true, lite: true },
     { id: 'secrets', command: 'node scripts/secret-scan.mjs', required: true, lite: true },
     { id: 'hooks', command: 'node harness/hook-stamp.mjs check', required: true, lite: true, cache: false },
     { id: 'game', command: 'node harness/game-gates.mjs', required: true, lite: true, cache: false },
@@ -93,6 +94,7 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
     '}',
     "console.log(`Test Files  ${bad ? `${bad} failed | ` : ''}${list.length - bad} passed (${list.length})`);",
     'process.exit(bad ? 1 : 0);', ''].join('\n'));
+  write(dir, 'game/demo/protected-sim.mjs', "import fs from 'node:fs'; const d = 'game/demo/notes'; const bad = fs.readdirSync(d).filter((f) => fs.readFileSync(`${d}/${f}`, 'utf8').includes('VIOLATES-PROTECTED'));\nif (bad.length) { console.error(`[protected] FAIL a protected file changed without the owner's approval: ${bad.join(', ')}`); process.exit(1); }\nconsole.log('[protected] PASS');\n");
   for (const n of ['a', 'b']) write(dir, `game/demo/tests/${n}.test.mjs`, `// ${n}\n`);
   write(dir, 'game/demo/notes/readme.md', '# Notes\n');
   g(dir, 'init', '-q', '-b', 'main'); g(dir, 'config', 'core.autocrlf', 'false');
@@ -139,7 +141,7 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
 
   // ---- 4-5. remote verify: the pure flow with a fake client and a fake fetch ----
   const rp = path.join(tmpRoot, `remote-269q-${process.pid}.mjs`);
-  fs.writeFileSync(rp, `import { remoteVerify, parseGithubRemote, githubClient, remoteMode } from ${href('harness/remote-verify.mjs')};
+  fs.writeFileSync(rp, `import { remoteVerify, parseGithubRemote, githubClient, remoteMode, localGateIds } from ${href('harness/remote-verify.mjs')};
 const TOKEN = 'tok-secret-269q';
 const env = { STUDIO_VERIFY_REMOTE: 'github', GH_TOKEN: TOKEN, STUDIO_VERIFY_REMOTE_TIMEOUT_MIN: '60', STUDIO_VERIFY_REMOTE_START_MIN: '10', STUDIO_VERIFY_REMOTE_POLL_S: '30' };
 const mk = (o = {}) => {
@@ -155,13 +157,16 @@ const mk = (o = {}) => {
   return { calls, client };
 };
 const go = async (o, e = env) => { const f = mk(o); let t = 0; const logs = []; const r = await remoteVerify({ root: process.cwd(), id: '20261102-1', sha: 'abc1234def', env: e, client: o.noClient ? null : f.client, log: (m) => logs.push(m), now: () => t, sleep: async (ms) => { t += ms; } }); return { r, calls: f.calls, logs, t }; };
-const done = (c) => [{ name: 'ci', status: 'completed', conclusion: c }];
+const done = (c) => [{ name: 'lint', status: 'completed', conclusion: 'success' }, { name: 'release-gate', status: 'completed', conclusion: c }];
 const out = {
-  green: await go({ runs: (n) => (n < 3 ? [{ name: 'ci', status: 'in_progress', conclusion: null }] : done('success')) }),
+  green: await go({ runs: (n) => (n < 3 ? [{ name: 'release-gate', status: 'in_progress', conclusion: null }] : done('success')) }),
+  skipped: await go({ runs: () => done('skipped') }),
+  noNamed: await go({ runs: () => [{ name: 'lint', status: 'completed', conclusion: 'success' }, { name: 'docs', status: 'completed', conclusion: 'success' }] }),
+  custom: await go({ runs: () => [{ name: 'ci', status: 'completed', conclusion: 'success' }] }, { ...env, STUDIO_VERIFY_REMOTE_CHECK: '^ci$' }),
   red: await go({ runs: () => done('failure') }),
   pushErr: await go({ pushErr: true }),
   repoErr: await go({ repoErr: true }),
-  timeout: await go({ runs: () => [{ name: 'ci', status: 'in_progress', conclusion: null }] }),
+  timeout: await go({ runs: () => [{ name: 'release-gate', status: 'in_progress', conclusion: null }] }),
   noStart: await go({ runs: () => [] }),
   exists: await go({ exists: true }),
   priv: await go({ private: true }),
@@ -174,7 +179,7 @@ const real = githubClient({ root: process.cwd(), owner: 'o', repo: 'r', token: T
 const refused = [];
 for (const b of ['main', 'train/../main', 'refs/heads/main', 'feature/x']) { try { await real.deleteBranch(b); } catch { refused.push(b); } }
 await real.deleteBranch('train/20261102-1');
-console.log(JSON.stringify({ out, seen, refused, parse: [parseGithubRemote('https://github.com/acme/demo.git'), parseGithubRemote('git@github.com:acme/demo.git'), parseGithubRemote('https://gitlab.com/acme/demo.git')], modes: [remoteMode({}), remoteMode({ STUDIO_VERIFY_REMOTE: 'GitHub' })], leak: JSON.stringify(out).includes(TOKEN) }));
+console.log(JSON.stringify({ out, seen, refused, local: localGateIds([{ id: 'protected' }, { id: 'secrets' }, { id: 'hooks' }, { id: 'weakened-tests' }, { id: 'golden' }, { id: 'regressions' }, { id: 'game', command: 'node harness/game-gates.mjs' }, { id: 'unit2', command: 'node harness/game-gates.mjs --x' }, { id: 'engine' }, { id: 'engine:godot' }, { id: 'godot-unit' }, { id: 'browser-play' }, { id: 'soak', heavy: true }], ['game']), parse: [parseGithubRemote('https://github.com/acme/demo.git'), parseGithubRemote('git@github.com:acme/demo.git'), parseGithubRemote('https://gitlab.com/acme/demo.git')], modes: [remoteMode({}), remoteMode({ STUDIO_VERIFY_REMOTE: 'GitHub' })], leak: JSON.stringify(out).includes(TOKEN) }));
 `);
   const rr = run(dir, `node "${rp}"`);
   const rj = parse(rr);
@@ -183,13 +188,18 @@ console.log(JSON.stringify({ out, seen, refused, parse: [parseGithubRemote('http
   const onlyOwn = Object.values(O).every((c) => del(c).every((x) => x === 'delete train/20261102-1'));
   report('2.69.0 (q, 2): remote verify with a fake client: green CI (after two pending polls) is used as the verify; red CI is a result (ok false); a push error, a repo error, CI still running at STUDIO_VERIFY_REMOTE_TIMEOUT_MIN, no check run within STUDIO_VERIFY_REMOTE_START_MIN, an existing train/<id>, a private repo (paid minutes), no token and STUDIO_VERIFY_REMOTE unset all fall back (used: false); only its own train/<id> is deleted and only after its own push; the token never appears in a result (fails on 2.68.0: harness/remote-verify.mjs does not exist)',
     rr.status === 0 && O.green?.r?.used === true && O.green.r.ok === true && O.green.calls.filter((x) => x === 'runs').length === 3 && JSON.stringify(del(O.green)) === '["delete train/20261102-1"]'
-      && O.red?.r?.used === true && O.red.r.ok === false && /CI red: ci failure/.test(O.red.r.why) && del(O.red).length === 1
+      && O.red?.r?.used === true && O.red.r.ok === false && /CI red: release-gate failure/.test(O.red.r.why) && del(O.red).length === 1
       && O.pushErr?.r?.used === false && /\*\*\*/.test(O.pushErr.r.why) && !del(O.pushErr).length && O.repoErr?.r?.used === false && !O.repoErr.calls.some((x) => /^push|^delete/.test(x))
       && O.timeout?.r?.used === false && /STUDIO_VERIFY_REMOTE_TIMEOUT_MIN/.test(O.timeout.r.why) && O.timeout.t >= 3600000 && del(O.timeout).length === 1
       && O.noStart?.r?.used === false && /STUDIO_VERIFY_REMOTE_START_MIN/.test(O.noStart.r.why) && O.noStart.t < 3600000 && del(O.noStart).length === 1
       && O.exists?.r?.used === false && !O.exists.calls.some((x) => /^push|^delete/.test(x)) && O.priv?.r?.used === false && /paid minutes/.test(O.priv.r.why) && !O.priv.calls.some((x) => /^push/.test(x))
       && O.off?.r?.why === 'off' && !O.off.calls.length && O.noToken?.r?.used === false && /GH_TOKEN/.test(O.noToken.r.why) && onlyOwn && rj.leak === false,
     out(rr).slice(-2500));
+  report('2.69.0 (q, 2, review): only the NAMED check run counts (STUDIO_VERIFY_REMOTE_CHECK, default release-gate): a CI whose runs are all green but has no release-gate run falls back to the local verify as soon as its runs are done (not used, the pattern named); a skipped release-gate is not green; a custom pattern (^ci$) picks its own run; the safety gates kept local are every gate but the game checks, engine and heavy ones (fails on a3b7117: any green run passed, and there was no local part)',
+    rr.status === 0 && O.noNamed?.r?.used === false && /no CI check run named \/release-gate\/i/.test(O.noNamed.r.why) && /STUDIO_VERIFY_REMOTE_CHECK/.test(O.noNamed.r.why) && O.noNamed.t < 600000 && del(O.noNamed).length === 1
+      && O.skipped?.r?.used === true && O.skipped.r.ok === false && O.custom?.r?.used === true && O.custom.r.ok === true
+      && JSON.stringify(rj.local) === '["protected","secrets","hooks","weakened-tests","golden","regressions"]',
+    out(rr).slice(-2000));
   report('2.69.0 (q, 2): the real GitHub client (with a fake fetch, no network) refuses to delete any branch but train/<id> (main, train/../main, refs/heads/main, feature/x), deletes train/<id> with one DELETE /repos/o/r/git/refs/heads/train/<id> carrying the token as a Bearer header; github remotes parse (https, ssh), others don\'t (fails on 2.68.0: no such client)',
     rr.status === 0 && JSON.stringify(rj.refused) === '["main","train/../main","refs/heads/main","feature/x"]' && JSON.stringify(rj.seen) === '["DELETE /repos/o/r/git/refs/heads/train/20261102-1 auth=true"]'
       && JSON.stringify(rj.parse) === '[{"owner":"acme","repo":"demo"},{"owner":"acme","repo":"demo"},null]' && JSON.stringify(rj.modes) === '["off","github"]',
@@ -204,12 +214,12 @@ const remoteClient = {
   async repo() { calls.push('repo'); return { private: false }; },
   async branchExists(b) { calls.push('exists ' + b); return false; },
   async push(sha, b) { calls.push('push ' + b); if (mode === 'error') throw new Error('network down'); },
-  async checkRuns() { calls.push('runs'); return [{ name: 'ci', status: 'completed', conclusion: 'success' }]; },
+  async checkRuns() { calls.push('runs'); return mode === 'noNamed' ? [{ name: 'lint', status: 'completed', conclusion: 'success' }] : [{ name: 'release-gate', status: 'completed', conclusion: 'success' }]; },
   async deleteBranch(b) { calls.push('delete ' + b); },
 };
 const logs = [];
 const r = await runTrain({ by: 'tester', now: true, deps: { remoteClient }, log: (m) => logs.push(m) });
-console.log(JSON.stringify({ id: r.id, landed: r.landed, verifies: r.verifies, calls, logs: logs.join('\\n').slice(-2500) }));
+console.log(JSON.stringify({ id: r.id, landed: r.landed, dropped: (r.dropped || []).map((d) => d.task), verifies: r.verifies, calls, logs: logs.join('\\n').slice(-12000) }));
 `);
   const Rg = [1, 2].map((k) => lane(`pq-g${k}`, `Docs: note g${k}`, { [`game/demo/notes/g${k}.md`]: `# g${k}\n` }));
   resetRan();
@@ -217,17 +227,39 @@ console.log(JSON.stringify({ id: r.id, landed: r.landed, verifies: r.verifies, c
   const o6 = run(dir, `node "${tp}" green`, remoteEnv);
   const j6 = parse(o6);
   const verifyRan6 = ran().filter((r) => /^train-/.test(r.owner) && !/-re\d*$/.test(r.owner));
+  let split6 = null;
+  try { const d = path.join(dir, '.studio', 'train', 'split'); split6 = JSON.parse(fs.readFileSync(path.join(d, fs.readdirSync(d).find((f) => f.startsWith(String(j6.id)))), 'utf8')); } catch {}
   const Re = [1, 2].map((k) => lane(`pq-e${k}`, `Docs: note e${k}`, { [`game/demo/notes/e${k}.md`]: `# e${k}\n` }));
   resetRan();
   const o6b = run(dir, `node "${tp}" error`, remoteEnv);
   const j6b = parse(o6b);
   const verifyRan6b = ran().filter((r) => /^train-/.test(r.owner) && !/-re\d*$/.test(r.owner));
-  report('2.69.0 (q, 2): a train with STUDIO_VERIFY_REMOTE=github and a fake client: green CI on train/<id> stands for the verify (both lanes land, no local verify ran, the client pushed and then deleted exactly train/<id>); a push error falls back to the local verify (it ran, both lanes land, nothing deleted); the token is never printed (fails on 2.68.0: the train never asks a remote)',
+  report('2.69.0 (q, 2): a train with STUDIO_VERIFY_REMOTE=github and a fake client: green CI (the named release-gate run) on train/<id> stands for the game checks and the local safety gates (protected, secrets, hooks) ran on the same tree, recorded part by part in .studio/train/split/<id>-<n>.json (both lanes land, no local game check ran, the client pushed and then deleted exactly train/<id>); a push error falls back to the local verify (it ran, both lanes land, nothing deleted); the token is never printed (fails on 2.68.0: the train never asks a remote)',
     Rg.every((l) => l.ok) && Re.every((l) => l.ok) && o6.status === 0 && (j6.landed || []).length === 2 && !verifyRan6.length && j6.verifies === 0
-      && JSON.stringify(j6.calls) === JSON.stringify(['repo', `exists train/${j6.id}`, `push train/${j6.id}`, 'runs', `delete train/${j6.id}`]) && /it stands for the verify/.test(j6.logs)
-      && onMain('game/demo/notes/g1.md') && onMain('game/demo/notes/g2.md')
+      && JSON.stringify(j6.calls) === JSON.stringify(['repo', `exists train/${j6.id}`, `push train/${j6.id}`, 'runs', `delete train/${j6.id}`])
+      && onMain('game/demo/notes/g1.md') && onMain('game/demo/notes/g2.md') && /local safety gates green \(protected, secrets, hooks\), the game's checks from the repo's CI/.test(j6.logs)
+      && split6?.from?.game === 'remote CI: release-gate' && /^local/.test(split6?.from?.protected || '') && /^local/.test(split6?.from?.hooks || '') && split6?.tree
       && o6b.status === 0 && (j6b.landed || []).length === 2 && verifyRan6b.length >= 1 && !(j6b.calls || []).some((x) => /^delete/.test(x)) && /remote verify not used \(remote verify failed: network down\): the local verify runs/.test(j6b.logs)
       && onMain('game/demo/notes/e1.md') && !`${out(o6)}${out(o6b)}`.includes('tok-secret-269q'),
-    `${out(o6).slice(-1500)}\nverifyRan=${verifyRan6.length}\n---\n${out(o6b).slice(-1500)}\nverifyRan=${verifyRan6b.length}`);
+    `split=${JSON.stringify(split6?.from)}\n${(j6.logs || "").split("\n").filter((l) => /local safety/.test(l)).join("\n")}\nverifyRan=${verifyRan6.length}\n---\n${out(o6b).slice(-1500)}\nverifyRan=${verifyRan6b.length}`);
+
+  // ---- 7-8 (review). a local safety-gate violation with a green remote is red; a CI lacking the named check falls back ----
+  const V = [1, 2].map((k) => lane(`pq-v${k}`, `Docs: note v${k}`, { [`game/demo/notes/v${k}.md`]: k === 2 ? 'VIOLATES-PROTECTED\n' : `# v${k}\n` }));
+  resetRan();
+  const o7 = run(dir, `node "${tp}" green`, remoteEnv);
+  const j7 = parse(o7);
+  const firstPush = (j7.calls || []).indexOf((j7.calls || []).find((x) => /^push/.test(x)));
+  report('2.69.0 (q, 2, review): with STUDIO_VERIFY_REMOTE=github and a GREEN remote, a lane that turns a local safety gate red (the protected gate) still makes the train red: the remote is not asked for that tree ("the local safety gates are red ... a remote result never stands for them"), the lane is handed back by the prefix search on that gate, the other lane lands (its own tree: safety gates local, game from the remote) (fails on a3b7117: the remote green stood for every gate and both lanes landed)',
+    V.every((l) => l.ok) && o7.status === 0 && /remote verify not asked: the local safety gates are red on tree [0-9a-f]{8} \(failed: protected\); a remote result never stands for them/.test(j7.logs || '')
+      && (j7.dropped || []).includes(V[1].id) && (j7.landed || []).join(',') === V[0].id && onMain('game/demo/notes/v1.md') && !onMain('game/demo/notes/v2.md') && firstPush >= 0 && (j7.calls || []).filter((x) => /^push/.test(x)).length === 1,
+    `${out(o7).slice(-2500)}`);
+  const N = [1, 2].map((k) => lane(`pq-n${k}`, `Docs: note n${k}`, { [`game/demo/notes/n${k}.md`]: `# n${k}\n` }));
+  resetRan();
+  const o8 = run(dir, `node "${tp}" noNamed`, remoteEnv);
+  const j8 = parse(o8);
+  const verifyRan8 = ran().filter((r) => /^train-/.test(r.owner) && !/-re\d*$/.test(r.owner));
+  report('2.69.0 (q, 2, review): a train whose remote CI ran only other checks (no release-gate run) falls back to the full local verify (it ran the game checks; both lanes land; its own train/<id> deleted) (fails on a3b7117: any green run stood for the verify, no local run)',
+    N.every((l) => l.ok) && o8.status === 0 && (j8.landed || []).length === 2 && verifyRan8.length >= 1 && /remote verify not used \(no CI check run named \/release-gate\/i/.test(j8.logs || '') && (j8.calls || []).includes(`delete train/${j8.id}`),
+    `${out(o8).slice(-2000)}\nverifyRan=${verifyRan8.length}`);
   for (const p of [pure, laneProbe, rp, tp, ranLog]) { try { fs.rmSync(p, { force: true }); } catch {} }
 }
