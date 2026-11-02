@@ -4,6 +4,49 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.70.0] — 2026-11-02
+2.70.0, "use the idle hardware": GPU work beside CPU work, faster Unity runs, a check on asset previews, and lanes
+that fit the disk (from the hardware findings and the overseer's duty 15; P-188 to P-192).
+### Added
+- **GPU area for jobs (t).** When the machine scan shows a GPU, mostly-GPU jobs (browser playtests with GPU flags,
+  Blender previews and the asset round trip, Unity bakes and graphics runs, the landing clip) claim VRAM plus a small
+  RAM/CPU share and run beside a CPU verify; no GPU or no scan means the 2.69 claims. Caps count by group: one Unity,
+  one harness Blender job. Each job logs which area it took.
+- **Browser GPU flags (t, opt-in, UNVERIFIED).** `STUDIO_BROWSER_GPU=on|auto` adds Chromium's GPU flags; reports record
+  the WebGL renderer and say when the CPU renderer is still in use. The visual check never compares across renderers:
+  it names both and asks for a new "before" (the tolerance is never loosened).
+- **Blender (t).** Out of machine:heavy into the GPU area, with `-t` threads from the budget
+  (`STUDIO_BLENDER_THREADS`, never 0); an interactive Blender is never touched.
+- **Playable build + clip after each landing (t).** One low-priority job after a train lands (a newer landing
+  replaces a queued one); `build.snapshot` and `clip.recorded` events; shown in `status --brief` and the digest.
+  `STUDIO_LANDING_BUILD=off` turns it off. The train never waits for it.
+- **Unity speed (u).** `STUDIO_UNITY_ACCELERATOR=<host:port>` adds the Unity Accelerator to every editor start when it
+  answers (the gate says cache server on/off). Edit Mode isn't run twice: skipped when the code-only .NET run covered
+  every Edit Mode test in the gate, or after a pass on the same clean tree and Unity. Tests tagged `Graphics` run with
+  a device, the rest headless. `STUDIO_UNITY_ONE_EDITOR=on` (UNVERIFIED) runs both modes in one editor and falls back
+  to two starts. `STUDIO_UNITY_LANDING_BUILD=fast` and `STUDIO_UNITY_CODE_OPT=release` pass build-method arguments only.
+  The warm Library copies in parallel (`STUDIO_UNITY_CACHE_COPY`).
+- **Asset preview check (v).** Plain-Node checks on the front, 3/4 and top previews fail blank, black, white,
+  untextured-magenta, clipped and tiny renders with a Fix line; a top-heavy shape is a warning. When they pass,
+  `task done` writes a review request and files one review task (role from `studio/asset-review.json`, default
+  art-director); the asset lands after `npm run asset -- review <asset> --pass|--fail "why" --by <name>` from someone
+  other than its maker (delegable as `asset-review`). A pass holds only for those files' checksums. Thresholds in
+  `studio/asset-review.json` (tier C).
+- **Sparse lanes and lane disk (w).** A manifest's `laneExclude` (or `STUDIO_LANE_EXCLUDE`) leaves docs and media out of
+  new lane copies; a task's declared paths stay and asset tasks keep everything. `npm run lanes -- widen` puts paths
+  back; checks put back what they read first, so a verify never sees a partial tree. `npm run lanes -- disk` reports
+  sizes and savings; `STUDIO_LANES_MAX_GB` warns. The supervisor proposes stale lanes every 6 h (dry run), landed
+  lanes go stale after 6 h, and the digest, `status --brief` and the War Room show it. `janitor-lanes` is delegable;
+  a `hold` delegation no longer covers deleting lanes.
+
+### Untested
+- Real hardware: Chromium GPU flags on Windows/macOS, Blender's `-t`, every Unity-side behaviour (a stand-in editor
+  records the arguments), `-testCategory "!Graphics"` in TestRunnerApi. Windows: sparse patterns through spawnSync,
+  the detached workers' priority, the parallel Library copy, the review command.
+- The landing clip runs a full browser play (about 5 GB on the CPU renderer); it shares the one-playtest cap.
+
+---
+
 ## [2.69.0] — 2026-11-02
 2.69.0, "less repeated work": the merge train stops re-running what it already knows, runs on its own, and tells a
 flaky test from a broken one (from the hardware findings and the overseer's duties 3, 8 and 13; P-181 to P-186).
