@@ -34,8 +34,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT } from './event.mjs';
+import { REPO_ROOT, emitEvent } from './event.mjs';
 import { withHeavy } from './heavy.mjs';
+import { seedLibrary, saveLibrary, cacheLine } from './unity-cache.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const rel = (f) => path.relative(REPO_ROOT, f).split(path.sep).join('/');
@@ -220,7 +221,19 @@ export function build(dir, target = 'windows', { out = null, ...heavyOpts } = {}
   if (!fs.existsSync(path.join(dir, 'Assets', 'Editor', 'StudioBuild.cs'))) return { ok: false, problems: [`${rel(dir)}/Assets/Editor/StudioBuild.cs is missing (copy it from engine/_unity)`] };
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): set STUDIO_UNITY to the editor's full path. A ${t[0]} build also needs that platform's module installed in Unity Hub.`] };
   const dest = path.resolve(dir, out || t[1]);
-  const h = underHeavy(`unity ${t[0]} build (${rel(dir) || '.'})`, () => spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, '-logFile', '-'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 }), heavyOpts);
+  // 2.67.1 (k): the warm Library is seeded before the editor and saved after a passing build (harness/unity-cache.mjs).
+  const mainRoot = heavyOpts.heavyRoot || REPO_ROOT;
+  const say = heavyOpts.log || ((m) => console.error(m));
+  const h = underHeavy(`unity ${t[0]} build (${rel(dir) || '.'})`, () => {
+    const seed = seedLibrary(dir, { mainRoot });
+    if (seed.status !== 'off' && seed.status !== 'skipped') say(cacheLine(seed, 'before the editor'));
+    const r = spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, '-logFile', '-'], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 });
+    if (r.status === 0 && /\[build\] PASS/.test(`${r.stdout || ''}${r.stderr || ''}`)) {
+      const saved = saveLibrary(dir, { mainRoot });
+      if (saved.status !== 'off' && saved.status !== 'skipped') say(cacheLine(saved, 'after the passing build'));
+    }
+    return r;
+  }, heavyOpts);
   if (h.busy) return { ok: false, busy: true, target: t[0], out: rel(dest), problems: [`the ${t[0]} build did not start: ${h.busy}`] };
   const r = h.value;
   const log = `${r.stdout || ''}${r.stderr || ''}`;
@@ -231,27 +244,128 @@ export function build(dir, target = 'windows', { out = null, ...heavyOpts } = {}
   return { ok: problems.length === 0, target: t[0], out: rel(dest), problems, line };
 }
 
-/** The editor's gate: purity, pin, Edit Mode and Play Mode tests. */
-export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log, ...heavyOpts } = {}) {
+/**
+ * 2.67.1 (k): the editor-free steps of a Unity-track check, from studio/game.json engines.unity "codeOnly" (a command
+ * or a list; {folder} is the project; "codeOnly": [] or false: none), else `dotnet test tools/SimTests` when the
+ * project has that .NET test project. [{ kind: 'command', cmd } | { kind: 'dotnet' }].
+ */
+export function codeOnlySteps(dir, { root = REPO_ROOT, env = process.env } = {}) {
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_CODE_ONLY || ''))) return [];
+  let cfg = {};
+  try { cfg = JSON.parse(read(path.join(root, 'studio', 'game.json')) || '{}')?.engines?.unity || {}; } catch { cfg = {}; }
+  const c = cfg.codeOnly;
+  if (c === false || (Array.isArray(c) && !c.length)) return [];
+  const cmds = (typeof c === 'string' ? [c] : Array.isArray(c) ? c : []).filter((x) => typeof x === 'string' && x.trim());
+  if (cmds.length) return cmds.map((cmd) => ({ kind: 'command', cmd: cmd.trim(), timeoutMin: Number(cfg.codeOnlyTimeoutMin || 20) }));
+  return fs.existsSync(path.join(dir, 'tools', 'SimTests')) ? [{ kind: 'dotnet' }] : [];
+}
+
+/**
+ * 2.67.1 (k): run the editor-free steps WITHOUT machine:heavy, before the editor waits for it: a lane gets its code
+ * checks while another lane's editor run holds the machine, and a failure here stops before any wait for the editor.
+ * { ok, ran, problems }.
+ */
+export function runCodeOnly(dir, { log = console.log, root = REPO_ROOT, env = process.env } = {}) {
+  const steps = codeOnlySteps(dir, { root, env });
+  const ran = [];
+  for (const st of steps) {
+    if (st.kind === 'dotnet') {
+      if (!which(dotnetBin())) { log('[unity] note: the sim\'s .NET tests (tools/SimTests) need the .NET 8 SDK (dotnet, or STUDIO_DOTNET), which isn\'t here: skipped; the editor\'s Edit Mode tests still run'); continue; }
+      const r = runSim(dir, { log: () => {} });
+      ran.push('dotnet test tools/SimTests');
+      log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} code-only: dotnet test tools/SimTests${r.total ? ` (${r.total - (r.failed || 0)}/${r.total} passed)` : ''} (no editor, no machine:heavy)`);
+      if (!r.ok) return { ok: false, ran, problems: r.problems.map((x) => `code-only (dotnet test): ${x}`) };
+      continue;
+    }
+    const q = (s) => (/[\s"]/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : s);
+    const cmd = st.cmd.replaceAll('{folder}', q(dir));
+    const t0 = Date.now();
+    const r = spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...env }, timeout: st.timeoutMin * 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+    ran.push(st.cmd);
+    const ok = r.status === 0 && !r.error;
+    log(`[gate] ${ok ? 'PASS' : 'FAIL'} code-only: ${st.cmd} (${Math.round((Date.now() - t0) / 1000)} s; no editor, no machine:heavy)`);
+    if (!ok) {
+      const tail = `${r.stdout || ''}${r.stderr || ''}`.trimEnd().split('\n').slice(-8).join(' | ');
+      return { ok: false, ran, problems: [`code-only step "${st.cmd}" failed (${r.error?.code === 'ETIMEDOUT' ? `timed out after ${st.timeoutMin} min` : `exit ${r.status}`}): ${tail || 'no output'}. The editor's tests did not run (they wait for machine:heavy only after the code-only steps pass)`] };
+    }
+  }
+  return { ok: true, ran, problems: [] };
+}
+
+// 2.67.1 (k): a failed Play Mode run is retried once when its tests ran and failed (never a compile error, a missing
+// results file, a licence problem or Edit Mode).
+const retryOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_UNITY_PLAYMODE_RETRY || ''));
+const compileErrors = (log) => /error CS\d+/.test(String(log || ''));
+export const retryablePlayMode = (r) => Boolean(r && !r.ok && !r.busy && r.platform === 'PlayMode' && r.results && r.results.failed > 0 && !compileErrors(r.log) && !r.problems.some((x) => /licence/.test(x)));
+const saveLog = (name, text) => {
+  const f = path.join(REPO_ROOT, '.studio', 'gates', 'out', name);
+  try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text || ''); } catch {}
+  return rel(f);
+};
+
+/** 2.67.1 (k): record a Play Mode flake: <main checkout>/.studio/unity-flakes.jsonl and a unity.flake event. */
+export function recordFlake(mainRoot, rec) {
+  const f = path.join(mainRoot, '.studio', 'unity-flakes.jsonl');
+  try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.appendFileSync(f, `${JSON.stringify(rec)}\n`); } catch {}
+  try { emitEvent({ type: 'unity.flake', agent: process.env.STUDIO_LOCK_OWNER || 'unity', status: 'warn', msg: `Unity Play Mode flaked in ${rec.project}: ${rec.tests.join(', ') || 'a test'} failed, then passed on retry`.slice(0, 400), meta: { project: rec.project, tests: rec.tests.slice(0, 20), logs: rec.logs } }); } catch {}
+  return rel(f);
+}
+
+/**
+ * The editor's gate: purity, pin, the code-only steps (no machine:heavy; 2.67.1), then Edit Mode and Play Mode tests
+ * under one machine:heavy hold, with the warm Library seeded first and saved after a green run (harness/unity-cache.mjs)
+ * and one retry for a Play Mode test failure (a pass on retry is green with a flake record). { ok, problems, flakes }.
+ */
+export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log, env = process.env, ...heavyOpts } = {}) {
   const problems = [];
+  const flakes = [];
   const p = simPurity(dir);
   if (!p.ok) return { ok: false, problems: p.problems };
   const pin = checkPin(dir);
   if (!pin.ok) return { ok: false, problems: [pin.why] };
   if (pin.note) log(`[unity] note: ${pin.note}`);
+  // 2.67.1 (k): code-only first, without the lock; a failure stops here, before any wait for the editor.
+  const co = runCodeOnly(dir, { log, env });
+  if (!co.ok) return { ok: false, codeOnly: co, problems: co.problems };
   if (!which(unityBin())) return { ok: false, problems: [`the Unity editor isn't found (${unityBin()}): install Unity ${pin.version} with Unity Hub and set STUDIO_UNITY to the editor's full path (Windows: C:\\Program Files\\Unity\\Hub\\Editor\\${pin.version}\\Editor\\Unity.exe). The sim's checks need no editor: npm run engine:sim`] };
   const controlsOut = path.join(REPO_ROOT, 'qa', 'reports', 'controls-unity.json');
+  const mainRoot = heavyOpts.heavyRoot || REPO_ROOT;
+  let cache = null;
   // One machine:heavy hold for every platform (no other heavy job slips in between Edit Mode and Play Mode).
   const h = underHeavy(`unity gate ${platforms.join('+')} (${rel(dir) || '.'})`, () => {
+    const seed = seedLibrary(dir, { mainRoot, env });
+    if (seed.status !== 'off' && seed.status !== 'skipped') log(cacheLine(seed, 'before the editor'));
     for (const platform of platforms) {
-      const r = runUnityTests(dir, platform, { controlsOut: platform === 'PlayMode' ? controlsOut : null, ...heavyOpts });
-      log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} ${platform}${r.results ? `: ${r.results.passed}/${r.results.total} passed` : ''}`);
+      const opts = { controlsOut: platform === 'PlayMode' ? controlsOut : null, ...heavyOpts };
+      let r = runUnityTests(dir, platform, opts);
+      if (retryablePlayMode(r) && retryOn(env)) {
+        const first = r;
+        const logs = [saveLog(`unity-${platform}-try1.log`, first.log)];
+        log(`[gate] FAIL ${platform}: ${first.results.failed}/${first.results.total} failed; retrying once (a Play Mode failure gets one retry; STUDIO_UNITY_PLAYMODE_RETRY=off turns it off)`);
+        r = runUnityTests(dir, platform, opts);
+        logs.push(saveLog(`unity-${platform}-try2.log`, r.log));
+        const tests = first.results.failures.map((f) => f.name);
+        if (r.ok) {
+          const rec = { at: new Date().toISOString(), project: rel(dir) || '.', platform, tests, first: { result: 'failed', failed: first.results.failed, total: first.results.total, failures: first.results.failures }, second: { result: 'passed', passed: r.results?.passed ?? null, total: r.results?.total ?? null }, logs };
+          const where = recordFlake(mainRoot, rec);
+          flakes.push(rec);
+          log(`[gate] WARN ${platform} flaked: ${tests.join(', ') || `${first.results.failed} test(s)`} failed, then passed on retry: counted green, recorded in ${where} (logs: ${logs.join(', ')})`);
+        } else {
+          log(`[gate] FAIL ${platform} again on retry: red (logs: ${logs.join(', ')})`);
+        }
+      }
+      log(`[gate] ${r.ok ? 'PASS' : 'FAIL'} ${platform}${r.results ? `: ${r.results.passed}/${r.results.total} passed` : ''}${r.ok && flakes.some((f) => f.platform === platform) ? ' (on retry)' : ''}`);
       problems.push(...r.problems);
       if (r.problems.some((x) => /licence/.test(x))) break;
     }
+    if (!problems.length) {
+      const saved = saveLibrary(dir, { mainRoot, env });
+      if (saved.status !== 'off' && saved.status !== 'skipped') log(cacheLine(saved, 'after the green run'));
+      cache = { seed, saved };
+    } else cache = { seed };
   }, heavyOpts);
-  if (h.busy) return { ok: false, busy: true, problems: [`the editor's tests did not run: ${h.busy}`] };
-  return { ok: problems.length === 0, problems };
+  if (h.busy) return { ok: false, busy: true, codeOnly: co, problems: [`the editor's tests did not run: ${h.busy}`] };
+  return { ok: problems.length === 0, problems, flakes, codeOnly: co, cache };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -290,7 +404,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.65.0: the uniform job.done (harness/jobs.mjs) for the editor's tests.
     try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
     if (!r.ok) fail(r.problems, r.busy ? 3 : 1);
-    console.log('[unity] PASS the editor\'s tests (Edit Mode and Play Mode)');
+    // 2.67.1 (k): a pass on retry is green, with a warning naming the flaky tests.
+    for (const f of r.flakes || []) console.log(`[unity] WARN flaky ${f.platform} test(s): ${f.tests.join(', ') || '?'} failed once, passed on retry (.studio/unity-flakes.jsonl)`);
+    console.log(`[unity] PASS the editor's tests (Edit Mode and Play Mode)${r.flakes?.length ? ' (with a flake: see the warning)' : ''}`);
   } else if (cmd === 'build') {
     // 2.47.0: the track's buildTarget (npm run engine -- link unity <repo> --build windows) is the default.
     const t0 = Date.now();

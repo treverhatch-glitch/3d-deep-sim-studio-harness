@@ -13,6 +13,7 @@
  *   - spend: a tool over its weekly target (npm run budget);
  *   - stops: a halted supervisor whose cause isn't on the self-triage list, and causes self-triage left for a person;
  *   - 2.66.0: fuzz findings suggested in the last 24 h (npm run fuzz's shadow week); filed ones get a count line;
+ *   - 2.67.1: Unity Play Mode flakes (a test that failed, then passed on its one retry) in the last 24 h, as a line;
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -97,6 +98,14 @@ export function fuzzFiledLine(ev, now = Date.now()) {
   return filed.length ? `Fuzz filed ${filed.length} bug task${filed.length === 1 ? '' : 's'} in 24 h: ${filed.map((e) => e.meta?.task).filter(Boolean).slice(0, 4).join(', ')}.` : '';
 }
 
+/** 2.67.1 (k): Unity Play Mode tests that failed once and passed on retry in the last 24 h (harness/unity.mjs gate). */
+export function unityFlakeLine(ev, now = Date.now()) {
+  const fl = ev.filter((e) => e.type === 'unity.flake' && (Date.parse(e.ts) || 0) >= now - DAY);
+  if (!fl.length) return '';
+  const tests = [...new Set(fl.flatMap((e) => e.meta?.tests || []))];
+  return `Unity Play Mode flaked ${fl.length} time${fl.length === 1 ? '' : 's'} in 24 h (failed, then passed on retry; counted green): ${tests.slice(0, 3).join(', ') || '?'}${tests.length > 3 ? ' …' : ''} (.studio/unity-flakes.jsonl).`;
+}
+
 /** The digest's text (markdown) and its parts. */
 export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events = null, date = null } = {}) {
   const ev = events || readRecentEvents(20000);
@@ -110,6 +119,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const head = `# Studio digest ${d}`;
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
   const fuzzLine = fuzzFiledLine(ev, now);
+  const flakeLine = unityFlakeLine(ev, now); // 2.67.1 (k)
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
   let delegLine = '';
   try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
@@ -117,7 +127,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
   let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);

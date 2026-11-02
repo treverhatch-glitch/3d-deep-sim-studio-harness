@@ -973,3 +973,18 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the crew's `npm run autonomy` (13.06M tokens / 7 days counted only harness-launched sessions; no dollars; tierCUnsigned n/a; a 1,838-min halt).
 - **Why:** outside sessions weren't recorded; no prices file; the tier was read from the landing event; halts never closed on supervisor stop.
 - **Fix:** harness/usage.mjs, studio/prices.json, tier events, stale halts, STUDIO_TZ. qa/selftest-267i.mjs.
+
+### P-167 — no checks on asset work at landing, and nothing queued the engine wiring · fixed in 2.67.1
+- **Evidence:** the crew's 11:17 asks; asset tasks closed with no licence, budget, scale or brand checks.
+- **Why:** no asset gate.
+- **Fix:** harness/asset-gate.mjs and the "Wire in" hand-off. qa/selftest-2671j.mjs.
+
+### P-168 — no single asset flow; the studio's own library was never searched first · fixed in 2.67.1
+- **Evidence:** the owner's 11:30 ask.
+- **Why:** scout, pull and adapt were separate steps.
+- **Fix:** harness/asset-need.mjs. qa/selftest-2671l.mjs.
+
+### P-169 — fresh Unity copies re-imported Library (~10 min); one flaky Play Mode test turned the gate red; code checks waited behind another lane's editor · fixed in 2.67.1
+- **Evidence:** the crew's 11:17 asks 2(a)-(c).
+- **Why:** no cache, no retry, the whole gate under machine:heavy.
+- **Fix:** harness/unity-cache.mjs, the Play Mode retry, code-only steps first. qa/selftest-2671k.mjs.
