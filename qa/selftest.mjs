@@ -4160,6 +4160,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.2 (a): false alarms: a busy verify is never red (B-50), a held task stays out of trains (train leave), no-work
+// sessions are recorded and parked, the regression refusal says exactly what to add (qa/selftest-2672a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2672A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2672a.mjs')).href);
+  await selftest2672A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
