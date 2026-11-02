@@ -144,6 +144,32 @@ Rewrite `studio/PLAN.md` for the game too: its goal, the phase it is in, and the
 - **Mid-development games:** pick a freeze point, finish or park open branches, and let the old
   workflow's CI keep running alongside until the studio's gates cover the same ground.
 
+## Tests on shared randomness (2.67.0)
+
+A test that starts a seeded game is only repeatable if the game's dice are its own. When a test setup file routes the
+sim's random source to the worker's shared `Math.random`, `beginNew(42)` depends on which tests ran before it, and the
+suite fails now and then. Declare what your calls look like in `studio.gates.json` (the names here are an example):
+
+```json
+{
+  "testRandomness": {
+    "mode": "warn",
+    "seededCalls": ["\\bbeginNew\\s*\\("],
+    "sharedRandomSetup": ["\\bforceSimRandom\\s*\\(\\s*Math\\.random"],
+    "isolateCall": "forceSimRandom(null)",
+    "setupFiles": ["src/test/setup.ts"]
+  }
+}
+```
+
+`node harness/test-rng.mjs` then flags a test file that makes a seeded call while a setup file (or the file itself)
+routes the dice to `Math.random` and the file never makes the isolate call (`shared-random`), and a seeded call with no
+argument or one built from `Math.random`/`Date.now` (`unseeded-game`). The game gate runs it as `game:test-rng`: a WARN
+in verify, never a failure, and a hand-back lists the findings. `"mode": "required"` (or `STUDIO_TEST_RNG=required` for
+a run) makes it fail; `"off"` turns it off. `setupFiles` defaults to files named `*setup*`, `paths` (where tests live)
+to the game's folder. It reads text: a seeded call through a helper with another name isn't seen. The manifest is
+protected: adding this needs the owner's approval.
+
 ## Slow tests under load (2.60.0)
 
 The game check's own timeout grows with load (2.59.0), but a per-test timeout in the game's test config doesn't.
