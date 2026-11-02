@@ -15,6 +15,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-selftest-'));
+// 2.68.0: marked as the harness's own, so `npm run janitor` may remove it if a crashed run leaves it behind.
+try { (await import('../harness/janitor.mjs')).markTemp(tmpRoot, { by: 'selftest' }); } catch {}
 let gates = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates;
 const SKIP = new Set(['.git', 'node_modules', '.env', 'dist']);
 // Windows starts each process in about 1.5-2 s (Gemini's run on Hatch's PC: the 8 s supervisor runs timed
@@ -4185,6 +4187,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest268N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268n.mjs')).href);
   await selftest268N({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.68.0 (o): the crew watchdog, the futility cap (shadow first), the usage wind-down, the temp-file janitor (never a lane
+// with work) and the release impact report (qa/selftest-268o.mjs).
+{
+  const dir = copyRepo();
+  const { selftest268O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268o.mjs')).href);
+  await selftest268O({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
