@@ -57,6 +57,8 @@ export const DEFAULT_PROTECTED = [
   'studio/bench/**',
   // 2.64.0: the trigger table (harness/threads.mjs). studio/autonomy.json is not protected (the owner's rule).
   'studio/triggers.json',
+  // 2.67.0: the owner's standing delegation to an outside agent (harness/delegation.mjs): an agent can't grant itself one.
+  'studio/delegation.json',
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
