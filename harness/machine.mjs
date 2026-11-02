@@ -286,6 +286,8 @@ export function scanMachine({ root = MACHINE_ROOT, env = process.env, platform =
   if (p.ram.totalGb === null) p.ram.totalGb = probe('ram', () => r1(totalmem() / GB));
   if (p.ram.freeGb === null) p.ram.freeGb = probe('ram', () => r1(freemem() / GB));
   probe('disk', () => { const s = statfs(root); p.disk.freeGb = r1((Number(s.bavail) * Number(s.bsize)) / GB); p.disk.totalGb = r1((Number(s.blocks) * Number(s.bsize)) / GB); return true; });
+  // 2.70.0 (w): the lane copies' total from the last lane disk report (harness/lane-disk.mjs; never measured here).
+  { const l = readJson(path.join(root, '.studio', 'lanes', 'disk.json')); if (Number.isFinite(l?.totalGb)) p.disk.lanesGb = l.totalGb; }
   p.at = new Date(now).toISOString();
   return p;
 }
@@ -340,7 +342,7 @@ export function machineLine(p) {
   const g = (p.gpus || [])[0];
   if (g) parts.push(`GPU ${Number.isFinite(g.busy) ? pct(g.busy) : '?'}${Number.isFinite(g.vramGb) ? ` (${Number.isFinite(g.vramFreeGb) ? `${fmt(g.vramGb - g.vramFreeGb)}/` : ''}${fmt(g.vramGb)} GB${g.unified ? ' unified' : ''})` : ''}`);
   else parts.push('no GPU found');
-  parts.push(`disk ${fmt(p.disk?.freeGb)} GB free`);
+  parts.push(`disk ${fmt(p.disk?.freeGb)} GB free${Number.isFinite(p.disk?.lanesGb) ? ` (lane copies ${fmt(p.disk.lanesGb)} GB)` : ''}`);
   if (p.power?.onBattery) parts.push(`on battery${Number.isFinite(p.power.percent) ? ` ${p.power.percent}%` : ''}`);
   return `Machine: ${parts.join(', ')}`;
 }
@@ -453,7 +455,7 @@ function text(p) {
   const L = [machineLine(p)];
   L.push(`OS: ${p.osName || p.os} ${p.arch}; cores: ${p.cores.logical ?? '?'} logical${p.cores.physical ? `, ${p.cores.physical} physical` : ''}${p.cores.performance !== null ? ` (${p.cores.performance} performance + ${p.cores.efficiency} efficiency, ${p.cores.source})` : ''}${p.cpu.model ? `; ${p.cpu.model}` : ''}`);
   for (const g of p.gpus) L.push(`GPU: ${g.name}${Number.isFinite(g.vramGb) ? `, ${fmt(g.vramGb)} GB${g.unified ? ' unified' : ''}` : ''}${Number.isFinite(g.vramFreeGb) ? ` (${fmt(g.vramFreeGb)} free)` : ''}${Number.isFinite(g.busy) ? `, ${pct(g.busy)} busy` : ''}`);
-  L.push(`Disk: ${fmt(p.disk.freeGb)} of ${fmt(p.disk.totalGb)} GB free; power: ${p.power.onBattery === null ? 'unknown' : p.power.onBattery ? `battery${Number.isFinite(p.power.percent) ? ` ${p.power.percent}%` : ''}` : 'mains'}`);
+  L.push(`Disk: ${fmt(p.disk.freeGb)} of ${fmt(p.disk.totalGb)} GB free${Number.isFinite(p.disk.lanesGb) ? `, lane copies ${fmt(p.disk.lanesGb)} GB (npm run lanes -- disk)` : ''}; power: ${p.power.onBattery === null ? 'unknown' : p.power.onBattery ? `battery${Number.isFinite(p.power.percent) ? ` ${p.power.percent}%` : ''}` : 'mains'}`);
   if (p.processes.length) L.push(`Top processes by memory: ${p.processes.map((x) => `${x.name} ${x.mb} MB${Number.isFinite(x.cpu) ? ` ${fmt(x.cpu)}%` : ''}`).join(', ')}`);
   const errs = Object.entries(p.errors || {});
   if (errs.length) L.push(`Not read: ${errs.map(([k, v]) => `${k} (${v})`).join('; ')}`);

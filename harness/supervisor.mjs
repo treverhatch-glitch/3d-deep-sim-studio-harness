@@ -276,6 +276,11 @@ export async function supervise(opts, state, now = Date.now()) {
       if (w?.line) why.push(w.line);
     } catch { /* a watch, never a crash */ }
   }
+  // 2.70.0 (w): the janitor's stale-lane proposals (a dry run, never deletes) and the lane disk report, at most every
+  // STUDIO_JANITOR_LANES_MIN (360) minutes, in a detached child (harness/lane-disk.mjs).
+  if (!opts.watcher) {
+    try { await (await import('./lane-disk.mjs')).lanesPass({ now, inline: Boolean(opts.deps?.lanesInline) }); } catch { /* a report, never a crash */ }
+  }
   let room = ramCap.cap - live.length;
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);

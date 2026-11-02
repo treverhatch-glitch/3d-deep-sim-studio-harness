@@ -101,7 +101,10 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   // 2.68.0 (m): the machine line (the last scan, or a new one when it is older than 2 x STUDIO_MACHINE_SAMPLE_S).
   let machine = '';
   try { const m = await import('./machine.mjs'); machine = m.machineLine(m.readMachine({ root, env })); } catch { machine = ''; }
-  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}) };
+  // 2.70.0 (w): stale lane copies the janitor proposed (harness/lane-disk.mjs).
+  let staleLanes = '';
+  try { staleLanes = (await import('./lane-disk.mjs')).staleLanesLine({ root, now }); } catch { staleLanes = ''; }
+  return { now, from: fromMs, workers, landed, bugs, unity, blockers, freeGb, heavy, ...(train ? { train } : {}), ...(machine ? { machine } : {}), ...(staleLanes ? { staleLanes } : {}) };
 }
 
 const cut = (ids, k) => (ids.length <= k ? ids.join(', ') : `${ids.slice(0, k).join(', ')} +${ids.length - k} more`);
@@ -117,6 +120,7 @@ export function briefText(f, { maxWords = BRIEF_MAX_WORDS } = {}) {
     if (f.train) L.push(`${trainStatusLine(f.train, { short: true }).replace(/^Train \S+/, 'Train')}${Number(f.train.lanes) > 6 ? ' (STUDIO_TRAIN_MAX caps lanes)' : ''}.`);
     L.push(f.blockers.length ? `Blockers: ${f.blockers.map((b) => (b.ids ? `${b.text}: ${cut(b.ids, k)}` : b.text)).join('; ')}.` : 'Blockers: none.');
     if (f.machine) L.push(`${f.machine}.`);
+    if (f.staleLanes) L.push(`Lanes: ${f.staleLanes}.`);
     L.push(`PC: ${f.freeGb} GB free; heavy: ${f.heavy.length ? cut(f.heavy.map((h) => `${h.label}${h.owner ? ` (${h.owner})` : ''}`), Math.max(1, Math.min(k, 2))) : 'free'}.`);
     return L.join('\n');
   };

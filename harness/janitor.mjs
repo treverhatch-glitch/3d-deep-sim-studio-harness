@@ -20,8 +20,9 @@
  *     STUDIO_CACHE_MAX_GB (20); an entry a Unity run holds (a lock under an hour old) is kept.
  * What it never deletes: a lane copy with commits not on main, uncommitted changes, a running session or a held or
  * parked task; anything outside the studio except a temp folder carrying this studio's marker. Lanes that are merely
- * stale (older than STUDIO_JANITOR_LANE_H, 24 h; nothing unique; clean; nobody in them) are listed with --lanes and
- * deleted only with --yes --by <name>: a person, an agent under the owner's delegation for hold, or a Producer/Director
+ * stale (older than STUDIO_JANITOR_LANE_H, 24 h, or STUDIO_JANITOR_LANDED_H, 6 h, once their work has landed (2.70.0);
+ * nothing unique; clean; nobody in them) are listed with --lanes and deleted only with --yes --by <name>: a person, an
+ * agent under the owner's delegation for janitor-lanes (2.70.0; before: hold), or a Producer/Director
  * session or outside agent on a person's direct permission (harness/decider.mjs; the people `task hold` allows, made
  * exact). One janitor.run event per run that deletes (or finds) something.
  *
@@ -35,7 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
 
 const H = 3600000;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -55,6 +56,8 @@ export function janitorLimits(env = process.env) {
   return {
     tmpMs: Math.max(0, num(env.STUDIO_JANITOR_TMP_H, 24)) * H,
     laneMs: Math.max(0, num(env.STUDIO_JANITOR_LANE_H, 24)) * H,
+    // 2.70.0 (w): a lane copy whose work has landed (its task is done, or its branch was merged) is stale sooner.
+    landedMs: Math.max(0, num(env.STUDIO_JANITOR_LANDED_H, 6)) * H,
     keepLogs: Math.max(0, Math.round(num(env.STUDIO_JANITOR_KEEP_LOGS, 40))),
     logsBytes: Math.max(0, num(env.STUDIO_JANITOR_LOGS_MB, 200)) * 1024 ** 2,
     cacheBytes: Math.max(0, num(env.STUDIO_CACHE_MAX_GB, 20)) * 1024 ** 3,
@@ -186,6 +189,7 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
   let running = new Set();
   try { running = new Set((await import('./agent.mjs')).sessions().filter((s) => s.running).map((s) => s.agent)); } catch {}
   let holds = {}; try { holds = (await import('./task-hold.mjs')).readHolds(); } catch {}
+  const landed = landedLanes(root);
   const out = [];
   for (const c of laneCopies(root)) {
     const rec = readJson(path.join(root, '.studio', 'agents', `${c.agent}.json`)) || {};
@@ -199,10 +203,29 @@ export async function laneProposals({ root = studioRoot(), env = process.env, no
     else if (task && holds[task]?.held) why = `its task ${task} is held`;
     else if (task && holds[task]?.parked) why = `its task ${task} is parked`;
     else { const l = laneLive(c.agent, root); if (l.live) why = `someone is working in it (${l.why})`; }
-    if (!why && now - last < lim.laneMs) why = `used ${Math.round((now - last) / H)} h ago (under STUDIO_JANITOR_LANE_H, ${Math.round(lim.laneMs / H)} h)`;
-    out.push({ agent: c.agent, dir: c.dir, path: relp, task, bytes: why ? 0 : sizeOf(c.dir), stale: !why, why: why || `stale: ${Math.round((now - last) / H)} h untouched, nothing unique, clean, nobody in it` });
+    const done = !why && (landed.agents.has(c.agent) || (task && landed.tasks.has(task)));
+    const limMs = done ? lim.landedMs : lim.laneMs;
+    if (!why && now - last < limMs) why = `used ${Math.round((now - last) / H)} h ago (under ${done ? `STUDIO_JANITOR_LANDED_H, ${Math.round(limMs / H)} h, its work has landed` : `STUDIO_JANITOR_LANE_H, ${Math.round(limMs / H)} h`})`;
+    out.push({ agent: c.agent, dir: c.dir, path: relp, task, landed: Boolean(done), bytes: why ? 0 : sizeOf(c.dir), stale: !why, why: why || `stale: ${Math.round((now - last) / H)} h untouched${done ? ', its work has landed' : ''}, nothing unique, clean, nobody in it` });
   }
   return out;
+}
+
+/**
+ * 2.70.0 (w): lanes whose work has landed: { tasks, agents } from studio/DONE.md (tasks marked done) and lane.merged
+ * events (the agent that landed, the task).
+ */
+export function landedLanes(root) {
+  const tasks = new Set(); const agents = new Set();
+  try { for (const m of fs.readFileSync(path.join(root, 'studio', 'DONE.md'), 'utf8').matchAll(/^\s*[-*]\s+\[[xX]\]\s+\*\*([A-Z]+-\d+)\*\*/gm)) tasks.add(m[1]); } catch {}
+  try {
+    const text = fs.readFileSync(getEventPaths().primary, 'utf8');
+    for (const l of text.slice(-4 * 1024 * 1024).split('\n')) {
+      if (!l.includes('"lane.merged"')) continue;
+      try { const e = JSON.parse(l); if (e.type === 'lane.merged') { if (e.task) tasks.add(e.task); if (e.agent) agents.add(e.agent); } } catch {}
+    }
+  } catch {}
+  return { tasks, agents };
 }
 
 function removeItem(root, it) {
@@ -245,7 +268,8 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
     const stale = props.filter((l) => l.stale);
     if (yes && stale.length) {
       const { deciderCheck } = await import('./decider.mjs');
-      const d = await deciderCheck({ by, permission, env, what: 'delete lane copies' });
+      // 2.70.0 (w): the owner's delegation for exactly this action (janitor-lanes), no longer the one for hold.
+      const d = await deciderCheck({ by, permission, env, action: 'janitor-lanes', what: 'delete lane copies' });
       if (!d.ok) refused = d.why;
       else {
         const { removeLaneCopy } = await import('./worktree.mjs');
@@ -259,6 +283,10 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
         }
       }
     }
+  }
+  // 2.70.0 (w): what the digest, status --brief and the War Room show (harness/lane-disk.mjs), kept current.
+  if (lanes) {
+    try { await (await import('./lane-disk.mjs')).recordProposals({ root, env, now, emit: null, props: props.filter((l) => !lanesDeleted.some((x) => x.agent === l.agent)) }); } catch {}
   }
   const freed = deleted.reduce((s, i) => s + i.bytes, 0) + lanesDeleted.reduce((s, l) => s + l.bytes, 0);
   const staleLanes = props.filter((l) => l.stale);
