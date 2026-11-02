@@ -37,6 +37,7 @@ import { RETRO_DIR } from './retro.mjs';
 import { signature, shape, signatureKey, signatureId, FAILURE_TYPES, readChanges, addChange, evaluateChanges, changeLine, readLadder, writeLadder } from './changes.mjs';
 import { parseNextQueue, addTask, HANDOFF_DIR } from './task.mjs';
 import { taskType } from './done-check.mjs';
+import { ownerType } from './reclassify.mjs';
 
 const read = (rel) => {
   try {
@@ -134,7 +135,9 @@ export function boardTypes(events = []) {
   const byId = new Map([...q.inProgress, ...q.backlog, ...q.done].map((t) => [t.id, t]));
   const added = new Map();
   for (const e of events) if (e.type === 'task.added' && e.task && e.meta?.type) added.set(e.task, e.meta.type);
-  return (id) => (byId.get(id) ? taskType(byId.get(id)) : added.get(id) || 'unknown');
+  // 2.67.0 (B-38): a task no longer on the board still takes the owner's type before the type it was queued with.
+  const owned = (id) => { try { return ownerType(id)?.type || null; } catch { return null; } };
+  return (id) => (byId.get(id) ? taskType(byId.get(id)) : owned(id) || added.get(id) || 'unknown');
 }
 
 /** What `npm run learn` and the HUB's daily pass do besides writing LEARNED.md: grade due changes, climb the ladder. */

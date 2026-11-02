@@ -99,5 +99,16 @@ export function setTrunk(state, { by, why = '' } = {}) {
   return { ok: true, trunk: rec };
 }
 
-/** A task that fixes the trunk (its title or tags say so). */
-export const isFixTask = (t) => /^\s*(fix|bug|hotfix|repair|revert)\b/i.test(String(t?.title || '')) || /\[(fix|bug)(:[^\]]*)?\]/i.test(String(t?.title || '')) || /^Whole-game check red\b/i.test(String(t?.title || ''));
+/**
+ * A task that fixes the trunk (its title or tags say so). 2.67.0 (B-38): `ownerTypeOf` (harness/reclassify.mjs
+ * ownerType) lets a valid owner type outrank the title: an owner "bug" or "whole" is a fix task whatever the title, any
+ * other owner type is not (a "Fix …" title the owner made "docs" no longer starts on a red trunk).
+ */
+export const isFixTask = (t, ownerTypeOf = null) => {
+  if (typeof ownerTypeOf === 'function' && t?.id) {
+    let o = null;
+    try { o = ownerTypeOf(t.id); } catch { o = null; }
+    if (o?.type) return o.type === 'bug' || o.type === 'whole';
+  }
+  return /^\s*(fix|bug|hotfix|repair|revert)\b/i.test(String(t?.title || '')) || /\[(fix|bug)(:[^\]]*)?\]/i.test(String(t?.title || '')) || /^Whole-game check red\b/i.test(String(t?.title || ''));
+};
