@@ -124,7 +124,7 @@ change adds or changes files under the game's declared asset paths. Its limits c
 | texture | a PNG/JPEG (loose or inside a .glb) is bigger than `textureMaxPx` |
 | scale | the model's bounding box (LOD 0 meshes' POSITION min/max through their nodes' transforms, metres; Y-up: w = x, h = y, d = z) is outside the stated size ± `sizeTolerance`; the size is `"size": { "w", "d", "h" }` in its manifest row or in `<name>.asset.json` next to it (none: a note, or a failure with `sizeRequired`). A game's own engine-side model check can run as the round-trip command |
 | preview | a model has no `<name>.preview.png` (or `_preview`, `.jpg`, `.webp`) next to it |
-| roundtrip | the configured command exits non-zero (it runs under the machine:heavy lock; `{file}` runs it per model). No command, or the program isn't installed: skipped with a note |
+| roundtrip | the configured command exits non-zero (it runs under the machine:heavy lock, 2.70.0: in the GPU area when the scan shows a GPU, one harness Blender job at a time, `-t <n>` threads from `STUDIO_BLENDER_THREADS` or the scan; docs/WORK-ORGANIZATION.md; `{file}` runs it per model). No command, or the program isn't installed: skipped with a note |
 | brand | a configured brand name is in a file name, a glTF node/mesh/material/texture/image name, or the manifest row |
 
 Every failure prints a `Fix:` line (`harness/gate-fix.mjs` ASSET_FIXES) and goes into the task's next hand-back facts.
