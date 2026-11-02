@@ -233,6 +233,21 @@ maxWorkers: workers,
 
 Outside the gate the variable is unset and Vitest picks its own count.
 
+## Quarantined flaky tests (2.69.0)
+
+A test the merge train's flake triager labelled flaky 3 times in a week is on `studio/quarantine.json`
+(docs/WORK-ORGANIZATION.md, "The flake triager"). The game's checks get the list as `STUDIO_TEST_QUARANTINE`, a JSON
+list of test files as the runner printed them (unset when none). Skip them in the test config, for example in
+`vitest.config.ts`:
+
+```ts
+const quarantined: string[] = JSON.parse(process.env.STUDIO_TEST_QUARANTINE || '[]');
+// in defineConfig({ test: { ... } }):
+exclude: [...configDefaults.exclude, ...quarantined],
+```
+
+A fix task is filed for each; when it lands, a game dev releases the test: `npm run flakes -- release <test> --by <name>`.
+
 ## Landing tiers and batching for the merge train (2.63.0)
 
 The merge train gives each lane a blast-radius tier from its diff (`harness/tiers.mjs`; docs/WORK-ORGANIZATION.md):
