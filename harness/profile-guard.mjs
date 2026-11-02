@@ -14,7 +14,7 @@
  * A refusal is a plain message and a profile.refused event; nothing starts.
  */
 import { emitEvent } from './event.mjs';
-import { PLANNING_ROLES } from './stall.mjs';
+import { PLANNING_ROLES } from './planning-roles.mjs';
 
 const key = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 const list = (v) => String(v || '').split(/[\s,]+/).filter(Boolean);
