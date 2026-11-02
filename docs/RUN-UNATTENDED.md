@@ -107,6 +107,16 @@ A park is undone by an unpark: the launcher's loop park and the watchdog's "hand
 count only hand-backs since the last done, unblock or unpark, and a park is written once however many passes
 reach it at the same moment (2.58.3).
 
+A session that ends with no work is recorded and counted too (2.67.2, `harness/session-outcome.mjs`): each
+`agent.session.end` carries `meta.outcome` (its task, whether it claimed it, its commits, whether it was done, and,
+without a done, why: its `task start` was refused (`task.start_refused`), it never claimed the task, `task done` was
+refused and by what, or it claimed and committed nothing). After `STUDIO_NO_WORK_EXITS` (2; 0 turns it off) such exits
+in a row (no done, and no commit or a refused task done; a person's stop, a refresh, a usage limit or a provider error
+don't count) the launcher parks the task with that reason and tells the Producer, instead of starting it again; `npm
+run task -- unpark <ID> --by <name>` resets the count. A bug task's brief and its done-check refusal name the
+regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regressions.mjs --update` and
+`node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
+
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back.
 

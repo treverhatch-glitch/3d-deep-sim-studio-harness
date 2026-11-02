@@ -1636,6 +1636,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       process.exit(1);
     }
     if (started.error) {
+      // 2.67.2: a refused start is evidence for the session's end record (harness/session-outcome.mjs).
+      emitEvent({ type: 'task.start_refused', agent: whoAmI(flags) || undefined, task: targetId, status: 'blocked', msg: `${started.error}: ${started.message || (started.lock?.owner ? `claimed by ${started.lock.owner}` : "can't be claimed right now")}`.slice(0, 400) });
       console.error(started.error === 'locked' && started.lock?.owner && !started.message ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
       process.exit(1);
     }
@@ -1854,7 +1856,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
-      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
+      console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}${tr.taskHoldOf(mainRoot(), e.task) ? `  OUT OF TRAINS: ${tr.heldOutWhy(tr.taskHoldOf(mainRoot(), e.task)).replace('<ID>', e.task)}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
       { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
       process.exit(0);
     }
@@ -1866,6 +1868,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
+    // 2.67.2: take a queued lane out of the train queue on purpose, recorded (who, why); never a worker.
+    if (arg1 === 'leave') {
+      const tid = flags._[2];
+      if (!tid || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train leave <TASK_ID> --by <name> --why "…"'); process.exit(1); }
+      const r = await tr.leaveTrain(mainRoot(), tid, { by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
     // 2.65.0 (B-40): apply a config proposal held on main (its protected part waited for the owner, or main moved a key).
     if (arg1 === 'config') {
       const tid = flags._[2];
@@ -1874,12 +1884,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train config <ID> [--by <name>]'); process.exit(1); }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
     (r.ok ? console.log : console.error)(r.message);
-    console.log(JSON.stringify({ train: r.id, ...(r.trains ? { trains: r.trains } : {}), landed: r.landed, dropped: r.dropped, deferred: r.deferred, ...(r.held?.length ? { held: r.held.map(({ fresh, ...h }) => h) } : {}), ...(r.tiers && Object.keys(r.tiers).length ? { tiers: r.tiers } : {}), verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+    console.log(JSON.stringify({ train: r.id, ...(r.trains ? { trains: r.trains } : {}), landed: r.landed, dropped: r.dropped, deferred: r.deferred, ...(r.held?.length ? { held: r.held.map(({ fresh, ...h }) => h) } : {}), ...(r.tiers && Object.keys(r.tiers).length ? { tiers: r.tiers } : {}), verifies: r.verifies ?? 0, reused: r.reused ?? 0, ...(r.rechecks ? { rechecks: r.rechecks } : {}), ...(r.pinRefresh ? { pinRefresh: r.pinRefresh } : {}), ...(r.union ? { union: r.union } : {}), ...(r.redMain ? { redMain: true } : {}), ...(r.noCheck ? { noCheck: r.noCheck } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
     process.exit(r.ok ? 0 : 1);
   }
 

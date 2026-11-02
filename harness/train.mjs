@@ -80,6 +80,7 @@ import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './t
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
 import { withFacts } from './handback-facts.mjs';
+import { runGatesWaiting } from './train-busy.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -120,6 +121,42 @@ export function dequeue(root, task) {
   return withQueue(root, (q) => { const i = q.findIndex((e) => e.task === task); if (i >= 0) q.splice(i, 1); return i >= 0; });
 }
 const requeue = (root, lane, patch) => withQueue(root, (q) => { const e = q.find((x) => x.task === lane.task); if (e) Object.assign(e, patch); });
+
+// ---- 2.67.2: a held task stays out of trains; train leave -----------------------------------------
+
+/** The `task hold` record for a task (studio/task-holds.json, main's), or null. */
+export function taskHoldOf(root, task) {
+  try { return JSON.parse(fs.readFileSync(path.join(root, 'studio', 'task-holds.json'), 'utf8')).tasks?.[task]?.held || null; } catch { return null; }
+}
+/** Words for a held task left out of a train. */
+export const heldOutWhy = (h) => `held for landing by ${h.by || 'someone'}${h.why ? `: ${h.why}` : ''}; it stays out of trains until npm run task -- unhold <ID> --by <name>`;
+
+/** Who left the train queue on purpose, newest last: .studio/train/left.json [{ task, by, why, at, head, branch }]. */
+export function readLeft(root) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(root, TRAIN_DIR, 'left.json'), 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; }
+}
+
+/**
+ * `npm run task -- train leave <ID> --by <name> --why "…"`: take a queued lane out of the train queue on purpose (its
+ * copy and commits stay; task done <ID> --train queues it again). Who: as for task hold (a person, a Producer or
+ * Director session, an agent outside the harness; never a worker). Recorded (.studio/train/left.json) with who and why,
+ * and a task.train.left event. Before 2.67.2 the crew called dequeue() from this file by hand.
+ */
+export async function leaveTrain(root, task, { by = '', why = '', env = process.env } = {}) {
+  const { holdRefusal } = await import('./task-hold.mjs');
+  const refused = holdRefusal(by, env);
+  if (refused) return { ok: false, message: refused.replace('hold a lane', 'take a lane out of the train').replace('holds lanes', 'takes lanes out of the train') };
+  if (!String(why).trim()) return { ok: false, message: 'Say why: --why "…" (it is recorded and shown in npm run lanes).' };
+  const e = readQueue(root).find((x) => x.task === task);
+  if (!e) return { ok: false, message: `${task} isn't in the train queue (npm run task -- train status lists it).` };
+  dequeue(root, task);
+  const rec = { task, by: String(by).trim().slice(0, 60), why: String(why).trim().slice(0, 300), at: new Date().toISOString(), head: e.head || null, branch: e.branch || null };
+  const f = path.join(root, TRAIN_DIR, 'left.json');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify([...readLeft(root), rec].slice(-200), null, 2));
+  emitEvent({ type: 'task.train.left', agent: rec.by, task, to: e.agent || undefined, status: 'warn', msg: `${task} left the train queue (by ${rec.by}): ${rec.why}`.slice(0, 600), meta: { head: rec.head, branch: rec.branch } });
+  return { ok: true, entry: rec, message: `${task} is out of the train queue (by ${rec.by}: ${rec.why}). Its copy and commits are unchanged; npm run task -- done ${task} --train queues it again.` };
+}
 
 // ---- one train at a time ------------------------------------------------------------------------
 
@@ -465,8 +502,8 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lo
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
   const t0 = Date.now();
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
-  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
   const recDir = path.join(root, TRAIN_DIR, 'records');
   fs.mkdirSync(recDir, { recursive: true });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}.log`);
@@ -479,10 +516,10 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lo
   // Green only when the gates passed AND the record says they tested exactly this tree, clean, in full.
   const ok = r.status === 0 && recordGreen(rec) && rec.tree === tree && (!all || !rec.scoped);
   const { gates, detail } = failLines(text);
-  const why = ok ? '' : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
+  const why = ok ? '' : noCheck ? `ran no check (${busy || `exit ${r.status} before any gate ran`})` : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0 } });
-  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0 };
-  seen.set(tree, res);
+  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}) };
+  if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
   return j;
@@ -522,15 +559,14 @@ function recheck(sc, { id, tree, gates, changed, all, cache, log, res, label, fo
   writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, recheck: n, eta });
   ev('recheck', id, line, { meta: { n, about: about || null, question, gates, tree, focus: focus || null, eta: eta ? { ms: eta.ms, text: eta.text } : null } });
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `re-check ${n}` });
   const logFile = path.join(root, TRAIN_DIR, `${id}-recheck-${n}.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
   for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
   const { gates: failed, detail } = failLines(text);
   res.recheckMs = [...(res.recheckMs || []), Date.now() - t0];
-  const c = { ok: r.status === 0, gates: failed, detail, text, log: path.relative(root, logFile).split(path.sep).join('/') };
-  cache.set(key, c);
+  const c = { ok: r.status === 0, gates: failed, detail, text, log: path.relative(root, logFile).split(path.sep).join('/'), ...(r.status !== 0 && noCheck ? { noCheck: true, busy: busy || null } : {}) };
+  if (!c.noCheck) cache.set(key, c);
   return c;
 }
 
@@ -584,6 +620,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
   const steps = [];
   const c0 = check(0, { question: ask.main(), left: 1 + stepsLeft(0, n) });
   if (!c0) return { kind: 'alone', why: `${main} alone doesn't build` };
+  if (c0.noCheck) return noCheckPlan(c0, main);
   steps.push({ prefix: [], ok: c0.ok });
   const pinsOnly = settings.pins && tryPins ? pinsOnlyRed(v.rec?.tree === built.tree ? ctx.text : '', { failGates, gameGates: gameGateIds(sc.root), tests: settings.pins.tests }) : { ok: false, why: settings.pins ? 'pins already tried' : 'the game declares no pins' };
   if (!c0.ok) return { kind: 'redMain', gates: failGates, log: c0.log, why: pinsOnly.ok ? `the pinned checks (${pinsOnly.tests.slice(0, 5).join('; ')}) fail on ${main} itself: no lane in this train moved them, a regression on ${main}` : `${failGates.join(', ')} fail on ${main} itself` };
@@ -606,6 +643,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
       const mid = (lo + hi) >> 1;
       const c = check(mid, { question: ask.mid(lo, hi, mid, Boolean(red)), left: stepsLeft(lo, hi, Boolean(red)) });
       if (!c) return { kind: 'alone', why: `${label(mid)} doesn't build` };
+      if (c.noCheck) return noCheckPlan(c, label(mid));
       steps.push({ prefix: set.slice(0, mid).map((l) => l.task), ok: c.ok });
       if (c.ok) lo = mid; else { hi = mid; red = c; }
     }
@@ -613,6 +651,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
     // Only the full verify said the whole train is red: confirm it before anyone is handed back.
     const c = check(hi, { question: ask.confirm(lo, hi), left: 1 });
     if (!c) return { kind: 'alone', why: `${label(hi)} doesn't build` };
+    if (c.noCheck) return noCheckPlan(c, label(hi));
     steps.push({ prefix: set.slice(0, hi).map((l) => l.task), ok: c.ok });
     if (!c.ok) { red = c; break; }
     // 2.65.3 (B-43): the failing test files pass when run on their own on the very tree the verify failed: they fail
@@ -623,6 +662,7 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
       fx = null;
       const w0 = check(0, { question: `${ask.main()} (the whole failing gate(s) this time)`, left: 1 + stepsLeft(0, n) });
       if (!w0) return { kind: 'alone', why: `${main} alone doesn't build` };
+      if (w0.noCheck) return noCheckPlan(w0, main);
       steps.push({ prefix: [], ok: w0.ok, whole: true });
       if (!w0.ok) return { kind: 'redMain', gates: failGates, log: w0.log, why: `${failGates.join(', ')} fail on ${main} itself` };
       continue;
@@ -636,6 +676,22 @@ function redPlan(ctx, { pins: tryPins = true, bisect = true } = {}) {
     ? `the checks ${what} pass on ${main} + ${before.join(' + ')} (the lanes before it in this train) and fail once this lane is added (${label(hi)}): it breaks them, alone or only together with those lanes`
     : `the checks ${what} pass on ${main} and fail on ${main} + this lane`;
   return { kind: 'culprit', lane, steps, why: `${why}${red.detail.length ? `:\n${red.detail.join('\n')}` : ''}\nLog: ${red.log}. ${before.length ? `Once ${before.join(', ')} land${before.length === 1 ? 's' : ''}, merge ${main} into your copy (git merge ${main}), fix it there` : 'Fix it in your copy'}, commit, run npm run verify, then task done again` };
+}
+
+/** 2.67.2 (B-50): a re-check that ran no check (refused as busy, or stopped before any gate) judges nothing. */
+const noCheckPlan = (c, label) => ({ kind: 'noCheck', busy: c.busy || null, log: c.log, why: `the re-check on ${label} ran no check (${c.busy || 'it stopped before any gate ran'}; log ${c.log || '-'})` });
+
+/**
+ * 2.67.2 (B-50): a verify or re-check that ran no check: the lanes wait in the queue for the next train; nothing is
+ * judged (no hand-back, never "main itself is red").
+ */
+function deferNoCheck(res, set, defer, { id, log, by, what }) {
+  const why = `${what}: busy, not red. nothing landed, nobody was handed back and main was not judged; the lanes wait for the next train`;
+  res.ok = false;
+  res.noCheck = { why: what };
+  log(`[train] ${id}: ${why}`);
+  ev('no_check', id, `${set.map((l) => l.task).join(', ')}: ${why}`.slice(0, 600), { agent: by, to: 'producer', status: 'warn', meta: { lanes: set.map((l) => l.task) } });
+  for (const l of set) defer(l, `${what} (busy, not red)`);
 }
 
 /**
@@ -1335,9 +1391,17 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   const stillHeld = lanes.filter((l) => l.fromQueue && heldNow(l));
   for (const l of stillHeld) { res.held.push({ task: l.task, tier: l.held.tier, why: l.held.why, fresh: false }); log(`[train] ${id}: ${l.task} needs the owner (tier ${l.held.tier}: ${l.held.why}); npm run task -- train release ${l.task} --by <name> lands it`); }
   lanes = lanes.filter((l) => !stillHeld.includes(l));
+  // 2.67.2: a task held for landing (npm run task -- hold) stays out of trains: queued, ridden along or its own task done.
+  for (const l of lanes.filter((x) => taskHoldOf(root, x.task))) {
+    const why = heldOutWhy(taskHoldOf(root, l.task)).replace('<ID>', l.task);
+    res.deferred.push({ task: l.task, why });
+    log(`[train] ${id}: ${l.task} left out: ${why}`);
+    if (!dryRun) ev('deferred', id, `${l.task} left out of this train: ${why}`, { task: l.task, agent: by, to: l.agent, status: 'warn', meta: { held: true } });
+  }
+  lanes = lanes.filter((l) => !taskHoldOf(root, l.task));
   // 2.63.0 (ride along): a lone task done takes the lanes already queued for the next train with it.
   if (given && rideAlong) {
-    const riders = readQueue(root).filter((e) => !given.some((g0) => g0.task === e.task) && !heldNow(e)).map((e) => ({ ...e, fromQueue: true, rider: true }));
+    const riders = readQueue(root).filter((e) => !given.some((g0) => g0.task === e.task) && !heldNow(e) && !taskHoldOf(root, e.task)).map((e) => ({ ...e, fromQueue: true, rider: true }));
     lanes.push(...riders);
   }
   // 2.65.0 (B-34, 3.3): lanes queued after a predicted conflict, or whose --after dependencies haven't landed, wait
@@ -1489,6 +1553,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         if (!v.cached && !v.reused) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
         if (v.reused) res.reused += 1;
         if (v.ok) { verdict = { built, v }; break; }
+        if (v.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `verify ${res.verifies} ${v.why}` }); set = []; break; }
         // 2.65.3 (B-43): the red event and the log name the failing tests (parsed from the verify log, capped).
         let redText = '';
         try { redText = v.log ? fs.readFileSync(path.join(root, v.log), 'utf8') : ''; } catch {}
@@ -1528,6 +1593,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             ev('pin_refresh_red', id, `the pin refresh didn't make the train green (${v2.why}); bisecting instead`, { agent: by, status: 'warn', meta: { report: plan.info.report, gates: v2.gates } });
             plan = redPlan(ctx, { pins: false, bisect: !(oneLane && set.length === 1) });
           }
+          if (plan.kind === 'noCheck') { deferNoCheck(res, set, defer, { id, log, by, what: plan.why }); set = []; break; }
           if (plan.kind === 'redMain') {
             res.ok = false;
             res.redMain = true;
@@ -1578,7 +1644,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           if (!v1.cached && !v1.reused) res.verifies += 1;
           if (v1.reused) res.reused += 1;
           alone.push({ l, v1 });
+          if (v1.noCheck) break;
         }
+        const idle = alone.find(({ v1 }) => v1.noCheck);
+        if (idle) { deferNoCheck(res, set, defer, { id, log, by, what: `the verify of ${idle.l.task} alone ${idle.v1.why}` }); set = []; break; }
         ev('bisect', id, alone.map(({ l, v1 }) => `${l.task} alone: ${v1.ok ? 'green' : 'red'}`).join(', '), { agent: by, meta: { alone: alone.map(({ l, v1 }) => ({ task: l.task, ok: v1.ok })) } });
         const bad = alone.filter((x) => !x.v1.ok);
         if (bad.length && bad.length === alone.length) {
@@ -1586,6 +1655,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           const b0 = buildIntegration(sc, tip, [], { id, unionFiles });
           const v0 = verifyTree(sc, { id, n: res.verifies + 1, tree: b0.tree, changed: [], all: false, seen, tasks: alone.map(({ l }) => l.task), log });
           if (!v0.cached && !v0.reused) res.verifies += 1;
+          if (v0.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `the verify of main alone ${v0.why}` }); set = []; break; }
           if (!v0.ok) {
             res.ok = false;
             res.redMain = true;

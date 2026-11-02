@@ -40,7 +40,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
 import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, LANES_DIR } from './worktree.mjs';
-import { readQueue, heldNow, pinMoves, trainManifest } from './train.mjs';
+import { readQueue, heldNow, pinMoves, trainManifest, readLeft } from './train.mjs';
 import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';
 import { chainTailNotes } from './train-tail.mjs';
 import { mergeTreeSupport, mergeTree, placesFor } from './merge-tree.mjs';
@@ -161,6 +161,7 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
   const tip = out(git(root, 'rev-parse', `refs/heads/${main}`));
   const notes = [];
   const holds = readHolds();
+  let leftList = null;
   let events = [];
   try { events = readRecentEvents(5000); } catch {}
   const lanes = [];
@@ -185,6 +186,10 @@ export async function laneTable(root = mainRoot(), { stamps = true, conflicts = 
     row.queued = q ? { at: q.at || null, tier: recordedTier(q, row.task, events), held: heldNow(q) ? { tier: q.held.tier, why: q.held.why } : null, stale: q.head !== head } : null;
     const h = row.task ? holds[row.task]?.held : null;
     row.hold = h ? { by: h.by || null, why: h.why || '', at: h.at || null } : null;
+    // 2.67.2: a held lane stays out of trains (queued or not); a lane taken out of the queue (train leave) says by whom.
+    if (row.queued && h) row.queued.out = true;
+    const left = row.task && !row.queued ? (leftList ||= readLeft(root)).filter((x) => x.task === row.task).pop() : null;
+    row.left = left ? { by: left.by, why: left.why, at: left.at } : null;
     row.last = lastResult(root, l, head);
     row.session = sessionRunning(root, l.agent);
     lanes.push(row);
@@ -276,7 +281,7 @@ export function tableText(t) {
     r.error ? '?' : `+${r.ahead}/-${r.behind}`,
     stampWord(r.stamps),
     !r.harness ? '-' : r.harness.current ? 'current' : `stale (${r.harness.files})`,
-    r.queued ? `yes${r.queued.tier ? ` ${r.queued.tier}` : ''}${r.queued.held ? ' HELD-owner' : ''}${r.queued.stale ? ' (new commits)' : ''}` : '-',
+    r.queued ? `yes${r.queued.tier ? ` ${r.queued.tier}` : ''}${r.queued.held ? ' HELD-owner' : ''}${r.queued.out ? ' OUT (held)' : ''}${r.queued.stale ? ' (new commits)' : ''}` : r.left ? `left (by ${r.left.by})` : '-',
     r.hold ? `held by ${r.hold.by}` : '-',
     lastWord(r.last),
     r.pinMoves?.length ? r.pinMoves.join(',') : '-',

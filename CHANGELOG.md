@@ -4,6 +4,25 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.67.2] — 2026-11-02
+2.67.2: stop the false alarms (the crew's B-50 and two day-two findings; P-170 to P-173).
+### Fixed
+- **A busy verify is never red (B-50).** The full-verify record is per checkout, so a lane's verify no longer refuses
+  the train's. A run refused before any gate waits and runs again (`STUDIO_TRAIN_BUSY_WAIT_MIN`, 20), then the lanes
+  are deferred: no hand-back, never "main itself is red".
+- **A held task stays out of trains**, and `npm run task -- train leave <ID> --by --why` takes a lane out of the queue
+  on record (`npm run lanes` shows it).
+- **Sessions that end with no work are recorded and stop being relaunched.** Each session end records claimed,
+  commits, done and why there was no work (`task.start_refused` is the evidence); after `STUDIO_NO_WORK_EXITS` (2)
+  no-work exits in a row the task is parked for the Producer.
+- **The "Regression saved" refusal and bug briefs say exactly what to add** (`qa/regressions/<ID>.json`, missing
+  fields, the pin and fails-before commands).
+
+### Untested
+- Windows: realpath through junctions and case-folding in the per-checkout key.
+
+---
+
 ## [2.67.1] — 2026-11-02
 2.67.1: the crew's Blender and Unity notes (11:17) and the owner's one asset flow (11:30) (P-167 to P-169).
 ### Added

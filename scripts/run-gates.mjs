@@ -40,7 +40,12 @@ const argv = process.argv.slice(2);
 const SCRIPT = fileURLToPath(import.meta.url);
 const VERIFY_DIR = path.join(root, '.studio', 'verify-running');
 const verifyOwner = /^[\w.-]+$/.test(process.env.STUDIO_LOCK_OWNER || '') ? process.env.STUDIO_LOCK_OWNER : '_default';
-const FULL_FILE = path.join(VERIFY_DIR, 'full.json'); // 2.59.0 (#11b): the checkout's running full verify
+// 2.59.0 (#11b): the checkout's running full verify. 2.67.2 (B-50): keyed by checkout. A lane copy's (and a train's
+// scratch copy's) .studio/ is a link to the main checkout's, so one shared full.json made a builder's lane verify look
+// like "a full verify of this checkout" to the train and to every other lane: each was refused. The main checkout
+// keeps full.json; any other checkout uses full.<hash of its real path>.json, and a record names its checkout (root).
+const CHECKOUT = checkoutKey(root);
+const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
 {
   const stage = argv.indexOf('--verify-stage');
   if (stage >= 0) process.exit(await verifyStage(argv[stage + 1], argv[stage + 2]));
@@ -350,10 +355,24 @@ function changedTracked(before, after) {
 
 // ---- 2.59.0 (#11b): one full verify per checkout ----
 
+/**
+ * 2.67.2 (B-50): this checkout's key for the full-verify record: { real, file }. The checkout whose .studio/ is its
+ * own folder (the main checkout) uses full.json; a checkout whose .studio/ is a link (a lane or train copy) uses
+ * full.<12 hex of sha1(its real path)>.json. Windows paths compare case-insensitively.
+ */
+function checkoutKey(dir) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const here = norm(real(dir));
+  const own = norm(path.dirname(real(path.join(dir, '.studio')))) === here;
+  return { real: here, file: own ? 'full.json' : `full.${crypto.createHash('sha1').update(here).digest('hex').slice(0, 12)}.json` };
+}
+
 /** The live full verify of this checkout other than this process: its record, or null (none, or stale). */
 function liveFullVerify() {
   const rec = readJsonFile(FULL_FILE);
   if (!rec?.pid || rec.pid === process.pid) return null;
+  if (rec.root && rec.root !== CHECKOUT.real) return null; // another checkout's run (2.67.2, B-50)
   return idAlive(rec.pid, rec.identity) && Date.now() - Date.parse(rec.startedAt || 0) < Number(process.env.STUDIO_VERIFY_MAX_MIN || 360) * 60000 ? rec : null;
 }
 
@@ -364,7 +383,7 @@ function claimFullVerify() {
     const live = liveFullVerify();
     if (live) return live;
     const st = process.env.STUDIO_VERIFY_RUN ? readJsonFile(verifyFiles().status) : null;
-    writeAtomic(FULL_FILE, JSON.stringify({ pid: process.pid, identity: selfIdentity(), owner: verifyOwner, args: argv, startedAt: new Date().toISOString(), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN, log: st?.runId === process.env.STUDIO_VERIFY_RUN ? relPath(st.log) : null } : {}) }, null, 2));
+    writeAtomic(FULL_FILE, JSON.stringify({ pid: process.pid, identity: selfIdentity(), root: CHECKOUT.real, owner: verifyOwner, args: argv, startedAt: new Date().toISOString(), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN, log: st?.runId === process.env.STUDIO_VERIFY_RUN ? relPath(st.log) : null } : {}) }, null, 2));
     return null;
   });
   if (holder) {
