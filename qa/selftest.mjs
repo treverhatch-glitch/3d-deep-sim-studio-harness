@@ -4246,6 +4246,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.70.0 (u): Unity speed: the Accelerator (STUDIO_UNITY_ACCELERATOR), no duplicate Edit Mode run (dotnet-covered or the
+// same tree), one editor start (STUDIO_UNITY_ONE_EDITOR), the Graphics split, landing build options, the parallel
+// Library copy (qa/selftest-270u.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270u.mjs')).href);
+  await selftest270U({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -296,6 +296,88 @@ The land gate (`harness/unity-gate.mjs`) runs the land script as before: the scr
 worktree, so the harness has no checkout of that branch to run code-only steps on. Its land script can run its own
 code-only checks first.
 
+### Unity speed (2.70.0)
+
+Each of these is a setting. The ones that rest on Unity behaviour nobody has checked on a real editor yet are
+**off by default** and marked UNVERIFIED.
+
+- **Unity Accelerator** (`STUDIO_UNITY_ACCELERATOR=<host:port>`, default unset: off). Install the Accelerator (default
+  port 10080). Then every editor start the harness makes (Edit Mode, Play Mode, `build`) gets `-EnableCacheServer
+  -cacheServerEndpoint <host:port> -cacheServerEnableDownload true -cacheServerEnableUpload true
+  -cacheServerNamespacePrefix <the project's Unity version>`. The version namespace keeps one editor version's results
+  away from another's.
+  - Before the run, the harness tries a TCP connect, waiting up to `STUDIO_UNITY_ACCELERATOR_TIMEOUT_MS` (1500).
+  - If nothing answers, the run goes on without the Accelerator and says so once. The Accelerator never fails a gate.
+  - The gate's summary line ends with `cache server on` or `cache server off`.
+  - `node harness/unity.mjs accelerator [<folder>]` checks the endpoint and prints the arguments. Use them for other
+    editor batch work you start through `heavy.mjs run`, such as a bake.
+- **No duplicate Edit Mode** (`STUDIO_UNITY_EDITMODE_REUSE`, default on; `off` always runs it).
+  - **What ran twice:** the code-only step `dotnet test tools/SimTests` compiles and runs
+    `Assets/Tests/EditMode/**/*.cs` (see the template's `.csproj`). The editor then ran the same tests again in its own
+    start.
+  - **Reused from .NET:** the editor skips Edit Mode when the .NET run passed in this same gate *and* the `.csproj`
+    compiles every Edit Mode test file. A test file counts as Edit Mode when it sits under an Editor-only test
+    assembly: an asmdef with `UNITY_INCLUDE_TESTS` or a TestRunner reference.
+  - This reuse needs Play Mode in the same gate, so the editor still starts and compiles the whole project. A
+    `--platform EditMode` gate always runs Edit Mode in the editor.
+  - **Reused from an earlier gate:** a passing editor Edit Mode run is recorded in `.studio/gates/unity-editmode.json`
+    (per checkout). It holds the project's git tree, its Unity version and the editor path. A later gate skips Edit
+    Mode only on the same clean tree, with the same version and editor, within 24 h. Any uncommitted change, other
+    commit or other editor runs it again (the 2.69 verify-reuse rules).
+  - The gate says which reuse it used.
+  - Risk: .NET and Unity's runtime could disagree on a test that depends on float maths. Keep the sim's maths integer,
+    as the template does, or turn the reuse off.
+- **One editor start** (`STUDIO_UNITY_ONE_EDITOR=on`, default off, UNVERIFIED). Edit Mode and Play Mode run in one
+  editor through `-executeMethod StudioHarnessRunAll.Run`.
+  - The harness writes `Assets/StudioHarnessTemp/` for the run: a small script that uses `TestRunnerApi`, its asmdef,
+    and a `.gitignore` of `*`. It removes the folder and its `.meta` afterwards, even when the run fails.
+  - Two things are unchecked on a real editor: that both modes run one after the other in one Execute chain, and that
+    the callbacks come back after Play Mode's domain reload.
+  - If the run doesn't write both result files, the same gate falls back to two starts. The gate logs the fallback
+    and saves the log to `.studio/gates/out/unity-one-editor.log`.
+- **Graphics split** (`STUDIO_UNITY_GRAPHICS_SPLIT`; default on when any test source has `[Category("Graphics")]`
+  outside a comment; `off`: everything headless). On a platform with Graphics tests:
+  - one start runs `-nographics -testCategory "!Graphics"`;
+  - a second start runs `-testCategory Graphics` with a graphics device (no `-nographics`);
+  - their results are added together.
+  - The gate's `machine:heavy` hold claims the GPU area: the `unity-visual` (or `unity-graphics`) job kind's VRAM when
+    the budget defines one, else the `unity` kind's. Tag render, HDRP-visual and lightmap tests `Graphics`; everything
+    else stays headless and uses no VRAM.
+- **Landing build options** (`STUDIO_UNITY_LANDING_BUILD=fast`, default off). Builds the harness starts
+  (`npm run engine:build`) pass `-studioBuildSpeed fast` to the build method. `--release` never gets it. The harness
+  never edits ProjectSettings. The game's `Assets/Editor/StudioBuild.cs` decides what "fast" means, and puts back
+  whatever it changed:
+
+  ```csharp
+  // In Run(), before BuildPlayer: Arg("-studioBuildSpeed", "") == "fast" means a landing/dev build.
+  var named = UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(BuildPipeline.GetBuildTargetGroup(target));
+  var backend = PlayerSettings.GetScriptingBackend(named);
+  var codegen = PlayerSettings.GetIl2CppCodeGeneration(named);
+  try {
+      if (Arg("-studioBuildSpeed", "") == "fast") {
+          if (target == BuildTarget.WebGL) PlayerSettings.SetIl2CppCodeGeneration(named, UnityEditor.Build.Il2CppCodeGeneration.OptimizeSize); // "faster (smaller) builds"
+          else PlayerSettings.SetScriptingBackend(named, ScriptingImplementation.Mono2x);
+      }
+      // ... BuildPipeline.BuildPlayer(...) as before ...
+  } finally {
+      PlayerSettings.SetScriptingBackend(named, backend);
+      PlayerSettings.SetIl2CppCodeGeneration(named, codegen);
+  }
+  ```
+
+  This snippet is UNTESTED on an editor. Release builds stay as the owner sets them.
+- **Code optimization** (`STUDIO_UNITY_CODE_OPT=release`, default unset). The build method gets
+  `-studioCodeOptimization release`. **TODO:** the research behind 2.70 found no documented editor command-line flag
+  for release code optimization, so the harness adds no editor flag; check Unity's command-line reference for 6000.x
+  before adding one. Until then a build script can apply it itself (for example through
+  `UnityEditor.Compilation.CompilationPipeline.codeOptimization`, also unverified here).
+- **Faster Library copy** (`STUDIO_UNITY_CACHE_COPY=parallel|serial`, default parallel). The warm Library is copied by
+  a child process that copies up to `STUDIO_UNITY_CACHE_COPY_JOBS` files at once (default twice the cores, 4 to 16).
+  - The copies are real: `copyFile`, timestamps kept, lock files skipped, never hard-linked. On a ReFS Dev Drive,
+    Windows clones the blocks.
+  - The cache line measures the copy, for example `in 7 s (parallel copy, 16 at a time, 30123 file(s), 830 MB)`.
+  - If the parallel copy fails, the harness copies serially and says why.
+
 ### Several Unity passes per gate, as board tasks (for a crew orchestrator)
 
 Don't hand-roll a gate script that runs Unity once per branch. File each Unity pass as a board task, and let the
