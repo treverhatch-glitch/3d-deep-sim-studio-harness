@@ -70,6 +70,7 @@ import { classifyLane, tierLine } from './tiers.mjs';
 import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
+import { delegationFor, recordUse } from './delegation.mjs';
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
@@ -909,19 +910,24 @@ export function releaseRefusal({ by, permission, env = process.env, ownerKey = f
 /** Release a held lane for the head it is at (recorded in the queue entry and as a task.train.released event). */
 export function releaseLane(root, task, { by, permission = '', env = process.env } = {}) {
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `refs/heads/${mainBranch(root)}:studio/keys/owner-ed25519.pub.pem`)));
-  const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
-  if (refusal) return { ok: false, message: `${refusal} Nothing was released.` };
+  // 2.67.0: the owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
+  const dg = delegationFor({ action: 'train-release', by, env, root });
+  if (dg.ok && ownerKey && !dg.signed) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
+  const refusal = dg.ok ? '' : releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
+  if (refusal) return { ok: false, message: `${refusal}${dg.why ? ` (${dg.why})` : ''} Nothing was released.` };
+  if (dg.ok) { by = dg.owner; permission = dg.permission; }
   const perm = permissionText(permission);
-  const rec = perm ? agentOnPermission({ permission: perm, env }) : null;
+  const rec = dg.ok ? { ok: true, via: 'delegation', recordedBy: dg.agent } : perm ? agentOnPermission({ permission: perm, env }) : null;
   const r = withQueue(root, (q) => {
     const e = q.find((x) => x.task === task);
     if (!e) return { ok: false, message: `${task} is not in the train queue (task done ${task} --train queues it; a tier-C lane is held there).` };
     if (!e.held) return { ok: false, message: `${task} is queued but not held: it needs no release.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
   const e = r.entry;
+  if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
   emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${e.released.by}${e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}) } });
   return { ok: true, entry: e, message: `${task} is released (tier ${e.held.tier}: ${e.held.why}) by ${e.released.by}${e.released.recordedBy ? `, recorded by ${e.released.recordedBy}` : ''}, for ${String(e.head).slice(0, 8)}. It lands with the next train (npm run task -- train); new commits on the lane need a new release.` };
 }

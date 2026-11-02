@@ -145,6 +145,36 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   Only plain commands off the list are **candidates**. Nothing ever adds them to `.claude/settings*.json`,
   `harness/allowlist.mjs` or `--allowedTools`: a person reads them and decides.
 
+## The owner's standing delegation to an outside agent (2.67.0)
+
+An outside agent (the crew's orchestrator, a Claude Code session on the owner's PC) can run a short list of owner
+actions without the owner's words for each one, for a time the owner sets (harness/delegation.mjs):
+
+    npm run delegate -- grant opus-bot --actions train-release,type,yes,hold --hours 12 --by <owner> [--why "…"]
+    npm run delegate -- list | revoke
+
+- **Who grants:** the owner, once, in their own terminal. Refused in a launched session (`STUDIO_ROLE`), a lane copy,
+  a coding agent's shell (`CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX`, `GEMINI_CLI`), with `STUDIO_AGENT` or an agent's
+  name in `STUDIO_LOCK_OWNER`, or an agent's name in `--by`. The grant writes and commits `studio/delegation.json`
+  (`{ agent, actions, until, by, at, why }`), which is on the shipped protected list: a lane that writes it is tier C,
+  so an agent can't grant itself one. It counts as committed in the main checkout: with an owner key only with a valid
+  signature by that key (the grant signs it where the private key is; a changed file is ignored); without one only when
+  the commit that set it isn't an agent's (no `Studio-Agent` trailer).
+- **What it covers:** `train-release`, `type`, `visual`, `yes`, `hold` (hold and unhold), at most 72 hours. The named
+  agent runs them with `--by <agent>` and no `--permission`; each use is recorded for the owner by the agent "under
+  delegation <at> by <owner>" (the release, the task-types entry, the yes relay, the hold) plus one `delegation.used`
+  event, and the daily digest counts them. Never covered: `npm run approve` (signing protected files, tests, hooks,
+  force), gates or the protected list, money; workers, launched builder sessions and lane copies.
+- **Claude Code's permission prompt, set up once by the owner:** `npm run delegate -- claude-settings` prints narrow
+  allow rules for exactly the delegated commands (`Bash(npm run task -- train release:*)`,
+  `Bash(node harness/task.mjs train release:*)` and the same for type, yes, hold and unhold); `--write` (the owner's
+  terminal only) merges them into the studio's `.claude/settings.json` `permissions.allow`. It never writes a broad
+  rule (no `Bash(*)`, no `npm run *`) and never touches deny rules. The rules only skip the prompt; the harness still
+  refuses anyone but the delegated agent, and everything once the delegation ends. **Revoke:** `npm run delegate --
+  revoke` (anyone may: it only takes power away), then `npm run delegate -- claude-settings --remove --write`.
+- `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
+  and never acts (B-47: `task train --help` used to run a train).
+
 ## Drift checks (Check cards to the Producer)
 
 Each observation of a running session (the launcher's heartbeat, and the watch pass for a session whose
