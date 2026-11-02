@@ -231,6 +231,8 @@ for (const gate of gates) {
   if (compact) {
     const text = `${res.stdout || ''}${res.stderr || ''}`;
     try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
+    // 2.67.0 (B-48): a passing game gate's advisory checks (game:test-rng, game:det-math in warn mode) still show.
+    if (res.status === 0) for (const l of text.split('\n').filter((x) => /^\[game-gates\] WARN game:/.test(x)).slice(0, 5)) console.log(`${l} (advisory; full: .studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log)`);
     if (res.status !== 0) { const lines = text.trimEnd().split('\n'); const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40); console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${lines.length} lines; full: .studio/gates/out/${gate.id}.log)`); console.log(lines.slice(-n).join('\n')); }
   }
   const ms = Date.now() - start;

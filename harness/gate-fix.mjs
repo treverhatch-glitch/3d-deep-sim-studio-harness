@@ -74,6 +74,7 @@ export const GAME_GATE_FIXES = {
   'game:playtest': 'the game\'s playtest (<game>/sim/playtest.mjs) failed: run it alone, find the first tick that breaks, and fix the sim there',
   'game:golden': 'the game\'s golden replays (<game>/sim/golden.mjs) changed: if the sim change was intended, update the hashes the game\'s way and commit them with a Golden-Reason trailer; if not, find the change that broke determinism',
   'game:det-math': 'the game\'s sim calls inexact Math (sin, cos, atan2, pow, **, …): use the harness/det-math.mjs functions instead (the mode is "detMath" in the game\'s studio.gates.json)',
+  'game:test-rng': 'a test starts a seeded game on the shared Math.random (a setup file routes the sim\'s dice there) or starts one with no seed: the line names the file; call the game\'s isolate call ("isolateCall" in testRandomness) in that test file, or pass a fixed seed (node harness/test-rng.mjs lists them)',
   'game:layout': 'the game\'s exported layout breaks one of its own rules in studio.layout.json (the line names the object and the rule): fix where the view places it, not the rule',
   'game:none': 'the game declares no checks: add <game>/studio.gates.json with at least one gate (or <game>/sim/qa.mjs)',
   'game:*': 'a check from the game\'s studio.gates.json failed: run its "command" from the repo root, fix the failing tests it names (the [game-gates] failing tests line lists them)',
