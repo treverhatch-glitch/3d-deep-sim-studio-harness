@@ -179,7 +179,7 @@ let heavyLock = null;
   if (fullRun || gates.some(isHeavyGate)) {
     const { acquireHeavy, heavyRoot } = await import('../harness/heavy.mjs');
     try {
-      const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null });
+      const lk = acquireHeavy(await heavyRoot(), `${fullRun ? 'full verify' : 'verify'} of ${path.basename(root)}`, { log: (m) => console.log(m), owner: process.env.STUDIO_LOCK_OWNER || null, kind: 'verify' });
       heavyLock = lk;
       process.on('exit', () => lk.release());
     } catch (err) {
