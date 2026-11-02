@@ -1347,12 +1347,13 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   report('preflight clears a quota mark an older harness wrote, and says so', !quota().claude && /Cleared a stale quota mark for claude/.test(pf0.stdout), pf0.stdout.split('\n').filter((l) => /quota/i.test(l)).join('\n'));
   // A session that ends without task done or a hand-back gives the task back at once, with a note.
   const t2 = id('node harness/task.mjs add "Wire the bellhop sweep" --role builder');
-  // STUDIO_BREAKER=off: this proves the older 3-in-2-h rule still holds as the fallback (2.30c's breaker trips at 2; its own checks are below).
-  run(dir, `node harness/agent.mjs start --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  // STUDIO_BREAKER=off and STUDIO_NO_WORK_EXITS=0: this proves the older 3-in-2-h rule still holds as the fallback (2.30c's
+  // breaker trips at 2, 2.67.2's no-work park at 2; their own checks are below and in qa/selftest-2672a.mjs).
+  run(dir, `node harness/agent.mjs start --role builder --agent quit-1 --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const ql = JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout);
   const hf = path.join(dir, `studio/handoffs/${t2}.md`);
   report('a session that ends without task done hands its task back at once, with what it left (test #2: claims sat for an hour)', ql.backlog.some((t) => t.id === t2) && !/quit-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout) && fs.existsSync(hf) && /ended without task done/.test(fs.readFileSync(hf, 'utf8')), JSON.stringify(ql.inProgress) + (fs.existsSync(hf) ? fs.readFileSync(hf, 'utf8') : 'no handoff'));
-  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
+  for (const k of [2, 3]) run(dir, `node harness/agent.mjs start --role builder --agent quit-${k} --task ${t2}`, { ...env, STUDIO_BREAKER: 'off', STUDIO_NO_WORK_EXITS: '0', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} quit' });
   const holds = run(dir, 'node harness/task.mjs holds', env).stdout;
   report('a task handed back three times in two hours is parked, with its last note, and the Producer is told (test #2: T-110 went to 12 sessions)', new RegExp(`${t2}[^\\n]*parked[^\\n]*launcher[^\\n]*handed back 3 times`).test(holds) && /keeps coming back/.test(fs.readFileSync(path.join(dir, '.studio/events.jsonl'), 'utf8')), holds);
   // Anyone may hand back a task whose holder's session has ended.
