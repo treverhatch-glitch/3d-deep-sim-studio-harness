@@ -149,7 +149,7 @@ import * as V from ${u('harness/visual-proof.mjs')};
 const W = 64, H = 64;
 const img = (bump = new Set()) => { const rgba = new Uint8Array(W * H * 4); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; const v = 40 + x + y + (bump.has(y * W + x) ? 100 : 0); rgba[i] = v; rgba[i + 1] = v; rgba[i + 2] = v; rgba[i + 3] = 255; } return { width: W, height: H, rgba }; };
 const cells = (from, n) => new Set(Array.from({ length: n }, (_, k) => from + k));
-const put = (task, side, im, renderer) => { const d = path.join(V.proofDir(task), side); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'deck.png'), encodePng(im)); if (renderer !== undefined) fs.writeFileSync(path.join(d, 'renderer.json'), JSON.stringify(renderer)); };
+const put = (task, side, im, renderer) => { const d = path.join(V.proofDir(task), side); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'deck.png'), encodePng(im)); if (renderer !== undefined) fs.writeFileSync(d + '.renderer.json', JSON.stringify(renderer)); };
 const cpu = { renderer: 'Google SwiftShader', gpu: 'off' }, gpu = { renderer: 'ANGLE (NVIDIA, RTX, D3D11)', gpu: 'on' };
 // T-981: the second before was drawn by another renderer: 3% "noise" (over the cap), a 2.5% change.
 put('T-981', 'before', img(), cpu); put('T-981', 'before-noise', img(cells(0, 314)), gpu); put('T-981', 'after', img(cells(2000, 261)), cpu);
@@ -161,20 +161,21 @@ put('T-983', 'before', img(), cpu); put('T-983', 'before-noise', img(cells(0, 31
 put('T-984', 'before', img()); put('T-984', 'before-noise', img(cells(0, 63))); put('T-984', 'after', img(cells(2000, 261)));
 const r = { a: V.checkVisualProof('T-981'), b: V.checkVisualProof('T-982'), c: V.checkVisualProof('T-983'), d: V.checkVisualProof('T-984') };
 // captureWithCommand for "after": the before was taken with GPU flags on; this shell has them off: the capture runs with on.
-const before = path.join(V.proofDir('T-985'), 'before'); fs.mkdirSync(before, { recursive: true }); fs.writeFileSync(path.join(before, 'renderer.json'), JSON.stringify({ renderer: null, gpu: 'on' }));
+const before = path.join(V.proofDir('T-985'), 'before'); fs.mkdirSync(before, { recursive: true }); fs.writeFileSync(before + '.renderer.json', JSON.stringify({ renderer: null, gpu: 'on' }));
 fs.writeFileSync('cap-270t.mjs', "import fs from 'node:fs'; import path from 'node:path'; import { encodePng } from " + ${JSON.stringify(JSON.stringify(pathToFileURL(path.join(dir, 'harness/png.mjs')).href))} + "; const out = process.argv[2]; fs.writeFileSync(path.join(out, 'deck.png'), encodePng({ width: 2, height: 2, rgba: new Uint8Array(16).fill(200) })); fs.writeFileSync(path.join(out, 'seen.txt'), String(process.env.STUDIO_BROWSER_GPU) + '|' + String(process.env.STUDIO_RENDERER_FILE || ''));");
 const cap = V.captureWithCommand('node cap-270t.mjs {out}', path.join(V.proofDir('T-985'), 'after'), { phase: 'after' });
 const seen = fs.readFileSync(path.join(V.proofDir('T-985'), 'after', 'seen.txt'), 'utf8');
-const rec = JSON.parse(fs.readFileSync(path.join(V.proofDir('T-985'), 'after', 'renderer.json'), 'utf8'));
-console.log(JSON.stringify({ r, cap: { ok: cap.ok, log: cap.log.slice(0, 400) }, seen, rec }));`, { STUDIO_BROWSER_GPU: 'off' });
+const rec = JSON.parse(fs.readFileSync(path.join(V.proofDir('T-985'), 'after.renderer.json'), 'utf8'));
+const onlyPics = fs.readdirSync(path.join(V.proofDir('T-985'), 'after')).filter((f) => f !== 'seen.txt');
+console.log(JSON.stringify({ r, cap: { ok: cap.ok, log: cap.log.slice(0, 400) }, seen, rec, onlyPics }));`, { STUDIO_BROWSER_GPU: 'off' });
     const cam = (x) => x?.cameras?.[0] || {};
     report('2.70.0 (t, 2): the visual baseline knows its renderer: two before captures drawn by different renderers re-baseline the noise with a note (no "too noisy" failure from the renderer; judged against the minimum, said in notes), the same noise on one renderer is still too noisy (never loosened), and no renderer record keeps the 2.65 rules (fails on 2.69.0: T-981 failed "too noisy to judge" on the renderer change)',
       vp.r?.a?.ok === true && cam(vp.r.a).noise === null && /different renderers/.test((vp.r.a.notes || []).join(' ')) && /renderer changed between the before captures/.test(cam(vp.r.a).bar || '')
         && vp.r?.c?.ok === false && /too noisy to judge/.test(vp.r.c.why) && vp.r?.d?.ok === true && Math.abs(cam(vp.r.d).noise - 0.00603) < 0.0002,
       J(vp));
-    report('2.70.0 (t, 2): before drawn by SwiftShader and after by a GPU is never a pass ("a renderer change shifts pixels, so this pair can\'t be compared", naming both, asking for a new before); an after capture runs with the GPU setting its before was taken with (STUDIO_BROWSER_GPU=on pinned, said in the log) and gets STUDIO_RENDERER_FILE, and a capture that writes no renderer still records the setting (fails on 2.69.0: the 20% renderer change passed, and nothing recorded the renderer)',
+    report('2.70.0 (t, 2): before drawn by SwiftShader and after by a GPU is never a pass ("a renderer change shifts pixels, so this pair can\'t be compared", naming both, asking for a new before); an after capture runs with the GPU setting its before was taken with (STUDIO_BROWSER_GPU=on pinned, said in the log) and gets STUDIO_RENDERER_FILE, and a capture that writes no renderer still records the setting, beside the capture folder (which keeps only its pictures) (fails on 2.69.0: the 20% renderer change passed, and nothing recorded the renderer)',
       vp.r?.b?.ok === false && /before was drawn by Google SwiftShader and after by ANGLE/.test(vp.r.b.why) && /can't be compared/.test(vp.r.b.why) && cam(vp.r.b).rendererChanged === true
-        && vp.cap?.ok === true && /^on\|.*renderer\.json$/.test(vp.seen || '') && /captured with STUDIO_BROWSER_GPU=on, the setting its before was taken with/.test(vp.cap.log) && vp.rec?.gpu === 'on' && vp.rec.renderer === null,
+        && vp.cap?.ok === true && /^on\|.*after\.renderer\.json$/.test(vp.seen || '') && J(vp.onlyPics) === J(['deck.png']) && /captured with STUDIO_BROWSER_GPU=on, the setting its before was taken with/.test(vp.cap.log) && vp.rec?.gpu === 'on' && vp.rec.renderer === null,
       J(vp));
   });
 

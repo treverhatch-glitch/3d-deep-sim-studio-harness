@@ -81,7 +81,7 @@ renderer there, so it stays opt-in. With it on, a browser playtest takes the GPU
 - The run's report records the renderer the page actually got (`renderer`: WebGL `UNMASKED_RENDERER` through the
   debug extension when available). Flags on but SwiftShader or llvmpipe in use: the report and the log say "GPU flags
   on but CPU renderer in use" once.
-- A renderer change shifts pixels. The visual proof's captures record their renderer (`<side>/renderer.json`: a
+- A renderer change shifts pixels. The visual proof's captures record their renderer (`<side>.renderer.json` beside the folder: a
   capture through `qa/chromium.mjs` writes it via `STUDIO_RENDERER_FILE`, else the GPU setting alone). Two "before"
   captures on different renderers re-baseline the noise with a note (judged against the minimum, as with no second
   capture) instead of failing "too noisy"; before and after on different renderers is never a pass: the check names

@@ -69,7 +69,8 @@ export function noiseBar(noise, limits = visualLimits()) {
 export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'visual');
 
 /**
- * 2.70.0 (t): which renderer drew a capture side: <side>/renderer.json, written by a browser capture through
+ * 2.70.0 (t): which renderer drew a capture side: <side>.renderer.json beside the side's folder (the folder keeps only
+ * the pictures), written by a browser capture through
  * qa/chromium.mjs rendererReport (STUDIO_RENDERER_FILE, set by captureWithCommand), else captureWithCommand's own
  * record of the browser GPU setting. A renderer change (SwiftShader to a GPU, STUDIO_BROWSER_GPU) shifts pixels, so:
  *   - the two "before" captures on different renderers: the noise between them is the renderer's, not the scene's;
@@ -80,10 +81,11 @@ export const proofDir = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'vi
  *     the before was taken with (STUDIO_BROWSER_GPU pinned, said in its log), so a changed setting alone doesn't do this.
  * The tolerance is never loosened: no record on either side compares as before.
  */
-export const RENDERER_FILE = 'renderer.json';
+export const RENDERER_SUFFIX = '.renderer.json';
+const rendererFile = (sideDir) => `${path.resolve(sideDir)}${RENDERER_SUFFIX}`;
 export function rendererOf(sideDir) {
   let r = null;
-  try { r = JSON.parse(fs.readFileSync(path.join(sideDir, RENDERER_FILE), 'utf8')); } catch { return null; }
+  try { r = JSON.parse(fs.readFileSync(rendererFile(sideDir), 'utf8')); } catch { return null; }
   if (!r || typeof r !== 'object') return null;
   const key = r.renderer ? String(r.renderer) : r.gpu ? `browser GPU flags ${r.gpu}` : null;
   return key ? { key, gpu: r.gpu || null, renderer: r.renderer || null } : null;
@@ -298,12 +300,12 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
 const quoteArg = (v) => (process.platform === 'win32' ? `"${String(v).replace(/"/g, '""')}"` : `'${String(v).replace(/'/g, `'\\''`)}'`);
 
 /**
- * 2.70.0 (t): the capture's environment: STUDIO_RENDERER_FILE (<out>/renderer.json, which qa/chromium.mjs
+ * 2.70.0 (t): the capture's environment: STUDIO_RENDERER_FILE (<out>.renderer.json, which qa/chromium.mjs
  * rendererReport fills), and for an after capture the browser GPU setting its before was taken with. done() writes the
  * GPU setting alone when the capture recorded no renderer.
  */
 function rendererEnv(outDir, phase, env = process.env) {
-  const file = path.join(path.resolve(outDir), RENDERER_FILE);
+  const file = rendererFile(outDir);
   try { fs.rmSync(file, { force: true }); } catch {}
   const e = { ...env, STUDIO_RENDERER_FILE: file };
   let note = '';
