@@ -9,6 +9,8 @@
  *   npm run asset -- update <file> --by <person>                     re-record after a re-export (new checksum)
  *   npm run asset -- import-manifest <pack>/MANIFEST.json --by <person> [--pack <name>]   a whole pack at once
  *   npm run asset -- list
+ *   npm run asset -- need "<what>" --for unity|web --budget <tris> [--size <m>] [--style <ref>] [--tags a,b]
+ *   npm run asset -- needs [<id>] | library refresh <dir>      2.67.1: one asset flow (harness/asset-need.mjs)
  *
  * --use game: the person states they own it or hold a licence to use it in this game. The file is
  * copied to assets/ and recorded in studio/assets/manifest.json with who said so, when, the licence
@@ -203,6 +205,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await importManifest(a1, { by: flag('by') || '', owner: flag('owner') || '', pack: flag('pack') || '' });
     console.log(`Recorded ${r.done.length} file(s)${r.done.length ? `: ${r.done.join(', ')}` : ''}.`);
     if (!r.ok) fail(r.message);
+  } else if (['need', 'needs', 'library'].includes(cmd)) {
+    // 2.67.1 (l): one asset flow, in its own process: harness/asset-need.mjs imports this module, and this CLI's
+    // top-level await would deadlock a dynamic import of it from here.
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync(process.execPath, [fileURLToPath(new URL('./asset-need.mjs', import.meta.url)), ...argv], { stdio: 'inherit' });
+    process.exit(r.status ?? 1);
   } else {
     const m = readManifest();
     console.log(m.assets.length ? m.assets.map((a) => `${a.id} ${a.file} (${a.licence}${a.creditRequired ? `, credit: ${a.credit || 'required'}` : ''}; rights: ${a.rightsHolder || a.owner}${a.author ? `; author ${a.author}` : ''}${a.madeBy ? `; made by ${a.madeBy}` : ''}; declared by ${a.declaredBy} ${a.declaredAt.slice(0, 10)})`).join('\n') : 'No game assets recorded yet.');

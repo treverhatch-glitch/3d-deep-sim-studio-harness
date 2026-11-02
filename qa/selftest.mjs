@@ -4134,6 +4134,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.1 (l): one asset flow, asset need: library first, reuse first, the scout, pull + the Unity profile, else one
+// make task; library refresh is append-only (qa/selftest-2671l.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2671L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671l.mjs')).href);
+  await selftest2671L({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
