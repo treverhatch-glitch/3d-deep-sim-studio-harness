@@ -125,6 +125,7 @@
     "golden:py": "node qa/run-python.mjs tools/golden.py --check qa/golden",
     "test:golden": "node qa/run-python.mjs qa/test-golden.py",
     "verify": "node scripts/run-gates.mjs",
+    "gates": "node scripts/run-gates.mjs",
     "upgrade": "node harness/upgrade-guard.mjs",
     "verify:wait": "node scripts/run-gates.mjs --wait",
     "balance": "node scripts/balance-sweep.mjs --write",

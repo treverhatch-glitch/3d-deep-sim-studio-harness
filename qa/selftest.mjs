@@ -4199,6 +4199,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.69.0 (p): less repeated work in the merge train: a lane's green verify reused by a train of one (kept by tree),
+// prechecked lanes first, related tests first on the combined tree, the nightly slow tier (qa/selftest-269p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269p.mjs')).href);
+  await selftest269P({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

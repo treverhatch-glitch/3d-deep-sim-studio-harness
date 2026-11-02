@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
  * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
- *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge] [--no-cache] [--all]
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
  * In a lane copy the game checks are scoped to the lane's changes (2.31.0); --all runs every one.
  * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
  *
  * --tier fast (in-session): runs only the `lite` gates; a gate whose command and input files are unchanged
  *   since its last pass is skipped (cache keyed by content hash). A fast run never counts as a full verify.
  * --tier merge: runs a full, deep verify and never reads from cache (same as --full --deep).
+ * --tier slow (2.69.0): the game's slow tier only (harness/slow-tier.mjs; `npm run gates -- --tier slow`, nightly).
  * --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks; npm run release and CI do.
  * --full runs every gate a Full studio would.
  * Everyday verify (no tier) skips the deep gates, as before, and never reads the cache.
@@ -49,6 +50,9 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
 {
   const stage = argv.indexOf('--verify-stage');
   if (stage >= 0) process.exit(await verifyStage(argv[stage + 1], argv[stage + 2]));
+  // 2.69.0 (p): `npm run gates -- --tier slow` is the nightly slow tier (harness/slow-tier.mjs): the game's slow checks and
+  // slow tests only, on this checkout, one bug task per new failure. It is never a verify and writes no verify record.
+  if (argv.includes('--tier') && argv[argv.indexOf('--tier') + 1] === 'slow') process.exit(await (await import('../harness/slow-tier.mjs')).slowTierCli(argv, { root }));
   const detachEnv = String(process.env.STUDIO_VERIFY_DETACH || '');
   const detach = !argv.includes('--no-detach') && !process.env.STUDIO_VERIFY_RUN && !/^(off|0|false|no)$/i.test(detachEnv)
     && (argv.includes('--detach') || /^(on|1|true|yes)$/i.test(detachEnv) || process.env.npm_lifecycle_event === 'verify');
@@ -290,6 +294,14 @@ try {
     fs.mkdirSync(path.join(root, '.studio', 'gates'), { recursive: true });
     fs.writeFileSync(path.join(root, '.studio', 'gates', `${owner}.json`), rec);
     if (!only && !isFastTier) fs.writeFileSync(path.join(root, '.studio', 'gates', `${owner}-full.json`), rec);
+  }
+  // 2.69.0 (p): a clean full verify is also kept by the tree it tested (.studio/gates/trees/<tree>.json, the newest 64),
+  // so the merge train can reuse a lane's green verify after its agent's next verify replaced <owner>-full.json.
+  if (!only && !isFastTier && !focusRun && treeAtStart && dirtyNow === false && !relatedAtStart && !process.env.STUDIO_GATE_INCOMING_FILE) {
+    const tdir = path.join(root, '.studio', 'gates', 'trees');
+    fs.mkdirSync(tdir, { recursive: true });
+    fs.writeFileSync(path.join(tdir, `${treeAtStart}.json`), JSON.stringify({ ...JSON.parse(rec), owner: owner || null, checkout: root }, null, 2));
+    try { const old = fs.readdirSync(tdir).filter((n) => n.endsWith('.json')).map((n) => ({ n, t: fs.statSync(path.join(tdir, n)).mtimeMs })).sort((a, b) => b.t - a.t).slice(64); for (const o of old) fs.rmSync(path.join(tdir, o.n), { force: true }); } catch {}
   }
 } catch {
   // read-only checkout: the board just shows "not run"
