@@ -30,7 +30,8 @@ import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { boardStates } from './train-deps.mjs';
 
-export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
+import { PLANNING_ROLES } from './planning-roles.mjs';
+export { PLANNING_ROLES };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 export function stallLimits(role, env = process.env) {
   const plan = PLANNING_ROLES.has(String(role || '').toLowerCase());

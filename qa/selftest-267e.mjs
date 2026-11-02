@@ -15,4 +15,9 @@ export async function selftest267E({ dir, run, report }) {
   report('2.67.0 (e, B-47): `node harness/supervisor.mjs --help` (and -h --foreground) prints usage and exits 0 at once; no supervisor starts (no .studio/supervisor.json written) (fails on 2.66.0: --help started a real supervisor)',
     h.status === 0 && h2.status === 0 && /Usage:/.test(text) && /studio:start/.test(text) && !fs.existsSync(status),
     `${text.slice(-800)}\nstatus file: ${fs.existsSync(status)}`);
+  // 2.67.0: `node harness/stall.mjs` as the entry module must load: once task-hold.mjs imported reclassify.mjs, the
+  // cycle back through worktree.mjs read PLANNING_ROLES from stall.mjs before it existed (CI Node 24, 2.30o checks).
+  const st = run(dir, 'node harness/stall.mjs --no-such-command', env);
+  report('2.67.0 (e): `node harness/stall.mjs` loads as the entry module (PLANNING_ROLES lives in harness/planning-roles.mjs, so no import cycle reads it before it exists) (fails on the first 2.67.0 build: ReferenceError)',
+    !/ReferenceError|before initialization/.test(`${st.stdout || ''}${st.stderr || ''}`), `${st.stdout || ''}${st.stderr || ''}`.slice(-600));
 }

@@ -26,7 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
-import { PLANNING_ROLES } from './stall.mjs';
+import { PLANNING_ROLES } from './planning-roles.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 
 export const LANES_DIR = '.lanes';
