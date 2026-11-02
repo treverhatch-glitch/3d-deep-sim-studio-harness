@@ -28,6 +28,10 @@
  *       (studio/NEXT.md and studio/DONE.md: conflicting list or table rows are all kept); any other conflict refuses
  *       and lists, writing nothing. Commits, then prints the `git stash drop` to run. It never drops anything.
  *
+ * 2.67.0 (B-49): a merged update ends with `npm run lanes -- refresh --all` (the updated harness's), reported per lane:
+ *   refreshed / conflicted (merge aborted, files named) / red (targeted tests) / skipped (a running session, uncommitted
+ *   work: never touched). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour; =no-tests skips the targeted tests.
+ *
  * Bootstrap (2.60.0): an old studio has no --merge, so docs/RELEASE.md runs the new guard straight from the ref
  * (`git show <ref>:harness/upgrade-guard.mjs` into .studio/). So this file finds the studio by git from the current
  * folder, never by its own location, and loads harness/permission.mjs from beside it, the studio, or the ref.
@@ -299,12 +303,50 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     msg: `harness update ${ref} (${from} -> ${to}) merged into ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission: "${who.permission.slice(0, 120)}")` : ''}; backup ${backup}`.slice(0, 600),
     meta: { ref, sha, from, to, branch, backup, commit, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, goldens: g.fromRef.length + g.combined.length },
   });
+  // 2.67.0 (B-49): every lane copy takes the update now, so the next train doesn't hand each one back as stale.
+  const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
   return {
-    ok: true, code: 0, commit, backup,
+    ok: true, code: 0, commit, backup, lanes,
     lines: [...lines, `[upgrade] PASS merged ${ref} (${sha.slice(0, 10)}, harness ${from} -> ${to}) into ${branch}: ${commit.slice(0, 10)}, recorded for ${String(by).trim()}${who.permission ? ` on their permission (recorded by ${who.recordedBy})` : ''}.`,
       ...(g.fromRef.length ? [`[upgrade] ${g.fromRef.length} golden file(s) came unchanged from ${ref}: Golden-Reason added for them only.`] : []),
+      ...lanes.lines,
       '[upgrade] Next: npm run verify -- --all, then npm run task -- drain off --by <you>. Undo: git reset --hard ' + backup + ' (only before anything else lands).'],
   };
+}
+
+/**
+ * 2.67.0 (B-49): after a merged update, `lanes refresh --all` (harness/lanes.mjs, 2.65.0) from the studio as it is now
+ * (the updated harness), so each lane copy merges main and runs its targeted tests. A lane whose session is running,
+ * with uncommitted work or a merge in progress is skipped, never touched; a conflict is aborted and named (nothing is
+ * resolved). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour (no refresh), =no-tests merges without the tests.
+ * Returns { ran, refreshed, conflicted, red, skipped, results, lines }; never throws, never fails the upgrade.
+ */
+export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } = {}) {
+  const mode = String(env.STUDIO_UPGRADE_REFRESH || '').trim().toLowerCase();
+  const empty = (why) => ({ ran: false, why, refreshed: [], conflicted: [], red: [], skipped: [], results: [], lines: [`[upgrade] lanes: not refreshed (${why})`] });
+  if (/^(off|0|false|no)$/.test(mode)) return empty('STUDIO_UPGRADE_REFRESH=off; run npm run lanes -- refresh --all --by <you> when ready');
+  const script = path.join(root, 'harness', 'lanes.mjs');
+  if (!fs.existsSync(script)) return empty('this studio has no harness/lanes.mjs');
+  const args = [script, 'refresh', '--all', '--by', String(by || ''), '--json', ...(mode === 'no-tests' ? ['--no-tests'] : [])];
+  const r = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  let j = null;
+  try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { j = null; }
+  if (!j) {
+    const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-3).join(' / ');
+    return empty(`lanes refresh gave no result (exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}); run npm run lanes -- refresh --all --by <you>`);
+  }
+  if (j.refused) return empty(`lanes refresh refused: ${j.why}`);
+  const results = Array.isArray(j.results) ? j.results : [];
+  const pick = (s) => results.filter((x) => x.status === s);
+  const out = { ran: true, refreshed: pick('ok'), conflicted: pick('conflict'), red: pick('red'), skipped: pick('refused').concat(pick('skipped')), results };
+  const word = { ok: 'refreshed', conflict: 'conflicted', red: 'red', refused: 'skipped', skipped: 'skipped' };
+  out.lines = [
+    results.length
+      ? `[upgrade] lanes: ${out.refreshed.length} refreshed, ${out.conflicted.length} conflicted, ${out.red.length} red, ${out.skipped.length} skipped (npm run lanes -- refresh --all${mode === 'no-tests' ? ' --no-tests' : ''})`
+      : '[upgrade] lanes: no lane copy to refresh',
+    ...results.map((x) => `  ${word[x.status] || x.status} ${x.lane}: ${String(x.why || '').slice(0, 300)}`),
+  ];
+  return out;
 }
 
 /** Is every line of a conflict side a task row (a list item or a table row) or blank? */
