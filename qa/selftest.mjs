@@ -4226,6 +4226,15 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.69.0 (s): overlap checks at task add and start (lanes in flight, open lanes, near-duplicate titles; STUDIO_OVERLAP),
+// the queue-depth target (the Producer is asked, never a task invented) and the upgrade watch (qa/selftest-269s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269s.mjs')).href);
+  await selftest269S({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
