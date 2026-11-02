@@ -17,6 +17,7 @@
  *   - 2.70.0: the latest playable build and clip made after a landing in the last 24 h, as a line;
  *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
  *     both sides have enough data (npm run autonomy -- impact), as a line;
+ *   - 2.70.0 (v): assets waiting for a review of their previews, oldest first (harness/asset-review.mjs);
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -83,6 +84,11 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
   await tryAdd(async () => {
     const { pausedLines } = await import('./crew-watch.mjs');
     for (const p of pausedLines()) out.push({ kind: 'crew', line: `crew: ${p.line}` });
+  });
+  // 2.70.0 (v): assets whose previews passed the checks and wait for a look, oldest first (harness/asset-review.mjs).
+  await tryAdd(async () => {
+    const line = (await import('./asset-review.mjs')).pendingReviewsLine(root);
+    if (line) out.push({ kind: 'review', line });
   });
   out.push(...fuzzSuggestions(ev, now));
   const declined = ev.filter((e) => e.type === 'selftriage.declined' && (Date.parse(e.ts) || 0) >= now - DAY);
