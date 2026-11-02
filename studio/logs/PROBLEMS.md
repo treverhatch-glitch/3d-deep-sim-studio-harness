@@ -943,3 +943,33 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** 2.66.0 (b) added studio/fuzz.ignore.json and (d) a settings baseline; a worker could add to either.
 - **Why:** they're not protected (the owner chose a game dev or an outside agent, not owner-only).
 - **Fix:** tier C "silencer" rules for the ignore list; the baseline only shrinks. qa/selftest-266e.mjs.
+
+### P-161 — a stacked chain that passes only with one more fix was bisected apart · fixed in 2.67.0
+- **Evidence:** the crew's train 13 handed back a chain's first lane and landed only T-125; the tail fix (T-141) was written by hand.
+- **Why:** bisection blames the first red prefix; nothing prepared the missing fix.
+- **Fix:** harness/train-tail.mjs, chain-tail check before the verify. qa/selftest-267f.mjs.
+
+### P-162 — every owner action by an outside agent cost an owner round-trip · fixed in 2.67.0
+- **Evidence:** about 4 h of tier-C releases waiting overnight; Claude Code's classifier blocks per-action permission words.
+- **Why:** no standing delegation; no narrow allow rules.
+- **Fix:** harness/delegation.mjs (owner-run, signed with a key, time-limited, recorded). qa/selftest-267g.mjs.
+
+### P-163 — `--help` ran the command (B-47) · fixed in 2.67.0
+- **Evidence:** `task train --help` ran a real train at 06:19; `supervisor.mjs --help` started a supervisor (twice, in helpers' copies).
+- **Why:** no help check before acting.
+- **Fix:** harness/task-usage.mjs and guards. qa/selftest-267g.mjs, qa/selftest-267e.mjs.
+
+### P-164 — seeded tests silently on shared Math.random (B-48/B-45) · fixed in 2.67.0
+- **Evidence:** main red twice overnight; a test setup routed the sim's dice to Math.random, so seeded tests depended on order.
+- **Why:** no rule for it.
+- **Fix:** harness/test-rng.mjs, `game:test-rng` (advisory). qa/selftest-267h.mjs.
+
+### P-165 — every lane went stale after an upgrade (B-49); a hold commit restarted a train's verify (B-29) · fixed in 2.67.0
+- **Evidence:** 36 of 116 overnight hand-backs were "env-harness"; `task yes` commits restarted verifies.
+- **Why:** upgrade never refreshed lanes; studio/task-holds.json wasn't board-only.
+- **Fix:** refresh after the merge; entry-level record check. qa/selftest-267h.mjs.
+
+### P-166 — the scorecard couldn't see the orchestrator; no prices; tiers n/a; a stale halt; UTC days · fixed in 2.67.0
+- **Evidence:** the crew's `npm run autonomy` (13.06M tokens / 7 days counted only harness-launched sessions; no dollars; tierCUnsigned n/a; a 1,838-min halt).
+- **Why:** outside sessions weren't recorded; no prices file; the tier was read from the landing event; halts never closed on supervisor stop.
+- **Fix:** harness/usage.mjs, studio/prices.json, tier events, stale halts, STUDIO_TZ. qa/selftest-267i.mjs.

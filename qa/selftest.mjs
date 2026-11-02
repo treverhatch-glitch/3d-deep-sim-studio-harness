@@ -4126,6 +4126,14 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.67.0 (e): the supervisor's --help never starts one (qa/selftest-267e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest267E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267e.mjs')).href);
+  await selftest267E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

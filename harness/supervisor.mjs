@@ -531,6 +531,16 @@ function install(argv, remove = false) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
+  // 2.67.0 (B-47): --help / -h prints usage and never starts, stops or resumes anything.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(['Usage:',
+      '  npm run studio:start [-- --until 23:00 | --until 8h] [--window 09:00-23:00] [--budget 50% | --budget 3000000]',
+      '  npm run studio:start -- --install | --uninstall      start it at login, or stop doing so',
+      '  npm run studio:stop                                  stop the supervisor (agents finish their task)',
+      '  npm run studio:status',
+      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt'].join('\n'));
+    process.exit(0);
+  }
   if (argv[0] === 'stop') {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
     fs.writeFileSync(STOP_FILE, new Date().toISOString());
