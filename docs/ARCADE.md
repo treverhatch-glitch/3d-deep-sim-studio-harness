@@ -16,6 +16,10 @@ npm run play -- list         # saved builds; play an older one with --build <id>
 # The root (and the War Room's /play/<id>/) redirects to the page in its own folder, so its ./main.mjs loads.
 ```
 
+2.70.0: a build is also saved, with a short clip, after every merge-train landing (`harness/landing-build.mjs`,
+docs/WORK-ORGANIZATION.md); `npm run status -- --brief` and the digest name the latest. `STUDIO_LANDING_BUILD=off`
+turns that off.
+
 A bundled game (Vite and the like) declares `browser.dist` and `browser.build` in its qa.mjs; the
 harness runs the build and saves `dist/`. A plain page declares `browser.page` (`web/<game>/`), and the
 saved build holds that folder, the cartridge and `assets/approved/`.
