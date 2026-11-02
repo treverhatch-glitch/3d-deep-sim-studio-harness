@@ -48,7 +48,8 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './merge-lane.mjs';
 import { normMode } from './det-math.mjs';
 import { testRngMode } from './test-rng.mjs';
-import { scaledTimeout, recordGateTime, recordGatePass } from './heavy.mjs';
+import { scaledTimeout, recordGateTime, recordGatePass, heldClaim, heavyHolders, laneChecksRunning } from './heavy.mjs';
+import { machineProfile, testWorkers, oomSignature } from './heavy-budget.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
 
@@ -316,6 +317,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     let curRelated = false;
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
+    const workersNow = () => {
+      try {
+        return testWorkers({ profile: machineProfile(slotRoot), env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT });
+      } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2` }; }
+    };
     const runOnce = (cmd, forceMs = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
@@ -331,6 +337,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         runEnv = { ...env, STUDIO_TEST_TIMEOUT_SCALE: String(testScale), STUDIO_SLOW_TESTS: slow.pattern };
         console.error(`[game-gates] ${cmdLabel}: slow tests${slow.pattern ? ` (${slow.pattern})` : ''}: per-test timeouts x${testScale} (STUDIO_TEST_TIMEOUT_SCALE=${testScale}; the gate's load factor ${timing.factor}${slow.minScale > 1 ? `, minScale ${slow.minScale}` : ''})`);
       }
+      // 2.68.0 (n): test workers sized to the machine (harness/heavy-budget.mjs testWorkers), always passed (CI=true
+      // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
+      const tw = workersNow();
+      runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
+      console.error(`[game-gates] ${cmdLabel}: ${tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${tw.why})`);
       const t0 = Date.now();
       const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
       // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
@@ -374,6 +385,16 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = runOnce(g.command);
         }
       }
+      // 2.68.0 (n): a check killed for memory (heavy-budget.mjs oomSignature) runs once more (it queues for its gate
+      // slot again), with a note, instead of counting red. STUDIO_HEAVY_OOM_RETRY=off: it counts as it is.
+      let oomRetry = null;
+      const oom = /^(off|0|false|no)$/i.test(process.env.STUDIO_HEAVY_OOM_RETRY || '') ? '' : oomSignature(r);
+      if (oom) {
+        console.error(`[game-gates] ${g.id}: died out of memory (${oom}): queued once more`);
+        emitEvent({ type: 'heavy.oom_retry', agent: process.env.STUDIO_LOCK_OWNER || 'gates', status: 'warn', msg: `${g.id} died out of memory (${oom}); re-queued once`.slice(0, 400), meta: { gate: g.id, signature: oom } });
+        r = runOnce(cmd);
+        oomRetry = oomSignature(r) ? `${oom}, and again on its one retry` : oom;
+      }
       const timedOut = (x) => x.error?.code === 'ETIMEDOUT' || (x.status === null && x.signal);
       const timeoutLine = () => `\nError: timed out after ${Math.round(timing.ms / 1000)} s (STUDIO_GAME_GATE_TIMEOUT_MS${timing.factor > 1 ? ` ${Math.round(baseTimeout / 1000)} s x ${timing.factor} for load` : ''}${timing.floor ? `${timing.factor > 1 ? ',' : ` ${Math.round(baseTimeout / 1000)} s`} raised to ${timing.floor.mult} x the last ${timing.floor.from === 'last pass' ? 'passing' : 'quiet'} run of ${Math.round(timing.floor.lastMs / 1000)} s` : ''}${timing.rerun ? '; self-triage\'s one re-run at the cap' : ''})`;
       if (timedOut(r)) r.stderr = `${r.stderr || ''}${timeoutLine()}`;
@@ -411,7 +432,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
       const failFiles = r.status === 0 ? [] : failingTestFiles(`${r.stdout || ''}${r.stderr || ''}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}) });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
