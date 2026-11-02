@@ -20,7 +20,8 @@
  * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
  * holds machine:heavy. 2.68.0 (m): a "Machine: RAM …, CPU …, GPU …, disk … free" line (harness/machine.mjs); 2.68.0 (o): blockers also name roles
  * the crew watchdog paused and a usage wind-down. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
- * when it has more than 6 lanes. Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
+ * when it has more than 6 lanes. 2.70.0 (v): blockers name assets waiting for a review of their previews, oldest first
+ * (harness/asset-review.mjs). Lists are cut ("+3 more") until the whole text is under 100 words (BRIEF_MAX_WORDS).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -89,6 +90,8 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   // 2.68.0: roles the crew watchdog paused (.studio/crew-paused.json) and a usage wind-down (.studio/winddown.json).
   const crew = Object.keys(readJson(path.join(root, '.studio', 'crew-paused.json'), {})?.roles || {});
   if (crew.length) blockers.push({ kind: 'crew', ids: crew, text: 'crew paused (sessions, nothing landed)' });
+  // 2.70.0 (v): assets waiting for a review of their previews (.studio/asset-reviews/), oldest first.
+  try { const rv = (await import('./asset-review.mjs')).pendingReviews(root); if (rv.length) blockers.push({ kind: 'asset-review', ids: rv.map((r) => r.asset), text: 'asset reviews (oldest first)' }); } catch {}
   const wd = readJson(path.join(root, '.studio', 'winddown.json'));
   if (wd?.at) blockers.push({ kind: 'winddown', text: `winding down${wd.pct !== null && wd.pct !== undefined ? ` (usage ${Math.round(wd.pct)}%)` : ''}` });
   // PC.
