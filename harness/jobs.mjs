@@ -32,7 +32,9 @@
  * jobDone() without an import cycle.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, getEventPaths, rolledEventFiles, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
 
@@ -49,6 +51,8 @@ export function jobDone({ kind, id = null, code = null, result = null, ms = null
     const res = String(result || (code === 0 ? 'pass' : code === null || code === undefined ? 'done' : 'fail'));
     const status = /^(pass|ok|done|landed|skipped)$/i.test(res) ? 'ok' : /^(busy|refused|nothing|held|stopped)$/i.test(res) ? 'warn' : 'error';
     const t = String(tail || '').trim();
+    // 2.68.0: after a train or verify job, the temp-file janitor runs on its own (harness/janitor.mjs; throttled).
+    janitorAfterJob(kind);
     return emitEvent({
       type: 'job.done',
       agent: agent || process.env.STUDIO_LOCK_OWNER || kind,
@@ -61,6 +65,30 @@ export function jobDone({ kind, id = null, code = null, result = null, ms = null
   } catch {
     return null;
   }
+}
+
+/**
+ * 2.68.0: after a train or verify job, the temp-file janitor (harness/janitor.mjs --yes --auto: the harness's own temp
+ * files only, never lanes) runs on its own, at most every STUDIO_JANITOR_EVERY_MIN (30) minutes; STUDIO_JANITOR=off: never.
+ * Spawned, not imported: janitor.mjs's CLI awaits modules that import this one.
+ */
+export function janitorAfterJob(kind, { env = process.env } = {}) {
+  try {
+    if (!['train', 'verify'].includes(kind) || /^(off|0|false|no)$/i.test(String(env.STUDIO_JANITOR || '').trim())) return false;
+    const every = (Number.isFinite(Number(env.STUDIO_JANITOR_EVERY_MIN)) && String(env.STUDIO_JANITOR_EVERY_MIN ?? '').trim() !== '' ? Math.max(0, Number(env.STUDIO_JANITOR_EVERY_MIN)) : 30) * 60000;
+    const root = env.STUDIO_MAIN_ROOT ? path.resolve(env.STUDIO_MAIN_ROOT) : path.resolve(STUDIO_STATE_DIR, '..').replace(/[\\/]\.lanes[\\/][^\\/]+$/, '');
+    const stamp = path.join(root, '.studio', 'janitor-last.json');
+    let last = 0;
+    try { last = Date.parse(JSON.parse(fs.readFileSync(stamp, 'utf8')).at) || 0; } catch {}
+    if (Date.now() - last < every) return false;
+    fs.mkdirSync(path.dirname(stamp), { recursive: true });
+    fs.writeFileSync(stamp, `${JSON.stringify({ at: new Date().toISOString(), after: kind })}\n`);
+    // cwd outside the studio, so a folder being removed (Windows) is never held by it.
+    const child = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'janitor.mjs'), '--yes', '--auto', '--root', root], { cwd: os.tmpdir(), detached: true, stdio: 'ignore', windowsHide: true, env: { ...env, STUDIO_MAIN_ROOT: root } });
+    child.on('error', () => {});
+    child.unref();
+    return true;
+  } catch { return false; }
 }
 
 // ---- matching -------------------------------------------------------------------------------------
