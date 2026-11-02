@@ -310,7 +310,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## NO_* (2)
 
 - `STUDIO_NO_PARSER` · no simple default · harness/codeindex.mjs, harness/done-check.mjs, harness/map.mjs (+1 more) · undocumented
-- `STUDIO_NO_WORK_EXITS` · no simple default · harness/agent.mjs, harness/session-outcome.mjs, qa/selftest-2672a.mjs · [RUN-UNATTENDED.md:113](RUN-UNATTENDED.md)
+- `STUDIO_NO_WORK_EXITS` · no simple default · harness/agent.mjs, harness/session-outcome.mjs, qa/selftest-2672a.mjs (+1 more) · [RUN-UNATTENDED.md:113](RUN-UNATTENDED.md)
 
 ## NTFY_* (2)
 
