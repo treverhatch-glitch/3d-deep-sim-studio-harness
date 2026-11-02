@@ -261,6 +261,57 @@ A Unity editor run takes 6-7 GB, so it shares the `machine:heavy` lock with full
   A background service of one (Unity Hub's `Unity.exe ... serve`, alive for days) doesn't count: a command line
   matching `STUDIO_HEAVY_IGNORE_ARGS` (a regex, default the word `serve`; `off`: none) is skipped (2.65.3, B-44).
 
+### Faster Unity checks (2.67.1)
+
+`node harness/unity.mjs gate <folder>` runs in this order:
+
+1. **Code-only steps, without the lock.** These are the commands in `studio/game.json` `engines.unity.codeOnly` (one
+   command or a list; `{folder}` is the project; each has up to `codeOnlyTimeoutMin` minutes, default 20). Without
+   that setting the step is `dotnet test tools/SimTests` when the project has that folder and .NET is installed.
+   `"codeOnly": []` means no code-only steps, and `STUDIO_UNITY_CODE_ONLY=off` skips them. These steps never wait for
+   `machine:heavy`, so a lane gets its code checks while another lane's editor run holds the machine. If one fails,
+   the gate is red right away and doesn't wait for the editor. `studio/game.json` is protected, so only the owner
+   sets these commands.
+2. **The editor steps, under one `machine:heavy` hold:** Edit Mode, then Play Mode.
+   - **Warm Library.** Before the editor starts, a copy that has no `Library/` gets the cached one, so it skips the
+     ~10 min import. After a green run (or a passing `build`), the copy's `Library/` becomes the cached one. The cache
+     lives in `STUDIO_UNITY_LIBRARY_CACHE` (default `<main checkout>/.studio/unity-cache`; set it to `off` to turn the
+     cache off). It is keyed by project, Unity version, branch base (`STUDIO_UNITY_LIBRARY_BASE`, else
+     `engines.unity.target`, else `main`) and a hash of `Packages/manifest.json` and `packages-lock.json`. A version
+     or package change starts a new key, so that first run is cold. Each project keeps its newest
+     `STUDIO_UNITY_LIBRARY_CACHE_KEEP` (2) keys.
+   - The cache is **copied, never linked.** The editor rewrites Library files in place, so a hard link would write a
+     lane's changes into the cache, and a junction or symlink would make two editor runs share one live Library.
+     Lock files are not copied. While another run copies a key in or out (`<cache>/<key>.lock`), a run neither seeds
+     from that key nor saves over it: it imports from scratch and says so. `node harness/unity-cache.mjs status
+     [<folder>] | seed <folder> | save <folder> | clear [<folder>]` does the same by hand, and a land script can use
+     it around its own editor steps in its gate worktree.
+   - **Play Mode flake retry.** A Play Mode run whose tests ran and failed gets one retry. A pass on the retry counts
+     as green: the gate prints a WARN naming the tests, adds a record to `.studio/unity-flakes.jsonl` (tests, both
+     results, both logs in `.studio/gates/out/unity-PlayMode-try1.log` and `-try2.log`), and the day's digest gets a
+     line. Two failures are red. Edit Mode, compile errors, a missing results file and licence problems are never
+     retried. `STUDIO_UNITY_PLAYMODE_RETRY=off` turns retries off.
+
+The land gate (`harness/unity-gate.mjs`) runs the land script as before: the script merges `{branch}` in its own
+worktree, so the harness has no checkout of that branch to run code-only steps on. Its land script can run its own
+code-only checks first.
+
+### Several Unity passes per gate, as board tasks (for a crew orchestrator)
+
+Don't hand-roll a gate script that runs Unity once per branch. File each Unity pass as a board task, and let the
+Unity train batch them:
+
+```bash
+npm run task -- add "Port the dock rules to C#" --track engine:unity --branch unity/dock-rules --role engine-porter
+# the porter works on unity/dock-rules, then:
+npm run task -- done T-031 --agent porter-a --train      # checks pass: queued for the Unity train
+npm run task -- train --unity [--max 4]                   # ONE land run for every queued branch (bisects a red one)
+npm run task -- train status                              # the queue and the running train
+```
+
+Each pass is a task with its own branch, its own result and its own history on the board. A red batch is bisected
+to the branch that broke it, and only that task is handed back. Refusals (busy) are retried, and nobody is blamed.
+
 ## Settings
 
 In `.env`:
