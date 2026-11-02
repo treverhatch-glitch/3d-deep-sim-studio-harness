@@ -85,3 +85,54 @@ When a task requires interactive scene inspection, multi-part rigging, UV unwrap
 ## 3. Rules & Boundaries
 - Keep asset scripts in `tools/blender/` or `assets/blender/`.
 - All Blender and `.glb` logic stays strictly on the **presentation** side of [`studio/rules/graphics-sim-boundary.md`](../studio/rules/graphics-sim-boundary.md).
+
+---
+
+## 4. Asset track (2.67.1)
+
+Asset work runs as its own track: `npm run task -- add "<asset>" --role asset-3d --track asset`. The role's brief
+template (what, where it's used, real-world size in metres, triangle budget per LOD, texture budget, style refs,
+licence) is [`studio/templates/asset-brief.md`](../studio/templates/asset-brief.md) (a stable path: anything that queues
+a make task copies it); the role is [`studio/roles/asset-3d.md`](../studio/roles/asset-3d.md). Blender runs headless only
+(`blender -b --factory-startup -P <script>`).
+
+**The asset gate** (`harness/asset-gate.mjs`) runs at `task done` for a task on `--track asset`, and for any task whose
+change adds or changes files under the game's declared asset paths. Its limits come from `studio/game.json`
+(protected: the owner's), with defaults:
+
+```json
+"assets": {
+  "paths": ["assets", "public/assets"],
+  "manifest": "studio/assets/manifest.json",
+  "triangleBudget": { "lod0": 2500, "lod1": 1200, "lod2": 500 },
+  "textureMaxPx": 2048,
+  "previewRequired": true,
+  "sizeTolerance": 0.15,
+  "sizeRequired": false,
+  "brandNames": [],
+  "licences": { "allow": ["own work", "CC0", "MIT", "CC-BY", "..."], "ask": ["SA", "GPL"], "block": ["NC", "ND"] },
+  "roundTrip": { "command": "blender -b --factory-startup -P tools/roundtrip.py -- {file}", "timeoutMin": 20 }
+}
+```
+
+| Check | Fails when |
+|---|---|
+| licence | a new asset file has no row in the manifest (`npm run asset -- add`), or its licence is blocked (NC, ND) or not on the allow list; an AI-made row has no recorded terms |
+| licence-ask | a share-alike licence has no game dev's yes (tier C): `node harness/asset-gate.mjs allow <file> --by <person> --permission "<their words>"` (never a worker) |
+| credit | CC-BY (or a row marked credit required) without a credit line |
+| triangles | a LOD (mesh or node named `<name>_LOD<n>`, else LOD 0) is over its budget; counted from the glTF JSON (indices / 3) |
+| texture | a PNG/JPEG (loose or inside a .glb) is bigger than `textureMaxPx` |
+| scale | the model's bounding box (LOD 0 meshes' POSITION min/max through their nodes' transforms, metres; Y-up: w = x, h = y, d = z) is outside the stated size ± `sizeTolerance`; the size is `"size": { "w", "d", "h" }` in its manifest row or in `<name>.asset.json` next to it (none: a note, or a failure with `sizeRequired`). A game's own engine-side model check can run as the round-trip command |
+| preview | a model has no `<name>.preview.png` (or `_preview`, `.jpg`, `.webp`) next to it |
+| roundtrip | the configured command exits non-zero (it runs under the machine:heavy lock; `{file}` runs it per model). No command, or the program isn't installed: skipped with a note |
+| brand | a configured brand name is in a file name, a glTF node/mesh/material/texture/image name, or the manifest row |
+
+Every failure prints a `Fix:` line (`harness/gate-fix.mjs` ASSET_FIXES) and goes into the task's next hand-back facts.
+AI-made files are listed for the Steam AI disclosure (pre-generated content). `task done --check` runs every check
+but the round trip.
+
+**Hand-off.** When an asset task lands (task done or the merge train), the harness queues one "Wire in <asset>" task
+naming the files, `--after` the asset task: on the Unity track (`--track engine:unity`, an engine-porter) when the
+studio has the Unity engine configured, else a builder task. It is filed once per asset task (an `asset.handoff`
+event).
+
