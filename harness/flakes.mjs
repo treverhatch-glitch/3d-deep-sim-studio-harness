@@ -12,9 +12,16 @@
  *   intermittent it passes alone once, then fails alone under low load (flaky with no named cause).
  * Each label is a line in .studio/flakes.jsonl ({ at, test, check, label, why, train, tree, runs, rng }). A test
  * labelled flaky (any label but "real") STUDIO_FLAKE_QUARANTINE_AFTER (3) times in STUDIO_FLAKE_WINDOW_DAYS (7) goes on
- * the quarantine list studio/quarantine.json ([{ test, label, since, why, by, evidence, task }]), which game checks get
- * as STUDIO_TEST_QUARANTINE (a JSON list of test files) for the game's runner to skip, and ONE fix task is filed for it
- * (deduped by the entry's task and the board's same-title check). A real failure is never quarantined.
+ * the quarantine list studio/quarantine.json ([{ test, label, since, why, by, evidence, task, status }]) as PROPOSED:
+ * the harness never silences a test on its own authority, so a proposed entry is not skipped; it is listed by the
+ * digest and `npm run flakes` until a person, an agent under the owner's delegation, or an outside agent (or a
+ * Producer/Director session) on a person's permission confirms it (`npm run flakes -- confirm <test> --by <name>`,
+ * harness/decider.mjs; never a worker). Then it is active: game checks get the active entries as
+ * STUDIO_TEST_QUARANTINE (a JSON list of test files) for the game's runner to skip. Exception: "autoQuarantine": true in
+ * studio/quarantine.json ({ "autoQuarantine": true, "tests": [...] }) or in the game's studio.gates.json (the owner's
+ * or a game dev's choice; both files are guarded) makes the harness's entries active at once, still with evidence.
+ * ONE fix task is filed either way (deduped by the entry's task and the board's same-title check). A real failure is
+ * never quarantined.
  * The list silences a check, so a lane that changes it is tier C (harness/tiers.mjs SILENCERS, like the fuzz ignore
  * list): a game dev releases an entry (`npm run flakes -- release <test> --by <name>`), or an outside agent, or a
  * Producer/Director session, on a person's recorded permission (harness/decider.mjs); never a worker. The harness's
@@ -27,7 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 import { focusFromLog, normTestPath } from './train-focus.mjs';
-import { testRngFacts } from './test-rng.mjs';
+import { testRngFacts, gameFolder } from './test-rng.mjs';
 
 export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
@@ -59,11 +66,31 @@ export function readQuarantine(root) {
   const list = Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : [];
   return list.filter((e) => e && typeof e.test === 'string' && e.test.trim());
 }
-const writeQuarantine = (root, list) => writeAtomic(path.join(root, QUARANTINE_REL), `${JSON.stringify(list, null, 2)}\n`);
+/** Writes the list back in the file's own shape (a list, or { autoQuarantine, tests }). */
+const writeQuarantine = (root, list) => {
+  const raw = readJson(path.join(root, QUARANTINE_REL), null);
+  const body = raw && !Array.isArray(raw) && typeof raw === 'object' ? { ...raw, tests: list } : list;
+  writeAtomic(path.join(root, QUARANTINE_REL), `${JSON.stringify(body, null, 2)}\n`);
+};
+/** An entry the runner skips: confirmed (status "active"), or written by hand without a status. "proposed" isn't. */
+export const isActive = (e) => !e.status || e.status === 'active';
+/**
+ * Does the harness's addition go active at once? "autoQuarantine": true in studio/quarantine.json or in the game's
+ * studio.gates.json: { on, where }.
+ */
+export function autoQuarantine(root, env = process.env) {
+  const q = readJson(path.join(root, QUARANTINE_REL), null);
+  if (q && !Array.isArray(q) && q.autoQuarantine === true) return { on: true, where: QUARANTINE_REL };
+  try {
+    const g = gameFolder(root, env);
+    if (g && readJson(path.join(root, g, 'studio.gates.json'), null)?.autoQuarantine === true) return { on: true, where: `${g}/studio.gates.json` };
+  } catch {}
+  return { on: false, where: null };
+}
 
 /** What game checks get as STUDIO_TEST_QUARANTINE: a JSON list of test files ('' when none). */
 export function quarantineEnvValue(root) {
-  const list = readQuarantine(root).map((e) => normTestPath(e.test)).filter(Boolean);
+  const list = readQuarantine(root).filter(isActive).map((e) => normTestPath(e.test)).filter(Boolean);
   return list.length ? JSON.stringify([...new Set(list)]) : '';
 }
 
@@ -114,7 +141,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
     out.labels.push(row);
     log(`[flakes] ${row.test} (${check}): ${row.label}: ${row.why}`);
     const q = maybeQuarantine(root, row, { now, env, emit });
-    if (q) { out.quarantined.push(q); log(`[flakes] ${row.test} is quarantined (${q.why}); the game's runner skips it via STUDIO_TEST_QUARANTINE until a game dev releases it`); }
+    if (q) { out.quarantined.push(q); log(q.status === 'active' ? `[flakes] ${row.test} is quarantined (${q.why}; autoQuarantine in ${q.auto}); the game's runner skips it via STUDIO_TEST_QUARANTINE until a game dev releases it` : `[flakes] ${row.test} is PROPOSED for quarantine (${q.why}); it still runs until a person confirms: npm run flakes -- confirm ${row.test} --by <name>`); }
   }
   if (pairs.length > rules.maxFiles) log(`[flakes] ${pairs.length - rules.maxFiles} more failing test file(s) not triaged (STUDIO_FLAKE_MAX_FILES ${rules.maxFiles})`);
   if (out.labels.length) {
@@ -135,9 +162,13 @@ export function maybeQuarantine(root, row, { now = Date.now(), env = process.env
   const counts = {};
   for (const h of hits) counts[h.label] = (counts[h.label] || 0) + 1;
   const label = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
-  const entry = { test: row.test, label, since: new Date(now).toISOString(), why: `labelled flaky ${hits.length} times in ${rules.days} days (${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}); a real failure is never quarantined`, by: 'harness', evidence: hits.slice(-5).map((h) => ({ at: h.at, label: h.label, train: h.train || null, tree: h.tree ? String(h.tree).slice(0, 12) : null })), task: null };
+  const auto = autoQuarantine(root, env);
+  const entry = { test: row.test, label, since: new Date(now).toISOString(), why: `labelled flaky ${hits.length} times in ${rules.days} days (${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ')}); a real failure is never quarantined`, by: 'harness', status: auto.on ? 'active' : 'proposed', ...(auto.on ? { auto: auto.where } : {}), evidence: hits.slice(-5).map((h) => ({ at: h.at, label: h.label, train: h.train || null, tree: h.tree ? String(h.tree).slice(0, 12) : null })), task: null };
   writeQuarantine(root, [...list, entry]);
-  try { emit({ type: 'test.quarantined', agent: 'harness', to: 'producer', status: 'warn', msg: `${entry.test} quarantined by the harness: ${entry.why}. The game's runner skips it (STUDIO_TEST_QUARANTINE); a fix task is filed; a game dev releases it: npm run flakes -- release ${entry.test} --by <name>`.slice(0, 600), meta: { test: entry.test, label, evidence: entry.evidence, by: 'harness' } }); } catch {}
+  const msg = auto.on
+    ? `${entry.test} quarantined by the harness ("autoQuarantine": true in ${auto.where}): ${entry.why}. The game's runner skips it (STUDIO_TEST_QUARANTINE); a fix task is filed; a game dev releases it: npm run flakes -- release ${entry.test} --by <name>`
+    : `${entry.test} proposed for quarantine: ${entry.why}. It still runs until a person confirms (npm run flakes -- confirm ${entry.test} --by <name>); a fix task is filed`;
+  try { emit({ type: auto.on ? 'test.quarantined' : 'test.quarantine_proposed', agent: 'harness', to: 'producer', status: 'warn', msg: msg.slice(0, 600), meta: { test: entry.test, label, status: entry.status, auto: auto.where, evidence: entry.evidence, by: 'harness' } }); } catch {}
   return entry;
 }
 
@@ -164,6 +195,22 @@ export async function fileQuarantineTasks(root, fileTask, { emit = emitEvent } =
   return done;
 }
 
+/** Confirm a proposed entry (the decider rules: never a worker): it goes active, and the game's runner skips it. */
+export async function confirmQuarantine(root, test, { by, permission = '', why = '', env = process.env, emit = emitEvent } = {}) {
+  const list = readQuarantine(root);
+  const e = list.find((x) => samePath(x.test, test));
+  if (!e) return { ok: false, message: `${test} is not on the quarantine list (${QUARANTINE_REL}).` };
+  if (isActive(e)) return { ok: true, message: `${e.test} is already quarantined (active).` };
+  const { deciderCheck } = await import('./decider.mjs');
+  const d = await deciderCheck({ by, permission, env, action: 'quarantine', what: 'confirm a test quarantine' });
+  if (!d.ok) return { ok: false, message: d.why };
+  e.status = 'active';
+  e.confirmed = { by: d.by, at: new Date().toISOString(), via: d.via, ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}), ...(why ? { why: String(why).slice(0, 300) } : {}) };
+  writeQuarantine(root, list);
+  emit({ type: 'test.quarantined', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} confirmed the quarantine of ${e.test} (${e.label}; ${e.why})${d.via !== 'person' ? ` (recorded by ${d.recordedBy} on ${d.by}'s permission)` : ''}: the game's runner skips it (STUDIO_TEST_QUARANTINE)`.slice(0, 600), meta: { test: e.test, label: e.label, status: 'active', confirmedBy: d.by, via: d.via, evidence: e.evidence || [], by: e.by || null } });
+  return { ok: true, message: `Confirmed: ${e.test} is quarantined; the game's runner skips it from the next check. Release: npm run flakes -- release ${e.test} --by <name>.` };
+}
+
 /** Release an entry (a game dev, or an outside agent or a Producer/Director session on a person's permission; never a worker). */
 export async function releaseQuarantine(root, test, { by, permission = '', why = '', env = process.env, emit = emitEvent } = {}) {
   const list = readQuarantine(root);
@@ -179,12 +226,15 @@ export async function releaseQuarantine(root, test, { by, permission = '', why =
 
 /** The digest's line: the harness's quarantine additions in 24 h, and how many tests are quarantined now. */
 export function quarantineDigestLine(events, { now = Date.now(), root = null } = {}) {
-  const added = (events || []).filter((e) => e.type === 'test.quarantined' && (Date.parse(e.ts) || 0) >= now - DAY);
-  const nowList = root ? readQuarantine(root) : [];
-  if (!added.length && !nowList.length) return '';
-  const head = added.length ? `The harness quarantined ${added.length} flaky test${added.length === 1 ? '' : 's'} in 24 h: ${added.slice(0, 3).map((e) => `${e.meta?.test || '?'} (${e.meta?.label || '?'}, ${(e.meta?.evidence || []).length} labels)`).join(', ')}${added.length > 3 ? ' …' : ''}.` : '';
-  const tail = nowList.length ? `${nowList.length} test${nowList.length === 1 ? '' : 's'} quarantined (${QUARANTINE_REL}; npm run flakes; release: npm run flakes -- release <test> --by <you>).` : '';
-  return [head, tail].filter(Boolean).join(' ');
+  const added = (events || []).filter((e) => e.type === 'test.quarantined' && e.agent === 'harness' && (Date.parse(e.ts) || 0) >= now - DAY);
+  const all = root ? readQuarantine(root) : [];
+  const proposed = all.filter((e) => !isActive(e));
+  const active = all.filter(isActive);
+  if (!added.length && !all.length) return '';
+  const head = added.length ? `The harness quarantined ${added.length} flaky test${added.length === 1 ? '' : 's'} in 24 h (autoQuarantine): ${added.slice(0, 3).map((e) => `${e.meta?.test || '?'} (${e.meta?.label || '?'}, ${(e.meta?.evidence || []).length} labels)`).join(', ')}${added.length > 3 ? ' …' : ''}.` : '';
+  const prop = proposed.length ? `Proposed for quarantine, still running until you confirm: ${proposed.slice(0, 3).map((e) => `${e.test} (${e.label}, ${(e.evidence || []).length} labels)`).join(', ')}${proposed.length > 3 ? ' …' : ''} (npm run flakes -- confirm <test> --by <you>).` : '';
+  const tail = active.length ? `${active.length} test${active.length === 1 ? '' : 's'} quarantined (${QUARANTINE_REL}; npm run flakes; release: npm run flakes -- release <test> --by <you>).` : '';
+  return [head, prop, tail].filter(Boolean).join(' ');
 }
 
 export function statusText(root, now = Date.now(), env = process.env) {
@@ -193,8 +243,12 @@ export function statusText(root, now = Date.now(), env = process.env) {
   const recent = readFlakes(root).filter((r) => (Date.parse(r.at) || 0) >= now - days * DAY);
   const by = {};
   for (const r of recent) (by[r.test] ||= {})[r.label] = ((by[r.test] || {})[r.label] || 0) + 1;
-  const lines = [q.length ? `Quarantined (${QUARANTINE_REL}; the game's runner skips them via STUDIO_TEST_QUARANTINE):` : 'No test is quarantined.'];
-  for (const e of q) lines.push(`  ${e.test}  ${e.label}  since ${String(e.since).slice(0, 16)}  by ${e.by || '?'}${e.task ? `  fix: ${e.task}` : ''}  (${e.why})`);
+  const act = q.filter(isActive);
+  const prop = q.filter((e) => !isActive(e));
+  const row = (e) => `  ${e.test}  ${e.label}  since ${String(e.since).slice(0, 16)}  by ${e.by || '?'}${e.confirmed ? `, confirmed by ${e.confirmed.by}` : ''}${e.task ? `  fix: ${e.task}` : ''}  (${e.why})`;
+  const lines = [act.length ? `Quarantined (${QUARANTINE_REL}; the game's runner skips them via STUDIO_TEST_QUARANTINE):` : 'No test is quarantined.'];
+  for (const e of act) lines.push(row(e));
+  if (prop.length) { lines.push(`Proposed by the harness, still running until confirmed (npm run flakes -- confirm <test> --by <name>):`); for (const e of prop) lines.push(row(e)); }
   lines.push(Object.keys(by).length ? `Labels in ${days} days (${FLAKES_REL}):` : `No flake labels in ${days} days.`);
   for (const [t, c] of Object.entries(by)) lines.push(`  ${t}  ${Object.entries(c).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   return lines.join('\n');
@@ -206,11 +260,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const { mainRoot } = await import('./worktree.mjs');
   const root = mainRoot();
   if (!argv.length || argv[0] === 'status') { console.log(statusText(root)); process.exit(0); }
+  if (argv[0] === 'confirm' && argv[1] && flag('by')) {
+    const r = await confirmQuarantine(root, argv[1], { by: flag('by'), permission: flag('permission') || '', why: flag('why') || '' });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
   if (argv[0] === 'release' && argv[1] && flag('by')) {
     const r = await releaseQuarantine(root, argv[1], { by: flag('by'), permission: flag('permission') || '', why: flag('why') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
-  console.error('Usage: npm run flakes [-- status] | npm run flakes -- release <test file> --by <name> [--permission "<their words or a link>"] [--why "…"]');
+  console.error('Usage: npm run flakes [-- status] | npm run flakes -- confirm|release <test file> --by <name> [--permission "<their words or a link>"] [--why "…"]');
   process.exit(2);
 }
