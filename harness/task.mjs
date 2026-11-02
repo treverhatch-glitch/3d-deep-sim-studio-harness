@@ -21,6 +21,7 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
+import { overlapCheck } from './task-overlap.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -1305,7 +1306,7 @@ export function addTask(opts) {
   return { ...out, started: false, startError: started?.message || (started?.lock?.owner ? `claimed by ${started.lock.owner}` : 'not started') };
 }
 
-function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {}, startFor = null }) {
+function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {}, startFor = null, overlap = true }) {
   // 2.35.0: a rescuer splitting a stuck task (it holds "Rescue: T-x" and the new title names T-x) queues directly.
   if (!meta.promoted && agent && !isDecider(agent, process.env)) {
     try {
@@ -1336,6 +1337,11 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
     return { error: 'gated', message: gate.message };
   }
   if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
+  // 2.69.0 (s): overlap with open tasks' lanes, lanes in flight and near-duplicate titles (harness/task-overlap.mjs).
+  // Advisory unless STUDIO_OVERLAP=block. A planner's split and a rescue's pieces overlap their parent on purpose.
+  const ov = overlap && !meta.splitOf && !fromRescueMeta(meta) ? overlapCheck({ title, role, meta, phase: 'add', agent, board: parseNextQueue() }) : { found: [], lines: [], block: false };
+  if (ov.block) return { error: 'overlap', message: ov.lines.join('\n') };
+  if (ov.lines.length) gate.warnings.push(...ov.lines);
   const newTask = {
     id: allocateTaskId(parseNextQueue()),
     priority: priority.toUpperCase(),
@@ -1400,6 +1406,8 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
   const extra = { ...(split?.id ? { split: split.id } : {}), ...(tricks ? { tricks } : {}) };
   return gate.warnings.length ? { ...newTask, ...extra, warnings: gate.warnings } : { ...newTask, ...extra };
 }
+
+const fromRescueMeta = (meta) => meta?.origin === 'rescue' || meta?.rescueSplit;
 
 /** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
 export function dropTask(id, { by = actor(), why } = {}) {
@@ -1633,6 +1641,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const targetId = arg1 || q.backlog[0]?.id;
     if (!targetId) {
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
+      process.exit(1);
+    }
+    // 2.69.0 (s): the task against the work in flight (its lane, its own diff once it has one, near-duplicate titles).
+    const startOv = (() => { const t = q.backlog.find((x) => x.id === targetId) || q.inProgress.find((x) => x.id === targetId); return t ? overlapCheck({ id: t.id, title: t.title, role: t.role, phase: 'start', agent: whoAmI(flags), board: q }) : null; })();
+    for (const l of startOv?.lines || []) console.error(l);
+    if (startOv?.block) {
+      emitEvent({ type: 'task.start_refused', agent: whoAmI(flags) || undefined, task: targetId, status: 'blocked', msg: `overlap (STUDIO_OVERLAP=block): ${startOv.found.map((f) => f.with).join(', ')}`.slice(0, 400) });
       process.exit(1);
     }
     const started = startTask(targetId, whoAmI(flags), { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force) });

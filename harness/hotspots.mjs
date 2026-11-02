@@ -143,6 +143,23 @@ export function overlaps(root = mainRoot(), lanes = lanesInFlight(root)) {
   return found.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
+/**
+ * 2.69.0 (s): what one lane in flight changes against main, on its own lines: Map(file → [{ start, end }]) (an
+ * insertion is the line it follows). harness/task-overlap.mjs names these when a new task's lane meets them.
+ */
+export function laneChanges(root, lane) {
+  const main = mainBranch(root);
+  const tip = out(git(root, 'rev-parse', `refs/heads/${main}`));
+  const mb = isSha(tip) && isSha(lane?.head) ? out(git(root, 'merge-base', tip, lane.head)) : '';
+  const res = new Map();
+  if (!isSha(mb)) return res;
+  for (const [f, hunks] of diffHunks(root, mb, lane.head)) {
+    if (SKIP.test(f)) continue;
+    res.set(f, hunks.map((h) => ({ start: Math.max(1, h.ns), end: Math.max(1, h.nn > 0 ? h.ns + h.nn - 1 : h.ns) })));
+  }
+  return res;
+}
+
 // ---- telling the Producer ---------------------------------------------------------------------------
 
 function readState(root) {
