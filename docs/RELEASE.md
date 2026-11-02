@@ -87,6 +87,27 @@ which node can't run, so use the line above there.) The guard finds the studio b
    it prints the `git stash drop stash@{n}` to run once the board has every row.
 6. `npm run verify`, then `npm run task -- drain off --by <you>`.
 
+### The upgrade watch (2.69.0)
+
+`npm run upgrade -- watch` checks for a newer harness now; the supervisor does the same every
+`STUDIO_UPGRADE_WATCH_MIN` (60; `off`: never). It watches the `ref` in `studio/upgrade.json`, else `main` on the remote
+of `STUDIO_HARNESS_REF`, else `upstream/main`; fetches it (`STUDIO_UPGRADE_FETCH_MS`, 60000) and compares its
+`package.json` version with the studio's. A newer one has its CI read from the public GitHub API (no token); a remote
+that isn't on GitHub, an API it can't reach or CI that isn't finished green means it is only reported. It takes the
+update on its own (steps 4-5 above, as `upgrade --merge` for the person who switched it on) only when:
+
+- auto-upgrade is on: `npm run upgrade -- watch auto on --by <person>` commits `studio/upgrade.json` with who set it.
+  A person in their own terminal, an agent outside the harness or a Producer/Director session with `--permission
+  "<the person's words>"`, or the agent the owner's delegation covers for `upgrade-auto` (`npm run delegate`); never
+  a worker. `watch auto off` (anyone) turns it off. It counts as committed in the main checkout;
+- CI on that commit is green;
+- now is inside `STUDIO_UPGRADE_WINDOW` (local time, for example `03:00-05:00`; unset: report only);
+- no merge train, no heavy work (a verify) and no agent session is running; otherwise it waits for the next check.
+
+After the merge and the lanes refresh it files one builder task per conflicted lane. Every changed answer is an
+`upgrade.watch` event (the 2.68.0 impact report reads `upgrade.merged`). `npm run upgrade -- watch status` shows the
+switch and the last check. The running supervisor keeps the old harness in memory: restart it after an upgrade.
+
 ### Taking 2.59.0 with live lanes (migration note)
 
 2.59.0 changes how lanes land (the merge train), what a hook stamp records (`Studio-Patch-U0`) and refuses a lane's

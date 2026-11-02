@@ -120,3 +120,22 @@ event's meta first (`kind`, `id`, `code`), then the event's own fields (`task`, 
 
 Phone alerts (`npm run alerts`) can also send `job.done` for a train or a full verify. This is off by default:
 set `STUDIO_ALERT_JOBS=on` in `.env`.
+
+## 6. Overlaps, queue depth and harness upgrades (2.69.0)
+
+Three things the conductor used to do by eye or by hand:
+
+- **Overlaps when work is added or started** (harness/task-overlap.mjs). `task add` and `task start` compare the
+  task's lane (`--paths`/`--lane`, `task lane`, or the guess from its title) with what each lane in flight already
+  changes (queued lanes and lane copies with unlanded commits, diffed against main), with the lanes of open tasks,
+  and, at start, its own lane's diff line by line; and its title with open tasks' titles (70% or more of the words in
+  common). Each finding is one line, for example `T-132 already changes src/sim/sim.ts:120-140; consider stacking
+  (--after T-132) or splitting the scope`, and one `task.overlap` event. Advisory: `STUDIO_OVERLAP=block` makes add and
+  start refuse while an overlap stands; `STUDIO_OVERLAP=off` skips the check (default `warn`).
+- **Queue depth** (harness/queue-depth.mjs). Each supervisor pass counts the builder tasks that could start now
+  (unclaimed, no open `--after`, no hold, park or block, no folder another agent holds). Below `STUDIO_QUEUE_DEPTH`
+  (default: the supervisor's session cap for that pass; `off` turns it off) the Producer is asked like the refill
+  asks: a `queue.depth` event, a line in `studio/producer/INBOX.md` naming the areas chains and holds block (so it plans
+  elsewhere), and a wake unless `STUDIO_REFILL_WAKE=off`. It never adds a task. One ask per
+  `STUDIO_QUEUE_DEPTH_ASK_MIN` (30) minutes while the shortfall lasts; a bigger shortfall asks again.
+- **The upgrade watch**: `npm run upgrade -- watch` (docs/RELEASE.md, "The upgrade watch").
