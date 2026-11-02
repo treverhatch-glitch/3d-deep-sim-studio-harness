@@ -32,6 +32,12 @@
  *       Who: a person, a Producer or Director session, or an agent outside the harness (harness/permission.mjs); a
  *       worker never. --busy-ok is theirs too.
  *
+ *   npm run lanes -- disk [--top N] [--json]            2.70.0: each lane copy's size, the total, what laneExclude saves
+ *                                                        (harness/lane-disk.mjs)
+ *   npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]
+ *                                                        2.70.0: put left-out paths back into a sparse lane copy, logged
+ *                                                        (harness/lane-sparse.mjs)
+ *
  * Exit: 0 all fine; 1 a conflict or red; 2 refused or bad usage.
  */
 import fs from 'node:fs';
@@ -427,7 +433,7 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   // 2.67.0 (B-47): --help / -h prints usage and never acts.
-  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]'); process.exit(0); }
+  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json] | npm run lanes -- disk [--top N] [--json] | npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "…"]'); process.exit(0); }
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   const json = argv.includes('--json');
   const root = mainRoot();
@@ -452,6 +458,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (json) console.log(JSON.stringify({ ok: results.every((r) => r.status === 'ok'), results }));
     if (!results.length && !json) console.log('[lanes] no lane copy to refresh');
     process.exit(results.some((r) => r.status === 'conflict' || r.status === 'red') ? 1 : results.some((r) => r.status === 'refused') ? 2 : 0);
+  }
+  // 2.70.0 (w): `lanes disk` (harness/lane-disk.mjs) and `lanes widen` (harness/lane-sparse.mjs).
+  if (argv[0] === 'disk') {
+    const ld = await import('./lane-disk.mjs');
+    const top = Number(opt('--top')) > 0 ? Number(opt('--top')) : 10;
+    const r = ld.recordLaneDisk({ root });
+    const shown = { ...r, top: r.lanes.slice(0, top) };
+    console.log(json ? JSON.stringify(shown) : ld.diskText(shown));
+    process.exit(0);
+  }
+  if (argv[0] === 'widen') {
+    const ls = await import('./lane-sparse.mjs');
+    const vals = new Set(['--lane', '--why', '--by']);
+    const paths = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && !vals.has(all[i - 1]));
+    const agent = opt('--lane');
+    const wt = await import('./worktree.mjs');
+    const dir = agent ? path.join(root, LANES_DIR, agent) : wt.inLaneCopy() ? (await import('./event.mjs')).REPO_ROOT : null;
+    if (!paths.length || !dir) { console.error('Usage: npm run lanes -- widen <path|glob> [...] [--lane <agent>] [--why "<why>"]   (in a lane copy, or --lane from the main checkout)'); process.exit(2); }
+    if (!fs.existsSync(dir)) { console.error(`No lane copy ${LANES_DIR}/${agent}.`); process.exit(2); }
+    const r = ls.widenLane({ dir, paths, why: opt('--why') || 'asked for', by: opt('--by') || process.env.STUDIO_LOCK_OWNER || null, root, agent: path.basename(dir) });
+    if (json) console.log(JSON.stringify(r));
+    else console.log(r.ok ? (r.added.length ? `[lanes] ${path.basename(dir)} widened: ${r.added.join(' ')} (logged as lane.widened)` : `[lanes] ${path.basename(dir)}: ${r.why}`) : `[lanes] could not widen: ${r.why}`);
+    process.exit(r.ok ? 0 : 1);
   }
   if (argv[0] && !argv[0].startsWith('--')) { console.error('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests]'); process.exit(2); }
   const t = await laneTable(root, { stamps: !argv.includes('--no-stamps') });

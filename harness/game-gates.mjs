@@ -327,6 +327,13 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
   let slotRoot = REPO_ROOT;
   try { slotRoot = (await import('./worktree.mjs')).mainRoot(); } catch {}
   const slot = (label, fn) => withGateSlot(slotRoot, label, fn, { log: (m) => console.error(m) });
+  // 2.70.0 (w): in a sparse lane, put back every left-out file the checks about to run read (harness/lane-sparse.mjs).
+  if (game?.root) {
+    try {
+      const ls = await import('./lane-sparse.mjs');
+      ls.widenForChecks({ dir: REPO_ROOT, label: '[game-gates]', log: (m) => console.error(m), needs: ls.gameCheckNeeds({ root: REPO_ROOT, gameRoot: game.root, ids: gates.map((g) => g.id), engineProjects: (plan.engine || []).map((e) => e.project).filter(Boolean), layout: plan.layout, layoutPaths: plan.layoutPaths }) });
+    } catch (err) { console.error(`[game-gates] WARN sparse lane check: ${err.message}`); }
+  }
   if (game) {
     if (plan.why) log(`[game-gates] ${plan.why}`);
     if (!all.length) rows.push({ id: 'game:none', ok: false, required: true, why: `the game ${game.name} declares no checks: add ${game.root || `web/${game.name}`}/studio.gates.json or ${game.sim || '<game>/sim'}/qa.mjs` });

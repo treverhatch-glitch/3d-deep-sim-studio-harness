@@ -28,6 +28,7 @@ import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
+import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -150,7 +151,7 @@ export function nodeModuleDirs(root) {
  * Make the lane copy for an agent. Returns { dir, branch } or { error }. Any work an earlier agent left
  * on this task's branch is merged in.
  */
-export function createLaneCopy(agent, { task = null } = {}) {
+export function createLaneCopy(agent, { task = null, lane = null } = {}) {
   // 2.60.0 (#6): a task id that isn't on the board (studio/NEXT.md or DONE.md) is refused before anything is made or
   // written: a guessed id (T-115) used to leave a stale key in .studio/lane-branches.json.
   if (task) {
@@ -168,10 +169,13 @@ export function createLaneCopy(agent, { task = null } = {}) {
   ignoreLanes(root);
   const add = git(root, 'worktree', 'add', '--no-checkout', '-b', branch, dir, 'HEAD');
   if (add.status !== 0) return { error: `git worktree add failed: ${(add.stderr || '').trim().split('\n').pop()}` };
+  // 2.70.0 (w): the game's laneExclude (and STUDIO_LANE_EXCLUDE) are left out too, minus the task's declared scope
+  // (harness/lane-sparse.mjs); off unless declared.
+  const plan = sparsePlanSafe(root, task, lane);
   const steps = [
     ['config', 'extensions.worktreeConfig', 'true'],
     ['config', '--worktree', 'sparse.expectFilesOutsideOfPatterns', 'true'],
-    ['sparse-checkout', 'set', '--no-cone', '/*', '!/studio/', '!/.studio/'],
+    ['sparse-checkout', 'set', '--no-cone', ...plan.patterns],
     ['checkout', '-q', branch],
   ];
   for (const s of steps) {
@@ -197,8 +201,15 @@ export function createLaneCopy(agent, { task = null } = {}) {
   fs.writeFileSync(exclude, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));
   git(dir, 'config', '--worktree', 'core.excludesFile', exclude);
   const carried = task ? carryTaskBranch(task, dir) : null;
-  emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}` });
-  return { dir, branch, carried };
+  if (plan.on) writeSparseRecord(root, agent, { agent, task, at: new Date().toISOString(), exclude: plan.exclude, keep: plan.keep, from: plan.from, patterns: plan.patterns, widened: [] });
+  else removeSparseRecord(root, agent);
+  emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}${plan.on ? `; ${plan.why}` : ''}`.slice(0, 500), ...(plan.on ? { meta: { exclude: plan.exclude, keep: plan.keep } } : {}) });
+  return { dir, branch, carried, sparse: plan.on ? { exclude: plan.exclude, keep: plan.keep } : null };
+}
+
+/** 2.70.0 (w): the sparse plan for a new lane copy; the 2.29 patterns if it can't be worked out. */
+function sparsePlanSafe(root, task, lane) {
+  try { return lanePlan({ root, task, lane }); } catch { return { on: false, patterns: ['/*', '!/studio/', '!/.studio/'] }; }
 }
 
 /**
@@ -341,6 +352,7 @@ export function removeLaneCopy(agent, { keepBranch = false, ifIdle = false } = {
   try {
     fs.rmSync(path.join(root, '.studio', 'lanes', `${agent}.exclude`), { force: true });
   } catch {}
+  removeSparseRecord(root, agent);
   return { branch };
 }
 
@@ -400,6 +412,8 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
   if (!inLaneCopy()) return null;
   const root = mainRoot();
   const main = mainBranch(root);
+  // 2.70.0 (w): files written into paths a sparse lane left out are hidden from git; widen over them first.
+  try { widenStrays({ dir: REPO_ROOT, root, log: (m) => console.warn(m) }); } catch {}
   const { dirty, eol } = laneDirty(REPO_ROOT);
   if (eol.length) {
     console.warn(`[task done] note: ${eolNote(eol)}`);
