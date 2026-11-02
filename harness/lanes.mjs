@@ -420,6 +420,8 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
+  // 2.67.0 (B-47): --help / -h prints usage and never acts.
+  if (argv.includes('--help') || argv.includes('-h')) { console.log('Usage: npm run lanes [-- --json] [--no-stamps] | npm run lanes -- refresh <task|agent|branch|--all> --by <name> [--busy-ok] [--no-tests] [--json]'); process.exit(0); }
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
   const json = argv.includes('--json');
   const root = mainRoot();

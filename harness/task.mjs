@@ -1438,6 +1438,13 @@ function parseFlags(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  // 2.67.0 (B-47): --help / -h prints usage and exits before anything reads the board or acts (train --help ran a train).
+  const help = await import('./task-usage.mjs');
+  if (help.wantsHelp(process.argv.slice(2))) {
+    const first = process.argv.slice(2).find((a) => !a.startsWith('-'));
+    console.log(help.usageFor(first || ''));
+    process.exit(0);
+  }
   const flags = parseFlags(process.argv.slice(2));
   const [cmd = 'next', arg1] = flags._;
   const q = parseNextQueue();
