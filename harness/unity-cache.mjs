@@ -20,7 +20,8 @@
  * memory-mapped database file, rewritten under the same name): a hard link would write the lane's changes into the
  * cache, and a junction or symlink would make two editor runs share one live Library (on Windows a junction also
  * makes deleting the lane copy delete through into the cache with some tools). A copy costs a minute or two for a
- * few GB against a ~10 min import; lock files (*-lock, *.lock) are not copied.
+ * few GB against a ~10 min import; lock files (*-lock, *.lock) are not copied. 2.70.0 (u): the copy runs up to
+ * STUDIO_UNITY_CACHE_COPY_JOBS files at once (STUDIO_UNITY_CACHE_COPY=parallel, the default; serial: fs.cpSync).
  *
  * Never shared by two editor runs at once: each run works on its own copy, and the copy in or out takes
  * <cache>/<key>.lock (a live holder: the run goes cold, or doesn't save, and says so; it never waits or overwrites).
@@ -38,6 +39,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT } from './event.mjs';
 import { pidAlive, selfIdentity } from './proc-identity.mjs';
@@ -69,7 +72,70 @@ export function cacheKey(dir, { root = REPO_ROOT, env = process.env } = {}) {
 
 const hasLibrary = (dir) => { try { return fs.readdirSync(path.join(dir, 'Library')).length > 0; } catch { return false; } };
 const skipLock = (src) => !/(?:-lock|\.lock)$/i.test(path.basename(src));
-const copyDir = (from, to) => fs.cpSync(from, to, { recursive: true, force: true, preserveTimestamps: true, filter: skipLock });
+const serialCopy = (from, to) => fs.cpSync(from, to, { recursive: true, force: true, preserveTimestamps: true, filter: skipLock });
+
+// ---- 2.70.0 (u): a parallel Library copy -------------------------------------------------------------------------
+// fs.cpSync copies one file at a time; a Library is tens of thousands of small files, so the copy waits on each one in
+// turn. The parallel copy runs in a child node process (seed and save are synchronous, like the gate that calls them)
+// with up to STUDIO_UNITY_CACHE_COPY_JOBS copyFile calls at once. Files are copied (copyFile: on a ReFS Dev Drive
+// Windows clones the blocks), never hard-linked; timestamps are kept; lock files are skipped, as before.
+
+/** STUDIO_UNITY_CACHE_COPY: 'parallel' (default) or 'serial' (fs.cpSync, as in 2.67.1). */
+export const copyMode = (env = process.env) => (/^serial$/i.test(String(env.STUDIO_UNITY_CACHE_COPY || '').trim()) ? 'serial' : 'parallel');
+/** How many files the parallel copy copies at once: STUDIO_UNITY_CACHE_COPY_JOBS, else twice the cores (4 to 16). */
+export function copyJobs(env = process.env) {
+  const v = Math.floor(num(env.STUDIO_UNITY_CACHE_COPY_JOBS, 0));
+  if (v > 0) return Math.min(64, v);
+  const cores = (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 2;
+  return Math.max(4, Math.min(16, cores * 2));
+}
+
+/** Copy a folder with `jobs` copies in flight (the child process's work). { files, bytes }. */
+export async function parallelCopy(from, to, jobs = 8) {
+  const files = [];
+  const links = [];
+  const dirs = [to];
+  const stack = [[from, to]];
+  while (stack.length) {
+    const [s, d] = stack.pop();
+    for (const e of fs.readdirSync(s, { withFileTypes: true })) {
+      const sp = path.join(s, e.name);
+      const dp = path.join(d, e.name);
+      if (!skipLock(sp)) continue;
+      if (e.isDirectory()) { dirs.push(dp); stack.push([sp, dp]); } else if (e.isSymbolicLink()) links.push([sp, dp]); else if (e.isFile()) files.push([sp, dp]);
+    }
+  }
+  for (const d of dirs) fs.mkdirSync(d, { recursive: true });
+  for (const [s, d] of links) { try { fs.rmSync(d, { force: true }); } catch {} fs.symlinkSync(fs.readlinkSync(s), d); }
+  let next = 0;
+  let bytes = 0;
+  const worker = async () => {
+    while (next < files.length) {
+      const [s, d] = files[next++];
+      await fs.promises.copyFile(s, d);
+      const st = await fs.promises.stat(s);
+      bytes += st.size;
+      await fs.promises.utimes(d, st.atime, st.mtime);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(jobs, files.length || 1)) }, worker));
+  return { files: files.length, bytes };
+}
+
+/** Copy a Library folder: parallel (a child process) or serial. { mode, jobs, files, note }. Throws when the copy fails. */
+export function copyDir(from, to, env = process.env) {
+  if (copyMode(env) === 'parallel') {
+    const jobs = copyJobs(env);
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '_copy', from, to, String(jobs)], { encoding: 'utf8', windowsHide: true, timeout: 60 * 60000, maxBuffer: 16 * 1024 * 1024 });
+    const j = (() => { try { return JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { return null; } })();
+    if (r.status === 0 && j && Number.isFinite(j.files)) return { mode: 'parallel', jobs, files: j.files, note: `parallel copy, ${jobs} at a time, ${j.files} file(s), ${Math.round(j.bytes / 1048576)} MB` };
+    fs.rmSync(to, { recursive: true, force: true });
+    serialCopy(from, to);
+    return { mode: 'serial', jobs: 1, files: null, note: `serial copy: the parallel copy failed (${String(r.error?.code || r.stderr || `exit ${r.status}`).trim().split('\n').pop().slice(0, 160)})` };
+  }
+  serialCopy(from, to);
+  return { mode: 'serial', jobs: 1, files: null, note: 'serial copy (STUDIO_UNITY_CACHE_COPY=serial)' };
+}
 
 /** Take <cache>/<key>.lock: { release } or { busy: why }. A dead or reused-pid holder's lock is taken over. */
 export function takeKeyLock(cache, key, what) {
@@ -109,10 +175,10 @@ export function seedLibrary(dir, { mainRoot = REPO_ROOT, root = REPO_ROOT, env =
   const tmp = path.join(dir, `Library.seed-${process.pid}`);
   try {
     fs.rmSync(tmp, { recursive: true, force: true });
-    copyDir(src, tmp);
+    const cp = copyDir(src, tmp, env);
     fs.rmSync(path.join(dir, 'Library'), { recursive: true, force: true });
     fs.renameSync(tmp, path.join(dir, 'Library'));
-    return { status: 'seeded', key: k.key, ms: Date.now() - t0, why: `copied the warm Library (${k.key}) in ${span(Date.now() - t0)}` };
+    return { status: 'seeded', key: k.key, ms: Date.now() - t0, copy: cp.mode, files: cp.files, why: `copied the warm Library (${k.key}) in ${span(Date.now() - t0)} (${cp.note})` };
   } catch (err) {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
     return { status: 'error', key: k.key, why: `could not copy the warm Library (${err.code || err.message}): the editor imports from scratch` };
@@ -144,10 +210,11 @@ export function saveLibrary(dir, { mainRoot = REPO_ROOT, root = REPO_ROOT, env =
   const entry = path.join(cache, k.key);
   const tmp = path.join(entry, `Library.tmp-${process.pid}`);
   const old = path.join(entry, `Library.old-${process.pid}`);
+  let cp = { mode: null, files: null, note: '' };
   try {
     fs.mkdirSync(entry, { recursive: true });
     fs.rmSync(tmp, { recursive: true, force: true });
-    copyDir(path.join(dir, 'Library'), tmp);
+    cp = copyDir(path.join(dir, 'Library'), tmp, env);
     if (fs.existsSync(path.join(entry, 'Library'))) fs.renameSync(path.join(entry, 'Library'), old);
     fs.renameSync(tmp, path.join(entry, 'Library'));
     fs.rmSync(old, { recursive: true, force: true });
@@ -167,13 +234,17 @@ export function saveLibrary(dir, { mainRoot = REPO_ROOT, root = REPO_ROOT, env =
     try { fs.rmSync(path.join(cache, e.key), { recursive: true, force: true }); pruned.push(e.key); } catch {}
     l.release();
   }
-  return { status: 'saved', key: k.key, ms: Date.now() - t0, pruned, why: `saved this copy's Library as the warm one (${k.key}) in ${span(Date.now() - t0)}${pruned.length ? `; deleted ${pruned.length} older key(s)` : ''}` };
+  return { status: 'saved', key: k.key, ms: Date.now() - t0, pruned, copy: cp.mode, files: cp.files, why: `saved this copy's Library as the warm one (${k.key}) in ${span(Date.now() - t0)} (${cp.note})${pruned.length ? `; deleted ${pruned.length} older key(s)` : ''}` };
 }
 
 /** One line for the gate's output. */
 export const cacheLine = (r, when) => `[unity] Library cache (${when}): ${r.status}: ${r.why}`;
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)) && process.argv[2] === '_copy') {
+  // 2.70.0 (u): the parallel copy's child process (copyDir): _copy <from> <to> <jobs>; prints { files, bytes }.
+  const [from, to, jobs] = process.argv.slice(3);
+  try { console.log(JSON.stringify(await parallelCopy(from, to, Number(jobs) || 8))); } catch (err) { console.error(String(err.code || err.message || err)); process.exit(1); }
+} else if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const [cmd, folderArg] = argv;
   let mainRoot = REPO_ROOT;
