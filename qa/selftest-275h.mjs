@@ -55,7 +55,8 @@ export async function selftest275H({ dir, run, report, tmpRoot, root }) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   try {
-    const page = fs.readFileSync(path.join(dir, 'hub', 'v3', 'index.html'), 'utf8');
+    // Line endings as checked out (a Windows checkout with core.autocrlf has CRLF): the patterns below read LF.
+    const page = fs.readFileSync(path.join(dir, 'hub', 'v3', 'index.html'), 'utf8').replace(/\r\n/g, '\n');
     const VIEWS = ['ops', 'tycoon', 'plan', 'assets', 'arcade', 'away'];
     const ORDER = 'ops,tycoon,plan,assets,arcade';
     await guard('275h tabs: every view has the same tab bar (Control room, Studio floor, Game plan, Assets, Arcade), the current view marked aria-current, each tab a .switch with data-to (fails on 2.74.0: each view had its own list of other views)', () => {
