@@ -36,8 +36,11 @@ export function warnIdentityOnce(file, text, { write = (s) => process.stderr.wri
   const hits = identityLines(text);
   if (!hits.length) return hits;
   const seen = (globalThis[WARNED] ||= new Set());
-  if (!seen.has(file)) {
-    seen.add(file);
+  // Keyed by the resolved path: on Windows two loaders spell the same file with \ and / (CI, 2.73.1).
+  let key = String(file);
+  try { key = path.resolve(key); if (process.platform === 'win32') key = key.toLowerCase(); } catch {}
+  if (!seen.has(key)) {
+    seen.add(key);
     try { write(identityWarning(hits, file)); } catch {}
   }
   return hits;
