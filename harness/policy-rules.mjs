@@ -85,6 +85,30 @@ function shapeError(d) {
   if (d.never !== undefined && !Array.isArray(d.never)) return '"never" must be a list';
   if (d.notes !== undefined && !Array.isArray(d.notes)) return '"notes" must be a list';
   if (a?.allowed && WORKER_NAME.test(String(a.agent || ''))) return `${a.agent} is a worker agent's name; autonomous mode never covers workers`;
+  return auditRoutingShapeError(d);
+}
+
+/**
+ * 2.73.0 (e): the policy's "audit" and "routing" blocks.
+ *   "audit": { "rate": 0.1 }   the share of hands-free landings and autonomous decisions picked for an after-the-fact
+ *                              audit (harness/audit.mjs); default 0.1 while autonomous mode is on, else 0.
+ *   "routing": { "cheapFirst": ["chore", "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top":
+ *                "<model>" }, "models": ["<model>", …], "holdout": 0 }   cheap-first routing (harness/routing.mjs): the
+ *                listed task types/tracks start on the cheapest listed tier; the router never picks a model the policy
+ *                doesn't list (tiers' values and "models"). "holdout" (default 0, OFF: deferred by the owner until API
+ *                credit is available) sends that share of matching tasks to the default tier to measure the difference.
+ */
+function auditRoutingShapeError(d) {
+  const au = d.audit;
+  if (au !== undefined && (typeof au !== 'object' || au === null || Array.isArray(au))) return '"audit" must be an object';
+  if (au?.rate !== undefined && !(Number.isFinite(Number(au.rate)) && Number(au.rate) >= 0 && Number(au.rate) <= 1)) return '"audit.rate" must be a share from 0 to 1';
+  const r = d.routing;
+  if (r === undefined) return '';
+  if (typeof r !== 'object' || r === null || Array.isArray(r)) return '"routing" must be an object';
+  if (r.cheapFirst !== undefined && !Array.isArray(r.cheapFirst)) return '"routing.cheapFirst" must be a list of task types or tracks';
+  if (r.models !== undefined && !Array.isArray(r.models)) return '"routing.models" must be a list of models';
+  if (r.tiers !== undefined && (typeof r.tiers !== 'object' || r.tiers === null || Array.isArray(r.tiers) || Object.keys(r.tiers).some((k) => !['cheap', 'mid', 'top'].includes(k)))) return '"routing.tiers" must be { "cheap": …, "mid": …, "top": … }';
+  if (r.holdout !== undefined && !(Number.isFinite(Number(r.holdout)) && Number(r.holdout) >= 0 && Number(r.holdout) <= 0.5)) return '"routing.holdout" must be a share from 0 to 0.5';
   return '';
 }
 
@@ -98,8 +122,20 @@ export function effectivePolicy(doc) {
     autonomous: { allowed: a.allowed === true && Boolean(a.agent), agent: a.agent ? String(a.agent) : null, actions: actions.filter((x) => !never.includes(x)), reviewWithinH: Number(a.reviewWithinH) > 0 ? Math.min(Number(a.reviewWithinH), 24 * 30) : DEFAULT_REVIEW_H, by: a.by || null, at: a.at || null },
     never,
     notes: strs(doc?.notes).map((x) => x.slice(0, 500)),
+    audit: { rate: doc?.audit && doc.audit.rate !== undefined && Number.isFinite(Number(doc.audit.rate)) ? Math.min(1, Math.max(0, Number(doc.audit.rate))) : null },
+    routing: routingOf(doc?.routing),
     ignoredActions: listed.filter((x) => !AUTONOMOUS_ELIGIBLE.includes(x) || never.includes(x)),
   };
+}
+
+/** 2.73.0 (e): the routing block in force: { cheapFirst, tiers, models (every model it lists), holdout }. */
+export function routingOf(r) {
+  const o = r && typeof r === 'object' && !Array.isArray(r) ? r : {};
+  const tiers = {};
+  for (const t of ['cheap', 'mid', 'top']) if (o.tiers && typeof o.tiers === 'object' && String(o.tiers[t] || '').trim()) tiers[t] = String(o.tiers[t]).trim().slice(0, 120);
+  const models = [...new Set([...Object.values(tiers), ...strs(o.models).map((x) => x.slice(0, 120))])];
+  const h = Number(o.holdout);
+  return { cheapFirst: strs(o.cheapFirst).map((x) => x.toLowerCase().slice(0, 60)), tiers, models, holdout: Number.isFinite(h) && h > 0 ? Math.min(0.5, h) : 0 };
 }
 
 /**
@@ -353,6 +389,13 @@ export function policyText({ root = mainRoot() } = {}) {
   if (e.ignoredActions.length && p.counts) L.push(`Ignored in the file's actions (never autonomous): ${e.ignoredActions.join(', ')}.`);
   L.push(`Never (any agent, whatever the file says, in autonomous mode): ${NEVER_WORDS}.${e.never.filter((x) => !NEVER_AUTONOMOUS.includes(x)).length ? ` The file adds: ${e.never.filter((x) => !NEVER_AUTONOMOUS.includes(x)).join(', ')}.` : ''}`);
   if (e.notes.length) { L.push('The owner\'s notes for every agent:'); for (const n of e.notes) L.push(`  - ${n}`); }
+  // 2.73.0 (e): audits and cheap-first routing.
+  const on = p.counts && a.allowed && !p.paused;
+  const ar = p.counts && e.audit.rate !== null ? e.audit.rate : on ? 0.1 : 0;
+  L.push(`Audits: ${ar ? `${Math.round(ar * 1000) / 10}% of hands-free landings and autonomous decisions${p.counts && e.audit.rate !== null ? ' ("audit.rate")' : ' (the default while autonomous mode is on)'}, picked by a draw seeded with the task or decision id, reviewed after the fact by someone who didn't do the work (npm run decisions -- review); never blocks work` : 'off (0: no "audit.rate" and autonomous mode is off)'}.`);
+  const r = e.routing;
+  if (p.counts && r.cheapFirst.length) L.push(`Cheap-first routing: ${r.cheapFirst.join(', ')} start on the cheapest listed tier (${['cheap', 'mid', 'top'].filter((t) => r.tiers[t]).map((t) => `${t} ${r.tiers[t]}`).join(', ') || 'no tier listed: nothing is routed'}), one tier up after a red round; only models the policy lists. Holdout: ${r.holdout ? `${Math.round(r.holdout * 100)}% to the default tier` : 'off (0; deferred by the owner until API credit is available)'}. Stats: npm run autonomy -- routing.`);
+  else L.push('Cheap-first routing: off (no "routing.cheapFirst").');
   const prop = readJson(path.join(root, PROPOSAL_REL));
   if (prop?.autonomous?.agent) L.push(`Proposed by ${prop.by} at ${short(prop.at)}: autonomous mode for ${prop.autonomous.agent} (${(prop.autonomous.actions || []).join(', ')}). The owner confirms: npm run policy -- confirm --by <owner>.`);
   return L.join('\n');

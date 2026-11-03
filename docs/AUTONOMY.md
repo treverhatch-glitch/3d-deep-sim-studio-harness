@@ -253,7 +253,8 @@ them, and a revert run from it never logs a second decision.
     npm run decisions [-- --since 24h|7d|<ISO>] [--by <name>] [--action <a>] [--json]
 
 **The studio policy** (`studio/policy.json`, protected; `npm run policy` prints it): the owner's plain rules,
-`{ "autonomous": { "allowed", "agent", "actions", "reviewWithinH" }, "never": [...], "notes": [...] }`. No file means
+`{ "autonomous": { "allowed", "agent", "actions", "reviewWithinH" }, "never": [...], "notes": [...] }`, and (2.73.0)
+`"audit"` (below). No file means
 today's behaviour. It counts like the delegation: committed in the main checkout, signed when the studio has an owner
 key, otherwise only when the commit that set it isn't an agent's. `notes` are shown to every agent; a `never` word
 (`delete-lanes`, `upgrade-auto`, or an action's name) rules that action out for any agent, a delegated one included.
@@ -280,6 +281,16 @@ and no permission words. Each is recorded `as: "autonomous"` and goes on a **rev
   asset review reopened, a released lane held again; a lane that already landed gets a revert task instead.
 - **Shown:** the War Room snapshot (`decisions`: count, oldest, overdue) and the digest line (decisions per day,
   approved vs reverted and the revert rate, time saved). Past `reviewWithinH` (72) they go under "Needs you".
+- **Audits (2.73.0, harness/audit.mjs).** A fixed share of hands-free landings and autonomous decisions is picked
+  for an after-the-fact review by someone who didn't do the work: `"audit": { "rate": 0.1 }` in the policy; with no
+  rate, 0.1 while autonomous mode is on, else 0. The draw is seeded, never random: sha256 of `studio-audit|<seed>` read
+  as a fraction under the rate, the seed being the decision id or, for a landing, the task id (landing events carry no
+  commit, and a retry keeps the task id, so retrying can't draw again; `npm run decisions -- audit-draw <id>` shows
+  any draw). Picked items are listed by `npm run decisions -- review` (marked `[audit]`) and in the digest, and never
+  block work. `npm run decisions -- audit <AU-id> pass|fail --by <name> [--note "…"]` records one (a fail needs a note):
+  a person or an agent on a person's permission, never an agent that claimed, ran or landed the task, nor the deciding
+  agent. Approving an audited decision passes its audit; reverting or editing it fails it. Each verdict is an `audit`
+  record in the log and an `audit.verdict` event; a failed audit counts as a Redo in the redo rate and the L3 bar.
 - **Time saved** per action is the median owner wait for that action over the last 14 days from events (held to
   released, an agent's proposal to the dev's yes, a review request to its answer, a proposed quarantine to its
   confirm) less the autonomous decision's own wait; under `STUDIO_DECISION_MIN_N` (10) waits it says "not enough data".
