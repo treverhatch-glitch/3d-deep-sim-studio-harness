@@ -21,6 +21,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
 import { constraintsBlock } from './learning-edge.mjs';
+import { ensureRoleBrief } from './role-brief.mjs';
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -96,6 +97,12 @@ export function kickoffParts(opts, { named = false } = {}) {
   // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
   if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER and STUDIO_AGENT_MODEL${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
   if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
+  // 2.71.0 (y): a saved builder brief generated from the studio's rule files (harness/role-brief.mjs; refreshed here when
+  // a source changed or it was edited) is read first; the AGENTS file stays the whole text. No saved brief: as before.
+  if (String(opts.role || '').toLowerCase() === 'builder') {
+    const rb = ensureRoleBrief();
+    if (rb) text = text.replace(/Read `(AGENTS(?:\.lite)?\.md)`/, (_, f) => `Read \`${rb}\` (your rules, generated from \`${f}\`, the pitfalls, the protected list and the gates; open \`${f}\` only for what it says it cut)`);
+  }
   // How long the verify takes here, so nobody sends it to the background and ends the session under it.
   // It changes with every full verify, so it goes in the volatile part, never mid-prefix.
   let volatile = '';
