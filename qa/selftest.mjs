@@ -4440,11 +4440,21 @@ if (inShard('selftest-273g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.0 (e): the L3 bar on one-sided 90% Wilson bounds (demotion on point estimates), audit sampling of hands-free
+// landings and autonomous decisions (seeded draw, review list, a failed audit is a Redo), and cheap-first routing with
+// the holdout off (qa/selftest-273e.mjs).
+if (inShard('selftest-273e')) {
+  const dir = copyRepo();
+  const { selftest273E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273e.mjs')).href);
+  await selftest273E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.73.0 (f): taking an update safely and the overseer's stages: `upgrade --preflight` (read-only, PASS/WARN/FAIL with Fix
 // lines) and `--smoke` (a tiny verify and train in a scratch copy, the machine scan, a dry supervisor pass), the before
 // snapshot `--merge` writes and `autonomy -- impact` reads, `release -- predict` scored by impact, studio/overseer.json
 // and `npm run overseer`, `workaround -- repro` in a separate harness clone, the weekly harness scout (qa/selftest-273f.mjs).
-{
+if (inShard('selftest-273f')) {
   const dir = copyRepo();
   const { selftest273F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273f.mjs')).href);
   await selftest273F({ dir, run, report, tmpRoot });

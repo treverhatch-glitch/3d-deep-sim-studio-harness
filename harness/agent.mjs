@@ -45,6 +45,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { escalationFor } from './model-tiers.mjs';
+import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
 import { kickoffParts } from './kickoff.mjs';
 import { sweepThreads } from './threads.mjs';
@@ -1540,8 +1541,28 @@ export function startAgent(opts, { detach = false } = {}) {
       // the rescue model is a preference, never a blocker
     }
   }
-  // 2.30d (plan #3): a task that came back without being done starts one model tier up.
+  // 2.73.0 (e): cheap-first routing (harness/routing.mjs, studio/policy.json "routing"): a listed task type/track starts
+  // on the cheapest tier the policy lists and goes one tier up per red round; only models the policy lists, picked at
+  // session start (never mid-task). A routed task skips the tier-up and reroute below (they could pick unlisted models).
+  let routed = null;
   if (opts.task && !opts.model) {
+    try {
+      const q = parseNextQueue();
+      const t = [...q.inProgress, ...q.backlog].find((x) => x.id === opts.task);
+      if (t) {
+        const evs = readRecentEvents(20000);
+        const track = evs.filter((e) => e.type === 'task.added' && e.task === t.id).pop()?.meta?.track || '';
+        const r = launchRoute({ id: t.id, type: taskType(t), track, role: t.role || role }, { events: evs });
+        if (r && r.arm !== 'none') {
+          routed = r;
+          if (r.model) model = r.model;
+          emitEvent({ type: 'model.routed', agent: opts.by || 'launcher', task: t.id, msg: `${t.id} (${r.matched}): ${r.arm === 'holdout' ? `holdout: starts on the default model ${model}` : `starts on ${r.model} (${r.tier} tier)`}: ${r.why}`.slice(0, 400), meta: { ...r, model: r.model || model } });
+        }
+      }
+    } catch { /* routing is a preference, never a blocker */ }
+  }
+  // 2.30d (plan #3): a task that came back without being done starts one model tier up.
+  if (opts.task && !opts.model && !routed) {
     const esc = escalationFor(opts.task);
     if (esc && esc.tier !== esc.from) {
       if (esc.applied) model = esc.model;
@@ -1549,7 +1570,7 @@ export function startAgent(opts, { detach = false } = {}) {
     }
   }
   // 2.30h (3): the last hand-off was reasoning only: the Director's reroute moves the task to another family.
-  if (opts.task && !opts.model) {
+  if (opts.task && !opts.model && !routed) {
     const rr = rerouteFor(opts.task, readRecentEvents(5000));
     if (rr) {
       if (rr.applied) {
