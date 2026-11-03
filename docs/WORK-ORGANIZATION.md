@@ -214,7 +214,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
     plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
     file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`); 2.71.1: a golden or snapshot the lane
     re-records with its own `Golden-Reason:` (rule `golden-rerecord`: a person, a delegation or autonomous review releases
-    it; the game's manifest may set it to B), and a game's test toolchain (its test configs, the setup files they name,
+    it; the game's manifest may set it to B; 2.73.0: the hold shows the harness's first-divergence report, the releaser
+    can't be the lane's author, and without a report only a person releases it: docs/SECURITY.md), and a game's test toolchain (its test configs, the setup files they name,
     `.npmrc`, package.json's test scripts; docs/SECURITY.md). It is held in the queue
     (`task.train.held`, `task train status` says NEEDS THE OWNER) and lands only after
     `npm run task -- train release <ID> --by <name> [--permission "<their words or a link>"]`: a person in their own

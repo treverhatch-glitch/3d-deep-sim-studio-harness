@@ -95,6 +95,12 @@ decides red or green. When the reference commit doesn't reproduce the golden eit
 hand-back facts. `STUDIO_GOLDEN_DIVERGENCE=off` turns it off. A cartridge that imports files outside its folder
 can't be loaded from the reference commit; the line says so.
 
+2.73.0: the result is also the golden's signed first-divergence report, `.studio/gates/divergence/<golden path, / as
+__>.json` (`harness/golden-report.mjs`), written on a red and by `npm run golden -- --update` before it overwrites a
+changed answer. A lane that re-records the golden carries it: the merge train shows it to whoever releases the lane
+(never the lane's own agent), and without it only a person can release. So run the golden check before `--update`.
+The signing key is the studio's verify key (`STUDIO_VERIFY_KEY_DIR`, default `~/.studio-verify/`; docs/SECURITY.md).
+
 A studio game (not a cartridge) gets the same with a `"divergence"` entry in its `studio.gates.json`:
 
 ```json
