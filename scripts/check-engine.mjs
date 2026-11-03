@@ -55,6 +55,16 @@ if (haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'proje
 // also show at least one test script that ran (a "[gate] PASS|FAIL <file>.gd" line or "N test script(s)" with N > 0).
 const framesOnly = t.engine === 'godot' && /smoke frames/i.test(out) && !/\[gate\] (?:PASS|FAIL) \S+\.gd/.test(out) && !/\b[1-9]\d* test script\(s\)/.test(out);
 if (framesOnly) console.error('[engine] the Godot gate rendered smoke frames but ran no test: frames alone are not a check. Add a test in res://tests/.');
+// 2.73.2 (e, B-73): the engine's gate exited 3 with a NOT RUN line (harness/unity.mjs gate: an infrastructure abort,
+// free RAM under STUDIO_UNITY_MIN_FREE_GB, machine:heavy busy): nothing was tested, so this gate says "not run", not FAIL.
+const notRun = r.status === 3 ? (out.match(/^\[(?:unity|engine-gate|heavy)\] NOT RUN\b[^\n]*/m) || [])[0] : null;
+if (notRun) {
+  const why = notRun.replace(/^\[[\w-]+\] NOT RUN\s*/, '').slice(0, 300);
+  emitEvent({ type: 'qa.engine.not_run', agent: process.env.STUDIO_LOCK_OWNER || 'qa', track: t.track, status: 'warn', msg: `${t.label} gate not run: ${why}` });
+  logEngine(`gate NOT RUN: ${why}, log ${logFile}`, process.env.STUDIO_LOCK_OWNER || 'qa');
+  console.error(`[engine] NOT RUN ${t.label}: not run: ${why}. Not a failure of the work: run it again later. Log ${logFile}`);
+  process.exit(3);
+}
 const ok = r.status === 0 && scriptErrors === 0 && parse.broken.length === 0 && !framesOnly;
 emitEvent({ type: ok ? 'qa.engine.pass' : 'qa.engine.fail', agent: process.env.STUDIO_LOCK_OWNER || 'qa', track: t.track, msg: `${t.label} gate ${ok ? 'passed' : 'failed'} in ${Math.round((Date.now() - start) / 1000)} s${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}` });
 logEngine(`gate ${ok ? 'PASS' : 'FAIL'}: exit ${r.status}${scriptErrors ? `, ${scriptErrors} script error(s)` : ''}, log ${logFile}`, process.env.STUDIO_LOCK_OWNER || 'qa');

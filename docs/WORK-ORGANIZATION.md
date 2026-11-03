@@ -397,6 +397,10 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
 - A job killed for memory (Windows 0xC0000017, Node's "JavaScript heap out of memory", exit 137 elsewhere) is queued
   once more with a note instead of counting red (`heavy run`, game checks, the Unity land gate, the asset round trip;
   `STUDIO_HEAVY_OOM_RETRY=off` turns it off). A second one counts.
+- 2.73.2: a Unity job also waits for live free RAM of at least `STUDIO_UNITY_MIN_FREE_GB` (12, never above 60% of the
+  RAM). A wait that runs out is "not run" (exit 3), never red. For a studio's own scripts: `npm run heavy -- wait
+  [--min-free-gb N] [--timeout-min M] [--hold <label>]`, `npm run heavy -- release --label <label>`, and `heavy run
+  --min-free-gb N --timeout-min M -- <command>` (docs/UNITY-TRACK.md).
 - Game checks get `STUDIO_TEST_WORKERS` and `VITEST_MAX_WORKERS`: free RAM for the job / `STUDIO_TEST_WORKER_GB`
   (0.45), between 2 and cores - 2. Inside a verify that is the verify's claim; a lane's check shares the free budget
   with the other lane checks running. `STUDIO_TEST_WORKERS` sets it; 2 with no scan. The game's test config reads it

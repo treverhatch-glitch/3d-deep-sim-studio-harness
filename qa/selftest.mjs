@@ -4499,6 +4499,16 @@ if (inShard('selftest-2731c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.2 (e, B-73): a Unity run waits for a free-RAM floor (STUDIO_UNITY_MIN_FREE_GB) under machine:heavy, `npm run heavy
+// -- wait|run|release` for a studio's own scripts, and an infrastructure abort (out of memory, killed, no licence, aborted
+// before results) is NOT RUN in the gate, the land record and the train, never a FAIL (qa/selftest-2732e.mjs).
+if (inShard('selftest-2732e')) {
+  const dir = copyRepo();
+  const { selftest2732E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732e.mjs')).href);
+  await selftest2732E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

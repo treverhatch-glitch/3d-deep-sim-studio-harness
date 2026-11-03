@@ -397,6 +397,52 @@ Each kind of failure prints its own line, `[engine-gate] FAIL <kind> (unity|godo
 `empty-run`, `compile-error`, `licence`, `aborted`, `exit-mismatch` and `test-failed`. The Godot gate counts only a
 `reports/report_*` folder that did not exist before the run. A folder the run only touched is `stale-results`.
 
+### Enough free memory first, and "not run" is not red (2.73.2)
+
+A landing that started Unity with about 9 GB free, beside a web verify's test workers (7+ GB), peaked at 4.6 GB, fell
+to 3.9 GB free and aborted twice. The landing script then recorded a FAIL. Now:
+
+- **A free-RAM floor.** Every Unity editor run the harness starts (`unity.mjs gate` and `build`, the Unity land gate
+  and the Unity train, `heavy run --kind unity`) takes `machine:heavy` as a Unity job, so it never overlaps a full
+  verify or another heavy job. It also waits until free RAM is at least `STUDIO_UNITY_MIN_FREE_GB` (default 12; `0`
+  turns the floor off). On a smaller machine the floor is never above 60% of the RAM: 16 GB waits for 9.6 GB. Free RAM
+  is the live figure (on Windows, the lower of available memory and the commit headroom). It waits up to
+  `STUDIO_HEAVY_WAIT_MIN`, then the run is **not run** (`ram-floor`) and the editor never starts.
+- **An infrastructure abort is NOT RUN, not FAIL.** Out of memory, the editor ended from outside, a licence or
+  launch failure, `Aborting batchmode` before any results file, or a floor wait that timed out: the gate prints
+  `[engine-gate] NOT RUN <kind> (unity): …` with its Fix line and exits 3. The kinds are `out-of-memory`,
+  `editor-killed`, `launch-failed`, `licence`, `aborted`, `ram-floor` and `busy`. The land gate records status `not-run`,
+  with "not run: <why>" in `.studio/gates/unity-last.json`, the `engine.land` event (warn) and
+  `studio/engine/LOG.md`. The Unity train tries a not-run land run again, like a refusal, then leaves the branch
+  queued. Nobody is handed back for it. `task done` says "run task done again later". A verify gate that exits 3 with
+  a `NOT RUN` line shows as `NOT RUN <id>: not run: <why>`. The verify is still not a pass.
+- **A real failure is still a FAIL.** A compile error or a failing test in the log or results keeps a run red, even
+  next to an out-of-memory or `Aborting batchmode` line. With a results file, `Aborting batchmode` stays
+  `FAIL aborted`, as in 2.72.0.
+- A land script can name its own not-run exit in its contract: `"exits": { "5": { "status": "not-run", "why": "…" } }`.
+
+**A studio's own landing script.** The harness doesn't run a script you start yourself, so call the harness from it
+before Unity starts. `heavy run` is the better choice, because the slot is let go when the command ends:
+
+```powershell
+# tools/land/land-unity.ps1 (a studio's script), run from the studio folder. The Unity call itself is in its own script
+# (run-unity-tests.ps1), because `heavy run` joins its command into one shell line and a path with spaces would split.
+node harness/heavy.mjs run --kind unity --min-free-gb 12 --timeout-min 30 --label "unity land" -- powershell -NoProfile -File tools/land/run-unity-tests.ps1
+if ($LASTEXITCODE -eq 3) { Write-Host "NOT RUN: not enough free memory, or machine:heavy stayed busy"; exit 3 }  # no FAIL record
+```
+
+Or wait, hold the slot and release it yourself:
+
+```powershell
+node harness/heavy.mjs wait --min-free-gb 12 --timeout-min 30 --hold "unity land"   # exit 0: held; 3: NOT RUN
+if ($LASTEXITCODE -ne 0) { exit 3 }
+try { & $env:STUDIO_UNITY -batchmode ... } finally { node harness/heavy.mjs release --label "unity land" }
+```
+
+(`npm run heavy -- …` is the same command.) `heavy wait` without `--hold` only checks: it exits 0 when the floor holds and a slot is free, and holds
+nothing. A `--hold` ends by itself after `--hold-max-min` (120). When Unity's own run aborts, say "not run" in the
+script, never FAIL: exit 3 (refused), or a code your `exits` contract maps to `not-run`.
+
 ### Several Unity passes per gate, as board tasks (for a crew orchestrator)
 
 Don't hand-roll a gate script that runs Unity once per branch. File each Unity pass as a board task, and let the
@@ -421,6 +467,7 @@ In `.env`:
 STUDIO_UNITY=C:\Program Files\Unity\Hub\Editor\6000.3.26f1\Editor\Unity.exe   # the editor
 STUDIO_UNITY_PIN=6000.3      # the editor line the project stays on: an upgrade rewrites project files, so it's a decision
 STUDIO_DOTNET=dotnet         # the .NET 8 SDK, if it isn't on the PATH
+STUDIO_UNITY_MIN_FREE_GB=12  # free RAM a Unity run waits for (never above 60% of the RAM; 0: no floor)
 ```
 
 ## Licence and CI

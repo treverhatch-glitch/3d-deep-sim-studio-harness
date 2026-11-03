@@ -838,7 +838,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     try { u = JSON.parse((ug.stdout || '').trim().split('\n').pop()); } catch {}
     if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
     if (u.status === 'skipped' && !u.notUnity) console.log(`[task done] skipped the Unity gate: ${u.why}`);
-    if (!u.ok) return { error: u.status === 'refused' ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\n${u.status === 'refused' ? 'Run task done again later; nothing is wrong with the work.' : `Fix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
+    // 2.73.2 (e, B-73): not run (an infrastructure abort, or free RAM under the Unity floor) is "try again", like busy.
+    const later = u.status === 'refused' || u.status === 'not-run';
+    if (!u.ok) return { error: later ? 'unity-busy' : 'unity-gate', unity: u, message: `${target.id} is not done: the Unity gate ${u.status === 'refused' ? 'is busy' : u.status === 'not-run' ? 'did not run' : `says ${u.status}`}: ${u.why}${u.tail ? `\n${u.tail.split('\n').map((l) => `  ${l}`).join('\n')}` : ''}\n${later ? 'Run task done again later; nothing is wrong with the work.' : `Fix it and run task done again (node harness/unity-gate.mjs --task ${target.id} runs it; its log: ${u.log || '.studio/gates/out/unity.log'}).`}` };
   }
 
   // Forced past a failing check: the owner's uncommitted work in its claimed folders is saved as a patch
