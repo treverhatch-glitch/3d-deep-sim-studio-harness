@@ -77,6 +77,7 @@ import { toolchainProtected } from './test-toolchain.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
+import { recordRound, redSignature } from './round-cap.mjs';
 import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
@@ -1153,7 +1154,9 @@ export async function laneTier(root, { head }, { tip = null, settings = null } =
   const s = settings || await trainManifest(root, t);
   const base = out(git(root, 'merge-base', t, head)) || t;
   const prot = protectedAt(root, t);
-  const files = laneFiles(root, base, head);
+  let files = laneFiles(root, base, head);
+  // 2.72.0 (b): a purity ratchet baseline that grew in the lane is tier C (harness/ratchet.mjs markGrowth, tiers "ratchet-grow").
+  try { files = (await import('./ratchet.mjs')).markGrowth(root, base, head, files); } catch { /* the rule just doesn't fire */ }
   // 2.65.0 (B-40): the files each config proposal of the lane names (a protected one makes the lane tier C).
   const proposals = Object.fromEntries(files.filter((f) => isProposalPath(f.path) && !String(f.status).startsWith('D')).map((f) => {
     const r = git(root, 'show', `${head}:${f.path}`);
@@ -1827,7 +1830,11 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked' });
     if (handBack && !lane.own) {
       try { if (lane.branch) rememberTaskBranch(lane.task, lane.branch); } catch {}
-      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}`, { agent: lane.agent, dir: lane.dir, root })); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
+      // 2.72.0 (b): a train red is a round of the lane's task (harness/round-cap.mjs); red twice in a row on one failure adds
+      // the cap's summary and its restart-from-the-spec note to the hand-back.
+      let capNoteText = '';
+      try { const rc = trainRound(lane, why); if (rc?.capped) capNoteText = `\n${rc.note}`; } catch {}
+      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}${capNoteText}`, { agent: lane.agent, dir: lane.dir, root })); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
     }
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
@@ -2281,4 +2288,10 @@ function summary(res) {
 /** The lane copy this process runs in, as a train lane: { dir, branch, head } (task done's one-lane train). */
 export function thisLane(dir) {
   return { dir, branch: out(git(dir, 'symbolic-ref', '--short', 'HEAD')), head: out(git(dir, 'rev-parse', 'HEAD')) };
+}
+
+/** 2.72.0 (b): a lane the train handed back is one red round of its task (harness/round-cap.mjs), signed by its reason. */
+export function trainRound(lane, why) {
+  if (!lane?.task || !lane?.agent) return null;
+  return recordRound({ task: lane.task, agent: lane.agent, ok: false, sig: redSignature(String(why || ''), { gate: 'train' }), source: 'train' });
 }

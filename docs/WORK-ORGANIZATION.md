@@ -56,6 +56,17 @@ Every verify compares the tracked files (outside `studio/`) before and after its
 rewriting a snapshot's line endings, a generated file) are named in a warning and listed as `changedByVerify` in
 the verify record; the exit code is unchanged. Game checks run with `CI=true` so test runners don't write snapshots.
 
+### Two rounds, then restart from the spec (2.72.0)
+
+Each full verify of a task by the agent that holds it, and each merge-train hand-back of its lane, is one round
+(a `task.round` event with the failing check's sub-id, e.g. `game:unit`, and its first FAIL line as the signature).
+When the last `STUDIO_ROUND_CAP` (default 2; `0` turns it off) rounds of a task in one agent's session are red with
+the same signature, the task is handed back with a summary the harness writes (files touched, gates, the sub-id, both
+red signatures, the decisions logged on the task) and a note to restart from the spec instead of patching the last
+attempt (`task.round_cap`). In that session a third attempt is refused: `npm run verify` while the agent still holds
+the task, and `task start` of it again. A new session (after `agent.session.start` or `.end`) may take it; an agent
+outside the launcher counts the last 12 hours as its session. `--force` on `task start` is a person's reassignment.
+
 ## Landing lanes: the merge train (2.59.0)
 
 A lane copy's work reaches the studio's branch through a merge train (`harness/train.mjs`). Before 2.59.0 every

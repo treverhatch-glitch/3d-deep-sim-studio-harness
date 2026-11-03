@@ -68,6 +68,7 @@ export const DEFAULT_PROTECTED = [
   // (harness/gate-trust.mjs and harness/test-toolchain.mjs decide what the gates trust, so they are here too).
   'scripts/run-gates.mjs', 'harness/gate-spawn.mjs', 'harness/game-gates.mjs', 'harness/silent-green.mjs', 'harness/cartridge.mjs',
   'harness/hash.mjs', 'harness/merge-lane.mjs', 'harness/gate-trust.mjs', 'harness/test-toolchain.mjs',
+  'harness/ratchet.mjs', // 2.72.0 (b): the purity ratchet decides which hits stand
   'scripts/check-sim-*.mjs', 'qa/check-*.mjs', 'qa/fails-before.mjs', 'qa/vertical-slice.mjs', 'qa/run-python.mjs', 'qa/test-golden.py', 'qa/selftest*.mjs',
   // 2.71.1 (H03/H04/S02): each game's test toolchain (configs, .npmrc); the setup files they name and package.json's
   // test scripts are added from the base (harness/test-toolchain.mjs).

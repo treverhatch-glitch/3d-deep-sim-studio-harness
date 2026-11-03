@@ -103,7 +103,9 @@ export async function runSlowTier({ root, env = process.env, log = (m) => consol
   const tier = game ? gg.slowTierOf(game) : null;
   if (!tier || gg.slowTierOff(env)) {
     log(`[slow-tier] nothing to run: ${gg.slowTierOff(env) ? 'STUDIO_SLOW_TIER=off (every test runs in every verify)' : 'the game declares no slow tier ("slowTests": [<globs>] or "tier": "slow" on a check in its studio.gates.json)'}`);
-    return { ok: true, none: true, failures: [], filed: [], known: [], over: [] };
+    let canaries = null; // 2.72.0 (b): a game with canaries and no slow tier still gets its nightly canary run
+    if (game && !gg.slowTierOff(env) && gg.declaredGates(game).some((g) => g.canary)) { try { canaries = (await (await import('./canaries.mjs')).runCanaries({ root, env, log })).counts; } catch (err) { log(`[slow-tier] note: canaries not run (${err.message})`); } }
+    return { ok: true, none: true, failures: [], filed: [], known: [], over: [], canaries };
   }
   const t0 = Date.now();
   const head = (spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout || '').trim() || null;
@@ -132,7 +134,10 @@ export async function runSlowTier({ root, env = process.env, log = (m) => consol
   for (const f of filed.filed) log(`[slow-tier] filed ${f.task}: ${f.key}`);
   for (const f of filed.known) log(`[slow-tier] ${f.key}: already filed as ${f.task} (still open)`);
   try { emitEvent({ type: 'gates.slow_tier', agent: 'slow-tier', to: ok ? null : 'producer', status: ok ? 'ok' : 'warn', msg: msg.slice(0, 500), meta: { head, ok, failures: failures.map((f) => f.key).slice(0, 50), filed: filed.filed, known: filed.known, over: filed.over, ms } }); } catch {}
-  return { ok, failures, ...filed, ms, log: '.studio/slow-tier-last.log' };
+  // 2.72.0 (b): the game checks' must-fail canaries (harness/canaries.mjs), report only: never changes the tier's result.
+  let canaries = null;
+  try { canaries = (await (await import('./canaries.mjs')).runCanaries({ root, env, log })).counts; } catch (err) { log(`[slow-tier] note: canaries not run (${err.message})`); }
+  return { ok, failures, ...filed, ms, log: '.studio/slow-tier-last.log', canaries };
 }
 
 /** `npm run gates -- --tier slow` (scripts/run-gates.mjs): exit 1 when the slow tier is red. */
@@ -148,7 +153,7 @@ export async function slowTierCli(argv = [], { root = process.cwd(), env = proce
  */
 export async function slowTierPass({ root, now = Date.now(), env = process.env, dryRun = false, start = null } = {}) {
   let declared = false;
-  try { const gg = await import('./game-gates.mjs'); const game = await gg.studioGame(); declared = Boolean(game && gg.slowTierOf(game)) && !gg.slowTierOff(env); } catch {}
+  try { const gg = await import('./game-gates.mjs'); const game = await gg.studioGame(); declared = Boolean(game && (gg.slowTierOf(game) || gg.declaredGates(game).some((g) => g.canary))) && !gg.slowTierOff(env); } catch {} // 2.72.0 (b): canaries alone make it due
   const d = slowTierDue(root, { now, env, declared });
   if (!d.due) return { started: false, why: d.why };
   if (dryRun) return { started: false, why: `due (${d.why}); dry run` };

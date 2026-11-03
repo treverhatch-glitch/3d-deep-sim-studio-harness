@@ -219,6 +219,42 @@ include: only?.length ? only : ['src/**/*.test.ts'], exclude: [...configDefaults
 puts everything back into every verify. The object form of `"slowTests"` (above) still only scales timeouts, unless it
 also says `"tier": "slow"` (then its `pattern` is a slow glob).
 
+## The purity ratchet and must-fail canaries (2.72.0)
+
+A real game switched to the sim purity check (or a lint check) can start with hundreds of hits. Record them once as
+standing, and from then on only new ones fail:
+
+```
+npm run purity -- baseline --write --by <person>     # writes <game>/purity-baseline.json (a cartridge's: cartridges/<name>/)
+npm run purity                                       # standing, new and fixed hits
+```
+
+The baseline (harness/ratchet.mjs) keys each hit by file, rule and source line (spaces normalised), never the line
+number, so moving code keeps its key. It covers the purity check ("purity": `scripts/check-sim-purity.mjs`, its
+static rules and required deterministic math) and every check in this manifest with `"ratchet": true` (a section
+per check id). A ratchet check's hits are its output lines `<file>:<line>[:<col>] [<RULE>] <message>` or
+`<file>:<line>:<col>: <message> [<rule>]` (ESLint's unix formatter); a run that exits non-zero with no such line still
+fails. Any new hit fails the check, and only the new ones are printed, with a Fix line. A fixed hit leaves the
+baseline at task done (one commit of that file in the task's copy; `npm run purity -- baseline --shrink` by hand).
+It never grows from a lane: in a lane copy a hit counts as standing only as far as the studio's branch lists it, and
+the merge train holds a lane that grows it as tier C. Growing it is a person's call (their terminal; an agent with
+`--permission "<their words>"`; an outside agent under a `purity-baseline` delegation; never a worker). No baseline
+file: every hit fails, as before.
+
+A check may also declare `"canary"`: a command that runs it on something broken, or a fixture path (passed through
+the check's `focus` command, or appended when its command clearly runs vitest, jest or node --test; the run also gets
+`STUDIO_CANARY`, the fixture's absolute path, or `1` for a command). The canary must make the check fail:
+
+```json
+{ "gates": [ { "id": "lint", "command": "npx eslint -f unix src", "ratchet": true, "canary": "npx eslint -f unix tools/canary/bad.ts" } ] }
+```
+
+`npm run gates -- --canaries` runs every canary (and the nightly slow tier does, after its run; a game with canaries
+and no slow tier gets the nightly run for them). A check that stays green on its canary is "silently green": a
+`gate.silently_green` event, a digest line and one harness task in `studio/HARNESS-TASKS.md` (the workaround queue);
+a check with no canary is "unproven". Report only: it never blocks a landing, and exits 1 when a check is silently
+green so a scheduled run shows red.
+
 ## Test workers sized to the machine (2.68.0)
 
 The game's checks run with `CI=true` (no snapshot writes), and with `VITEST_MAX_WORKERS` and `STUDIO_TEST_WORKERS`:

@@ -43,6 +43,8 @@ import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.
 import { reviewsAtDone } from './asset-review.mjs';
 import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
+import { shrinkAtDone } from './ratchet.mjs';
+import { capRefusal } from './round-cap.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -432,6 +434,9 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
   const overWhy = stopIfOverBudget(taskId, { by: 'budget' });
   if (overWhy) return { error: 'over-budget', message: `${taskId} can't start: ${overWhy}` };
+  // 2.72.0 (b): handed back by the two-round cap in this agent's session: no third attempt here (harness/round-cap.mjs).
+  const capWhy = force ? '' : capRefusal(taskId, agent);
+  if (capWhy) { emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: refused by the round cap` }); return { error: 'round-cap', message: `${taskId} can't start: ${capWhy}.` }; }
   // 2.58.5 (H-5): a claim that ran out under an owner still at work is that owner's (--force: a person reassigns it).
   if (!force && !lockStatus(`task:${taskId}`).locked) {
     const live = liveOwner(taskId, agent, null, { waiting: !parseNextQueue().inProgress.some((t) => t.id === taskId) });
@@ -743,6 +748,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.72.0 (b): fixed purity hits leave the baseline (harness/ratchet.mjs), committed in this copy before it lands.
+  if (trainCheck) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
   if (trainCheck) {
     const g = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
     return { trainReady: true, id: target.id, type: check.type, all: check.type === 'whole', head: g('rev-parse', 'HEAD'), tree: g('rev-parse', 'HEAD^{tree}'), branch: g('symbolic-ref', '--short', 'HEAD') };
@@ -816,6 +823,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
     }
   }
+
+  // 2.72.0 (b): the game's checks passed: fixed purity hits leave the baseline (a commit of that file only) before it lands.
+  if (!force) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
 
   // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
   // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.

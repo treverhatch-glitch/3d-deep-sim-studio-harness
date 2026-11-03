@@ -4325,6 +4325,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.72.0 (b): the purity ratchet (standing hits in a committed baseline, only new ones fail, it shrinks at task done and
+// never grows from a lane: tier C), must-fail canaries for a game's checks (npm run gates -- --canaries: silently green
+// checks reported) and the two-round cap (red twice on one sub-id: handed back, a third attempt refused) (qa/selftest-272b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest272B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272b.mjs')).href);
+  await selftest272B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

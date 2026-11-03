@@ -48,7 +48,8 @@ export const DELEGATION_REL = 'studio/delegation.json';
  * switch; `asset-review` (2.70.0) answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs);
  * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes).
  */
-export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes'];
+// 2.72.0 (b): `purity-baseline` growing a game's purity ratchet baseline (npm run purity -- baseline --write, harness/purity.mjs).
+export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'purity-baseline'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
 const FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
@@ -69,6 +70,7 @@ export const ACTION_COMMANDS = {
   'asset-review': [],
   // 2.70.0 (w): `npm run janitor -- --lanes --yes --by <agent>` (harness/janitor.mjs); not a task command, so no allow rule.
   'janitor-lanes': [],
+  'purity-baseline': [], // 2.72.0 (b): not a task command, so no allow rule
 };
 
 /**

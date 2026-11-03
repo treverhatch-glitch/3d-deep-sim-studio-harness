@@ -113,6 +113,10 @@ export function assetFix(check, file = '<file>') {
   return `${t.replaceAll('{file}', file)}; then node harness/asset-gate.mjs --files ${file} checks it again`;
 }
 
+/** 2.72.0 (b): a ratchet run that found new hits ("[sim-purity] ratchet: NEW 2 hit(s)", "[ratchet] game:lint: NEW 1 hit(s)"). */
+const RATCHET_NEW = /\bratchet\]?:?[^\n]*?\bNEW \d+ hit/;
+export const RATCHET_FIX = 'new hit(s) the game\'s purity-baseline.json doesn\'t list (the "x" lines under NEW): fix each one where it points (the rule says how); the standing hits never fail, and the baseline never grows from a lane, so don\'t edit it: if a hit must stay, hand the task back with a note naming it (a person records it with npm run purity -- baseline --write --by <person>)';
+
 const TIMEOUT = /\btimed out\b|\bETIMEDOUT\b|\bSIGTERM\b.*\btimeout\b/i;
 
 const safeId = (id) => String(id).replace(/[^\w.-]/g, '_');
@@ -137,6 +141,8 @@ export function gateFix(gate, { output = '', compact = false } = {}) {
   const rerun = `then rerun only this gate: npm run verify -- --only ${id}`;
   const text = String(output || '');
   if (typeof g.fix === 'string' && g.fix.trim()) return { text: `${g.fix.trim()}; ${rerun}`, source: 'gates.json' };
+  // 2.72.0 (b): the purity ratchet (harness/ratchet.mjs): only the new hits failed; never "grow the baseline".
+  if (RATCHET_NEW.test(text)) return { text: `${RATCHET_FIX}; ${rerun}`, source: 'ratchet' };
   const sub = text.match(/\[game-gates\] FAIL (\S+?)(?::\s|:?$|\s)/m);
   if (sub && gameKindFix(sub[1])) return { text: `${sub[1]}: ${gameKindFix(sub[1])}; ${rerun}`, source: 'game-check' };
   // 2.67.1 (j): a failing asset check (harness/asset-gate.mjs) names its check and file.

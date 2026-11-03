@@ -146,6 +146,8 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
   const fuzzLine = fuzzFiledLine(ev, now);
   const flakeLine = unityFlakeLine(ev, now); // 2.67.1 (k)
+  let canaryLine = ''; // 2.72.0 (b): the newest must-fail canary run (harness/canaries.mjs): silently green checks
+  try { canaryLine = (await import('./canaries.mjs')).canaryDigestLine(ev, now); } catch { canaryLine = ''; }
   let diskLine = ''; // 2.68.0 (m): the studio's disk under STUDIO_DISK_MIN_FREE_GB in the last 24 h
   try { diskLine = (await import('./machine.mjs')).diskDigestLine(ev, now); } catch { diskLine = ''; }
   // 2.68.0: the latest harness upgrade's verdict, once enough data exists on both sides (harness/impact.mjs).
@@ -173,7 +175,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // (harness/workaround.mjs; the harness maintainer's queue, never a game task).
   let workMod = null; let workPts = []; let workLine = '';
   try { workMod = await import('./workaround.mjs'); workPts = await workMod.upgradesSeen({ events: ev, now, root }); workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts }); } catch { workLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(canaryLine ? [canaryLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
