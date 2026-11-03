@@ -99,7 +99,15 @@ console.log(JSON.stringify({ titles: added.map((t) => t.title), one: one.id, two
     g(dir, 'commit', '-qm', `lights\n\nStudio-Task: ${j.one}`, '--no-verify');
     const head = g(dir, 'rev-parse', 'HEAD').stdout.trim();
     fs.mkdirSync(path.join(dir, '.studio', 'gates'), { recursive: true });
-    const plant = (h) => fs.writeFileSync(path.join(dir, '.studio', 'gates', 'builder-r-full.json'), JSON.stringify({ at: new Date(Date.now() + 1000).toISOString(), head: h, dirty: false, partial: false, scope: 'full', rows: [{ id: 'game', ok: true, required: true }, { id: 'secrets', ok: true, required: true }] }));
+    // 2.71.1 (D01/T04): a record counts only with the run log the harness writes beside it (and, from 2.73, its
+    // signature), so the planted "own green verify" is written the way run-gates writes one: through harness/gate-trust.mjs,
+    // in a child with the same environment as task done. A bare hand-written record is refused (selftest-2711a).
+    const plant = (h) => {
+      const rec = { at: new Date(Date.now() + 1000).toISOString(), head: h, dirty: false, partial: false, scope: 'full', rows: [{ id: 'game', ok: true, required: true }, { id: 'secrets', ok: true, required: true }] };
+      fs.writeFileSync(path.join(dir, '.studio', 'plant-243.json'), JSON.stringify(rec));
+      const w = run(dir, `node -e "const fs = require('node:fs'), path = require('node:path'); import(require('node:url').pathToFileURL(path.resolve('harness/gate-trust.mjs')).href).then((t) => { const rec = JSON.parse(fs.readFileSync(path.join('.studio', 'plant-243.json'), 'utf8')); rec.runId = t.newRunId(); fs.writeFileSync(path.join('.studio', 'gates', 'builder-r-full.json'), JSON.stringify(rec)); t.writeRunLog(path.resolve('.studio'), rec, { root: process.cwd(), owner: 'builder-r' }); })"`, denv);
+      if (w.status !== 0) fs.writeFileSync(path.join(dir, '.studio', 'gates', 'builder-r-full.json'), JSON.stringify(rec));
+    };
     plant(head);
     const off = run(dir, `node harness/task.mjs done ${j.one} --agent builder-r`, denv);
     plant('0'.repeat(40));
