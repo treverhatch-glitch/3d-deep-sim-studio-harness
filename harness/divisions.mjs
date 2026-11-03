@@ -30,7 +30,8 @@ export const DEFAULT_DIVISIONS = [
   { id: 'narrative', name: 'Narrative', roles: ['writer', 'narrator'] },
   { id: 'release', name: 'Release & Store', roles: ['release-manager'] },
   { id: 'devlog', name: 'Devlog', roles: ['devlogger'] },
-  { id: 'engine', name: 'Engine Transfer', roles: ['engine-porter'] },
+  // 2.74.0: Engine Bay: engine workers (a Unity, Godot or other engine track's sessions) and their own train.
+  { id: 'engine', name: 'Engine Bay', roles: ['engine-porter', 'engine-worker'] },
   { id: 'hacks', name: 'Dev Hacker Lab', roles: ['dev-hacker'] },
 ];
 
@@ -38,7 +39,9 @@ export function listDivisions() {
   const cfg = readJson('studio/divisions.json');
   const saved = Array.isArray(cfg?.divisions) ? cfg.divisions : [];
   // A saved file keeps its on/off choices; divisions added in later versions (and their roles) still appear.
-  const list = [...saved.map((d) => ({ ...(DEFAULT_DIVISIONS.find((x) => x.id === d.id) || {}), ...d })), ...DEFAULT_DIVISIONS.filter((x) => !saved.some((d) => d.id === x.id))];
+  // 2.74.0: a saved file names the engine room by its old default name; it is Engine Bay now.
+  const renamed = saved.map((d) => (d.id === 'engine' && d.name === 'Engine Transfer' ? { ...d, name: 'Engine Bay' } : d));
+  const list = [...renamed.map((d) => ({ ...(DEFAULT_DIVISIONS.find((x) => x.id === d.id) || {}), ...d })), ...DEFAULT_DIVISIONS.filter((x) => !renamed.some((d) => d.id === x.id))];
   return list.map((d) => ({ ...d, roles: d.roles || DEFAULT_DIVISIONS.find((x) => x.id === d.id)?.roles || [], active: Boolean(d.core || d.active) }));
 }
 
