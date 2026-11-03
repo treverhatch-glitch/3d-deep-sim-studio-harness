@@ -71,6 +71,11 @@ An orchestrator outside the harness (the "conductor") doesn't rebuild state by h
 - `npm run events -- wait --type job.done --match kind=train` waits for a job to end instead of polling logs.
 - `npm run next-board` gives "what's next" on one screen (2.71.0, below); `npm run report -- post` sends a post to
   the owner's chat through a webhook.
+- **The owner proxy (2.73.1):** once the owner has run `npm run delegate -- proxy <bot-name> --by <owner>`, the
+  orchestrator's own shell (`STUDIO_LOCK_OWNER=<bot-name>`) does every owner action with `--by <owner>` (releases,
+  resumes, unparks, holds, types) and signs approvals with the owner's yes recorded: `npm run approve -- protected
+  --note "…" --by <owner> --permission "<the owner's words or the message link>"`, committed from that same shell.
+  Post a one-line summary of each approval to the chat. `npm run delegate -- revoke` ends it (docs/AUTONOMY.md).
 
 ## The overseer's paperwork, moved into the harness (2.71.0)
 

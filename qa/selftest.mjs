@@ -4461,6 +4461,15 @@ if (inShard('selftest-273f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.1 (B-67): the standing owner proxy: one owner-signed grant, every action in the proxy's own shell, approvals
+// with the owner's recorded yes and no private key, voided by a revoke (qa/selftest-2731o.mjs).
+if (inShard('selftest-2731o')) {
+  const dir = copyRepo();
+  const { selftest2731O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731o.mjs')).href);
+  await selftest2731O({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

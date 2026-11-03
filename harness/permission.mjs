@@ -13,6 +13,8 @@
  * is there so a person can check it. With an owner key, a decision that needs the key's signature still needs it.
  */
 
+import { proxyShell } from './owner-proxy.mjs';
+
 // Launched sessions that may act on a person's permission.
 export const DECIDER_ROLES = /^(producer|director)$/i;
 // Worker agents: never, with or without permission (names as the launcher hands them out: builder-s3, qa-playtester-s2).
@@ -20,7 +22,16 @@ export const WORKER_NAME = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|a
 // A coding agent's own shell (outside the harness).
 export const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
 
-export const permissionText = (p) => String(p || '').trim();
+/**
+ * 2.73.1 (B-67): in the owner proxy's own shell (harness/owner-proxy.mjs: STUDIO_LOCK_OWNER=<agent>, a signed proxy
+ * grant on file, not a launched session or a lane copy) the standing grant stands in for --permission when none is given,
+ * so every "a person's direct permission" command works for the proxy with --by <the owner>. Anywhere else: as before.
+ */
+export const permissionText = (p, env = process.env) => {
+  const t = String(p || '').trim();
+  if (t) return t;
+  try { const s = proxyShell({ env }); return s.ok ? s.words : ''; } catch { return ''; }
+};
 
 /**
  * May this caller record a person's decision on their permission? { ok, recordedBy, via, why }.
