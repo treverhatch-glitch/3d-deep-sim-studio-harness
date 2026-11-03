@@ -142,11 +142,47 @@
 - It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
   `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
   --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.
-- Both checkers and the hooks are protected files (`studio/protected.json`).
+- Both checkers and the hooks are protected files (`studio/protected.json`). 2.71.1: in a lane copy `=off` is ignored
+  (see "What the gates trust" below).
 - Not caught: a stamp a forger computes by hand (the content gates still judge the change); `git revert`, a rebase with
   conflicts or squashes, and an `--amend -m` later rebased onto a moved base are flagged until re-committed; a weaker
   assert in the same count (`toBe` → `toBeTruthy`), an assert removed with an unrelated one added in the same place, a
   helper that always passes, a special case in the game code instead of the test, and tests outside the names above.
+
+## What the gates trust (2.71.1, red-team fixes)
+
+- Gate runners are protected (A01b/A01d/A03): `scripts/run-gates.mjs`, `harness/gate-spawn.mjs`, `harness/game-gates.mjs`,
+  `harness/silent-green.mjs`, the cartridge loader `harness/cartridge.mjs`, `harness/hash.mjs`, `harness/merge-lane.mjs`
+  (the protected check's glob matcher), `scripts/check-sim-*.mjs`, `qa/check-*.mjs`, `qa/fails-before.mjs`,
+  `qa/vertical-slice.mjs`, `qa/run-python.mjs`, `qa/test-golden.py`, `qa/selftest*.mjs` and the two modules below. Not all
+  of `harness/`: a lane changing other harness code is tier C in the train anyway. Running the runners from the main
+  checkout instead was not done: every runner finds its root from its own path, so it would need a root override in each.
+- Each game's test toolchain is protected (H03/H04/S02, `harness/test-toolchain.mjs`): under `game/` and `web/`, any
+  `vitest.config.*`, `vitest.workspace.*`, `vite.config.*`, `jest.config.*` and `.npmrc` (and the root `.npmrc`); the setup
+  files those configs name at the base (`setupFiles`, `setupFilesAfterEnv`, `globalSetup`, `globalTeardown`, also a
+  package.json `jest` key); and in a game's `package.json` only the test entries (scripts `test`, `test:*`, `pre`/`post`,
+  the scripts the game's manifest runs, the `jest` key), listed as `<path>#test-scripts`. A new dependency is a normal
+  change. The train sees the same (a lane changing them is tier C).
+- Weakened tests also flag (H10/H13): `skipIf`/`runIf` added to an existing test or on an env/CI condition (a new test that
+  runs on one OS only is fine), chained skips (`it.concurrent.skip`), an early return on CI or an env variable
+  (`env-skip`), and `expect`/`assert` redefined, renamed on import, wrapped in a Proxy or its library mocked
+  (`expect-shadowed`). The harness's own `qa/*.mjs` scripts are not judged by these three (they read env by design).
+- In a lane copy (`<main>/.lanes/<agent>`, or any worktree of a main checkout that has `.lanes/`; `harness/gate-trust.mjs`)
+  `STUDIO_PROTECT_BASE`, `GITHUB_BASE_REF`, `STUDIO_PROTECT_ROOT` and `STUDIO_WEAKENED_TESTS=off` are ignored, and the
+  protected and weakened-tests results say "ignored in a lane copy" (A09/A16/A01b). `STUDIO_MAIN_ROOT` counts only when it
+  is the main worktree `git worktree list` names, never the checkout itself (G12). `CI`/`GITHUB_ACTIONS` prove nothing
+  (S01). The main checkout and CI keep these settings.
+- Verify records (D01/T04, G15/T02): every record has a run id, and a full verify writes its run log
+  (`.studio/gates/runs/<id>.json`, the record's digest). Task done and the train reuse a record only when its run log
+  matches (a hand-written or edited record says why it isn't reused). A verify started beside untracked files, or
+  ignored ones outside build and dependency output (`node_modules`, `dist`, `build`, `coverage`, `.vite`, …), under the
+  game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/`, `hub/` or a runner config at the root, records
+  `dirty: true` and the files (`hidden`), and is never reused.
+- A golden re-recorded by a lane with its own `Golden-Reason` is tier C (rule `golden-rerecord`, A13): a person, a
+  delegation or autonomous review releases it. The game's manifest (protected) may set it to B
+  (`"tiers": { "set": { "golden-rerecord": "B" } }`), for example for UI snapshots.
+- Still open: the runner protection only matters where an owner key enforces it; a forger who writes both a record and
+  its run log in `.studio/` (any agent can) is not stopped, only the hand-written record alone.
 
 ## Failures
 - Closed-loop writes the cartridge, seed, the tick the cartridge failed on, and every action to `.studio/last-seed-failure.json`.
