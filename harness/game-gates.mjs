@@ -52,6 +52,7 @@ import { scaledTimeout, recordGateTime, recordGatePass, heldClaim, heavyHolders,
 import { machineProfile, testWorkers, oomSignature } from './heavy-budget.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
+import { quarantineEnvValue } from './flakes.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -75,7 +76,7 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}) }));
+    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}), ...(x.tier === 'slow' ? { tier: 'slow' } : {}), ...(x.slowTests === true ? { slowTests: true } : {}) }));
     // 2.58.2 (PU-22): a manifest with "detMath" (warn or required) gets the deterministic-math check on its sim
     // paths; the cartridge purity gate is skipped for such a game, so this is where it runs. Required fails.
     if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
@@ -107,13 +108,34 @@ export function slowTestsOf(game) {
   if (!game?.root) return null;
   try {
     const st = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).slowTests;
-    if (!st || typeof st !== 'object' || st.timeoutScale === false) return null;
+    if (!st || typeof st !== 'object' || Array.isArray(st) || st.timeoutScale === false) return null; // 2.69.0: an array is the slow tier
     const min = Number(st.minScale);
     return { pattern: String(st.pattern || ''), minScale: Number.isFinite(min) && min > 1 ? min : 1 };
   } catch {
     return null;
   }
 }
+
+/**
+ * 2.69.0 (p): the game's slow tier, or null. The manifest marks test globs slow ("slowTests": ["<glob>", ...], e.g. a soak-test file glob;
+ * the object form, { "pattern", "timeoutScale" }, still only scales timeouts, unless it also says "tier": "slow") and/or
+ * whole checks ("tier": "slow" on a gate). Verifies and trains skip them (STUDIO_TEST_EXCLUDE for the game's test config);
+ * the nightly slow tier (npm run gates -- --tier slow, harness/slow-tier.mjs) runs only them, on main. The manifest is a
+ * protected file, so only the owner moves a test out of landing. STUDIO_SLOW_TIER=off runs everything in every verify.
+ */
+export function slowTierOf(game) {
+  if (!game?.root) return null;
+  let j = null;
+  try { j = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')); } catch { return null; }
+  const st = j?.slowTests;
+  const globs = Array.isArray(st) ? st.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : st && typeof st === 'object' && st.tier === 'slow' && String(st.pattern || '').trim() ? [String(st.pattern).trim()] : [];
+  const gates = (Array.isArray(j?.gates) ? j.gates : []).filter((x) => x && x.id && x.command && x.tier === 'slow').map((x) => `game:${x.id}`);
+  return globs.length || gates.length ? { globs, gates } : null;
+}
+/** 2.69.0 (p): this run is the slow tier (STUDIO_GATE_TIER=slow, set by harness/slow-tier.mjs). */
+export const slowTierRun = (env = process.env) => /^slow$/i.test(String(env.STUDIO_GATE_TIER || ''));
+/** 2.69.0 (p): STUDIO_SLOW_TIER=off: no slow tier, every check and test runs in every verify (as before 2.69.0). */
+export const slowTierOff = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_SLOW_TIER || ''));
 
 /**
  * The per-test timeout factor a game's test command gets: the gate's load factor, at least the manifest's minScale
@@ -231,7 +253,31 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
     }
     engine = keepEngine;
   }
-  return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '' };
+  // 2.69.0 (p): the slow tier. A verify (and a train) skips the slow checks; the slow tier runs only them, plus the test
+  // checks (a "related" or "focus" command, or "slowTests": true) with only the slow test globs (STUDIO_TEST_ONLY).
+  const tierInfo = game && !slowTierOff() ? slowTierOf(game) : null;
+  let slowTier = null;
+  if (tierInfo) {
+    const slowRun = slowTierRun();
+    const testGate = (g) => Boolean(g.related || g.focus || g.slowTests);
+    const keep = [];
+    for (const g of gates) {
+      if (slowRun ? g.tier === 'slow' || (tierInfo.globs.length && testGate(g)) : g.tier !== 'slow') keep.push(g);
+      else skipped.push({ id: g.id, why: slowRun ? 'not in the slow tier (it runs in every verify)' : 'slow tier: it runs nightly on main (npm run gates -- --tier slow); landing never waits for it' });
+    }
+    gates = keep;
+    slowTier = { run: slowRun, globs: tierInfo.globs };
+    if (slowRun) { runLayout = false; engine = []; }
+  }
+  return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '', slowTier };
+}
+
+/** 2.69.0 (p): the slow-tier env one game check runs with: STUDIO_TEST_EXCLUDE in a verify, STUDIO_TEST_ONLY in the slow tier. */
+export function slowTierEnv(slowTier, gate, env = process.env) {
+  if (!slowTier?.globs?.length || gate?.tier === 'slow') return {};
+  if (slowTier.run) return { STUDIO_TEST_ONLY: slowTier.globs.join(',') };
+  const mine = String(env.STUDIO_TEST_EXCLUDE || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return { STUDIO_TEST_EXCLUDE: [...new Set([...mine, ...slowTier.globs])].join(',') };
 }
 
 /** 2.44.0: related tests only (STUDIO_GATE_RELATED=on, or STUDIO_WHOLE_GAME=on). */
@@ -303,7 +349,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // scaledTimeout): other heavy work running (a full verify, the Unity gate, a browser playtest), other game checks,
     // a high load average. Never below STUDIO_GAME_GATE_TIMEOUT_MS (600 s), at most STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
     // (3) times it; the value used is printed and kept in the check's row, so a real hang still fails, just later.
-    const baseTimeout = Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000);
+    // 2.69.0 (p): the slow tier's checks are long by definition: their base is STUDIO_SLOW_TIMEOUT_MS (60 min).
+    const baseTimeout = plan.slowTier?.run ? Number(process.env.STUDIO_SLOW_TIMEOUT_MS || 3600000) : Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000);
     let timing = { ms: baseTimeout, base: baseTimeout, factor: 1, why: '' };
     // 2.60.0 (#6): slow seeded tests ("slowTests" in the manifest). A per-test timeout in the game's test config still
     // tripped under load after 2.59.0 scaled the gate's own timeout, so the game's checks get the same factor in
@@ -315,6 +362,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // per game and check in the main checkout's .studio/gates/game-gate-times.json from passing whole-suite runs at
     // load factor 1; the line is printed whenever the timeout differs from the base, naming why.
     let curRelated = false;
+    let curGate = null;
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
     const workersNow = () => {
@@ -323,7 +371,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2` }; }
     };
     const runOnce = (cmd, forceMs = null) => slot(cmdLabel, () => {
-      timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated ? null : timeKey() });
+      timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated || plan.slowTier?.run ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
       if (forceMs) timing = { ...timing, ms: Math.max(timing.ms, forceMs), rerun: true };
       const changedT = timing.ms !== baseTimeout;
@@ -341,12 +389,19 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
       const tw = workersNow();
       runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
+      // 2.69.0 (p): the slow tier's test globs: left out of a verify (STUDIO_TEST_EXCLUDE), the only ones in the slow tier.
+      const ste = slowTierEnv(plan.slowTier, curGate);
+      if (Object.keys(ste).length) { runEnv = { ...runEnv, ...ste }; console.error(`[game-gates] ${cmdLabel}: slow tier: ${ste.STUDIO_TEST_ONLY ? `only ${ste.STUDIO_TEST_ONLY} (STUDIO_TEST_ONLY)` : `skips ${plan.slowTier.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run nightly on main)`}`); }
+      // 2.69.0 (r): the quarantine list (studio/quarantine.json, harness/flakes.mjs) as STUDIO_TEST_QUARANTINE, a JSON
+      // list of test files for the game's runner to skip; unset when nothing is quarantined.
+      const quarantined = quarantineEnvValue(REPO_ROOT);
+      if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${tw.why})`);
       const t0 = Date.now();
       const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
       // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
       // also its lastPass at any factor, which stands in for the floor only while no quiet run is recorded.
-      if (res.status === 0 && !curRelated) {
+      if (res.status === 0 && !curRelated && !plan.slowTier?.run) {
         const took = Date.now() - t0;
         if (timing.factor === 1) recordGateTime(slotRoot, timeKey(), took);
         if (timing.rerun) recordGatePass(slotRoot, timeKey(), took, timing.factor);
@@ -357,11 +412,17 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // failing check on its failing test files only (harness/train-focus.mjs); the checks that passed in the verify are
     // skipped. Never in a verify: run-gates drops the variable from any other run.
     const focusMap = readFocus();
+    // 2.69.0 (p): a merge train's related-first check (STUDIO_GATE_RELATED_ONLY=on with STUDIO_GATE_RELATED=on) runs
+    // only the checks that have related tests for these files; nothing else (no whole suite, no layout, no engine gate).
+    const relatedOnly = relatedOn && /^(on|1|true|yes)$/i.test(process.env.STUDIO_GATE_RELATED_ONLY || '');
+    if (relatedOnly) { plan.layout = false; plan.engine = []; }
     for (const g of gates) {
       cmdLabel = g.id;
+      curGate = g;
       if (focusMap && !(g.id in focusMap)) { skipped.push({ id: g.id, why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' }); continue; }
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
       const related = Boolean(g.related && relatedOn && codeOnly && existing.length);
+      if (relatedOnly && !related) { skipped.push({ id: g.id, why: 'related-first: it has no related-tests command for these files (the full verify runs it)' }); continue; }
       let focused = null;
       if (focusMap && !related) {
         const fc = focusCommand(g, focusMap[g.id]);

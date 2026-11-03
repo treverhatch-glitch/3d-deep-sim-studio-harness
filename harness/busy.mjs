@@ -127,7 +127,8 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
   if (!c || (c.orphaned && !orphaned)) return { busy: false };
   // The claim's own task.start isn't proof of work since: a claim runs out an hour after it, so on its own it is never
   // inside the window when the claim ran out by itself (only when it was released by hand straight away).
-  const mine = evs.filter((e) => e.agent === c.owner && !(e.type === 'task.start' && e.task === task && e.ts === c.at));
+  // 2.69.0: nor is the overlap advice its start records (task.overlap): written by the start command, not by work.
+  const mine = evs.filter((e) => e.agent === c.owner && !(e.type === 'task.start' && e.task === task && e.ts === c.at) && !(e.type === 'task.overlap' && e.task === task));
   const last = mine[mine.length - 1];
   const min = (t) => Math.max(0, Math.round((now - t) / 60000));
   if (last && !GONE_TYPES.has(last.type)) {

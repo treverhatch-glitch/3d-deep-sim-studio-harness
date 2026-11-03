@@ -1034,3 +1034,36 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-180 — a halt was lost when --until came first · fixed in 2.68.0 (and 2.67.1/2.67.2)
 - **Evidence:** CI Windows, 2.67.1: halted undefined after two exit-127 sessions.
 - **Fix:** checkBadEnds() runs on the time-up pass too. qa/selftest-267e.mjs.
+
+### P-181 — a train re-ran a full verify a lane had just passed · fixed in 2.69.0
+- **Evidence:** the crew's data: 27.1 h of verifying in 43 h, 96% of it the game gate; one-lane trains re-verified
+  trees their lane had already verified (records overwritten per agent; scoped records never counted for `--all`).
+- **Fix:** verifies kept by tree; reuse with the whole-check rule; green lanes first; related tests first.
+  qa/selftest-269p.mjs.
+
+### P-182 — slow tests sat on every landing · fixed in 2.69.0
+- **Evidence:** the hardware findings: long-running checks in every verify though they rarely change.
+- **Fix:** an opt-in slow tier run nightly, failures filed as tasks. qa/selftest-269p.mjs.
+
+### P-183 — a red train searched one prefix at a time on an idle machine · fixed in 2.69.0
+- **Evidence:** CPU 2-32% during bisection; each re-check ~10 min.
+- **Fix:** K prefixes at once within the machine budget; optional remote game checks with local safety gates.
+  qa/selftest-269q.mjs.
+
+### P-184 — trains waited for someone to start them · fixed in 2.69.0
+- **Evidence:** the overseer's duty 3 (starting trains by hand).
+- **Fix:** the train daemon in the supervisor loop. qa/selftest-269r.mjs.
+
+### P-185 — a flaky test looked like a broken lane · fixed in 2.69.0
+- **Evidence:** the overseer's duty 8; re-runs decided by hand.
+- **Fix:** the flake triager (labels only; quarantine proposed until confirmed). qa/selftest-269r.mjs.
+
+### P-186 — overlapping tasks were found only at merge; the queue ran dry; upgrades waited · fixed in 2.69.0
+- **Evidence:** the overseer's duties 13 and others; overlaps found by conflicts in trains.
+- **Fix:** overlap checks at add/start, the queue-depth ask, the upgrade watch. qa/selftest-269s.mjs.
+
+### P-187 — overlap advice hid a failed start and kept an expired claim alive · fixed in 2.69.0
+- **Evidence:** the combined 2.69.0 tree failed 2.58's P-054 (the watcher kept T-101: "active 0 min ago (task.overlap)")
+  and P-055 (the "claim was released" line came after the overlap lines).
+- **Fix:** the advice prints after a successful start; claimActive ignores task.overlap for that task.
+  qa/selftest-258b.mjs.

@@ -21,6 +21,7 @@ import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
+import { overlapCheck } from './task-overlap.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -1043,6 +1044,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
       if (t?.id && !t.error && !t.proposed && !t.duplicate) setHold(t.id, { chainTail: { chain, train, after } });
       return t;
     },
+    // 2.69.0 (r): ONE fix task per test the flake triager quarantined (harness/flakes.mjs; the board dedupes by title).
+    fileFlakeTask: ({ title, test, label }) => addTask({ title, role: 'builder', priority: 'P1', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', flake: { test, label } } }),
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1305,7 +1308,7 @@ export function addTask(opts) {
   return { ...out, started: false, startError: started?.message || (started?.lock?.owner ? `claimed by ${started.lock.owner}` : 'not started') };
 }
 
-function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {}, startFor = null }) {
+function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUCER_NAME(), meta = {}, startFor = null, overlap = true }) {
   // 2.35.0: a rescuer splitting a stuck task (it holds "Rescue: T-x" and the new title names T-x) queues directly.
   if (!meta.promoted && agent && !isDecider(agent, process.env)) {
     try {
@@ -1336,6 +1339,11 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
     return { error: 'gated', message: gate.message };
   }
   if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
+  // 2.69.0 (s): overlap with open tasks' lanes, lanes in flight and near-duplicate titles (harness/task-overlap.mjs).
+  // Advisory unless STUDIO_OVERLAP=block. A planner's split and a rescue's pieces overlap their parent on purpose.
+  const ov = overlap && !meta.splitOf && !fromRescueMeta(meta) ? overlapCheck({ title, role, meta, phase: 'add', agent, board: parseNextQueue() }) : { found: [], lines: [], block: false };
+  if (ov.block) return { error: 'overlap', message: ov.lines.join('\n') };
+  if (ov.lines.length) gate.warnings.push(...ov.lines);
   const newTask = {
     id: allocateTaskId(parseNextQueue()),
     priority: priority.toUpperCase(),
@@ -1400,6 +1408,8 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
   const extra = { ...(split?.id ? { split: split.id } : {}), ...(tricks ? { tricks } : {}) };
   return gate.warnings.length ? { ...newTask, ...extra, warnings: gate.warnings } : { ...newTask, ...extra };
 }
+
+const fromRescueMeta = (meta) => meta?.origin === 'rescue' || meta?.rescueSplit;
 
 /** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
 export function dropTask(id, { by = actor(), why } = {}) {
@@ -1635,6 +1645,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('Usage: node harness/task.mjs start <TASK_ID> --agent <unique-name>');
       process.exit(1);
     }
+    // 2.69.0 (s): the task against the work in flight (its lane, its own diff once it has one, near-duplicate titles).
+    const startOv = (() => { const t = q.backlog.find((x) => x.id === targetId) || q.inProgress.find((x) => x.id === targetId); return t ? overlapCheck({ id: t.id, title: t.title, role: t.role, phase: 'start', agent: whoAmI(flags), board: q }) : null; })();
+    // Advice is printed after the start succeeds (below), so a refused or failed start says its own reason first;
+    // a blocking overlap is the refusal itself and is printed here.
+    if (startOv?.block) {
+      for (const l of startOv.lines || []) console.error(l);
+      emitEvent({ type: 'task.start_refused', agent: whoAmI(flags) || undefined, task: targetId, status: 'blocked', msg: `overlap (STUDIO_OVERLAP=block): ${startOv.found.map((f) => f.with).join(', ')}`.slice(0, 400) });
+      process.exit(1);
+    }
     const started = startTask(targetId, whoAmI(flags), { model: typeof flags.model === 'string' ? flags.model : null, force: Boolean(flags.force) });
     if (!started) {
       console.error(`Task "${targetId}" not found.`);
@@ -1651,6 +1670,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
+    for (const l of startOv?.lines || []) console.error(l); // 2.69.0 (s): overlap advice, once the task is started
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
     await startDiskWarning(); // 2.68.0 (m)
     const { handoff, ...rest } = started;
@@ -1882,6 +1902,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
+    // 2.69.0 (r): the train daemon's switch (harness/train-daemon.mjs; decider rules: a person, never a worker).
+    if (arg1 === 'auto') {
+      const want = flags._[2];
+      const td = await import('./train-daemon.mjs');
+      if (!want) { console.log(td.autoStatusText(mainRoot())); process.exit(0); }
+      if (!/^(on|off)$/.test(want) || typeof flags.by !== 'string') { console.error('Usage: npm run task -- train auto off|on --by <name> [--why "…"] [--permission "<their words or a link>"]'); process.exit(1); }
+      const r = await td.setTrainAuto(mainRoot(), { on: want === 'on', by: flags.by, why: typeof flags.why === 'string' ? flags.why : '', permission: typeof flags.permission === 'string' ? flags.permission : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
     // 2.65.0 (B-40): apply a config proposal held on main (its protected part waited for the owner, or main moved a key).
     if (arg1 === 'config') {
       const tid = flags._[2];
@@ -1890,7 +1920,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>]'); process.exit(1); }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });

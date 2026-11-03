@@ -27,6 +27,8 @@
  * 2.68.0: each pass also runs the crew watchdog (harness/crew-watch.mjs: a role launching sessions that land nothing is
  * paused), the futility cap (harness/futility.mjs, shadow mode by default) and the usage wind-down
  * (harness/winddown.mjs, STUDIO_USAGE_WINDDOWN_PCT). Code only: no model, no tokens.
+ * 2.69.0 (r): and the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO, default on): a merge train starts on
+ * its own when lanes are ready and the machine budget has room for a verify (npm run task -- train auto off|on --by).
  * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
  */
 import fs from 'node:fs';
@@ -222,6 +224,12 @@ export async function supervise(opts, state, now = Date.now()) {
       const { futilityPass } = await import('./futility.mjs');
       futilityPass({ sessions: sessions(), events: readRecentEvents(20000), now, dryRun: opts.dryRun, pause: opts.deps?.pauseAgent || (await import('./agent.mjs')).pauseAgent });
     } catch { /* a check, never a crash */ }
+    // 2.69.0 (p): the nightly slow tier (harness/slow-tier.mjs): once a day from STUDIO_SLOW_HOUR (3), detached, on main.
+    try {
+      const { mainRoot: slowRoot } = await import('./worktree.mjs');
+      const sl = await (opts.deps?.slowTierPass || (await import('./slow-tier.mjs')).slowTierPass)({ root: slowRoot(), now, dryRun: opts.dryRun });
+      if (sl?.started) console.log(`[supervisor] started the nightly slow tier (${sl.why}); output .studio/slow-tier.log`);
+    } catch { /* the slow tier never blocks the supervisor */ }
   }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
@@ -249,6 +257,25 @@ export async function supervise(opts, state, now = Date.now()) {
   // 2.68.0 (n): the session cap by RAM (harness/heavy-budget.mjs sessionCap): the RAM budget less the heavy jobs' claims,
   // STUDIO_SESSION_RAM_GB (0.6) a session; no machine scan: the pace's cap as before.
   const ramCap = await sessionCapNow(configured);
+  // 2.69.0 (s): the queue-depth target (harness/queue-depth.mjs): fewer startable builder tasks than STUDIO_QUEUE_DEPTH
+  // (default this cap) asks the Producer, naming the areas chains and holds block. It never adds a task.
+  if (!opts.watcher) {
+    try {
+      const { queueDepthPass } = await import('./queue-depth.mjs');
+      const { listLocks } = await import('./lock.mjs');
+      const { unmerged } = await import('./worktree.mjs');
+      const qd = await queueDepthPass({ q: parseNextQueue(), cap: ramCap.cap, now, dryRun: opts.dryRun, deps: { locks: listLocks(), unmerged, locked: (id) => lockStatus(`task:${id}`).locked, ...(opts.deps?.wake ? { wake: opts.deps.wake } : {}) } });
+      if (qd.asked) why.push(`queue below its depth target (${qd.ready.length} ready, target ${qd.target}): the Producer was asked`);
+    } catch { /* a nudge, never a crash */ }
+  }
+  // 2.69.0 (s): the upgrade watch (harness/upgrade-watch.mjs), every STUDIO_UPGRADE_WATCH_MIN (60) minutes.
+  if (!opts.watcher) {
+    try {
+      const uw = await import('./upgrade-watch.mjs');
+      const w = await uw.supervisorWatch({ now, dryRun: opts.dryRun });
+      if (w?.line) why.push(w.line);
+    } catch { /* a watch, never a crash */ }
+  }
   let room = ramCap.cap - live.length;
   if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
   if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
@@ -421,6 +448,19 @@ export async function supervise(opts, state, now = Date.now()) {
   return { started, why };
 }
 
+/**
+ * 2.69.0 (r): one train-daemon pass for the supervisor loop: what it decided goes in state.train (studio:status).
+ * A halt, a wind-down (supervise's result) and "Stop all" keep it from starting a train. Never throws.
+ */
+export async function trainDaemonTick(state, r = {}, opts = {}) {
+  try {
+    const { trainDaemonPass } = await import('./train-daemon.mjs');
+    const d = await trainDaemonPass({ halted: state.halted || null, ...(r.winddown ? { winddown: r.why?.[0] || 'winding down' } : {}), ...opts });
+    state.train = { at: new Date().toISOString(), started: Boolean(d.started), why: d.why, ...(d.pid ? { pid: d.pid } : {}) };
+    return d;
+  } catch (err) { state.train = { at: new Date().toISOString(), started: false, why: `error: ${err.message}` }; return { started: false, why: err.message }; }
+}
+
 /** 2.68.0 (n): the session cap by RAM, { cap, why }; the configured cap when anything fails. */
 async function sessionCapNow(configured) {
   try {
@@ -521,6 +561,9 @@ async function main(argv) {
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
+    // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
+    if (!r.stop) await trainDaemonTick(state, r);
     save();
     if (r.stop) finish(r.why[0]);
   };

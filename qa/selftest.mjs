@@ -4199,6 +4199,42 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.69.0 (p): less repeated work in the merge train: a lane's green verify reused by a train of one (kept by tree),
+// prechecked lanes first, related tests first on the combined tree, the nightly slow tier (qa/selftest-269p.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269p.mjs')).href);
+  await selftest269P({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.69.0 (q): a red train's prefix search checks K prefixes at once (K from the machine budget, each in its own scratch
+// copy), and STUDIO_VERIFY_REMOTE=github uses the repo's CI as the verify, falling back to the local one (qa/selftest-269q.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269q.mjs')).href);
+  await selftest269Q({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.69.0 (r): the train daemon (harness/train-daemon.mjs) and the flake triager with its quarantine (harness/flakes.mjs)
+// (qa/selftest-269r.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269r.mjs')).href);
+  await selftest269R({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.69.0 (s): overlap checks at task add and start (lanes in flight, open lanes, near-duplicate titles; STUDIO_OVERLAP),
+// the queue-depth target (the Producer is asked, never a task invented) and the upgrade watch (qa/selftest-269s.mjs).
+{
+  const dir = copyRepo();
+  const { selftest269S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269s.mjs')).href);
+  await selftest269S({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

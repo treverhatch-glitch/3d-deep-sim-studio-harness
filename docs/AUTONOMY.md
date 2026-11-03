@@ -201,7 +201,8 @@ actions without the owner's words for each one, for a time the owner sets (harne
   so an agent can't grant itself one. It counts as committed in the main checkout: with an owner key only with a valid
   signature by that key (the grant signs it where the private key is; a changed file is ignored); without one only when
   the commit that set it isn't an agent's (no `Studio-Agent` trailer).
-- **What it covers:** `train-release`, `type`, `visual`, `yes`, `hold` (hold and unhold), at most 72 hours. The named
+- **What it covers:** `train-release`, `type`, `visual`, `yes`, `hold` (hold and unhold), `upgrade-auto` (2.69.0: the
+  auto-upgrade switch, `npm run upgrade -- watch auto on`, recorded for the owner), at most 72 hours. The named
   agent runs them with `--by <agent>` and no `--permission`; each use is recorded for the owner by the agent "under
   delegation <at> by <owner>" (the release, the task-types entry, the yes relay, the hold) plus one `delegation.used`
   event, and the daily digest counts them. Never covered: `npm run approve` (signing protected files, tests, hooks,

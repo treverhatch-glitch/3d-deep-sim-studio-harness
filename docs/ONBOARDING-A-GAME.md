@@ -192,6 +192,33 @@ testTimeout: 5000 * scale, hookTimeout: 10000 * scale,
 or only for the slow files, with `{ timeout: 6000 * scale }` on those tests. Outside the gate the variable is unset, so
 the factor is 1. `"timeoutScale": false` turns it off. The manifest is protected: adding this needs the owner's approval.
 
+## The slow tier (2.69.0)
+
+Long tests (a 60-day soak) put a floor under every verify and every merge train. The game's manifest (protected: the
+owner approves) can move them to a nightly slow tier:
+
+```json
+{ "slowTests": ["src/**/*.soak.test.ts"], "gates": [ { "id": "unit", "command": "npx vitest run", "related": "npx vitest related --run --passWithNoTests {files}" }, { "id": "soak", "command": "npx vitest run --config soak.config.ts", "tier": "slow" } ] }
+```
+
+A check with `"tier": "slow"` is skipped in verifies and trains. The slow test globs are passed to the game's test
+checks as `STUDIO_TEST_EXCLUDE` (comma-separated globs) in every verify; in the slow tier the test checks (those with a
+`related` or `focus` command, or `"slowTests": true`) run with `STUDIO_TEST_ONLY` instead. Read both in the test config,
+like `VITEST_MAX_WORKERS`, for example in `vitest.config.ts`:
+
+```ts
+const only = process.env.STUDIO_TEST_ONLY?.split(',').filter(Boolean);
+const skip = process.env.STUDIO_TEST_EXCLUDE?.split(',').filter(Boolean) ?? [];
+// in defineConfig({ test: { ... } }):
+include: only?.length ? only : ['src/**/*.test.ts'], exclude: [...configDefaults.exclude, ...skip],
+```
+
+`npm run gates -- --tier slow` runs the slow tier on the checkout (game-gates with `STUDIO_GATE_TIER=slow`; the supervisor runs it on main once a day at
+`STUDIO_SLOW_HOUR`, default 3); its base timeout is `STUDIO_SLOW_TIMEOUT_MS` (60 min). Each new failure is one bug task
+(`.studio/slow-tier.json` keeps what was filed; `.studio/slow-tier-last.log` the last run). `STUDIO_SLOW_TIER=off`
+puts everything back into every verify. The object form of `"slowTests"` (above) still only scales timeouts, unless it
+also says `"tier": "slow"` (then its `pattern` is a slow glob).
+
 ## Test workers sized to the machine (2.68.0)
 
 The game's checks run with `CI=true` (no snapshot writes), and with `VITEST_MAX_WORKERS` and `STUDIO_TEST_WORKERS`:
@@ -205,6 +232,22 @@ maxWorkers: workers,
 ```
 
 Outside the gate the variable is unset and Vitest picks its own count.
+
+## Quarantined flaky tests (2.69.0)
+
+A test the merge train's flake triager labelled flaky 3 times in a week is proposed on `studio/quarantine.json`
+(docs/WORK-ORGANIZATION.md, "The flake triager"); once a person confirms it (or at once with `"autoQuarantine": true`
+in this manifest or in that file), the game's checks get it in `STUDIO_TEST_QUARANTINE`, a JSON list of the active
+entries' test files as the runner printed them (unset when none). Skip them in the test config, for example in
+`vitest.config.ts`:
+
+```ts
+const quarantined: string[] = JSON.parse(process.env.STUDIO_TEST_QUARANTINE || '[]');
+// in defineConfig({ test: { ... } }):
+exclude: [...configDefaults.exclude, ...quarantined],
+```
+
+A fix task is filed for each; when it lands, a game dev releases the test: `npm run flakes -- release <test> --by <name>`.
 
 ## Landing tiers and batching for the merge train (2.63.0)
 

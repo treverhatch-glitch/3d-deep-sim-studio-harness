@@ -100,6 +100,29 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   is named, main + lanes 1..k-1 get a full verify and, green, land at once (`STUDIO_TRAIN_LAND_PREFIX`, default on;
   `off` keeps 2.65.2); the culprit is handed back and the lanes after it wait for the next train, which runs right
   away (also after a task done's own train). Events `task.train.recheck`, `.prefix_landed`, `.prefix_red`.
+- Parallel prefixes (2.69.0, `harness/train-parallel.mjs`): the prefix search is K-ary. Between a green lo and a red
+  hi it re-checks K boundary prefixes at once (split into K+1 parts), each in its own scratch copy and each run-gates
+  taking its own machine:heavy claim; the answer is the same first red prefix, in about log(K+1) N rounds instead of
+  log2 N. K = how many focused re-check claims (2..8 test workers each) fit the machine budget now (the last machine
+  scan, live heavy holders, slots, RAM, CPU), capped by `STUDIO_TRAIN_BISECT_PARALLEL` (default 4; `1`/`off`: one at
+  a time). No scan: K = 1, the search above unchanged. The log says "bisect round 1: checking prefixes 3, 6 at once";
+  event `task.train.bisect_round`.
+- Remote verify (2.69.0, `harness/remote-verify.mjs`, `STUDIO_VERIFY_REMOTE=github`, off by default): the remote CI
+  may stand for the game's own checks ONLY, never for a safety gate. The train first runs every other gate locally on
+  its tree (`run-gates --only`, every studio gate but the game checks, engine and heavy ones: protected, secrets,
+  hooks, weakened-tests, golden, regressions, ...; about 10 s). Red there (not excused by a baseline): the verify is
+  red, the remote is not asked, and the prefix search re-checks those gates. Green: for a PUBLIC GitHub repo, with
+  `GH_TOKEN` or `GITHUB_TOKEN` set by the owner (never printed, never on a command line), the train pushes its
+  integration commit to `train/<id>` on origin and waits for the check run named by `STUDIO_VERIFY_REMOTE_CHECK` (a
+  pattern, default `release-gate`): every matching run must complete with success (skipped or neutral is not green;
+  other check runs don't count). Both parts green: the tree counts as verified, and
+  `.studio/train/split/<id>-<n>.json` records which gate came from where. Anything else runs the full local verify:
+  any error, a private repo, an existing `train/<id>`, no run of the named check (`STUDIO_VERIFY_REMOTE_START_MIN`,
+  10; the workflow must run on pushes to any branch), no result within `STUDIO_VERIFY_REMOTE_TIMEOUT_MIN` (60; polled
+  every `STUDIO_VERIFY_REMOTE_POLL_S`, 30), and red CI (the local record names the failing checks for the search). The
+  train then deletes its own `train/<id>` branch (only that name, only if its push made it). Cost: GitHub's standard
+  runners are free for public repos; a private repo would use paid minutes, so it is never used there. Event
+  `task.train.remote_verify`.
 - Chain tails (2.67.0, `harness/train-tail.mjs`, `STUDIO_TRAIN_CHAIN_TAIL`, default on; `off` keeps 2.66.0): when a
   train starts with a stacked chain (lanes linked by `--after` / `task block --until`) or a lane that declares
   `Pin-Moves:`, BEFORE its verify it builds main + the chain in a second scratch copy and runs the chain's touched test
@@ -204,6 +227,32 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
   one verify; only its own lane's result is its answer (a rider that fails is handed back as in any train).
   `STUDIO_TRAIN_RIDE_ALONG=off` turns that off.
+- The train daemon (2.69.0, `harness/train-daemon.mjs`): while a supervisor runs (`STUDIO_TRAIN_AUTO`, default on),
+  each pass starts a train on its own, in a detached child (`.studio/train/daemon.json`, its log `daemon.log`), when
+  lanes are ready by the batching rules above (`STUDIO_TRAIN_MIN` lanes not held, or the oldest waited
+  `STUDIO_TRAIN_WAIT_MIN`) AND the machine budget admits a verify claim (the machine:heavy admission below); never
+  beside another train (the train lock) or its own last one, never while the supervisor is halted, winding down or
+  "Stop all" is on (`task.train.auto_waiting` says why, once per reason). After it, each handed-back lane whose task
+  has no running session is made sure to be back on the board with the hand-back facts (only what is missing is
+  added), and ONE `job.done` (kind train, `meta.auto`, `requeued`) sums it. `npm run task -- train auto off|on --by
+  <name> [--why "…"]` switches it (a person, the owner's delegation, or a Producer/Director session or an outside agent
+  on a person's `--permission`; never a worker); `npm run task -- train auto` shows it.
+- The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
+  (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
+  fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
+  and again with one test worker → `load-flake`; passes then fails → `intermittent`. Labels go to
+  `.studio/flakes.jsonl`; they never change what the train does. A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
+  (3) times in `STUDIO_FLAKE_WINDOW_DAYS` (7) goes on `studio/quarantine.json` (`{ test, label, since, why, by,
+  status, evidence, task }`) as PROPOSED, and ONE fix task is filed. The harness never silences a test on its own
+  authority: a proposed entry still runs; the digest and `npm run flakes` list it until a person, an agent under the
+  owner's delegation, or an outside agent (or a Producer/Director session) with `--permission` confirms it (`npm run
+  flakes -- confirm <test> --by <name>`; never a worker). Then it is active and the game's runner skips it
+  (`STUDIO_TEST_QUARANTINE`, docs/ONBOARDING-A-GAME.md). `"autoQuarantine": true` in `studio/quarantine.json` (then
+  `{ "autoQuarantine": true, "tests": [...] }`) or in the game's `studio.gates.json` (the owner's or a game dev's
+  choice) makes the harness's entries active at once, still recorded with evidence. A real failure is never
+  quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
+  flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
+  (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
@@ -263,6 +312,27 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - A state file written in place because another program kept it open (Windows) leaves a `fsafe.warning` event.
 - The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
   EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
+
+## Less repeated work in the merge train (2.69.0)
+
+- **A lane's green verify stands for a train of one.** When a train holds ONE lane and its integration tree is the tree
+  that lane's verify tested (green, full, clean, same rules as task done's reuse), the train doesn't verify again; the
+  log says `reused <lane>'s green verify of tree <x>`. A clean full verify is now also kept by tree
+  (`.studio/gates/trees/<tree>.json`, the newest 64), so the agent's next verify no longer hides it; a lane copy whose
+  `.studio/` is its own (not the link) is searched too.
+- **Prechecked lanes first.** In a multi-lane train, a lane whose own tree on main's tip (merge-tree of tip and its head)
+  has a green recorded verify goes first (`prechecked first: ...` in the log; the rest keep their order, `--after`
+  order still wins). `STUDIO_TRAIN_GREEN_FIRST=off` keeps queue order.
+- **Related tests first on the combined tree.** Before the full verify of a multi-lane train, each lane's related tests
+  (the game's `related` command on the lane's own changed files, the same machinery as `STUDIO_GATE_RELATED`, with
+  `STUDIO_GATE_RELATED_ONLY=on` so checks without one don't run) run on the combined tree in the scratch copy. A lane
+  red there whose failing tests pass on main's tip is handed back at once, with the failing tests, the log and the
+  facts block: no full verify, no bisection. Red on main's tip too: nobody is dropped, the full verify decides.
+  `STUDIO_TRAIN_RELATED_FIRST=on|off`; unset, it is on when the game's manifest declares a `related` command.
+- **The slow tier.** Checks and test globs the game marks slow (docs/ONBOARDING-A-GAME.md, "The slow tier") are left
+  out of verifies and trains; `npm run gates -- --tier slow` runs only them on main, and the supervisor starts it once a
+  day at `STUDIO_SLOW_HOUR` (local hour, default 3; `off` never). One bug task per new failure (deduped by check and
+  test while its task is open; at most `STUDIO_SLOW_MAX_TASKS`, 10, per run). Landing never waits for it.
 
 ## Heavy work shares the machine by budget (2.68.0)
 
