@@ -16,7 +16,8 @@ if (!agent || !task || status !== 'ok') {
   process.exit(1);
 }
 
-const sh = (...a) => spawnSync(process.execPath, a, { encoding: 'utf8', env: process.env });
+// 2.71.0 (z): a rehearsal's scripted --force is the harness's own stand-in, not a workaround (harness/workaround.mjs).
+const sh = (...a) => spawnSync(process.execPath, a, { encoding: 'utf8', env: { ...process.env, STUDIO_WORKAROUND_DETECT: 'off' } });
 
 // It claims the task like a real agent.
 const st = sh('harness/task.mjs', 'start', task, '--agent', agent, '--model', 'rehearsal');

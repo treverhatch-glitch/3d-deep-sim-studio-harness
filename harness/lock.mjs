@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
+import { watchCommand } from './workaround.mjs';
 
 // 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
 // as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
@@ -400,6 +401,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const all = process.argv.slice(2);
   const flag = (name) => (all.includes(name) ? all[all.indexOf(name) + 1] : undefined);
   const owner = flag('--owner') || process.env.STUDIO_LOCK_OWNER || '';
+  // 2.71.0 (z): --force and a refused claim re-run again and again are detected workarounds (harness/workaround.mjs).
+  if (cmd !== 'check-staged') { try { watchCommand('lock', all, { agent: owner || null }); } catch { /* evidence only */ } }
   const out = (res, ok = res.ok) => {
     console.log(JSON.stringify(res, null, 2));
     process.exit(ok ? 0 : 1);
