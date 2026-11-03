@@ -4,7 +4,7 @@
  * `npm run release -- <version>` ships a release end to end instead: scripts/release-ship.mjs.
  *
  * 1. Syntax-checks every JS module and Python tool.
- * 2. Runs every required gate (scripts/run-gates.mjs --required-only).
+ * 2. Runs every required gate (scripts/run-gates.mjs --required-only; --except <ids> leaves some to CI jobs of their own).
  * 3. Proves the closed loop still records and exits 1 on a failure.
  * 4. Fails if any gate modified a tracked file (gates must be read-only).
  * 5. Checks CHANGELOG.md has an entry for the package.json version.
@@ -56,8 +56,12 @@ const tracked = () => (isGit ? run('git', ['diff', '--name-only']).stdout.trim()
 const before = tracked();
 
 // 2. Gates
-const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep'], { cwd: root, stdio: 'inherit' });
-step('required gates', gates.status === 0);
+// 2.72.0 (d): `--except selftest` (CI only) leaves gates out for jobs of their own: the self-test runs in parallel
+// shards (node qa/selftest.mjs --shard i/N) and a summary job fails the run when any shard failed.
+const exceptArg = process.argv.includes('--except') ? String(process.argv[process.argv.indexOf('--except') + 1] || '') : null;
+if (exceptArg !== null) console.log(`[release] note: --except ${exceptArg}: those gates run in jobs of their own; this alone is not a full release check`);
+const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep', ...(exceptArg !== null ? ['--except', exceptArg] : [])], { cwd: root, stdio: 'inherit' });
+step(exceptArg !== null ? `required gates (except ${exceptArg})` : 'required gates', gates.status === 0);
 
 // 3. Closed loop still fails loudly
 const loop = run(process.execPath, [path.join(root, 'harness', 'closed-loop.mjs'), '--simulate-fail']);

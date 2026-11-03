@@ -144,9 +144,70 @@ const runAsync = (dir, cmd, env = {}) =>
     c.on('close', (status) => resolve({ status, stdout, stderr }));
   });
 const report = (label, ok, detail = '') => {
+  if (strayCheck(label)) return;
   console.log(`[selftest] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail.slice(-600)}`}`);
   if (!ok) failed += 1;
 };
+
+// 2.72.0 (d): CI shards. Every check below sits in a unit that starts with `if (inShard(...)) {` (a top-level block,
+// or one gate of the sabotage loop). `--shard i/N` runs units i, i+N, i+2N, ... in file order (a group: every unit
+// with the same group name runs in the shard of its first unit, for checks that must stay together); nothing else
+// changes, so the shards' union is the whole self-test. `--list-shards N` runs no check: it prints the units and
+// their shard as JSON, plus any check that ran outside a unit ("strays": a new block without the guard), and exits 1
+// when there is one. A new block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {`).
+// Each shard runs on its own CI runner; shards are balanced by count, not time (each shard prints its slowest units).
+const SELFTEST_ARGS = process.argv.slice(2);
+const argValue = (name) => {
+  const i = SELFTEST_ARGS.findIndex((a) => a === name || a.startsWith(`${name}=`));
+  if (i < 0) return null;
+  return SELFTEST_ARGS[i].includes('=') ? SELFTEST_ARGS[i].slice(name.length + 1) : (SELFTEST_ARGS[i + 1] ?? '');
+};
+let SHARD = null;
+let LIST_SHARDS = null;
+parseShardArgs();
+function parseShardArgs() {
+  const sh = argValue('--shard');
+  const ls = argValue('--list-shards');
+  const m = sh === null ? null : /^(\d+)\/(\d+)$/.exec(sh);
+  if (sh !== null && (!m || Number(m[2]) < 1 || Number(m[1]) < 1 || Number(m[1]) > Number(m[2]))) {
+    console.error(`[selftest] --shard i/N with 1 <= i <= N (e.g. --shard 2/4), not "${sh}"`);
+    process.exit(2);
+  }
+  if (ls !== null && !(/^\d+$/.test(ls) && Number(ls) >= 1)) {
+    console.error(`[selftest] --list-shards N with N >= 1, not "${ls}"`);
+    process.exit(2);
+  }
+  if (m) SHARD = { i: Number(m[1]), n: Number(m[2]) };
+  if (ls !== null) LIST_SHARDS = Number(ls);
+}
+const UNITS = [];
+const SHARD_OF = new Map();
+const STRAYS = [];
+let unitNow = null;
+function endUnit() {
+  if (unitNow) unitNow.u.ms = Date.now() - unitNow.t0;
+  unitNow = null;
+}
+/** Does this unit run here? Called once per unit, in file order, by every run (so the numbering never depends on the shard). */
+function inShard(label = null, group = null) {
+  endUnit();
+  const line = Number((String(new Error().stack).split('\n')[2] || '').match(/:(\d+):\d+\)?\s*$/)?.[1]) || null;
+  const n = LIST_SHARDS || SHARD?.n || 1;
+  const key = group ? `group:${group}` : `unit:${UNITS.length}`;
+  if (!SHARD_OF.has(key)) SHARD_OF.set(key, (SHARD_OF.size % n) + 1);
+  const u = { label: label || `L${line}`, ...(group ? { group } : {}), shard: SHARD_OF.get(key), line };
+  UNITS.push(u);
+  if (LIST_SHARDS) return false;
+  const runs = !SHARD || u.shard === SHARD.i;
+  if (runs) unitNow = { u, t0: Date.now() };
+  return runs;
+}
+/** A check outside any unit: listed (and not run) by --list-shards; in a shard run it is named once at the end. */
+function strayCheck(label) {
+  if (!LIST_SHARDS && (!SHARD || unitNow)) return false;
+  STRAYS.push(String(label).slice(0, 160));
+  return Boolean(LIST_SHARDS);
+}
 
 const SIM = 'cartridges/example-sim/index.mjs';
 const SABOTAGE = {
@@ -254,7 +315,7 @@ const EXPECT = {
 const CANNOT = { selftest: 'this file' };
 
 // Control: an untouched copy must pass every required gate, so a failure below is caused by its sabotage.
-{
+if (inShard('control')) {
   const dir = copyRepo();
   for (const gate of gates.filter((g) => g.required !== false && !CANNOT[g.id])) {
     const res = run(dir, gate.command);
@@ -264,6 +325,7 @@ const CANNOT = { selftest: 'this file' };
 
 for (const gate of gates.filter((g) => g.required !== false)) {
   if (CANNOT[gate.id]) continue;
+  if (!inShard(`sabotage:${gate.id}`)) continue;
   const sabotage = SABOTAGE[gate.id];
   if (!sabotage) {
     report(`gate "${gate.id}" has no sabotage in qa/selftest.mjs, so nothing proves it can fail`, false);
@@ -278,7 +340,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Purity: the Function constructor reached through a prototype is caught, statically and at runtime.
-{
+if (inShard()) {
   const dir = copyRepo();
   edit(dir, SIM, (s) => s.replace('const drift =', "const C = 'constr' + 'uctor'; const F = (() => {})[C]; F('return 1')();\n  const drift ="));
   const res = run(dir, 'node scripts/check-sim-purity.mjs');
@@ -291,7 +353,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 
 // Hashes: the display hash is real FNV-1a 64 (standard vectors), the example cartridge's copy agrees with the
 // harness, and SHA-256 matches Node's own over the same canonical bytes.
-{
+if (inShard('hashes')) {
   const h = await import(pathToFileURL(path.join(root, 'harness/hash.mjs')).href);
   const enc = (s) => new TextEncoder().encode(s);
   report('the display hash is standard FNV-1a 64-bit', h.fnv1a64(enc('')) === 'cbf29ce484222325' && h.fnv1a64(enc('a')) === 'af63dc4c8601ec8c' && h.fnv1a64(enc('foobar')) === '85944171f73967e8');
@@ -309,14 +371,14 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Golden stubs are not a pass.
-{
+if (inShard()) {
   const dir = copyRepo();
   edit(dir, 'qa/golden/example-1337.json', (s) => s.replace(/"sha256": "[0-9a-f]{64}"/, '"sha256": "REPLACE_AFTER_FIRST_RUN"'));
   report('golden stub hash fails (no silent rewrite)', run(dir, 'node qa/check-golden.mjs').status !== 0);
 }
 
 // A scenario golden pins the actions taken, not only the end state; a custom display hash still passes Python on SHA-256.
-{
+if (inShard()) {
   const dir = copyRepo();
   edit(dir, 'qa/golden/example-sim-start-to-win.json', (s) => s.replace(/"actionsSha256": "[0-9a-f]{64}"/, `"actionsSha256": "${'1'.repeat(64)}"`));
   const res = run(dir, 'node qa/check-golden.mjs');
@@ -330,7 +392,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Locks and task claims.
-{
+if (inShard()) {
   const dir = copyRepo();
   report('lock refuses a shared owner name', run(dir, 'node harness/lock.mjs claim task:T-9 --owner cursor').status !== 0);
   const wide = run(dir, 'node harness/lock.mjs claim path:studio --owner alice-1');
@@ -346,7 +408,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Locks: agents claiming a folder and files inside it at the same moment can't all win.
-{
+if (inShard()) {
   const dir = copyRepo();
   const keys = ['path:cartridges', 'path:cartridges/example-sim', 'path:cartridges/example-sim/index.mjs', 'path:cartridges/example-sim/qa.mjs'];
   const results = await Promise.all(keys.flatMap((k, i) => [0, 1].map((j) => runAsync(dir, `node harness/lock.mjs claim ${k} --owner racer-${i}-${j} --wide race`))));
@@ -357,7 +419,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Done-checks: each type of task refuses to close while its proof is missing, and forcing tells the Producer.
-{
+if (inShard()) {
   const dir = copyRepo();
   const kinds = [
     ['change', 'node harness/task.mjs add "Wire the spawn table" --role builder'],
@@ -393,7 +455,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The Producer handoff reflects the studio's real state, and meetings leave notes, tasks and a log entry.
-{
+if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner alice-1');
   run(dir, 'node harness/task.mjs start T-003 --agent alice-1');
@@ -417,7 +479,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Workers who stop hand back with a note; the watcher requeues abandoned work and pings the Producer once.
-{
+if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model test-model-1');
   run(dir, 'node harness/lock.mjs claim path:cartridges/example-sim --owner cursor-a');
@@ -436,7 +498,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Onboarding an existing game: read-only scan, fact sheet, tasks once, and the briefing shows it.
-{
+if (inShard()) {
   const dir = copyRepo();
   const gameDir = path.join(tmpRoot, `game-${n}`);
   fs.mkdirSync(path.join(gameDir, 'src'), { recursive: true });
@@ -453,7 +515,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Model scorecard: bugs land on the model that closed the work; the retro turns patterns into suggestions.
-{
+if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/task.mjs start T-003 --agent cursor-a --model model-a');
   run(dir, 'node harness/task.mjs done T-003 --agent cursor-a --force --reason "selftest forced close"');
@@ -483,7 +545,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The daily spend cap stops model calls before they reach a provider; studio:reset starts a fresh project.
-{
+if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/event.mjs --quiet --type route.success --agent builder --tokens-in 60 --tokens-out 60 --msg "earlier call"');
   const capped = run(dir, 'node harness/route.mjs --prompt hi --dry-run', { STUDIO_DAILY_TOKEN_CAP: '100' });
@@ -498,7 +560,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Done-checks read content in a git checkout, and the scorecard traces a bug to the commit before it.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -530,7 +592,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The model check and the launch lines work without any keys.
-{
+if (inShard()) {
   const dir = copyRepo();
   const mc = run(dir, 'node harness/models-check.mjs --dry-run', { OPENAI_API_KEY: 'test-not-a-key' });
   report('models:check --dry-run names what it would ask, and what has no key', mc.status === 0 && /would-check\s+openai-gpt/.test(mc.stdout) && /no-key/.test(mc.stdout), mc.stdout + mc.stderr);
@@ -539,7 +601,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Pre-production: intake writes the Game Bible; build work waits for a person; phases, purpose and crossed-out layers are enforced.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const add = (args) => run(dir, `node harness/task.mjs add ${args}`, env);
@@ -633,7 +695,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // Experiments: tagged commits can be kept, or taken back out in part or in full, leaving other work alone.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd, env = {}) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`, env);
   git('init -q');
@@ -667,7 +729,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The Liaison: nothing moves until the game dev confirms; then it reaches the Producer and the Director.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_LOCK_OWNER: 'liaison-1' };
   run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
@@ -687,7 +749,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The learning loop: the same failure on two days is flagged, with the lesson that didn't stick.
-{
+if (inShard()) {
   const dir = copyRepo();
   const day = (d, msg) => JSON.stringify({ ts: `${d}T10:00:00.000Z`, type: 'closedloop.escalate', agent: 'watch', msg });
   fs.appendFileSync(path.join(dir, '.studio/events.jsonl'), `${[day('2026-10-01', 'BUG-11 replay drift at tick 120: Math.random in a helper'), day('2026-10-03', 'BUG-19 replay drift at tick 340: Math.random in a helper')].join('\n')}\n`);
@@ -715,7 +777,7 @@ for (const gate of gates.filter((g) => g.required !== false)) {
 }
 
 // The dev's seat: references are kept, assets carry who may use them, follow-up questions get asked.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   fs.writeFileSync(path.join(dir, 'clip.mp4'), 'a saved clip');
@@ -758,7 +820,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // Agent identity and the game's voice: briefs carry who the agent is, where its role gets refused,
 // lessons filed for the role, and the voice; the fun check reads the game through the personas.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const id = JSON.parse(run(dir, 'node harness/task.mjs add "Wire the moss table"', env).stdout).id;
@@ -777,7 +839,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Signed results: a signature proves who vouched; tampering breaks it; --replay re-runs the goldens.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -816,7 +878,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Trajectory export: opt-in only, one labelled record per finished task, secrets scrubbed.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
@@ -859,7 +921,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // A bug's regression must fail on the code before the fix, or it guards nothing.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
@@ -892,7 +954,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // System tasks: spec with hand-off, scenario, goldens, playtest, verify, and a review from another model family.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
@@ -924,7 +986,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Renderer budget: measured in Chromium when a build is running; the static scan still catches too many lights.
-{
+if (inShard()) {
   const dir = copyRepo();
   const pages = fs.mkdtempSync(path.join(tmpRoot, 'render-'));
   const page = (calls) => `<!doctype html><title>r</title><script>function f(){window.__render={drawCalls:${calls},triangles:1000,lights:2,frameMs:4};requestAnimationFrame(f)}f()</script>`;
@@ -950,7 +1012,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // First real run (Jed, v2.14.0): fixes for what blocked or misled it.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
@@ -1012,7 +1074,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // The launcher: agents are started, watched and cleaned up; the mode's caps and MAX SPEED decide how many run.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -1052,7 +1114,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // The supervisor keeps the studio running: one task per session, the next session when one ends, a stop
 // time, lanes so builders never share a folder, and tools out of quota skipped until they reset.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -1094,7 +1156,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Hiring into departments, and the dev hacker: trick cards that reach the Producer without holding anything up.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1' };
   report('the dev hacker and the missing department roles have role cards', ['dev-hacker', 'sound-designer', 'composer', 'artist', 'art-director'].every((r) => fs.existsSync(path.join(dir, `studio/roles/${r}.md`))));
@@ -1146,7 +1208,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 // quota, dependencies and parked tasks, a stop's cooldown, builders never share files, names never
 // repeat, a supervisor that stops after two identical failures, a browser contract a renderer can't
 // skip, a frozen harness that stays unedited, and "throw it all away and restart" with an undo.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -1276,7 +1338,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // 2.25: every game has its own ID (made without anyone asking) on goldens, results, builds and events;
 // a recording from another game fails; a copy records its parent; version tags; the Prototype sprint pace.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const ng = run(dir, 'node scripts/new-game.mjs tin-moon', env);
@@ -1320,7 +1382,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 // long resets are read right, stale marks are cleared; a session that ends holding a task hands it back,
 // and one that keeps coming back is parked; one launcher; never two sessions on a task; owed reviews;
 // relayed chat verdicts; a map and a pitfall list every agent reads; real token counts; short hand-backs.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -1482,7 +1544,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 // 2.27: the engine track. Only after Phase 1 is proven, only on a person's yes; then its own folder,
 // department, lane and gate, and a parity test against the web game. With a real Godot (STUDIO_GODOT),
 // the shipped template's parity and gate run for real.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const node = (name, code, e = env) => {
@@ -1576,7 +1638,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Pace and timed questions: the game dev chooses how fast; the Producer may decide when the dev is slow, never on protected topics.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   report('the pace defaults to precise until the game dev chooses', /Precise and slow \(default/.test(run(dir, 'node harness/mode.mjs', env).stdout));
@@ -1605,7 +1667,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // The art department starts in pre-production; the dev approves its designs; War Room actions reach agents.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   run(dir, 'node harness/intake.mjs --answers studio/templates/intake-example.json', env);
@@ -1680,7 +1742,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // The Asset studio: rounds without waiting, thumbs up moves a file to assets/approved/ and queues its
 // import, feedback by #number, the Producer approves provisionally when the dev is away, and references.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   fs.mkdirSync(path.join(dir, 'art-out'), { recursive: true });
@@ -1737,7 +1799,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // The browser play gate: the example game is won with real key presses while the screen matches the sim;
 // a blank canvas, a frozen clock, a HUD that disagrees, the camera in a wall, or keys that never arrive all fail it.
-{
+if (inShard()) {
   const dir = copyRepo();
   const chromium = process.env.PLAYWRIGHT_CHROMIUM || ['/opt/pw-browsers/chromium'].find((p) => fs.existsSync(p));
   const env = chromium ? { PLAYWRIGHT_CHROMIUM: chromium } : {};
@@ -1801,7 +1863,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // Renderer work: bugs carry a part; a renderer bug closes with a browser regression, and screenshots need
 // a line each and a check by someone other than the builder.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   report('--part only takes sim, renderer or both', run(dir, 'node harness/task.mjs add "HUD lags" --type bug --part ui', env).status !== 0);
@@ -1829,7 +1891,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // Run #1's art agent notes: forced work grouped by cause and accepted once; agents credited for their own
 // notes; rooms that open for the agents in them; out-of-quota isn't "stalled"; a second game gets its own studio.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const add = (t) => JSON.parse(run(dir, `node harness/task.mjs add "${t}"`, env).stdout).id;
@@ -1887,7 +1949,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // npm run review: a local model from another company reviews a task's commits and its verdict closes a system task.
-{
+if (inShard()) {
   const http = await import('node:http');
   let answer = 'VERDICT: APPROVE\nWHY: The visitor rate is seeded and tested; the hand-off explains the tuning.\nISSUES:\n- none';
   const fake = http.createServer((req, res) => {
@@ -1933,7 +1995,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Cheap prepare, strong act: short history skips the model; a cheap model's draft is checked; a bad draft is thrown away.
-{
+if (inShard()) {
   const dir = copyRepo();
   const add = (cmd) => JSON.parse(run(dir, cmd).stdout).id;
   const short = add('node harness/task.mjs add "Tidy the readme" --type docs');
@@ -1969,7 +2031,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Agents get a one-page brief on start and a kickoff prompt; harness notes survive a studio reset.
-{
+if (inShard()) {
   const dir = copyRepo();
   const start = run(dir, 'node harness/task.mjs start T-003 --agent claude-a --model model-x');
   const brief = fs.existsSync(path.join(dir, '.studio/briefs/T-003.md')) ? fs.readFileSync(path.join(dir, '.studio/briefs/T-003.md'), 'utf8') : '';
@@ -1983,7 +2045,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // The pre-commit hook blocks a staged file locked by someone else, and a staged secret.
-{
+if (inShard()) {
   const dir = copyRepo();
   const git = (cmd) => run(dir, `git -c user.name=selftest -c user.email=selftest@example.com ${cmd}`);
   git('init -q');
@@ -2024,7 +2086,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // Test runs: the stop switch holds every start; the run report gathers results in one folder.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   run(dir, 'node harness/task.mjs stop --by hatch --reason "checking costs"', env);
@@ -2049,7 +2111,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // The closed loop records the tick the cartridge failed on, and the trace replays to it.
-{
+if (inShard()) {
   const dir = copyRepo();
   edit(dir, SIM, plantInvariant(37));
   const loop = run(dir, 'node harness/closed-loop.mjs');
@@ -2065,7 +2127,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // 2.28: measured tokens, Lite scope, park --until, a hand-back note that names a blocker, FIX 06, lock renewal.
-{
+if (inShard()) {
   const dir = copyRepo();
   const ev = path.join(dir, '.studio', 'events.jsonl');
   const now = Date.now();
@@ -2137,7 +2199,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // 2.29: one working copy per lane. An agent with a code lane works in .lanes/<agent> on its own branch;
 // task done adds its commits to the studio's branch; a hand-back keeps its commits for the next agent.
-{
+if (inShard()) {
   const dir = copyRepo();
   const g = (cmd) => run(dir, `git -c user.email=t@t -c user.name=t ${cmd}`);
   g('init -q -b main');
@@ -2176,7 +2238,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 }
 
 // 2.29: npm run map -- find answers in one call; the size ratchet refuses growth past the limit.
-{
+if (inShard()) {
   const dir = copyRepo();
   // The parser is the harness's typescript dev dependency; the copies don't carry node_modules.
   const noParser = run(dir, 'node harness/map.mjs find spawnCost');
@@ -2206,7 +2268,7 @@ s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
 
 // 2.29.2: refresh context by default, cache reads in the budget, a daily cap by default, per-role model
 // warning, the cheat sheet check. Each module is exercised in a copy; the launcher end to end with a fake agent.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -2309,7 +2371,7 @@ console.log(JSON.stringify({ meter: s.meter, sc: s.sessionCap?.limits, rows: s.s
 
 // 2.30a: intent cards and task origin, the dev's yes, phase override, owned waits, phrase scope checks,
 // drop/reorder, quota accuracy, the watchdog, the Arcade's what-changed, ccusage. Each in a copy.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -2427,7 +2489,7 @@ function run() {
 }
 
 // 2.30b: real-input fun probes (J1), sim features shown in the build (J4), the asset scout (G7). Each in a copy.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -2533,7 +2595,7 @@ console.log(JSON.stringify({ found, sa, noAuthor, cc0, ccby, lic: ['CC0', 'CC-BY
 // 2.30c: short output (#4), circuit breakers (#8), the Producer on events (#11), dependency-aware
 // handout (#12), DONE.md (#13), the allowlist in the kickoff (#15), gates in plain words (G3), the
 // overnight summary (G6) and the release command. Each in a copy.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -2664,7 +2726,7 @@ console.log(JSON.stringify({ done: o.done.length, noDone: o.noDone.map((s) => s.
 
 // 2.30d: forced work pending review, the size cap and split, the proposed list, model escalation, tricks on add,
 // fun checks in waves, away mode and its review, phone alerts, phone login, the watchdog's kennel. Each in a copy.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -2818,7 +2880,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 }
 
 // 2.30e: the art scout widened (palettes, kinds) and the art agent's adapt step (recolour, resize, LODs, mesh fixes).
-{
+if (inShard()) {
   const dir = copyRepo();
   const zlib = await import('node:zlib');
   // An offline Lospec: one CC0 palette, one CC-BY-NC palette.
@@ -2900,7 +2962,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 }
 
 // 2.30e: the scout judges quality (0-10) from resolution, maps, poly count, popularity and tags, with an optional vision judge.
-{
+if (inShard()) {
   const dir = copyRepo();
   fs.writeFileSync(path.join(dir, 'fake-sources.mjs'), `export default async (url, opts) => {
   if (url.includes('api.polyhaven.com')) return { ok: true, json: async () => ({
@@ -2929,7 +2991,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 }
 
 // 2.30e: token ledger and gate cache.
-{
+if (inShard()) {
   const dir = copyRepo();
   const eventsPath = path.join(dir, '.studio', 'events.jsonl');
   fs.mkdirSync(path.dirname(eventsPath), { recursive: true });
@@ -2982,7 +3044,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 }
 
 // 2.30e: rehearsal mode (R6) runs the real launcher on board tasks with no model; F15 vision check is opt-in.
-{
+if (inShard()) {
   const dir = copyRepo();
   run(dir, 'node harness/task.mjs add "Rehearsal task one" --role builder');
   run(dir, 'node harness/task.mjs add "Rehearsal task two" --role builder');
@@ -3009,7 +3071,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 }
 
 // 2.30f: floors, phase scenarios and content schemas, in a copy.
-{
+if (inShard()) {
   const dir = copyRepo();
   const env = { STUDIO_PRODUCER_NAME: 'prod-1' };
   const floorsJSON = { maxParallel: 1, autoOpen: true, requireScenarios: true };
@@ -3146,7 +3208,7 @@ console.log(JSON.stringify({ away: s.away && Array.isArray(s.away.review), pendi
 // 2.30g: token savers. The kickoff's fixed part is the same bytes for every session of a role, the
 // ledger measures it, cache writes are read from Claude's own usage, the hooks trim / guard / gate, token
 // norms flag (never cap), verdicts become notes in briefs, and the Godot unit gate skips or reports.
-{
+if (inShard()) {
   const dir = copyRepo();
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const probe = (code, env = {}) => {
@@ -3233,7 +3295,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.30h: design fidelity, the Director's flow, reasoning-only replies, model limits as awareness, the CI
 // watch, GDScript parse failures and the lock version (qa/selftest-230h.mjs).
-{
+if (inShard('selftest-230h')) {
   const dir = copyRepo();
   const { selftest230h } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230h.mjs')).href);
   await selftest230h({ dir, run, report, tmpRoot });
@@ -3241,7 +3303,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30j: fixes from real HUD use (qa/selftest-230j.mjs).
-{
+if (inShard('selftest-230j')) {
   const dir = copyRepo();
   const { selftest230j } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230j.mjs')).href);
   await selftest230j({ dir, run, report, tmpRoot });
@@ -3250,7 +3312,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.30i: launcher verify after a session ends without task done, .env for agent start, NIM one at a time,
 // 429 in the stream json (qa/selftest-230i.mjs).
-{
+if (inShard('selftest-230i')) {
   const dir = copyRepo();
   const { selftest230i } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230i.mjs')).href);
   await selftest230i({ dir, run, report, tmpRoot });
@@ -3258,7 +3320,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30k: file-level lanes, task done refuses uncommitted changes (qa/selftest-230k.mjs).
-{
+if (inShard('selftest-230k')) {
   const dir = copyRepo();
   const { selftest230k } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230k.mjs')).href);
   await selftest230k({ dir, run, report, tmpRoot });
@@ -3266,7 +3328,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30l: one builder per task, the studio's game apart from the cartridge (qa/selftest-230l.mjs).
-{
+if (inShard('selftest-230l')) {
   const dir = copyRepo();
   const { selftest230l } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230l.mjs')).href);
   await selftest230l({ dir, run, report, tmpRoot });
@@ -3274,7 +3336,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30m: build tasks must change code or be closed as no-op with a reason (qa/selftest-230m.mjs).
-{
+if (inShard('selftest-230m')) {
   const dir = copyRepo();
   const { selftest230m } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230m.mjs')).href);
   await selftest230m({ dir, run, report, tmpRoot });
@@ -3282,7 +3344,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30n: the gates follow the studio's game; engine gate; lane, force and spec fixes (qa/selftest-230n.mjs).
-{
+if (inShard('selftest-230n')) {
   const dir = copyRepo();
   const { selftest230n } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230n.mjs')).href);
   await selftest230n({ dir, run, report, tmpRoot });
@@ -3290,7 +3352,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30o: stall cap, visual proof, split verdict, layout gate, refill, profile check, tiers, game-dev loop (qa/selftest-230o.mjs).
-{
+if (inShard('selftest-230o')) {
   const dir = copyRepo();
   const { selftest230o } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230o.mjs')).href);
   await selftest230o({ dir, run, report, tmpRoot });
@@ -3298,7 +3360,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30p: path-scoped gates, reused lane results, the land lock and a safe board write (qa/selftest-230p.mjs).
-{
+if (inShard('selftest-230p')) {
   const dir = copyRepo();
   const { selftest230p } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230p.mjs')).href);
   await selftest230p({ dir, run, report, tmpRoot });
@@ -3306,7 +3368,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.30q: merge worktree landing, busy-not-stalled, budget stop on every launch path, untracked usage (qa/selftest-230q.mjs).
-{
+if (inShard('selftest-230q')) {
   const dir = copyRepo();
   const { selftest230q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-230q.mjs')).href);
   await selftest230q({ dir, run, report, tmpRoot });
@@ -3314,7 +3376,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.31.0: task budgets, gate slots, verify scoped to a lane, scoped verify coverage, engine cache landings (qa/selftest-231.mjs).
-{
+if (inShard('selftest-231')) {
   const dir = copyRepo();
   const { selftest231 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-231.mjs')).href);
   await selftest231({ dir, run, report, tmpRoot });
@@ -3322,7 +3384,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.32.0: the Game Bible's controls list against each track's real-input results (qa/selftest-232.mjs).
-{
+if (inShard('selftest-232')) {
   const dir = copyRepo();
   const { selftest232 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-232.mjs')).href);
   await selftest232({ dir, run, report, tmpRoot });
@@ -3330,7 +3392,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.33.0: one door, scoped agent env, guard hook, re-claim baseline, --check, monotonic ids (qa/selftest-233.mjs).
-{
+if (inShard('selftest-233')) {
   const dir = copyRepo();
   const { selftest233 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-233.mjs')).href);
   await selftest233({ dir, run, report, tmpRoot });
@@ -3338,7 +3400,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.34.0: harness health numbers and the morning report (qa/selftest-234.mjs).
-{
+if (inShard('selftest-234')) {
   const dir = copyRepo();
   const { selftest234 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-234.mjs')).href);
   await selftest234({ dir, run, report, tmpRoot });
@@ -3346,7 +3408,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.35.0: the rescue ladder for a task stopped by its budget (qa/selftest-235.mjs).
-{
+if (inShard('selftest-235')) {
   const dir = copyRepo();
   const { selftest235 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-235.mjs')).href);
   await selftest235({ dir, run, report, tmpRoot });
@@ -3354,7 +3416,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.36.0: a check that exits 0 but ran no tests (qa/selftest-236.mjs).
-{
+if (inShard('selftest-236')) {
   const dir = copyRepo();
   const { selftest236 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-236.mjs')).href);
   await selftest236({ dir, run, report, tmpRoot });
@@ -3362,7 +3424,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.37.0: the whole-game check after work lands (qa/selftest-237.mjs).
-{
+if (inShard('selftest-237')) {
   const dir = copyRepo();
   const { selftest237 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-237.mjs')).href);
   await selftest237({ dir, run, report, tmpRoot });
@@ -3370,7 +3432,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.38.0: built but not wired (qa/selftest-238.mjs).
-{
+if (inShard('selftest-238')) {
   const dir = copyRepo();
   const { selftest238 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-238.mjs')).href);
   await selftest238({ dir, run, report, tmpRoot });
@@ -3378,7 +3440,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.39.0: what a control must change, in the Game Bible (qa/selftest-239.mjs).
-{
+if (inShard('selftest-239')) {
   const dir = copyRepo();
   const { selftest239 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-239.mjs')).href);
   await selftest239({ dir, run, report, tmpRoot });
@@ -3386,7 +3448,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.40.0: a quieter watchdog log and the health counts (qa/selftest-240.mjs).
-{
+if (inShard('selftest-240')) {
   const dir = copyRepo();
   const { selftest240 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-240.mjs')).href);
   await selftest240({ dir, run, report, tmpRoot });
@@ -3394,7 +3456,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.41.0: two greens before a new regression is protected (qa/selftest-241.mjs).
-{
+if (inShard('selftest-241')) {
   const dir = copyRepo();
   const { selftest241 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-241.mjs')).href);
   await selftest241({ dir, run, report, tmpRoot });
@@ -3402,7 +3464,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.42.0: Godot versions agree (qa/selftest-242.mjs).
-{
+if (inShard('selftest-242')) {
   const dir = copyRepo();
   const { selftest242 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-242.mjs')).href);
   await selftest242({ dir, run, report, tmpRoot });
@@ -3410,7 +3472,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.43.0: adopting a game that already exists (qa/selftest-243.mjs).
-{
+if (inShard('selftest-243')) {
   const dir = copyRepo();
   const { selftest243 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-243.mjs')).href);
   await selftest243({ dir, run, report, tmpRoot });
@@ -3418,7 +3480,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.44.0: sync, related tests, retry once (qa/selftest-244.mjs).
-{
+if (inShard('selftest-244')) {
   const dir = copyRepo();
   const { selftest244 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-244.mjs')).href);
   await selftest244({ dir, run, report, tmpRoot });
@@ -3426,7 +3488,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.45.0: real-input controls for a studio web game, the parts without a browser (qa/selftest-245.mjs).
-{
+if (inShard('selftest-245')) {
   const dir = copyRepo();
   const { selftest245 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-245.mjs')).href);
   await selftest245({ dir, run, report, tmpRoot });
@@ -3434,7 +3496,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.46.0: the Unity track's checks without .NET or Unity (qa/selftest-246.mjs).
-{
+if (inShard('selftest-246')) {
   const dir = copyRepo();
   const { selftest246 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-246.mjs')).href);
   await selftest246({ dir, run, report, tmpRoot });
@@ -3442,7 +3504,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.47.0: an engine port in its own repo, parity for an adopted game, the self-hosted runner (qa/selftest-247.mjs).
-{
+if (inShard('selftest-247')) {
   const dir = copyRepo();
   const { selftest247 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-247.mjs')).href);
   await selftest247({ dir, run, report, tmpRoot });
@@ -3450,7 +3512,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.48.0: Windows by default for a Unity track (qa/selftest-248.mjs).
-{
+if (inShard('selftest-248')) {
   const dir = copyRepo();
   const { selftest248 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-248.mjs')).href);
   await selftest248({ dir, run, report, tmpRoot });
@@ -3458,7 +3520,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.49.0 (U-004): npm run logs (qa/selftest-249.mjs).
-{
+if (inShard('selftest-249')) {
   const dir = copyRepo();
   const { selftest249 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-249.mjs')).href);
   await selftest249({ dir, run, report, tmpRoot });
@@ -3466,7 +3528,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.50.0 (U-006): parity seeds for a Vite game's test runner (qa/selftest-250.mjs).
-{
+if (inShard('selftest-250')) {
   const dir = copyRepo();
   const { selftest250 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-250.mjs')).href);
   await selftest250({ dir, run, report, tmpRoot });
@@ -3474,7 +3536,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.51.0 (U-005): the public-repo guard as a harness feature (qa/selftest-251.mjs).
-{
+if (inShard('selftest-251')) {
   const dir = copyRepo();
   const { selftest251 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-251.mjs')).href);
   await selftest251({ dir, run, report, tmpRoot });
@@ -3482,7 +3544,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.53.0: the public guard's per-repo private markers (qa/selftest-253.mjs).
-{
+if (inShard('selftest-253')) {
   const dir = copyRepo();
   const { selftest253 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-253.mjs')).href);
   await selftest253({ dir, run, report, tmpRoot });
@@ -3490,7 +3552,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.54.0: fixes from the first crew run, P-022 to P-027 (qa/selftest-254.mjs).
-{
+if (inShard('selftest-254')) {
   const dir = copyRepo();
   const { selftest254 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-254.mjs')).href);
   await selftest254({ dir, run, report, tmpRoot });
@@ -3499,7 +3561,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.55.0: fixes from the crew's own logs, P-028, P-030, P-031, P-032 (qa/selftest-255.mjs).
-{
+if (inShard('selftest-255')) {
   const dir = copyRepo();
   const { selftest255 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-255.mjs')).href);
   await selftest255({ dir, run, report, tmpRoot });
@@ -3507,7 +3569,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.56.0 (PU-15): the visual-effect spec and frame checks (qa/selftest-256.mjs).
-{
+if (inShard('selftest-256')) {
   const dir = copyRepo();
   const { selftest256 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-256.mjs')).href);
   await selftest256({ dir, run, report, tmpRoot });
@@ -3515,7 +3577,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // PU-20: the protected-files check also sees uncommitted and already-pushed edits (qa/selftest-pu20.mjs).
-{
+if (inShard('selftest-pu20')) {
   const dir = copyRepo();
   const { selftestPU20 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu20.mjs')).href);
   await selftestPU20({ dir, run, report, tmpRoot });
@@ -3523,7 +3585,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // PU-19 (P-042): 5-hour and weekly limit messages count as usage limits, with their reset times (qa/selftest-pu19.mjs).
-{
+if (inShard('selftest-pu19')) {
   const dir = copyRepo();
   const { selftestPU19 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu19.mjs')).href);
   await selftestPU19({ dir, run, report, tmpRoot });
@@ -3532,7 +3594,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // PU-18 (P-040): the secret scan catches Discord, Slack, Telegram and AWS secret tokens, named secrets and
 // base64-wrapped tokens; placeholders and base64 data pass (qa/selftest-pu18.mjs).
-{
+if (inShard('selftest-pu18')) {
   const dir = copyRepo();
   const { selftestPU18 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu18.mjs')).href);
   await selftestPU18({ dir, run, report, tmpRoot });
@@ -3540,7 +3602,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.57.0 (PU-16): crash-safe studio state, P-037, P-038, P-041 (qa/selftest-pu16.mjs).
-{
+if (inShard('selftest-pu16')) {
   const dir = copyRepo();
   const { selftestPU16 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu16.mjs')).href);
   await selftestPU16({ dir, run, report, tmpRoot });
@@ -3549,7 +3611,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // PU-17 (P-039, P-045): agent stop checks the process at kill time, with no extra process calls on launch or in
 // listings; a stop during start-up stops the launcher (qa/selftest-pu17.mjs).
-{
+if (inShard('selftest-pu17')) {
   const dir = copyRepo();
   const { selftestPU17 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-pu17.mjs')).href);
   await selftestPU17({ dir, run, report, tmpRoot });
@@ -3557,7 +3619,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.58.0 (PU-41): the events log after a roll-over (P-058) and metrics on a long log (P-059) (qa/selftest-258e.mjs).
-{
+if (inShard('selftest-258e')) {
   const dir = copyRepo();
   const { selftest258E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258e.mjs')).href);
   await selftest258E({ dir, run, report, tmpRoot });
@@ -3565,7 +3627,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.58.0 (F): verify survives being reaped, runs game checks with CI=true, names files it changed (qa/selftest-258f.mjs).
-{
+if (inShard('selftest-258f')) {
   const dir = copyRepo();
   const { selftest258F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258f.mjs')).href);
   await selftest258F({ dir, run, report, tmpRoot });
@@ -3573,7 +3635,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.58.0 part A: size growth from the merge-base, the chore type, PU-34 (P-047), PU-35 (P-048) (qa/selftest-258a.mjs).
-{
+if (inShard('selftest-258a')) {
   const dir = copyRepo();
   const { selftest258A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258a.mjs')).href);
   await selftest258A({ dir, run, report, tmpRoot });
@@ -3582,7 +3644,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.0 part B (PU-37, PU-38, PU-42, PU-43): killed board writes, leaked and raced claims, live lock holders,
 // hand-edited board lines, temp files, case-blind folder claims: P-052 to P-057, P-060 (qa/selftest-258b.mjs).
-{
+if (inShard('selftest-258b')) {
   const dir = copyRepo();
   const { selftest258B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258b.mjs')).href);
   await selftest258B({ dir, run, report, tmpRoot });
@@ -3591,7 +3653,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.0 part D: untrusted text marked in briefs and prompts (PU-36), stalled agents freed (PU-39), custom-command
 // limits per program (PU-40), auto-start opt-in (qa/selftest-258d.mjs).
-{
+if (inShard('selftest-258d')) {
   const dir = copyRepo();
   const { selftest258D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258d.mjs')).href);
   await selftest258D({ dir, run, report, tmpRoot });
@@ -3601,7 +3663,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.0 (PU-33, P-046): the hook scans the staged blobs, verify's secrets gate scans the commits since the base
 // (lines added and messages), UTF-16 files are read, the skip list is tied to real paths, scrub() shares the
 // scan's list (qa/selftest-258c.mjs).
-{
+if (inShard('selftest-258c')) {
   const dir = copyRepo();
   const { selftest258C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-258c.mjs')).href);
   await selftest258C({ dir, run, report, tmpRoot });
@@ -3611,7 +3673,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // P-066 (crew P-036): agents start with no shell and their arguments intact on Windows: npm .cmd shims run as node on
 // their .js entry, any other .cmd through cmd.exe with one quoting function, custom-command values quoted for the
 // shell; end to end through `agent start` with stand-in programs on PATH (qa/selftest-259h.mjs).
-{
+if (inShard('selftest-259h')) {
   const dir = copyRepo();
   const { selftest259H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259h.mjs')).href);
   await selftest259H({ dir, run, report, tmpRoot });
@@ -3620,7 +3682,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // P-067 (crew P-037): an owner-approved step writes agy's headless allow-rules from the harness allowlist, and the
 // launcher says when they're missing (qa/selftest-259i.mjs).
-{
+if (inShard('selftest-259i')) {
   const dir = copyRepo();
   const { selftest259I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259i.mjs')).href);
   await selftest259I({ dir, run, report, tmpRoot });
@@ -3629,7 +3691,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // PU-22: the sim-purity gate flags engine-dependent Math calls (sin, atan2, hypot, pow, ...) in sim code: warn by
 // default, required for new games, the detMath module exempt (qa/selftest-2582l.mjs).
-{
+if (inShard('selftest-2582l')) {
   const dir = copyRepo();
   const { selftest2582L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582l.mjs')).href);
   await selftest2582L({ dir, run, report, tmpRoot });
@@ -3639,7 +3701,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // PU-29: the hooks stamp each commit they pass and a gate lists commits without a valid stamp (--no-verify); a second
 // gate flags weakened tests (removed asserts, skip/only, raised timeouts, wider tolerances, seed special cases, deleted
 // tests, goldens without a reason) unless the owner signed them; both run at task done (qa/selftest-2582k.mjs).
-{
+if (inShard('selftest-2582k')) {
   const dir = copyRepo();
   const { selftest2582K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582k.mjs')).href);
   await selftest2582K({ dir, run, report, tmpRoot, root });
@@ -3648,7 +3710,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // P-044: the War Room browser checks wait for the page state instead of reading it once, and the Stop/Pause
 // checks can be repeated on their own (qa/selftest-2582j.mjs).
-{
+if (inShard('selftest-2582j')) {
   const dir = copyRepo();
   const { selftest2582J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2582j.mjs')).href);
   await selftest2582J({ dir, run, report, tmpRoot });
@@ -3658,7 +3720,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.3 (M1-M5): Claude in a lane copy gets --add-dir for studio/ and .studio/; a code-writing role on a laneless
 // task gets its own copy; agy's rules go to .studio/agy-settings.json (agy --settings); a nim tool (aider on NVIDIA
 // NIM, key mapped, never printed); the kickoff says one command per Bash call (qa/selftest-2583m.mjs).
-{
+if (inShard('selftest-2583m')) {
   const dir = copyRepo();
   const { selftest2583M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583m.mjs')).href);
   await selftest2583M({ dir, run, report, tmpRoot });
@@ -3667,7 +3729,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.3 (N1-N4): a person's stop is a stop, not a crash; a live owner's expired claim isn't handed back; the watchdog
 // honours an unpark and parks once; rescues nobody can pick up don't escalate (qa/selftest-2583n.mjs).
-{
+if (inShard('selftest-2583n')) {
   const dir = copyRepo();
   const { selftest2583N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583n.mjs')).href);
   await selftest2583N({ dir, run, report, tmpRoot });
@@ -3677,7 +3739,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.3 (helper o): what task done asks for, from the crew's logs: "Fix: … see <file>.md" is code, anonymous functions
 // keep their identity in the size ratchet and every item is listed, line-ending-only files don't block, strays on the
 // main checkout don't refuse unrelated tasks, and a stale verify says what is stale (qa/selftest-2583o.mjs).
-{
+if (inShard()) {
   const dir = copyRepo();
   if (fs.existsSync(path.join(root, 'node_modules', 'typescript')) && !fs.existsSync(path.join(dir, 'node_modules'))) fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   const { selftest2583O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583o.mjs')).href);
@@ -3687,7 +3749,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.3 (P-069): claude's -p is --print, not a profile, and with no profiles set up a Producer or Director starts while a
 // builder runs (qa/selftest-2583p.mjs).
-{
+if (inShard('selftest-2583p')) {
   const dir = copyRepo();
   const { selftest2583P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2583p.mjs')).href);
   await selftest2583P({ dir, run, report, tmpRoot });
@@ -3696,7 +3758,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.4: "fails before the fix" counts only a run that played the old code: a cartridge missing at that commit, a
 // failed build or import, or a timeout is an error, never a pass (qa/selftest-2584a.mjs).
-{
+if (inShard('selftest-2584a')) {
   const dir = copyRepo();
   const { selftest2584A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2584a.mjs')).href);
   await selftest2584A({ dir, run, report, tmpRoot });
@@ -3705,7 +3767,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.58.4: a studio game with its own checks keeps the every-cartridge gates for a real cartridge beside it, and a
 // cartridge sets its own tick budget (qa/selftest-2584b.mjs).
-{
+if (inShard('selftest-2584b')) {
   const dir = copyRepo();
   const { selftest2584B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2584b.mjs')).href);
   await selftest2584B({ dir, run, report, tmpRoot });
@@ -3715,7 +3777,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.5 (H-7): the hooks gate patch-ids only the commits that need it, streamed (a whole-range git log -p --binary over
 // a game's art passed Node's string limit); the grandfather list too; the weakened-tests gate reads only the files it
 // judges; an output too big to read fails a gate instead of passing it (qa/selftest-2585p.mjs).
-{
+if (inShard('selftest-2585p')) {
   const dir = copyRepo();
   const { selftest2585P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585p.mjs')).href);
   await selftest2585P({ dir, run, report, tmpRoot });
@@ -3726,7 +3788,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // stand in for the game's checks; after a rebase only the checks whose inputs main changed run again; a landing takes
 // the next free gate slot first; `npm run upgrade -- --check` keeps the board out of upgrade stashes; every "no owner
 // key" note says how; a loop over seeds isn't a seed special case (qa/selftest-2585s.mjs).
-{
+if (inShard('selftest-2585s')) {
   const dir = copyRepo();
   const { selftest2585S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585s.mjs')).href);
   await selftest2585S({ dir, run, report, tmpRoot });
@@ -3736,7 +3798,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.5 (H-5, H-10, H-6): a live owner's lapsed claim stays its own (built-but-unlanded lanes, `task start`, atomic
 // `task add --start`, the breaker), lane commits aren't refused for other lanes' locks, broad by-hand claims need --wide,
 // and a merge commit is judged on its own diff (qa/selftest-2585q.mjs).
-{
+if (inShard('selftest-2585q')) {
   const dir = copyRepo();
   const { selftest2585Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585q.mjs')).href);
   await selftest2585Q({ dir, run, report, tmpRoot });
@@ -3746,7 +3808,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.58.5 (crew report 2026-11-01, H-9 H-2 H-2b H-1 H-8): a custom tool command gets the lane copy and {mainRoot}
 // {addDirs}; agy's prompt on stdin; agy's approved rule set; nim never runs the role's model, a gone model says so;
 // the NIM key survives aider's .env loading (qa/selftest-2585r.mjs).
-{
+if (inShard('selftest-2585r')) {
   const dir = copyRepo();
   const { selftest2585R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2585r.mjs')).href);
   await selftest2585R({ dir, run, report, tmpRoot });
@@ -3756,7 +3818,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.59.0 (helper a, brief item 1): the merge train: queued lanes land on one full verify of main + the lanes; a red train
 // hands back the lane that fails alone; conflicting lanes aren't trained together; the hooks gate still judges every
 // lane's commits; task done in a lane copy is a one-lane train (qa/selftest-259a.mjs).
-{
+if (inShard('selftest-259a')) {
   const dir = copyRepo();
   const { selftest259A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259a.mjs')).href);
   await selftest259A({ dir, run, report, tmpRoot });
@@ -3766,7 +3828,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.59.0 (final brief H-13 H-12 #6): a clean rebase near a commit's hunks keeps its hook stamp (Studio-Patch-U0);
 // task done's rebase and `npm run hooks -- restamp` re-commit stale stamps through the real hooks; Studio-Task names one
 // task; a lane copy behind a harness change on main refuses its gates (qa/selftest-259b.mjs).
-{
+if (inShard('selftest-259b')) {
   const dir = copyRepo();
   const { selftest259B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259b.mjs')).href);
   await selftest259B({ dir, run, report, tmpRoot });
@@ -3775,7 +3837,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.59.0 (crew brief item 5): the owner reclassifies a task's type (task type, recorded or signed; agents refused), and
 // a bug's regression can be a seeded game unit test proven by fails-before (qa/selftest-259c.mjs).
-{
+if (inShard('selftest-259c')) {
   const dir = copyRepo();
   const { selftest259C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259c.mjs')).href);
   await selftest259C({ dir, run, report, tmpRoot });
@@ -3786,7 +3848,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // not inside a launched session); the owner's per-agent key mapping (names logged, values never); the launcher holds no
 // too-broad lane as a session lock (lane copy: unheld; main checkout: refused unless a person kept it wide)
 // (qa/selftest-259e.mjs).
-{
+if (inShard('selftest-259e')) {
   const dir = copyRepo();
   const { selftest259E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259e.mjs')).href);
   await selftest259E({ dir, run, report, tmpRoot });
@@ -3795,7 +3857,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.59.0: a render task on a game that isn't a Godot project captures with the game's own command (its manifest's
 // "visual": { "capture": ... }); task done's hint names the right route (qa/selftest-259f.mjs).
-{
+if (inShard('selftest-259f')) {
   const dir = copyRepo();
   const { selftest259F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259f.mjs')).href);
   await selftest259F({ dir, run, report, tmpRoot });
@@ -3804,7 +3866,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.59.0 (#11, #2, #16): the machine:heavy lock, one full verify per checkout, the supervisor's RAM floor, a game
 // check's timeout scaled for load, and the Unity engine-track landing gate (qa/selftest-259d.mjs).
-{
+if (inShard('selftest-259d')) {
   const dir = copyRepo();
   const { selftest259D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-259d.mjs')).href);
   await selftest259D({ dir, run, report, tmpRoot });
@@ -3813,7 +3875,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.59.1: with a person's direct permission (--by <them> --permission "…") a Producer or Director session, or an agent
 // outside the harness, may record a task's type or resume the supervisor for them; workers never (qa/selftest-2591.mjs).
-{
+if (inShard('selftest-2591')) {
   const dir = copyRepo();
   const { selftest2591 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2591.mjs')).href);
   await selftest2591({ dir, run, report, tmpRoot });
@@ -3822,7 +3884,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.60.0 (helper a): a red merge train re-runs only its failing checks on prefixes (exact blame, interaction culprits
 // too), refreshes declared pins in one Pin-Refresh commit, and union-merges the manifest's unionFiles (qa/selftest-260a.mjs).
-{
+if (inShard('selftest-260a')) {
   const dir = copyRepo();
   const { selftest260A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260a.mjs')).href);
   await selftest260A({ dir, run, report, tmpRoot });
@@ -3832,7 +3894,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.60.0 (helper b): a game's protected manifest may exempt a barrel from the size ratchet (with a hard cap) and let
 // import-only lines through; lines two lanes in flight change are warned about, and the third conflict on one line
 // asks the Producer to restructure it (qa/selftest-260b.mjs).
-{
+if (inShard('selftest-260b')) {
   const dir = copyRepo();
   const { selftest260B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260b.mjs')).href);
   await selftest260B({ dir, run, report, tmpRoot, root });
@@ -3842,7 +3904,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.60.0 (#3, #4): the upgrade path (a bootstrap from the ref, upgrade --merge through the hooks with the main-checkout
 // guard opened for that merge only, Golden-Reason for goldens straight from the ref, --restore-stash keeping both
 // sides' rows) and STUDIO_HARNESS_REF in the hooks gate (qa/selftest-260c.mjs).
-{
+if (inShard('selftest-260c')) {
   const dir = copyRepo();
   const { selftest260C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260c.mjs')).href);
   await selftest260C({ dir, run, report, tmpRoot });
@@ -3852,7 +3914,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.60.0 (#5, #6): heavy stop kills a holder's whole process tree (and a killed holder's orphans go at the next take),
 // createLaneCopy refuses a task id that isn't on the board, a manifest's slowTests get the load factor
 // (qa/selftest-260d.mjs).
-{
+if (inShard('selftest-260d')) {
   const dir = copyRepo();
   const { selftest260D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-260d.mjs')).href);
   await selftest260D({ dir, run, report, tmpRoot });
@@ -3861,7 +3923,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.61.0 (e): the learning edge: change records graded before/after (one revert question for a regression), the lesson →
 // check ladder (one task per signature), and skill load/follow telemetry per model (qa/selftest-261e.mjs).
-{
+if (inShard('selftest-261e')) {
   const dir = copyRepo();
   const { selftest261E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261e.mjs')).href);
   await selftest261E({ dir, run, report, tmpRoot });
@@ -3871,7 +3933,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.61.0 (the learning edge, f): a bounded "constraints from past failures" block in the Director's brief, the Producer's
 // handoff and the planner's kickoff/brief; agents' pitfalls are proposals until accepted, scoped by role, and evicted
 // by measured usefulness, never a line tied to a regression without a person (qa/selftest-261f.mjs).
-{
+if (inShard('selftest-261f')) {
   const dir = copyRepo();
   const { selftest261F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-261f.mjs')).href);
   await selftest261F({ dir, run, report, tmpRoot });
@@ -3880,7 +3942,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.62.0: the sealed replay bench (npm run bench: cases at a commit, k tries by real agents in clean copies, code
 // graders, pass@1 / pass^k, a paired compare) and the component-removal review (--without) (qa/selftest-262g.mjs).
-{
+if (inShard('selftest-262g')) {
   const dir = copyRepo();
   const { selftest262G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262g.mjs')).href);
   await selftest262G({ dir, run, report, tmpRoot });
@@ -3889,7 +3951,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.62.0 (H): per-task acceptance contracts: agreed before coding, only `passes` flips after; the weakened-tests gate,
 // done-check and the reviewer's brief read them (qa/selftest-262h.mjs).
-{
+if (inShard('selftest-262h')) {
   const dir = copyRepo();
   const { selftest262H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-262h.mjs')).href);
   await selftest262H({ dir, run, report, tmpRoot });
@@ -3899,7 +3961,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.63.0 (helper i): blast-radius landing tiers (tier C held for the owner until a person releases it, tier B verified
 // with --all and its Golden-Reason / Pin-Moves required), STUDIO_TRAIN_MIN / _MAX / _WAIT_MIN batching, run-alone lanes,
 // and a lone task done riding along with queued lanes (qa/selftest-263i.mjs).
-{
+if (inShard('selftest-263i')) {
   const dir = copyRepo();
   const { selftest263I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263i.mjs')).href);
   await selftest263I({ dir, run, report, tmpRoot, root });
@@ -3909,7 +3971,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.63.0 (helper j): the Unity merge train: queued Unity branches land on ONE land run, a red train hands back exactly
 // the culprit by prefix bisection, a conflict waits or is handed back, a refusal blames nobody and is retried, one Unity
 // train at a time and every land run under machine:heavy (qa/selftest-263j.mjs).
-{
+if (inShard('selftest-263j')) {
   const dir = copyRepo();
   const { selftest263J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-263j.mjs')).href);
   await selftest263J({ dir, run, report, tmpRoot });
@@ -3919,7 +3981,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.64.0 (helper k): the autonomy scorecard (npm run autonomy, the overnight line, the War Room card; a person's
 // permission counts as the person; L3 only ever suggested) and the drift Checks (same gate failing 3 times, verify with
 // no new diff, edits outside the lane), which never stop anything (qa/selftest-264k.mjs).
-{
+if (inShard('selftest-264k')) {
   const dir = copyRepo();
   const { selftest264K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264k.mjs')).href);
   await selftest264K({ dir, run, report, tmpRoot });
@@ -3930,7 +3992,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // train reaches the task's inbox (on) or is only logged (shadow), no thread goes to the Producer, ignore drops, links
 // refuse workers, the hook tells the session, hub /api/inbox takes a task key, nothing creates a task
 // (qa/selftest-264l.mjs).
-{
+if (inShard('selftest-264l')) {
   const dir = copyRepo();
   const { selftest264L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-264l.mjs')).href);
   await selftest264L({ dir, run, report, tmpRoot });
@@ -3940,7 +4002,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.60.1 (B-17, B-35, B-41): a game check's timeout scales on Windows (a CPU probe, a Unity editor outside the lock,
 // a floor from the last quiet run); the Unity editor's runs take machine:heavy and a heavy take checks free memory;
 // the Unity land gate's branch, folder and exit meanings (qa/selftest-2601m.mjs).
-{
+if (inShard('selftest-2601m')) {
   const dir = copyRepo();
   const { selftest2601M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601m.mjs')).href);
   await selftest2601M({ dir, run, report, tmpRoot });
@@ -3951,7 +4013,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // nim command keeps the NIM key, the nim model checked (stub answers) with fallback through STUDIO_NIM_MODELS, the
 // .aiderignore and the brief as --read, --no-pretty --no-fancy-input, a failed session's lane copy and last lines kept
 // (qa/selftest-2601n.mjs).
-{
+if (inShard('selftest-2601n')) {
   const dir = copyRepo();
   const { selftest2601N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601n.mjs')).href);
   await selftest2601N({ dir, run, report, tmpRoot });
@@ -3961,7 +4023,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.60.1 (helper o, B-29 to B-33): a board-only commit on main keeps the train's verify; one base for the hooks check,
 // restamp and the protected gate (local main in a lane, printed); goldens that arrive unchanged in a merge need no
 // Golden-Reason; task done --train names the check that blocks (qa/selftest-2601o.mjs).
-{
+if (inShard('selftest-2601o')) {
   const dir = copyRepo();
   const { selftest2601O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601o.mjs')).href);
   await selftest2601O({ dir, run, report, tmpRoot });
@@ -3972,7 +4034,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // task; a lane held for landing or queued for the train runs no claim clock and gets no rescue, landing closes its
 // rescues; a lane copy's studio/ config is guarded and task done in a lane warns about main's uncommitted config
 // (qa/selftest-2601q.mjs).
-{
+if (inShard('selftest-2601q')) {
   const dir = copyRepo();
   const { selftest2601Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2601q.mjs')).href);
   await selftest2601Q({ dir, run, report, tmpRoot });
@@ -3982,7 +4044,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.65.0 (helper p): the conductor's tools: npm run lanes (the lane table), lanes refresh (merge main, re-stamp, targeted
 // tests; refuses workers and busy lanes; stops on a conflict), status --brief (under 100 words), task note (conductor
 // rulings in the task's record and brief), job.done events and npm run events -- wait (qa/selftest-265p.mjs).
-{
+if (inShard('selftest-265p')) {
   const dir = copyRepo();
   const { selftest265P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265p.mjs')).href);
   await selftest265P({ dir, run, report, tmpRoot });
@@ -3992,7 +4054,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.65.0 (helper r): conflict prediction at task done --train (B-34: after a queued lane, refused against main, union
 // files), --after honoured by the train, drift Checks for no heartbeat and borrowed commits, trigger senders
 // (qa/selftest-265r.mjs).
-{
+if (inShard('selftest-265r')) {
   const dir = copyRepo();
   const { selftest265R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265r.mjs')).href);
   await selftest265R({ dir, run, report, tmpRoot, root });
@@ -4002,7 +4064,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.65.0 (helper s): studio config proposals a lane carries (studio-proposals/<ID>.json) applied when it lands, under
 // the protected-file rules; the visual proof's per-camera noise baseline; a full verify's gate shells recorded in the
 // machine:heavy holder's tree on Windows (qa/selftest-265s.mjs).
-{
+if (inShard('selftest-265s')) {
   const dir = copyRepo();
   const { selftest265S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265s.mjs')).href);
   await selftest265S({ dir, run, report, tmpRoot, root });
@@ -4011,7 +4073,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.65.0 (hands-off by default): a bug task's type from its diff, the self-triage list, the daily digest, the autonomy
 // level command, cost per merged change on the scorecard (qa/selftest-265t.mjs).
-{
+if (inShard('selftest-265t')) {
   const dir = copyRepo();
   const { selftest265T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-265t.mjs')).href);
   await selftest265T({ dir, run, report, tmpRoot });
@@ -4020,7 +4082,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.65.1 (a): a game check's load reading printed every time; self-triage's re-run of a first timeout with no quiet run
 // recorded (and its lastPass); one merge-tree helper for npm run lanes and the queue's prediction (qa/selftest-2651a.mjs).
-{
+if (inShard('selftest-2651a')) {
   const dir = copyRepo();
   const { selftest2651A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2651a.mjs')).href);
   await selftest2651A({ dir, run, report, tmpRoot });
@@ -4029,7 +4091,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.65.2 (a): cache writes priced by TTL, the reported cost preferred, the scorecard's default weighting, cached tokens
 // in a plain usage report counted once, example-sim refusing a spawn whose id is in use (qa/selftest-2652a.mjs).
-{
+if (inShard('selftest-2652a')) {
   const dir = copyRepo();
   const { selftest2652A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2652a.mjs')).href);
   await selftest2652A({ dir, run, report, tmpRoot });
@@ -4038,7 +4100,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.65.3 (a), B-43: a red merge train re-checks only the failing test files, says what each step decides, lands the
 // green prefix before a culprit early and prints an ETA (qa/selftest-2653a.mjs).
-{
+if (inShard('selftest-2653a')) {
   const dir = copyRepo();
   const { selftest2653A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2653a.mjs')).href);
   await selftest2653A({ dir, run, report, tmpRoot });
@@ -4048,7 +4110,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.66.0 (a): tokens that do work: kept / pending / reopened / reverted-or-redone landings over keepDays, the waste
 // split, the effective-token ratio and cost per kept change (per type), the minimum sample with a Wilson interval,
 // --since, revert commits from git (qa/selftest-266a.mjs).
-{
+if (inShard('selftest-266a')) {
   const dir = copyRepo();
   const { selftest266A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266a.mjs')).href);
   await selftest266A({ dir, run, report, tmpRoot });
@@ -4057,7 +4119,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.66.0 (b): npm run fuzz: generated play, invariants, save/load, determinism, ddmin shrinking, findings deduped by id,
 // suggest vs file (the shadow week), the ignore list, the digest line (qa/selftest-266b.mjs).
-{
+if (inShard('selftest-266b')) {
   const dir = copyRepo();
   const { selftest266B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266b.mjs')).href);
   await selftest266B({ dir, run, report, tmpRoot });
@@ -4066,7 +4128,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.66.0 (c): hand-back facts written by the harness ahead of the prose (train drop, task pause, a refused done, the
 // next brief), and the blocked-command log (permission_denials, npm run denials, digest candidates) (qa/selftest-266c.mjs).
-{
+if (inShard('selftest-266c')) {
   const dir = copyRepo();
   const { selftest266C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266c.mjs')).href);
   await selftest266C({ dir, run, report, tmpRoot, root });
@@ -4075,7 +4137,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.66.0 (d): a Fix: line under every gate failure (an entry for every gate and game check kind), and the generated
 // settings map with its ratchet on new undocumented STUDIO_* names (qa/selftest-266d.mjs).
-{
+if (inShard('selftest-266d')) {
   const dir = copyRepo();
   const { selftest266D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266d.mjs')).href);
   await selftest266D({ dir, run, report, tmpRoot });
@@ -4084,7 +4146,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.66.0 (e): who may silence a check (the fuzz ignore list is tier C), the settings baseline only shrinks, and the
 // train's hand-back detail leaves out the Fix: line (qa/selftest-266e.mjs).
-{
+if (inShard('selftest-266e')) {
   const dir = copyRepo();
   const { selftest266E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-266e.mjs')).href);
   await selftest266E({ dir, run, report, tmpRoot });
@@ -4094,7 +4156,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.67.0 (f): the proactive chain-tail fixer: a stacked chain's touched tests and pins run before the train's verify;
 // red: one chain-tail task stacked on its last lane; a verify red on exactly those tests defers the chain for its
 // tail instead of bisecting it; chain + tail land together (qa/selftest-267f.mjs).
-{
+if (inShard('selftest-267f')) {
   const dir = copyRepo();
   const { selftest267F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267f.mjs')).href);
   await selftest267F({ dir, run, report, tmpRoot, root });
@@ -4103,7 +4165,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.67.0 (g): the owner's standing delegation to an outside agent (npm run delegate), its Claude Code rules, and
 // --help never acts (B-47) (qa/selftest-267g.mjs).
-{
+if (inShard('selftest-267g', 'owner-key')) {
   const dir = copyRepo();
   const { selftest267G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267g.mjs')).href);
   await selftest267G({ dir, run, report, tmpRoot });
@@ -4113,7 +4175,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.67.0 (h): test hygiene and upgrade friction: a seeded test on the shared Math.random or an unseeded game (B-48),
 // upgrade --merge refreshes the lanes (B-49), board-only commits keep a train's verify (B-29), an owner type outranks the
 // title (B-38) (qa/selftest-267h.mjs).
-{
+if (inShard('selftest-267h')) {
   const dir = copyRepo();
   const { selftest267H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267h.mjs')).href);
   await selftest267H({ dir, run, report, tmpRoot });
@@ -4123,7 +4185,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.67.0 (helper i): the scorecard's gaps from the crew's day one: outside work (npm run usage add / import) and an
 // outside orchestrator's steps count, default prices with a checked stamp, risk tiers from the train's tier events, a
 // stale halt named and cleared by studio:resume, local days (qa/selftest-267i.mjs).
-{
+if (inShard('selftest-267i')) {
   const dir = copyRepo();
   const { selftest267I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267i.mjs')).href);
   await selftest267I({ dir, run, report, tmpRoot });
@@ -4131,7 +4193,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.67.0 (e): the supervisor's --help never starts one (qa/selftest-267e.mjs).
-{
+if (inShard('selftest-267e')) {
   const dir = copyRepo();
   const { selftest267E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-267e.mjs')).href);
   await selftest267E({ dir, run, report, tmpRoot });
@@ -4140,7 +4202,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.67.1 (j): the asset track: the asset gate at task done (licence rows, triangles per LOD, textures, scale, preview,
 // round trip, brand names) and the one engine-track hand-off when an asset task lands (qa/selftest-2671j.mjs).
-{
+if (inShard('selftest-2671j')) {
   const dir = copyRepo();
   const { selftest2671J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671j.mjs')).href);
   await selftest2671J({ dir, run, report, tmpRoot });
@@ -4148,7 +4210,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 }
 
 // 2.67.1 (k): Unity streamlining: warm Library cache, Play Mode flake retry, code-only steps (qa/selftest-2671k.mjs).
-{
+if (inShard('selftest-2671k')) {
   const dir = copyRepo();
   const { selftest2671K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671k.mjs')).href);
   await selftest2671K({ dir, run, report, tmpRoot });
@@ -4157,7 +4219,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.67.1 (l): one asset flow, asset need: library first, reuse first, the scout, pull + the Unity profile, else one
 // make task; library refresh is append-only (qa/selftest-2671l.mjs).
-{
+if (inShard('selftest-2671l')) {
   const dir = copyRepo();
   const { selftest2671L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2671l.mjs')).href);
   await selftest2671L({ dir, run, report, tmpRoot });
@@ -4166,7 +4228,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.67.2 (a): false alarms: a busy verify is never red (B-50), a held task stays out of trains (train leave), no-work
 // sessions are recorded and parked, the regression refusal says exactly what to add (qa/selftest-2672a.mjs).
-{
+if (inShard('selftest-2672a')) {
   const dir = copyRepo();
   const { selftest2672A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2672a.mjs')).href);
   await selftest2672A({ dir, run, report, tmpRoot });
@@ -4175,7 +4237,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.68.0 (m): the machine scan (Windows, macOS and Linux probes stubbed), the resource monitor, the machine line in
 // status --brief and lanes, the disk budget, ramCheck on the commit headroom (qa/selftest-268m.mjs).
-{
+if (inShard('selftest-268m')) {
   const dir = copyRepo();
   const { selftest268M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268m.mjs')).href);
   await selftest268M({ dir, run, report, tmpRoot });
@@ -4184,7 +4246,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.68.0 (n): one resource-aware queue for heavy work (RAM/GPU/CPU areas from the machine scan), the out-of-memory
 // retry, test workers sized to the machine, the supervisor's session cap by RAM (qa/selftest-268n.mjs).
-{
+if (inShard('selftest-268n')) {
   const dir = copyRepo();
   const { selftest268N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268n.mjs')).href);
   await selftest268N({ dir, run, report, tmpRoot });
@@ -4193,7 +4255,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.68.0 (o): the crew watchdog, the futility cap (shadow first), the usage wind-down, the temp-file janitor (never a lane
 // with work) and the release impact report (qa/selftest-268o.mjs).
-{
+if (inShard('selftest-268o')) {
   const dir = copyRepo();
   const { selftest268O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-268o.mjs')).href);
   await selftest268O({ dir, run, report, tmpRoot });
@@ -4202,7 +4264,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.69.0 (p): less repeated work in the merge train: a lane's green verify reused by a train of one (kept by tree),
 // prechecked lanes first, related tests first on the combined tree, the nightly slow tier (qa/selftest-269p.mjs).
-{
+if (inShard('selftest-269p')) {
   const dir = copyRepo();
   const { selftest269P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269p.mjs')).href);
   await selftest269P({ dir, run, report, tmpRoot, root });
@@ -4211,7 +4273,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.69.0 (q): a red train's prefix search checks K prefixes at once (K from the machine budget, each in its own scratch
 // copy), and STUDIO_VERIFY_REMOTE=github uses the repo's CI as the verify, falling back to the local one (qa/selftest-269q.mjs).
-{
+if (inShard('selftest-269q')) {
   const dir = copyRepo();
   const { selftest269Q } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269q.mjs')).href);
   await selftest269Q({ dir, run, report, tmpRoot });
@@ -4220,7 +4282,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.69.0 (r): the train daemon (harness/train-daemon.mjs) and the flake triager with its quarantine (harness/flakes.mjs)
 // (qa/selftest-269r.mjs).
-{
+if (inShard('selftest-269r')) {
   const dir = copyRepo();
   const { selftest269R } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269r.mjs')).href);
   await selftest269R({ dir, run, report, tmpRoot });
@@ -4229,7 +4291,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.69.0 (s): overlap checks at task add and start (lanes in flight, open lanes, near-duplicate titles; STUDIO_OVERLAP),
 // the queue-depth target (the Producer is asked, never a task invented) and the upgrade watch (qa/selftest-269s.mjs).
-{
+if (inShard('selftest-269s')) {
   const dir = copyRepo();
   const { selftest269S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269s.mjs')).href);
   await selftest269S({ dir, run, report, tmpRoot });
@@ -4239,7 +4301,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.70.0 (t): GPU area jobs (heavy-budget.mjs), browser GPU flags and the renderer record (qa/chromium.mjs,
 // visual-proof.mjs), Blender out of machine:heavy (harness/blender-job.mjs) and a playable build + clip after a landing
 // (harness/landing-build.mjs) (qa/selftest-270t.mjs).
-{
+if (inShard('selftest-270t')) {
   const dir = copyRepo();
   const { selftest270T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270t.mjs')).href);
   await selftest270T({ dir, run, report, tmpRoot, root });
@@ -4249,7 +4311,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.70.0 (u): Unity speed: the Accelerator (STUDIO_UNITY_ACCELERATOR), no duplicate Edit Mode run (dotnet-covered or the
 // same tree), one editor start (STUDIO_UNITY_ONE_EDITOR), the Graphics split, landing build options, the parallel
 // Library copy (qa/selftest-270u.mjs).
-{
+if (inShard('selftest-270u')) {
   const dir = copyRepo();
   const { selftest270U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270u.mjs')).href);
   await selftest270U({ dir, run, report, tmpRoot });
@@ -4259,7 +4321,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.70.0 (v): a vision check on asset previews before an asset lands: deterministic preview checks (blank, black,
 // white, magenta, clipped, small; an up-axis warning), then ONE review request and task, answered by someone other
 // than the maker (npm run asset -- review), before the asset lands (qa/selftest-270v.mjs).
-{
+if (inShard('selftest-270v', 'owner-key')) {
   const dir = copyRepo();
   const { selftest270V } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270v.mjs')).href);
   await selftest270V({ dir, run, report, tmpRoot });
@@ -4268,7 +4330,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.70.0 (w): sparse lanes (laneExclude, widen, the checks never see a partial tree), the lane disk report and the
 // janitor's stale-lane proposals surfaced by the supervisor in the digest, status --brief and the War Room (qa/selftest-270w.mjs).
-{
+if (inShard('selftest-270w')) {
   const dir = copyRepo();
   const { selftest270W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270w.mjs')).href);
   await selftest270W({ dir, run, report, tmpRoot });
@@ -4278,7 +4340,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.71.0 (x): one decision log (.studio/decisions.jsonl, npm run decisions), the studio policy file (npm run policy) and
 // autonomous mode with its review list: approve, revert (runs the undo), edit; never for protected files or deletes
 // (qa/selftest-271x.mjs).
-{
+if (inShard('selftest-271x')) {
   const dir = copyRepo();
   const { selftest271X } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-271x.mjs')).href);
   await selftest271X({ dir, run, report, tmpRoot });
@@ -4287,7 +4349,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 
 // 2.71.0 (y): the overseer's paperwork: the what's-next board, reports posted to the owner's webhook (a local stand-in
 // server; the URL never shown), the builder brief generated from the real rules, the research task type (qa/selftest-271y.mjs).
-{
+if (inShard('selftest-271y')) {
   const dir = copyRepo();
   const { selftest271Y } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-271y.mjs')).href);
   await selftest271Y({ dir, run, report, tmpRoot });
@@ -4297,7 +4359,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.71.0 (z): the self-repair loop: workarounds logged by hand or detected (--force, refused commands re-run, hand-edited
 // board and train queue, supervisor restarts, killed launchers), one harness task per signature in studio/HARNESS-TASKS.md,
 // "maybe fixed" after an upgrade, the digest and impact measures and the export (qa/selftest-271z.mjs).
-{
+if (inShard('selftest-271z')) {
   const dir = copyRepo();
   const { selftest271Z } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-271z.mjs')).href);
   await selftest271Z({ dir, run, report, tmpRoot });
@@ -4307,7 +4369,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 // 2.71.1 (A): the red team's holes in the protection gates: gate runners and each game's test toolchain protected,
 // skipIf/early return on CI and a stand-in expect flagged, env overrides ignored in a lane copy, verify records reused
 // only with their run log and from a clean run, a golden re-recorded on the lane's own word tier C (qa/selftest-2711a.mjs).
-{
+if (inShard('selftest-2711a')) {
   const dir = copyRepo();
   const { selftest2711A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2711a.mjs')).href);
   await selftest2711A({ dir, run, report, tmpRoot });
@@ -4318,15 +4380,25 @@ console.log(JSON.stringify({ a, b, c }));`);
 // refs and grafts fail the protected check, quote-safe and case-folded protected paths (G14/W01), lock release bound to
 // the holder (K01), gate output fenced and capped (L01/I01), the task on every session end, node_modules drift (S04) and
 // `upgrade --rollback` (qa/selftest-2711b.mjs).
-{
+if (inShard('selftest-2711b')) {
   const dir = copyRepo();
   const { selftest2711B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2711b.mjs')).href);
   await selftest2711B({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.72.0 (d): the gameplay logic library (npm run logic: need, add after landing, confirm by someone else, licences,
+// stale modules, language-neutral specs) and the self-test's CI shards (--shard i/N, --list-shards, run-gates
+// --except, the workflow's shard jobs and summary) (qa/selftest-272d.mjs).
+if (inShard('selftest-272d')) {
+  const dir = copyRepo();
+  const { selftest272D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272d.mjs')).href);
+  await selftest272D({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
-{
+if (inShard('new-game')) {
   const dir = copyRepo();
   const made = run(dir, 'node scripts/new-game.mjs selftest-game');
   report('new-game scaffolds a cartridge', made.status === 0, `${made.stdout}${made.stderr}`);
@@ -4336,14 +4408,29 @@ console.log(JSON.stringify({ a, b, c }));`);
   }
 }
 
+endUnit();
 try {
   fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 });
 } catch (err) {
   // Windows keeps a folder while any process still runs in it; the OS cleans its temp folder later.
   console.log(`[selftest] note: couldn't remove ${tmpRoot} yet (${err.code})`);
 }
+if (LIST_SHARDS) {
+  console.log(JSON.stringify({ n: LIST_SHARDS, units: UNITS, strays: STRAYS }));
+  process.exit(STRAYS.length ? 1 : 0);
+}
+if (SHARD) {
+  const mine = UNITS.filter((u) => u.shard === SHARD.i);
+  const slow = [...mine].sort((a, b) => (b.ms || 0) - (a.ms || 0)).slice(0, 5).map((u) => `${u.label} ${Math.round((u.ms || 0) / 1000)} s`);
+  console.log(`[selftest] shard ${SHARD.i}/${SHARD.n}: ran ${mine.length} of ${UNITS.length} unit(s); slowest: ${slow.join(', ') || 'none'}`);
+  if (STRAYS.length) console.log(`[selftest] WARN ${STRAYS.length} check(s) ran outside a unit, so in every shard (wrap their block in if (inShard()) { ... }): ${STRAYS.slice(0, 3).join(' | ')}`);
+  if (!mine.length) {
+    console.error(`[selftest] shard ${SHARD.i}/${SHARD.n} has no unit: it checked nothing, which is not a pass (fewer shards, or --list-shards ${SHARD.n})`);
+    failed += 1;
+  }
+}
 if (failed) {
   console.error(`[selftest] ${failed} check(s) failed`);
   process.exit(1);
 }
-console.log('[selftest] ok — every required gate was shown to fail when broken');
+console.log(SHARD ? `[selftest] ok — shard ${SHARD.i}/${SHARD.n} passed (the other shards run the rest of the self-test)` : '[selftest] ok — every required gate was shown to fail when broken');

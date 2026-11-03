@@ -25,6 +25,17 @@ Any red step before the push undoes the commit and leaves the work uncommitted; 
 
 `npm run release` with no version is the read-only check CI runs (syntax, required gates, closed loop, changelog).
 
+**CI shards (2.72.0).** CI runs `node scripts/release.mjs --except selftest` (Linux, Node 22 and 24) and
+`node scripts/run-gates.mjs --required-only --deep --except selftest` (Windows); the self-test runs beside them in 4
+parallel jobs per platform (`release-gate-selftest`, `windows-selftest`: `node qa/selftest.mjs --shard i/4`), and
+`release-gate-summary` is red unless every one of them passed. `--shard i/N` runs every Nth unit of qa/selftest.mjs in
+file order (a unit is a top-level block or one gate's sabotage; units with the same group name, such as 267g and
+270v's `owner-key`, share a shard), so the shards together are the whole self-test; an empty shard fails.
+`node qa/selftest.mjs --list-shards 4` prints the split as JSON and fails when a check runs outside a unit: a new
+block starts with `if (inShard()) {` (or `if (inShard('<label>', '<group>')) {` for checks that must stay together).
+A one-unit shard (`--list-shards <units>` gives its number) runs one block alone. `--except` runs are partial: they
+never write a verify record. Locally, `npm run release` still runs the whole self-test in one process.
+
 **Batching (owner's rule, 2026-11-01):** approved upgrades can and should ship together in one release and one PR,
 each with its own commit and its own selftest file. Still required: a backup branch of `main` first, the full
 selftest, and green online checks before the merge.
