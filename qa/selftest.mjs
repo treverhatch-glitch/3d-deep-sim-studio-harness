@@ -4509,6 +4509,16 @@ if (inShard('selftest-2732e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.2 (f): a session end is recorded once and an ending session isn't STALLED (B-72), the watchdog's stall end counts as
+// a stall, not toward the halt (B-72/B-76), and .env changes reach running processes, with studio:reload-env (B-74)
+// (qa/selftest-2732f.mjs).
+if (inShard('selftest-2732f')) {
+  const dir = copyRepo();
+  const { selftest2732F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732f.mjs')).href);
+  await selftest2732F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
