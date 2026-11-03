@@ -78,6 +78,37 @@ npm run golden -- --update
 node qa/check-regressions.mjs --update
 ```
 
+## Where a red golden first went wrong (2.72.0)
+
+A golden red on its SHA-256 also prints the first divergence: the harness re-runs it in lockstep on this tree and on
+the commit that last changed the golden file (it recorded the hash; `STUDIO_DIVERGENCE_REF` names another commit),
+with a cheap per-subsystem digest per tick (FNV-1a of each top-level state key), stops at the first tick where one
+differs and names the first field there (`harness/divergence.mjs`):
+
+```
+[golden] first divergence: tick 23, resources.credits 1936 -> 1937 (subsystem resources; example-1337.json vs 3f2a1b4c, the commit that recorded it)
+```
+
+It runs only on a red (per-tick hashing of the whole state roughly doubles a run), locates the change and never
+decides red or green. When the reference commit doesn't reproduce the golden either, the line says so. The result is a
+`golden.divergence` event, part of the `gates.run` event (`meta.divergence`) and a "First divergence" line in the
+hand-back facts. `STUDIO_GOLDEN_DIVERGENCE=off` turns it off. A cartridge that imports files outside its folder
+can't be loaded from the reference commit; the line says so.
+
+A studio game (not a cartridge) gets the same with a `"divergence"` entry in its `studio.gates.json`:
+
+```json
+"divergence": { "command": "node sim/trace.mjs", "state": "node sim/trace.mjs --state {tick} --run {run}", "gate": "golden", "goldens": ["sim/golden.json"] }
+```
+
+`command` prints one JSON line per tick, `{ "run": "<name>", "tick": 1, "digests": { "<subsystem>": "<hash>" } }`
+(optionally `"fields": { "<subsystem>": { ... } }`); `state` (optional) prints the whole state at `{tick}` of `{run}` as
+one JSON object, so the harness can name the field. When the check `gate` (default: any check whose id has "golden")
+fails, the harness runs `command` on this tree and on the reference (the last commit of `goldens`, else the merge base
+with main, else HEAD) in a detached git worktree in the temp folder (`node_modules` linked; removed afterwards), and
+compares the lines itself. The commands run with `STUDIO_DIVERGENCE=trace` set (a game's script may read it); each is
+bounded by `STUDIO_DIVERGENCE_TIMEOUT_MS` (600000).
+
 - JS checks: `node qa/check-golden.mjs`, `node qa/check-regressions.mjs`
 - Python: `node qa/run-python.mjs qa/test-golden.py`, `node qa/run-python.mjs tools/golden.py --check qa/golden`
 - Hash a state file in Python: `python tools/golden.py --hash state.json`
