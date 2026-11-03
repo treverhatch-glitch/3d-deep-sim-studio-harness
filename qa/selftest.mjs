@@ -4461,6 +4461,16 @@ if (inShard('selftest-273f')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.74.0 (w): the War Room refresh: pairing a browser (one-time code, HttpOnly cookie, paired writes act as the person),
+// Act buttons that run the CLI's own code (studio:resume, hold, delegate revoke), B-70 (a throwing handler no longer ends
+// the hub, every exit logged, the supervisor's keeper with backoff), the page's version, the deck's panels and the rooms.
+if (inShard('selftest-274w')) {
+  const dir = copyRepo();
+  const { selftest274W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-274w.mjs')).href);
+  await selftest274W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
