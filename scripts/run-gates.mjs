@@ -370,6 +370,20 @@ try {
 } catch {
   // the event log is a help, never a blocker
 }
+// 2.72.0 (c): error-signature memory (harness/error-memory.mjs): a red on the owner's task is kept as pending; a later green of
+// that gate on the same task records the fix (commit, summary, files) for the next agent who meets the same red.
+try {
+  const em = await import('../harness/error-memory.mjs');
+  const task = await em.taskOfOwner(process.env.STUDIO_LOCK_OWNER);
+  if (task) {
+    const outOf = (id) => { try { return fs.readFileSync(path.join(root, '.studio', 'gates', 'out', `${String(id).replace(/[^\w.-]/g, '_')}.log`), 'utf8'); } catch { return ''; } };
+    const seen = await em.observeVerify({ task, rows, outputOf: outOf, cwd: root, head: headAtStart });
+    for (const f of seen.fixed) console.log(`[gates] note: remembered the fix of ${f.sub || f.gate}'s red for ${task} (${f.commit}; .studio/error-memory.jsonl)`);
+    for (const l of em.seenLinesFor(seen.pending.map((x) => x.key))) console.log(`[gates] ${l}`);
+  }
+} catch {
+  // a help, never a blocker
+}
 // 2.31.0: fail closed. A verify where no gate ran checked nothing; it used to print "0/0 passed, all
 // required gates green" and count as a full verify.
 if (!rows.length) {
