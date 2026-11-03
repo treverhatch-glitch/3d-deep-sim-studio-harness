@@ -498,7 +498,7 @@ export function buildHudState() {
       return r && (r.probes?.length || r.simFeatures?.length) ? { at: r.at, probes: r.probes || [], simFeatures: r.simFeatures || [] } : null;
     })(),
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
-    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
+    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, ending: s.ending || null, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
     signals,
     queue,
     progress: { done: queue.done.length, total, ratio: total ? queue.done.length / total : 0 },

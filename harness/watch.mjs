@@ -105,7 +105,9 @@ export function releaseStalled({ now = Date.now(), dryRun = false, events = read
   const away = Number.isFinite(prevPassAt) && now - prevPassAt > min * 60000 ? Math.round((now - prevPassAt) / 60000) : 0;
   const out = [];
   for (const s of list) {
-    if (!s.running) continue;
+    // 2.73.2 (B-72): an ending session (its agent exited; its launcher is handing the work back) isn't silent: freeing
+    // its task now would hand the same work back twice.
+    if (!s.running || s.ending) continue;
     const beat = Date.parse(s.lastBeat || s.startedAt || '');
     if (!Number.isFinite(beat) || now - beat < min * 60000) continue;
     const age = Math.round((now - beat) / 60000);
