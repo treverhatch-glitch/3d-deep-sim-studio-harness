@@ -4,6 +4,46 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.73.0] — 2026-11-03
+2.73.0, "autonomy, safely": a measured, reversible way to hand more to the overseer, and the last red-team holes the
+outside review left open (the dev plan's 2.73, the verified Grok dossier and the owner's overseer roadmap; P-213 to P-218).
+### Added
+- **Upgrade preflight and smoke (f).** `npm run upgrade -- --preflight` (read-only, PASS/WARN/FAIL with Fix lines: node
+  and git, the board committed, the owner key and signatures, disk and RAM, Unity/Godot paths, the webhook set (never
+  printed), the policy and delegation files, lanes with unlanded work) before an update, and `--smoke` right after it
+  (a tiny verify and train on a made-up task in a scratch copy, the machine scan, a dry supervisor pass).
+- **Before snapshot and predictions (f).** `--merge` writes `.studio/upgrades/<from>-to-<to>.json` (landed/h, false reds
+  per train, red-verify %, tokens per landed change by task, workarounds/day), which `npm run autonomy -- impact`
+  compares against; `npm run release -- predict --metric <m> --expect "<-30%>"` records what a release should move and
+  impact scores it.
+- **The overseer's stages (f).** `studio/overseer.json` (protected; stage 0 by default, only the owner raises it);
+  `npm run overseer` says whether the next stage's criteria hold (a suggestion); `npm run workaround -- repro`
+  scaffolds a failing-test PR in a separate harness clone (stage 1+). A weekly harness scout research task, off by
+  default (`STUDIO_HARNESS_SCOUT=on`).
+- **Confidence bounds on the L3 bar (e).** Promotion needs one-sided 90% Wilson bounds to clear the bar (hands-free lower
+  bound >= 0.8, reopen and redo upper bounds under their caps) and says how many more landings would clear it;
+  demotion stays on point estimates (`"confidence"` in studio/autonomy.json or `STUDIO_L3_CONFIDENCE`; 0 = old rule).
+- **Audit sampling (e).** A seeded share of hands-free landings and autonomous decisions (`"audit": { "rate" }`, default
+  0.1 in autonomous mode) goes on the review list and in the digest, never blocking work; the auditor can't be anyone
+  who did the work; a failed audit counts as a Redo.
+- **Cheap-first routing (e).** Task types the policy lists start on the cheapest listed model tier and step up after a
+  red round, only to models the policy lists; `npm run autonomy -- routing` shows success and tokens per landed change
+  by tier. The holdout is built but off until API credit is available (the owner's decision).
+- **Signed verify records (g).** Each studio gets a local verify key outside every checkout
+  (`~/.studio-verify/<studio-id>.key`, `STUDIO_VERIFY_KEY_DIR`); run-gates signs each run log (HMAC-SHA256) and reuse
+  needs a valid signature, so a hand-written record and run log are no longer accepted. Older records are just not
+  reused once. (A process running as the same user can still read the key: see docs/SECURITY.md.)
+- **Golden re-records with evidence and a second signer (g).** A lane's golden re-record carries the harness's signed
+  first-divergence report; the train shows it to the releaser; the lane's own author can't release it; without a
+  report only a person can; the decision log records the tick and field.
+
+### Untested
+- Windows: the smoke copy's junction and removal, the key file's permissions (Windows ignores mode 600), `where`
+  lookups. The launcher's routing call is checked from source only (the routing logic itself is fully tested).
+- The default overseer criteria are a first guess; the owner edits them in studio/overseer.json.
+
+---
+
 ## [2.72.0] — 2026-11-03
 2.72.0, "better reds, better games": a red says where and why, a flaky timeout or an old lint hit stops costing a round,
 engine gates prove they ran, a fixed red is remembered, and code a game already landed can be found before it is written

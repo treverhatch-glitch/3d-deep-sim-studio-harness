@@ -169,10 +169,12 @@ console.log(JSON.stringify({ rate: a.rate, source: a.source, ids: a.items.map((x
     const noNote = cli(`node harness/decisions.mjs audit ${other?.id} fail --by dana`);
     const fail = cli(`node harness/decisions.mjs audit ${other?.id} fail --by dana --note "the change skipped the edge case it was for"`);
     const appr = cli(`node harness/decisions.mjs approve ${decItem?.decision} --by dana`);
+    // The scorecard's window ends now (at the probe), not at the test's start: on a loaded machine the audit verdicts
+    // above are written more than a minute after NOW and fell outside a NOW + 60 s window (seen with 11 runs at once).
     const evs = fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const s = probe(`import fs from 'node:fs'; import { buildAutonomy, levelBadge, personClassifier, DEFAULT_AUTONOMY } from ${u('harness/autonomy.mjs')};
 const evs = fs.readFileSync(${JSON.stringify(evFile)}, 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l));
-const c = buildAutonomy(evs, { now: ${NOW} + 60000, days: 7, isPersonName: await personClassifier() });
+const c = buildAutonomy(evs, { now: Date.now() + 1000, days: 7, isPersonName: await personClassifier() });
 const b = levelBadge(c, DEFAULT_AUTONOMY);
 console.log(JSON.stringify({ v: c.verdicts, redo: b.checks.find((x) => x.id === 'redoRate') }));`);
     const av = evs.filter((e) => e.type === 'audit.verdict');

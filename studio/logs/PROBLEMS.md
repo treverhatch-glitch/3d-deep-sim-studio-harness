@@ -1173,3 +1173,24 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-212 — game logic was written again per game; CI was one long serial run · fixed in 2.72.0
 - **Fix:** the gameplay logic library; selftest shards. qa/selftest-272d.mjs.
 
+### P-213 — no check before or after a big harness update · fixed in 2.73.0
+- **Evidence:** the crew's PC jumps 2.66 -> 2.73 in one step; problems were found only once agents were working.
+- **Fix:** `upgrade --preflight` and `--smoke`. qa/selftest-273f.mjs.
+
+### P-214 — upgrades made no measurable claims and had no clean "before" · fixed in 2.73.0
+- **Fix:** the before snapshot; `release -- predict` scored by impact. qa/selftest-273f.mjs.
+
+### P-215 — the overseer's stages existed only on paper · fixed in 2.73.0
+- **Fix:** studio/overseer.json (protected), `npm run overseer`, `workaround -- repro`, the weekly scout. qa/selftest-273f.mjs.
+
+### P-216 — a lucky week could suggest L3; autonomous work was reviewed only by choice · fixed in 2.73.0
+- **Evidence:** 12 clean landings suggested L3 on point estimates.
+- **Fix:** Wilson bounds for promotion; seeded audit sampling. qa/selftest-273e.mjs.
+
+### P-217 — every task used the same model tier · fixed in 2.73.0
+- **Fix:** policy-limited cheap-first routing with per-tier measurement (holdout off). qa/selftest-273e.mjs.
+
+### P-218 — a forged record + run log was reused; an author could release its own golden re-record · fixed in 2.73.0
+- **Evidence:** the red team's D01/T04 remainder and A13 (re-tested by our verifier on 2.70.0).
+- **Fix:** signed verify records; signed first-divergence reports and a second signer. qa/selftest-273g.mjs.
+
