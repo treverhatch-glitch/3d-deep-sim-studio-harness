@@ -145,7 +145,9 @@ function tinyTrain(scratch, env, run) {
   let doneMd = '';
   try { doneMd = fs.readFileSync(path.join(scratch, 'studio', 'DONE.md'), 'utf8'); } catch {}
   if (new RegExp(`\\b${id}\\b`).test(doneMd)) return item('train', 'PASS', `${id} (made up) started in a lane copy, queued with task done --train and landed by task train --now in the copy`);
-  return item('train', 'FAIL', `${id} did not land: done ${done.status}: ${tail(done, 4)}; train ${train.status}: ${tail(train, 4)}`, 'npm run upgrade -- --smoke --keep, then read the copy\'s .studio/train/ logs; npm run upgrade -- --rollback --by <you> to go back to the harness before the update');
+  // The refusal's first line names the check that blocked: tail() alone keeps only the "To finish anyway" lines.
+  const why = `${done.stdout || ''}${done.stderr || ''}`.split('\n').find((l) => /is not done:|refused|Error/.test(l)) || '';
+  return item('train', 'FAIL', `${id} did not land: done ${done.status}${why ? ` (${why.trim().slice(0, 300)})` : ''}: ${tail(done, 4)}; train ${train.status}: ${tail(train, 4)}`, 'npm run upgrade -- --smoke --keep, then read the copy\'s .studio/train/ logs; npm run upgrade -- --rollback --by <you> to go back to the harness before the update');
 }
 
 function supervisorPass(scratch, run) {

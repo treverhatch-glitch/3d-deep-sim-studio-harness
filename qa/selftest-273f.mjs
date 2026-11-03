@@ -20,9 +20,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export async function selftest273F({ dir, run, report, tmpRoot }) {
+export async function selftest273F({ dir, run, report, tmpRoot, root }) {
+  // The smoke's train runs the size check, which needs typescript: a copy made without node_modules (the full
+  // selftest's copyRepo, CI shard 2/4 of 2.73.0) gets the harness's own, linked, as selftest-270t does.
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'typescript')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'typescript'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };

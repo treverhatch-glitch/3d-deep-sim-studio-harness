@@ -4457,7 +4457,7 @@ if (inShard('selftest-273e')) {
 if (inShard('selftest-273f')) {
   const dir = copyRepo();
   const { selftest273F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273f.mjs')).href);
-  await selftest273F({ dir, run, report, tmpRoot });
+  await selftest273F({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
