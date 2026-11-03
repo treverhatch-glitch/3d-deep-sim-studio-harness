@@ -4242,7 +4242,7 @@ console.log(JSON.stringify({ a, b, c }));`);
 {
   const dir = copyRepo();
   const { selftest270T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270t.mjs')).href);
-  await selftest270T({ dir, run, report, tmpRoot });
+  await selftest270T({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
