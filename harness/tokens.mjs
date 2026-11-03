@@ -2,7 +2,10 @@
 /**
  * harness/tokens.mjs — measured token use, from the agent.session.end events the launcher writes.
  *
- *   npm run tokens [-- --since 5h|24h|today|all] [--by agent|role|model|tool] [--json]
+ *   npm run tokens [-- --since 5h|24h|today|all] [--by agent|role|model|tool|task] [--json]
+ *
+ * 2.71.1 (B): --by task groups by the task each session end names (the launcher records it since 2.71.1; older ends
+ * and sessions with no task are "(no task)"), so the tokens a landed change took can be read per task.
  *
  * Every number here is what a tool reported at the end of a session (Claude's result usage, Codex's
  * turn totals, or a plain usage line). Nothing is estimated. Two things are not counted, and the output
@@ -35,7 +38,7 @@ export function tokenTotals({ since = 'all', events = null, now = Date.now() } =
   const ev = from ? all.filter((e) => Date.parse(e.ts) >= from) : all;
   const starts = new Map();
   for (const e of all) if (e.type === 'agent.session.start') starts.set(e.agent, e);
-  const groups = { agent: {}, role: {}, model: {}, tool: {} };
+  const groups = { agent: {}, role: {}, model: {}, tool: {}, task: {} };
   const total = blank();
   const untracked = {};
   const add = (g, e, measured) => {
@@ -62,7 +65,7 @@ export function tokenTotals({ since = 'all', events = null, now = Date.now() } =
     const measured = (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0) + (Number(e.meta?.cacheRead) || 0) > 0;
     if (!measured) untracked[tool] = (untracked[tool] || 0) + 1;
     add(total, e, measured);
-    for (const [k, key] of [['agent', e.agent], ['role', role], ['model', model], ['tool', tool]]) add((groups[k][key] ||= blank()), e, measured);
+    for (const [k, key] of [['agent', e.agent], ['role', role], ['model', model], ['tool', tool], ['task', String(e.task || e.meta?.task || '(no task)')]]) add((groups[k][key] ||= blank()), e, measured);
   }
   for (const e of ev) {
     if (e.type !== 'task.done') continue;
@@ -80,6 +83,8 @@ export function tokenTotals({ since = 'all', events = null, now = Date.now() } =
     byRole: list('role'),
     byModel: list('model'),
     byTool: list('tool'),
+    byTask: list('task'),
+    sessionsWithTask: Object.entries(groups.task).filter(([k]) => k !== '(no task)').reduce((n, [, g]) => n + g.sessions, 0),
     untracked,
     notCounted: 'Work outside the launcher (your own chat, IDE or terminal sessions) is not counted.',
   };
@@ -88,7 +93,7 @@ export function tokenTotals({ since = 'all', events = null, now = Date.now() } =
 const M = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
 
 export function formatTotals(t, by = 'role') {
-  const rows = { agent: t.byAgent, role: t.byRole, model: t.byModel, tool: t.byTool }[by] || t.byRole;
+  const rows = { agent: t.byAgent, role: t.byRole, model: t.byModel, tool: t.byTool, task: t.byTask || [] }[by] || t.byRole;
   const L = [`Tokens, measured (${t.since === 'all' ? 'whole event log' : `since ${t.from.slice(0, 16).replace('T', ' ')} UTC`})`];
   L.push(`  ${t.total.sessions} sessions ended, ${t.total.measured} reported usage. In ${M(t.total.tokensIn)}, out ${M(t.total.tokensOut)}, cache reads ${M(t.total.cacheRead)}${t.total.costUsd ? `, $${t.total.costUsd.toFixed(2)} at API prices as the tool reported it (a subscription isn't billed this)` : ''}.`);
   if (t.total.measured) L.push(`  Cache reads per measured session: ${M(t.total.cacheRead / t.total.measured)}. Per task done: ${t.total.tasksDone ? M(t.total.cacheRead / t.total.tasksDone) : 'no task done'}.${t.total.withTurns ? ` Turns per session: ${Math.round(t.total.turns / t.total.withTurns)}${t.total.tasksDone ? `, per task done: ${Math.round(t.total.turns / t.total.tasksDone)}` : ''}.` : ''}`);
