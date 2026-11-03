@@ -469,7 +469,8 @@ async function warRoom274() {
   // A new page version (the hub was upgraded): the page reloads itself.
   fs.appendFileSync(path.join(dir, 'hub', 'v3', 'index.html'), '\n<!-- 274 reload check -->\n');
   hub.kill('SIGTERM');
-  await wait(500);
+  // Wait for the old hub to exit (it frees the port), not a fixed pause (P-044).
+  await new Promise((done) => { if (hub.exitCode !== null || hub.signalCode) return done(); hub.once('exit', done); setTimeout(done, 10000); });
   hub = startHub();
   await expect('2.74.0: after a hub restart with a new page, the page reloads itself', async () => {
     const kept = await page.evaluate(() => window.__noReload === 1).catch(() => true);
