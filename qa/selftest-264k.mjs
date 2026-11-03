@@ -19,7 +19,8 @@ export async function selftest264K({ dir, run, report, tmpRoot }) {
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const evFile = path.join(dir, '.studio', 'events-264k.jsonl');
-  const env = { AGENT_EVENTS_FILE: evFile, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off' };
+  // 2.73.0 (e): these checks score the L3 bar on point estimates ("confidence": 0); qa/selftest-273e.mjs checks the default 90% bound.
+  const env = { AGENT_EVENTS_FILE: evFile, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_L3_CONFIDENCE: '0' };
   const probe = (name, code, extra = {}) => {
     const f = path.join(dir, `.probe-264k-${name}.mjs`);
     fs.writeFileSync(f, code);
