@@ -37,6 +37,10 @@
  * --changed (or STUDIO_GATE_CHANGED), only gates whose paths the change touches run; skipped gates are
  * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
  * No game set (or the game is a cartridge): nothing extra runs, the cartridge gates cover it.
+ *
+ * 2.72.0 (b): a gate may declare "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new
+ * hits, harness/ratchet.mjs) and "canary": "<command or fixture path>" (input that must make it fail; npm run gates --
+ * --canaries, harness/canaries.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -77,7 +81,7 @@ export function declaredGates(game) {
   const man = path.join(REPO_ROOT, game.root, 'studio.gates.json');
   if (fs.existsSync(man)) {
     const j = JSON.parse(fs.readFileSync(man, 'utf8'));
-    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}), ...(x.tier === 'slow' ? { tier: 'slow' } : {}), ...(x.slowTests === true ? { slowTests: true } : {}) }));
+    const list = (j.gates || []).filter((x) => x && x.id && x.command).map((x) => ({ id: `game:${x.id}`, command: x.command, required: x.required !== false, ...(Array.isArray(x.paths) && x.paths.length ? { paths: x.paths.map(String) } : {}), ...(x.track ? { track: String(x.track) } : {}), ...(typeof x.related === 'string' && x.related.includes('{files}') ? { related: x.related } : {}), ...(typeof x.focus === 'string' && x.focus.includes('{files}') ? { focus: x.focus } : {}), ...(x.tier === 'slow' ? { tier: 'slow' } : {}), ...(x.slowTests === true ? { slowTests: true } : {}), ...(x.ratchet === true ? { ratchet: true } : {}), ...(typeof x.canary === 'string' && x.canary.trim() ? { canary: x.canary.trim() } : {}) }));
     // 2.58.2 (PU-22): a manifest with "detMath" (warn or required) gets the deterministic-math check on its sim
     // paths; the cartridge purity gate is skipped for such a game, so this is where it runs. Required fails.
     if (j.detMath !== undefined && !list.some((x) => /check-sim-purity/.test(x.command))) {
@@ -567,6 +571,16 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = again;
         } else r = again;
       }
+      // 2.72.0 (b): a "ratchet": true check whose game has a baseline for it fails only on hits the baseline doesn't list
+      // (harness/ratchet.mjs judgeCheck); only those are printed. No baseline section: its own exit code, as before.
+      let ratchet = null;
+      if (g.ratchet && !related && !focused) {
+        try {
+          const rat = await import('./ratchet.mjs');
+          ratchet = rat.judgeCheck(g, r, { root: REPO_ROOT, gameRoot: game.root, base: await rat.laneBase() });
+        } catch (err) { log(`[game-gates] WARN ${g.id}: the ratchet couldn't judge it (${err.message}); its exit code stands`); }
+        if (ratchet) { for (const l of ratchet.lines) log(l); r = { ...r, status: ratchet.status }; }
+      }
       // 2.72.0 (a): a red golden-type check of a game whose manifest declares "divergence": where it first went wrong
       // (harness/divergence.mjs gameDivergence: the game's per-tick digests on this tree and the reference commit).
       if (r.status !== 0) await divergenceForCheck(game, g, log);
@@ -582,6 +596,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // (Every failure was one of the timed-out files, so the files red alone are exactly the failing ones.)
       if (r.status !== 0 && redAlone) failFiles = [...redAlone];
       rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
+      if (ratchet) { const row = rows[rows.length - 1]; delete row.failures; delete row.failingFiles; if (ratchet.why) row.why = ratchet.why; row.ratchet = { fresh: ratchet.judged?.fresh.length ?? null, standing: ratchet.judged?.standing ?? null }; }
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

@@ -9,6 +9,7 @@
  *   since its last pass is skipped (cache keyed by content hash). A fast run never counts as a full verify.
  * --tier merge: runs a full, deep verify and never reads from cache (same as --full --deep).
  * --tier slow (2.69.0): the game's slow tier only (harness/slow-tier.mjs; `npm run gates -- --tier slow`, nightly).
+ * --canaries (2.72.0): each game check run on its must-fail canary (harness/canaries.mjs); report only.
  * --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks; npm run release and CI do.
  * --full runs every gate a Full studio would.
  * Everyday verify (no tier) skips the deep gates, as before, and never reads the cache.
@@ -63,10 +64,19 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
   // 2.69.0 (p): `npm run gates -- --tier slow` is the nightly slow tier (harness/slow-tier.mjs): the game's slow checks and
   // slow tests only, on this checkout, one bug task per new failure. It is never a verify and writes no verify record.
   if (argv.includes('--tier') && argv[argv.indexOf('--tier') + 1] === 'slow') process.exit(await (await import('../harness/slow-tier.mjs')).slowTierCli(argv, { root }));
+  // 2.72.0 (b): `npm run gates -- --canaries` runs each game check against its must-fail canary (harness/canaries.mjs);
+  // report only, never a verify, no verify record.
+  if (argv.includes('--canaries')) process.exit(await (await import('../harness/canaries.mjs')).canariesCli(argv, { root }));
   const detachEnv = String(process.env.STUDIO_VERIFY_DETACH || '');
   const detach = !argv.includes('--no-detach') && !process.env.STUDIO_VERIFY_RUN && !/^(off|0|false|no)$/i.test(detachEnv)
     && (argv.includes('--detach') || /^(on|1|true|yes)$/i.test(detachEnv) || process.env.npm_lifecycle_event === 'verify');
   const wait = argv.includes('--wait') && !process.env.STUDIO_VERIFY_RUN;
+  // 2.72.0 (b): the two-round cap (harness/round-cap.mjs): a task handed back for being red twice in a row on the same
+  // failure gets no third verify in the same session.
+  if (!wait && !process.env.STUDIO_VERIFY_RUN) {
+    const capWhy = await (await import('../harness/round-cap.mjs')).verifyRefusal();
+    if (capWhy) { console.error(`[gates] refused (STUDIO_ROUND_CAP): ${capWhy}. Nothing was run.`); process.exit(1); }
+  }
   // 2.59.0 (#6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed them since
   // the lane branched, its gates would judge with the old code (T-061 failed the hooks gate again after the fix had
   // landed on main): refuse and name the files and the fix (rebase). The studio's branch holds the reviewed harness; a
@@ -253,6 +263,7 @@ let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
 // 2.58.0 (F2): the tracked files as they are before any gate runs, to name the ones this verify changes.
 const trackedBefore = trackedSnapshot();
+let firstRed = null;
 for (const gate of gates) {
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
@@ -302,6 +313,7 @@ for (const gate of gates) {
   // alone, and a red golden's first divergence, read from the gate's own output (harness/gate-subids.mjs).
   const facts = await gateRowFacts(gate.id, ok, fenced.text);
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts });
+  if (!ok && required && !firstRed) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
   if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
   if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: fenced.text, compact })}`); // 2.66.0 (d): one next step per failure
@@ -380,6 +392,8 @@ try {
 } catch {
   // the event log is a help, never a blocker
 }
+// 2.72.0 (b): one round of the owner's task (a full verify only) and, red twice in a row on one failure, its hand-back.
+if (!only && !isFastTier && rows.length) await (await import('../harness/round-cap.mjs')).verifyRound({ ok: !rows.some((r) => !r.ok && r.required), failGate: firstRed?.id || null, failText: firstRed?.text || '' });
 // 2.31.0: fail closed. A verify where no gate ran checked nothing; it used to print "0/0 passed, all
 // required gates green" and count as a full verify.
 if (!rows.length) {

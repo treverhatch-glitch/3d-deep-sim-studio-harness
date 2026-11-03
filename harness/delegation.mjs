@@ -49,7 +49,8 @@ export const DELEGATION_REL = 'studio/delegation.json';
  * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes);
  * `logic-library` (2.72.0) confirming a module proposed for the gameplay logic library (npm run logic -- confirm).
  */
-export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'logic-library'];
+// 2.72.0 (b): `purity-baseline` growing a game's purity ratchet baseline (npm run purity -- baseline --write, harness/purity.mjs).
+export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'logic-library', 'purity-baseline'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
 const FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
@@ -72,6 +73,7 @@ export const ACTION_COMMANDS = {
   'janitor-lanes': [],
   // 2.72.0 (d): `npm run logic -- confirm <name> --by <agent>` (harness/logic-library.mjs); not a task command, so no allow rule.
   'logic-library': [],
+  'purity-baseline': [], // 2.72.0 (b): not a task command, so no allow rule
 };
 
 /**

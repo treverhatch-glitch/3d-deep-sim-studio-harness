@@ -4397,10 +4397,20 @@ if (inShard('selftest-272d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.72.0 (b): the purity ratchet (standing hits in a committed baseline, only new ones fail, it shrinks at task done and
+// never grows from a lane: tier C), must-fail canaries for a game's checks (npm run gates -- --canaries: silently green
+// checks reported) and the two-round cap (red twice on one sub-id: handed back, a third attempt refused) (qa/selftest-272b.mjs).
+if (inShard('selftest-272b')) {
+  const dir = copyRepo();
+  const { selftest272B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272b.mjs')).href);
+  await selftest272B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.72.0 (a): a red golden's first divergence (tick, subsystem, field; the cartridge goldens and a game's "divergence"
 // contract), sub-ids for the game gate (game:<check>:<file>, golden:<file>) in the row, gates.run and the hand-back facts,
 // and a timeout-only red re-run alone at low load (timeout-flake) (qa/selftest-272a.mjs).
-{
+if (inShard('selftest-272a')) {
   const dir = copyRepo();
   const { selftest272A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272a.mjs')).href);
   await selftest272A({ dir, run, report, tmpRoot });
