@@ -4325,6 +4325,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.72.0 (c): engine gates that prove they ran (fresh results with a run nonce, tests > 0 unless allowEmpty, no compile/
+// licence/abort signature, the exit code agreeing with the results), the state probe (game:state-probe), the completeness
+// rubric (test-name criteria, unverified must-items hold a lane at tier C until a reviewer signs) and the error-signature
+// memory (qa/selftest-272c.mjs).
+{
+  const dir = copyRepo();
+  const { selftest272C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272c.mjs')).href);
+  await selftest272C({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
