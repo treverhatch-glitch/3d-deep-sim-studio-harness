@@ -1093,3 +1093,21 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
   showed only when someone ran the janitor.
 - **Fix:** sparse lanes with widening, `lanes disk`, the supervisor's proposal pass. qa/selftest-270w.mjs.
 
+### P-193 — owner decisions had no single record and no autonomous path · fixed in 2.71.0
+- **Evidence:** decisions were spread over task-types.json, the train queue, the hold file and permission quotes;
+  nothing listed them, so nothing could be reviewed or measured; the owner asked for an overseer that decides and is
+  reviewed afterwards.
+- **Fix:** the decision log, `studio/policy.json`, opt-in autonomous mode with a review list. qa/selftest-271x.mjs.
+
+### P-194 — status and what's-next were posted by hand · fixed in 2.71.0
+- **Evidence:** the overseer pasted them into Discord each session (duties 9, 10).
+- **Fix:** next-board, report post through a webhook, the supervisor pass. qa/selftest-271y.mjs.
+
+### P-195 — builder briefs drifted from the rules; research had no shape · fixed in 2.71.0
+- **Evidence:** briefs rewritten by hand each session (duty 12); research write-ups sometimes without sources (duty 16).
+- **Fix:** the generated, hash-checked builder brief; the research task type. qa/selftest-271y.mjs.
+
+### P-196 — workarounds of the harness were recorded only in the overseer's notes · fixed in 2.71.0
+- **Evidence:** most of 2.65-2.70 came from those notes (retries, hand edits, killed processes, restarts).
+- **Fix:** the workaround log, detected signals, the maintainer's task queue, the export. qa/selftest-271z.mjs.
+

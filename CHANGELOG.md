@@ -4,6 +4,39 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.71.0] — 2026-11-03
+2.71.0, "the owner layer": one log of every owner and game-dev decision, a studio policy file, an opt-in autonomous
+mode the owner reviews afterwards, the overseer's paperwork as commands, and a record of every time the harness had to
+be worked around (the owner's request of 2026-11-02 and the overseer's duties 9, 10, 12, 16, 19, 20; P-193 to P-196).
+### Added
+- **Decision log (x).** Every owner and game-dev decision (train release, type, visual, yes, hold, asset review,
+  quarantine, stale lanes, train/upgrade auto, crew and studio resume, autonomy level, delegation, autonomous mode)
+  writes one record to `.studio/decisions.jsonl` with who, as what (person, delegation, permission, autonomous), why
+  and how to undo it; `npm run decisions`.
+- **Studio policy (x).** `studio/policy.json` (protected; `npm run policy`) holds the owner's rules; agents get a
+  one-line pointer; a `never` word rules an action out for any agent, a delegated one included. No file: unchanged.
+- **Autonomous mode (x, opt-in).** Only the owner turns it on (directly, or by confirming a game dev's proposal); the
+  named overseer then takes the listed decisions without waiting, each logged `autonomous` on a review list that never
+  blocks work: `npm run decisions -- review | approve | revert (runs the undo) | edit`. Never covered: protected files,
+  gates, the policy file, money, deletes (stale lanes included), visibility, keys. The agent that decided can't review
+  itself. The digest and War Room show the count, the oldest, the revert rate and time saved.
+- **Overseer paperwork (y).** `npm run next-board` (what's next on one screen); `npm run report -- post` sends the
+  status, board or digest to the owner's webhook (`STUDIO_REPORT_WEBHOOK`, in `.env`, never printed or passed to
+  agents) as Discord, Slack or JSON, with one retry; the supervisor posts at `STUDIO_REPORT_HOUR` and when the queue
+  changes a lot. `npm run brief -- builder --write` generates the builder brief from the studio's real rules (the
+  kickoff keeps it current). `--type research` tasks need a linked Sources section to be done.
+- **Self-repair loop (z).** `npm run workaround -- log` records a workaround; the harness also detects hand edits of
+  the board and train queue, `--force`, a refused command re-run 3 times in 10 minutes, a quick supervisor restart and
+  a launcher killed outside the harness. A repeat opens one task in `studio/HARNESS-TASKS.md` for the harness
+  maintainer (never on the board); after an upgrade, one unseen for 7 days is marked "maybe fixed". Digest and
+  `autonomy -- impact` show the trend; `workaround -- export` writes one redacted file for the maintainer.
+
+### Untested
+- Windows: all of it, including the policy commit and signing on a real studio, the detached report child, `.env`
+  with CRLF, write-stamp timing on coarse-mtime filesystems. Real Discord/Slack endpoints (a local stand-in was used).
+
+---
+
 ## [2.70.0] — 2026-11-02
 2.70.0, "use the idle hardware": GPU work beside CPU work, faster Unity runs, a check on asset previews, and lanes
 that fit the disk (from the hardware findings and the overseer's duty 15; P-188 to P-192).
