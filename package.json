@@ -44,6 +44,7 @@
     "experiment": "node harness/experiment.mjs",
     "ref": "node harness/refs.mjs",
     "asset": "node harness/assets.mjs",
+    "logic": "node harness/logic-library.mjs",
     "scout": "node harness/asset-scout.mjs",
     "adapt": "node harness/art-adapt.mjs",
     "rehearse": "node harness/rehearsal.mjs",

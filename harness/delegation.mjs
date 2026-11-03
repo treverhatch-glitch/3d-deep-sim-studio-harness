@@ -46,9 +46,10 @@ export const DELEGATION_REL = 'studio/delegation.json';
 /**
  * The owner actions a delegation can cover. `hold` covers hold and unhold; `upgrade-auto` (2.69.0) the auto-upgrade
  * switch; `asset-review` (2.70.0) answering an asset's preview review (npm run asset -- review, harness/asset-review.mjs);
- * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes).
+ * `janitor-lanes` (2.70.0) deleting the stale lane copies the janitor proposes (npm run janitor -- --lanes --yes);
+ * `logic-library` (2.72.0) confirming a module proposed for the gameplay logic library (npm run logic -- confirm).
  */
-export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes'];
+export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'logic-library'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
 const FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
@@ -69,6 +70,8 @@ export const ACTION_COMMANDS = {
   'asset-review': [],
   // 2.70.0 (w): `npm run janitor -- --lanes --yes --by <agent>` (harness/janitor.mjs); not a task command, so no allow rule.
   'janitor-lanes': [],
+  // 2.72.0 (d): `npm run logic -- confirm <name> --by <agent>` (harness/logic-library.mjs); not a task command, so no allow rule.
+  'logic-library': [],
 };
 
 /**
