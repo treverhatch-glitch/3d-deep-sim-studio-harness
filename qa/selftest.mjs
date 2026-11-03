@@ -4480,6 +4480,15 @@ if (inShard('selftest-2731a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.1 (b): identity settings never from the shared .env (B-60), leftover folders in .lanes/ are not lanes (B-51), and
+// the one-command boot `npm run studio:boot` (B-69) (qa/selftest-2731b.mjs).
+if (inShard('selftest-2731b')) {
+  const dir = copyRepo();
+  const { selftest2731B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731b.mjs')).href);
+  await selftest2731B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

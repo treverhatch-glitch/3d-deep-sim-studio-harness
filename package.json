@@ -66,6 +66,7 @@
     "play:controls": "node qa/controls-play.mjs",
     "play": "node harness/builds.mjs",
     "studio:start": "node harness/supervisor.mjs",
+    "studio:boot": "node harness/boot.mjs",
     "studio:stop": "node harness/supervisor.mjs stop",
     "studio:status": "node harness/supervisor.mjs status",
     "studio:resume": "node harness/supervisor.mjs resume",

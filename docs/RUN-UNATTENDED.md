@@ -5,6 +5,25 @@ started again until someone asked. The supervisor fixes that.
 
 ## Start it
 
+After a restart, one command brings the studio up (2.73.1, B-69):
+
+```bash
+npm run studio:boot                    # Windows PowerShell: npm.cmd run studio:boot
+npm run studio:boot -- --check         # report only: nothing is cleared or started
+npm run studio:boot -- --until 46h     # --until, --window, --budget, --lanes go to the supervisor it starts
+npm run studio:boot -- --shortcut      # also put a "Studio boot" file on the Desktop (Windows: a .cmd running npm.cmd)
+```
+
+It checks node, npm (on Windows it says to type `npm.cmd` when the execution policy blocks `npm.ps1`) and `.env` (no
+session identity in it, a War Room token for the buttons); clears lock and status files whose process is gone
+(`train.lock`, `land.lock`, `unity-train.lock`, `verify-running/full.json`, `train/daemon.json`, a "running"
+`supervisor.json`), one `boot.stale_cleared` event each, never a lane copy or anyone's work; starts the hub and then
+the supervisor, each only when it isn't running already, detached and hidden, with output in `.studio/logs/`; the train
+daemon runs inside the supervisor's pass. Then one card: crew sessions, the train, halts, what needs you, outside agents
+seen lately, lane copies and leftover folders in `.lanes/`, and the War Room address (the link with your token is in
+`.studio/logs/hub.log`). Chat-based orchestrators outside the harness are not restarted. The hub and supervisor never
+get the shell's `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`.
+
 ```bash
 npm run studio:start -- --until 23:00                 # until 23:00 (or --until 8h); runs on its own
 npm run studio:start -- --until 23:00 --foreground    # stays attached to this terminal instead
