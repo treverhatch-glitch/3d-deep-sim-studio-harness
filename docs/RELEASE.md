@@ -86,6 +86,16 @@ which node can't run, so use the line above there.) The guard finds the studio b
    all kept), and commits. Any other conflict refuses and lists the files, writing nothing. It never drops the stash:
    it prints the `git stash drop stash@{n}` to run once the board has every row.
 6. `npm run verify`, then `npm run task -- drain off --by <you>`.
+7. **Roll back (2.71.1):** `npm run upgrade -- --rollback --by <you> [--permission "…"]` returns the studio to the
+   harness it had before the last update (`backup/pre-<version>`) in one step: it reverts that update's merge commit
+   (`git revert -m 1`, never a reset), so work that landed since stays. It goes through the hooks (the main-checkout
+   guard opens for exactly that revert: `STUDIO_UPGRADE_REVERT=<the merge>`, checked against `REVERT_HEAD`), adds
+   `Upgrade-Rollback-Of` and a `Golden-Reason` for goldens that come back as they were, refreshes the lanes, and records
+   an `upgrade.rolled_back` event and an `upgrade-rollback` decision (`npm run decisions`). It refuses with an
+   uncommitted board change (or any uncommitted tracked change), mid-merge or mid-revert, in a lane copy, and on a
+   conflict with later work (the revert is undone and the files named; resolving it is the owner's call). It never
+   deletes a branch. Who may run it is the same as `--merge`. Take the update again with `--merge` (or revert the
+   rollback commit).
 
 ### The upgrade watch (2.69.0)
 

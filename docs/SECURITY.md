@@ -41,7 +41,11 @@
 - `node harness/task.mjs start <ID> --agent <unique>` refuses a task that is already claimed; `done` only works for its owner.
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
-- Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
+- Release with `node harness/lock.mjs release <key> --owner <agent>` when done. (2.71.1, K01) The release is bound to the
+  holder, not just the name: a lock records where it was claimed (`holder`: the lane copy, `STUDIO_LOCK_OWNER`), and a
+  release from someone else (another `STUDIO_LOCK_OWNER`, or another agent's lane copy) is refused naming the holder,
+  unless the holder's launched session is over (its record says ended, or its process is gone). Locks stay cooperative:
+  a person who unsets their name in the main checkout can still release by name.
 - (2.58.5) Claim files, not whole trees: a by-hand claim on a game's folder or source root (`game|web|engine/<name>`,
   `…/<name>/src`) or a folder of more than `STUDIO_LOCK_MAX_FILES` (50) tracked files needs `--wide "<why>"`.
 - (2.59.0) The launcher doesn't hold a too-broad lane (the same rule) as a 6-hour session lock either. In the agent's
@@ -78,6 +82,28 @@
   doesn't count) and `git ls-remote` must confirm the branch and its commit there (a remote-tracking ref moved by hand
   doesn't count). It asks the remote only when a commit is unstamped, and when it can't reach it the ref isn't used
   (the gate fails closed). The output names the ref and commit used, or why it wasn't. Remove it once the branch merges.
+- The gates' environment (2.71.1, S03/T06/G10/G16/T01): `scripts/run-gates.mjs` and `harness/game-gates.mjs` scrub their
+  own environment before anything runs (`harness/gate-env.mjs`): `NODE_OPTIONS` keeps only flags that load no code
+  (memory, warnings, certificate store, DNS order), `npm_config_node_options` goes, every git call runs with
+  `GIT_NO_REPLACE_OBJECTS=1` and without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_GRAFT_FILE`, `GIT_REPLACE_REF_BASE`,
+  `GIT_SHALLOW_FILE` or `GIT_CONFIG*`. Task done, the train, the launcher's verify and the whole-game check start the
+  gates with the same environment. The protected gate fails while the git folder has replace refs (`git replace -l`) or
+  a grafts file: they would show other commits or files than the committed ones in every lane copy. A person who runs
+  `NODE_OPTIONS=--require … npm run verify` by hand preloads code into run-gates itself, which nothing inside it can
+  undo: its checks still run clean, it prints a WARN and the verify record says `nodeOptionsPreload` (out of scope
+  otherwise). `STUDIO_VERIFY_PRELOADED` carries that note from a verify to its detached run. node_modules that don't match
+  package-lock.json (versions, missing or extra packages, a plain file in `.bin` on macOS and Linux) get one WARN line.
+- Paths (2.71.1, G14/W01): the gates read git's file lists with `-z` and `core.quotePath=false` (a non-ASCII name is no
+  longer a quoted `"web/\340…"` that no glob matches), and the protected list matches in any case and spelling
+  (backslashes, `./`, Unicode form, trailing dots and spaces Windows drops): matching more is only stricter.
+- A gate's output (2.71.1, L01/I01): it goes to `.studio/gates/out/<gate>.log` whole (the gate writes the file itself, so
+  nothing is lost when a check exits right after a burst), and run-gates shows at most its first and last
+  `STUDIO_GATE_OUTPUT_LINES` (200) lines, saying how many were left out. A line from a gate that starts like run-gates'
+  own (`[gates] `, `[verify] `, after any spaces or colour codes) is shown as `| [gates] …`, so a check can't print a
+  verdict or a Fix line that reads as the harness's.
+- `npm run upgrade -- --rollback` (2.71.1) sets `STUDIO_UPGRADE_REVERT=<the update's merge commit>` for its own revert
+  commit only; `pre-commit` lets it through the guard only while `REVERT_HEAD` is exactly that commit (docs/RELEASE.md).
 - The main-checkout guard and a harness update (2.60.0, #3): `npm run upgrade -- --merge <ref> --by <person>` sets
   `STUDIO_UPGRADE_MERGE=<the merged commit>` for its own merge commit only; `pre-commit` lets a commit through the
   guard with it only while `MERGE_HEAD` is exactly that commit. Every other hook check still runs, and the merge is
