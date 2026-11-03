@@ -16,6 +16,7 @@ import { checkProtected } from '../harness/approve.mjs';
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const r = checkProtected();
   if (process.argv.includes('--json')) console.log(JSON.stringify(r));
+  if (r.note) console.error(`[protected] note: ${r.note}`);
   if (!r.ok) {
     console.error(`[protected] FAIL ${r.why}:`);
     for (const c of r.changes) console.error(`  ${c.path}`);

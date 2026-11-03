@@ -43,6 +43,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { matchAny } from './merge-lane.mjs';
+import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
+import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
 
 export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const APPROVALS_REL = 'studio/approvals';
@@ -61,11 +63,20 @@ export const DEFAULT_PROTECTED = [
   'studio/delegation.json',
   // 2.71.0: the studio policy (harness/policy.mjs): autonomous mode and the owner's rules; an agent can't turn it on.
   'studio/policy.json',
+  // 2.71.1 (A01b/A01d/A03): the gate runners and what they load, so a lane can't neuter the check that judges it
+  // (harness/gate-trust.mjs and harness/test-toolchain.mjs decide what the gates trust, so they are here too).
+  'scripts/run-gates.mjs', 'harness/gate-spawn.mjs', 'harness/game-gates.mjs', 'harness/silent-green.mjs', 'harness/cartridge.mjs',
+  'harness/hash.mjs', 'harness/merge-lane.mjs', 'harness/gate-trust.mjs', 'harness/test-toolchain.mjs',
+  'scripts/check-sim-*.mjs', 'qa/check-*.mjs', 'qa/fails-before.mjs', 'qa/vertical-slice.mjs', 'qa/run-python.mjs', 'qa/test-golden.py', 'qa/selftest*.mjs',
+  // 2.71.1 (H03/H04/S02): each game's test toolchain (configs, .npmrc); the setup files they name and package.json's
+  // test scripts are added from the base (harness/test-toolchain.mjs).
+  ...TOOLCHAIN_GLOBS,
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
 // (STUDIO_PROTECT_ROOT), so a branch can't weaken the check that judges it.
-const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : REPO_ROOT;
+// 2.71.1 (A16): never in a lane copy (harness/gate-trust.mjs): there the checker judges the lane itself.
+const ROOT = protectRoot(REPO_ROOT) || REPO_ROOT;
 const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 /**
  * 2.58.5 (H-11): how the owner key gets made, said the same way wherever a check finds none. An agent asked to make it
@@ -98,7 +109,8 @@ export function ownerPublicKey(base = null) {
  * still runs), so a sub-agent started without STUDIO_MAIN_ROOT judges against the same local branch. Null elsewhere.
  */
 function studioBranchOfLane(env = process.env) {
-  if (env.STUDIO_MAIN_ROOT) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) return b; }
+  // 2.71.1 (G12): STUDIO_MAIN_ROOT counts only when it is this repository's main worktree, never this checkout itself.
+  if (env.STUDIO_MAIN_ROOT && mainRootTrust(ROOT, env.STUDIO_MAIN_ROOT).ok) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) return b; }
   try {
     const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
     const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8', env: clean }).stdout.trim();
@@ -131,7 +143,9 @@ function studioBranchOfLane(env = process.env) {
  *     stale), unless HEAD is on main itself (there origin/main still names what isn't pushed yet).
  * Which commits count as stamped is unchanged; only the base is.
  */
-export function resolveBase(env = process.env) {
+export function resolveBase(envIn = process.env) {
+  // 2.71.1 (A09, S01): in a lane copy a named base (STUDIO_PROTECT_BASE, GITHUB_BASE_REF) is ignored (gate-trust.mjs).
+  const env = trustedEnv(ROOT, envIn).env;
   const tries = [];
   const decisive = new Set([env.STUDIO_PROTECT_BASE].filter(Boolean));
   if (env.STUDIO_PROTECT_BASE) tries.push(env.STUDIO_PROTECT_BASE);
@@ -176,11 +190,26 @@ export function protectedChanges(base, globs = protectedGlobs(base)) {
   const committed = git(['diff', '--name-only', `${base}...HEAD`]).stdout.split('\n');
   const dirty = git(['status', '--porcelain', '--untracked-files=all']).stdout.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
   const addOnly = addOnlyGlobs(base);
-  const files = [...new Set([...committed, ...dirty].map((f) => f.trim()).filter(Boolean))]
-    .filter((f) => matchAny(f, globs))
+  const all = [...new Set([...committed, ...dirty].map((f) => f.trim()).filter(Boolean))];
+  // 2.71.1 (H03/H04/S02): the setup files the base's test configs name, and package.json's test entries (by key).
+  const tc = toolchainChanges(base, all);
+  const files = all
+    .filter((f) => matchAny(f, [...globs, ...tc.globs]))
     .filter((f) => !(matchAny(f, addOnly) && !inBase(base, f) && fs.existsSync(path.join(ROOT, f))))
     .sort();
-  return files.map((f) => ({ path: f, sha256: blobSha(f) }));
+  return [...files.map((f) => ({ path: f, sha256: blobSha(f) })), ...tc.keyed].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** 2.71.1: harness/test-toolchain.mjs against this checkout (the base by git, the rest from the working tree). */
+function toolchainChanges(base, changed) {
+  try {
+    return toolchainProtected({
+      base, changed,
+      show: (rev, f) => { const r = git(['show', `${rev}:${f}`]); return r.status === 0 ? r.stdout : null; },
+      names: (rev) => git(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', rev, '--', 'game', 'web']).stdout.split('\n').filter(Boolean),
+      now: (f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch { return null; } },
+    });
+  } catch { return { globs: [], keyed: [] }; }
 }
 
 export const changeId = (changes) => crypto.createHash('sha256').update(canonicalBytes(changes.map((c) => [c.path, c.sha256]))).digest('hex');
@@ -201,6 +230,11 @@ export function verifyApproval(doc, publicPem) {
 
 /** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
 export function checkProtected({ env = process.env } = {}) {
+  const note = trustedEnv(ROOT, env).note; // 2.71.1: an override a lane copy can't use is ignored, and said so
+  const r = checkProtectedWith(env);
+  return note ? { ...r, note } : r;
+}
+function checkProtectedWith(env) {
   const b = resolveBase(env);
   if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet; ${OWNER_KEY_HOWTO}` };
   const pub = ownerPublicKey(b.base);
