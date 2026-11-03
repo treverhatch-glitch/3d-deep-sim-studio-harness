@@ -256,6 +256,23 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
   flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
   (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+- Timeout-only reds (2.72.0, `harness/timeout-rerun.mjs`): in any game check (a verify, a train's verify or
+  re-check, task done), a red whose ONLY failures are per-test timeouts (vitest "Test timed out in N ms", jest
+  "Exceeded timeout of N ms", `node --test` `testTimeoutFailure` / "test timed out after", each in a named file, the
+  runner's own failure count agreeing) re-runs just those files, each once ALONE at low load (one test worker), through
+  the check's focus command. Every file green alone: the check counts green, each file labelled `timeout-flake` in
+  `.studio/flakes.jsonl` (a `test.timeout_flake` event, the digest's flake line, `meta.timeoutFlakes` on `gates.run`,
+  `timeout-flake in <check>: [...]` in the log) and counted toward quarantine like any flaky label; the lane is not
+  blamed for it. A file red alone: a real red, naming only the red files. A mixed red (a timeout plus a real failure),
+  output the harness can't read, or more files than `STUDIO_FLAKE_MAX_FILES`: a real red, as before. A file that was
+  not re-run green never counts green. `STUDIO_TIMEOUT_RERUN=off` keeps 2.71.1's behaviour; the flake triager's own
+  runs set it off (they want the raw answer).
+- Sub-ids (2.72.0, `harness/gate-subids.mjs`): a failed gate names its parts: `game:<check>:<test file>` (paths
+  relative to the checkout), `game:<check>` for a check that names no file, `golden:<file>` for a red golden,
+  `<gate>:<file>` for another gate whose output names failing test files, else the gate id. They are in the run's
+  rows (`sub`), the `gates.run` event (`meta.subIds`, beside the unchanged `meta.failed`), a `[gates] <id> failed in:`
+  line, the train's `red` and `verify` events and the hand-back facts ("Failing sub-ids"). `subIdsOf(event)` reads
+  them (falling back to `meta.failed` for older events).
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
