@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { PROOF_KINDS as ENGINE_PROOF_KINDS } from './engine-proof.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -77,6 +78,7 @@ export const GAME_GATE_FIXES = {
   'game:det-math': 'the game\'s sim calls inexact Math (sin, cos, atan2, pow, **, …): use the harness/det-math.mjs functions instead (the mode is "detMath" in the game\'s studio.gates.json)',
   'game:test-rng': 'a test starts a seeded game on the shared Math.random (a setup file routes the sim\'s dice there) or starts one with no seed: the line names the file; call the game\'s isolate call ("isolateCall" in testRandomness) in that test file, or pass a fixed seed (node harness/test-rng.mjs lists them)',
   'game:layout': 'the game\'s exported layout breaks one of its own rules in studio.layout.json (the line names the object and the rule): fix where the view places it, not the rule',
+  'game:state-probe': 'the sim\'s state digest differs from main\'s at the tick named (or the probe failed): if the change is intended, node harness/state-probe.mjs record and commit the baseline with a Golden-Reason trailer; if not, the change broke the sim from that tick on (node harness/replay.mjs --trace finds the step); a failing probe: run its command from the game\'s "stateProbe" yourself',
   'game:none': 'the game declares no checks: add <game>/studio.gates.json with at least one gate (or <game>/sim/qa.mjs)',
   'game:*': 'a check from the game\'s studio.gates.json failed: run its "command" from the repo root, fix the failing tests it names (the [game-gates] failing tests line lists them)',
   'engine:*': 'Godot\'s headless import or tools/gate.gd failed in this project: fix the script on the SCRIPT ERROR / Parse Error line above (STUDIO_GODOT names the Godot binary)',
@@ -117,6 +119,28 @@ export function assetFix(check, file = '<file>') {
 const RATCHET_NEW = /\bratchet\]?:?[^\n]*?\bNEW \d+ hit/;
 export const RATCHET_FIX = 'new hit(s) the game\'s purity-baseline.json doesn\'t list (the "x" lines under NEW): fix each one where it points (the rule says how); the standing hits never fail, and the baseline never grows from a lane, so don\'t edit it: if a hit must stay, hand the task back with a note naming it (a person records it with npm run purity -- baseline --write --by <person>)';
 
+/**
+ * 2.72.0 (c): an engine gate's (Unity, Godot) failure kinds (harness/engine-proof.mjs PROOF_KINDS): the gate prints
+ * `[engine-gate] FAIL <kind>: <plain words>` and this Fix. {engine} is unity or godot. None says to loosen the check.
+ */
+export const ENGINE_FIXES = {
+  'stale-results': 'the results file the gate found was written before this run started (or by another run): this run wrote none. Run the gate again and read the editor\'s log for why it never got to write results (it crashed, was killed, or ran another project); never copy or touch an old results file',
+  'no-results': 'the engine wrote no results file at all: read the editor\'s log (above) for the first error (compile error, licence, crash, wrong project path) and fix that, then run the gate again',
+  'empty-run': 'the run counted 0 tests: the test assembly or folder wasn\'t found, didn\'t compile, or every test is filtered out. Check the test asmdef/folder and the category filter; a project that truly has no tests for a platform says so with "allowEmpty" in its manifest (studio/game.json engines.unity.allowEmpty, studio/godot-unit.json "allowEmpty"), which is the owner\'s file',
+  'compile-error': 'the scripts don\'t compile (the file:line errors above): fix them first; tests that ran next to a compile error ran against an older build and prove nothing',
+  licence: 'the editor has no active licence on this machine: activate one in Unity Hub (CI: the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets); this is a person\'s step, so hand the task back if you can\'t',
+  aborted: 'the editor aborted batch mode (the "Aborting batchmode" line names why: a compile error, a missing method, an exception in an editor script): fix that cause and run the gate again',
+  'exit-mismatch': 'the exit code and the results disagree (a non-zero exit, a kill or a timeout behind green results): read the end of the editor\'s log for what failed after the tests (a crash on exit, a script error) and fix it; a run that didn\'t end cleanly is not a pass',
+  'test-failed': 'a test failed (its name and message are above): fix the code it tests, or the test if it is wrong (a weakened test is caught by the weakened-tests gate)',
+};
+
+/** The Fix text for one engine-gate failure kind. */
+export function engineFix(kind, engine = 'unity') {
+  const t = ENGINE_FIXES[kind] || 'read the [engine-gate] FAIL line above and the editor\'s log for the first error and fix that';
+  const again = engine === 'godot' ? 'npm run godot-unit' : 'node harness/unity.mjs gate <folder>';
+  return `${t}; then run the gate again (${again})`;
+}
+
 const TIMEOUT = /\btimed out\b|\bETIMEDOUT\b|\bSIGTERM\b.*\btimeout\b/i;
 
 const safeId = (id) => String(id).replace(/[^\w.-]/g, '_');
@@ -148,6 +172,9 @@ export function gateFix(gate, { output = '', compact = false } = {}) {
   // 2.67.1 (j): a failing asset check (harness/asset-gate.mjs) names its check and file.
   const asub = text.match(/\[asset-gate\] FAIL (\S+) (\S+?):/m);
   if (asub) return { text: `asset ${asub[1]}: ${assetFix(asub[1], asub[2])}`, source: 'asset-check' };
+  // 2.72.0 (c): an engine gate's failure kind (harness/engine-proof.mjs) picks its own Fix.
+  const esub = text.match(/\[engine-gate\] FAIL ([\w-]+)(?: \((\w+)\))?:/m);
+  if (esub && ENGINE_FIXES[esub[1]]) return { text: `engine ${esub[1]}: ${engineFix(esub[1], esub[2] || 'unity')}; ${rerun}`, source: 'engine-check' };
   if (TIMEOUT.test(text)) return { text: `it timed out, which is often load rather than a wrong result: check what else is running (npm run status), wait for heavy work to finish, ${rerun}; a timeout on a quiet machine is a slow check to fix (${log})`, source: 'timeout' };
   if (GATE_FIXES[id]) return { text: `${GATE_FIXES[id]}; ${rerun}${compact ? ` (full log: ${log})` : ''}`, source: 'table' };
   const kind = gameKindFix(id);
@@ -187,6 +214,8 @@ export function fixCoverage(root = ROOT) {
   for (const g of gates) if (!(typeof g.fix === 'string' && g.fix.trim()) && !GATE_FIXES[g.id]) missing.push(g.id);
   const kinds = gameGateKinds(root);
   for (const k of kinds) if (!GAME_GATE_FIXES[k]) missing.push(k);
+  // 2.72.0 (c): every engine-gate failure kind has its own Fix.
+  for (const k of ENGINE_PROOF_KINDS) if (!ENGINE_FIXES[k]) missing.push(`engine-gate:${k}`);
   return { ok: missing.length === 0, missing, gates: gates.length, kinds };
 }
 

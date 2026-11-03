@@ -39,6 +39,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { withHeavy } from './heavy.mjs';
 import { JOB_KINDS } from './heavy-budget.mjs';
 import { seedLibrary, saveLibrary, cacheLine } from './unity-cache.mjs';
+import { runNonce, freshFile, logSignatures, exitAgrees, proofLine, kindsOf } from './engine-proof.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -196,31 +197,77 @@ export function runSim(dir, { log = console.log } = {}) {
  * 2.70.0 (u): extraArgs (the Accelerator's), category (-testCategory, e.g. "!Graphics"), graphics: true starts the
  * editor with a graphics device (no -nographics), suffix names the results file (TestResults-<platform><suffix>.xml).
  */
-export function runUnityTests(dir, platform, { controlsOut = null, extraArgs = [], category = null, graphics = false, suffix = '', ...heavyOpts } = {}) {
-  const resultsFile = path.join(dir, `TestResults-${platform}${suffix}.xml`);
-  fs.rmSync(resultsFile, { force: true });
-  const args = ['-batchmode', ...(graphics ? [] : ['-nographics']), '-projectPath', dir, '-runTests', '-testPlatform', platform, ...(category ? ['-testCategory', category] : []), '-testResults', resultsFile, '-logFile', '-', ...extraArgs];
+export function runUnityTests(dir, platform, { controlsOut = null, extraArgs = [], category = null, graphics = false, suffix = '', allowEmpty = false, ...heavyOpts } = {}) {
+  // 2.72.0 (c): this run's nonce is in the results file's name, and older results files for this platform are removed
+  // first: no file another run wrote can stand in for this one (harness/engine-proof.mjs).
+  const nonce = runNonce();
+  const resultsFile = path.join(dir, `TestResults-${platform}${suffix}-${nonce}.xml`);
+  removeOldResults(dir, `${platform}${suffix}`);
+  let startedAt = null;
+  const args = (file) => ['-batchmode', ...(graphics ? [] : ['-nographics']), '-projectPath', dir, '-runTests', '-testPlatform', platform, ...(category ? ['-testCategory', category] : []), '-testResults', file, '-logFile', '-', ...extraArgs];
   // Under machine:heavy (2.60.1, B-35); STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
-  const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => spawnSync(unityBin(), args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }), heavyOpts);
+  const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => { startedAt = Date.now(); return spawnSync(unityBin(), args(resultsFile), { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }); }, heavyOpts);
   if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '' };
   const r = h.value;
-  return judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status);
+  return { ...judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status, { startedAt, allowEmpty, signal: r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null) }), resultsFile: rel(resultsFile) };
 }
 
-/** A run's NUnit results and log, judged: { ok, platform, results, problems, log }. unhandled: count exceptions in the log. */
-export function judgeRun(platform, resultsFile, log, status, { unhandled: countUnhandled = true } = {}) {
+/** 2.72.0 (c): remove the results files earlier runs left for one platform (TestResults-<platform>[-<nonce>].xml). */
+function removeOldResults(dir, stem) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return; }
+  const re = new RegExp(`^TestResults-${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-[0-9a-z]+-[0-9a-f]{8})?\\.xml$`);
+  for (const n of names) if (re.test(n)) { try { fs.rmSync(path.join(dir, n), { force: true }); } catch {} }
+}
+
+/**
+ * 2.72.0 (c): may a platform's run count 0 tests? studio/game.json engines.unity "allowEmpty": true (every platform) or a
+ * list of platforms (["PlayMode"]). Default: no (an empty run is not a check).
+ */
+export function unityAllowEmpty(platform, { root = REPO_ROOT } = {}) {
+  let v = null;
+  try { v = JSON.parse(read(path.join(root, 'studio', 'game.json')) || '{}')?.engines?.unity?.allowEmpty; } catch { v = null; }
+  return v === true || (Array.isArray(v) && v.map(String).includes(platform));
+}
+
+/**
+ * A run's NUnit results and log, judged: { ok, platform, results, problems, proof, log }. unhandled: count exceptions in
+ * the log. 2.72.0 (c), harness/engine-proof.mjs: startedAt (the run's start; a results file older than it was not
+ * written by this run), allowEmpty (0 tests may pass), signal (the run was killed). `proof` lists each failure's kind.
+ */
+export function judgeRun(platform, resultsFile, log, status, { unhandled: countUnhandled = true, startedAt = null, allowEmpty = false, signal = null } = {}) {
   const problems = [];
-  if (/No valid Unity Editor license|License is not active|Failed to activate|com\.unity\.editor\.headless/i.test(log)) problems.push('the editor has no active licence on this machine (activate one in Unity Hub; CI needs the UNITY_LICENSE secret)');
-  const res = parseNUnit(read(resultsFile));
-  if (!res) problems.push(`${platform}: no test results written (exit ${status})${/error CS\d+/.test(log) ? `; compile errors: ${[...new Set(log.match(/[^\s]+\.cs\(\d+,\d+\): error CS\d+:[^\n]*/g) || [])].slice(0, 4).join(' | ')}` : ''}`);
-  else {
-    if (!res.total) problems.push(`${platform}: no test ran: an empty run is not a check`);
-    for (const f of res.failures) problems.push(`${platform}: ${f.name} failed: ${f.message}`);
-    if (res.failed && !res.failures.length) problems.push(`${platform}: ${res.failed} test(s) failed`);
+  const proof = [];
+  const add = (kind, text, shown = text) => { proof.push({ kind, text: `${platform}: ${text}` }); if (shown) problems.push(shown); };
+  const sigs = logSignatures(log, 'unity');
+  if (sigs.some((x) => x.kind === 'licence')) add('licence', sigs.find((x) => x.kind === 'licence').text, 'the editor has no active licence on this machine (activate one in Unity Hub; CI needs the UNITY_LICENSE secret)');
+  const fresh = startedAt ? freshFile(resultsFile, startedAt) : { ok: true };
+  let res = parseNUnit(read(resultsFile));
+  if (res && !fresh.ok) {
+    add('stale-results', `the results file ${path.basename(resultsFile)} was not written by this run (${fresh.why}): an earlier run's results don't stand for this one`);
+    res = null;
+  } else if (!res) {
+    const ce = /error CS\d+/.test(log) ? `; compile errors: ${[...new Set(log.match(/[^\s]+\.cs\(\d+,\d+\): error CS\d+:[^\n]*/g) || [])].slice(0, 4).join(' | ')}` : '';
+    add('no-results', `no test results written (exit ${status})`, `${platform}: no test results written (exit ${status})${ce}`);
+    if (ce) proof.push({ kind: 'compile-error', text: `${platform}: ${sigs.find((x) => x.kind === 'compile-error')?.text || 'compile errors'}` });
   }
+  if (res) {
+    if (!res.total && !allowEmpty) add('empty-run', 'no test ran: an empty run is not a check', `${platform}: no test ran: an empty run is not a check`);
+    for (const f of res.failures) add('test-failed', `${f.name} failed: ${f.message}`, `${platform}: ${f.name} failed: ${f.message}`);
+    if (res.failed && !res.failures.length) add('test-failed', `${res.failed} test(s) failed`, `${platform}: ${res.failed} test(s) failed`);
+    // A results file next to compile errors or a batch-mode abort: the log says the run is not what the file says.
+    const ce = sigs.find((x) => x.kind === 'compile-error');
+    if (ce) add('compile-error', `${ce.text} (while a results file was written: the tests may have run against an older build)`, `${platform}: ${ce.text} (while a results file was written: the tests may have run against an older build)`);
+    if (res.total || res.failed) {
+      const ex = exitAgrees(status, res, { signal });
+      if (!ex.ok) add('exit-mismatch', ex.why, `${platform}: ${ex.why}`);
+    }
+  }
+  const ab = sigs.find((x) => x.kind === 'aborted');
+  if (ab) add('aborted', ab.text, `${platform}: ${ab.text}`);
   const unhandled = countUnhandled ? (log.match(/Unhandled exception|NullReferenceException|MissingReferenceException/g) || []).length : 0;
   if (unhandled && res && !res.failed) problems.push(`${platform}: ${unhandled} unhandled exception(s) in the log while the tests passed`);
-  return { ok: problems.length === 0, platform, results: res, problems, log };
+  return { ok: problems.length === 0, platform, results: res, problems, proof, log, ...(res && !res.total && allowEmpty ? { note: `${platform}: 0 tests ran, allowed by studio/game.json engines.unity.allowEmpty` } : {}) };
 }
 
 /**
@@ -462,9 +509,11 @@ export function runPlatform(dir, platform, opts = {}, { split = null, headless =
   if (b.busy) return b;
   const results = sumResults([a.results, b.results]);
   const problems = [...a.problems, ...b.problems].filter((x) => !/: no test ran: /.test(x));
-  if (results && !results.total) problems.push(`${platform}: no test ran: an empty run is not a check`);
+  // 2.72.0 (c): each half's failure kinds, the empty-run one judged over both halves.
+  const proof = [...(a.proof || []), ...(b.proof || [])].filter((x) => x.kind !== 'empty-run');
+  if (results && !results.total && !opts.allowEmpty) { problems.push(`${platform}: no test ran: an empty run is not a check`); proof.push({ kind: 'empty-run', text: `${platform}: no test ran in either start: an empty run is not a check` }); }
   if (!a.results && !b.results) problems.push(`${platform}: no test results written`);
-  return { ok: problems.length === 0, platform, results, problems: [...new Set(problems)], log: `${a.log}\n${b.log}`, graphics: { headless: a.results, device: b.results } };
+  return { ok: problems.length === 0, platform, results, problems: [...new Set(problems)], proof, log: `${a.log}\n${b.log}`, graphics: { headless: a.results, device: b.results } };
 }
 
 // -- no duplicate Edit Mode --
@@ -654,9 +703,12 @@ const removeOneEditorFiles = (dir) => {
  * Assets/StudioHarnessTemp (with a .gitignore of *, so a killed run can't get it committed) and removed after, whatever
  * happens. { ok: both result files written, results: { EditMode, PlayMode } (judged runs), why, log }.
  */
-export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category = null, timeoutMin = 60 } = {}) {
-  const files = { EditMode: path.join(dir, 'TestResults-EditMode.xml'), PlayMode: path.join(dir, 'TestResults-PlayMode.xml') };
-  for (const f of Object.values(files)) fs.rmSync(f, { force: true });
+export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category = null, timeoutMin = 60, allowEmpty = {} } = {}) {
+  // 2.72.0 (c): this run's nonce in both results files' names (harness/engine-proof.mjs).
+  const nonce = runNonce();
+  const files = { EditMode: path.join(dir, `TestResults-EditMode-${nonce}.xml`), PlayMode: path.join(dir, `TestResults-PlayMode-${nonce}.xml`) };
+  for (const p of Object.keys(files)) removeOldResults(dir, p);
+  let startedAt = null;
   removeOneEditorFiles(dir);
   const sdir = path.join(dir, ONE_EDITOR_DIR);
   let r = null;
@@ -666,6 +718,7 @@ export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category
     fs.writeFileSync(path.join(sdir, 'StudioHarnessRunAll.cs'), ONE_EDITOR_SCRIPT);
     fs.writeFileSync(path.join(sdir, 'StudioHarnessTemp.asmdef'), ONE_EDITOR_ASMDEF);
     const args = ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', 'StudioHarnessRunAll.Run', '-studioEditModeResults', files.EditMode, '-studioPlayModeResults', files.PlayMode, ...(category ? ['-studioTestCategory', category] : []), '-logFile', '-', ...extraArgs];
+    startedAt = Date.now();
     r = spawnSync(unityBin(), args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: timeoutMin * 60000, maxBuffer: 256 * 1024 * 1024 });
   } finally {
     removeOneEditorFiles(dir);
@@ -673,7 +726,8 @@ export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category
   const log = `${r?.stdout || ''}${r?.stderr || ''}`;
   const missing = Object.keys(files).filter((p) => !parseNUnit(read(files[p])));
   if (missing.length) return { ok: false, why: `${missing.join(' and ')} results not written (exit ${r?.status ?? '?'}${r?.error ? `, ${r.error.code}` : ''})`, log };
-  return { ok: true, why: 'both results written', log, results: { EditMode: judgeRun('EditMode', files.EditMode, log, r.status, { unhandled: false }), PlayMode: judgeRun('PlayMode', files.PlayMode, log, r.status) } };
+  const sig = r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null);
+  return { ok: true, why: 'both results written', log, results: { EditMode: judgeRun('EditMode', files.EditMode, log, r.status, { unhandled: false, startedAt, allowEmpty: Boolean(allowEmpty.EditMode), signal: sig }), PlayMode: judgeRun('PlayMode', files.PlayMode, log, r.status, { startedAt, allowEmpty: Boolean(allowEmpty.PlayMode), signal: sig }) } };
 }
 
 // -- landing build options --
@@ -707,6 +761,7 @@ export function buildSpeedArgs(env = process.env, { release = false } = {}) {
 export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.log, env = process.env, ...heavyOpts } = {}) {
   const problems = [];
   const flakes = [];
+  const proof = []; // 2.72.0 (c): each failure's kind (harness/engine-proof.mjs), for its own plain-words and Fix line
   const p = simPurity(dir);
   if (!p.ok) return { ok: false, problems: p.problems };
   const pin = checkPin(dir);
@@ -749,12 +804,12 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
     // 2.70.0 (u): STUDIO_UNITY_ONE_EDITOR=on: both modes in one start; anything short of both results: two starts.
     let pre = null;
     if (oneEditor) {
-      const o = runOneEditor(dir, { controlsOut, extraArgs: acc.args, category: split.on ? '!Graphics' : null });
+      const o = runOneEditor(dir, { controlsOut, extraArgs: acc.args, category: split.on ? '!Graphics' : null, allowEmpty: { EditMode: unityAllowEmpty('EditMode'), PlayMode: unityAllowEmpty('PlayMode') } });
       if (o.ok) { pre = o.results; oneEditorUsed = true; log('[gate] one editor start: Edit Mode and Play Mode ran in one editor (STUDIO_UNITY_ONE_EDITOR=on)'); }
       else log(`[gate] note: the one editor start (STUDIO_UNITY_ONE_EDITOR=on) didn't write both results (${o.why}): falling back to one start per mode (its log: ${saveLog('unity-one-editor.log', o.log)})`);
     }
     for (const platform of todo) {
-      const opts = { controlsOut: platform === 'PlayMode' ? controlsOut : null, extraArgs: acc.args, ...heavyOpts };
+      const opts = { controlsOut: platform === 'PlayMode' ? controlsOut : null, extraArgs: acc.args, allowEmpty: unityAllowEmpty(platform), ...heavyOpts };
       let r = runPlatform(dir, platform, opts, { split, headless: pre?.[platform] || null, log });
       if (retryablePlayMode(r) && retryOn(env)) {
         const first = r;
@@ -776,6 +831,8 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
       // 2.70.0 (u): a passing Edit Mode run on a clean tree is remembered, so the next gate on that tree skips it.
       if (platform === 'EditMode' && r.ok) recordEditModePass(dir, r.results, { tree });
       problems.push(...r.problems);
+      if (!r.ok) proof.push(...(r.proof || []));
+      if (r.note) log(`[unity] note: ${r.note}`);
       if (r.problems.some((x) => /licence/.test(x))) break;
     }
     if (!problems.length) {
@@ -785,7 +842,7 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
     } else cache = { seed };
   }, { ...heavyOpts, ...(split.on ? { vramGb: graphicsVramGb() } : {}) });
   if (h.busy) return { ok: false, busy: true, codeOnly: co, accelerator: acc, problems: [`the editor's tests did not run: ${h.busy}`] };
-  return { ok: problems.length === 0, problems, flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split, oneEditor: oneEditor ? (oneEditorUsed ? 'used' : 'fell back') : 'off' };
+  return { ok: problems.length === 0, problems, proof, flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split, oneEditor: oneEditor ? (oneEditorUsed ? 'used' : 'fell back') : 'off' };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
@@ -832,7 +889,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
     // 2.70.0 (u): the summary line says whether the cache server was on and whether Edit Mode was reused.
     const tail = `${r.accelerator ? `; ${r.accelerator.on ? 'cache server on' : 'cache server off'}` : ''}${r.editMode ? `; Edit Mode reused (${r.editMode.how === 'dotnet' ? 'passed with .NET in this gate' : 'passed earlier on this tree'})` : ''}${r.oneEditor === 'used' ? '; one editor start' : r.oneEditor === 'fell back' ? '; one editor start fell back to two' : ''}`;
-    if (!r.ok) { if (tail) console.error(`[unity] FAIL summary${tail}`); fail(r.problems, r.busy ? 3 : 1); }
+    if (!r.ok) {
+      if (tail) console.error(`[unity] FAIL summary${tail}`);
+      // 2.72.0 (c): one plain-words line and one Fix line per kind of failure (harness/engine-proof.mjs, gate-fix.mjs).
+      if (r.proof?.length) {
+        const { engineFix } = await import('./gate-fix.mjs');
+        for (const k of kindsOf(r.proof)) { console.error(proofLine(r.proof.find((x) => x.kind === k), 'unity')); console.error(`[engine-gate] Fix: ${engineFix(k, 'unity')}`); }
+      }
+      fail(r.problems, r.busy ? 3 : 1);
+    }
     // 2.67.1 (k): a pass on retry is green, with a warning naming the flaky tests.
     for (const f of r.flakes || []) console.log(`[unity] WARN flaky ${f.platform} test(s): ${f.tests.join(', ') || '?'} failed once, passed on retry (.studio/unity-flakes.jsonl)`);
     const which2 = pf ? `${pf === 'EditMode' ? 'Edit Mode' : 'Play Mode'}` : 'Edit Mode and Play Mode';
