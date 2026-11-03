@@ -81,14 +81,16 @@ export async function gamedevPass(now = Date.now(), { events = readRecentEvents(
     try {
       const { sessions, stopAgent } = await import('./agent.mjs');
       const { observe, logTokens, logStall, readStall } = await import('./stall.mjs');
-      for (const s of sessions().filter((x) => x.running)) {
+      // 2.73.2 (B-72): a session whose agent has already exited (its launcher is handing its work back) is left to the
+      // launcher, and a stall end is logged and acted on once per session (logStall returns false after the first).
+      for (const s of sessions().filter((x) => x.running && !x.ending)) {
         let v = readStall(s.agent)?.verdict;
         const fresh = readStall(s.agent)?.startedAt === s.startedAt && (now - Date.parse(s.lastBeat || 0)) < 5 * 60000;
         if (!fresh) {
           let log = ''; try { log = fs.readFileSync(path.join(REPO_ROOT, s.log || ''), 'utf8').slice(-2000000); } catch {}
           v = observe(s, { tokens: logTokens(log), cwd: s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : REPO_ROOT, now, events });
         }
-        if (v?.stalled && !s.stalled) { logStall(s, v); stopAgent(s, { by: 'watchdog' }); actions.push({ kind: 'stall', msg: `ended ${s.agent}: ${v.why}` }); }
+        if (v?.stalled && !s.stalled && logStall(s, v, { by: 'watchdog', now })) { stopAgent(s, { by: 'watchdog' }); actions.push({ kind: 'stall', msg: `ended ${s.agent}: ${v.why}` }); }
       }
     } catch (e) { actions.push({ kind: 'error', msg: `stall step: ${e.message}` }); }
   }

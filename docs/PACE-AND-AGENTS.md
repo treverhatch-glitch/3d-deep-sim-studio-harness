@@ -141,7 +141,7 @@ npm run agent -- logs audio-1                        # its output so far
   - Narrative: writer
   - Release & Store: release-manager
   - Devlog: devlogger
-  - Engine Transfer: engine-porter
+  - Engine Bay: engine-porter, engine-worker (and any session on an engine track)
   - Dev Hacker Lab: dev-hacker (docs/DEV-HACKER.md)
 - The run report's **Staffing** section lists who was hired, by whom, into which room, how long they worked, and their tokens.
 - In a frozen clone, `STUDIO_CLAUDE_BYPASS=1` lets claude agents run without permission prompts.

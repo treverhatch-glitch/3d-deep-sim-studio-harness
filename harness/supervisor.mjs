@@ -588,8 +588,12 @@ function ramNote(ram, now) {
   emitEvent({ type: 'supervisor.ram_low', agent: 'supervisor', to: 'producer', status: 'warn', msg: `Not starting agents: ${ram.why}`, meta: { freeGb: ram.freeGb, floorGb: ram.floorGb } });
 }
 
-function hubUp(port) {
-  return fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok, () => false);
+/** 2.74.0 (B-70): one keeper pass for the hub (harness/hub-keeper.mjs); returns the hub child to keep. Never throws. */
+async function keepHubUp(state, port, child) {
+  try {
+    const { keepHub } = await import('./hub-keeper.mjs');
+    return (await keepHub({ state, port, child, loopMs: LOOP_MS })).child;
+  } catch { return child; }
 }
 
 async function main(argv) {
@@ -613,7 +617,6 @@ async function main(argv) {
   const state = { pid: process.pid, identity: selfIdentity(), status: 'running', startedAt: Date.now(), opts: { ...opts, until: opts.until ? new Date(opts.until).toISOString() : null }, sessions: 0, doneAtStart: parseNextQueue().done.length, hubDown: [] };
   const port = Number(process.env.HUB_PORT || 3847);
   let hub = null;
-  let downSince = null;
   const save = (extra = {}) => fs.writeFileSync(STATUS_FILE, `${JSON.stringify({ ...state, ...extra, startedAt: new Date(state.startedAt).toISOString(), lastLoop: new Date().toISOString(), tasksDone: parseNextQueue().done.length - state.doneAtStart }, null, 2)}\n`);
   emitEvent({ type: 'supervisor.start', agent: 'supervisor', to: 'producer', msg: `Supervisor running${opts.until ? ` until ${new Date(opts.until).toTimeString().slice(0, 5)}` : ''}${opts.window ? `, window ${opts.window}` : ''}${opts.budget ? `, budget ${budgetArg}` : ''}${opts.lanes ? `, lanes ${opts.lanes}` : ''}` });
   console.log(`[supervisor] running (pid ${process.pid}). npm run studio:stop to stop; agents finish their current task.`);
@@ -640,22 +643,14 @@ async function main(argv) {
   };
   process.on('SIGINT', () => finish('stopped by hand'));
   process.on('SIGTERM', () => finish('stopped by the system'));
+  // 2.73.2 (B-74): `npm run studio:reload-env` is answered within seconds; every pass also re-reads .env when it changed.
+  const { reloadEnvIfChanged, watchReloadRequests } = await import('./env-reload.mjs');
+  watchReloadRequests({ by: 'supervisor' });
   const tick = async () => {
     if (stopping) return;
-    // 1. The hub: up, or restart it and remember how long it was down.
-    if (opts.hub && !(await hubUp(port))) {
-      if (!downSince) downSince = Date.now();
-      if (!hub || hub.exitCode !== null) {
-        const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'hub.log'), 'a');
-        hub = spawn(process.execPath, [path.join(REPO_ROOT, 'hub', 'server.mjs')], { windowsHide: true, cwd: REPO_ROOT, stdio: ['ignore', log, log], env: process.env });
-      }
-    } else if (downSince) {
-      if (Date.now() - downSince > LOOP_MS) {
-        state.hubDown.push({ from: new Date(downSince).toISOString(), to: new Date().toISOString() });
-        emitEvent({ type: 'supervisor.hub_restarted', agent: 'supervisor', to: 'producer', msg: `The War Room hub was down from ${new Date(downSince).toTimeString().slice(0, 5)} to ${new Date().toTimeString().slice(0, 5)}; restarted` });
-      }
-      downSince = null;
-    }
+    reloadEnvIfChanged({ by: 'supervisor', ack: true });
+    // 1. The hub: up, or restart it (with backoff) and remember how long it was down and why (2.74.0, harness/hub-keeper.mjs).
+    if (opts.hub) hub = await keepHubUp(state, port, hub);
     // 2-4. Work.
     const r = await supervise(opts, state).catch((err) => ({ started: [], why: [`error: ${err.message}`] }));
     state.sessions += r.started.length;
@@ -802,7 +797,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (argv[0] === 'status') {
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}` : 'The supervisor has not run here yet: npm run studio:start');
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

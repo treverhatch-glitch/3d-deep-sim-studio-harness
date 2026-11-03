@@ -217,9 +217,27 @@ export function idleVerdict({ role, startedAt, idleSince }, now = Date.now(), en
   return m >= min ? { exit: true, why: `no task claimed for ${Math.round(m)} min (limit ${min})` } : { exit: false, idleMin: Math.round(m) };
 }
 
-/** Log a stall once. */
-export function logStall(session, v) {
-  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role } });
+/**
+ * Log a stall once per session. 2.73.2 (B-72): the launcher's heartbeat and the watchdog's pass (the hub's, every few
+ * minutes) both end a stalled session; the watchdog's guard read the listing's "stalled" (a heartbeat-age flag, not
+ * this verdict), so "Ended builder-s122" was logged and the kill tried on every pass, 4 times in 6 minutes. The first
+ * caller records the end in the session's stall state (ended: { at, by, kind, why }, for this startedAt) and logs it;
+ * every later call for the same session returns false and logs nothing. by: 'launcher' or 'watchdog'.
+ */
+export function logStall(session, v, { by = 'launcher', now = Date.now() } = {}) {
+  const prev = readStall(session.agent);
+  const same = prev && prev.startedAt === session.startedAt;
+  if (same && prev.ended) return false;
+  const ended = { at: new Date(now).toISOString(), by, kind: v.kind || null, why: String(v.why || '').slice(0, 300) };
+  try { writeStall(session.agent, { ...(same ? prev : { agent: session.agent, role: session.role, startedAt: session.startedAt }), ended }); } catch { /* the log below still goes out */ }
+  emitEvent({ type: 'session.stall', agent: 'watchdog', to: 'producer', task: session.task || undefined, status: 'warn', msg: `Ended ${session.agent} (${session.role}${session.task ? `, ${session.task}` : ''}): ${v.why}`, meta: { kind: v.kind, target: session.agent, role: session.role, by } });
+  return true;
+}
+
+/** 2.73.2 (B-72): the stall end recorded for this session (logStall), or null. */
+export function stallEndOf(agent, startedAt) {
+  const st = readStall(agent);
+  return st && st.startedAt === startedAt && st.ended ? st.ended : null;
 }
 
 /*

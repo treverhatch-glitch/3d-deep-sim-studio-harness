@@ -44,6 +44,7 @@ import { startTask, completeTask, addTask, pauseTask, reopenTask, NEXT_FILE, rea
 import { loadDotEnv, markCooldown } from '../harness/route.mjs';
 import { buildPreparedBrief } from '../harness/prepare-brief.mjs';
 import { buildHudState, buildAgentDetail, setDivision, listDivisions } from '../harness/hud.mjs';
+import { warRoomState } from '../harness/war-room.mjs';
 import { acceptCause } from '../harness/causes.mjs';
 import { serveBuildFile, buildPagePath } from '../harness/builds.mjs';
 import { watchPass } from '../harness/watch.mjs';
@@ -64,6 +65,7 @@ import { runIntake } from '../harness/intake.mjs';
 import { readConsent, setConsent, markShown, describeConsent, QUESTION as DATA_QUESTION, DETAIL as DATA_DETAIL } from '../harness/data-consent.mjs';
 import { addIdea, routeIdea } from '../harness/ideas.mjs';
 import { checkSession as phoneSession, parseCookieSid, login as phoneLogin, sessionCookie, LOGIN_PAGE_HTML, readPhone } from '../harness/phone.mjs';
+import { claimPairCode, pairFor, unpair, pairCookie, clearCookie, cookieToken as pairCookieToken, personEnv, pairCli } from './pair.mjs';
 
 loadDotEnv();
 
@@ -129,7 +131,7 @@ function hostAllowed(req) {
 
 function isReadAuthorized(req, url) {
   if (isLoopback(HOST)) return true;
-  return tokenMatches(headerToken(req)) || tokenMatches(url.searchParams.get('token')) || tokenMatches(cookieToken(req)) || phoneSession(parseCookieSid(req.headers.cookie)).ok;
+  return tokenMatches(headerToken(req)) || tokenMatches(url.searchParams.get('token')) || tokenMatches(cookieToken(req)) || phoneSession(parseCookieSid(req.headers.cookie)).ok || Boolean(pairedOf(req));
 }
 // 2.30d (H3): a phone logged in with a pairing code (npm run phone -- on) reads with its session cookie and
 // writes with that cookie plus the per-session X-Phone-CSRF header. Off unless the dev turned it on.
@@ -294,11 +296,15 @@ function readBody(req, limit = 8e6) {
       if (data.length > limit) req.destroy();
     });
     req.on('end', () => {
+      let body = {};
       try {
-        resolve(data ? JSON.parse(data) : {});
+        body = data ? JSON.parse(data) : {};
       } catch {
-        resolve({});
+        body = {};
       }
+      // A paired browser acts as the person who paired it, whatever name the page sent.
+      if (req.hubPair && body && typeof body === 'object' && !Array.isArray(body)) body.by = req.hubPair.by;
+      resolve(body);
     });
   });
 }
@@ -312,7 +318,28 @@ function sendJson(res, status, obj) {
 }
 
 // Writes need the token in a header. A cookie or query string is never enough for a write (no CSRF).
+// 2.74.0 (B-70): or a paired browser (hub/pair.mjs): its HttpOnly SameSite=Strict cookie, from this machine (a loopback
+// address), on a request that carries the X-Hub-Paired header (a header a cross-site form can't send) and, when the
+// browser names an origin, a loopback one. Such a write is done by the paired person: req.hubPair, and body.by is theirs.
+const loopbackPeer = (req) => /^(127\.|::1$|::ffff:127\.)/.test(String(req.socket?.remoteAddress || ''));
+function originLoopback(req) {
+  const o = String(req.headers.origin || '');
+  if (!o) return true;
+  try { const u = new URL(o); return isLoopback(u.hostname.replace(/^\[|\]$/g, '')) || isLoopback(u.hostname); } catch { return false; }
+}
+/** The pairing this request's cookie belongs to, from this machine only, or null. */
+export function pairedOf(req) {
+  if (!loopbackPeer(req)) return null;
+  try { return pairFor(pairCookieToken(req.headers.cookie)); } catch { return null; }
+}
+function pairedWrite(req) {
+  if (headerToken(req) || String(req.headers['x-hub-paired'] || '') !== '1' || !originLoopback(req)) return false;
+  const p = pairedOf(req);
+  if (p) req.hubPair = p;
+  return Boolean(p);
+}
 function isWriteAuthorized(req) {
+  if (pairedWrite(req)) return true;
   return tokenMatches(headerToken(req)) || phoneWrite(req);
 }
 
@@ -327,6 +354,49 @@ function runCommandCapture(cmd, cwd = REPO_ROOT, timeoutMs = 25000) {
       });
     });
   });
+}
+
+/**
+ * 2.74.0: run a harness command exactly as a terminal would (`node harness/<file> …`, no shell), for an Act button, so the
+ * button and `npm run …` share one code path and the page shows the command's own words. { ok, code, text }.
+ */
+export function runHarnessCli(rel, args, { env = process.env, timeoutMs = 120000 } = {}) {
+  return new Promise((resolve) => {
+    let out = '';
+    let child;
+    try {
+      child = spawn(process.execPath, [path.join(REPO_ROOT, rel), ...args], { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (err) {
+      resolve({ ok: false, code: 1, text: `Couldn't start ${rel}: ${err.message}` });
+      return;
+    }
+    const t = setTimeout(() => { try { child.kill(); } catch {} }, timeoutMs);
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    child.on('error', (err) => { out += `\n${err.message}`; });
+    child.on('close', (code, signal) => {
+      clearTimeout(t);
+      const text = out.replace(/\x1b\[[0-9;]*m/g, '').trim().slice(-2000) || (code === 0 ? 'Done.' : `${rel} ended with ${signal ? `signal ${signal}` : `exit ${code}`} and said nothing.`);
+      resolve({ ok: code === 0, code: code ?? 1, text });
+    });
+  });
+}
+
+/** The Act buttons that run a CLI command: the command each one is, by the person pressing it. */
+export function actCommand(action, { task = '', why = '', by = '' } = {}) {
+  const id = String(task || '');
+  const needTask = ['release', 'hold', 'unhold', 'unpark'].includes(action);
+  if (needTask && !/^[A-Z]+-\d+$/.test(id)) return { error: 'Which task? (a task id like T-12)' };
+  const note = String(why || '').trim().slice(0, 300);
+  switch (action) {
+    case 'resume': return { rel: 'harness/supervisor.mjs', args: ['resume', '--by', by, ...(note ? ['--why', note] : [])], cli: `npm run studio:resume -- --by ${by}` };
+    case 'release': return { rel: 'harness/task.mjs', args: ['train', 'release', id, '--by', by], cli: `npm run task -- train release ${id} --by ${by}` };
+    case 'hold': return { rel: 'harness/task.mjs', args: ['hold', id, '--by', by, '--why', note || 'held from the War Room'], cli: `npm run task -- hold ${id} --by ${by} --why "…"` };
+    case 'unhold': return { rel: 'harness/task.mjs', args: ['unhold', id, '--by', by], cli: `npm run task -- unhold ${id} --by ${by}` };
+    case 'unpark': return { rel: 'harness/task.mjs', args: ['unpark', id, '--by', by], cli: `npm run task -- unpark ${id} --by ${by}` };
+    case 'revoke': return { rel: 'harness/delegation.mjs', args: ['revoke', '--by', by], cli: `npm run delegate -- revoke --by ${by}` };
+    default: return { error: `Unknown action ${action}: one of resume, release, hold, unhold, unpark, revoke` };
+  }
 }
 
 async function executeTacticalMacro(macro, args = {}) {
@@ -506,10 +576,58 @@ async function executeTacticalMacro(macro, args = {}) {
   return { ok: false, output: `Unknown macro: ${macro}` };
 }
 
+// 2.74.0 (B-70): this hub's boot, and the page's version, for the War Room's reconnect (reload only when the page changed).
+export const BOOT_ID = crypto.randomBytes(6).toString('hex');
+const BOOT_AT = new Date().toISOString();
+let pageVer = { mtime: 0, v: '' };
+export function pageVersion() {
+  try {
+    const f = path.join(__dirname, 'v3', 'index.html');
+    const m = fs.statSync(f).mtimeMs;
+    if (m !== pageVer.mtime) pageVer = { mtime: m, v: crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex').slice(0, 12) };
+  } catch {}
+  return pageVer.v;
+}
+// Several tabs poll /api/hud every 2 s: one build serves them all for a second. A build that takes over 2 s blocks every
+// request (the supervisor's /health check among them), so it is logged with its time (B-70's "hub down" evidence).
+let hudCache = { at: 0, v: null };
+async function hudCached() {
+  const t0 = Date.now();
+  if (hudCache.v && t0 - hudCache.at < 1000) return hudCache.v;
+  const v = buildHudState();
+  // 2.74.0: the refreshed War Room's panels and rooms (harness/war-room.mjs).
+  try { v.warRoom = await warRoomState(v); } catch (err) { v.warRoom = { error: err.message }; }
+  const ms = Date.now() - t0;
+  if (ms > 2000) hubLog('slow', `building /api/hud took ${ms} ms (the hub answers nothing else meanwhile)`);
+  hudCache = { at: Date.now(), v };
+  return v;
+}
+
+/** 2.74.0 (B-70): one line per hub exit, crash or slow build in .studio/logs/hub-exit.log ({ at, pid, bootId, kind, cause }). */
+export const HUB_EXIT_LOG = path.join(STUDIO_STATE_DIR, 'logs', 'hub-exit.log');
+export function hubLog(kind, cause, extra = {}) {
+  try {
+    fs.mkdirSync(path.dirname(HUB_EXIT_LOG), { recursive: true });
+    try { if (fs.statSync(HUB_EXIT_LOG).size > 512 * 1024) fs.renameSync(HUB_EXIT_LOG, `${HUB_EXIT_LOG}.1`); } catch {}
+    fs.appendFileSync(HUB_EXIT_LOG, `${JSON.stringify({ at: new Date().toISOString(), pid: process.pid, bootId: BOOT_ID, kind, cause: String(cause).slice(0, 2000), ...extra })}\n`);
+  } catch { /* logging never takes the hub down */ }
+}
+
 export function createHubServer() {
   // The build page the Arcade opened last (for a bundled game's root-relative files, below).
   let lastPlayed = null;
-  const server = http.createServer(async (req, res) => {
+  // 2.74.0 (B-70): a request handler that throws answers 500 with the error and is logged; it never ends the hub
+  // (an async handler's error was an unhandled rejection, which ends Node by default).
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((err) => {
+      hubLog('error', `${req.method} ${String(req.url || '').split('?')[0]}: ${err?.stack || err}`);
+      try {
+        if (!res.headersSent) sendJson(res, 500, { ok: false, error: `The hub hit an error: ${err?.message || err}` });
+        else res.end();
+      } catch { /* the socket is gone */ }
+    });
+  });
+  const handle = async (req, res) => {
     const url = new URL(req.url || '/', 'http://hub.local');
 
     if (!hostAllowed(req)) {
@@ -527,6 +645,23 @@ export function createHubServer() {
       if (!r.ok) return sendJson(res, r.retryAfterSec ? 429 : 401, { ok: false, error: r.error, retryAfterSec: r.retryAfterSec || undefined });
       res.setHeader('Set-Cookie', sessionCookie(r.sid, new Date(r.expiresAt)));
       return sendJson(res, 200, { ok: true, csrf: r.csrf, expiresAt: r.expiresAt });
+    }
+    // 2.74.0: pairing a browser (hub/pair.mjs). The code is the proof, so these come before the token check; this
+    // machine only (a loopback address), whatever the bind.
+    if (url.pathname === '/pair' && req.method === 'GET') {
+      if (!loopbackPeer(req)) return sendJson(res, 403, { ok: false, error: 'pair from the browser on this machine' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+      return res.end(PAIR_PAGE_HTML);
+    }
+    if (url.pathname === '/pair/claim' && req.method === 'POST') {
+      if (!loopbackPeer(req) || !originLoopback(req) || String(req.headers['x-hub-paired'] || '') !== '1') return sendJson(res, 403, { ok: false, error: 'pair from the browser on this machine' });
+      const body = await readBody(req, 4096);
+      const r = claimPairCode(String(body.code || ''), { ua: String(req.headers['user-agent'] || '') });
+      if (!r.ok) return sendJson(res, r.retryAfterSec ? 429 : 401, { ok: false, error: r.message, retryAfterSec: r.retryAfterSec || undefined });
+      res.setHeader('Set-Cookie', pairCookie(r.token));
+      emitEvent({ type: 'hub.paired', agent: r.pair.by, msg: `${r.pair.by} paired a browser with the War Room (${r.pair.id})`, meta: { id: r.pair.id } });
+      noteHuman(r.pair.by);
+      return sendJson(res, 200, { ok: true, by: r.pair.by, id: r.pair.id, next: `This browser is paired as ${r.pair.by}: the buttons work here and act as ${r.pair.by}.` });
     }
     if (!isReadAuthorized(req, url)) {
       return sendJson(res, 401, { ok: false, error: 'token required when the HUB listens beyond localhost' });
@@ -552,11 +687,39 @@ export function createHubServer() {
       return res.end();
     }
 
+    // 2.74.0: who this browser is paired as (the page shows it; nothing secret).
+    if (url.pathname === '/api/pair/me' && req.method === 'GET') {
+      const p = pairedOf(req);
+      return sendJson(res, 200, p ? { ok: true, paired: true, by: p.by, id: p.id, at: p.at } : { ok: true, paired: false });
+    }
+    if (url.pathname === '/api/pair/forget' && req.method === 'POST') {
+      const tok = pairCookieToken(req.headers.cookie);
+      const r = req.hubPair ? unpair({ token: tok }) : { ok: false, message: 'This browser isn\'t paired.' };
+      res.setHeader('Set-Cookie', clearCookie());
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: 'This browser is no longer paired: the buttons are off here until you pair it again.' } : { ok: false, error: r.message });
+    }
+    // 2.74.0: one Act button = one harness command, run as the person (a paired browser's name, or by for a token).
+    if (url.pathname === '/api/act' && req.method === 'POST') {
+      const body = await readBody(req);
+      const by = String(body.by || '').trim().slice(0, 60);
+      if (!by) return sendJson(res, 400, { ok: false, error: 'Who is acting? Pair this browser (npm run hub -- pair --by <your name>) or send by.' });
+      const c = actCommand(String(body.action || ''), { task: body.task, why: body.why, by });
+      if (c.error) return sendJson(res, 400, { ok: false, error: c.error });
+      noteHuman(by);
+      const r = await runHarnessCli(c.rel, c.args, { env: req.hubPair ? personEnv(process.env) : process.env });
+      broadcastSnapshot();
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: r.text, cli: c.cli } : { ok: false, error: r.text, cli: c.cli });
+    }
+
     if (url.pathname === '/health' && req.method === 'GET') {
       ensureEventsFile();
       return sendJson(res, 200, {
         ok: true,
         status: 'healthy',
+        bootId: BOOT_ID,
+        pid: process.pid,
+        startedAt: BOOT_AT,
+        page: pageVersion(),
         uptimeSec: Math.round(process.uptime()),
         eventsFile: path.relative(REPO_ROOT, eventsFile),
         zeroToken: true,
@@ -820,11 +983,12 @@ export function createHubServer() {
       const by = String(body.by || 'war-room-human').slice(0, 60);
       noteHuman(by);
       if (body.action !== 'resume') return sendJson(res, 400, { ok: false, error: 'action must be resume' });
-      fs.mkdirSync(path.join(REPO_ROOT, '.studio'), { recursive: true });
-      fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'supervisor-resume'), by);
-      emitEvent({ type: 'supervisor.resume_asked', agent: by, to: 'supervisor', msg: `${by} asked the supervisor to try again` });
+      // 2.74.0 (B-70): the same code as `npm run studio:resume -- --by <name>` (harness/supervisor.mjs resumeCli): its
+      // checks, its decision-log record and its own words, success or refusal (it used to write the file and say yes).
+      const c = actCommand('resume', { by, why: body.why });
+      const r = await runHarnessCli(c.rel, c.args, { env: req.hubPair ? personEnv(process.env) : process.env });
       broadcastSnapshot();
-      return sendJson(res, 200, { ok: true, next: 'The supervisor tries again on its next pass (within a minute).' });
+      return sendJson(res, r.ok ? 200 : 400, r.ok ? { ok: true, next: r.text, cli: c.cli } : { ok: false, error: r.text, cli: c.cli });
     }
     if (url.pathname === '/api/causes' && req.method === 'POST') {
       const body = await readBody(req);
@@ -1065,13 +1229,14 @@ export function createHubServer() {
       }
     }
     if (url.pathname === '/api/hud' && req.method === 'GET') {
-      return sendJson(res, 200, buildHudState());
+      return sendJson(res, 200, await hudCached());
     }
 
     // The War Room v3 is the home page. The old React War Room is retired to /legacy for one release.
     if ((url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/v3' || url.pathname === '/v3/') && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(fs.readFileSync(path.join(__dirname, 'v3', 'index.html'), 'utf8'));
+      // The page knows which version it is, so after a hub restart it reloads itself only when the page changed.
+      return res.end(fs.readFileSync(path.join(__dirname, 'v3', 'index.html'), 'utf8').replace('__HUB_PAGE_VERSION__', pageVersion()));
     }
 
     if (url.pathname === '/api/state' && req.method === 'GET') {
@@ -1306,7 +1471,7 @@ export function createHubServer() {
     // Without this a dist build plays in npm run play:browser and shows a black screen in the Arcade.
     if (req.method === 'GET' && lastPlayed && Date.now() - lastPlayed.at < 12 * 3600000 && !url.pathname.startsWith('/api/') && serveBuildFile(lastPlayed.id, url.pathname.slice(1), res)) return;
     sendJson(res, 404, { error: 'Not found', path: url.pathname });
-  });
+  };
 
   // RFC 6455 WebSocket Upgrade for Terminal & Real-Time State Stream
   server.on('upgrade', (req, socket) => {
@@ -1409,6 +1574,37 @@ export function createHubServer() {
   return server;
 }
 
+// The pairing page: a code box (filled from ?code=), one button, the answer. No token on the page, ever.
+const PAIR_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pair this browser</title>
+<style>:root{color-scheme:light dark;--bg:#f4f6f8;--ink:#17202a;--panel:#fff;--line:#c8d0d9;--go:#147a42;--bad:#b3261e}@media (prefers-color-scheme:dark){:root{--bg:#1d2530;--ink:#e8edf2;--panel:#252f3c;--line:#3a4757;--go:#3ddc84;--bad:#ff8a8f}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}main{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;max-width:30rem;width:calc(100% - 32px)}
+h1{margin:0 0 8px;font-size:1.4rem}input{font:600 1.4rem ui-monospace,monospace;letter-spacing:.12em;width:100%;padding:8px 10px;border:2px solid var(--line);border-radius:8px;background:transparent;color:inherit;text-transform:uppercase}button{margin-top:12px;font:inherit;font-weight:600;padding:8px 16px;border-radius:8px;border:0;background:var(--go);color:#fff;cursor:pointer}
+#msg{min-height:1.5em;margin-top:12px}#msg.bad{color:var(--bad)}#msg.ok{color:var(--go)}code{font-family:ui-monospace,monospace}</style></head>
+<body><main><h1>Pair this browser with the War Room</h1><p>In your own terminal: <code>npm run hub -- pair --by &lt;your name&gt;</code>. Enter the code it prints. The buttons then work in this browser and act as you.</p>
+<form id="f"><label for="code">Pairing code</label><input id="code" autocomplete="one-time-code" maxlength="12" required><button>Pair</button></form><p id="msg" role="status" aria-live="polite"></p></main>
+<script>const q=new URL(location.href);const c=q.searchParams.get('code');if(c){document.getElementById('code').value=c;history.replaceState(null,'',q.pathname)}
+const msg=document.getElementById('msg');async function go(e){e&&e.preventDefault();msg.className='';msg.textContent='Pairing…';try{const r=await fetch('/pair/claim',{method:'POST',headers:{'Content-Type':'application/json','X-Hub-Paired':'1'},body:JSON.stringify({code:document.getElementById('code').value})});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw new Error(d.error||('The hub answered '+r.status));msg.className='ok';msg.textContent=d.next+' Opening the War Room…';setTimeout(()=>location.replace('/?skin=ops'),900)}catch(err){msg.className='bad';msg.textContent=err.message}}
+document.getElementById('f').addEventListener('submit',go);if(c)go();</script></body></html>`;
+
+/** 2.74.0 (B-70): where this hub is ({ pid, bootId, port, host, startedAt }), for the supervisor's keeper and studio:status. */
+export const HUB_STATE_FILE = path.join(STUDIO_STATE_DIR, 'hub.json');
+
+/** Log why the hub ends: a signal, an uncaught error, the port in use, or a plain exit. Kept running after a stray rejection. */
+function watchExit(server) {
+  let said = false;
+  const end = (kind, cause, code) => {
+    if (!said) { said = true; hubLog(kind, cause, { code }); }
+    process.exit(code);
+  };
+  process.on('uncaughtException', (err) => end('exit', `uncaught exception: ${err?.stack || err}`, 1));
+  process.on('unhandledRejection', (err) => hubLog('error', `unhandled rejection (the hub kept running): ${err?.stack || err}`));
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+    try { process.on(sig, () => end('exit', `stopped by ${sig}${sig === 'SIGINT' ? ' (Ctrl+C, or the supervisor stopping)' : ''}`, 0)); } catch { /* not on this platform */ }
+  }
+  process.on('exit', (code) => { if (!said) { said = true; hubLog('exit', `exited with code ${code}`, { code }); } });
+  server.on('error', (err) => end('exit', err?.code === 'EADDRINUSE' ? `port ${PORT} is in use (another hub, or another program): ${err.message}` : `server error: ${err?.stack || err}`, err?.code === 'EADDRINUSE' ? 2 : 1));
+}
+
 export function startHubCli() {
   const bind = assertSafeBind(HOST);
   if (!bind.ok) {
@@ -1419,13 +1615,17 @@ export function startHubCli() {
     console.warn('[hub] HUB_TOKEN is unset, short, or a placeholder: the page is read-only. Run `npm run setup` to generate one.');
   }
   const server = createHubServer();
+  watchExit(server);
   server.listen(PORT, HOST, () => {
+    try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(HUB_STATE_FILE, `${JSON.stringify({ pid: process.pid, bootId: BOOT_ID, port: PORT, host: HOST, startedAt: BOOT_AT }, null, 2)}\n`); } catch {}
+    hubLog('start', `listening on ${HOST}:${PORT}`);
     console.log('====================================================================');
     console.log(' 3D DEEP-SIM WORKFLOW UI HUB — ZERO-TOKEN MISSION CONTROL WAR ROOM');
     console.log('====================================================================');
     // The token is printed in the link so a person can open it and use the buttons straight away (it
     // leaves the address bar on load and stays in that tab). It is in .env on this machine anyway.
-    console.log(` War Room                      : http://localhost:${PORT}/${hubToken() ? `?token=${hubToken()}  (open this link: the buttons work in that tab)` : ' (read-only: set HUB_TOKEN in .env to use the buttons)'}`);
+    // 2.74.0: the token is no longer printed: a person pairs their browser once (npm run hub -- pair --by <name>).
+    console.log(` War Room                      : http://localhost:${PORT}/  (buttons: npm run hub -- pair --by <your name>, once per browser)`);
     console.log(` Studio view                   : http://localhost:${PORT}/?skin=tycoon`);
     console.log(` Retired War Room (one release): http://localhost:${PORT}/legacy`);
     console.log(` WebSocket Terminal & Stream   : ws://localhost:${PORT}/ws`);
@@ -1473,5 +1673,10 @@ export function startHubCli() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  startHubCli();
+  const sub = process.argv[2];
+  if (['pair', 'pairs', 'unpair'].includes(sub)) {
+    const r = await pairCli(process.argv.slice(2));
+    (r.code ? console.error : console.log)(r.text);
+    process.exit(r.code);
+  } else startHubCli();
 }

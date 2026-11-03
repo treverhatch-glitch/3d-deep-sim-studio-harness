@@ -16,6 +16,10 @@
  *   node harness/unity.mjs version <folder>
  *   node harness/unity.mjs accelerator [<folder>]   2.70.0: does STUDIO_UNITY_ACCELERATOR answer (a TCP connect)
  *   gate and build exit 3 when machine:heavy (or free memory) stayed busy and the editor didn't run.
+ *   2.73.2 (e, B-73): gate also exits 3, "NOT RUN <kind>", for an infrastructure abort (the editor ran out of memory,
+ *   was ended from outside, couldn't start, had no licence, or aborted batch mode before it wrote results; or free RAM
+ *   stayed under STUDIO_UNITY_MIN_FREE_GB): nothing was tested, so it is never a FAIL of the game's tests. A compile
+ *   error or a failing test is always a FAIL (exit 1).
  *
  * The folder is a Unity project (ProjectSettings/ProjectVersion.txt): engine/<game> for an engine track, or
  * game/<slug> for an adopted Unity game. The editor: STUDIO_UNITY (its full path) or `unity` on the PATH.
@@ -39,7 +43,7 @@ import { REPO_ROOT, emitEvent } from './event.mjs';
 import { withHeavy } from './heavy.mjs';
 import { JOB_KINDS } from './heavy-budget.mjs';
 import { seedLibrary, saveLibrary, cacheLine } from './unity-cache.mjs';
-import { runNonce, freshFile, logSignatures, exitAgrees, proofLine, kindsOf } from './engine-proof.mjs';
+import { runNonce, freshFile, logSignatures, exitAgrees, proofLine, kindsOf, infraAbort, notRunLine } from './engine-proof.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const num = (v, d) => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -162,7 +166,8 @@ export function underHeavy(label, fn, { heavy = true, heavyRoot = REPO_ROOT, log
     // 2.70.0 (u): vramGb (the Graphics split's device run) claims the GPU area; unset: the unity kind's own claim.
     return { value: withHeavy(heavyRoot, label, fn, { log, kind: 'unity', ...(vramGb !== undefined ? { vramGb } : {}) }) };
   } catch (err) {
-    if (err.code === 'HEAVY_BUSY') return { busy: String(err.message || err).replace(/^\[heavy\]\s*/, '') };
+    // 2.73.2 (e, B-73): floor: free RAM stayed under STUDIO_UNITY_MIN_FREE_GB (else the lock stayed busy).
+    if (err.code === 'HEAVY_BUSY') return { busy: String(err.message || err).replace(/^\[heavy\]\s*(NOT RUN\s*)?/, ''), floor: Boolean(err.floor) };
     throw err;
   }
 }
@@ -207,9 +212,9 @@ export function runUnityTests(dir, platform, { controlsOut = null, extraArgs = [
   const args = (file) => ['-batchmode', ...(graphics ? [] : ['-nographics']), '-projectPath', dir, '-runTests', '-testPlatform', platform, ...(category ? ['-testCategory', category] : []), '-testResults', file, '-logFile', '-', ...extraArgs];
   // Under machine:heavy (2.60.1, B-35); STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
   const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => { startedAt = Date.now(); return spawnSync(unityBin(), args(resultsFile), { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }); }, heavyOpts);
-  if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '' };
+  if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '', notRun: { kind: h.floor ? 'ram-floor' : 'busy', text: `${platform}: ${h.busy}` } };
   const r = h.value;
-  return { ...judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status, { startedAt, allowEmpty, signal: r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null) }), resultsFile: rel(resultsFile) };
+  return { ...judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status, { startedAt, allowEmpty, signal: r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null), spawnError: r.error || null }), resultsFile: rel(resultsFile) };
 }
 
 /** 2.72.0 (c): remove the results files earlier runs left for one platform (TestResults-<platform>[-<nonce>].xml). */
@@ -235,7 +240,7 @@ export function unityAllowEmpty(platform, { root = REPO_ROOT } = {}) {
  * the log. 2.72.0 (c), harness/engine-proof.mjs: startedAt (the run's start; a results file older than it was not
  * written by this run), allowEmpty (0 tests may pass), signal (the run was killed). `proof` lists each failure's kind.
  */
-export function judgeRun(platform, resultsFile, log, status, { unhandled: countUnhandled = true, startedAt = null, allowEmpty = false, signal = null } = {}) {
+export function judgeRun(platform, resultsFile, log, status, { unhandled: countUnhandled = true, startedAt = null, allowEmpty = false, signal = null, spawnError = null } = {}) {
   const problems = [];
   const proof = [];
   const add = (kind, text, shown = text) => { proof.push({ kind, text: `${platform}: ${text}` }); if (shown) problems.push(shown); };
@@ -265,6 +270,13 @@ export function judgeRun(platform, resultsFile, log, status, { unhandled: countU
   }
   const ab = sigs.find((x) => x.kind === 'aborted');
   if (ab) add('aborted', ab.text, `${platform}: ${ab.text}`);
+  // 2.73.2 (e, B-73): an infrastructure abort (out of memory, killed, no licence, couldn't start, aborted before any
+  // results) is NOT RUN: nothing was tested. Never when the log shows a compile error or a test failed (those stay FAIL).
+  const infra = infraAbort({ log, status, signal, spawnError, results: res, timedOut: signal === 'timeout', engine: 'unity' });
+  if (infra) {
+    const text = `${platform}: ${infra.text}`;
+    return { ok: false, notRun: { kind: infra.kind, text }, platform, results: res, problems: [`${platform}: not run (${infra.kind}): ${infra.text}`], proof: [{ kind: infra.kind, text, notRun: true }], log };
+  }
   const unhandled = countUnhandled ? (log.match(/Unhandled exception|NullReferenceException|MissingReferenceException/g) || []).length : 0;
   if (unhandled && res && !res.failed) problems.push(`${platform}: ${unhandled} unhandled exception(s) in the log while the tests passed`);
   return { ok: problems.length === 0, platform, results: res, problems, proof, log, ...(res && !res.total && allowEmpty ? { note: `${platform}: 0 tests ran, allowed by studio/game.json engines.unity.allowEmpty` } : {}) };
@@ -503,10 +515,11 @@ export function runPlatform(dir, platform, opts = {}, { split = null, headless =
   const splitHere = Boolean(split?.on && split.platforms.includes(platform));
   if (!splitHere) return headless || runUnityTests(dir, platform, opts);
   const a = headless || runUnityTests(dir, platform, { ...opts, category: '!Graphics' });
-  if (a.busy || a.problems.some((x) => /licence/.test(x)) || (!a.results && compileErrors(a.log))) return a;
+  if (a.busy || a.notRun || a.problems.some((x) => /licence/.test(x)) || (!a.results && compileErrors(a.log))) return a;
   log(`[gate] ${platform}: the Graphics tests run in their own start with a graphics device (the rest ran with -nographics)`);
   const b = runUnityTests(dir, platform, { ...opts, category: 'Graphics', graphics: true, suffix: '-Graphics' });
-  if (b.busy) return b;
+  // 2.73.2 (e): the device half not run: a red headless half still stands as the FAIL; else the platform is not run.
+  if (b.busy || b.notRun) return a.ok ? b : a;
   const results = sumResults([a.results, b.results]);
   const problems = [...a.problems, ...b.problems].filter((x) => !/: no test ran: /.test(x));
   // 2.72.0 (c): each half's failure kinds, the empty-run one judged over both halves.
@@ -797,6 +810,7 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
   const oneEditor = isOn(env.STUDIO_UNITY_ONE_EDITOR) && todo.includes('EditMode') && todo.includes('PlayMode');
   let oneEditorUsed = false;
   let cache = null;
+  const notRuns = []; // 2.73.2 (e, B-73): platforms an infrastructure abort stopped (NOT RUN, apart from problems)
   // One machine:heavy hold for every platform (no other heavy job slips in between Edit Mode and Play Mode).
   const h = underHeavy(`unity gate ${todo.join('+')} (${rel(dir) || '.'})`, () => {
     const seed = seedLibrary(dir, { mainRoot, env });
@@ -811,6 +825,12 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
     for (const platform of todo) {
       const opts = { controlsOut: platform === 'PlayMode' ? controlsOut : null, extraArgs: acc.args, allowEmpty: unityAllowEmpty(platform), ...heavyOpts };
       let r = runPlatform(dir, platform, opts, { split, headless: pre?.[platform] || null, log });
+      if (r.notRun) {
+        // 2.73.2 (e, B-73): not run is not red: no retry, no FAIL line, no Edit Mode record; the next platform isn't started.
+        notRuns.push({ ...r.notRun, platform, proof: r.proof || [] });
+        log(`[gate] NOT RUN ${platform}: ${r.notRun.text.replace(`${platform}: `, '')} (not a failure of the work)`);
+        break;
+      }
       if (retryablePlayMode(r) && retryOn(env)) {
         const first = r;
         const logs = [saveLog(`unity-${platform}-try1.log`, first.log)];
@@ -835,13 +855,16 @@ export function gate(dir, { platforms = ['EditMode', 'PlayMode'], log = console.
       if (r.note) log(`[unity] note: ${r.note}`);
       if (r.problems.some((x) => /licence/.test(x))) break;
     }
-    if (!problems.length) {
+    if (!problems.length && !notRuns.length) {
       const saved = saveLibrary(dir, { mainRoot, env });
       if (saved.status !== 'off' && saved.status !== 'skipped') log(cacheLine(saved, 'after the green run'));
       cache = { seed, saved };
     } else cache = { seed };
   }, { ...heavyOpts, ...(split.on ? { vramGb: graphicsVramGb() } : {}) });
-  if (h.busy) return { ok: false, busy: true, codeOnly: co, accelerator: acc, problems: [`the editor's tests did not run: ${h.busy}`] };
+  if (h.busy) return { ok: false, busy: true, notRun: { kind: h.floor ? 'ram-floor' : 'busy', text: h.busy }, codeOnly: co, accelerator: acc, problems: [`the editor's tests did not run: ${h.busy}`] };
+  // 2.73.2 (e, B-73): a real FAIL on one platform wins over a later platform that didn't run; else not run, not red.
+  const notRun = !problems.length && notRuns.length ? { kind: notRuns[0].kind, text: notRuns.map((x) => x.text).join('; '), platforms: notRuns.map((x) => x.platform) } : null;
+  if (notRun) return { ok: false, notRun, problems: notRuns.map((x) => `not run (${x.kind}): ${x.text}`), proof: notRuns.flatMap((x) => x.proof), flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split };
   return { ok: problems.length === 0, problems, proof, flakes, codeOnly: co, cache, editMode: reused, accelerator: acc, split, oneEditor: oneEditor ? (oneEditorUsed ? 'used' : 'fell back') : 'off' };
 }
 
@@ -886,9 +909,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const t0 = Date.now();
     const r = gate(dir, { platforms: pf ? [pf] : undefined, heavyRoot });
     // 2.65.0: the uniform job.done (harness/jobs.mjs) for the editor's tests.
-    try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy ? 3 : 1, result: r.ok ? 'pass' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
+    try { (await import('./jobs.mjs')).jobDone({ kind: 'unity-test', id: folder, code: r.ok ? 0 : r.busy || r.notRun ? 3 : 1, result: r.ok ? 'pass' : r.notRun ? 'not-run' : r.busy ? 'busy' : 'fail', ms: Date.now() - t0, tail: (r.problems || []).join(' | ') }); } catch {}
     // 2.70.0 (u): the summary line says whether the cache server was on and whether Edit Mode was reused.
     const tail = `${r.accelerator ? `; ${r.accelerator.on ? 'cache server on' : 'cache server off'}` : ''}${r.editMode ? `; Edit Mode reused (${r.editMode.how === 'dotnet' ? 'passed with .NET in this gate' : 'passed earlier on this tree'})` : ''}${r.oneEditor === 'used' ? '; one editor start' : r.oneEditor === 'fell back' ? '; one editor start fell back to two' : ''}`;
+    if (!r.ok && r.notRun) {
+      // 2.73.2 (e, B-73): not run (exit 3): one NOT RUN line per kind and its Fix line; never "[engine-gate] FAIL".
+      const { engineFix } = await import('./gate-fix.mjs');
+      const shown = r.proof?.length ? r.proof : [{ kind: r.notRun.kind, text: r.notRun.text }];
+      for (const k of kindsOf(shown)) { console.error(notRunLine(shown.find((x) => x.kind === k), 'unity')); console.error(`[engine-gate] Fix: ${engineFix(k, 'unity')}`); }
+      console.error(`[unity] NOT RUN the editor's tests: not run: ${r.notRun.text} (exit 3: not a failure of the work; run the gate again later)`);
+      process.exit(3);
+    }
     if (!r.ok) {
       if (tail) console.error(`[unity] FAIL summary${tail}`);
       // 2.72.0 (c): one plain-words line and one Fix line per kind of failure (harness/engine-proof.mjs, gate-fix.mjs).

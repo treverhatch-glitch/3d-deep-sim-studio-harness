@@ -37,6 +37,7 @@
  */
 import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings } from './agy-allow.mjs';
@@ -73,7 +74,8 @@ import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
-import { observe, logTokens, logStall, idleVerdict, readStall } from './stall.mjs';
+import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf } from './stall.mjs';
+import { reloadEnvIfChanged } from './env-reload.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
@@ -300,8 +302,57 @@ export function sessions() {
   return fs.readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.json')).map((f) => readJson(path.join(AGENTS_DIR, f))).filter(Boolean).map((s) => {
     const running = s.status === 'running' && recordAlive(s);
     const beatAge = s.lastBeat ? Math.round((Date.now() - Date.parse(s.lastBeat)) / 60000) : null;
-    return { ...s, running, beatAgeMin: beatAge, stalled: running && beatAge !== null && beatAge > STALL_BEAT_MIN };
+    const ending = running ? wrappingUp(s) : null;
+    // 2.73.2 (B-72): an ending session's heartbeat stops while its launcher hands its work back: not a stall.
+    return { ...s, running, beatAgeMin: beatAge, stalled: running && !ending && beatAge !== null && beatAge > STALL_BEAT_MIN, ...(ending ? { ending } : {}) };
   });
+}
+
+/**
+ * 2.73.2 (B-72): the agent's process has ended and its (live) launcher is wrapping up: it saves the work, may close the
+ * task itself (autoFinish runs the gates, minutes with no heartbeat) and records the end. The watchdog ended
+ * builder-s122, its process was gone, but the record still said running with a heartbeat going stale, so the listing
+ * said STALLED, the watchdog logged "Ended" on every pass and the watch pass raised a stall task. { since, why } or null.
+ * The launcher marks it at once (agentExited); a launcher that hasn't yet (or can't) is seen by its agent's pid being
+ * gone. Bounded: past STUDIO_DONE_RUNNING_MAX_MIN (90) minutes it is a stall again (a hung launcher).
+ */
+export function wrappingUp(s, now = Date.now(), env = process.env) {
+  if (!s || s.status !== 'running' || s.starting || !s.pid || !s.supervisor || s.supervisor === s.pid) return null;
+  const mark = s.agentExited && (!s.agentExited.startedAt || !s.startedAt || s.agentExited.startedAt === s.startedAt) ? s.agentExited : null;
+  if (!mark && pidAlive(s.pid, s.identity?.pid)) return null;
+  const since = mark?.at || s.lastBeat || s.startedAt || null;
+  const max = Number(env.STUDIO_DONE_RUNNING_MAX_MIN ?? 90);
+  if (Number.isFinite(max) && max > 0 && since && now - Date.parse(since) > max * 60000) return null;
+  return { since, why: mark ? `its agent exited${mark.kind && mark.kind !== 'exit' ? ` (${mark.kind})` : ''}; the launcher is handing its work back` : `its agent's process (pid ${s.pid}) is gone; the launcher is handing its work back` };
+}
+
+/** 2.73.2 (B-72): the launcher notes at once that its agent exited (before its clean-up, which can take minutes). */
+function markAgentExited(agent, startedAt, info) {
+  try {
+    const cur = readJson(sessionFile(agent));
+    if (!cur || cur.status !== 'running' || (cur.startedAt && cur.startedAt !== startedAt)) return;
+    writeAtomic(sessionFile(agent), JSON.stringify({ ...cur, agentExited: { startedAt, ...info }, lastBeat: new Date().toISOString() }, null, 2), { fsync: false });
+  } catch { /* the listing still sees the agent's pid gone */ }
+}
+
+/**
+ * 2.73.2 (B-72): one agent.session.end per session, whoever records it (the launcher's clean-up, the watch pass's
+ * markGone, a stop's endAsDead). An atomic create of .studio/session-ends/<agent>.<hash of startedAt>: true for the
+ * first caller only. Markers older than a week are pruned.
+ */
+export function claimSessionEnd(agent, startedAt, by = 'launcher') {
+  if (!agent || !startedAt) return true;
+  const dir = path.join(STUDIO_STATE_DIR, 'session-ends');
+  const name = `${String(agent).replace(/[^\w.-]/g, '_')}.${crypto.createHash('sha1').update(String(startedAt)).digest('hex').slice(0, 12)}`;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), `${JSON.stringify({ agent, startedAt, by, at: new Date().toISOString(), pid: process.pid })}\n`, { flag: 'wx' });
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    return true; // can't tell: record it, as before
+  }
+  try { const old = Date.now() - 7 * 86400000; for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (fs.statSync(p).mtimeMs < old) fs.rmSync(p, { force: true }); } } catch {}
+  return true;
 }
 
 /**
@@ -351,8 +402,9 @@ export function markGone() {
   for (const s of sessions()) {
     if (s.status !== 'running' || s.running) continue;
     const at = new Date().toISOString();
-    fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
-    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
+    fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
+    // 2.73.2 (B-72): one agent.session.end per session (claimSessionEnd), whichever pass or launcher records it.
+    if (claimSessionEnd(s.agent, s.startedAt, 'watch')) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
@@ -468,7 +520,7 @@ export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommi
 export function exitCause({ code, exit = {}, stop = null } = {}) {
   const base = { code: code ?? null, signal: exit.signal || null, at: exit.at || new Date().toISOString(), ...(Number.isFinite(exit.ranMs) ? { ranSec: Math.round(exit.ranMs / 1000) } : {}) };
   if (stop) return { ...base, kind: 'stopped', by: stop.by, why: stop.kind || 'stop' };
-  if (exit.killedBy?.kind) return { ...base, kind: exit.killedBy.kind, by: 'launcher', why: String(exit.killedBy.why || '').slice(0, 200) };
+  if (exit.killedBy?.kind) return { ...base, kind: exit.killedBy.kind, by: exit.killedBy.by || 'launcher', why: String(exit.killedBy.why || '').slice(0, 200) };
   if (exit.spawnError) return { ...base, kind: 'spawn-error', why: String(exit.spawnError).slice(0, 200) };
   if (exit.signal) return { ...base, kind: 'signal', why: `killed by ${exit.signal} from outside the launcher` };
   return { ...base, kind: 'exit' };
@@ -577,8 +629,10 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const cause = exitCause({ code, exit, stop });
+  // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
+  const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -588,7 +642,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
   // 2.66.0 (c): Claude Code's permission_denials, harvested into .studio/denials.jsonl (redacted; candidates only, never allowed).
   try { recordDenials({ log, logFile: s0.log ? path.join(REPO_ROOT, s0.log) : null, task: s0.task || tasks[0] || null, agent, role }); } catch { /* evidence, never a blocker */ }
   const s = readJson(sessionFile(agent)) || {};
-  fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: new Date().toISOString(), code, reason, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
+  fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: s.status === 'ended' && s.endedAt ? s.endedAt : new Date().toISOString(), code, reason, exitCause: cause, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
   fs.rmSync(stopFile(agent), { force: true });
   return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
 }
@@ -974,6 +1028,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
   const beat = setInterval(() => {
+    // 2.73.2 (B-74): limits changed in .env since this launcher started (STUDIO_STALL_MIN, ...) apply from this beat.
+    reloadEnvIfChanged({ by: `launcher ${agent}` });
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
     const wip = wipSummary(agent);
@@ -1009,9 +1065,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       killedBy ||= { kind: 'idle', why: idle.why, at: new Date().toISOString() };
       stopChild(child);
     }
-    if (stall?.stalled && !s.stalled) {
-      logStall({ ...session, ...s }, stall);
-      killedBy ||= { kind: 'stall', why: stall.why, stallKind: stall.kind, at: new Date().toISOString() };
+    // 2.73.2 (B-72): logged once per session (logStall: not again when the watchdog logged it first); this launcher
+    // ends its own agent once.
+    if (stall?.stalled && !killedBy) {
+      logStall({ ...session, ...s }, stall, { by: 'launcher' });
+      killedBy = { kind: 'stall', why: stall.why, stallKind: stall.kind, at: new Date().toISOString() };
       stopChild(child);
     }
     // 2.31.0: the task this session holds used its budget across sessions: end the session, the task stays parked.
@@ -1046,6 +1104,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     child.on('exit', (c, sig) => { exitSignal = sig || null; exitedAt = new Date().toISOString(); resolve(c ?? 1); });
   });
   clearInterval(beat);
+  // 2.73.2 (B-72/B-76): the watchdog's stall end (another process: logStall recorded it) is a stall end here too, so
+  // the halt rule doesn't count it as the tool failing; and the record says at once that the agent has exited, so the
+  // listing, the HUD and the watch pass see it ending while the clean-up below runs (it can take minutes).
+  if (!killedBy) { const st = stallEndOf(agent, startedAt); if (st && st.by !== 'launcher') killedBy = { kind: 'stall', why: st.why, stallKind: st.kind, at: st.at, by: st.by }; }
+  markAgentExited(agent, startedAt, { at: exitedAt || new Date().toISOString(), code, signal: exitSignal, kind: killedBy?.kind || (spawnError ? 'spawn-error' : exitSignal ? 'signal' : 'exit') });
   fs.closeSync(out);
   const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
   // B-37 (2.60.1): a failed aider session (nim, aider) leaves evidence: the last lines of its output in a file beside
@@ -1206,7 +1269,9 @@ export function killVerdict(s, cur, now = Date.now()) {
   const recorded = starting ? s.identity?.supervisor : s.identity?.pid;
   const who = starting ? 'its launcher (the agent was still starting)' : 'the agent';
   // While the agent runs, its launcher hands the work back when the agent ends (listing check: no OS query).
-  const launcherLive = !starting && Boolean(s.supervisor) && s.supervisor !== s.pid && fresh && pidAlive(s.supervisor, s.identity?.supervisor);
+  // 2.73.2 (B-72): a launcher wrapping up after its agent exited (no heartbeat while it hands the work back) is live too:
+  // a stop then must not hand the same work back a second time beside it.
+  const launcherLive = !starting && Boolean(s.supervisor) && s.supervisor !== s.pid && (fresh || Boolean(wrappingUp(s, now))) && pidAlive(s.supervisor, s.identity?.supervisor);
   const base = { pid, target: starting ? 'launcher' : 'agent', beatMin, cmd: cur?.cmd || null, end: starting || !launcherLive };
   if (!pid) return { ...base, kill: false, end: true, kind: 'gone', why: 'it has no process on record' };
   if (!cur) return { ...base, kill: false, kind: 'gone', why: `${starting ? 'its launcher' : 'its process'} (pid ${pid}) is gone` };
@@ -1262,7 +1327,7 @@ function endAsDead(s, v, by) {
   const reason = v.kill ? what : `ended by ${by}: ${v.why}`;
   // 2.58.3 (N1): a stop someone asked for (agent stop, pause, stop all) is a stop, not a crash.
   const stop = stopMark(s.agent, cur);
-  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: new Date().toISOString(), reason, ...(stop ? { stoppedBy: stop.by } : {}) }, null, 2));
+  fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...cur, running: undefined, stalled: undefined, beatAgeMin: undefined, ending: undefined, status: 'ended', endedAt: new Date().toISOString(), reason, ...(stop ? { stoppedBy: stop.by } : {}) }, null, 2));
   fs.rmSync(stopFile(s.agent), { force: true });
   const mine = listLocks().filter((l) => l.owner === s.agent);
   const held = mine.filter((l) => l.key.startsWith('task:')).map((l) => l.key.slice(5));
@@ -1272,7 +1337,7 @@ function endAsDead(s, v, by) {
   }
   for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
   if (cur.copy) removeLaneCopy(s.agent, { keepBranch: unmerged(cur.copy.branch) > 0, ifIdle: true });
-  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: s.task || cur.task || held[0] || claimedSince(s.agent, s.startedAt) || undefined, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  if (claimSessionEnd(s.agent, cur.startedAt || s.startedAt, by)) emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: s.task || cur.task || held[0] || claimedSince(s.agent, s.startedAt) || undefined, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: stop ? 'stopped' : 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: String(what || '').slice(0, 300), log: s.log || null, extra: { role: s.role || null, handed: held } });
   if (v.kind === 'reused' || v.kind === 'stale') {
     emitEvent({ type: 'agent.pid_reused', agent: by, status: 'warn', msg: `${s.agent}: ${v.why}; its session is marked ended${held.length ? ` and ${held.join(', ')} handed back` : ''}`, meta: { session: s.agent, pid: v.pid, target: v.target, verified: v.kind === 'reused', now: v.cmd || undefined } });
@@ -1821,7 +1886,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'allow') process.exit(allowCli(argv.slice(1))); // P-067: the owner enrols agy's allow-rules (harness/agy-allow.mjs)
   const list = sessions();
   if (!list.length) console.log('No agents started by the launcher yet. npm run agent -- start --role builder --agent builder-1 --tool claude --model claude-sonnet-5-5');
-  for (const s of list) console.log(`${s.running ? (s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago` : `  ${s.reason || ''}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
+  for (const s of list) console.log(`${s.running ? (s.ending ? 'ending ' : s.stalled ? 'STALLED' : 'running') : 'ended  '}  ${s.agent.padEnd(18)} ${String(s.role).padEnd(14)} ${s.tool}/${s.model}${s.task ? `  ${s.task}` : ''}${s.running ? `  heartbeat ${s.beatAgeMin} min ago${s.ending ? ` (${s.ending.why})` : ''}` : `  ${s.reason || ''}`}${s.running && s.copy ? `  own copy ${s.copy.dir} (${s.copy.branch})` : ''}`);
   const others = otherAgents();
   for (const o of others.list) console.log(`outside  pid ${String(o.pid).padEnd(12)} not started by the launcher: ${o.command}`);
   if (others.list.length) console.log('  Agents outside the launcher keep no heartbeat and don\'t see Stop all until they next run a harness command. Prefer npm run agent -- hire.');

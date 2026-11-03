@@ -33,6 +33,7 @@ import { readTricks } from './tricks.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
 import { readTrack } from './engine.mjs';
+import { roomFor as assignmentRoom, cachedProxy, ASSIGNMENT_ROOMS } from './war-room.mjs';
 
 /** The engine track for the Arcade: which engine, its web export if built, its last frames. */
 function engineInfo() {
@@ -265,6 +266,9 @@ export function buildHudState() {
   });
   const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task);
   const originOf = Object.fromEntries(added.filter((e) => e.meta?.origin).map((e) => [e.task, e.meta.origin]));
+  // 2.74.0: a task on another version of the game (--track engine:<name>) seats its agent in Engine Bay.
+  const trackOf = Object.fromEntries(added.filter((e) => e.meta?.track).map((e) => [e.task, String(e.meta.track)]));
+  const proxyAgent = cachedProxy()?.agent || '';
   for (const k of ['inProgress', 'backlog']) queue[k] = queue[k].map((t) => (originOf[t.id] ? { ...t, origin: originOf[t.id] } : t));
   const dayAgo = now - 24 * 3600 * 1000;
 
@@ -327,7 +331,8 @@ export function buildHudState() {
       ...a,
       role,
       // Seated by the division it was hired into, then by role.
-      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || roomForRole(role, divs) || 'engineering',
+      // 2.74.0: then the Studio floor's assignment rooms (Rail Yard, Watchtower, Engine Bay: harness/war-room.mjs roomFor).
+      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || assignmentRoom({ name: a.name, role: sess?.role || role || '', track: trackOf[a.task] || '', proxyAgent }) || roomForRole(role, divs) || 'engineering',
       // The launcher's heartbeat is the truth for agents it started.
       status: sess?.running ? (sess.stalled ? 'stalled' : 'working') : stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       launched: Boolean(sess?.running),
@@ -337,6 +342,23 @@ export function buildHudState() {
       idleMin,
     };
   });
+  // 2.75.0: who is on the Studio floor. An agent whose session ended (agent.session.end, a stop, an idle exit, its task
+  // done or handed back with nothing held) leaves the floor; so does one silent STUDIO_FLOOR_IDLE_MIN (30) minutes with
+  // no claim. A session the launcher is wrapping up shows as "ending". People, scripts and the Producer's seat stay.
+  // The Control room's list is unchanged (it shows the last 24 hours); onFloor only drives the Studio floor.
+  const floorIdle = Number(process.env.STUDIO_FLOOR_IDLE_MIN) > 0 ? Number(process.env.STUDIO_FLOOR_IDLE_MIN) : 30;
+  const ENDED = /^(agent\.session\.end|agent\.stopped|agent\.paused|agent\.idle_exit|agent\.budget_stop|task\.done|task\.paused|task\.not_done|task\.forced)$/;
+  for (const a of agentList) {
+    if (a.kind === 'human' || a.kind === 'script' || a.placeholder || a.room === 'production') continue;
+    const sess = launchedNow.find((x) => x.agent === a.name);
+    const holds = (a.holds || []).some((k) => k.startsWith('task:'));
+    if (sess?.running) { if (sess.ending) a.presence = 'ending'; continue; }
+    const endedAt = sess && sess.status === 'ended' ? Date.parse(sess.endedAt || '') || 0 : 0;
+    const why = endedAt && Date.parse(a.lastSeen || '') <= endedAt + 5000 ? 'its session ended'
+      : ENDED.test(a.lastType || '') && !holds ? `its last step was ${a.lastType}`
+        : !holds && a.idleMin !== null && a.idleMin >= floorIdle ? `idle ${a.idleMin} min with nothing claimed` : '';
+    if (why) { a.onFloor = false; a.leftFloor = why; }
+  }
   // Out of quota, not stalled: the last thing an agent said was a usage limit (and when it resets).
   const QUOTA = /usage limit|rate.?limit|\b429\b|quota|insufficient[_ ]credit|credit balance/i;
   for (const a of agentList) {
@@ -498,7 +520,7 @@ export function buildHudState() {
       return r && (r.probes?.length || r.simFeatures?.length) ? { at: r.at, probes: r.probes || [], simFeatures: r.simFeatures || [] } : null;
     })(),
     asks: { open: openAsks(), decided: allAsks().filter((a) => a.status === 'decided').slice(-5) },
-    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
+    launched: launched.map((s) => ({ agent: s.agent, role: s.role, tool: s.tool, model: s.model, task: s.task, running: s.running, stalled: s.stalled, ending: s.ending || null, beatAgeMin: s.beatAgeMin, reason: s.reason || null, wip: s.wip || null, now: s.now || null, lane: s.lane || null })),
     signals,
     queue,
     progress: { done: queue.done.length, total, ratio: total ? queue.done.length / total : 0 },
@@ -556,6 +578,7 @@ export function buildHudState() {
     // What is being worked on: every task with activity in the last 30 minutes.
     now: queue.inProgress.map((t) => ({ id: t.id, title: t.title, agents: [...new Set(events.filter((e) => e.task === t.id && Date.parse(e.ts) > now - 30 * 60000).map((e) => e.agent))] })).filter((t, i) => t.agents.length || i === 0),
     divisions: divs,
+    assignmentRooms: ASSIGNMENT_ROOMS,
     lessons: lessons(),
     rtk: rtkGain(),
     tokenUse: tokensCached(),

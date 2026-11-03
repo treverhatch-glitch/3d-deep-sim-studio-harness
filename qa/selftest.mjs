@@ -130,7 +130,7 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
 // counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
 // 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_UNITY_MIN_FREE_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
@@ -4496,6 +4496,55 @@ if (inShard('selftest-2731c')) {
   const dir = copyRepo();
   const { selftest2731C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731c.mjs')).href);
   await selftest2731C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.73.2 (e, B-73): a Unity run waits for a free-RAM floor (STUDIO_UNITY_MIN_FREE_GB) under machine:heavy, `npm run heavy
+// -- wait|run|release` for a studio's own scripts, and an infrastructure abort (out of memory, killed, no licence, aborted
+// before results) is NOT RUN in the gate, the land record and the train, never a FAIL (qa/selftest-2732e.mjs).
+if (inShard('selftest-2732e')) {
+  const dir = copyRepo();
+  const { selftest2732E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732e.mjs')).href);
+  await selftest2732E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.73.2 (f): a session end is recorded once and an ending session isn't STALLED (B-72), the watchdog's stall end counts as
+// a stall, not toward the halt (B-72/B-76), and .env changes reach running processes, with studio:reload-env (B-74)
+// (qa/selftest-2732f.mjs).
+if (inShard('selftest-2732f')) {
+  const dir = copyRepo();
+  const { selftest2732F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732f.mjs')).href);
+  await selftest2732F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.74.0 (w): the War Room refresh: pairing a browser (one-time code, HttpOnly cookie, paired writes act as the person),
+// Act buttons that run the CLI's own code (studio:resume, hold, delegate revoke), B-70 (a throwing handler no longer ends
+// the hub, every exit logged, the supervisor's keeper with backoff), the page's version, the deck's panels and the rooms.
+if (inShard('selftest-274w')) {
+  const dir = copyRepo();
+  const { selftest274W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-274w.mjs')).href);
+  await selftest274W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.73.2 (d, B-71, B-75): per-test timeouts scaled for the test workers (--testTimeout / --hookTimeout / --test-timeout,
+// never below the game's own), and a lane that changes the config of the check main is stuck red on trains alone and
+// first (qa/selftest-2732d.mjs).
+if (inShard('selftest-2732d')) {
+  const dir = copyRepo();
+  const { selftest2732D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732d.mjs')).href);
+  await selftest2732D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.75.0 (h): the War Room's visual redo: one tab bar on every view, the design tokens (light and dark, no web fonts),
+// the Studio floor's name plates, its state badges and key, and agents leaving the floor when their session ends.
+if (inShard('selftest-275h')) {
+  const dir = copyRepo();
+  const { selftest275H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-275h.mjs')).href);
+  await selftest275H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

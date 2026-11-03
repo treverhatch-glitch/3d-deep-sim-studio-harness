@@ -294,6 +294,32 @@ maxWorkers: workers,
 
 Outside the gate the variable is unset and Vitest picks its own count.
 
+### Per-test timeouts that fit the workers (2.73.2)
+
+More workers make each test slower, so a per-test timeout tuned on a quiet run trips on time alone. When a check's
+command runs vitest, jest or `node --test` (directly, or as the last step of the npm script it calls, such as the
+`test` script an adopted game's check runs), the gate passes the runner a scaled per-test timeout:
+
+- factor = ceil(4 x test workers / logical cores), between 1 and 4 (a test's timeout is taken as fitting a quarter
+  load; 25 workers on 28 threads is x4), or the gate's load factor or the manifest's `slowTests` `minScale` if higher;
+- vitest: `--testTimeout=<base x factor> --hookTimeout=<hook base x factor>`; jest: `--testTimeout`; `node --test`:
+  `--test-timeout`, only when the command sets one (it has no per-test timeout by default);
+- the base is the game's own: the largest number literal given for `testTimeout` (`hookTimeout`) in the config the
+  runner uses (vitest.config.* / vite.config.*, found upward from the command's folder, or its `--config`; jest.config.*
+  or package.json `"jest"`), else the runner's default (vitest 5 s / 10 s, jest 5 s). One it can't read as a number (an
+  expression, a workspace or `projects` config, a flag already in the npm script) is left alone, saying why. The
+  result is never below what the game set.
+
+The line `[game-gates] <check>: per-test timeout 60 s (vitest, npm script "test": --testTimeout=60000 ...)` is printed
+and the check's row keeps `"testTimeout": { ms, baseMs, factor, why, flags }`. It is a runtime flag: no test or config
+file changes, so the weakened-tests gate has nothing to flag; a per-test `{ timeout }` in a test file is not changed
+(read `STUDIO_TEST_TIMEOUT_SCALE` there, "Slow tests under load"). `STUDIO_TEST_TIMEOUT_SCALE=<n>` (at least 1)
+replaces the worker-derived factor; `STUDIO_TEST_TIMEOUT_SCALE=off` passes nothing. pnpm and yarn scripts get nothing.
+
+New games: `npm run new-game` makes a cartridge whose checks are plain node scripts (`qa.mjs`, golden, playtest) with
+no per-test timeout, so nothing needs to fit. A web game's own vitest config can keep a timeout that fits one quiet
+worker (the runner default, or e.g. `testTimeout: 15_000` for a heavy render test): the gate scales it for the load.
+
 ## Quarantined flaky tests (2.69.0)
 
 A test the merge train's flake triager labelled flaky 3 times in a week is proposed on `studio/quarantine.json`

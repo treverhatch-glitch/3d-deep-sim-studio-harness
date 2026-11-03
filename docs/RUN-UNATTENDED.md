@@ -34,6 +34,7 @@ npm run studio:start -- --install --window 09:00-23:00   # come back after a res
 npm run studio:stop                                   # agents finish their task; nothing new starts
 npm run studio:status
 npm run studio:extend -- --until 2026-11-05T11:52:00Z --by <your name>   # move a running supervisor's end time
+npm run studio:reload-env -- --by <your name>         # running processes pick up what you changed in .env now
 ```
 
 **Changing the end time (2.73.1).** `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
@@ -43,7 +44,20 @@ the end time). It writes `.studio/supervisor-extend.json`; the next pass (within
 `supervisor-extend`; a Producer or Director session or an outside agent on a person's direct permission
 (`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
 
-Every minute it keeps the War Room hub up (and logs how long it was down), then starts a fresh agent
+**Changing a setting in .env while the studio runs (2.73.2, B-74).** The long-running loops re-read `.env` when its
+mtime or size changed: each supervisor pass (with the train daemon's pass in it), each launcher heartbeat (the stall
+limits, the idle exit), the watchdog's pass and the watch pass. So a raised `STUDIO_STALL_MIN` reaches the sessions
+already running at their next heartbeat, not only new ones. `npm run studio:reload-env` asks for a reload now; a
+running supervisor answers within seconds with what changed. Each change is logged once (`env.reloaded`, naming the
+keys; values of keys that look secret, `*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks, are never written).
+Precedence: a variable set in the environment a process was started with (your shell, a scheduled task's
+environment) still wins over `.env`; a value that came from `.env`, in the process or through its parent (a launcher
+inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which names those are, never their values),
+follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
+`STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
+needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
+
+Every minute it keeps the War Room hub up (and logs how long it was down; 2.74.0: harness/hub-keeper.mjs, below), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
 ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the
 window, past `--until`, or past the budget. The Ops view shows "Running unattended", and the run
@@ -68,6 +82,15 @@ Scheduler (Windows); `--uninstall` removes it.
   `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
   what the temp-file janitor can free when it is installed.
 
+- **The hub keeper (2.74.0, B-70).** The hub counts as up when `/health` answers within 5 s (it was 2 s, so a busy hub
+  building a big page was logged as down). A hub process of the supervisor's that is still there but silent is left
+  alone for `STUDIO_HUB_HANG_MIN` (5) minutes, then ended and restarted; a hub someone else started (the pid in
+  `.studio/hub.json`, alive) is never touched. A dead hub is started again (hidden on Windows) at most once per
+  backoff step (30 s, 1, 2, 4, 8, then every 10 minutes; the steps start over after 10 minutes up), each restart a
+  `supervisor.hub_restart` event with its cause. The cause is the hub's own line in `.studio/logs/hub-exit.log`: the hub
+  writes one on every exit (a signal, an uncaught error, `port … is in use`), on an error it survived (a request whose
+  handler threw now answers 500 instead of ending the hub), and when building `/api/hud` took over 2 s.
+  `npm run studio:status` ends with "Hub last restarted 12:05 UTC (<cause>); 3 restarts this run."
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
@@ -75,7 +98,8 @@ Scheduler (Windows); `--uninstall` removes it.
   Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
 - **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
   found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then press "Fixed it: try again", or from a terminal (2.59.0, no hub token needed):
+  cause, then press "Fixed it: try again" (2.74.0: in a paired browser it runs this same command as the paired person
+  and shows its answer, docs/WAR-ROOM-V3.md), or from a terminal (2.59.0, no hub token needed):
   `npm run studio:resume -- --by <your name> [--why "what you fixed"]`. It prints the halt it cleared, and the next
   pass's `supervisor.resumed` event names who asked (`meta.by`, `meta.why`). Not halted: it says so and does nothing.
   A person decides to retry after repeated failures, so it refuses inside a launched agent session (`STUDIO_ROLE` set)
@@ -105,7 +129,12 @@ Scheduler (Windows); `--uninstall` removes it.
   stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most
   `STUDIO_STALL_VERIFY_MAX_MIN` (60) minutes. A verify counts for at most that long from its start (a done for
   `STUDIO_DONE_RUNNING_MAX_MIN`, 90), so a hung verify can't keep a session alive. `node harness/stall.mjs check`
-  shows "waiting on its own verify" for such a session.
+  shows "waiting on its own verify" for such a session. 2.73.2 (B-72): a stall end is recorded once per session
+  (`.studio/stall/<agent>.json` `ended`), whether the launcher's heartbeat or the watchdog's pass saw it first, and the
+  watchdog's end counts as a stall end (`exitCause.kind` stall), never toward the "two sessions in a row" halt. Once the
+  agent's process has exited, the session lists as `ending` (not STALLED) while its launcher hands the work back, which
+  can take minutes when it closes the task itself; the watchdog, the watch pass and the silent-agent release leave it
+  to the launcher (bounded by `STUDIO_DONE_RUNNING_MAX_MIN`, 90). One `agent.session.end` per session, whoever records it.
 - **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
   is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
   and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,

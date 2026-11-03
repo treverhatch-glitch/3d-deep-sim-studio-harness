@@ -1221,3 +1221,35 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-225 — console windows flashed for every process on Windows · fixed in 2.73.1
 - **Evidence:** B-59: 452 of 534 process starts had no windowsHide.
 - **Fix:** windowsHide on every start, a source scan in the selftest. qa/selftest-2731c.mjs.
+
+### P-226 — tests failed on time alone when the harness ran many test workers · fixed in 2.73.2
+- **Evidence:** B-71/B-55: 25 workers with the game's 15 s testTimeout; main red on timeouts.
+- **Fix:** per-test timeouts scaled to the workers, never lowered. qa/selftest-2732d.mjs.
+
+### P-227 — main red on a check deadlocked every train, the fix included · fixed in 2.73.2
+- **Evidence:** B-75: five lanes held by hand so the timeout fix could ride alone.
+- **Fix:** the fix for the stuck check trains alone and first. qa/selftest-2732d.mjs.
+
+### P-228 — Unity started short of memory; its abort was recorded as FAIL · fixed in 2.73.2
+- **Evidence:** B-73: 3.9 GB free at the peak, two aborts, a FAIL record commit.
+- **Fix:** a free-RAM floor under machine:heavy; infrastructure aborts are NOT RUN. qa/selftest-2732e.mjs.
+
+### P-229 — a stalled session was "ended" again and again and still listed STALLED · fixed in 2.73.2
+- **Evidence:** B-72: four "Ended builder-s122" lines in six minutes and a stall task for a gone process.
+- **Fix:** one recorded end, an ending state, one session-end record. qa/selftest-2732f.mjs.
+
+### P-230 — .env changes reached only new processes · fixed in 2.73.2
+- **Evidence:** B-74: a raised STUDIO_STALL_MIN didn't save a running session.
+- **Fix:** reload on change in the long-running loops; studio:reload-env. qa/selftest-2732f.mjs.
+
+### P-231 — the War Room's buttons failed on a refused hub token · fixed in 2.74.0
+- **Evidence:** "The HUB token was refused. Check HUB_TOKEN in .env" on "Fixed it: try again".
+- **Fix:** pair a browser once; Act runs the CLI's own code. qa/selftest-274w.mjs.
+
+### P-232 — the hub kept dropping · fixed in 2.74.0
+- **Evidence:** B-70: five Hub-down spans in an hour.
+- **Fix:** a throwing handler no longer ends it; exits logged; the supervisor's keeper restarts it. qa/selftest-274w.mjs.
+
+### P-233 — the Studio floor was cluttered with cut-off names and agents long gone · fixed in 2.75.0
+- **Evidence:** "unkno…", "builde…" plates; every agent of the last 24 h stayed on the floor.
+- **Fix:** short plates over the role, state badges, agents leave when done. qa/selftest-275h.mjs.

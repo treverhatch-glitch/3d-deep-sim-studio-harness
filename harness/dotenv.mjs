@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 /**
  * 2.73.1 (B-60): who a shell is comes from the session, never from the studio's shared .env. The launcher sets these for
@@ -43,6 +44,90 @@ export function warnIdentityOnce(file, text, { write = (s) => process.stderr.wri
     try { write(identityWarning(hits, file)); } catch {}
   }
   return hits;
+}
+
+/*
+ * 2.73.2 (B-74): the studio settings in .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*) and which of a process's values
+ * came from that file. event.mjs loads them once at start (a value already in the environment wins, as before) and
+ * notes the ones it took from the file in STUDIO_ENV_FROM_FILE: { f: the .env's path, sig: its mtime:size, k: { NAME:
+ * hash of the value } }. A child started with this environment inherits the note, so it knows that, say, its
+ * STUDIO_STALL_MIN came from .env through its parent, not from whoever started it. harness/env-reload.mjs re-reads the
+ * file in the long-running loops and updates only those values (syncStudioEnv). Values are never written to the note.
+ */
+export const ENV_FROM_FILE = 'STUDIO_ENV_FROM_FILE';
+const SETTINGS_LINE = /^\s*((?:STUDIO|HUB|AGENT|PLAYTEST)_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/;
+/** The studio settings in a .env text: { NAME: value }. The last non-empty line for a name wins; identity keys never. */
+export function parseStudioEnv(text) {
+  const found = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = line.match(SETTINGS_LINE);
+    if (!m || isSessionIdentity(m[1]) || m[1] === ENV_FROM_FILE) continue;
+    const v = m[2].replace(/^['"]|['"]$/g, '');
+    if (v !== '' || !(m[1] in found)) found[m[1]] = v;
+  }
+  return found;
+}
+export const valueHash = (v) => crypto.createHash('sha1').update(String(v)).digest('hex').slice(0, 10);
+/** The file's version for "did it change": mtime and size, or null when there is no file. */
+export function envFileSig(file) {
+  try { const st = fs.statSync(file); return `${Math.round(st.mtimeMs)}:${st.size}`; } catch { return null; }
+}
+/** The from-file note in env, or null. */
+export function readFromFileNote(env = process.env) {
+  try { const o = JSON.parse(env[ENV_FROM_FILE] || ''); return o && typeof o === 'object' && o.k && typeof o.k === 'object' ? o : null; } catch { return null; }
+}
+export function writeFromFileNote(env, { file, sig, marks }) {
+  env[ENV_FROM_FILE] = JSON.stringify({ f: path.resolve(file), sig: sig || null, k: Object.fromEntries([...marks].sort()) });
+}
+/** A name whose value is never logged (tokens, keys, secrets, passwords, webhooks). */
+export const looksSecret = (key) => /(TOKEN|SECRET|PASSWORD|PASSWD|WEBHOOK|CREDENTIAL|PRIVATE|_KEY$|_KEY_|APIKEY)/i.test(String(key || ''));
+
+/**
+ * Bring env in line with .env's settings `found`, for the values that came from the file. marks: Map NAME -> hash of
+ * the value the file gave (the note). A value someone else set (in the environment the process was started with, or
+ * in the process since) is left alone and listed in `kept`. Returns { added, changed: [{ key, from, to }], removed, kept }.
+ */
+export function syncStudioEnv(found, env, marks) {
+  const out = { added: [], changed: [], removed: [], kept: [] };
+  for (const [k, v] of Object.entries(found)) {
+    const cur = env[k];
+    if (cur === undefined) { env[k] = v; marks.set(k, valueHash(v)); out.added.push(k); continue; }
+    if (marks.get(k) === valueHash(cur)) {
+      if (cur !== v) { env[k] = v; out.changed.push({ key: k, from: cur, to: v }); }
+      marks.set(k, valueHash(v));
+    } else if (cur !== v) out.kept.push(k);
+  }
+  for (const [k, hash] of [...marks]) {
+    if (k in found) continue;
+    if (env[k] !== undefined && valueHash(env[k]) === hash) { delete env[k]; out.removed.push(k); }
+    marks.delete(k);
+  }
+  return out;
+}
+
+const ENV_STATE = Symbol.for('studio.envFileState');
+/** This process's view of the .env it loaded: { file, sig, marks, reqId }. */
+export const envFileState = () => globalThis[ENV_STATE] || null;
+/**
+ * event.mjs's start-up load: a value already in the environment wins (unchanged since before 2.73.2), the values taken
+ * from the file are marked. A note inherited from the parent for the same .env carries over (its marks, and its sig,
+ * so a file edited between the parent's start and this one's is synced on the first reload).
+ */
+export function loadStudioEnvAtStart(file, env = process.env) {
+  let text = null;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { text = null; }
+  const inherited = readFromFileNote(env);
+  const same = inherited && inherited.f === path.resolve(file);
+  const marks = new Map();
+  if (same) for (const [k, h] of Object.entries(inherited.k)) if (env[k] !== undefined && valueHash(env[k]) === h) marks.set(k, h);
+  const sig = same && inherited.sig ? inherited.sig : envFileSig(file);
+  if (text !== null) {
+    warnIdentityOnce(file, text);
+    for (const [k, v] of Object.entries(parseStudioEnv(text))) if (env[k] === undefined) { env[k] = v; marks.set(k, valueHash(v)); }
+  }
+  if (env === process.env) globalThis[ENV_STATE] = { file: path.resolve(file), sig, marks, reqId: null };
+  if (text !== null || marks.size) writeFromFileNote(env, { file, sig, marks });
+  return marks;
 }
 
 export function loadDotEnv(file, env = process.env) {

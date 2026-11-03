@@ -87,7 +87,12 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Red (2.60.0, prefix bisection): only the failing checks run again (`run-gates --only`, scoped as the train's verify
   was), first on main, then on cumulative prefixes main+A, main+A+B, ... by binary search (about log2 N targeted
   runs; logs `.studio/train/<id>-recheck-<n>.log`). Red on main: main itself is red, nothing lands and nobody is
-  handed back. A verify or re-check that ran no check (2.67.2, B-50: refused because a full verify of the same
+  handed back. 2.73.2 (B-75): the train remembers it (`.studio/train/red-streak.json`, also a game check red in two
+  trains in a row; a train that lands anything clears it), and the next train puts the first queued lane that changes
+  that check's configuration (the game's vitest/vite/jest configs and workspaces, `.npmrc`, its `studio.gates.json`, the
+  test scripts of its package.json) first and alone (runAlone, `task.train.fix_first` with the reason), once per lane
+  commit; the other lanes follow in the next train. A tier-C fix still waits for the owner's release.
+  `STUDIO_TRAIN_FIX_FIRST=off` turns it off. A verify or re-check that ran no check (2.67.2, B-50: refused because a full verify of the same
   checkout runs, or `machine:heavy` stayed held past its wait) is busy, never red: the train waits and runs it again
   (`STUDIO_TRAIN_BUSY_WAIT_MIN`, 20 minutes in all, logged each time), then defers its lanes for the next train
   (`task.train.no_check`); it never hands anyone back or concludes that main is red from it (`harness/train-busy.mjs`).
@@ -397,10 +402,16 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
 - A job killed for memory (Windows 0xC0000017, Node's "JavaScript heap out of memory", exit 137 elsewhere) is queued
   once more with a note instead of counting red (`heavy run`, game checks, the Unity land gate, the asset round trip;
   `STUDIO_HEAVY_OOM_RETRY=off` turns it off). A second one counts.
+- 2.73.2: a Unity job also waits for live free RAM of at least `STUDIO_UNITY_MIN_FREE_GB` (12, never above 60% of the
+  RAM). A wait that runs out is "not run" (exit 3), never red. For a studio's own scripts: `npm run heavy -- wait
+  [--min-free-gb N] [--timeout-min M] [--hold <label>]`, `npm run heavy -- release --label <label>`, and `heavy run
+  --min-free-gb N --timeout-min M -- <command>` (docs/UNITY-TRACK.md).
 - Game checks get `STUDIO_TEST_WORKERS` and `VITEST_MAX_WORKERS`: free RAM for the job / `STUDIO_TEST_WORKER_GB`
   (0.45), between 2 and cores - 2. Inside a verify that is the verify's claim; a lane's check shares the free budget
   with the other lane checks running. `STUDIO_TEST_WORKERS` sets it; 2 with no scan. The game's test config reads it
-  (docs/ONBOARDING-A-GAME.md).
+  (docs/ONBOARDING-A-GAME.md). 2.73.2: a vitest/jest/`node --test` check also gets its per-test timeout scaled for that
+  many workers (ceil(4 x workers / cores), 1..4; `STUDIO_TEST_TIMEOUT_SCALE`; ONBOARDING-A-GAME.md, "Per-test timeouts
+  that fit the workers").
 - The supervisor starts at most (RAM - reserve - heavy claims) / `STUDIO_SESSION_RAM_GB` (0.6) agent sessions, and
   says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
   `none`).

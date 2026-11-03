@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { PROOF_KINDS as ENGINE_PROOF_KINDS } from './engine-proof.mjs';
+import { PROOF_KINDS as ENGINE_PROOF_KINDS, INFRA_KINDS as ENGINE_INFRA_KINDS } from './engine-proof.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -128,10 +128,16 @@ export const ENGINE_FIXES = {
   'no-results': 'the engine wrote no results file at all: read the editor\'s log (above) for the first error (compile error, licence, crash, wrong project path) and fix that, then run the gate again',
   'empty-run': 'the run counted 0 tests: the test assembly or folder wasn\'t found, didn\'t compile, or every test is filtered out. Check the test asmdef/folder and the category filter; a project that truly has no tests for a platform says so with "allowEmpty" in its manifest (studio/game.json engines.unity.allowEmpty, studio/godot-unit.json "allowEmpty"), which is the owner\'s file',
   'compile-error': 'the scripts don\'t compile (the file:line errors above): fix them first; tests that ran next to a compile error ran against an older build and prove nothing',
-  licence: 'the editor has no active licence on this machine: activate one in Unity Hub (CI: the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets); this is a person\'s step, so hand the task back if you can\'t',
-  aborted: 'the editor aborted batch mode (the "Aborting batchmode" line names why: a compile error, a missing method, an exception in an editor script): fix that cause and run the gate again',
+  licence: 'the editor has no active licence on this machine (2.73.2: the run is NOT RUN, not a FAIL of the tests): activate one in Unity Hub (CI: the UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD secrets); this is a person\'s step, so hand the task back if you can\'t',
+  aborted: 'the editor aborted batch mode (the "Aborting batchmode" line names why: a compile error, a missing method, an exception in an editor script, or the machine ran short of memory). With no results written it is NOT RUN (2.73.2: never a red of the tests) and the train tries again later; if it repeats on a quiet machine, the line names a cause in the project: fix that and run the gate again',
   'exit-mismatch': 'the exit code and the results disagree (a non-zero exit, a kill or a timeout behind green results): read the end of the editor\'s log for what failed after the tests (a crash on exit, a script error) and fix it; a run that didn\'t end cleanly is not a pass',
   'test-failed': 'a test failed (its name and message are above): fix the code it tests, or the test if it is wrong (a weakened test is caught by the weakened-tests gate)',
+  // 2.73.2 (e, B-73): infrastructure aborts ("[engine-gate] NOT RUN <kind>"): nothing was tested, so nothing in the work is to fix.
+  'out-of-memory': 'NOT RUN: the editor ran out of memory, so the tests did not run (not a failure of the work). Wait for other heavy work to end (npm run heavy -- status; a web verify\'s test workers take 7+ GB) and run it again; Unity waits for STUDIO_UNITY_MIN_FREE_GB (12) free before it starts',
+  'editor-killed': 'NOT RUN: the editor was ended from outside before it wrote results (someone stopped it, the machine shut it, or the session ended): run the gate again; nothing in the work is to fix',
+  'launch-failed': 'NOT RUN: the editor could not be started: set STUDIO_UNITY (or STUDIO_GODOT) to the editor\'s full path and check it opens on this machine; this is a machine step, not the work\'s',
+  'ram-floor': 'NOT RUN: free RAM stayed under the floor a Unity run waits for (STUDIO_UNITY_MIN_FREE_GB, 12, at most 60% of the RAM), so the editor never started: let other heavy work end (npm run heavy -- status) and run it again later',
+  busy: 'NOT RUN: the machine:heavy lock stayed busy, so the editor never started: run it again when the holder ends (npm run heavy -- status)',
 };
 
 /** The Fix text for one engine-gate failure kind. */
@@ -173,7 +179,7 @@ export function gateFix(gate, { output = '', compact = false } = {}) {
   const asub = text.match(/\[asset-gate\] FAIL (\S+) (\S+?):/m);
   if (asub) return { text: `asset ${asub[1]}: ${assetFix(asub[1], asub[2])}`, source: 'asset-check' };
   // 2.72.0 (c): an engine gate's failure kind (harness/engine-proof.mjs) picks its own Fix.
-  const esub = text.match(/\[engine-gate\] FAIL ([\w-]+)(?: \((\w+)\))?:/m);
+  const esub = text.match(/\[engine-gate\] (?:FAIL|NOT RUN) ([\w-]+)(?: \((\w+)\))?:/m);
   if (esub && ENGINE_FIXES[esub[1]]) return { text: `engine ${esub[1]}: ${engineFix(esub[1], esub[2] || 'unity')}; ${rerun}`, source: 'engine-check' };
   if (TIMEOUT.test(text)) return { text: `it timed out, which is often load rather than a wrong result: check what else is running (npm run status), wait for heavy work to finish, ${rerun}; a timeout on a quiet machine is a slow check to fix (${log})`, source: 'timeout' };
   if (GATE_FIXES[id]) return { text: `${GATE_FIXES[id]}; ${rerun}${compact ? ` (full log: ${log})` : ''}`, source: 'table' };
@@ -215,7 +221,7 @@ export function fixCoverage(root = ROOT) {
   const kinds = gameGateKinds(root);
   for (const k of kinds) if (!GAME_GATE_FIXES[k]) missing.push(k);
   // 2.72.0 (c): every engine-gate failure kind has its own Fix.
-  for (const k of ENGINE_PROOF_KINDS) if (!ENGINE_FIXES[k]) missing.push(`engine-gate:${k}`);
+  for (const k of [...ENGINE_PROOF_KINDS, ...ENGINE_INFRA_KINDS]) if (!ENGINE_FIXES[k] && !missing.includes(`engine-gate:${k}`)) missing.push(`engine-gate:${k}`);
   return { ok: missing.length === 0, missing, gates: gates.length, kinds };
 }
 

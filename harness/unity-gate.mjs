@@ -31,7 +31,7 @@
  *     code it doesn't list is an error that names the code; the output's last lines always come with a non-pass.
  *
  *   node harness/unity-gate.mjs [--task T-012] [--branch <name>] [--json]
- *      exit 0 pass or skipped, 3 refused (try again later), 1 red, conflict or error
+ *      exit 0 pass or skipped, 3 refused or not run (try again later), 1 red, conflict or error
  *   node harness/unity-gate.mjs branch <T-ID> <branch>     record the task's Unity branch (task.unity_branch)
  *
  * `task done` runs it for a task on the Unity track (task add --track engine:unity) once the task's other checks
@@ -46,6 +46,17 @@
  *   "gateWorktree"  the land script's own worktree: the harness never touches its files (only the land script does).
  * A branch or task name that a shell could read as more than a name (anything but letters, digits, . _ / - and a
  * leading letter or digit) is refused before any command runs: the command line goes through a shell.
+ *
+ * 2.73.2 (e, B-73): a land run that started Unity with about 9 GB free beside a web verify aborted twice for memory and
+ * was recorded as a FAIL. Now:
+ *   - the run takes machine:heavy as a Unity kind, so it also waits for the free-RAM floor (STUDIO_UNITY_MIN_FREE_GB,
+ *     12, never above 60% of the RAM; harness/heavy.mjs); a floor that stays unmet is status "not-run" (exit 3);
+ *   - a red or error exit whose output shows an infrastructure abort (out of memory, no licence, the editor ended from
+ *     outside, "Aborting batchmode" with no test failure and no compile error: harness/engine-proof.mjs infraAbort) is
+ *     status "not-run", recorded as "not run: <why>" in unity-last.json, the engine.land event, the job record and
+ *     studio/engine/LOG.md, never as red. A compile error or a failing test in the output keeps it red. The land
+ *     script's own contract can name a not-run exit too: "exits": { "5": { "status": "not-run", "why": "..." } }.
+ *   The Unity train tries a not-run land run again later like a refusal and hands nobody back for it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +67,7 @@ import { jobDone } from './jobs.mjs';
 import { acquireHeavy, heavyRoot } from './heavy.mjs';
 import { oomSignature } from './heavy-budget.mjs';
 import { readTrack, logEngine } from './engine.mjs';
+import { infraAbort } from './engine-proof.mjs';
 
 export const UNITY_EXIT = { 0: 'pass', 1: 'red', 2: 'conflict', 3: 'refused', 4: 'error' };
 const WORDS = {
@@ -64,6 +76,7 @@ const WORDS = {
   conflict: 'found a merge conflict: the branch does not apply to the target; rebase it on the target and try again',
   refused: 'refused to start (busy: an editor open, too little memory or another landing). Not a failure of the work: try again later',
   error: 'failed to run',
+  'not-run': 'did not run to the end for a reason outside the work (an infrastructure abort): not a failure of the work; try again later',
 };
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
@@ -119,7 +132,20 @@ export function setTaskBranch(taskId, branch, { agent = process.env.STUDIO_LOCK_
   return { ok: true, why: `${taskId} lands from the Unity branch ${branch}` };
 }
 
-const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error']);
+const STATUSES = new Set(['pass', 'red', 'conflict', 'refused', 'error', 'not-run']);
+
+// 2.73.2 (e, B-73): signs in a land command's output that the work's own tests or compile failed (then a red stays red).
+const WORK_FAILED = /<test-case\b[^>]*\bresult="Failed"|\b[1-9]\d* (?:test\(s\)|tests?) failed\b|\[gate\] FAIL\b|\[engine-gate\] FAIL (?:test-failed|compile-error)\b|\bTest(?:Run)? ?Failed\b/i;
+/**
+ * 2.73.2 (e, B-73): was a red or error land run an infrastructure abort? { kind, text } or null. The output shows out of
+ * memory (or exit 0xC0000017), no licence, the editor or the script ended from outside, or "Aborting batchmode", and
+ * shows no failing test and no compile error (harness/engine-proof.mjs infraAbort). A timeout is never one here.
+ */
+export function landInfra(text, { status = null, signal = null, timedOut = false } = {}) {
+  if (timedOut) return null;
+  const failed = WORK_FAILED.test(String(text || ''));
+  return infraAbort({ log: text, status, signal, results: failed ? { failed: 1 } : null, engine: 'unity' });
+}
 
 /**
  * Map a land command's exit to a result. 2.60.1 (B-41): `exits` (studio/game.json engines.unity.exits) is the land
@@ -190,6 +216,8 @@ export async function runUnityGate({ task = null, branch = null, branches = null
     lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env, kind: 'unity' });
   } catch (err) {
     if (err.code !== 'HEAVY_BUSY') throw err;
+    // 2.73.2 (e, B-73): free RAM stayed under STUDIO_UNITY_MIN_FREE_GB: Unity never started, so not run (never red).
+    if (err.floor) return finish({ status: 'not-run', ok: false, code: 3, infra: { kind: 'ram-floor', text: err.message.replace(/^\[heavy\]\s*NOT RUN\s*/, '') }, why: `not run: ${err.message.replace(/^\[heavy\]\s*NOT RUN\s*/, '')}` });
     return finish({ status: 'refused', ok: false, code: 3, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
   }
   let r;
@@ -209,6 +237,7 @@ export async function runUnityGate({ task = null, branch = null, branches = null
       lk = acquireHeavy(await heavyRoot(), label || `unity land${task ? ` (${task})` : ''}`, { log, env, kind: 'unity' });
     } catch (err) {
       if (err.code !== 'HEAVY_BUSY') throw err;
+      if (err.floor) return finish({ status: 'not-run', ok: false, code: 3, infra: { kind: 'out-of-memory', text: `the Unity land command died out of memory (${oom})` }, why: `not run: the Unity land command died out of memory (${oom}), and free RAM stayed under the floor for its one retry: ${err.message.replace(/^\[heavy\]\s*NOT RUN\s*/, '')}` });
       return finish({ status: 'refused', ok: false, code: 3, why: `out of memory (${oom}), and the machine:heavy lock stayed busy for its one retry: ${err.message.replace(/^\[heavy\]\s*/, '')}` });
     }
     try { r = landOnce(); } finally { lk.release(); }
@@ -217,23 +246,28 @@ export async function runUnityGate({ task = null, branch = null, branches = null
   const out = path.join(REPO_ROOT, '.studio', 'gates', 'out', 'unity.log');
   try { fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text); } catch {}
   const timedOut = r.error?.code === 'ETIMEDOUT';
-  const m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null });
+  let m = r.error && !timedOut ? { status: 'error', why: `could not run it: ${r.error.code || r.error.message}` } : mapUnityExit(r.status, { signal: r.signal, timedOut, timeoutMin, exits: cfg.exits && typeof cfg.exits === 'object' ? cfg.exits : null });
+  // 2.73.2 (e, B-73): a red or error that the output shows was an infrastructure abort is "not run", never red.
+  let infra = null;
+  if ((m.status === 'red' || (m.status === 'error' && !r.error)) && (infra = landInfra(text, { status: r.status, signal: r.signal, timedOut }))) {
+    m = { status: 'not-run', why: `not run (${infra.kind}): ${infra.text}; the land command exited ${r.status ?? r.signal ?? '?'} (${m.status} by its contract), but nothing in its output shows a failing test or a compile error: ${WORDS['not-run']}` };
+  } else if (m.status === 'not-run') m = { ...m, why: `not run: ${m.why}` };
   const tail = text.trimEnd().split('\n').slice(-12).join('\n');
-  return finish({ ...m, ok: m.status === 'pass', code: r.status, log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
+  return finish({ ...m, ok: m.status === 'pass', code: r.status, ...(infra ? { infra } : {}), log: path.relative(REPO_ROOT, out).split(path.sep).join('/'), ...(m.status === 'pass' ? {} : { tail }) });
 
   function finish(res) {
     const full = { ...res, ms: Date.now() - t0, ...(task ? { task } : {}), ...(br ? { branch: br } : {}), ...(many ? { branches: many } : {}), at: new Date().toISOString() };
     try { fs.mkdirSync(path.join(REPO_ROOT, '.studio', 'gates'), { recursive: true }); fs.writeFileSync(path.join(REPO_ROOT, '.studio', 'gates', 'unity-last.json'), JSON.stringify(full, null, 2)); } catch {}
-    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: 'engine:unity', status: full.ok ? 'ok' : full.status === 'refused' ? 'warn' : 'blocked', msg: `Unity land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { status: full.status, code: full.code ?? null, ms: full.ms, ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
+    try { emitEvent({ type: 'engine.land', agent: env.STUDIO_LOCK_OWNER || 'gates', task: task && !String(task).includes(',') ? task : undefined, track: 'engine:unity', status: full.ok ? 'ok' : full.status === 'refused' || full.status === 'not-run' ? 'warn' : 'blocked', msg: `Unity land${task ? ` for ${task}` : ''}: ${full.status} (${full.why})`.slice(0, 400), meta: { status: full.status, code: full.code ?? null, ms: full.ms, ...(full.infra ? { infra: full.infra.kind } : {}), ...(many ? { branches: many } : {}), ...(String(task || '').includes(',') ? { tasks: String(task).split(',') } : {}) } }); } catch {}
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside engine.land.
     if (full.status !== 'skipped') jobDone({ kind: 'unity-gate', id: task || br || null, code: full.code ?? null, result: full.status, ms: full.ms, tail: full.tail || full.why || '', log: full.log || null, task: task && !String(task).includes(',') ? task : null, agent: env.STUDIO_LOCK_OWNER || 'gates' });
-    try { logEngine(`unity land${task ? ` ${task}` : ''}: ${full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
+    try { logEngine(`unity land${task ? ` ${task}` : ''}: ${full.status === 'not-run' ? `not run${full.infra ? ` (${full.infra.kind})` : ''}` : full.status}${full.code !== null && full.code !== undefined ? ` (exit ${full.code})` : ''}`, env.STUDIO_LOCK_OWNER || undefined); } catch {}
     return full;
   }
 }
 
 /** One line for people: "PASS unity: ..." etc. */
-export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status.toUpperCase()} unity: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;
+export const unityLine = (res) => `[unity-gate] ${res.status === 'skipped' ? 'SKIP' : res.status === 'not-run' ? 'NOT RUN' : res.status.toUpperCase()} unity: ${res.why}${res.ms && res.status !== 'skipped' ? ` (${Math.round(res.ms / 1000)} s)` : ''}`;
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
@@ -250,5 +284,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     console.log(unityLine(res));
     if (res.tail) console.log(`[unity-gate] its last lines (all of it: ${res.log}):\n${res.tail}`);
   }
-  process.exit(res.status === 'pass' || res.status === 'skipped' ? 0 : res.status === 'refused' ? 3 : 1);
+  process.exit(res.status === 'pass' || res.status === 'skipped' ? 0 : res.status === 'refused' || res.status === 'not-run' ? 3 : 1);
 }

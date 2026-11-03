@@ -3,6 +3,12 @@
 ## Hub
 - Default bind is `127.0.0.1` (see `HUB_HOST` in `.env`). `npm run setup` writes a random `HUB_TOKEN` to `.env`.
 - Writes need the token in `X-Hub-Token` or `Authorization: Bearer`; a cookie or query string never authorizes a write.
+  2.74.0, one exception: a browser paired with `npm run hub -- pair --by <name>` (hub/pair.mjs; docs/WAR-ROOM-V3.md). Its
+  HttpOnly, SameSite=Strict cookie writes only from this machine (a loopback address), with the `X-Hub-Paired` header a
+  cross-site form can't send, and from a loopback origin; what it does is done `--by` the paired person. `pair` is refused
+  in an agent's shell and for an agent's name; the code works once for `STUDIO_HUB_PAIR_CODE_MIN` (10) minutes; only the
+  token's sha256 is kept, in `.studio/hub-pairs.json`; a pairing lapses after `STUDIO_HUB_PAIR_DAYS` (30) days unused;
+  `npm run hub -- unpair --by <name>` (or "Forget this browser") ends it. The hub no longer prints `HUB_TOKEN` in its link.
 - The WebSocket needs the token (`/ws?token=`) and a same-origin page.
 - Placeholder tokens (`change-me…`) and tokens shorter than 24 characters never authorize anything.
 - On a loopback bind, requests whose Host header is not localhost are refused (DNS rebinding). Add names with `HUB_ALLOWED_HOSTS`.

@@ -25,6 +25,14 @@
  *   node harness/heavy.mjs run --label <what> -- <cmd>  run a command under the lock; exits with its code
  *   node harness/heavy.mjs stop [--label <x> | --all] --by <name>
  *                                                       kill a holder's whole process tree and free its slot
+ *   node harness/heavy.mjs wait [--min-free-gb N] [--timeout-min M] [--kind K] [--hold <label>]
+ *   node harness/heavy.mjs release --label <label>      2.73.2 (e, B-73): for a studio's own scripts before Unity
+ *                                                       (heavyWaitCli); `run` takes --min-free-gb / --timeout-min too
+ *
+ * 2.73.2 (e, B-73): a Unity job (every Unity kind) also waits for live free RAM of at least STUDIO_UNITY_MIN_FREE_GB
+ * (12, never above 60% of the RAM; heavy-budget.mjs unityMinFreeGb, floorFree here); --min-free-gb asks for a floor on
+ * any kind. A wait that runs out throws HEAVY_BUSY with floor: true ("[heavy] NOT RUN <label>: ..."), exit 3. Not
+ * checked when machine:heavy is off (STUDIO_HEAVY_SLOTS=0) or inside a parent's hold (the parent waited for it).
  *
  * 2.60.0 (#5): killing a bash landing loop on Windows left `npm run verify` and its vitest workers running (Git Bash
  * can't kill a process group there; the crew used taskkill /T /F by hand). So a holder also records its process tree
@@ -79,7 +87,7 @@ import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, s
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
 import { ramCheck } from './ram.mjs';
-import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup } from './heavy-budget.mjs';
+import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent, capGroup, unityMinFreeGb, isUnityKind, scanFreeGb } from './heavy-budget.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -408,7 +416,7 @@ export function heldClaim(root, env = process.env) {
  * ("waiting for RAM: needs 8 GB, 3.1 free"), up to STUDIO_HEAVY_WAIT_MIN like any wait. With no scan, the 2.67 rules:
  * one slot and the STUDIO_RAM_FLOOR_GB floor (STUDIO_HEAVY_RAM_WAIT_MIN). The record keeps its claim (status shows it).
  */
-export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly } = {}) {
+export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly, minFreeGb = undefined, waitMin = undefined } = {}) {
   const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
   let profile = profileNow();
   const n = slotsFor(profile, env);
@@ -419,7 +427,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const parent = heldByParent(dir, env);
   if (parent) return { ...none, inside: parent };
   const staleMs = staleOf(env);
-  const waitMs = num(env.STUDIO_HEAVY_WAIT_MIN, 60) * 60000;
+  // 2.73.2 (e): waitMin (heavy.mjs wait/run --timeout-min) stands in for STUDIO_HEAVY_WAIT_MIN for this one take.
+  const waitMs = (Number(waitMin) >= 0 && waitMin !== null && waitMin !== '' ? Number(waitMin) : num(env.STUDIO_HEAVY_WAIT_MIN, 60)) * 60000;
   // 2.60.1 (B-35): free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long (no scan only).
   const ramWaitMs = Math.min(waitMs, num(env.STUDIO_HEAVY_RAM_WAIT_MIN, 10) * 60000);
   const poll = num(env.STUDIO_HEAVY_POLL_MS, 2000);
@@ -441,6 +450,13 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const ramVar = ownFloor ? 'STUDIO_HEAVY_RAM_FLOOR_GB' : 'STUDIO_RAM_FLOOR_GB';
   const ramEnv = ownFloor ? { ...env, STUDIO_RAM_FLOOR_GB: env.STUDIO_HEAVY_RAM_FLOOR_GB } : env;
   let ramTold = false;
+  // 2.73.2 (e, B-73): a Unity editor run (every Unity kind) waits for a free-RAM floor before it starts (STUDIO_UNITY_
+  // MIN_FREE_GB, 12, never above 60% of the RAM); minFreeGb (heavy.mjs wait/run --min-free-gb) asks for one on any kind.
+  const explicitFloor = minFreeGb !== undefined && minFreeGb !== null && minFreeGb !== '';
+  const floorCfg = explicitFloor ? unityMinFreeGb({ env: { ...env, STUDIO_UNITY_MIN_FREE_GB: String(minFreeGb) }, profile }) : isUnityKind(firstClaim.kind || kind) ? unityMinFreeGb({ env, profile }) : { gb: 0 };
+  const floorVar = explicitFloor ? '--min-free-gb' : 'STUDIO_UNITY_MIN_FREE_GB';
+  let floor = { low: false };
+  let floorTold = 0;
   try {
     while (!mine) {
       profile = profileNow();
@@ -462,7 +478,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly });
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }) });
-      if (adm.ok && !ram.low) {
+      floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
+      if (adm.ok && !ram.low && !floor.low) {
         for (let i = 1; i <= n + 16 && !mine; i += 1) {
           const f = path.join(dir, `${PREFIX}-${i}.lock`);
           try {
@@ -474,9 +491,19 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         }
       }
       if (mine) break;
+      // 2.73.2 (e, B-73): only the free-RAM floor holds it back: wait for memory, then "not run" (never a red) on timeout.
+      const floorLine = floor.low ? `free RAM is ${floor.freeGb} GB${floor.src ? ` (${floor.src})` : ''}, under the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})` : '';
+      if (floor.low && adm.ok && !ram.low) {
+        if (Date.now() - t0 >= waitMs) {
+          throw Object.assign(new Error(`[heavy] NOT RUN ${label}: ${floorLine}, and it stayed there for ${span(Date.now() - t0)} (the wait limit: --timeout-min or STUDIO_HEAVY_WAIT_MIN). Not a failure of the work: it did not start, so nothing was tested. Close what holds the memory (a web verify's test workers, a browser playtest, an open editor) or run it again later; STUDIO_UNITY_MIN_FREE_GB=0 turns the floor off.`), { code: 'HEAVY_BUSY', floor: true, notRun: 'ram-floor', freeGb: floor.freeGb, floorGb: floorCfg.gb, holders });
+        }
+        if (!floorTold || Date.now() - floorTold >= remind) { log(`[heavy] ${label} waits for memory: ${floorLine}; it starts once enough is free, waiting up to ${span(waitMs)}`); floorTold = Date.now(); toldAt = floorTold; }
+        sleep(poll);
+        continue;
+      }
       if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
       const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `${ahead.some((w) => w.landing) && !landing ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
-      const why = ['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) ? adm.line : '';
+      const why = [['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) ? adm.line : '', floorLine].filter(Boolean).join('; ');
       if (Date.now() - t0 >= waitMs) {
         throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${why ? `${why}; ` : ''}${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders, ...(why ? { area: adm.area } : {}) });
       }
@@ -493,6 +520,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   }
   const waitedMs = Date.now() - t0;
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
+  if (floorCfg.gb > 0) log(`[heavy] ${label}: free RAM ${floor.freeGb ?? '?'} GB, over the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})`);
   if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
   // 2.70.0 (t): one line naming the area a mostly-GPU job took and why (heavy-budget.mjs gpuAreaClaim).
   if (claim?.areaWhy) log(`[heavy] ${label} took ${claim.areaWhy}`);
@@ -517,6 +545,24 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
     } catch { return false; }
   };
   return { release, update, held: path.basename(mine), waitedMs, claim };
+}
+
+/**
+ * 2.73.2 (e, B-73): free RAM now against a floor: { low, freeGb, floorGb, src }. The live figure (harness/ram.mjs
+ * ramCheck: os.freemem, and on Windows the commit headroom of a machine scan at most 2 x STUDIO_MACHINE_SAMPLE_S old);
+ * test hooks: freemem / STUDIO_TEST_FREEMEM_MB, else STUDIO_TEST_MACHINE's free figure. Never throws (unknown: not low).
+ */
+export function floorFree(floorGb, { env = process.env, freemem = undefined, profile = null } = {}) {
+  const t = env.STUDIO_TEST_FREEMEM_MB;
+  if (typeof freemem !== 'function' && !(t !== undefined && t !== '') && env.STUDIO_TEST_MACHINE && profile) {
+    const f = scanFreeGb(profile);
+    return Number.isFinite(f) ? { low: f < floorGb, freeGb: f, floorGb, src: 'the test machine profile' } : { low: false, freeGb: null, floorGb };
+  }
+  try {
+    const r = ramCheck(freemem ? { freemem } : {}, { ...env, STUDIO_RAM_FLOOR_GB: String(floorGb) });
+    if (!Number.isFinite(r.freeGb)) return { low: false, freeGb: null, floorGb };
+    return { low: Boolean(r.low), freeGb: r.freeGb, floorGb, ...(r.commitHeadroomGb !== undefined && r.commitHeadroomGb < r.availableGb ? { src: `commit headroom; ${r.availableGb} GB available` } : {}) };
+  } catch { return { low: false, freeGb: null, floorGb }; }
 }
 
 /** 2.68.0 (n): the live holders in every slot file; a stale one (dead, reused pid, too old) is cleared after its tree is reaped. */
@@ -779,10 +825,111 @@ export function scaledTimeout(base, root, { env = process.env, label = null, ...
   return { ms, base, factor, why, floor, busy, busyThreshold, load, cores, scaleOff: false, floorMult: mult, label, quiet: label ? quiet || null : undefined, lastPass, floorMs };
 }
 
+/**
+ * 2.73.2 (e, B-73): for a studio's own scripts (a Unity landing script) before they start Unity, which the harness
+ * doesn't run for them:
+ *   heavy wait [--min-free-gb N] [--timeout-min M] [--kind K]
+ *       wait for the free-RAM floor (--min-free-gb, else STUDIO_UNITY_MIN_FREE_GB for a Unity kind; never above 60% of
+ *       the RAM) and a free machine:heavy slot (the kind's claim, default unity); exit 0 when both were there (the slot is
+ *       taken and given back at once: nothing is held), exit 3 when the wait ran out ("NOT RUN": nothing started).
+ *   heavy wait --hold <label> [--hold-max-min H] [...]
+ *       the same, then a background holder keeps the slot until `heavy release --label <label>` or H minutes (120,
+ *       at most STUDIO_HEAVY_STALE_MIN); exit 0 once it holds.
+ *   heavy release --label <label>   end a --hold (only holds made by wait --hold; `heavy stop` is for other holders).
+ * `heavy run --kind unity [--min-free-gb N] [--timeout-min M] -- <command>` is better: the slot is let go when the
+ * command ends, whatever happens to the script. Returns the exit code.
+ */
+async function heavyWaitCli(root, argv, { preOpt, floorOpts }) {
+  const cmd = argv[0];
+  const kind = preOpt('--kind') || 'unity';
+  if (cmd === 'release') {
+    const want = preOpt('--label');
+    if (!want) { console.error('Usage: npm run heavy -- release --label <label>   (ends a hold made by npm run heavy -- wait --hold <label>)'); return 2; }
+    const recs = heavyRecords(root).filter((r) => r.hold && r.live && String(r.label || '') === want);
+    if (!recs.length) { console.error(`[heavy] release: no hold named "${want}" (npm run heavy -- status shows the holders)`); return 1; }
+    for (const r of recs) {
+      try { process.kill(r.pid, 'SIGTERM'); } catch {}
+      const f = path.join(heavyDir(root), r.file);
+      for (const t0 = Date.now(); Date.now() - t0 < 5000 && readJson(f)?.pid === r.pid && !holderGone(r);) sleep(100);
+      // Windows ends the holder without its exit handler: its record is removed here once it is gone.
+      if (holderGone(r)) { try { if (readJson(f)?.pid === r.pid) fs.rmSync(f, { force: true }); } catch {} }
+      console.log(`[heavy] released "${want}" (pid ${r.pid}): its machine:heavy slot is ${readJson(f)?.pid === r.pid ? 'still held (the holder did not end)' : 'free'}`);
+    }
+    return 0;
+  }
+  const label = preOpt('--hold') || preOpt('--label') || 'studio script';
+  const fo = floorOpts();
+  if (cmd === 'hold') {
+    // The background holder `wait --hold` starts: take the slot, say so in the ready file, hold until told or max.
+    const ready = preOpt('--ready');
+    const lines = [];
+    const tell = (o) => { if (ready) { try { fs.writeFileSync(`${ready}.tmp`, JSON.stringify({ ...o, lines })); fs.renameSync(`${ready}.tmp`, ready); } catch {} } };
+    let lk;
+    try { lk = acquireHeavy(root, label, { log: (m) => lines.push(m), kind, ...fo }); } catch (err) {
+      tell({ ok: false, code: err.code === 'HEAVY_BUSY' ? 3 : 1, why: String(err.message || err) });
+      return err.code === 'HEAVY_BUSY' ? 3 : 1;
+    }
+    const maxMin = Math.max(1, Math.min(num(preOpt('--hold-max-min'), 120), num(process.env.STUDIO_HEAVY_STALE_MIN, 240)));
+    lk.update((cur) => ({ ...cur, hold: true, holdMaxMin: maxMin }));
+    tell({ ok: true, pid: process.pid, held: lk.held, inside: Boolean(lk.inside), skipped: Boolean(lk.skipped), maxMin });
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, maxMin * 60000);
+      for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, () => { clearTimeout(t); resolve(); });
+    });
+    lk.release();
+    return 0;
+  }
+  if (!preOpt('--hold')) {
+    // wait: both the floor and a slot, at one moment; nothing is kept.
+    let lk;
+    try { lk = acquireHeavy(root, label, { log: (m) => console.error(m), kind, ...fo }); } catch (err) {
+      if (err.code !== 'HEAVY_BUSY') throw err;
+      console.error(err.message);
+      if (!/NOT RUN/.test(err.message)) console.error(`[heavy] NOT RUN ${label}: the machine:heavy lock stayed busy (exit 3: start nothing heavy now; run it again later)`);
+      return 3;
+    }
+    lk.release();
+    console.log(`[heavy] ready: ${lk.skipped ? 'machine:heavy is off (STUDIO_HEAVY_SLOTS=0)' : lk.inside ? 'this runs inside a machine:heavy hold already' : 'the free-RAM floor holds and a machine:heavy slot was free'}; nothing is held now. Start Unity under the lock: npm run heavy -- run --kind ${kind} --label "${label}" -- <command> (or wait --hold <label>, then release --label <label>)`);
+    return 0;
+  }
+  // wait --hold: a detached holder takes the slot and keeps it after this command ends.
+  fs.mkdirSync(heavyDir(root), { recursive: true });
+  const ready = path.join(heavyDir(root), `machine-heavy-hold-${process.pid}-${Date.now()}.ready`);
+  const pass = ['--min-free-gb', '--timeout-min', '--hold-max-min'].flatMap((k) => (preOpt(k) !== null ? [k, preOpt(k)] : []));
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'hold', '--hold', label, '--kind', kind, '--ready', ready, ...pass], { detached: true, stdio: 'ignore', windowsHide: true, cwd: root, env: process.env });
+  child.unref();
+  const waitMs = (fo.waitMin !== undefined ? fo.waitMin : num(process.env.STUDIO_HEAVY_WAIT_MIN, 60)) * 60000;
+  console.error(`[heavy] ${label}: waiting for the free-RAM floor and a machine:heavy slot (up to ${span(waitMs)}); a background holder (pid ${child.pid}) keeps the slot once it has it`);
+  let r = null;
+  for (const t0 = Date.now(); Date.now() - t0 < waitMs + 60000; sleep(200)) {
+    r = readJson(ready);
+    if (r) break;
+    if (!pidAlive(child.pid) || zombie(child.pid)) { r = readJson(ready); break; }
+  }
+  try { fs.rmSync(ready, { force: true }); } catch {}
+  for (const l of r?.lines || []) console.error(l);
+  if (!r) { console.error(`[heavy] NOT RUN ${label}: the background holder did not report (pid ${child.pid}); nothing is held${pidAlive(child.pid) ? ': stop it with npm run heavy -- release --label ' + label : ''}`); return 3; }
+  if (!r.ok) { console.error(r.why); if (!/NOT RUN/.test(r.why)) console.error(`[heavy] NOT RUN ${label}: the machine:heavy lock stayed busy (exit 3)`); return r.code === 3 ? 3 : 1; }
+  console.log(`[heavy] held: machine:heavy for "${label}" by pid ${r.pid}${r.held ? ` (${r.held})` : r.inside ? ' (inside a hold already: nothing more taken)' : r.skipped ? ' (machine:heavy is off)' : ''}. Release it when Unity ends: npm run heavy -- release --label "${label}" (it lets go by itself after ${r.maxMin} min)`);
+  return 0;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const root = await heavyRoot();
   const opt = (k) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : null);
+  // 2.73.2 (e): an option before `--` only (the wrapped command's own arguments are never read as ours).
+  const pre = argv.indexOf('--') >= 0 ? argv.slice(0, argv.indexOf('--')) : argv;
+  const preOpt = (k) => (pre.includes(k) ? pre[pre.indexOf(k) + 1] : null);
+  const floorOpts = () => {
+    const o = {};
+    const mf = preOpt('--min-free-gb');
+    if (mf !== null) { if (!(Number(mf) >= 0)) { console.error(`[heavy] --min-free-gb takes a number of GB (got "${mf}")`); process.exit(2); } o.minFreeGb = Number(mf); }
+    const tm = preOpt('--timeout-min');
+    if (tm !== null) { if (!(Number(tm) >= 0)) { console.error(`[heavy] --timeout-min takes a number of minutes (got "${tm}")`); process.exit(2); } o.waitMin = Number(tm); }
+    return o;
+  };
+  if (argv[0] === 'wait' || argv[0] === 'hold' || argv[0] === 'release') process.exit(await heavyWaitCli(root, argv, { preOpt, floorOpts }));
   if (argv[0] === 'run') {
     const sep = argv.indexOf('--');
     const label = opt('--label') || 'heavy command';
@@ -792,7 +939,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.68.0 (n): the job's claim: --kind (browser-playtest, gpu-playtest, blender-preview, unity, asset-roundtrip,
     // verify; 2.70.0: unity-bake, unity-visual, build-clip; default heavy), --ram-gb / --vram-gb / --gpu-only to override
     // it. 2.70.0 (t): a mostly-GPU kind takes the GPU area when the scan shows a GPU (heavy-budget.mjs gpuAreaClaim).
-    const claimOpts = { kind: opt('--kind') || 'heavy', ...(opt('--ram-gb') ? { ramGb: Number(opt('--ram-gb')) } : {}), ...(opt('--vram-gb') ? { vramGb: Number(opt('--vram-gb')) } : {}), ...(argv.slice(0, sep >= 0 ? sep : argv.length).includes('--gpu-only') ? { gpuOnly: true } : {}) };
+    const claimOpts = { kind: opt('--kind') || 'heavy', ...(opt('--ram-gb') ? { ramGb: Number(opt('--ram-gb')) } : {}), ...(opt('--vram-gb') ? { vramGb: Number(opt('--vram-gb')) } : {}), ...(argv.slice(0, sep >= 0 ? sep : argv.length).includes('--gpu-only') ? { gpuOnly: true } : {}), ...floorOpts() };
     const runOnce = async () => {
       let lk;
       try {
@@ -800,6 +947,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       } catch (err) {
         if (err.code !== 'HEAVY_BUSY') throw err;
         console.error(err.message);
+        // 2.73.2 (e, B-73): one line a studio's script can match: the command did not run (exit 3), why, and nothing failed.
+        if (!/NOT RUN/.test(err.message)) console.error(`[heavy] NOT RUN ${label}: ${err.floor ? 'free RAM stayed under the floor' : 'the machine:heavy lock stayed busy'} (exit 3: not a failure of the work; run it again later)`);
         process.exit(3);
       }
       // One command line, run by the shell as written (no glob of ours; quoting is the caller's). 2.60.0 (#5): in a

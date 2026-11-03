@@ -44,10 +44,11 @@ const plain = (id) => PLAIN[id] || `the ${id} gate failed`;
 export function gateWords(rec, allGates = []) {
   const rows = rec?.rows || [];
   const ran = new Set(rows.map((r) => r.id));
-  const failing = rows.filter((r) => !r.ok && r.required !== false);
-  const warn = rows.filter((r) => !r.ok && r.required === false);
+  // 2.73.2 (e, B-73): a row that ran but tested nothing (r.notRun: an infrastructure abort) is "not run", not failing.
+  const failing = rows.filter((r) => !r.ok && !r.notRun && r.required !== false);
+  const warn = rows.filter((r) => !r.ok && !r.notRun && r.required === false);
   const passing = rows.filter((r) => r.ok);
-  const notRun = allGates.filter((g) => !ran.has(g.id)).map((g) => ({ id: g.id, why: (rec?.skipped || []).find((x) => x.startsWith(g.id)) ? (/\(deep\)/.test((rec.skipped || []).find((x) => x.startsWith(g.id))) ? 'deep check, not in everyday verify' : 'not in this scope') : rec?.partial ? 'not in this partial run' : !rec ? 'no verify recorded' : g.required === false ? 'optional' : 'not run' }));
+  const notRun = rows.filter((r) => !r.ok && r.notRun).map((r) => ({ id: r.id, why: `not run: ${r.notRun}` })).concat(allGates.filter((g) => !ran.has(g.id)).map((g) => ({ id: g.id, why: (rec?.skipped || []).find((x) => x.startsWith(g.id)) ? (/\(deep\)/.test((rec.skipped || []).find((x) => x.startsWith(g.id))) ? 'deep check, not in everyday verify' : 'not in this scope') : rec?.partial ? 'not in this partial run' : !rec ? 'no verify recorded' : g.required === false ? 'optional' : 'not run' })));
   const lines = [];
   if (!rec) lines.push('NOT RUN: no verify has been recorded yet, so nothing below is a pass.');
   if (failing.length) lines.push(`FAILING (${failing.length}):`, ...failing.map((r) => `  - ${r.id}: ${plain(r.id)}`));
