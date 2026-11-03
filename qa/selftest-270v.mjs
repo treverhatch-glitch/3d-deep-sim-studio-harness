@@ -209,6 +209,8 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
     const hadKey = fs.existsSync(path.join(dir, keyRel));
     if (hadKey) { g('rm', '-q', '--cached', keyRel); fs.renameSync(path.join(dir, keyRel), path.join(dir, `${keyRel}.270v`)); g('commit', '-qm', 'test: no owner key for the delegation check', '--no-verify'); }
     const gr = run(dir, 'node harness/delegation.mjs grant opus-bot --actions asset-review --hours 2 --by pat --why "asset reviews while the crew runs"', base);
+    // Why the delegation does or doesn't count, printed first when this check fails (CI only: the shared studio differs).
+    const delegWhy = (() => { const r = run(dir, `node -e "import('./harness/delegation.mjs').then((m) => { const d = m.readDelegation({ root: process.cwd() }); console.log(JSON.stringify({ ok: d.ok, why: d.why, signed: d.signed, commit: d.commit })); })"`, base); return out(r).trim().slice(-400); })();
     const dl = asset('review dock-barrel --pass --by opus-bot', { CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'opus-bot' });
     const recB3 = rj('.studio/asset-reviews/dock-barrel.json');
     const dB2 = task(`done ${B.id} --agent artist-270v-b`);
@@ -223,7 +225,7 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
     await guard('2.70.0 (v4b): a preview re-rendered after the request makes a stale answer refused and the next task done asks again for the new checksums (the same open review task, its request rewritten: a pass counts for the files\' checksums only); the owner\'s delegation for asset-review lets the outside agent answer, recorded as via delegation, and the asset lands (2.69.0: no review)', () => [
       passB.status !== 0 && /changed since the request/.test(out(passB)) && recB1.verdict === null && dB.status !== 0 && recB2.verdict === null && recB2.hashes?.['assets/dock/barrel.preview-top.png'] && recB2.hashes['assets/dock/barrel.preview-top.png'] !== recB1.hashes?.['assets/dock/barrel.preview-top.png'] && bReviews.length === 1 && recB2.reviewTask === recB1.reviewTask
         && gr.status === 0 && dl.status === 0 && recB3.verdict === 'pass' && recB3.via === 'delegation' && dB2.status === 0,
-      JSON.stringify({ passB: out(passB).slice(-300), dB: out(dB).slice(-300), bReviews: bReviews.length, gr: out(gr).slice(-300), dl: out(dl).slice(-300), recB3: { verdict: recB3.verdict, via: recB3.via }, dB2: out(dB2).slice(-400) }).slice(0, 3000)]);
+      JSON.stringify({ deleg: delegWhy, gr: `${gr.status} ${out(gr).slice(-300)}`, dl: out(dl).slice(-300), recB3: { verdict: recB3.verdict, via: recB3.via }, passB: out(passB).slice(-200), dB: out(dB).slice(-200), bReviews: bReviews.length, dB2: out(dB2).slice(-200) }).slice(0, 3000)]);
 
     // 5. a failed review files a fix task with the reviewer's words
     const C = make('Plan asset: dock lamp prop', 'artist-270v-c', 'dock', 'lamp', all3('good'));
