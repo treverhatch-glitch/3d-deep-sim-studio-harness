@@ -1508,6 +1508,14 @@ function parseFlags(argv) {
   return flags;
 }
 
+/** 2.71.0 (x): one decision-log record for a board decision (hold, unhold, yes; harness/decisions.mjs). Never throws. */
+async function logTaskDecision({ action, subject, by, dg = null, why = '', evidence = '', undo = null }) {
+  try {
+    const dm = await import('./decisions-log.mjs');
+    dm.logDecision({ action, subject, by, as: dg && dg.ok !== false && (dg.ok || dg.via) ? dm.asCaller(dg) : dm.asCaller(null), why, evidence, undo });
+  } catch { /* the board's own record stands */ }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   // 2.67.0 (B-47): --help / -h prints usage and exits before anything reads the board or acts (train --help ran a train).
   const help = await import('./task-usage.mjs');
@@ -1991,19 +1999,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.67.0: under the owner's standing delegation the record says so (harness/delegation.mjs).
     const dl = await import('./delegation.mjs');
     const dg = dl.delegationFor({ action: 'hold', by });
-    const under = dg.ok ? ` (${dl.delegationWords({ at: dg.at, by: dg.owner }).slice(0, 160)})` : '';
+    const under = dg.ok ? ` (${(dg.autonomous ? dg.permission : dl.delegationWords({ at: dg.at, by: dg.owner })).slice(0, 160)})` : '';
     if (dg.ok) dl.recordUse(dg, { action: 'hold', task: t.id, detail: cmd });
     if (cmd === 'unhold') {
       if (!readHolds()[t.id]?.held) { console.log(`${t.id} isn't held.`); process.exit(0); }
+      const wasHeld = readHolds()[t.id]?.held;
       setHold(t.id, { held: null });
-      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again${under}`, ...(dg.ok ? { meta: { delegation: dg.at, owner: dg.owner } } : {}) });
+      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again${under}`, ...(dg.ok ? { meta: { delegation: dg.at, owner: dg.owner, ...(dg.autonomous ? { autonomous: true } : {}) } } : {}) });
+      await logTaskDecision({ action: 'hold', subject: t.id, by, dg, why: `unhold (was held: ${wasHeld?.why || '?'})`, evidence: 'unhold', undo: { kind: 'hold', task: t.id, held: wasHeld || null, text: `npm run task -- hold ${t.id} --by <name> --why "…"` } });
       console.log(`${t.id} is no longer held: its claim clock runs again.`);
       process.exit(0);
     }
     const why = String(flags.why).trim();
     const was = readHolds()[t.id]?.parked;
     setHold(t.id, { held: { by, why, at: new Date().toISOString(), ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
-    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing${under}: ${why}`.slice(0, 400), meta: { why, ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
+    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing${under}: ${why}`.slice(0, 400), meta: { why, ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
+    await logTaskDecision({ action: 'hold', subject: t.id, by, dg, why, evidence: 'hold for landing', undo: { kind: 'unhold', task: t.id, text: `npm run task -- unhold ${t.id} --by <name>` } });
     // A stop by the claim clock while it waited to land wasn't a stuck lane: the park is lifted (and the budget count
     // starts again), and its waiting rescues are closed.
     if (was?.budget) setHold(t.id, { parked: null }, { by, msg: `${by} unparked ${t.id}: held for landing, not stuck (${why})`.slice(0, 400) });
@@ -2079,15 +2090,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.67.0: the owner's standing delegation (harness/delegation.mjs): the named outside agent says yes with --by <agent>.
     const dl = await import('./delegation.mjs');
     const dg = dl.delegationFor({ action: 'yes', by: typeof flags.by === 'string' ? flags.by : '' });
-    if (dg.ok) { flags.by = dg.owner; flags.quote = dg.permission; flags.source = dl.DELEGATION_REL; }
+    if (dg.ok) { flags.by = dg.owner; flags.quote = dg.permission; flags.source = dg.autonomous ? 'studio/policy.json' : dl.DELEGATION_REL; }
     const who = dg.ok ? { ok: true, relayedBy: dg.agent } : devSays(typeof flags.by === 'string' ? flags.by : null, { quote: flags.quote || '', source: flags.source || '' });
     if (!who.ok) {
       console.error(`${who.message}${dg.why ? ` (${dg.why})` : ''}`);
       process.exit(1);
     }
     if (dg.ok) dl.recordUse(dg, { action: 'yes', task: arg1 });
+    const neededYes = readHolds()[arg1]?.needsYes || null; // 2.71.0 (x): the decision log's undo
     setHold(arg1, { needsYes: null }, { by: flags.by, msg: `${flags.by} said yes to ${arg1}${who.relayedBy ? ` (relayed by ${who.relayedBy}: "${flags.quote}", ${flags.source})` : ''}` });
-    emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}`, meta: who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {} });
+    emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}${dg.autonomous ? ' (autonomous mode: on the review list)' : ''}`, meta: { ...(who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
+    await logTaskDecision({ action: 'yes', subject: arg1, by: dg.ok ? dg.agent : flags.by, dg: dg.ok ? dg : (who.relayedBy ? { via: 'outside agent', permission: `${flags.quote} (${flags.source})` } : null), why: t.title, evidence: neededYes ? `proposed by ${neededYes.by || '?'}` : 'no yes was pending', undo: neededYes ? { kind: 'needs-yes', task: arg1, needsYes: neededYes, text: `the task waits for the dev's yes again` } : null });
     console.log(`${arg1} can start.`);
     process.exit(0);
   }

@@ -58,6 +58,7 @@ export async function setTrainAuto(root, { on, by, why = '', permission = '', en
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const rec = { off: !on, by: d.by, why: String(why || '').slice(0, 300), at: new Date().toISOString(), via: d.via, ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}) };
   fs.writeFileSync(f, `${JSON.stringify(rec, null, 2)}\n`);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'train-auto', subject: 'train daemon', by: d.by, as: dm.asOf(d), why: rec.why || (on ? 'train daemon on' : 'train daemon off'), evidence: on ? 'on' : 'off', undo: { kind: 'train-auto', on: !on, text: `npm run task -- train auto ${on ? 'off' : 'on'} --by <name>` }, root }); } catch {}
   emit({ type: on ? 'task.train.auto_on' : 'task.train.auto_off', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} turned the train daemon ${on ? 'on' : 'off'}${d.via !== 'person' ? ` (recorded by ${d.recordedBy})` : ''}${rec.why ? `: ${rec.why}` : ''}`.slice(0, 600), meta: rec });
   return { ok: true, message: on ? `The train daemon is on: the supervisor starts a train when lanes are ready and the machine has room${off(env.STUDIO_TRAIN_AUTO) ? ' (but STUDIO_TRAIN_AUTO is off in this environment)' : ''}.` : 'The train daemon is off: trains run only by hand (npm run task -- train) until train auto on.' };
 }

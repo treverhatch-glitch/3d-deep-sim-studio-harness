@@ -10,6 +10,8 @@
  * landed for keepDays, over all judged tokens), the cost per kept change (also per task type) and the waste split
  * (reopened / reverted or redone / handed back / dropped / no task), with pending landings apart; --json: card.tokenWork.
  *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   2.65.0: set the level (setLevel)
+ *   npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   2.71.0: propose autonomous mode (the
+ *     owner confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
  *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
  *     (harness/impact.mjs)
  * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
@@ -904,6 +906,7 @@ export async function setLevel(level, { by, why = '', permission = '', env = pro
   fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
   const how = rec.recordedBy ? (rec.permission ? ` (recorded by ${rec.recordedBy} on ${who}'s permission: "${rec.permission.slice(0, 120)}")` : ` (a ${rec.via} session: ${rec.recordedBy})`) : '';
   emitEvent({ type: 'autonomy.level', agent: (rec.recordedBy || who).slice(0, 60), to: 'producer', msg: `Autonomy level ${from} -> ${to} by ${who}${how}${note ? `: ${note}` : ''}`.slice(0, 600), meta: { by: who.slice(0, 60), from, to, why: note || null, via: rec.via, ...(rec.recordedBy ? { recordedBy: rec.recordedBy } : {}), ...(rec.permission ? { permission: rec.permission } : {}) } });
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'autonomy-level', subject: AUTONOMY_REL, by: who, as: dm.asOf({ via: rec.via, permission: rec.permission }), why: note || `${from} -> ${to}`, evidence: `${from} -> ${to}`, undo: { kind: 'text', text: `npm run autonomy -- level ${from} --by <name>` } }); } catch {}
   return { ok: true, from, to, message: `Autonomy level ${from} -> ${to} in ${AUTONOMY_REL}, set by ${who}${how}${note ? ` (${note})` : ''}. Commit ${AUTONOMY_REL} so the change is on record.` };
 }
 
@@ -961,6 +964,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   if (argv[0] === 'level') {
     const r = await setLevel(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+  // 2.71.0 (x): `mode autonomous on|off --by <game dev>`: on writes a proposal the owner confirms (npm run policy --
+  // confirm); off pauses autonomous mode at once (harness/policy.mjs). Never turns anything on by itself.
+  if (argv[0] === 'mode') {
+    if (argv[1] !== 'autonomous' || !['on', 'off'].includes(argv[2])) { console.error('Usage: npm run autonomy -- mode autonomous on --agent <name> --by <game dev> [--actions …] [--review-h 72] [--why "…"] [--permission "…"]\n       npm run autonomy -- mode autonomous off --by <name> [--why "…"]'); process.exit(2); }
+    const r = await (await import('./policy-rules.mjs')).proposeMode({ on: argv[2] === 'on', agent: flag('agent') || '', actions: flag('actions'), reviewH: flag('review-h'), by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }

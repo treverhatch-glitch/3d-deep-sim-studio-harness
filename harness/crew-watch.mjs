@@ -164,6 +164,7 @@ export async function resumeRole(role, { by, why = '', permission = '', env = pr
   const asks = readJson(RESUME_FILE(), {}) || {};
   asks[r] = { by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null, why: String(why || '').slice(0, 300), at: new Date().toISOString() };
   writeJson(RESUME_FILE(), asks);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'crew-resume', subject: r, by: d.by, as: dm.asOf(d), why: asks[r].why || `resume ${r}`, evidence: 'paused by the crew watchdog', undo: null }); } catch {}
   return { code: 0, text: `Asked the supervisor to launch ${r} again (${d.via}${d.via !== 'person' ? `, recorded by ${d.recordedBy}` : ''}); its next pass emits crew.resumed.` };
 }
 

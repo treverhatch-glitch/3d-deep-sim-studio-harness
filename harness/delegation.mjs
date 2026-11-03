@@ -39,6 +39,8 @@ import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { OWNER_PUB_REL, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO } from './approve.mjs';
 import { WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
+import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
+import { logDecision } from './decisions-log.mjs';
 
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
@@ -146,7 +148,19 @@ export const delegationWords = (doc) => `under delegation ${doc.at} by ${doc.by}
  * permission } or { ok: false, why } (why is '' when `by` isn't the delegated agent at all: the caller's normal rules
  * apply and nothing about a delegation needs saying).
  */
-export function delegationFor({ action, by, env = process.env, root = mainRoot(), now = Date.now(), lane = inLaneCopy() } = {}) {
+export function delegationFor({ action, by, env = process.env, root = mainRoot(), now = Date.now(), lane = inLaneCopy(), autonomy = true } = {}) {
+  const d = delegationOnly({ action, by, env, root, now, lane });
+  // 2.71.0 (x): the studio policy's "never" rules an action out for every agent, a delegated one included.
+  const never = d.ok ? policyNeverWhy(action, { root }) : '';
+  if (never) return { ok: false, why: `no delegation applies: ${never}` };
+  if (d.ok || !autonomy) return d;
+  // 2.71.0 (x): autonomous mode (studio/policy.json, harness/policy.mjs): the overseer takes the listed game-dev
+  // decisions itself; each is logged "autonomous" and put on the review list. Same shape as a delegation, autonomous: true.
+  const a = autonomousFor({ action, by, env, root, lane });
+  if (a.ok) return a;
+  return { ok: false, why: d.why || a.why };
+}
+function delegationOnly({ action, by, env, root, now, lane }) {
   const who = String(by || '').trim();
   if (!who) return { ok: false, why: '' };
   const d = readDelegation({ root, now });
@@ -170,6 +184,7 @@ export function delegationFor({ action, by, env = process.env, root = mainRoot()
  * entry's time is inside its window.
  */
 export function embeddedDelegationOk(doc, pub, { action, agent, at } = {}) {
+  if (doc?.autonomous) return embeddedAutonomyOk(doc, pub, { action, agent, at }); // 2.71.0 (x): a signed policy
   if (!doc || shapeError(doc) || !doc.signature || !pub) return false;
   if (!verifyApproval({ approval: body(doc), signature: doc.signature }, pub)) return false;
   const t = Date.parse(at);
@@ -178,6 +193,7 @@ export function embeddedDelegationOk(doc, pub, { action, agent, at } = {}) {
 
 /** One delegation.used event per use (the daily digest counts them). */
 export function recordUse(d, { action, task = null, detail = '' } = {}) {
+  if (d?.autonomous) return; // 2.71.0 (x): an autonomous decision's record is the decision log's (harness/decisions.mjs)
   try {
     emitEvent({ type: 'delegation.used', agent: d.agent, task, to: d.owner, msg: `${d.agent} ran ${action}${task ? ` ${task}` : ''} ${delegationWords({ at: d.at, by: d.owner })}${detail ? ` (${detail})` : ''}`.slice(0, 400), meta: { action, owner: d.owner, at: d.at, until: d.until, signed: Boolean(d.signed) } });
   } catch { /* the record of the action itself is written by the action */ }
@@ -236,6 +252,7 @@ export function grantDelegation({ agent, actions, hours, by, why = '', commit = 
   fs.writeFileSync(path.join(root, DELEGATION_REL), `${JSON.stringify(doc, null, 2)}\n`);
   const c = commit ? commitFile(root, `delegate: ${doc.by} lets ${name} run ${list.join(', ')} until ${doc.until}`, doc.why) : { committed: false, note: ` Not committed (--no-commit): it counts once you commit ${DELEGATION_REL} from this terminal.` };
   emitEvent({ type: 'delegation.granted', agent: doc.by, to: name, msg: `${doc.by} lets ${name} run ${list.join(', ')} until ${short(doc.until)}${pub ? ' (signed)' : ''}: ${doc.why}`.slice(0, 400), meta: { agent: name, actions: list, at, until: doc.until, signed: Boolean(pub) } });
+  logDecision({ action: 'delegate', subject: DELEGATION_REL, by: doc.by, as: 'person', why: doc.why, evidence: `${name}: ${list.join(', ')} until ${short(doc.until)}`, undo: { kind: 'text', text: 'npm run delegate -- revoke --by <name>' }, root });
   return { ok: true, doc, committed: c.committed, message: `${name} may run ${list.join(', ')} with --by ${name} until ${short(doc.until)} (${h} h), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} Every use is recorded "${delegationWords(doc).slice(0, 80)}…" and shows in the digest. Never covered: ${NEVER_DELEGATED}. Claude Code rules for these commands: npm run delegate -- claude-settings.`.replace(/\s+/g, ' ').trim() };
 }
 
@@ -251,6 +268,7 @@ export function revokeDelegation({ by = '', commit = true, env = process.env, ro
   const who = String(by || env.STUDIO_LOCK_OWNER || env.USER || env.USERNAME || 'someone').trim().slice(0, 60);
   const c = commit ? commitFile(root, `delegate: revoked${doc?.agent ? ` (${doc.agent})` : ''} by ${who}`, 'revoked') : { committed: false, note: ` Not committed (--no-commit): commit the removal of ${DELEGATION_REL}.` };
   emitEvent({ type: 'delegation.revoked', agent: who, to: doc?.agent || null, msg: `${who} revoked the delegation${doc?.agent ? ` to ${doc.agent}` : ''}`, meta: { agent: doc?.agent || null, at: doc?.at || null } });
+  logDecision({ action: 'delegate', subject: DELEGATION_REL, by: who, as: 'person', why: `revoked${doc?.agent ? ` the delegation to ${doc.agent}` : ''}`, evidence: 'revoke', undo: null, root });
   return { ok: true, message: `Revoked${doc?.agent ? ` the delegation to ${doc.agent}` : ''}. ${c.committed ? `Committed the removal of ${DELEGATION_REL}.` : ''}${c.note} The Claude Code allow rules stay until removed: npm run delegate -- claude-settings --remove --write.`.replace(/\s+/g, ' ').trim() };
 }
 
