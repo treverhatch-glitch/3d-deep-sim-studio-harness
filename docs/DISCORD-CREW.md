@@ -69,6 +69,40 @@ An orchestrator outside the harness (the "conductor") doesn't rebuild state by h
 - `npm run status -- --brief` gives the status post, under 100 words.
 - `npm run task -- note <ID> "<ruling>" --by <bot-name>` keeps a ruling in the task's record and brief.
 - `npm run events -- wait --type job.done --match kind=train` waits for a job to end instead of polling logs.
+- `npm run next-board` gives "what's next" on one screen (2.71.0, below); `npm run report -- post` sends a post to
+  the owner's chat through a webhook.
+
+## The overseer's paperwork, moved into the harness (2.71.0)
+
+The conversation on the chat stays with the overseer; the posts and write-ups it made by hand are commands now.
+
+- **What's next** (`npm run next-board [-- --n 3] [--json]`, harness/next-board.mjs): per role, the next N tasks that
+  could start now (the same hold test `task next` uses), what blocks the rest (holds, parks, `--after` chains, a held
+  folder), overlaps the 2.69 overlap check recorded for them, lanes waiting for the merge train (and those held for a
+  person's release), and the count and first line of what needs a person. Under 150 words. Read-only.
+- **Posting** (`npm run report -- post [--what status|next|digest] [--dry-run]`, harness/report-post.mjs): builds the
+  text from `status -- --brief` (without moving its "since" mark), the what's-next board or today's digest, and POSTs
+  it as JSON to `STUDIO_REPORT_WEBHOOK` (the environment or the studio's `.env`, which is never committed). The format
+  is `STUDIO_REPORT_FORMAT=discord|slack|json`; unset, the URL's host picks it (discord.com: `{content}` split at 2000
+  characters, mentions off; hooks.slack.com: `{text}`), else `{what, text, at}`. One retry on a 5xx or 429 after
+  Retry-After (at most 30 s). `--dry-run` prints the payloads and sends nothing. The webhook is a secret: output and
+  logs name it as `webhook ...<last 4>`, the `report.posted` events carry none of it, error text is scrubbed of it,
+  launched agents never get it in their environment, and the secrets gate flags a Discord or Slack webhook URL in a
+  file. The supervisor posts the digest once a day at or after `STUDIO_REPORT_HOUR` (local time; unset: never) and the
+  what's-next board when the queue changed a lot (3 tasks or trains in or out since the last post, or half of a smaller
+  board), at most every `STUDIO_REPORT_NEXT_MIN` minutes (120; `off`: never). Nothing posts without a webhook.
+- **The builder's brief** (`npm run brief -- builder [--write]`, harness/role-brief.mjs): composed from the studio's
+  real rules: AGENTS.lite.md or AGENTS.md (as the scope says), studio/PITFALLS.md (lines for all and for builders),
+  the protected list, the gates the scope's verify runs with the remedy from each one's Fix line, studio/policy.json when
+  the studio has one, and the claim, lane and done commands. Under 800 words; it says what it cut. `--write` saves
+  `.studio/briefs/role-builder.md` with a hash of its sources and of its own body. Once saved, the builder kickoff
+  points at it instead of the AGENTS file, and writes it again when a source changed or the file was edited by hand.
+  Only this command (and the kickoff's refresh) writes it; it is derived state, not committed and not protected.
+- **Research tasks** (`npm run task -- add "<question>" --type research`, harness/research.mjs,
+  studio/skills/research.md): `task start` writes the template to `docs/research/<ID>.md` (or the game's own
+  `docs/research/`): the question, sources with links, findings, what is UNVERIFIED, a recommendation. `task done`
+  refuses the task while the write-up has no Sources section or no link in it. No verify. The daily digest lists the
+  research finished in the last 24 h with its file and recommendation.
 
 ## One machine, one studio
 
