@@ -22,7 +22,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { recordAlive } from './proc-identity.mjs';
 import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
 import { watchCommand } from './workaround.mjs';
 
@@ -203,7 +204,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   }
   const file = lockPath(k);
   const now = Date.now();
-  const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString() };
+  const payload = { key: k, owner: check.owner, claimedAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlSec * 1000).toISOString(), holder: holderOf() };
   // 2.57.0 (PU-16): the lock file appears already holding its payload (never empty, even if this process is killed).
   if (createExclusive(file, JSON.stringify(payload, null, 2))) return { ok: true, lock: payload };
   const seen = inspectLock(file);
@@ -222,7 +223,7 @@ function claimUnlocked(k, owner, ttlSec, again = false) {
   return claimUnlocked(k, owner, ttlSec, true);
 }
 
-export function release(key, owner) {
+export function release(key, owner, { caller = null } = {}) {
   const check = assertOwner(owner);
   if (!check.ok) return check;
   let file = lockPath(key);
@@ -234,9 +235,51 @@ export function release(key, owner) {
     if (mine) { file = lockPath(mine.key); existing = readLock(file); }
   }
   if (!existing) return { ok: true, released: false };
-  if (existing.owner !== check.owner) return { ok: false, reason: 'not-owner', lock: existing };
+  if (existing.owner !== check.owner) return { ok: false, reason: 'not-owner', lock: existing, message: `${existing.key} is held by ${existing.owner}, not ${check.owner}: only ${existing.owner} releases it` };
+  // 2.71.1 (B, K01): `lock release` from the command line is bound to the holder, not only to the name it was given.
+  if (caller) {
+    const refused = releaseRefused(existing, check.owner, caller);
+    if (refused) return refused;
+  }
   fs.rmSync(file, { force: true });
   return { ok: true, released: true };
+}
+
+/**
+ * 2.71.1 (B, K01): who is claiming, recorded on the lock: { lane: the lane copy it was claimed from (null: the main
+ * checkout), as: STUDIO_LOCK_OWNER then }. The launcher's session record (.studio/agents/<owner>.json: pid and start
+ * identity, harness/proc-identity.mjs) says whether the owner's session still runs.
+ */
+export function holderOf({ root = REPO_ROOT, env = process.env } = {}) {
+  return { lane: laneCopyName(root), as: String(env.STUDIO_LOCK_OWNER || '').trim() || null };
+}
+
+/** true: the owner's launched session is over (the record says ended, or its process is gone); false: it runs; null: no record says. */
+export function holderGone(lock) {
+  let s = null;
+  try { s = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'agents', `${lock.owner}.json`), 'utf8')); } catch { return null; }
+  if (!s || typeof s !== 'object') return null;
+  // P-028: a claim made after that session ended is someone else's under the same name: nothing says it is over.
+  if (s.status !== 'running') return s.endedAt && Date.parse(lock.claimedAt || '') > Date.parse(s.endedAt) ? null : true;
+  return !recordAlive(s);
+}
+
+/**
+ * The refusal for a release by someone who isn't the holder, or null. The caller ({ lane, as }: holderOf() of the
+ * releasing process) is another agent when STUDIO_LOCK_OWNER names someone else, or when it runs in another agent's
+ * lane copy (.lanes/<name>) than the one the lock was claimed from. Allowed anyway when the holder's session is over
+ * (the watcher's rule for dead holders, harness/agent.mjs releaseDeadLocks).
+ */
+export function releaseRefused(lock, owner, caller) {
+  const me = caller?.as || null;
+  const lane = caller?.lane || null;
+  const other = (me && me !== lock.owner) || (lane && lane !== lock.owner && lane !== (lock.holder?.lane || null));
+  if (!other) return null;
+  const gone = holderGone(lock);
+  if (gone === true) return null;
+  const where = lock.holder?.lane ? ` in lane copy ${lock.holder.lane}` : lock.holder ? ' in the main checkout' : '';
+  const you = [me ? `STUDIO_LOCK_OWNER=${me}` : '', lane ? `lane copy ${lane}` : ''].filter(Boolean).join(', ');
+  return { ok: false, reason: 'not-holder', lock, message: `${lock.key} is held by ${lock.owner} (claimed ${lock.claimedAt || '?'}${where}${gone === false ? '; its session is running' : ''}), and this release comes from someone else (${you}). Only ${lock.owner} releases it; it is freed when ${lock.owner}'s session ends. Need it? Ask ${lock.owner} or the Producer, or pick another task.` };
 }
 
 /**
@@ -424,7 +467,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(1);
   }
   if (cmd === 'claim') out(claim(maybeKey, owner, Number(flag('--ttl') || 3600), { wide: flag('--wide') || null, byHand: true }));
-  if (cmd === 'release') out(release(maybeKey, owner));
+  if (cmd === 'release') out(release(maybeKey, owner, { caller: holderOf() }));
   if (cmd === 'status') out(status(maybeKey), true);
   void rest;
   process.exit(1);
