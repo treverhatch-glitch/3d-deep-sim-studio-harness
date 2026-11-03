@@ -153,10 +153,16 @@ async function checkBadEnds(opts, state, now) {
   // PU-19: a session that stopped at its usage limit waits for the reset (its tool is marked out); it isn't a bad end.
   // 2.58.3 (N1): nor is a session a person (or the Producer) stopped or paused: killing it ends it with exit 1 on
   // Windows (taskkill /F) and by a signal elsewhere; the launcher records who stopped it (meta.stoppedBy).
-  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy);
-  const last2 = mine.slice(-2);
+  // 2.73.1 (B-66): nor one its own launcher ended (meta.exitCause: the stall watchdog, the idle exit, the task's budget):
+  // like the watchdog's stop (stoppedBy) it ends with exit 1 or a signal, and those have their own handling (the breaker,
+  // the crew watchdog). And sessions that die within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as ONE end: one
+  // outside cause (a killed process tree, a crash of the machine's shell) took them together.
+  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  const ends = groupSameDeaths(mine);
+  const last2 = ends.slice(-2).map((g) => g[g.length - 1]);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
+    const groups = ends.slice(-2);
     // Name the program, not "custom" (test #2): the first word of STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD.
     const metaTool = last2[0].meta?.tool || 'the agent tool';
     const roleOf = String(last2[0].meta?.role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
@@ -164,8 +170,10 @@ async function checkBadEnds(opts, state, now) {
     // A program that isn't on the PATH: exit 127 (9009, or 1 under cmd.exe on Windows), or one `which` can't find.
     const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' }).status !== 0);
     const hint = missing ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
-    state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}`, ...(metaTool === 'custom' ? { custom: true } : {}), ...(missing ? { missing: true } : {}) };
-    emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
+    const names = groups.map((g) => (g.length > 1 ? `${g.map((e) => e.agent).join(' + ')} together` : g[0].agent));
+    const causes = groups.flat().map((e) => ({ agent: e.agent, ...(e.meta?.exitCause ? { kind: e.meta.exitCause.kind, signal: e.meta.exitCause.signal || null } : { kind: 'unknown' }), code: e.meta?.code ?? null }));
+    state.halted = { at: new Date(now).toISOString(), code, tool, scope: 'builders', why: `two sessions in a row ended with exit ${code} (${names.join(', ')}): ${hint}`, causes, ...(metaTool === 'custom' ? { custom: true } : {}), ...(missing ? { missing: true } : {}) };
+    emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}. A halt stops new sessions only: the train daemon still lands lanes already queued.`, meta: { code, tool, scope: 'builders', causes, sameDeathSec: sameDeathSec() } });
     // 2.65.0: a halt whose cause is on the self-triage list (harness/self-triage.json: the tool isn't on PATH and another
     // tool is) is fixed and cleared as studio:resume would, by "self-triage"; the next pass resumes. Unknown causes,
     // and a cause already fixed once in the window, wait for a person as before.
@@ -179,6 +187,31 @@ async function checkBadEnds(opts, state, now) {
     return true;
   }
   return false;
+}
+
+/** 2.73.1 (B-66): ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. */
+const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped']);
+export const sameDeathSec = (env = process.env) => { const v = String(env.STUDIO_HALT_SAME_DEATH_SEC ?? '').trim(); const n = Number(v); return v !== '' && Number.isFinite(n) && n >= 0 ? n : 5; };
+/**
+ * 2.73.1 (B-66): session ends (in order) grouped so that ends within STUDIO_HALT_SAME_DEATH_SEC of the group's first are
+ * one group: [[end, …], …]. The time is when the process exited (meta.exitCause.at), else the event's. 0 = no grouping.
+ * Only ends that record how long the process ran (meta.exitCause.ranSec) and had run at least SAME_DEATH_MIN_RUN_SEC
+ * (60) are merged: sessions that crash at launch, together or one after another, are each evidence the tool is broken.
+ * Nor is an exit that says the tool itself can't run (127 or 9009: not found; 126: not executable).
+ */
+const TOOL_MISSING = new Set([126, 127, 9009]);
+const SAME_DEATH_MIN_RUN_SEC = 60;
+const mergeable = (e) => !TOOL_MISSING.has(Number(e.meta?.code)) && Number(e.meta?.exitCause?.ranSec) >= SAME_DEATH_MIN_RUN_SEC;
+export function groupSameDeaths(ends, env = process.env) {
+  const win = sameDeathSec(env) * 1000;
+  const at = (e) => { const t = Date.parse(e.meta?.exitCause?.at || ''); return Number.isFinite(t) ? t : Date.parse(e.ts); };
+  const out = [];
+  for (const e of ends) {
+    const g = out[out.length - 1];
+    if (g && win > 0 && mergeable(e) && mergeable(g[0]) && Math.abs(at(e) - at(g[0])) <= win) g.push(e);
+    else out.push([e]);
+  }
+  return out;
 }
 
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
@@ -472,7 +505,8 @@ export async function supervise(opts, state, now = Date.now()) {
 
 /**
  * 2.69.0 (r): one train-daemon pass for the supervisor loop: what it decided goes in state.train (studio:status).
- * A halt, a wind-down (supervise's result) and "Stop all" keep it from starting a train. Never throws.
+ * A wind-down (supervise's result), "Stop all" and drain keep it from starting a train. 2.73.1 (B-66): the supervisor's
+ * own halt (scope 'builders') stops new sessions only; a train for lanes already queued still starts. Never throws.
  */
 export async function trainDaemonTick(state, r = {}, opts = {}) {
   try {

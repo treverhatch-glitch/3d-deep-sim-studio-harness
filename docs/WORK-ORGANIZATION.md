@@ -246,8 +246,11 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   each pass starts a train on its own, in a detached child (`.studio/train/daemon.json`, its log `daemon.log`), when
   lanes are ready by the batching rules above (`STUDIO_TRAIN_MIN` lanes not held, or the oldest waited
   `STUDIO_TRAIN_WAIT_MIN`) AND the machine budget admits a verify claim (the machine:heavy admission below); never
-  beside another train (the train lock) or its own last one, never while the supervisor is halted, winding down or
-  "Stop all" is on (`task.train.auto_waiting` says why, once per reason). After it, each handed-back lane whose task
+  beside another train (the train lock) or its own last one, never while winding down, "Stop all" is on or drain is on
+  (`npm run task -- drain on`; `task.train.auto_waiting` says why, once per reason). 2.73.1 (B-66): the supervisor's
+  halt ("two sessions in a row ended with exit N") stops new sessions only, not trains: a lane already queued and
+  verified still lands while the halt waits for a person. Only "Stop all", drain, a wind-down, `train auto off` and
+  `studio:stop` (which ends the supervisor and with it the daemon) stop trains. After it, each handed-back lane whose task
   has no running session is made sure to be back on the board with the hand-back facts (only what is missing is
   added), and ONE `job.done` (kind train, `meta.auto`, `requeued`) sums it. `npm run task -- train auto off|on --by
   <name> [--why "…"]` switches it (a person, the owner's delegation, or a Producer/Director session or an outside agent

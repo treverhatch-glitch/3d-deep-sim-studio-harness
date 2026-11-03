@@ -8,7 +8,11 @@
  *     (.studio/train/auto.json, set by `npm run task -- train auto off|on --by <name>`: decider rules, harness/decider.mjs:
  *     a person, an agent under the owner's delegation, or a Producer/Director session or an outside agent on a
  *     person's permission; never a worker), and the train itself is on (STUDIO_TRAIN);
- *   - nothing stops it: no halt, no usage wind-down (2.68.0, harness/winddown.mjs), no "Stop all";
+ *   - nothing stops it: no usage wind-down (2.68.0, harness/winddown.mjs), no "Stop all", no drain (2.73.1: `npm run
+ *     task -- drain on`), and no halt other than the supervisor's builder halt. 2.73.1 (B-66): the supervisor's halt
+ *     ("two sessions in a row ended with exit N", scope 'builders') stops new sessions, not the train: a lane already
+ *     queued and verified still lands. A halt that names no scope still stops trains; studio:stop ends the supervisor
+ *     and with it the daemon;
  *   - never two trains: no train lock held by a live process (.studio/locks/train.lock), no daemon train still running;
  *   - the queue has ready lanes by the batch rules that already exist (STUDIO_TRAIN_MIN lanes not held for the owner or
  *     out of trains, or the oldest has waited STUDIO_TRAIN_WAIT_MIN);
@@ -96,7 +100,8 @@ export function daemonDecision(f) {
   const no = (why) => ({ start: false, why, lanes: [] });
   if (!f.auto?.on) return no(f.auto?.why || 'train auto is off');
   if (!f.trainOn) return no('STUDIO_TRAIN is off');
-  if (f.halted) return no(`halted: ${f.halted}`);
+  if (f.halted && f.haltScope !== 'builders') return no(`halted: ${f.halted}`);
+  if (f.drain) return no(`drain is on (${f.drain}; npm run task -- drain off)`);
   if (f.winddown) return no(`winding down: ${f.winddown}`);
   if (f.stopped) return no(`"Stop all" is on (${f.stopped})`);
   if (f.lock) return no(`another train is running (${f.lock.id || '?'}, by ${f.lock.by || '?'})`);
@@ -109,13 +114,14 @@ export function daemonDecision(f) {
   const waitedMin = (now - oldest) / 60000;
   if (ready.length < rules.min && waitedMin < rules.waitMin) return no(`${ready.length} of ${rules.min} lane(s) ready (STUDIO_TRAIN_MIN); waiting up to ${Math.ceil(rules.waitMin - waitedMin)} min more (STUDIO_TRAIN_WAIT_MIN)`);
   if (!f.room?.ok) return no(`no room on the machine for a verify: ${f.room?.line || 'the budget says no'}`);
-  return { start: true, why: `${ready.length} lane(s) ready${ready.length < rules.min ? ` (waited ${Math.round(waitedMin)} min, STUDIO_TRAIN_WAIT_MIN)` : ''}`, lanes: ready.map((e) => e.task) };
+  return { start: true, why: `${ready.length} lane(s) ready${ready.length < rules.min ? ` (waited ${Math.round(waitedMin)} min, STUDIO_TRAIN_WAIT_MIN)` : ''}${f.halted ? ` (the supervisor's builder halt stops new sessions, not trains: ${String(f.halted).slice(0, 120)})` : ''}`, lanes: ready.map((e) => e.task) };
 }
 
 /** Gather the facts for one pass. opts override any of them (tests). */
 export async function daemonFacts(root, { env = process.env, now = Date.now(), halted = null, ...given } = {}) {
   const tr = await import('./train.mjs');
-  const facts = { now, auto: trainAuto(root, env), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, ...given };
+  const facts = { now, auto: trainAuto(root, env), trainOn: tr.trainOn(env), halted: halted ? String(halted.why || halted) : null, haltScope: halted && typeof halted === 'object' ? halted.scope || null : null, ...given };
+  if (!('drain' in given)) { try { const d = await (await import('./busy.mjs')).readDrain(); facts.drain = d?.on ? `by ${d.by || '?'}${d.why ? `: ${d.why}` : ''}` : null; } catch { facts.drain = null; } }
   if (!('winddown' in given)) { try { const w = (await import('./winddown.mjs')).readWinddown(); facts.winddown = w ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
   if (!('stopped' in given)) { try { const s = (await import('./task.mjs')).readStop(); facts.stopped = s ? `by ${s.by}` : null; } catch { facts.stopped = null; } }
   if (!('lock' in given)) facts.lock = trainLockHeld(root, env, now);

@@ -57,6 +57,15 @@ Scheduler (Windows); `--uninstall` removes it.
   in `.env` (off by default). A session someone stopped or paused (`agent stop`, Pause, Stop all)
   never counts: the stop is written down before the kill, so its end reads "stopped by <name>"
   (`meta.stoppedBy`), not "exit 1", and its hand-back says "a stop, not a failure" (no park, breaker or tier-up).
+  2.73.1 (B-66): sessions that end within `STUDIO_HALT_SAME_DEATH_SEC` (5; 0 = off) seconds of each other count as ONE
+  end for this rule (one outside cause took them together). Only sessions that had run a minute or more are merged,
+  and never exit 126, 127 or 9009 (the tool itself can't run): sessions that crash at launch each count,
+  and an end the launcher caused itself (the stall
+  watchdog, the idle exit, the task's budget) never counts, like a stop. Each `agent.session.end` records how the
+  process ended in `meta.exitCause` (`kind`: exit, signal, stall, idle, budget, stopped, spawn-error; with `code`,
+  `signal`, `at` and `ranSec`), and `supervisor.halted` lists the causes (`meta.causes`). On Windows a kill from outside
+  (taskkill /F) reads as exit 1, since Windows has no signals. A halt stops new sessions only: merge trains for lanes
+  already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
