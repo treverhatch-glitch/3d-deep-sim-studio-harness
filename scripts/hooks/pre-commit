@@ -32,6 +32,11 @@ upgrade_merge=""
 if [ -n "${STUDIO_UPGRADE_MERGE:-}" ] && mh="$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null)" && [ "$mh" = "$STUDIO_UPGRADE_MERGE" ]; then
   upgrade_merge=1
 fi
+# 2.71.1 (B): `npm run upgrade -- --rollback` sets STUDIO_UPGRADE_REVERT=<the update's merge commit>; it lets through only
+# the revert whose REVERT_HEAD is exactly that commit.
+if [ -n "${STUDIO_UPGRADE_REVERT:-}" ] && rh="$(git rev-parse -q --verify REVERT_HEAD 2>/dev/null)" && [ "$rh" = "$STUDIO_UPGRADE_REVERT" ]; then
+  upgrade_merge=1
+fi
 if [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && [ "${STUDIO_MAIN_COMMIT:-}" != "allow" ] && [ -z "$upgrade_merge" ] \
    && git worktree list --porcelain | grep -q '/\.lanes/'; then
   outside="$(git diff --cached --name-only | grep -vE '^(studio|\.studio)/' || true)"

@@ -28,6 +28,9 @@
  *       (studio/NEXT.md and studio/DONE.md: conflicting list or table rows are all kept); any other conflict refuses
  *       and lists, writing nothing. Commits, then prints the `git stash drop` to run. It never drops anything.
  *
+ *   npm run upgrade -- --rollback --by <person> [--permission "…"]   (2.71.1)
+ *       back to the harness before the last update: reverts that update's merge commit (upgradeRollback), never a reset.
+ *
  * 2.67.0 (B-49): a merged update ends with `npm run lanes -- refresh --all` (the updated harness's), reported per lane:
  *   refreshed / conflicted (merge aborted, files named) / red (targeted tests) / skipped (a running session, uncommitted
  *   work: never touched). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour; =no-tests skips the targeted tests.
@@ -319,6 +322,110 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
 }
 
 /**
+ * 2.71.1 (B): the last harness update merged here (first-parent history; a commit with an Upgrade-Backup trailer and two
+ * parents) that no later rollback (an Upgrade-Rollback-Of trailer) undid: { sha, backup, ref, versions } or null.
+ */
+export function lastUpgradeMerge(root = ROOT, { depth = 2000 } = {}) {
+  const r = git(['log', '--first-parent', `-n${depth}`, '--format=%H%x1f%P%x1f%B%x1e', 'HEAD'], root);
+  if (r.status !== 0) return null;
+  const undone = new Set();
+  for (const rec of r.stdout.split('\x1e')) {
+    const [sha, parents, body] = rec.replace(/^\s+/, '').split('\x1f');
+    if (!sha || !body) continue;
+    const trailer = (k) => (body.match(new RegExp(`^${k}:\\s*(.+)$`, 'mi')) || [])[1]?.trim() || null;
+    const of = trailer('Upgrade-Rollback-Of');
+    if (of) { undone.add(of.split(/\s+/)[0]); continue; }
+    const backup = trailer('Upgrade-Backup');
+    if (!backup || String(parents).trim().split(/\s+/).length < 2) continue;
+    if ([...undone].some((u) => sha.startsWith(u))) continue;
+    return { sha, backup, ref: trailer('Upgrade-Ref'), versions: trailer('Upgrade-Versions'), first: String(parents).trim().split(/\s+/)[0] };
+  }
+  return null;
+}
+
+/**
+ * 2.71.1 (B): `npm run upgrade -- --rollback --by <person> [--permission "…"]`: one command back to the harness the
+ * studio had before its last update. It reverts that update's merge commit (git revert -m 1: the studio's own work since
+ * stays, nothing is reset or deleted, no branch is touched), through the hooks with the main-checkout guard opened for
+ * exactly this revert (STUDIO_UPGRADE_REVERT = the merge, checked against REVERT_HEAD), then refreshes the lanes, and
+ * records an upgrade.rolled_back event and a decision-log entry. Refuses with uncommitted board changes or any other
+ * uncommitted tracked change, in a lane copy, mid-merge or mid-revert, and on a conflict (the revert is undone, the
+ * files are named). Who may: the same as --merge (whoActs). Returns { ok, code, lines, commit?, merge?, backup? }.
+ */
+export async function upgradeRollback({ by, permission = '', root = ROOT, env = process.env } = {}) {
+  const lines = [];
+  const stop = (why, extra = {}) => ({ ok: false, code: 1, lines: [...lines, `[upgrade] Not rolled back: ${why}`], ...extra });
+  if (!root || !repoRoot(root)) return stop('this isn\'t a git checkout; run it in the studio\'s main checkout');
+  if (!isMainCheckout(root)) return stop('this is a lane copy; roll back in the studio\'s main checkout (the board and main live there)');
+  const branch = out1(git(['symbolic-ref', '-q', '--short', 'HEAD'], root));
+  if (!branch) return stop('HEAD is not on a branch; check out the studio\'s branch (main) first');
+  const who = await whoActs({ by, permission, env, root });
+  if (!who.ok) return stop(who.why);
+  for (const h of ['MERGE_HEAD', 'REVERT_HEAD', 'CHERRY_PICK_HEAD']) {
+    if (out1(git(['rev-parse', '-q', '--verify', h], root))) return stop(`a ${h === 'MERGE_HEAD' ? 'merge' : h === 'REVERT_HEAD' ? 'revert' : 'cherry-pick'} is in progress here: finish it or undo it (git ${h === 'MERGE_HEAD' ? 'merge' : h === 'REVERT_HEAD' ? 'revert' : 'cherry-pick'} --abort) first`);
+  }
+  const check = checkUpgrade(root);
+  if (!check.ok) return { ok: false, code: 1, lines: [...check.lines, '[upgrade] Not rolled back: commit the board first (above).'] };
+  const dirty = git(['-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=no'], root).stdout.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3));
+  if (dirty.length) return stop(`uncommitted changes to tracked files (${short(dirty, 5)}): commit them or put them aside first; a rollback never stashes or discards anything`);
+  const m = lastUpgradeMerge(root);
+  if (!m) return stop(`no harness update merged into ${branch} to roll back (no merge commit with an Upgrade-Backup trailer that a rollback hasn't undone)`);
+  const backupSha = out1(git(['rev-parse', '--verify', '--quiet', `refs/heads/${m.backup}`], root));
+  const [toV, fromV] = String(m.versions || '').split(/\s*->\s*/).reverse();
+  const after = out1(git(['rev-list', '--first-parent', '--count', `${m.sha}..HEAD`], root));
+  lines.push(`[upgrade] rolling back ${m.sha.slice(0, 10)} (harness ${m.versions || '?'}${m.ref ? `, from ${m.ref.split(' ')[0]}` : ''}); the studio returns to ${m.backup}${backupSha ? '' : ' (that branch is gone; its commit is the merge\'s first parent)'}${Number(after) ? `, keeping the ${after} commit(s) that landed since` : ''}.`);
+  const rv = git(['revert', '--no-commit', '-m', '1', m.sha], root, { env: { ...env, GIT_MERGE_AUTOEDIT: 'no' } });
+  const conflicts = unmergedFiles(root);
+  if (conflicts.length || rv.status !== 0) {
+    git(['revert', '--abort'], root);
+    if (conflicts.length) {
+      await emit(root, { type: 'upgrade.rollback_conflict', agent: String(by).trim().slice(0, 60), msg: `rolling back harness update ${m.sha.slice(0, 10)} conflicts in ${conflicts.length} file(s): ${short(conflicts, 5)}`.slice(0, 600), meta: { merge: m.sha, backup: m.backup, files: conflicts.slice(0, 50), recordedBy: who.recordedBy } });
+      return stop(`reverting the update conflicts with work that landed since in ${conflicts.length} file(s): ${short(conflicts)}. The revert was undone; nothing changed. How to resolve that is the owner's call (git revert -m 1 ${m.sha.slice(0, 10)} by hand).`, { conflicts, merge: m.sha, backup: m.backup });
+    }
+    return stop(`git revert refused: ${(rv.stderr || rv.stdout).trim().split('\n').slice(0, 6).join(' / ')}`, { merge: m.sha, backup: m.backup });
+  }
+  // Goldens that come back exactly as they were before the update carry the rollback's reason.
+  const goldens = git(['diff', '--cached', '--name-only', '--no-renames', 'HEAD', '--', 'qa/golden'], root).stdout.split('\n').filter(Boolean);
+  const trailers = [`Upgrade-Rollback-Of: ${m.sha}`, `Upgrade-Rollback-By: ${String(by).trim()}`];
+  if (who.permission) trailers.push(`Upgrade-Permission: ${who.permission}`);
+  trailers.push(`Upgrade-Recorded-By: ${who.recordedBy}`, `Upgrade-Backup: ${m.backup}`);
+  if (goldens.length) trailers.push(`Golden-Reason: rollback of the harness update ${m.sha.slice(0, 10)} (upgrade rollback): ${short(goldens, 20)}`);
+  const msg = [`upgrade: roll back harness ${toV || '?'} -> ${fromV || '?'} (revert ${m.sha.slice(0, 10)}) on ${branch}`, '', ...trailers, ''].join('\n');
+  const msgFile = gitPath(root, 'STUDIO_UPGRADE_MSG');
+  fs.writeFileSync(msgFile, msg);
+  const c = git(['commit', '-F', msgFile], root, { env: { ...env, STUDIO_UPGRADE_REVERT: m.sha } });
+  try { fs.rmSync(msgFile, { force: true }); } catch {}
+  if (c.status !== 0) {
+    git(['revert', '--abort'], root);
+    return stop(`the hooks refused the rollback commit; the revert was undone, nothing changed:\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}`, { merge: m.sha, backup: m.backup });
+  }
+  const commit = out1(git(['rev-parse', 'HEAD'], root));
+  const sameAsBackup = backupSha && out1(git(['rev-parse', `${commit}^{tree}`], root)) === out1(git(['rev-parse', `${backupSha}^{tree}`], root));
+  await emit(root, {
+    type: 'upgrade.rolled_back', agent: String(by).trim().slice(0, 60),
+    msg: `harness update ${m.sha.slice(0, 10)} (${m.versions || '?'}) rolled back on ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission)` : ''}; backup ${m.backup}`.slice(0, 600),
+    meta: { merge: m.sha, commit, branch, backup: m.backup, versions: m.versions || null, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, sameTreeAsBackup: Boolean(sameAsBackup) },
+  });
+  // The decision log (harness/decisions-log.mjs, 2.71.0): the harness now on disk is the one rolled back to; an older one
+  // without the log gets none (the event and the commit's trailers still record it).
+  let logged = false;
+  for (const f of [path.join(root, 'harness', 'decisions-log.mjs'), path.join(path.dirname(SELF), 'decisions-log.mjs')]) {
+    if (logged || !fs.existsSync(f)) continue;
+    try {
+      const dm = await importFile(f);
+      if (dm.logDecision) { dm.logDecision({ action: 'upgrade-rollback', subject: m.sha, by: String(by).trim(), as: who.permission ? `permission "${who.permission.slice(0, 200)}"` : who.via === 'person' ? 'person' : 'agent', why: `roll back harness ${m.versions || ''}`.trim(), evidence: `revert ${commit.slice(0, 10)} of ${m.sha.slice(0, 10)}; backup ${m.backup}`, undo: { kind: 'text', text: `git revert ${commit.slice(0, 10)} (takes the update again), or npm run upgrade -- --merge ${m.ref ? m.ref.split(' ')[0] : '<ref>'} --by <name>` }, root }); logged = true; }
+    } catch {}
+  }
+  const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
+  return {
+    ok: true, code: 0, commit, merge: m.sha, backup: m.backup, lanes, logged,
+    lines: [...lines, `[upgrade] PASS rolled back: ${commit.slice(0, 10)} reverts ${m.sha.slice(0, 10)} on ${branch}${sameAsBackup ? `; the tree is ${m.backup}'s again` : ''}. Recorded for ${String(by).trim()}${who.permission ? ` on their permission (recorded by ${who.recordedBy})` : ''}${logged ? ' (decision log too)' : ''}. No branch was deleted.`,
+      ...lanes.lines,
+      '[upgrade] Next: npm run verify -- --all. To take the update again: npm run upgrade -- --merge <ref> --by <you> (or git revert the rollback commit).'],
+  };
+}
+
+/**
  * 2.67.0 (B-49): after a merged update, `lanes refresh --all` (harness/lanes.mjs, 2.65.0) from the studio as it is now
  * (the updated harness), so each lane copy merges main and runs its targeted tests. A lane whose session is running,
  * with uncommitted work or a merge in progress is skipped, never touched; a conflict is aborted and named (nothing is
@@ -455,6 +562,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
       'Usage: npm run upgrade -- --check | --snapshot   (before taking a harness update: the board must be committed, never stashed)',
       '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue]',
       '       npm run upgrade -- --restore-stash <sha> --by <person>',
+      '       npm run upgrade -- --rollback --by <person> [--permission "<their words or a link>"]   (2.71.1: reverts the last update\'s merge; never resets or deletes)',
       '       npm run upgrade -- watch [--json] | watch status | watch auto on --by <person> [--permission "…"] [--ref <remote>/<branch>] | watch auto off',
       '         (2.69.0, harness/upgrade-watch.mjs: a newer harness on the harness remote, its CI, and STUDIO_UPGRADE_WINDOW)',
       'docs/RELEASE.md "Taking a harness update into a studio" has the steps, and the one-liner for a studio too old to have these.',
@@ -487,6 +595,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
   }
   if (a.includes('--merge')) {
     show(await upgradeMerge({ ref: flag('--merge'), by: flag('--by'), permission: flag('--permission') || '', goldenReason: flag('--golden-reason') || '', cont: a.includes('--continue') }));
+  }
+  if (a.includes('--rollback')) {
+    show(await upgradeRollback({ by: flag('--by'), permission: flag('--permission') || '' }));
   }
   if (a.includes('--restore-stash')) {
     show(await restoreStash({ stash: flag('--restore-stash'), by: flag('--by'), permission: flag('--permission') || '' }));
