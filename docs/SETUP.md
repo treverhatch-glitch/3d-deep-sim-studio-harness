@@ -31,3 +31,4 @@ node hub/server.mjs
 # Open http://localhost:3847 (or http://localhost:4177)
 ```
 Reads `.studio/events.jsonl` and `.studio/usage.json` with **0% LLM token usage**.
+To use its buttons, pair your browser once: `npm run hub -- pair --by <your name>` (docs/WAR-ROOM-V3.md).
