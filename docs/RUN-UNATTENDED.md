@@ -14,7 +14,15 @@ npm run studio:start -- --until 8h --lanes auto       # one builder per lane, in
 npm run studio:start -- --install --window 09:00-23:00   # come back after a restart or login
 npm run studio:stop                                   # agents finish their task; nothing new starts
 npm run studio:status
+npm run studio:extend -- --until 2026-11-05T11:52:00Z --by <your name>   # move a running supervisor's end time
 ```
+
+**Changing the end time (2.73.1).** `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
+[--why "…"]` moves a running supervisor's `--until` without a restart (`+8h` and `8h` count from now; `none` removes
+the end time). It writes `.studio/supervisor-extend.json`; the next pass (within a minute) applies it and logs a
+`supervisor.extended` event (from, to, who). Who may: a person; an agent the owner's delegation covers for
+`supervisor-extend`; a Producer or Director session or an outside agent on a person's direct permission
+(`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
 
 Every minute it keeps the War Room hub up (and logs how long it was down), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session

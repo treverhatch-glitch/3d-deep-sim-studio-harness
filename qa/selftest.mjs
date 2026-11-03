@@ -4470,6 +4470,16 @@ if (inShard('selftest-2731o')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.1 (a): the stall watchdog holds its clock while a session waits on its own verify or task done (B-68), sessions
+// that die together count as one end for the halt and each end records its exit cause (B-66), a builder halt doesn't
+// stop the train daemon, and `studio:extend` moves a running supervisor's end time.
+if (inShard('selftest-2731a')) {
+  const dir = copyRepo();
+  const { selftest2731A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731a.mjs')).href);
+  await selftest2731A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

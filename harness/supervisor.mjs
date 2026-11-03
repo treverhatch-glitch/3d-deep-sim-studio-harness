@@ -10,6 +10,8 @@
  *   npm run studio:status
  *   npm run studio:resume -- --by <your name> [--why "…"]   clear a halt ("Fixed it: try again" without the War Room)
  *     [--permission "<the person's words or a link>"]        2.59.1: a Producer/Director or an outside agent, for a person
+ *   npm run studio:extend -- --until <time|+8h|none> --by <your name> [--why "…"] [--permission "…"]
+ *                                                        2.73.1: move a running supervisor's end time, no restart
  *
  * Every minute it:
  *   1. keeps the War Room hub up (restarts it, and logs how long it was down);
@@ -96,6 +98,50 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
 }
 /**
+ * 2.73.1: `npm run studio:extend -- --until <time|+8h|none> --by <name> [--why "…"] [--permission "…"]` moves a running
+ * supervisor's end time (its --until) without a restart: it writes .studio/supervisor-extend.json, which the next pass
+ * reads (applyExtend: a supervisor.extended event). "none" removes the end time. Who may: the decider rules
+ * (harness/decider.mjs, action 'supervisor-extend'): a person; an agent the owner's delegation covers for
+ * 'supervisor-extend' (harness/delegation.mjs delegationFor); a Producer or Director session or an outside agent on a
+ * person's direct permission (--permission); never a worker session or a worker's name.
+ */
+export const EXTEND_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-extend.json');
+export async function extendCli({ until = null, by = null, why = null, permission = null, env = process.env, now = Date.now() } = {}) {
+  const raw = String(until || '').trim();
+  if (!raw) return { code: 1, text: 'Until when? npm run studio:extend -- --until <23:00 | +8h | 2026-11-05T11:52:00Z | none> --by <your name> [--why "…"]' };
+  const none = /^(none|off|never)$/i.test(raw);
+  const t = none ? null : parseUntil(raw, now);
+  if (!none && !Number.isFinite(t)) return { code: 1, text: `Not changed: "${raw}" isn't a time. Use 23:00, +8h, 90m, an ISO time (2026-11-05T11:52:00Z) or none.` };
+  if (!none && t <= now) return { code: 1, text: `Not changed: ${new Date(t).toISOString()} has passed. To stop now: npm run studio:stop.` };
+  const { deciderCheck } = await import('./decider.mjs');
+  const d = await deciderCheck({ by, permission, action: 'supervisor-extend', env, what: "change the supervisor's end time" });
+  if (!d.ok) return { code: 1, text: `Not changed: ${d.why.replace(/^Refused: /, '')}` };
+  const s = readStatus();
+  if (!s || s.status !== 'running' || !alive(s)) return { code: 1, text: `Not changed: no supervisor is running${s?.status === 'running' ? ' (its process is gone)' : ''}. Start one with the end time you want: npm run studio:start -- --until ${raw}` };
+  const from = s.opts?.until || null;
+  const rec = { until: none ? null : new Date(t).toISOString(), from, by: String(d.by).slice(0, 60), why: String(why || '').trim().slice(0, 300), via: d.via, at: new Date(now).toISOString(), ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: String(d.permission || '').slice(0, 300) } : {}) };
+  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  fs.writeFileSync(EXTEND_FILE, `${JSON.stringify(rec, null, 2)}\n`);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'supervisor-extend', subject: 'supervisor', by: rec.by, as: dm.asOf(d), why: rec.why || 'new end time', evidence: `until ${from || 'none'} -> ${rec.until || 'none'}`, undo: from ? { kind: 'supervisor-extend', text: `npm run studio:extend -- --until ${from} --by <name>` } : null }); } catch {}
+  emitEvent({ type: 'supervisor.extend_asked', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'supervisor', msg: `${rec.by} asked the supervisor to run ${rec.until ? `until ${rec.until}` : 'with no end time'} (was ${from || 'no end time'})${d.via !== 'person' ? ` (recorded by ${d.recordedBy}, ${d.via})` : ''}${rec.why ? `: ${rec.why}` : ''}`.slice(0, 600), meta: rec });
+  return { code: 0, text: `The supervisor runs ${rec.until ? `until ${rec.until} (${new Date(t).toString().slice(0, 21)} here)` : 'with no end time'} from its next pass (within ${Math.round(LOOP_MS / 1000)} s); it was ${from || 'no end time'}. Its supervisor.extended event names ${rec.by}.` };
+}
+/** The loop's half: a waiting studio:extend request moves opts.until (and the status record's). Returns it or null. */
+export function applyExtend(opts, state, now = Date.now()) {
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(EXTEND_FILE, 'utf8')); } catch { return null; }
+  fs.rmSync(EXTEND_FILE, { force: true });
+  const t = rec?.until === null ? null : Date.parse(rec?.until || '');
+  if (!rec || (rec.until !== null && !Number.isFinite(t))) return null;
+  const from = opts.until ? new Date(opts.until).toISOString() : null;
+  opts.until = t;
+  state.opts = { ...(state.opts || {}), until: t ? new Date(t).toISOString() : null };
+  state.extended = { at: new Date(now).toISOString(), by: rec.by || null, from, to: state.opts.until };
+  emitEvent({ type: 'supervisor.extended', agent: 'supervisor', to: 'producer', msg: `Supervisor end time ${from || 'none'} -> ${state.opts.until || 'none'} (${rec.by || 'someone'} asked${rec.why ? `: ${rec.why}` : ''})`.slice(0, 600), meta: { by: rec.by || null, why: rec.why || null, via: rec.via || null, recordedBy: rec.recordedBy || null, from, to: state.opts.until } });
+  return state.extended;
+}
+
+/**
  * 2.67.0: a halt left open in the event log by a supervisor that is no longer running (it crashed, or the PC
  * restarted) kept the scorecard's "still waiting" counting for days, and studio:resume said "nothing to clear". Once
  * the halt is older than STUDIO_HALT_STALE_H (24) hours, studio:resume (the same people as above: a person, or a
@@ -118,10 +164,10 @@ async function clearStaleHalt({ who, why, permRec = {}, env = process.env, now =
 // names a reused number reads as not running.
 const alive = (st) => Boolean(st?.pid) && pidAlive(st.pid, st.identity, { eperm: false });
 
-/** "23:00" (today, or tomorrow if past), "8h", "90m", or an ISO time. */
+/** "23:00" (today, or tomorrow if past), "8h", "90m" (2.73.1: or "+8h"; from now), or an ISO time. */
 export function parseUntil(s, now = Date.now()) {
   if (!s) return null;
-  const rel = String(s).match(/^(\d+(?:\.\d+)?)\s*(h|m|s)$/i);
+  const rel = String(s).trim().match(/^\+?\s*(\d+(?:\.\d+)?)\s*(h|m|s)$/i);
   if (rel) return now + Number(rel[1]) * { h: 3600000, m: 60000, s: 1000 }[rel[2].toLowerCase()];
   const hm = String(s).match(/^(?:tonight\s+|today\s+)?(\d{1,2}):(\d{2})$/i);
   if (hm) {
@@ -233,6 +279,8 @@ export async function supervise(opts, state, now = Date.now()) {
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
   if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  // 2.73.1: `npm run studio:extend` moved the end time (before the time-is-up check, so a late extend still counts).
+  if (!opts.watcher) { try { applyExtend(opts, state, now); } catch { /* the old end time stands */ } }
   // 2.71.0 (y): the owner's reports to a webhook (harness/report-post.mjs): the digest once a day at STUDIO_REPORT_HOUR,
   // the what's-next board when the queue changed a lot; before the halt and window checks, so a halted studio still reports.
   if (!opts.watcher) {
@@ -703,7 +751,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       '  npm run studio:start -- --install | --uninstall      start it at login, or stop doing so',
       '  npm run studio:stop                                  stop the supervisor (agents finish their task)',
       '  npm run studio:status',
-      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt'].join('\n'));
+      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt',
+      '  npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name> [--why "…"]   move a running supervisor\'s end time'].join('\n'));
     process.exit(0);
   }
   if (argv[0] === 'stop') {
@@ -745,9 +794,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.code ? console.error : console.log)(r.text);
     process.exit(r.code);
   }
+  if (argv[0] === 'extend') {
+    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const r = await extendCli({ until: flag('until'), by: flag('by'), why: flag('why'), permission: flag('permission') });
+    (r.code ? console.error : console.log)(r.text);
+    process.exit(r.code);
+  }
   if (argv[0] === 'status') {
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {
