@@ -342,6 +342,23 @@ export function buildHudState() {
       idleMin,
     };
   });
+  // 2.75.0: who is on the Studio floor. An agent whose session ended (agent.session.end, a stop, an idle exit, its task
+  // done or handed back with nothing held) leaves the floor; so does one silent STUDIO_FLOOR_IDLE_MIN (30) minutes with
+  // no claim. A session the launcher is wrapping up shows as "ending". People, scripts and the Producer's seat stay.
+  // The Control room's list is unchanged (it shows the last 24 hours); onFloor only drives the Studio floor.
+  const floorIdle = Number(process.env.STUDIO_FLOOR_IDLE_MIN) > 0 ? Number(process.env.STUDIO_FLOOR_IDLE_MIN) : 30;
+  const ENDED = /^(agent\.session\.end|agent\.stopped|agent\.paused|agent\.idle_exit|agent\.budget_stop|task\.done|task\.paused|task\.not_done|task\.forced)$/;
+  for (const a of agentList) {
+    if (a.kind === 'human' || a.kind === 'script' || a.placeholder || a.room === 'production') continue;
+    const sess = launchedNow.find((x) => x.agent === a.name);
+    const holds = (a.holds || []).some((k) => k.startsWith('task:'));
+    if (sess?.running) { if (sess.ending) a.presence = 'ending'; continue; }
+    const endedAt = sess && sess.status === 'ended' ? Date.parse(sess.endedAt || '') || 0 : 0;
+    const why = endedAt && Date.parse(a.lastSeen || '') <= endedAt + 5000 ? 'its session ended'
+      : ENDED.test(a.lastType || '') && !holds ? `its last step was ${a.lastType}`
+        : !holds && a.idleMin !== null && a.idleMin >= floorIdle ? `idle ${a.idleMin} min with nothing claimed` : '';
+    if (why) { a.onFloor = false; a.leftFloor = why; }
+  }
   // Out of quota, not stalled: the last thing an agent said was a usage limit (and when it resets).
   const QUOTA = /usage limit|rate.?limit|\b429\b|quota|insufficient[_ ]credit|credit balance/i;
   for (const a of agentList) {

@@ -4539,6 +4539,15 @@ if (inShard('selftest-2732d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.75.0 (h): the War Room's visual redo: one tab bar on every view, the design tokens (light and dark, no web fonts),
+// the Studio floor's name plates, its state badges and key, and agents leaving the floor when their session ends.
+if (inShard('selftest-275h')) {
+  const dir = copyRepo();
+  const { selftest275H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-275h.mjs')).href);
+  await selftest275H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

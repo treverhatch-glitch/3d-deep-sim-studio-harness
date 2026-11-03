@@ -32,7 +32,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] ?? '' : null);
 const shotsAt = arg('--shots') ? path.resolve(arg('--shots')) : null;
-const SECTIONS = ['stop-pause'];
+// 2.75.0: --only gallery sets the studio up, seeds the 2.74 deck data and shoots every view (desktop and phone, light and dark).
+const SECTIONS = ['stop-pause', 'gallery'];
 const only = arg('--only');
 const repeat = arg('--repeat') === null ? 1 : Number(arg('--repeat'));
 if (only !== null && !SECTIONS.includes(only)) {
@@ -324,8 +325,10 @@ function seed274() {
   git('commit', '-q', '-m', 'delegate: hatch lets crew-lead release', '--no-verify');
 }
 
+let seeded274 = false;
 async function warRoom274() {
   seed274();
+  seeded274 = true;
   const shot = async (pg, name, opts = {}) => { if (shotsAt) { fs.mkdirSync(shotsAt, { recursive: true }); await pg.screenshot({ path: path.join(shotsAt, name), ...opts }).catch(() => {}); } };
   // An unpaired browser: read-only, and the halt's button says how to pair instead of "the HUB token was refused".
   const ctx0 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -424,6 +427,18 @@ async function warRoom274() {
     return { ok: /T-002/.test(t) && /editing|verifying|held/.test(t) && btn >= 1, seen: `${t} | buttons ${btn}` };
   });
   await shot(page, '274-studio-floor-desktop.png', { fullPage: true });
+  // 2.75.0: every person wears one state badge (its key in the dock); when an agent's session ends it leaves the floor.
+  await expect('2.75.0: each agent on the Studio floor has a state badge, and the dock explains every badge', async () => {
+    const st = await page.locator('#t-crowd .person[data-agent="unity-worker-1"] > .stb').getAttribute('data-st').catch(() => null);
+    const key = await page.locator('#tycoon .statekey li').count();
+    return { ok: /^(working|idle|verifying|on-train|needs-release|held|handed-back|parked|stalled|ending)$/.test(st || '') && key === 8, seen: `badge ${st} | key items ${key}` };
+  });
+  sh('harness/event.mjs', '--type', 'agent.session.end', '--agent', 'unity-worker-1', '--msg', 'unity-worker-1 ended: its task is done');
+  await expect('2.75.0: when an agent\'s session ends its avatar walks out and is removed (desk and person), not left as an idle placeholder', async () => {
+    const person = await page.locator('#t-crowd .person[data-agent="unity-worker-1"]').count();
+    const desk = await page.locator('#t-crowd .desk[data-agent="unity-worker-1"]').count();
+    return { ok: person === 0 && desk === 0, seen: `person ${person} | desk ${desk}` };
+  }, { timeout: waitBudget(25000) });
   await goTo(page, 'ops');
   // Revoke: armed by the first press, run by the second: the same code as npm run delegate -- revoke.
   const rv = page.locator('#o-proxybody [data-act2="revoke"]');
@@ -471,11 +486,51 @@ async function warRoom274() {
     await expect.quiet(async () => ({ ok: /Crew/.test(await text(p2, '#o-crew')) && !/Loading/.test(await text(p2, '#o-crewbody')), seen: '' }));
     const bg = await p2.evaluate(() => getComputedStyle(document.body).backgroundColor);
     const wide = await p2.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
-    check(`2.74.0: ${scheme} ${w}px: the deck loads without errors and nothing runs off the side`, e2.length === 0 && !wide && (scheme === 'light' ? /rgb\(2[34]\d, 2[34]\d, 2[45]\d\)/.test(bg) : true), `${e2.join(' | ')} | sideways ${wide} | background ${bg}`);
+    check(`2.74.0: ${scheme} ${w}px: the deck loads without errors and nothing runs off the side`, e2.length === 0 && !wide && (scheme === 'light' ? (() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg) || []; return [1, 2, 3].every((i) => Number(m[i]) >= 200); })() : true), `${e2.join(' | ')} | sideways ${wide} | background ${bg}`);
     await shot(p2, name, { fullPage: scheme === 'dark' });
     await c2.close();
   }
   await ctx.close();
+}
+
+// 2.75.0: every view, desktop and phone, light and dark: drawn, no script errors, nothing off the side, one shared tab bar
+// (same order everywhere, the current view marked), screenshots in --shots/275/<scheme>-<size>-<view>.png.
+const VIEWS = ['ops', 'tycoon', 'plan', 'assets', 'arcade', 'away'];
+async function gallery275() {
+  if (!seeded274) { seed274(); seeded274 = true; }
+  const out = shotsAt ? path.join(shotsAt, '275') : null;
+  if (out) fs.mkdirSync(out, { recursive: true });
+  for (const scheme of ['dark', 'light']) {
+    for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
+      const page = await ctx.newPage();
+      const errs = [];
+      page.on('pageerror', (e) => errs.push(String(e)));
+      page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+      for (const v of VIEWS) {
+        errs.length = 0;
+        await page.goto(`${BASE}/?skin=${v}`);
+        const drawn = await expect.quiet(async () => {
+          const t = v === 'away' ? await text(page, '#aw-state') : await text(page, `#${v} [data-signals]`);
+          return { ok: v === 'away' ? !/Loading/.test(t) : /Pace/.test(t), seen: t };
+        });
+        await wait(v === 'tycoon' ? 2500 : 900);
+        const look = await page.evaluate((view) => {
+          const tabs = [...document.querySelectorAll(`#${view} .tabs [data-to]`)].map((b) => b.dataset.to);
+          const cur = document.querySelector(`#${view} .tabs [aria-current="page"]`)?.dataset.to || null;
+          const bg = getComputedStyle(document.body).backgroundColor;
+          return { tabs: tabs.join(','), cur, wide: document.documentElement.scrollWidth > innerWidth + 1, bg };
+        }, v);
+        const order = 'ops,tycoon,plan,assets,arcade';
+        // The page follows the system's light or dark setting on every view (relative luminance of the background).
+        const lum = (() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(look.bg) || []; const c = [1, 2, 3].map((i) => { const x = Number(m[i] || 0) / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; })();
+        look.scheme = scheme === 'light' ? lum > 0.55 : lum < 0.08;
+        check(`2.75.0: ${scheme} ${size} ${v}: drawn, no script errors, nothing off the side, the ${scheme} theme, the shared tab bar (${order})`, drawn.ok && !errs.length && !look.wide && look.scheme && look.tabs === order && (v === 'away' ? look.cur === null : look.cur === v), JSON.stringify({ drawn: drawn.ok ? 'yes' : drawn.message, errs: errs.slice(0, 3), ...look }));
+        if (out) await page.screenshot({ path: path.join(out, `${scheme}-${size}-${v}.png`), fullPage: true }).catch(() => {});
+      }
+      await ctx.close();
+    }
+  }
 }
 
 try {
@@ -744,14 +799,14 @@ try {
 
   // The agent checks: once in a full run; --only stop-pause --repeat <n> runs just these, n times.
   const rounds = [];
-  for (let i = 1; i <= repeat; i++) {
+  for (let i = 1; i <= (only === 'gallery' ? 0 : repeat); i++) {
     if (repeat > 1) console.log(`[hud] stop-pause round ${i} of ${repeat}`);
     const before = failed;
     const started = Date.now();
     await agentChecks(page);
     rounds.push({ ok: failed === before, s: (Date.now() - started) / 1000 });
   }
-  if (only) {
+  if (only && rounds.length) {
     const secs = rounds.map((r) => r.s).sort((a, b) => a - b);
     const mid = secs[Math.floor((secs.length - 1) / 2)];
     console.log(`[hud] ${only}: ${rounds.filter((r) => r.ok).length} of ${rounds.length} rounds passed; seconds per round min ${secs[0].toFixed(1)}, median ${mid.toFixed(1)}, max ${secs[secs.length - 1].toFixed(1)} (${rounds.map((r) => `${r.ok ? '' : 'FAIL '}${r.s.toFixed(1)}`).join(', ')})`);
@@ -829,6 +884,7 @@ try {
     if (shotsAt) await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-phone.png') });
   }
   if (!only) await warRoom274();
+  if (!only || only === 'gallery') await gallery275();
 } finally {
   for (const p of sleepers) { try { p.kill(); } catch {} }
   await browser.close();
