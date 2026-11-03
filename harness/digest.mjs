@@ -18,6 +18,7 @@
  *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
  *     both sides have enough data (npm run autonomy -- impact), as a line;
  *   - 2.70.0 (v): assets waiting for a review of their previews, oldest first (harness/asset-review.mjs);
+ *   - 2.71.0 (y): research tasks finished in the last 24 h, each with its write-up and recommendation, as a line;
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -150,9 +151,11 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
   let quarLine = ''; // 2.69.0 (r): tests the flake triager quarantined (harness/flakes.mjs), with their evidence
   try { quarLine = (await import('./flakes.mjs')).quarantineDigestLine(ev, { now, root }); } catch { quarLine = ''; }
+  let researchLine = ''; // 2.71.0 (y): research tasks finished in the last 24 h, with their write-ups (harness/research.mjs)
+  try { researchLine = (await import('./research.mjs')).researchDigestLine(ev, { now, root }); } catch { researchLine = ''; }
   let buildLine = ''; // 2.70.0 (t): the latest playable build and clip after a landing in the last 24 h
   try { const l = (await import('./landing-build.mjs')).landingLine(ev, { since: now - DAY }); buildLine = l ? `${l} (npm run play).` : ''; } catch { buildLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(researchLine ? [researchLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
