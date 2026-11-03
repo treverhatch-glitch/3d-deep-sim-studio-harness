@@ -1,5 +1,7 @@
 # Mission Control War Room & Embedded Terminal (`docs/WAR-ROOM.md`)
 
+> The War Room v3 as it is now (pairing, live refresh, the deck, the Studio floor's rooms): docs/WAR-ROOM-V3.md.
+>
 > **Retired in 2.4.0.** The HUB's home page is now War Room v3 (`hub/v3/index.html`): an Ops view and a
 > Studio view, built from files only, with buttons behind the HUB token. This React War Room still
 > answers at `/legacy` for one release and will then be removed. What follows describes the old page.
