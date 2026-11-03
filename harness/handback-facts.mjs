@@ -64,7 +64,7 @@ export function workDir(agent, dir = null) {
   if (agent && /^[\w.-]+$/.test(agent)) {
     const s = readJson(path.join(STUDIO_STATE_DIR, 'agents', `${agent}.json`));
     const fromSession = s?.copy?.dir ? path.join(root, s.copy.dir) : null;
-    if (fromSession && fs.existsSync(fromSession)) return fromSession;
+    if (fromSession && fs.existsSync(path.join(fromSession, '.git'))) return fromSession; // 2.73.1 (B-51): a lane has its own .git
     const lane = path.join(root, '.lanes', agent);
     if (fs.existsSync(path.join(lane, '.git'))) return lane;
   }

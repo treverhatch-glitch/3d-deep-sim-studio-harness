@@ -97,6 +97,8 @@ function laneChangedAt(dir) {
   let t = 0;
   const git = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8', windowsHide: true });
   try { t = Math.max(t, fs.statSync(dir).mtimeMs); } catch { return 0; }
+  // 2.73.1 (B-51): a folder without its own .git: only its own time (git there would read the main checkout's files).
+  if (!fs.existsSync(path.join(dir, '.git'))) return t;
   try {
     const idx = git('rev-parse', '--git-path', 'index').stdout?.trim();
     if (idx) t = Math.max(t, fs.statSync(path.resolve(dir, idx)).mtimeMs);
@@ -144,7 +146,8 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
         const b = read(path.join(root, '.studio', 'lane-branches.json'), {})[task];
         if (b) {
           for (const d of fs.readdirSync(lanes, { withFileTypes: true })) {
-            if (!d.isDirectory() || dirs.has(path.join(lanes, d.name))) continue;
+            // 2.73.1 (B-51): no own .git, no lane (git there would name the main checkout's branch).
+            if (!d.isDirectory() || dirs.has(path.join(lanes, d.name)) || !fs.existsSync(path.join(lanes, d.name, '.git'))) continue;
             const head = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: path.join(lanes, d.name), encoding: 'utf8', windowsHide: true }).stdout?.trim();
             if (head === b) dirs.add(path.join(lanes, d.name));
           }
@@ -199,6 +202,7 @@ function laneAhead(task, owner, root, now, env) {
   try { dirs = fs.readdirSync(lanes, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).slice(0, 64); } catch { return null; }
   for (const name of dirs) {
     const d = path.join(lanes, name);
+    if (!fs.existsSync(path.join(d, '.git'))) continue; // 2.73.1 (B-51): a leftover folder, not a lane
     const head = git(d, 'symbolic-ref', '--short', 'HEAD').stdout?.trim();
     if (!head || head === main) continue;
     const log = git(d, 'log', '--format=%x1e%s%n%b', `${main}..HEAD`);

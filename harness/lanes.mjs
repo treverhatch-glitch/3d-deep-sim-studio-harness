@@ -45,7 +45,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents, STUDIO_STATE_DIR } from './event.mjs';
-import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, LANES_DIR } from './worktree.mjs';
+import { mainRoot, mainBranch, laneCopies, laneLive, unmerged, isLaneWorktree, LANES_DIR } from './worktree.mjs';
 import { readQueue, heldNow, pinMoves, trainManifest, readLeft } from './train.mjs';
 import { readTrainStatus, trainStatusLine, capNote } from './train-status.mjs';
 import { chainTailNotes } from './train-tail.mjs';
@@ -366,6 +366,9 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
   if (who) return refuse(who);
   if (!lane) return refuse('no such lane (npm run lanes lists them)');
   if (!lane.dir || !fs.existsSync(lane.dir)) return refuse(`it has no lane copy to merge in (${lane.branch || 'no branch'}); the next agent on ${lane.task || 'the task'} gets main when its copy is made`);
+  // 2.73.1 (B-51): a folder in .lanes/ that isn't a registered worktree is no lane: git there answers for the main
+  // checkout (T-016 mapped to an empty .lanes/reviewer-s1 was refused for main's own board files).
+  if (!isLaneWorktree(lane.dir, root)) return refuse(`${path.relative(root, lane.dir).split(path.sep).join('/') || lane.dir} is a leftover folder, not a lane (no git worktree): nothing to refresh; the next agent on ${lane.task || 'the task'} gets a fresh copy`);
   if (!isSha(tip)) return refuse(`${main} has no commit`);
   const busy = laneBusy(root, lane);
   if (busy.busy && !busyOk) return refuse(`someone is working in it (${busy.why}); --busy-ok merges anyway (a Producer or Director session, a person, or an agent outside the harness)`);
