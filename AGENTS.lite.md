@@ -8,6 +8,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
 1. Read `studio/CURRENT_TASK.md`, then your brief in `.studio/briefs/<ID>.md`.
 2. To find code, `npm run map -- find <name>` gives the file, line range and arguments in one call.
 3. Follow `studio/PITFALLS.md`. Never read `CHANGELOG.md`. `npm run help` lists the commands.
+4. The owner's studio rules (what no agent decides, notes for every agent): `npm run policy`.
 
 ## Claim, work, finish
 
