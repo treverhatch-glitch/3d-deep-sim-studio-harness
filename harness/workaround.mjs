@@ -9,6 +9,8 @@
  *   npm run workaround -- close <H-id> --by <name> --note "<what fixed it>"
  *   npm run workaround -- export [--since 7d]              one markdown file for the harness maintainer (secrets removed)
  *   npm run workaround -- scan                             run the detection pass now (the supervisor runs it every 10 min)
+ *   npm run workaround -- repro <H-id> --by <agent> --harness-repo <clone>   2.73.0: a failing-test PR scaffold for the
+ *                                                          harness (harness/overseer-repro.mjs; overseer stage 1+)
  *
  * Records: .studio/workarounds.jsonl, one line each { id, ts, what, why, cmd, cmdKey, by, detected, kind, evidence,
  * signature, sig }, plus one `harness.workaround` event. The signature (harness/workaround-stats.mjs) is the harness
@@ -537,6 +539,7 @@ const USAGE = [
   '  npm run workaround -- close <H-id> --by <name> --note "<what fixed it>"',
   '  npm run workaround -- export [--since 7d]',
   '  npm run workaround -- scan',
+  '  npm run workaround -- repro <H-id> --by <agent> --harness-repo <a separate harness clone> [--base <ref>] [--commit]   (2.73.0: overseer stage 1+)',
 ].join('\n');
 
 export async function workaroundCli(argv) {
@@ -570,6 +573,11 @@ export async function workaroundCli(argv) {
   if (cmd === 'export') {
     const r = await exportWorkarounds({ since: flag('since') || '7d' });
     return r.error ? { code: 2, text: r.message } : { code: 0, text: `Wrote ${r.rel}: ${r.records} workaround(s), ${r.tasks} harness task(s). Read it, then send it to the harness maintainer.` };
+  }
+  // 2.73.0 (f): the overseer's failing-test PR scaffold for a harness task, in a separate harness clone (harness/overseer-repro.mjs).
+  if (cmd === 'repro') {
+    const r = await (await import('./overseer-repro.mjs')).reproScaffold({ id: words[1], by: flag('by'), harnessRepo: flag('harness-repo'), base: flag('base'), commit: argv.includes('--commit') });
+    return { code: r.code, text: r.lines.join('\n') };
   }
   if (cmd === 'scan') {
     const r = await workaroundPass({ force: true });

@@ -1,4 +1,4 @@
-# Autonomy: the scorecard, the drift checks, hands-off by default and the self-repair loop (2.64.0 to 2.71.0)
+# Autonomy: the scorecard, the drift checks, hands-off by default, the self-repair loop and the overseer's stages (2.64.0 to 2.73.0)
 
 Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
 read files and the event log only: no model, no tokens. Neither changes how the studio runs.
@@ -72,6 +72,14 @@ it: landed per hour, train verify minutes p50/p90, red verify %, hand-backs per 
 round-trips per landed and no-work sessions. A measure with fewer than `STUDIO_IMPACT_MIN_N` (30) items on either side
 reads "not enough data"; within 10% is "same". The verdict is better / worse / mixed by the measures judged, and the
 daily digest names the latest upgrade's verdict once one measure has enough data.
+
+2.73.0: when `npm run upgrade -- --merge` left a before snapshot for that release (`.studio/upgrades/<from>-to-<to>.json`,
+docs/RELEASE.md), its numbers are the before side (marked `*`): the studio as it was at the moment of the update, not
+recomputed later from a log that has rolled over. False reds per train (red train verifies whose tree verified green
+later, or whose flake triage labelled every failing test other than "real"), tokens per landed change (also by task, from
+sessions that name their task) and workarounds per day are compared too, apart from the verdict. A release's
+predictions (`npm run release -- predict`, `docs/releases/<version>.json`) are scored: hit or miss with the measured
+change, or not scored while a side has too little data.
 
 ### Tokens that do work (2.66.0)
 
@@ -302,6 +310,46 @@ maintains the harness (`harness/workaround.mjs`). The loop the overseer used to 
   the top signatures after it and the trend after each recent upgrade: fewer workarounds means the upgrade worked).
 - **Export:** `npm run workaround -- export [--since 7d]` writes `.studio/exports/harness-workarounds-<date>.md`, one file
   the owner can read and send to the harness maintainer (anything matching the secret scanner's patterns removed).
+
+## The overseer's stages, repro PRs and the weekly harness scout (2.73.0)
+
+The owner's plan for an outside overseer agent (the crew's orchestrator), in stages it earns. `studio/overseer.json`
+holds the stage the owner set (0-3), the overseer's name (`agent`), who set it and when (`setBy`, `setAt`) and each
+stage's entry criteria. It is protected (`studio/protected.json`): it changes only with the owner's signed approval, and
+the harness reads it as committed (an uncommitted edit is shown and ignored).
+
+| Stage | The overseer also... |
+|---|---|
+| 0 reporter | logs workarounds (`npm run workaround -- log`) |
+| 1 repro tests | writes failing reproduction tests as harness PRs (`npm run workaround -- repro`) |
+| 2 small fixes | makes small non-gate harness fixes, reviewed and merged by someone else |
+| 3 own releases | merges its own non-gate harness releases |
+
+Gates, protected files and money stay the owner's at every stage.
+
+- `npm run overseer [-- --json]` shows the stage, what it allows, the evidence since the stage was set and whether the
+  next stage's criteria hold: workarounds it logged, accepted repro PRs (distinct `Repro-Of: <H-id>` trailers on commits
+  with `Overseer-By: <agent>` that reached the studio through an update), merged PRs (commits with `Overseer-By`), the
+  revert rate (those commits reverted) and protected-file attempts (its events and workaround records about protected
+  files). A suggestion only: the owner changes the stage. Outcomes the harness can't see (a repro accepted or rejected
+  on the harness repo, a PR merged or reverted there, a protected-file attempt) a person records with `npm run overseer
+  -- record <repro-accepted|repro-rejected|pr-merged|pr-reverted|protected-attempt> <subject> --by <person>` (the
+  decision log; never the overseer itself). Default criteria: stage 1 after 7 days and 10 workarounds logged, stage 2
+  after 7 days and 5 accepted repros, stage 3 after 14 days, 10 merged PRs and a revert rate of 0.1 or less; no
+  protected-file attempt for any.
+- `npm run workaround -- repro <H-id> --by <agent> --harness-repo <dir> [--base <ref>] [--commit]` (stage 1 and up for an
+  agent; a person at any stage; never a builder session) scaffolds a failing-test PR branch for the harness from a
+  harness task, in a SEPARATE clone of the harness repo (never the studio, its lane copies or its installed harness):
+  branch `repro/<h-id>-<sig>`, `qa/selftest-repro-<h-id>.mjs` in the selftest style (the evidence in its header, a
+  made-up studio, one check per recorded command of a safe shape, or a TODO check that fails) staged, and the PR body
+  with the evidence, a checklist and the `Repro-Of` / `Repro-Signature` / `Overseer-By` trailers in the clone's
+  `.studio/repro/<H-id>-PR.md`. `--commit` commits it with those trailers. Nothing is pushed.
+- **The weekly harness scout:** with `STUDIO_HARNESS_SCOUT=on` (off by default: the owner turns it on), the supervisor
+  files one research task (`--type research`, role rnd) on `STUDIO_SCOUT_DAY` (monday by default; a day name or 0-6, in
+  `STUDIO_TZ`, else UTC), once a week and never while the last one is open: "Research: weekly harness scout (week of
+  <date>)". Its write-up template asks for new harness and agent-tooling ideas from the past week, each with its sources,
+  the claim, whether it is measured or a vendor claim, and which scorecard number it could move (the studio's numbers
+  at filing time are in it). Paperwork only: the harness makes no network call.
 
 ## Drift checks (Check cards to the Producer)
 
