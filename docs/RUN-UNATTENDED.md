@@ -105,7 +105,12 @@ Scheduler (Windows); `--uninstall` removes it.
   stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most
   `STUDIO_STALL_VERIFY_MAX_MIN` (60) minutes. A verify counts for at most that long from its start (a done for
   `STUDIO_DONE_RUNNING_MAX_MIN`, 90), so a hung verify can't keep a session alive. `node harness/stall.mjs check`
-  shows "waiting on its own verify" for such a session.
+  shows "waiting on its own verify" for such a session. 2.73.2 (B-72): a stall end is recorded once per session
+  (`.studio/stall/<agent>.json` `ended`), whether the launcher's heartbeat or the watchdog's pass saw it first, and the
+  watchdog's end counts as a stall end (`exitCause.kind` stall), never toward the "two sessions in a row" halt. Once the
+  agent's process has exited, the session lists as `ending` (not STALLED) while its launcher hands the work back, which
+  can take minutes when it closes the task itself; the watchdog, the watch pass and the silent-agent release leave it
+  to the launcher (bounded by `STUDIO_DONE_RUNNING_MAX_MIN`, 90). One `agent.session.end` per session, whoever records it.
 - **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
   is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
   and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
