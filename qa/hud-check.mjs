@@ -143,10 +143,15 @@ const port = await new Promise((resolve) => {
   });
 });
 const token = crypto.randomBytes(24).toString('hex');
-const hub = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
 let hubLog = '';
-hub.stdout.on('data', (d) => (hubLog += d));
-hub.stderr.on('data', (d) => (hubLog += d));
+// 2.74.0: the hub can be stopped and started again (the live-refresh check), on the same port.
+const startHub = () => {
+  const h = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  h.stdout.on('data', (d) => (hubLog += d));
+  h.stderr.on('data', (d) => (hubLog += d));
+  return h;
+};
+let hub = startHub();
 const BASE = `http://127.0.0.1:${port}`;
 for (let i = 0; i < 60; i++) {
   if (await fetch(`${BASE}/api/state`).then((r) => r.ok, () => false)) break;
@@ -277,6 +282,202 @@ const agentChecks = async (page) => {
   await expect('Pause stops it and hands its task back', launchedEmpty(page), { holdMs: 2500, more: agentsDiag });
 };
 
+// ---------- 2.74.0: the refreshed War Room (pairing, Act answers, live refresh, the deck, the Studio floor's rooms) ----------
+const sleepers = [];
+const NO_AGENT = (e) => { const o = { ...e }; for (const k of ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI', 'STUDIO_ROLE', 'STUDIO_LOCK_OWNER', 'STUDIO_AGENT', 'STUDIO_TRACK']) delete o[k]; return o; };
+const pairCode = (by = 'hatch') => {
+  const r = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', by], { cwd: dir, env: { ...NO_AGENT(env), HUB_PORT: String(port) }, encoding: 'utf8' });
+  return { out: `${r.stdout}${r.stderr}`, code: (/code=([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.stdout || '') || [])[1] || null, status: r.status };
+};
+function seed274() {
+  const st = path.join(dir, '.studio');
+  const now = Date.now();
+  const iso = (msAgo) => new Date(now - msAgo).toISOString();
+  // A supervisor that halted (its process: a sleeper we own), started 3 h ago with 45 h to go.
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3600000)'], { stdio: 'ignore' });
+  sleepers.push(sleeper);
+  fs.writeFileSync(path.join(st, 'supervisor.json'), JSON.stringify({ pid: sleeper.pid, status: 'running', startedAt: iso(3 * 3600000), opts: { until: new Date(now + 45 * 3600000).toISOString() }, sessions: 6, tasksDone: 3, hubDown: [], last: { at: iso(30000), started: [], why: ['builder: free memory 2.1 GB is under the 3 GB floor'] }, halted: { at: iso(600000), code: 1, why: 'two sessions in a row ended with exit 1 (builder-q1, builder-q2): see their logs' } }));
+  // A merge train verifying three lanes (one already handed back), one lane held for a person's release, a last train.
+  fs.mkdirSync(path.join(st, 'locks'), { recursive: true });
+  fs.writeFileSync(path.join(st, 'locks', 'train.lock'), JSON.stringify({ pid: process.pid, at: now - 14 * 60000, id: 'tr-demo', by: 'train-daemon' }));
+  fs.mkdirSync(path.join(st, 'train', 'tr-demo'), { recursive: true });
+  fs.writeFileSync(path.join(st, 'train', 'tr-demo', 'status.json'), JSON.stringify({ train: 'tr-demo', at: iso(5000), step: 'verify', text: 'verify 1: lanes 1-2, T-201, T-202', lanes: 3, round: 1, eta: { text: 'about 11 min' } }));
+  fs.writeFileSync(path.join(st, 'train', 'queue.json'), JSON.stringify([{ task: 'T-201', agent: 'builder-q1', head: 'a1' }, { task: 'T-202', agent: 'builder-q2', head: 'a2' }, { task: 'T-204', agent: 'builder-q3', head: 'a4', held: { tier: 'C', why: 'it changes a protected file' } }]));
+  const ev = [
+    { ts: iso(3 * 3600000 - 60000), type: 'task.train.landed', agent: 'train-daemon', msg: 'train tr-prev: main moved', meta: { train: 'tr-prev', lanes: ['T-190', 'T-191'] } },
+    { ts: iso(3 * 3600000 - 50000), type: 'task.train.done', agent: 'train-daemon', status: 'ok', msg: 'train tr-prev: landed T-190, T-191', meta: { train: 'tr-prev', landed: ['T-190', 'T-191'], dropped: [] } },
+    { ts: iso(30 * 60000), type: 'task.done', agent: 'builder-q9', task: 'T-195', msg: 'done' },
+    { ts: iso(14 * 60000), type: 'task.train.start', agent: 'train-daemon', msg: 'train tr-demo: 3 lane(s): T-201, T-202, T-203', meta: { train: 'tr-demo', lanes: ['T-201', 'T-202', 'T-203'] } },
+    { ts: iso(9 * 60000), type: 'task.train.dropped', agent: 'train-daemon', task: 'T-203', status: 'blocked', msg: 'train tr-demo: T-203 handed back: its lane copy is gone', meta: { train: 'tr-demo' } },
+    { ts: iso(8 * 60000), type: 'task.progress', agent: 'unity-worker-1', task: 'T-002', msg: 'porting the scene loader' },
+    { ts: iso(40 * 60000), type: 'delegation.used', agent: 'crew-lead', task: 'T-188', to: 'hatch', msg: 'crew-lead ran train-release T-188 under delegation by hatch', meta: { action: 'train-release' } },
+    { ts: iso(20 * 60000), type: 'task.progress', agent: 'crew-lead', msg: 'checked the board' },
+  ];
+  fs.appendFileSync(path.join(st, 'events.jsonl'), ev.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  fs.appendFileSync(path.join(st, 'decisions.jsonl'), JSON.stringify({ kind: 'decision', id: 'D-demo1', at: iso(35 * 60000), action: 'train-release', subject: 'T-188', by: 'crew-lead', as: `delegation ${iso(86400000)}`, why: 'released under the standing delegation', evidence: '', undo: null }) + '\n');
+  // The machine: a scan and a few samples.
+  fs.writeFileSync(path.join(st, 'machine.json'), JSON.stringify({ at: iso(20000), os: 'linux', ram: { totalGb: 32, freeGb: 6.5 }, cpu: { busy: 0.46 }, gpus: [{ name: 'GPU', busy: 0.07, vramGb: 12, vramFreeGb: 10.4 }], disk: { freeGb: 180 } }));
+  fs.writeFileSync(path.join(st, 'machine-history.jsonl'), [0.4, 0.5, 0.48].map((c, i) => JSON.stringify({ at: iso((3 - i) * 60000), ram: [24 + i, 32], cpu: Math.round(c * 100), gpu: [6, 1.6, 12], disk: 180 })).join('\n') + '\n');
+  // The owner's standing delegation, committed by a person (no Studio-Agent trailer).
+  fs.writeFileSync(path.join(dir, 'studio', 'delegation.json'), JSON.stringify({ agent: 'crew-lead', actions: ['train-release', 'hold'], until: new Date(now + 24 * 3600000).toISOString(), by: 'hatch', at: iso(86400000), why: 'the run\'s overseer' }, null, 2) + '\n');
+  git('add', 'studio/delegation.json');
+  git('commit', '-q', '-m', 'delegate: hatch lets crew-lead release', '--no-verify');
+}
+
+async function warRoom274() {
+  seed274();
+  const shot = async (pg, name, opts = {}) => { if (shotsAt) { fs.mkdirSync(shotsAt, { recursive: true }); await pg.screenshot({ path: path.join(shotsAt, name), ...opts }).catch(() => {}); } };
+  // An unpaired browser: read-only, and the halt's button says how to pair instead of "the HUB token was refused".
+  const ctx0 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const p0 = await ctx0.newPage();
+  await p0.goto(`${BASE}/?skin=ops`);
+  await expect('2.74.0: unpaired, the halt card\'s button is off and the deck says to pair this browser', async () => {
+    const need = await text(p0, '#o-needcount');
+    const btn = p0.locator('#o-holdlist [data-need="supervisor-resume"]');
+    const off = (await btn.count()) === 1 && await btn.isDisabled();
+    return { ok: off && /pair this browser/.test(need), seen: `button off ${off} | ${need} | ${await text(p0, '#o-holdlist')}` };
+  });
+  await ctx0.close();
+  // Pairing: a one-time code from the terminal, never the token; the link pairs the browser.
+  const refused = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', 'hatch'], { cwd: dir, env: { ...NO_AGENT(env), CLAUDECODE: '1' }, encoding: 'utf8' });
+  check('2.74.0: npm run hub -- pair is refused in a coding agent\'s shell', refused.status === 1 && /coding agent/.test(`${refused.stdout}${refused.stderr}`), `${refused.status} ${refused.stdout}${refused.stderr}`);
+  const pc = pairCode('hatch');
+  check('2.74.0: npm run hub -- pair prints a one-time code and a link, never the HUB token', pc.status === 0 && Boolean(pc.code) && !pc.out.includes(token), pc.out.replace(token, '(token)'));
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto(`${BASE}/pair?code=${pc.code}`);
+  await expect('2.74.0: the pairing link pairs the browser and opens the Ops view, paired as hatch', async () => {
+    const t = await text(page, '#o-pairstate');
+    const cookies = await ctx.cookies();
+    const c = cookies.find((k) => k.name === 'hub_pair');
+    return { ok: /Paired as hatch/.test(t) && c?.httpOnly === true && c?.sameSite === 'Strict' && !page.url().includes('code='), seen: `${page.url()} | ${t} | cookie ${JSON.stringify(c ? { httpOnly: c.httpOnly, sameSite: c.sameSite } : null)}` };
+  });
+  const again = await fetch(`${BASE}/pair/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Paired': '1' }, body: JSON.stringify({ code: pc.code }) });
+  check('2.74.0: a pairing code works once', again.status === 401, `second use answered ${again.status}`);
+  const store = read('.studio/hub-pairs.json');
+  const cookieVal = (await ctx.cookies()).find((k) => k.name === 'hub_pair')?.value || '(none)';
+  check('2.74.0: only the token\'s hash is kept (.studio/hub-pairs.json), never the token', /"by": "hatch"/.test(store) && !store.includes(cookieVal), store.slice(0, 200));
+  // Needs a person first, then the deck in the owner's order.
+  await expect('2.74.0: Needs a person comes first, then Crew, Train Room, Run clock, Machine and Owner proxy', async () => {
+    const order = await page.evaluate(() => ['o-hold', 'o-crew', 'o-trains', 'o-clock', 'o-machine', 'o-proxy', 'o-act'].map((id) => { const e = document.getElementById(id); return e ? Math.round(e.getBoundingClientRect().top + scrollY) * 10000 + Math.round(e.getBoundingClientRect().left) : -1; }));
+    const ok = order.every((v) => v >= 0) && order[0] < Math.min(...order.slice(1)) && order[1] <= order[2] && order[2] <= order[3] && order.slice(0, 6).every((v) => v < order[6]);
+    return { ok, seen: JSON.stringify(order) };
+  });
+  await expect('2.74.0: the Train Room shows the running train, its lanes (verifying, handed back), the verify step and time, the last train and the held lane with Release', async () => {
+    const t = await text(page, '#o-trainsbody');
+    const lanes = await page.locator('#o-trainsbody .threads .lane').evaluateAll((els) => els.map((e) => e.getAttribute('class')));
+    const rel = await page.locator('#o-trainsbody [data-act2="release"][data-task="T-204"]').count();
+    return { ok: /tr-demo/.test(t) && /verify/.test(t) && /14 min/.test(t) && /about 11 min/.test(t) && /tr-prev/.test(t) && /landed T-190, T-191/.test(t) && lanes.filter((c) => /verifying/.test(c)).length === 2 && lanes.some((c) => /dropped/.test(c)) && rel === 1, seen: `lanes ${JSON.stringify(lanes)} | release buttons ${rel} | ${t.slice(0, 500)}` };
+  });
+  await expect('2.74.0: the held lane is also a Needs-a-person card with one Release button', async () => ({ ok: (await page.locator('#o-holdlist [data-act2="release"][data-task="T-204"]').count()) === 1, seen: await text(page, '#o-holdlist') }));
+  await expect('2.74.0: the run clock shows the time since the supervisor started, the time left and landed per hour', async () => {
+    const t = await text(page, '#o-clockbody');
+    return { ok: /\b3(\.0)? h\b/.test(t) && /45 h left/.test(t) && /\b3\b\s*landed/.test(t) && /\/h/.test(t), seen: t };
+  });
+  await expect('2.74.0: the machine panel shows RAM, CPU and GPU now and averaged, and RAM per session', async () => {
+    const t = await text(page, '#o-machinebody');
+    return { ok: /25\.5\/32 GB/.test(t) && /46%/.test(t) && /avg/.test(t) && /7%/.test(t) && /180 GB/.test(t), seen: t };
+  });
+  await expect('2.74.0: the crew panel says why not more (the supervisor\'s last pass)', async () => {
+    const t = await text(page, '#o-crewbody');
+    return { ok: /Why not more: builder: free memory 2\.1 GB/.test(t), seen: t };
+  });
+  await expect('2.74.0: the Owner proxy panel lists what was done under the delegation, with Revoke', async () => {
+    const t = await text(page, '#o-proxybody');
+    return { ok: /crew-lead acts for hatch/.test(t) && /ran train-release T-188/.test(t) && /train-release T-188: released under the standing delegation/.test(t) && (await page.locator('#o-proxybody [data-act2="revoke"]').count()) === 1, seen: t };
+  });
+  await page.locator('#o-deck').scrollIntoViewIfNeeded().catch(() => {});
+  await shot(page, '274-ops-deck-desktop.png', { fullPage: false });
+  // "Fixed it: try again": the same code as npm run studio:resume, as the paired person, with the harness's words.
+  await page.locator('#o-holdlist [data-need="supervisor-resume"]').click();
+  await expect('2.74.0: "Fixed it: try again" in a paired browser runs studio:resume as hatch: the halt clears and the card shows the harness\'s own answer', async () => {
+    const resume = read('.studio/supervisor-resume');
+    const dec = read('.studio/decisions.jsonl');
+    const t = await text(page, '#o-holdlist');
+    const toastT = await text(page, '#toast');
+    return { ok: /"by":"hatch"/.test(resume) && /"via":"cli"/.test(resume) && /"action":"studio-resume"/.test(dec) && /Cleared the halt/.test(t + toastT), seen: `resume file ${resume || '(none)'} | ${t.slice(0, 300)} | toast ${toastT}` };
+  });
+  await shot(page, '274-ops-resume-answer.png', { fullPage: false });
+  // Release: the same code as npm run task -- train release, and the refusal (if any) in the harness's own words.
+  await page.locator('#o-holdlist [data-act2="release"][data-task="T-204"]').click();
+  await expect('2.74.0: Release on a held lane runs train release as hatch and the card shows its answer', async () => {
+    const q = read('.studio/train/queue.json');
+    const t = await text(page, '#o-holdlist');
+    const released = /"released":\s*\{[^}]*"by":\s*"hatch"/.test(q);
+    return { ok: released || /Nothing was released|Refused/.test(t), seen: `released ${released} | ${t.slice(0, 400)}` };
+  });
+  // The Studio floor: the Rail Yard, Engine Bay and Watchtower rooms, each saying what its staff do, with the action.
+  await goTo(page, 'tycoon');
+  await expect('2.74.0: the Studio floor has a Rail Yard with the train\'s cars, an open Engine Bay with the engine worker, and a Watchtower with the proxy', async () => {
+    const rooms = await page.locator('#t-office .room .sign').allInnerTexts();
+    const cars = await page.locator('#room-rails .yard .car').count();
+    const engine = await page.locator('#room-engine').getAttribute('class').catch(() => '');
+    const inEngine = await page.locator('#t-crowd .desk[data-room="engine"][data-agent="unity-worker-1"]').count();
+    const tower = await text(page, '#room-watchtower .towerlog');
+    return { ok: rooms.includes('Rail Yard') && rooms.includes('Watchtower') && rooms.includes('Engine Bay') && cars >= 3 && !/locked/.test(engine || '') && inEngine === 1 && /crew-lead for hatch/.test(tower), seen: `rooms ${rooms.join(', ')} | cars ${cars} | engine ${engine} | worker desks ${inEngine} | tower ${tower}` };
+  });
+  await expect('2.74.0: a room with work shows each agent\'s task, its step and the action right there', async () => {
+    const t = await text(page, '#room-engine [data-now]');
+    const btn = await page.locator('#room-engine [data-now] [data-act2]').count();
+    return { ok: /T-002/.test(t) && /editing|verifying|held/.test(t) && btn >= 1, seen: `${t} | buttons ${btn}` };
+  });
+  await shot(page, '274-studio-floor-desktop.png', { fullPage: true });
+  await goTo(page, 'ops');
+  // Revoke: armed by the first press, run by the second: the same code as npm run delegate -- revoke.
+  const rv = page.locator('#o-proxybody [data-act2="revoke"]');
+  await rv.click();
+  await rv.click();
+  await expect('2.74.0: Revoke (pressed twice) runs delegate revoke as hatch and says so', async () => {
+    const gone = !fs.existsSync(path.join(dir, 'studio', 'delegation.json'));
+    const t = await text(page, '#toast');
+    return { ok: gone && /Revoked the delegation to crew-lead/.test(t), seen: `file gone ${gone} | ${t}` };
+  });
+  // Live refresh: the hub stops, the badge says reconnecting; it starts again, the badge says back, no reload needed.
+  await page.evaluate(() => { window.__noReload = 1; });
+  hub.kill('SIGTERM');
+  await expect('2.74.0: when the hub stops, every view shows "Reconnecting…"', async () => {
+    const t = await text(page, '#live');
+    return { ok: /Reconnecting/.test(t), seen: t };
+  }, { timeout: waitBudget(20000) });
+  await shot(page, '274-live-reconnecting.png', { fullPage: false });
+  const exitLog = read('.studio/logs/hub-exit.log');
+  check('2.74.0: the hub logs why it ended in .studio/logs/hub-exit.log', /"kind":"exit"/.test(exitLog) && /SIGTERM/.test(exitLog), exitLog.slice(-400));
+  hub = startHub();
+  await expect('2.74.0: when the hub is back the page says so and is live again without a reload, still paired', async () => {
+    const t = await text(page, '#live');
+    const kept = await page.evaluate(() => window.__noReload === 1).catch(() => false);
+    const paired = await text(page, '#o-pairstate');
+    return { ok: /Back online|^Live$/.test(t.trim()) && kept && /Paired as hatch/.test(paired), seen: `${t} | same page ${kept} | ${paired}` };
+  }, { timeout: waitBudget(30000) });
+  // A new page version (the hub was upgraded): the page reloads itself.
+  fs.appendFileSync(path.join(dir, 'hub', 'v3', 'index.html'), '\n<!-- 274 reload check -->\n');
+  hub.kill('SIGTERM');
+  await wait(500);
+  hub = startHub();
+  await expect('2.74.0: after a hub restart with a new page, the page reloads itself', async () => {
+    const kept = await page.evaluate(() => window.__noReload === 1).catch(() => true);
+    return { ok: !kept, seen: `old page still loaded: ${kept}` };
+  }, { timeout: waitBudget(40000) });
+  check('2.74.0: no script errors on the refreshed views', errs.length === 0, errs.join(' | '));
+  // Light mode and the phone: the deck reads in both.
+  for (const [w, h, scheme, name] of [[1280, 900, 'light', '274-ops-light-desktop.png'], [390, 844, 'dark', '274-ops-deck-phone.png']]) {
+    const c2 = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
+    const p2 = await c2.newPage();
+    const e2 = [];
+    p2.on('pageerror', (e) => e2.push(String(e)));
+    await p2.goto(`${BASE}/?skin=ops`);
+    await expect.quiet(async () => ({ ok: /Crew/.test(await text(p2, '#o-crew')) && !/Loading/.test(await text(p2, '#o-crewbody')), seen: '' }));
+    const bg = await p2.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    const wide = await p2.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+    check(`2.74.0: ${scheme} ${w}px: the deck loads without errors and nothing runs off the side`, e2.length === 0 && !wide && (scheme === 'light' ? /rgb\(2[34]\d, 2[34]\d, 2[45]\d\)/.test(bg) : true), `${e2.join(' | ')} | sideways ${wide} | background ${bg}`);
+    await shot(p2, name, { fullPage: scheme === 'dark' });
+    await c2.close();
+  }
+  await ctx.close();
+}
+
 try {
   for (const [w, h, size] of only ? [] : [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
     for (const skin of ['ops', 'tycoon', 'plan', 'assets', 'arcade']) {
@@ -345,6 +546,8 @@ try {
       const hidden = await page.locator('#drawer').getAttribute('aria-hidden');
       return { ok: hidden === 'true', seen: `drawer aria-hidden=${hidden}` };
     });
+    // 2.74.0: the name and token box sits under "Use a HUB token instead" (pairing is the main way in).
+    await page.locator('#o-act .tokenbox summary').click();
     await page.fill('#o-name', 'hatch');
     await page.click('#o-save');
     await page.fill('#o-title', 'Docs: write the visitors hand-off');
@@ -625,7 +828,9 @@ try {
     });
     if (shotsAt) await box.screenshot({ path: path.join(shotsAt, 'ledger-tiles-phone.png') });
   }
+  if (!only) await warRoom274();
 } finally {
+  for (const p of sleepers) { try { p.kill(); } catch {} }
   await browser.close();
   hub.kill();
   fakeModel.close();
