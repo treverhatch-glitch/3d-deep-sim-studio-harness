@@ -87,23 +87,24 @@ console.log(JSON.stringify({ got, logs }));`;
     write('.probe-268n-oom.mjs', `import fs from 'node:fs';
 const f = process.argv[2]; const mode = process.argv[3];
 const n = (fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0) + 1; fs.writeFileSync(f, String(n));
-if (mode === 'once' && n === 1) { process.exitCode = 137; } else if (mode === 'heap') { console.error('FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory'); process.exitCode = 134; }
+if (mode === 'once' && n === 1) { process.exitCode = ${process.platform === 'win32' ? -1073741801 : 137}; } else if (mode === 'heap') { console.error('FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory'); process.exitCode = 134; }
 `);
     const cnt1 = path.join(dir, '.oom-count-1');
     const cnt2 = path.join(dir, '.oom-count-2');
     const once = run(dir, `node harness/heavy.mjs run --label oom-once -- node .probe-268n-oom.mjs "${cnt1}" once`, { ...base, STUDIO_TEST_MACHINE: machine() });
     const heap = run(dir, `node harness/heavy.mjs run --label oom-heap -- node .probe-268n-oom.mjs "${cnt2}" heap`, { ...base, STUDIO_TEST_MACHINE: machine() });
     const count = (f) => { try { return Number(fs.readFileSync(f, 'utf8')); } catch { return 0; } };
-    // A game check killed for memory once.
+    // A game check killed for memory once. Windows has no exit 137 (the harness reads it as OOM only on POSIX); there
+    // the probe exits 0xC0000017 (STATUS_NO_MEMORY), which is what a Windows OOM looks like (CI windows, 2.68.0).
     const cnt3 = path.join(dir, '.oom-count-3');
     write('game/oom268/studio.gates.json', JSON.stringify({ gates: [{ id: 'suite', command: `node .probe-268n-oom.mjs "${cnt3.replace(/\\/g, '/')}" once`, required: true }] }));
     const gg = run(dir, 'node harness/game-gates.mjs --json', { ...base, STUDIO_GAME: 'oom268', STUDIO_GAME_GATE_CI: '', STUDIO_TEST_MACHINE: machine() });
     let row = null;
     try { row = JSON.parse(String(gg.stdout).trim().split('\n').pop()).rows?.find((x) => /suite$/.test(x.id)); } catch {}
     guard('2.68.0 (n): a heavy job that dies out of memory (exit 137) is re-queued once with a note and its second run counts (exit 0); "JavaScript heap out of memory" twice runs exactly twice and keeps its exit; a game check killed for memory runs once more and is green with an oomRetry note (2.67.2: exit 137, red)', () => [
-      once.status === 0 && count(cnt1) === 2 && /oom-once died out of memory \(exit 137/.test(out(once))
+      once.status === 0 && count(cnt1) === 2 && /oom-once died out of memory \(exit (137|3221225495|-1073741801)/.test(out(once))
         && heap.status === 134 && count(cnt2) === 2 && /died out of memory again: not retried a second time/.test(out(heap))
-        && count(cnt3) === 2 && row?.ok === true && /exit 137/.test(row.oomRetry || ''),
+        && count(cnt3) === 2 && row?.ok === true && /exit (137|3221225495|-1073741801)/.test(row.oomRetry || ''),
       JSON.stringify({ st: [once.status, heap.status], once: out(once).slice(-500), heap: out(heap).slice(-500), c: [count(cnt1), count(cnt2), count(cnt3)], row, gg: out(gg).slice(-800) }).slice(0, 2500)]);
   }
 
