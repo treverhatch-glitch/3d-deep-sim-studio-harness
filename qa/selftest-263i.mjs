@@ -50,6 +50,9 @@ export async function selftest263I({ dir, run, report, tmpRoot, root }) {
   write(dir, 'game/demo/studio.gates.json', `${JSON.stringify({
     gates: [{ id: 'check', command: 'node game/demo/check.mjs' }],
     runAlone: { paths: ['game/demo/sim/core/**'] },
+    // 2.71.1 (A13): a golden re-recorded with the lane's own Golden-Reason is tier C by default; this game's owner keeps
+    // it at B, so check 3 below still tests the tier-B rule (handed back without the trailer, lands with it).
+    tiers: { set: { 'golden-rerecord': 'B' } },
   }, null, 2)}\n`);
   write(dir, 'game/demo/check.mjs', [
     "import fs from 'node:fs'; import path from 'node:path';",
