@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Studio Floor</title>
+<title>War Room</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%231f2933%27/%3E%3Crect x=%273%27 y=%273%27 width=%274%27 height=%274%27 fill=%27%2334d399%27/%3E%3Crect x=%279%27 y=%273%27 width=%274%27 height=%274%27 fill=%27%23fbbf24%27/%3E%3Crect x=%273%27 y=%279%27 width=%2710%27 height=%274%27 fill=%27%2360a5fa%27/%3E%3C/svg%3E" />
 <!-- 2.74.0: no web fonts (the War Room makes no outside request); the font names below fall back to local ones. -->
 <meta name="hub-page" content="__HUB_PAGE_VERSION__" />
@@ -480,7 +480,7 @@
   .person .alarm { position: absolute; bottom: 48px; left: 12px; font: 12px "Press Start 2P", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; color: var(--hold); display: none; }
   .person.attention .alarm { display: block; animation: hop .6s ease-in-out infinite; }
   @keyframes hop { 50% { transform: translateY(-5px); } }
-  .bubble { position: absolute; bottom: 50px; left: -8px; max-width: 140px; width: max-content; overflow-wrap: anywhere; padding: 4px 6px; background: #fff; border: 3px solid #000; font-size: 18px; line-height: 1; transform-origin: 20px 100%; display: none; }
+  .bubble { position: absolute; bottom: 50px; left: -8px; max-width: 150px; width: max-content; overflow-wrap: anywhere; padding: 4px 7px; background: #fff; color: #172029; border: 2px solid #172029; border-radius: 6px; font: 12px/1.25 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; transform-origin: 20px 100%; display: none; }
   .bubble.show { display: block; animation: pop .45s cubic-bezier(.2, 1.6, .4, 1) both; }
   .bubble.hide { display: block; animation: poof .3s ease-in forwards; }
   .bubble::after { content: ""; position: absolute; bottom: -9px; left: 16px; border: 6px solid transparent; border-top-color: #000; }
@@ -711,6 +711,297 @@
   .beacon.on { background: #ffee58; box-shadow: 0 0 16px 6px rgba(255, 238, 88, .75); animation: flicker 1.4s steps(2) infinite; }
   .towerlog { position: absolute; z-index: 3; width: 150px; font: 11px/1.05 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; background: #263238; color: #c5e1a5; border: 2px solid #102027; padding: 3px 5px; max-height: 84px; overflow: hidden; }
   .towerlog button { font: 11px/1 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; margin-top: 3px; border: 2px solid #7f0000; background: #c62828; color: #fff; padding: 1px 5px; cursor: pointer; }
+
+  /* ==================================================================================================================
+     2.75.0: one design system for every view: the production stripboard. A status is a colored strip on a card's left
+     edge and means the same thing everywhere (go, wait, stop, hold, info, off). Tokens for color, type, spacing and
+     radius; light and dark follow the system; reduced motion is respected (the rule at the top of this sheet).
+     ================================================================================================================== */
+  :root {
+    --ds-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --ds-display: "Bahnschrift SemiCondensed", Bahnschrift, "DIN Alternate", "DIN Condensed", "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+    --ds-1: 4px; --ds-2: 8px; --ds-3: 12px; --ds-4: 16px; --ds-5: 24px; --ds-6: 32px;
+    --ds-r1: 3px; --ds-r2: 6px; --ds-r3: 10px;
+    --ds-t-xs: 12px; --ds-t-s: 13px; --ds-t-m: 15px; --ds-t-l: 17px; --ds-t-xl: 20px; --ds-t-2xl: 26px;
+    --ds-strip: 5px;
+    --ds-bg: #151c24; --ds-surface: #1c2530; --ds-surface-2: #232e3b; --ds-line: #314050; --ds-text: #e4eaf0; --ds-muted: #8e9dad;
+    --ds-go: #34a874; --ds-wait: #e2a03a; --ds-stop: #e05656; --ds-hold: #9378e0; --ds-info: #4c9be0; --ds-off: #7d8a97;
+    --ds-go-bg: rgba(52, 168, 116, .14); --ds-wait-bg: rgba(226, 160, 58, .14); --ds-stop-bg: rgba(224, 86, 86, .14); --ds-hold-bg: rgba(147, 120, 224, .15); --ds-info-bg: rgba(76, 155, 224, .13);
+    --ds-tape: #f2c94c; --ds-on-strong: #0f151b; --ds-floor: #10161d; --ds-floor-line: #1b2530;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ds-bg: #e4e9ed; --ds-surface: #f7f9fa; --ds-surface-2: #edf1f4; --ds-line: #c6d0d9; --ds-text: #142029; --ds-muted: #4e5d6b;
+      --ds-go: #1f7f52; --ds-wait: #a4650f; --ds-stop: #b42f2f; --ds-hold: #6a4cc4; --ds-info: #1f69ae; --ds-off: #6b7784;
+      --ds-go-bg: rgba(31, 127, 82, .1); --ds-wait-bg: rgba(164, 101, 15, .1); --ds-stop-bg: rgba(180, 47, 47, .09); --ds-hold-bg: rgba(106, 76, 196, .1); --ds-info-bg: rgba(31, 105, 174, .09);
+      --ds-tape: #b8860b; --ds-on-strong: #ffffff; --ds-floor: #cfd6dc; --ds-floor-line: #c2cad1;
+    }
+  }
+  /* Every view maps its own names onto the tokens, so the older rules below them pick the system up. */
+  html body[data-skin] {
+    --bg: var(--ds-bg); --panel: var(--ds-surface); --card: var(--ds-surface-2); --chip: var(--ds-surface-2); --line: var(--ds-line); --ink: var(--ds-text); --quiet: var(--ds-muted);
+    --go: var(--ds-go); --standby: var(--ds-wait); --hold: var(--ds-stop); --link: var(--ds-info); --focus: var(--ds-tape); --wait: var(--ds-hold);
+    --ok-bg: var(--ds-go-bg); --bad-bg: var(--ds-stop-bg);
+    background: var(--ds-bg); color: var(--ds-text); font: 15px/1.5 var(--ds-font); font-variant-numeric: tabular-nums;
+  }
+  html body[data-skin="assets"] { --table: var(--ds-bg); --card: var(--ds-surface); --ink: var(--ds-text); --ok: var(--ds-go); --works: var(--ds-hold); --wait: var(--ds-wait); }
+  html body[data-skin="arcade"] { --void: var(--ds-bg); --cab: var(--ds-surface); --txt: var(--ds-text); --dim: var(--ds-muted); --cyan: var(--ds-info); --neon: var(--ds-hold); --lime: var(--ds-go); }
+  html body[data-skin="tycoon"] { --sky: var(--ds-bg); --frame: #3a2a1c; --panel: #fff8e8; --ink: var(--ds-text); font: 15px/1.4 var(--ds-font); }
+  html body :focus-visible { outline: 3px solid var(--ds-tape); outline-offset: 2px; }
+  html body a { color: var(--ds-info); }
+  html body code { font: 0.92em ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--ds-surface-2); border-radius: var(--ds-r1); padding: 0 4px; }
+  html body input, html body select, html body textarea { font: inherit; color: var(--ds-text); background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-r2); padding: 6px 10px; }
+  html body input::placeholder, html body textarea::placeholder { color: var(--ds-muted); }
+  html body button { font-family: var(--ds-font); }
+
+  /* ---- the header: the same slate bar on every view ---- */
+  html body .skin > header, html body #tycoon > .top {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--ds-2) var(--ds-4);
+    padding: var(--ds-3) var(--ds-5); background: var(--ds-surface); color: var(--ds-text); border-bottom: 1px solid var(--ds-line);
+  }
+  html body .skin > header h1, html body #tycoon > .top h1 {
+    margin: 0; font: 600 var(--ds-t-2xl)/1.05 var(--ds-display); letter-spacing: 0; color: var(--ds-text); text-shadow: none; text-transform: none;
+  }
+  html body .skin > header .now, html body .skin > header .state, html body .skin > header .game { color: var(--ds-muted); font: var(--ds-t-m)/1.4 var(--ds-font); max-width: 60ch; }
+  html body .skin > header .game { color: var(--ds-text); font-weight: 600; }
+  html body .skin > header .spacer, html body #tycoon > .top .spacer { flex: 1 1 0; }
+  html body .tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--ds-r2); background: var(--ds-bg); border: 1px solid var(--ds-line); order: 5; }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab {
+    font: 600 var(--ds-t-s)/1 var(--ds-font); color: var(--ds-muted); background: transparent; border: 0; border-radius: var(--ds-r1);
+    padding: 8px 12px; box-shadow: none; letter-spacing: 0; text-transform: none;
+  }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab:hover { color: var(--ds-text); background: var(--ds-surface-2); }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab[aria-current="page"] { color: var(--ds-text); background: var(--ds-surface); box-shadow: inset 0 -3px 0 var(--ds-tape); cursor: default; }
+  html body .skin > header .speed, html body #tycoon > .top .speed { order: 6; font: 700 var(--ds-t-xs)/1.2 var(--ds-font); border-radius: 999px; border-width: 1px; color: var(--ds-text); padding: 3px 12px 3px 3px; }
+  html body #tycoon .speed .knob { border-radius: 50%; }
+  html body .speed[aria-pressed="true"] { background: var(--ds-stop); border-color: var(--ds-stop); color: #fff; box-shadow: none; }
+  html body .meter, html body #o-gates { color: var(--ds-muted); font-size: var(--ds-t-s); }
+  html body .meter .bar { background: var(--ds-surface-2); }
+  html body .meter .bar i { background: var(--ds-go); }
+  @media (max-width: 760px) {
+    html body .skin > header, html body #tycoon > .top { padding: var(--ds-2) var(--ds-4); }
+    html body .tabs { order: 2; width: 100%; }
+    html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab { flex: 1 1 auto; padding: 8px 8px; }
+    html body .skin > header .now { max-width: none; }
+  }
+
+  /* ---- the signals strip: chips with a status strip ---- */
+  html body .signals, html body #tycoon .signals { padding: var(--ds-2) var(--ds-5); gap: var(--ds-2); background: transparent; color: var(--ds-text); font: var(--ds-t-s)/1.45 var(--ds-font); }
+  html body .sig { border: 1px solid var(--ds-line); border-left: var(--ds-strip) solid var(--ds-off); border-radius: var(--ds-r1); background: var(--ds-surface); padding: 4px 10px; font-size: var(--ds-t-s); }
+  html body .sig.pace { border-style: solid; border-left-color: var(--ds-info); opacity: 1; }
+  html body .sig.you { border-left-color: var(--ds-wait); background: linear-gradient(90deg, var(--ds-wait-bg), transparent 70%), var(--ds-surface); }
+  html body .sig.red { border-left-color: var(--ds-stop); background: linear-gradient(90deg, var(--ds-stop-bg), transparent 70%), var(--ds-surface); }
+  html body .sig.stall { border-left-color: var(--ds-hold); }
+  html body .sig.warn { border-left-color: var(--ds-wait); }
+  @media (max-width: 760px) { html body .signals, html body #tycoon .signals { padding: var(--ds-2) var(--ds-4); } }
+
+  /* ---- sections and panels: one surface, radius by rank ---- */
+  html body #ops main, html body #plan main, html body #assets main, html body #arcade main.arc { padding: var(--ds-4) var(--ds-5) var(--ds-6); max-width: 1520px; }
+  html body #ops section, html body #plan section, html body #arcade section, html body .deck .panel, html body .deck .needs {
+    background: var(--ds-surface); border: 1px solid var(--ds-line); border-radius: var(--ds-r3); padding: var(--ds-4); color: var(--ds-text); box-shadow: none;
+  }
+  html body #assets section { margin: var(--ds-5) 0; }
+  html body #ops h2, html body #plan h2, html body #assets h2, html body #arcade h2, html body .deck h2 {
+    margin: 0 0 var(--ds-3); font: 600 var(--ds-t-xl)/1.15 var(--ds-display); color: var(--ds-text); letter-spacing: 0; text-shadow: none;
+  }
+  html body #ops h2 small, html body #plan h2 small, html body #assets h2 small, html body #arcade h2 small, html body .deck h2 small, html body #arcade h3 small {
+    font: 400 var(--ds-t-s)/1.3 var(--ds-font); color: var(--ds-muted); margin-left: var(--ds-2);
+  }
+  html body #ops h3, html body #plan h3, html body #arcade h3 { font: 600 var(--ds-t-l)/1.2 var(--ds-display); color: var(--ds-text); margin: var(--ds-4) 0 var(--ds-2); }
+  html body .note, html body #assets .note, html body #arcade .hint, html body .lede { color: var(--ds-muted); }
+  html body #assets .lede { max-width: 72ch; color: var(--ds-muted); }
+  /* buttons: one primary (a person's next step), one quiet, one danger; status words keep their colors */
+  html body #ops button.act, html body .act-row button, html body #plan button, html body #assets button, html body #arcade button:not(.tab), html body .away-skin button {
+    font: 600 var(--ds-t-s)/1.2 var(--ds-font); border-radius: var(--ds-r2); border: 1px solid var(--ds-line); background: var(--ds-surface-2); color: var(--ds-text); padding: 7px 12px; text-shadow: none; box-shadow: none;
+  }
+  html body #plan button.go, html body #assets button.go, html body #arcade button.go, html body .need > button, html body .actbtn, html body #assets .acard .acts button.up {
+    background: var(--ds-go); border-color: var(--ds-go); color: var(--ds-on-strong);
+  }
+  html body .actbtn.quiet { background: var(--ds-surface-2); border-color: var(--ds-line); color: var(--ds-text); }
+  html body .actbtn.danger, html body #ops button.stop, html body #ops .restartbtns #o-restartyes { background: transparent; border: 1px solid var(--ds-stop); color: var(--ds-stop); }
+  html body .actbtn.danger { background: var(--ds-stop); color: #fff; }
+  html body button:disabled, html body .need > button:disabled { background: var(--ds-surface-2); border-color: var(--ds-line); color: var(--ds-muted); opacity: 1; cursor: not-allowed; }
+
+  /* ---- the Control room (ops) ---- */
+  html body .deck { padding: var(--ds-4) var(--ds-5) 0; }
+  html body .needs { border-left: var(--ds-strip) solid var(--ds-go); }
+  html body .needs.on { border-left-color: var(--ds-wait); background: linear-gradient(90deg, var(--ds-wait-bg), transparent 45%), var(--ds-surface); }
+  html body .need { background: var(--ds-bg); border: 1px solid var(--ds-line); border-left: var(--ds-strip) solid var(--ds-wait); border-radius: var(--ds-r2); padding: var(--ds-2) var(--ds-3); }
+  html body .need .what small { color: var(--ds-muted); font-size: var(--ds-t-xs); }
+  html body .res.ok { background: var(--ds-go-bg); border-left-color: var(--ds-go); }
+  html body .res.bad { background: var(--ds-stop-bg); border-left-color: var(--ds-stop); }
+  html body .big b { font: 600 34px/1 var(--ds-display); }
+  html body .chips li { background: var(--ds-surface-2); border-radius: var(--ds-r1); }
+  html body .plist li { border-left: 3px solid var(--ds-hold); }
+  html body #ops .statusline, html body #ops .meet-strip { margin: var(--ds-2) var(--ds-5) 0; border-left: var(--ds-strip) solid var(--ds-info); background: var(--ds-surface); border-radius: var(--ds-r2); padding: var(--ds-2) var(--ds-3); }
+  html body #ops .statusline .you { color: var(--ds-wait); }
+  html body #ops .hold-strip { margin: var(--ds-3) var(--ds-5) 0; border-left: var(--ds-strip) solid var(--ds-stop); background: var(--ds-stop-bg); border-radius: var(--ds-r2); }
+  html body #ops main { gap: var(--ds-4); }
+  html body #ops .cue { border-radius: var(--ds-r2); }
+  html body .lamp.working { background: var(--ds-go); } html body .lamp.idle { background: var(--ds-wait); } html body .lamp.stalled { box-shadow: 0 0 0 2px var(--ds-hold); }
+  html body .lamp.needs-attention, html body .lamp.out-of-quota { background: var(--ds-stop); }
+  html body #ops .timeline li { border-left: 3px solid var(--ds-line); }
+  html body #ops .timeline li.ok, html body #ops .timeline li.go { border-left-color: var(--ds-go); }
+  html body #ops .timeline li.warn, html body #ops .timeline li.standby { border-left-color: var(--ds-wait); }
+  html body #ops .timeline li.bad, html body #ops .timeline li.hold { border-left-color: var(--ds-stop); }
+  html body #ops .filters button { border-radius: 999px; }
+  html body #ops .filters button[aria-pressed="true"] { background: var(--ds-text); color: var(--ds-bg); border-color: var(--ds-text); }
+  html body .pri.P0 { background: var(--ds-stop); color: #fff; } html body .pri.P1 { background: var(--ds-wait); color: var(--ds-on-strong); }
+  html body .pri.P2 { background: var(--ds-info); color: #fff; } html body .pri.P3 { background: var(--ds-off); color: #fff; }
+  html body .pri { border-radius: var(--ds-r1); padding: 0 5px; font-size: var(--ds-t-xs); font-weight: 700; }
+  html body #o-ledger .tile { background: var(--ds-surface-2); color: var(--ds-text); border-radius: var(--ds-r2); border: 1px solid var(--ds-line); }
+  html body #o-ledger .tile .label { color: var(--ds-muted); }
+  html body .pairbox.on { border-color: var(--ds-go); background: var(--ds-go-bg); }
+  html body .threads .lane.verifying { stroke: var(--ds-info); filter: drop-shadow(0 0 3px var(--ds-info)); }
+  html body .threads .lane.landed { stroke: var(--ds-go); filter: drop-shadow(0 0 4px var(--ds-go)); } html body .threads .knot { fill: var(--ds-go); }
+  html body .threads .lane.dropped { stroke: var(--ds-stop); } html body .threads .lane.held, html body .threads .lane.deferred { stroke: var(--ds-hold); }
+  html body .threads text { font-family: var(--ds-font); }
+  @media (max-width: 760px) { html body .deck, html body #ops main, html body #plan main, html body #assets main, html body #arcade main.arc { padding-left: var(--ds-4); padding-right: var(--ds-4); } html body #ops .statusline, html body #ops .hold-strip, html body #ops .meet-strip { margin-left: var(--ds-4); margin-right: var(--ds-4); } }
+
+  /* ---- Game plan ---- */
+  html body #plan .mode { border: 1px solid var(--ds-line); border-left: var(--ds-strip) solid var(--ds-line); border-radius: var(--ds-r2); background: var(--ds-bg); padding: var(--ds-2) var(--ds-3); }
+  html body #plan .mode[aria-checked="true"] { border-left-color: var(--ds-tape); box-shadow: none; background: var(--ds-surface-2); }
+  html body #plan .mode b { font: 600 var(--ds-t-l)/1.2 var(--ds-display); }
+  html body #plan .ask { border-left: var(--ds-strip) solid var(--ds-wait); background: var(--ds-wait-bg); border-radius: var(--ds-r2); padding: var(--ds-2) var(--ds-3); }
+  html body #plan .design { border-radius: var(--ds-r2); border-color: var(--ds-line); background: var(--ds-bg); }
+  html body #plan .design.proposed { border-left: var(--ds-strip) solid var(--ds-wait); border-width: 1px 1px 1px var(--ds-strip); }
+  html body #plan .chatmsg.me { background: var(--ds-info-bg); }
+  html body #plan .chatmsg.them { border-color: var(--ds-line); background: var(--ds-bg); }
+  html body #plan .phase { border-color: var(--ds-line) !important; background: var(--ds-bg); border-radius: var(--ds-r2); }
+  html body #plan .phase.shut { opacity: .7; }
+  html body #plan .phase h3 { font-family: var(--ds-display); }
+  html body #plan .tag { border-radius: var(--ds-r1); border-color: var(--ds-line); }
+  html body #plan .board > div, html body #plan .idea { border-radius: var(--ds-r2); }
+
+  /* ---- Assets: proof sheets on the table; the strip on top says where each card stands ---- */
+  html body .acard { background: var(--ds-surface); color: var(--ds-text); border: 1px solid var(--ds-line); border-top: var(--ds-strip) solid var(--ds-off); border-radius: var(--ds-r2); box-shadow: none; }
+  html body .acard.proposed { border-top-color: var(--ds-wait); } html body .acard.approved { border-top-color: var(--ds-go); } html body .acard.changes { border-top-color: var(--ds-hold); }
+  html body .acard .view, html body .acard .rounds a { background: var(--ds-surface-2); border-color: var(--ds-line); }
+  html body .acard .cap, html body .acard .num { font-family: var(--ds-display); }
+  html body .acard .badge { background: var(--ds-wait-bg); border-color: var(--ds-wait); }
+  html body .acard input { background: var(--ds-bg); color: var(--ds-text); border-color: var(--ds-line); }
+  html body .acard .acts button { background: var(--ds-surface-2); color: var(--ds-text); border-color: var(--ds-line); }
+  html body #assets #a-saytext, html body #assets #a-reflabel { background: var(--ds-surface); color: var(--ds-text); border-color: var(--ds-line); }
+  html body #assets .sheet:empty::before { color: var(--ds-muted); }
+  html body #assets .state, html body #assets h2 small, html body #assets .kinds small { color: var(--ds-muted); }
+
+  /* ---- Arcade: the cabinet keeps its black screen; the room around it is the studio's ---- */
+  html body[data-skin="arcade"] { background: var(--ds-bg); }
+  html body #arcade section { border-width: 1px; }
+  html body #arcade .screen { box-shadow: 0 0 0 1px var(--ds-line); border-radius: var(--ds-r2); }
+  html body #arcade .buildline, html body #arcade .roomcard, html body #arcade p, html body #arcade label { font-family: var(--ds-font); }
+  html body #arcade .roomcard { background: var(--ds-bg); border-left: var(--ds-strip) solid var(--ds-info); border-radius: var(--ds-r2); color: var(--ds-text); }
+  html body #arcade .floors button { border-radius: var(--ds-r1); }
+  html body #arcade .floors button[aria-selected="true"] { background: var(--ds-info); color: #fff; }
+  html body #arcade .xp .bar { background: var(--ds-surface-2); }
+  html body #arcade .verdict .fun-yes { border-color: var(--ds-go); color: var(--ds-go); } html body #arcade .verdict .fun-no { border-color: var(--ds-wait); color: var(--ds-wait); }
+  html body #arcade textarea, html body #arcade select { background: var(--ds-surface); color: var(--ds-text); border-color: var(--ds-line); }
+
+  /* ---- While you were away ---- */
+  html body[data-skin="away"] { background: var(--ds-bg); color: var(--ds-text); }
+  html body #away .aw-list { padding: var(--ds-4) var(--ds-5); display: grid; gap: var(--ds-3); max-width: 1100px; }
+  html body #away .aw-list > .note { padding: var(--ds-6) var(--ds-5); border: 1px dashed var(--ds-line); border-radius: var(--ds-r3); color: var(--ds-muted); font-size: var(--ds-t-m); max-width: 60ch; }
+  html body #away .aw { background: var(--ds-surface); border: 1px solid var(--ds-line); border-left: var(--ds-strip) solid var(--ds-wait); border-radius: var(--ds-r2); }
+  html body #away .learned { padding: 0 var(--ds-5) var(--ds-5); color: var(--ds-muted); }
+
+  /* ---- the drawer, the toast, the live badge ---- */
+  html body .drawer, html body[data-skin="tycoon"] .drawer { background: var(--ds-surface); color: var(--ds-text); border-left: 1px solid var(--ds-line); font: var(--ds-t-m)/1.5 var(--ds-font); }
+  html body .drawer h2, html body .drawer h3, html body[data-skin="tycoon"] .drawer h2, html body[data-skin="tycoon"] .drawer h3 { font-family: var(--ds-display); color: var(--ds-text); }
+  html body[data-skin="tycoon"] .drawer .sub { color: var(--ds-muted); }
+  html body .toast { background: var(--ds-surface); color: var(--ds-text); border: 1px solid var(--ds-line); border-left: var(--ds-strip) solid var(--ds-go); border-radius: var(--ds-r2); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+  html body .toast.bad { border-left-color: var(--ds-stop); }
+  html body .live { background: var(--ds-surface); color: var(--ds-text); border: 1px solid var(--ds-line); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+  html body .live::before { background: var(--ds-go); }
+  html body .live[data-state="down"] { background: var(--ds-stop-bg); border-color: var(--ds-stop); color: var(--ds-text); } html body .live[data-state="down"]::before { background: var(--ds-stop); }
+  html body .live[data-state="back"] { border-color: var(--ds-info); } html body .live[data-state="back"]::before { background: var(--ds-info); }
+  html body[data-skin="tycoon"] .live { bottom: 84px; } html body[data-skin="tycoon"] .toast { bottom: 128px; }
+  /* ---- the Studio floor: a soundstage at night; each room a lit set, the people its crew ---- */
+  html body #tycoon > .top .stat { color: var(--ds-muted); font: var(--ds-t-s)/1.2 var(--ds-font); gap: var(--ds-1); }
+  html body #tycoon > .top .stat b { font: 600 var(--ds-t-l)/1 var(--ds-display); color: var(--ds-text); }
+  html body #tycoon .office {
+    background: linear-gradient(var(--ds-floor-line) 1px, transparent 1px) 0 0 / 32px 32px, linear-gradient(90deg, var(--ds-floor-line) 1px, var(--ds-floor) 1px) 0 0 / 32px 32px;
+    padding: var(--ds-5) var(--ds-5) var(--ds-6); gap: 20px;
+  }
+  html body .room { border: 3px solid #0b1015; border-radius: var(--ds-r2); box-shadow: 0 2px 0 rgba(0, 0, 0, .35); }
+  @media (prefers-color-scheme: light) { html body .room { border-color: #4a5560; box-shadow: 0 2px 0 rgba(40, 50, 60, .25); } }
+  html body .room.busy { animation: setlit 3s ease-in-out infinite; }
+  @keyframes setlit { 50% { box-shadow: 0 2px 0 rgba(0, 0, 0, .35), 0 0 0 3px var(--ds-tape), 0 0 22px rgba(242, 201, 76, .45); } }
+  html body .room .sign, html body .room.r-production .sign { top: 8px; left: 8px; padding: 3px 8px; border: 0; border-radius: var(--ds-r1); background: #fdfaf2; color: #172029; font: 600 13px/1.2 var(--ds-display); box-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
+  html body .room.r-production .sign { background: var(--ds-tape); }
+  html body .room .count { top: 8px; right: 8px; padding: 2px 7px; border: 0; border-radius: var(--ds-r1); background: rgba(10, 14, 18, .78); color: #f1f4f7; font: 600 12px/1.3 var(--ds-font); }
+  html body .room .hire { top: 34px; right: 8px; border: 0; border-radius: var(--ds-r1); background: var(--ds-go); color: #fff; font: 700 11px/1 var(--ds-font); padding: 5px 7px; }
+  /* A locked room: quiet. The set is dark, the sign stays readable, one line says how to open it. */
+  html body .room.locked { filter: none; border-style: dashed; border-color: var(--ds-line); box-shadow: none; }
+  html body .room.locked > :not(.sign) { filter: grayscale(1) brightness(.38) contrast(.9); }
+  html body .room.locked .sign { background: var(--ds-surface-2); color: var(--ds-muted); }
+  html body .room.locked::after { inset: auto 8px 8px auto; display: block; padding: 3px 8px; border-radius: var(--ds-r1); background: var(--ds-surface); color: var(--ds-muted); border: 1px solid var(--ds-line); font: 600 12px/1.3 var(--ds-font); text-shadow: none; content: 'Off: click to open'; }
+  /* Desk name plates: who (a short name) over what (the role); the full name on hover and focus. */
+  html body .desk .tag { top: 21px; left: -10px; width: 84px; padding: 1px 2px 2px; border: 0; border-radius: var(--ds-r1); background: #fdfaf2; color: #172029; box-shadow: 0 1px 0 rgba(0, 0, 0, .45); display: grid; line-height: 1.05; white-space: nowrap; }
+  html body .desk .tag b { font: 600 12px/1.1 var(--ds-display); letter-spacing: -.01em; overflow: hidden; text-overflow: clip; }
+  html body .desk .tag i { font: 500 10px/1.1 var(--ds-font); font-style: normal; color: #55626f; overflow: hidden; }
+  html body .desk.big .tag { left: 12px; background: var(--ds-tape); color: #172029; }
+  html body .desk .model { font: 500 10px/14px var(--ds-font); border-radius: 2px; }
+  html body .desk:focus-visible { outline: 3px solid var(--ds-tape); outline-offset: 3px; }
+  html body .desk .bugs { font: 700 10px/12px var(--ds-font); border-radius: var(--ds-r1); }
+  /* What each room's crew is doing now, with the action right there */
+  html body .room .now { font: 12px/1.15 var(--ds-font); top: 34px; }
+  html body .room .now .row { font-size: 12px; background: rgba(253, 250, 242, .96); color: #172029; border: 0; border-left: 4px solid var(--ds-info); border-radius: var(--ds-r1); padding: 2px 4px; box-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
+  html body .room .now .row b { font: 600 12px/1.1 var(--ds-display); }
+  html body .room .now .chip { border-radius: 2px; font: 600 11px/1.3 var(--ds-font); padding: 0 4px; background: #5b6875; }
+  html body .room .now .chip.editing { background: #2368a8; } html body .room .now .chip.verifying, html body .room .now .chip.on-train { background: #1f6fb8; }
+  html body .room .now .chip.needs-release, html body .room .now .chip.held { background: #6a4cc4; } html body .room .now .chip.parked { background: #b42f2f; } html body .room .now .chip.handed-back { background: #8a5a16; }
+  html body .room .now .row:has(.needs-release), html body .room .now .row:has(.held) { border-left-color: #6a4cc4; } html body .room .now .row:has(.parked) { border-left-color: #b42f2f; }
+  html body .room .now button { font: 700 11px/1 var(--ds-font); border: 0; border-radius: 2px; background: #1f7f52; padding: 3px 6px; }
+  /* Rail Yard: the locomotive runs the track while a train is on it; cars wait at their station */
+  html body .yard .stn { font: 600 11px/1 var(--ds-font); border-radius: 2px; border: 0; padding: 3px 6px; background: #263341; }
+  html body .yard .stn.l { background: #1f7f52; }
+  html body .yard .car { border-radius: 3px; font: 600 11px/14px var(--ds-font); border-width: 1px; }
+  html body .yard .car.verifying { background: #4c9be0; color: #fff; } html body .yard .car.landed { background: #34a874; color: #08130d; }
+  html body .yard .car.held, html body .yard .car.waiting { background: #9378e0; color: #fff; } html body .yard .car.dropped { background: #e05656; }
+  html body .yard .loco { animation: yardrun 9s linear infinite; border-radius: 3px 10px 3px 3px; }
+  html body .yard .loco::before { content: ''; position: absolute; right: 4px; top: -9px; width: 8px; height: 9px; background: #3e2723; }
+  html body .yard .loco::after { content: ''; position: absolute; right: 2px; top: -20px; width: 12px; height: 12px; border-radius: 50%; background: rgba(220, 225, 230, .7); animation: puff 1.2s ease-out infinite; }
+  @keyframes yardrun { 0% { left: -44px; } 100% { left: calc(100% + 4px); } }
+  @keyframes puff { 0% { transform: translate(0, 0) scale(.5); opacity: .9; } 100% { transform: translate(-10px, -12px) scale(1.4); opacity: 0; } }
+  html body .yard .note { display: none; }
+  /* Engine Bay: hazard floor and a turning gear while its engine train or workers run */
+  html body .room.r-engine.busy .prop svg.art { animation: gear 5s linear infinite; transform-origin: 50% 50%; }
+  @keyframes gear { to { transform: rotate(360deg); } }
+  html body .room.r-engine .belt .m { font: 600 10px/1 var(--ds-font); }
+  /* Watchtower: the beacon sweeps while the proxy has acted in the last hour */
+  html body .beacon.on::after { content: ''; position: absolute; left: 50%; top: 50%; width: 140px; height: 140px; margin: -70px 0 0 -70px; border-radius: 50%; background: conic-gradient(from 0deg, rgba(255, 238, 88, .4), transparent 18%, transparent); animation: gear 4s linear infinite; pointer-events: none; }
+  html body .towerlog { font: 12px/1.25 var(--ds-font); border-radius: var(--ds-r1); border: 0; background: rgba(10, 16, 22, .92); color: #cfe9c2; }
+  html body .towerlog button { font: 700 11px/1 var(--ds-font); border: 0; border-radius: 2px; }
+  /* the dock: the build bar and the ticker, at the foot of the floor, not over it */
+  html body #tycoon .dock { position: sticky; bottom: 0; background: var(--ds-surface); color: var(--ds-text); border-top: 1px solid var(--ds-line); padding: var(--ds-2) var(--ds-5); }
+  html body #tycoon .build { font: 600 var(--ds-t-m)/1.2 var(--ds-display); }
+  html body #tycoon .build .bar { height: 10px; border: 0; border-radius: 999px; background: var(--ds-surface-2); overflow: hidden; }
+  html body #tycoon .build .bar i { background: var(--ds-go); }
+  html body #tycoon .ticker { font: var(--ds-t-s)/1.4 var(--ds-font); color: var(--ds-muted); }
+  html body #tycoon .legend { font: var(--ds-t-xs)/1.4 var(--ds-font); color: var(--ds-muted); }
+  html body #tycoon .person .say, html body #tycoon .bubble { font-family: var(--ds-font); }
+  @media (max-width: 600px) { html body #tycoon .office { padding: var(--ds-4); } html body #tycoon .dock { position: static; padding: var(--ds-2) var(--ds-4); } }
+
+  /* 2.75.0: the state badge over each person and its key; a finished agent walks out and fades */
+  html body .stb { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font: 700 11px/1 var(--ds-font); color: #fff; background: var(--ds-off); box-shadow: 0 0 0 2px #fdfaf2; }
+  html body .person > .stb { position: absolute; z-index: 3; left: 50%; top: -20px; margin-left: -9px; }
+  html body .person.facing-left > .stb { transform: scaleX(-1); }
+  html body .stb[data-st="working"] { background: #1f7f52; } html body .stb[data-st="verifying"], html body .stb[data-st="on-train"] { background: #1f69ae; }
+  html body .stb[data-st="needs-release"], html body .stb[data-st="held"] { background: #6a4cc4; } html body .stb[data-st="handed-back"], html body .stb[data-st="idle"] { background: #a4650f; }
+  html body .stb[data-st="stalled"], html body .stb[data-st="parked"] { background: #b42f2f; } html body .stb[data-st="ending"] { background: #5b6875; }
+  html body .person[data-state="verifying"] > .stb { animation: flicker 1.4s steps(2) infinite; }
+  html body .person.leaving > .stb { background: #5b6875; }
+  html body .person.gone { opacity: 0; transition: opacity .6s ease; }
+  html body .statekey { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; padding: 0; list-style: none; font: var(--ds-t-xs)/1.4 var(--ds-font); color: var(--ds-muted); }
+  html body .statekey li { display: inline-flex; align-items: center; gap: 5px; }
+  html body .statekey .stb { width: 16px; height: 16px; font-size: 10px; box-shadow: none; }
+
+  html body :is(#ops, #plan, #assets, #arcade, #away) > header h1 { font: 600 var(--ds-t-2xl)/1.05 var(--ds-display); color: var(--ds-text); letter-spacing: 0; text-shadow: none; }
+  html body #arcade :is(p, span, label, textarea, select, small, .verdict, .hint, .xp, .roomcard, .buildline, button:not(.tab), h3) { font-family: var(--ds-font); }
+  html body #arcade h3 { font: 600 var(--ds-t-l)/1.2 var(--ds-display); color: var(--ds-text); }
+  html body #arcade .xp span { font-size: var(--ds-t-s); color: var(--ds-muted); }
+  html body #arcade .xp .bar i { background: var(--ds-info); }
+  html body #arcade .screen .none { color: #c9d3dc; font-family: var(--ds-font); }
 </style>
 </head>
 <body data-skin="ops">
@@ -718,15 +1009,12 @@
 <!-- Ops skin -->
 <div id="ops" class="skin">
   <header>
-    <h1>Studio floor</h1>
+    <h1>Control room</h1>
     <div class="now" id="o-now">Loading…</div>
     <div class="spacer"></div>
     <div class="meter" title="Tasks done out of all tasks in studio/NEXT.md"><span id="o-prog">0 of 0 tasks done</span><span class="bar"><i id="o-progbar"></i></span></div>
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
-    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
-    <button class="switch" data-to="plan">Game plan</button>
-    <button class="switch" data-to="assets">Asset studio</button>
-    <button class="switch" data-to="arcade">Arcade</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops" aria-current="page">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -807,7 +1095,7 @@
 <!-- Tycoon skin -->
 <div id="tycoon" class="skin">
   <div class="top">
-    <h1>Your Studio</h1>
+    <h1>Studio floor</h1>
     <span class="stat" title="Tasks done in studio/NEXT.md">Shipped <b id="t-done">0</b></span>
     <span class="stat" title="Open bug tasks (titles starting Bug or Fix)">Open bugs <b id="t-bugs">0</b></span>
     <span class="stat" id="t-checks-stat" title="Required checks green in the last verify">Checks <b id="t-fans">–</b></span>
@@ -815,10 +1103,7 @@
     <span class="stat" title="Tokens reported today">Tokens used <b id="t-tokens">–</b></span>
     <span class="stat" title="Local time (2.30j: a clock, not a game day)">Time <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
-    <button class="switch" data-to="ops">Ops view</button>
-    <button class="switch" data-to="plan">Game plan</button>
-    <button class="switch" data-to="assets">Assets</button>
-    <button class="switch" data-to="arcade">Arcade</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon" aria-current="page">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </div>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -826,7 +1111,8 @@
   <div class="dock">
     <div class="build"><span id="t-buildlabel">Game in development</span><span class="bar"><i id="t-buildbar"></i></span><span id="t-buildpct">0%</span></div>
     <div class="ticker" aria-live="off"><span id="t-ticker">Waiting for the first event…</span></div>
-    <div class="legend"><span id="t-phases"></span> Every number is read from the studio files. Locked rooms are divisions that are switched off.</div>
+    <ul class="statekey" aria-label="What the badge over each person means"><li><span class="stb" data-st="working" aria-hidden="true">✎</span>working</li><li><span class="stb" data-st="verifying" aria-hidden="true">◷</span>verifying</li><li><span class="stb" data-st="on-train" aria-hidden="true">⇢</span>on the train</li><li><span class="stb" data-st="needs-release" aria-hidden="true">◆</span>waits for a release</li><li><span class="stb" data-st="handed-back" aria-hidden="true">↩</span>handed back</li><li><span class="stb" data-st="stalled" aria-hidden="true">!</span>stalled</li><li><span class="stb" data-st="ending" aria-hidden="true">⇥</span>ending (leaves the room)</li><li><span class="stb" data-st="idle" aria-hidden="true">z</span>idle</li></ul>
+    <div class="legend"><span id="t-phases"></span> Every number is read from the studio files. Dark rooms are departments that are off; a person leaves when their session ends.</div>
   </div>
 </div>
 
@@ -838,10 +1124,7 @@
     <span class="game" id="p-game"></span>
     <span class="state" id="p-state">Loading…</span>
     <span class="spacer"></span>
-    <button class="switch" data-to="ops">Ops view</button>
-    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
-    <button class="switch" data-to="assets">Asset studio</button>
-    <button class="switch" data-to="arcade">Arcade</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan" aria-current="page">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -914,10 +1197,7 @@
     <h1>Asset studio</h1>
     <span class="state" id="a-state">Loading…</span>
     <span class="spacer"></span>
-    <button class="switch" data-to="ops">Ops view</button>
-    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
-    <button class="switch" data-to="plan">Game plan</button>
-    <button class="switch" data-to="arcade">Arcade</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets" aria-current="page">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -952,9 +1232,7 @@
     <h1>While you were away</h1>
     <span class="state" id="aw-state">Loading…</span>
     <span class="spacer" style="flex:1"></span>
-    <button class="switch" data-to="ops">Ops view</button>
-    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
-    <button class="switch" data-to="arcade">Arcade</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
   </header>
   <div class="awaybar" id="aw-bar" hidden></div>
   <div class="aw-list" id="aw-list"></div>
@@ -964,13 +1242,10 @@
 <!-- Arcade: play the last good build, take notes while playing, and walk the studio's dungeon (read-only) -->
 <div id="arcade" class="skin">
   <header>
-    <h1>ARCADE</h1>
+    <h1>Arcade</h1>
     <span class="state" id="r-state"></span>
     <span class="spacer"></span>
-    <button class="switch" data-to="ops">Ops view</button>
-    <button class="switch" data-to="tycoon">Studio Tycoon view</button>
-    <button class="switch" data-to="plan">Game plan</button>
-    <button class="switch" data-to="assets">Asset studio</button>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade" aria-current="page">Arcade</button></nav>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1392,6 +1667,7 @@
   $('o-agents').addEventListener('click', (e) => { const r = e.target.closest('[data-agent]'); if (r) openDrawer(r.dataset.agent); });
   $('o-agents').addEventListener('keydown', (e) => { const r = e.target.closest('[data-agent]'); if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDrawer(r.dataset.agent); } });
   $('t-crowd').addEventListener('click', (e) => { const el = e.target.closest('[data-agent]'); if (el) openDrawer(el.dataset.agent); });
+  $('t-crowd').addEventListener('keydown', (e) => { const el = e.target.closest('[data-agent]'); if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDrawer(el.dataset.agent); } });
   async function refreshDrawer() {
     if (!drawerName) return;
     try {
@@ -2003,12 +2279,12 @@
       html: () => '<div class="yard" data-dyn="yard"><span class="stn q">QUEUE</span><span class="stn v">VERIFY</span><span class="stn l">LANDED</span><span class="rail"></span><span class="note"></span></div>' },
     // 2.74.0: the outside overseer / owner proxy: a beacon lit while it acted in the last hour, its log, Revoke.
     watchtower: { cls: 'wl-plain fl-concrete r-watchtower', v: '--wall:#263238;--wall2:#1c262b;--trim:#ffee58;--fa:#78909c;--fb:#6c818c',
-      html: () => prop('right:20px;top:24px', '<div class="tower"><span class="beacon" data-dyn="beacon"></span></div>') + '<div class="towerlog" data-dyn="towerlog" style="left:8px;top:106px"></div>' },
+      html: () => prop('right:20px;top:24px', '<div class="tower"><span class="beacon" data-dyn="beacon"></span></div>') + '<div class="towerlog" data-dyn="towerlog" style="right:58px;top:30px"></div>' },
   };
   const roomHtml = (d) => {
     const r = ROOMS[d.baseId || d.id] || ROOMS.engineering;
-    return `<div class="room r-${esc(d.baseId || d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Locked: click to switch this division on (it also opens by itself when one of its agents starts work)'}" data-division="${esc(d.baseId || d.id)}">`
-      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign">${esc(d.name)}</span><span class="count"></span><div class="now" data-now></div>${d.active && d.id !== 'kennel' && !d.assignment ? `<button type="button" class="hire" data-hire="${esc(d.baseId || d.id)}" title="Hire a ${esc((d.roles || ['agent'])[0])} into ${esc(d.name)} (tool and model from .env)">+ Hire</button>` : ''}</div>`;
+    return `<div class="room r-${esc(d.baseId || d.id)} ${r.cls} ${d.active ? '' : 'locked'}" id="room-${esc(d.id)}" style="${r.v}" data-hint="${d.active ? '' : 'Off: click to open'}" ${d.active ? '' : 'title="This room is off. Click to switch the division on; it also opens by itself when one of its agents starts work."'} data-division="${esc(d.baseId || d.id)}">`
+      + `<div class="wall"></div><div class="floor"></div>${r.html()}<span class="door"></span><span class="sign" title="${esc(d.about || (d.id === 'kennel' ? 'The watchdog: asleep when off, on patrol when on' : `${d.name}: ${(d.roles || []).join(', ') || 'the department'}`))}">${esc(d.name)}</span><span class="count"></span><div class="now" data-now></div>${d.active && d.id !== 'kennel' && !d.assignment ? `<button type="button" class="hire" data-hire="${esc(d.baseId || d.id)}" title="Hire a ${esc((d.roles || ['agent'])[0])} into ${esc(d.name)} (tool and model from .env)">+ Hire</button>` : ''}</div>`;
   };
 
   // ----- layout: every position is in office coordinates (the #t-office box) -----
@@ -2029,13 +2305,13 @@
   function roomList(s) {
     const out = [];
     for (const d of s.divisions) {
-      const n = d.active ? Math.max(1, Math.ceil(s.agents.filter((a) => a.room === d.id).length / CAP)) : 1;
+      const n = d.active ? Math.max(1, Math.ceil(s.agents.filter((a) => a.room === d.id && a.onFloor !== false).length / CAP)) : 1;
       for (let k = 0; k < n; k++) out.push(k === 0 ? { ...d, baseId: d.id, k } : { ...d, id: `${d.id}-annex-${k + 1}`, baseId: d.id, name: `${d.name} ${k + 1}`, k });
     }
     // 2.74.0: rooms for specific assignments (harness/war-room.mjs): Rail Yard, Watchtower. Engine Bay is the engine division.
     for (const r of s.assignmentRooms || []) {
-      const n = Math.max(1, Math.ceil(s.agents.filter((a) => a.room === r.id).length / CAP));
-      for (let k = 0; k < n; k++) out.push({ id: k ? `${r.id}-annex-${k + 1}` : r.id, baseId: r.id, name: k ? `${r.name} ${k + 1}` : r.name, active: true, roles: r.roles, k, assignment: true });
+      const n = Math.max(1, Math.ceil(s.agents.filter((a) => a.room === r.id && a.onFloor !== false).length / CAP));
+      for (let k = 0; k < n; k++) out.push({ id: k ? `${r.id}-annex-${k + 1}` : r.id, baseId: r.id, name: k ? `${r.name} ${k + 1}` : r.name, active: true, roles: r.roles, about: r.about, k, assignment: true });
     }
     out.push({ id: 'kennel', baseId: 'kennel', name: 'Watchdog', active: true, roles: [], k: 0 });
     return out;
@@ -2229,6 +2505,23 @@
     return el;
   }
 
+  /** { short, role, full } for a desk plate: "builder-s12" is s12 over builder; a person is their name over "you". */
+  function plate(a) {
+    const name = String(a.name || '');
+    if (a.kind === 'script') return { short: name.slice(0, 10), role: 'script', full: `${name} (a script)` };
+    if (a.kind === 'human') return { short: name.slice(0, 10), role: 'you', full: `${name} (a person)` };
+    let role = String(a.role || '').replace(/^human$/, '');
+    let short = name;
+    const m = /^([a-z]+(?:-[a-z]+)?)-([a-z]*\d[\w.-]*|[a-z0-9]{1,4})$/i.exec(name);
+    if (role && name.toLowerCase().startsWith(`${role.toLowerCase()}-`)) short = name.slice(role.length + 1);
+    else if (m) { short = m[2]; role = role || m[1]; }
+    if (!role) role = a.room && a.room !== 'engineering' ? a.room : 'agent';
+    // A bare number ("1" for prod-1) says nothing on its own: then the plate shows the whole name.
+    if (/^\d{1,3}$/.test(short) || short === role) short = name;
+    if (role === name) role = a.room || 'agent';
+    const fit = (x, n) => (x.length > n ? `${x.slice(0, n - 1)}.` : x);
+    return { short: fit(short, 13), role: fit(role, 14), full: `${name}${a.role && a.role !== 'human' ? `, ${a.role}` : ''}${a.task ? `, on ${a.task}` : ''}${a.model ? ` (${a.model})` : ''}` };
+  }
   function placeDesk(a, roomId, i) {
     const g = geo(roomId);
     if (!g) return;
@@ -2246,7 +2539,15 @@
       crowd.appendChild(el);
       desks.set(a.name, el);
     }
-    el.querySelector('.tag').textContent = a.kind === 'script' ? 'watch (script)' : a.kind === 'human' ? `${a.name} (you)` : a.name;
+    // 2.75.0: a name plate that never truncates into "builde…": a short name over the role; the full name on hover/focus.
+    const pl = plate(a);
+    const tag = el.querySelector('.tag');
+    const sig = `${pl.short}|${pl.role}`;
+    if (tag.dataset.sig !== sig) { tag.dataset.sig = sig; tag.innerHTML = `<b>${esc(pl.short)}</b><i>${esc(pl.role)}</i>`; }
+    el.title = pl.full;
+    el.setAttribute('aria-label', `${pl.full}: open the details`);
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
     const nBugs = a.caused || 0;
     el.querySelector('.bugs').textContent = nBugs ? `CAUSED ${nBugs}` : '';
     el.classList.toggle('quota', a.status === 'out-of-quota');
@@ -2261,6 +2562,25 @@
   }
 
   // Room widgets that show real studio state.
+  // 2.75.0: one badge over each person: what they are doing, in the same colors as everywhere else (the key in the dock).
+  const STATE = { working: ['✎', 'working'], verifying: ['◷', 'verifying'], 'on-train': ['⇢', 'on the train'], 'needs-release': ['◆', 'waits for a release'], held: ['◆', 'held for landing'], 'handed-back': ['↩', 'handed back'], parked: ['!', 'parked'], stalled: ['!', 'stalled'], ending: ['⇥', 'ending: leaving the room'], idle: ['z', 'idle'] };
+  function stateOf(a, s) {
+    if (a.presence === 'ending') return 'ending';
+    if (['stalled', 'needs-attention', 'out-of-quota'].includes(a.status)) return 'stalled';
+    const st = s.warRoom?.steps?.[a.name]?.step;
+    if (st && st !== 'editing' && st !== 'done' && STATE[st]) return st;
+    return a.status === 'working' ? 'working' : 'idle';
+  }
+  function stateBadge(p, a, s) {
+    if (a.kind === 'human' || a.kind === 'script') return;
+    let b = p.el.querySelector(':scope > .stb');
+    if (!b) { b = document.createElement('span'); b.className = 'stb'; p.el.appendChild(b); }
+    const k = stateOf(a, s);
+    if (b.dataset.st !== k) { b.dataset.st = k; b.textContent = STATE[k][0]; }
+    p.el.dataset.state = k;
+    p.el.title = `${a.name}${a.role ? ` (${a.role})` : ''}: ${STATE[k][1]}${a.task ? `, ${a.task}` : ''}`;
+  }
+
   // 2.74.0: what each room's staff are doing right now (task, step) with the action right there (one CLI command each).
   const STEP_SHORT = { editing: 'editing', verifying: 'verifying', 'on-train': 'on train', 'needs-release': 'needs release', held: 'held', 'handed-back': 'handed back', parked: 'parked', done: 'done' };
   function renderTickets(roomEl, staff, s) {
@@ -2381,7 +2701,7 @@
       const g = geo(d.id);
       if (!g) continue;
       // 2.30 (J13): nobody sits at a desk in a locked room; only an agent actually working there shows.
-      const staff = s.agents.filter((a) => a.room === d.baseId && (d.active !== false || (a.status === 'working' && !a.placeholder))).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
+      const staff = s.agents.filter((a) => a.room === d.baseId && a.onFloor !== false && (d.active !== false || (a.status === 'working' && !a.placeholder))).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
       g.el.querySelector('.count').textContent = staff.length && !staff.every((a) => a.placeholder) ? `${staff.length} staff` : '';
       g.el.classList.toggle('busy', staff.some((a) => a.status === 'working') || (d.baseId === 'rails' && (s.warRoom?.trains || []).some((t) => t.kind === 'web' && t.running)) || (d.baseId === 'engine' && (s.warRoom?.trains || []).some((t) => t.kind === 'unity' && t.running)));
       renderTickets(g.el, staff, s);
@@ -2417,6 +2737,7 @@
           if (!p.walking && !p.visiting && !p.meeting && (Math.abs(p.x - h.x) > 1 || Math.abs(p.y - h.y) > 1)) walkPath(p, [h]);
           applyStatus(p);
         }
+        stateBadge(p, a, s);
         const b = bubbles.get(a.name);
         if (b && b.until > Date.now() && b.msg !== p.said) { p.said = b.msg; say(p, b.msg); }
       });
@@ -2427,7 +2748,10 @@
       people.delete(name);
       desks.get(name)?.remove();
       desks.delete(name);
-      if (g) walkPath(p, [doorIn(g), doorOut(g)], () => p.el.remove());
+      // 2.75.0: a finished agent walks out of its room's door and fades; with reduced motion it is simply gone.
+      p.el.classList.add('leaving');
+      p.el.dataset.leaving = '1';
+      if (g && !reduceMotion) walkPath(p, [doorIn(g), doorOut(g)], () => { p.el.classList.add('gone'); setTimeout(() => p.el.remove(), 700); });
       else p.el.remove();
     }
     syncMeeting(s.meeting);

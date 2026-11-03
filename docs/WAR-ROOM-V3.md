@@ -76,3 +76,24 @@ or track, never a fixed agent name):
 
 A room with work pulses. Each room shows what its staff are doing now (task, step: editing, verifying, on the train,
 needs release, held, handed back, parked) with the action for it right there (Release, Unpark, Unhold, Hold).
+
+## The look (2.75.0)
+
+One design system for every view, a production stripboard: a status is a colored strip on a card's left edge and keeps
+its meaning everywhere: green working or landed, amber waiting on you or idle, red stopped or stalled, violet held or
+waiting for a release (and the owner's proxy), blue verifying or on the train, grey off or ending. Tokens (`--ds-*` in
+`hub/v3/index.html`) set color, type, spacing and radius, with a light set for a light system theme; motion stops under
+reduced motion. Headings use Bahnschrift (it ships with Windows; DIN and condensed fallbacks elsewhere), the text the
+system's UI font. Nothing is loaded from outside the hub. Every view has the same tab bar: Control room, Studio floor,
+Game plan, Assets, Arcade (the current one marked).
+
+On the Studio floor each desk's plate is a short name over the role ("s12" over "builder"; the full name, task and model
+on hover and focus), each person wears one badge for what they are doing (the key is in the dock), dark rooms are
+departments that are off (click to open), and the Rail Yard's locomotive runs its track while a train is on it. An agent
+leaves the floor, walking out of its room's door, when its session ends, when its last step was `task.done` (or a hand-back,
+a stop) with nothing claimed, or after `STUDIO_FLOOR_IDLE_MIN` (30) minutes idle with nothing claimed; with reduced motion
+it is simply removed. The Producer's seat and people stay. The Control room's agent list still shows everyone from the
+last 24 hours.
+
+`node qa/hud-check.mjs --only gallery --shots <folder>` shoots every view, desktop and phone, light and dark, into
+`<folder>/275/`.
