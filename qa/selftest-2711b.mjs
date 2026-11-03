@@ -63,7 +63,10 @@ export async function selftest2711B({ dir, run, report, tmpRoot }) {
     addGate(S, { id: 'probe', command: 'node probe-gate.mjs', required: true });
     const other = path.join(tmpRoot, `2711b-other-git-${process.pid}`);
     fs.mkdirSync(other, { recursive: true }); g(other, ['init', '-q']);
-    const r = run(S, 'node scripts/run-gates.mjs --only probe --no-cache', { ...env, NODE_OPTIONS: `--require "${hook}" --max-old-space-size=2048`, npm_config_node_options: `--require "${hook}"`, GIT_DIR: path.join(other, '.git') });
+    // NODE_OPTIONS reads a backslash inside quotes as an escape, so a Windows path is given with forward slashes (CI
+    // windows: C:\\Users\\... became a missing module and node exited before run-gates ran).
+    const hookArg = hook.replace(/\\/g, '/');
+    const r = run(S, 'node scripts/run-gates.mjs --only probe --no-cache', { ...env, NODE_OPTIONS: `--require "${hookArg}" --max-old-space-size=2048`, npm_config_node_options: `--require "${hookArg}"`, GIT_DIR: path.join(other, '.git') });
     let pe = null; try { pe = JSON.parse(fs.readFileSync(path.join(S, 'probe-env.json'), 'utf8')); } catch {}
     await guard('2711b env: a gate\'s children run without code-loading NODE_OPTIONS (a memory flag stays), npm node-options and GIT_DIR, with replace refs off (S03)', () => [
       r.status === 1 && /\[gates\] FAIL probe/.test(out(r)) && pe && pe.NODE_OPTIONS === '--max-old-space-size=2048' && pe.npm === null && pe.GIT_DIR === null && pe.noReplace === '1',
@@ -190,7 +193,10 @@ console.log(JSON.stringify({ changes: a.protectedChanges('main').map((c) => c.pa
     await guard('2711b paths: a protected file under a non-ASCII folder is listed, and the lane diff names it unquoted (G14)', () => [
       pj.changes.includes('web/ไก่/studio.gates.json') && pj.since.includes('web/ไก่/studio.gates.json') && !pj.changes.includes('docs/note.md'),
       `${JSON.stringify(pj)}\n${out(pr).slice(-600)}`]);
-    await guard('2711b paths: a case variant of a protected path is listed (W01)', () => [pj.changes.includes('Web/Mini/Studio.Gates.json'), JSON.stringify(pj)]);
+    // On a case-insensitive disk (Windows, macOS) the case variant IS the protected file: git records the change under
+    // its tracked name, which must be listed (CI windows listed web/mini/studio.gates.json, never the variant).
+    const caseless = process.platform === 'win32' || process.platform === 'darwin';
+    await guard('2711b paths: a case variant of a protected path is listed (W01)', () => [pj.changes.includes('Web/Mini/Studio.Gates.json') || (caseless && pj.changes.includes('web/mini/studio.gates.json')), JSON.stringify(pj)]);
   }
 
   // ---- lock (K01) ----
