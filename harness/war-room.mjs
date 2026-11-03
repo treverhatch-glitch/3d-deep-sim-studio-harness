@@ -55,15 +55,20 @@ export function roomFor({ name = '', role = '', track = '', proxyAgent = '' } = 
   return null;
 }
 
-let proxyCache = { at: 0, v: null };
-/** The owner's delegation as it counts now ({ agent, by, until, actions, ok, why } or null), cached 30 s. */
-export async function loadProxy(now = Date.now()) {
-  if (now - proxyCache.at < 30000) return proxyCache.v;
+let proxyCache = { at: 0, v: null, key: '' };
+/**
+ * The owner's delegation as it counts now ({ agent, by, until, actions, ok, why } or null), cached 30 s, or until
+ * studio/delegation.json or the checkout's HEAD changes (a grant or a revoke shows on the next refresh).
+ */
+export async function loadProxy(now = Date.now(), root = REPO_ROOT) {
+  const st = (rel) => { try { const x = fs.statSync(path.join(root, rel)); return `${x.mtimeMs}:${x.size}`; } catch { return '-'; } };
+  const key = `${st('studio/delegation.json')}|${st('.git/HEAD')}|${st('.git/index')}`;
+  if (now - proxyCache.at < 30000 && key === proxyCache.key) return proxyCache.v;
   try {
     const { readDelegation } = await import('./delegation.mjs');
     const d = readDelegation({ now });
-    proxyCache = { at: now, v: d.doc ? { agent: d.doc.agent, by: d.doc.by, at: d.doc.at, until: d.doc.until, actions: d.doc.actions, ok: d.ok, why: d.why || '', signed: Boolean(d.signed) } : null };
-  } catch { proxyCache = { at: now, v: null }; }
+    proxyCache = { at: now, key, v: d.doc ? { agent: d.doc.agent, by: d.doc.by, at: d.doc.at, until: d.doc.until, actions: d.doc.actions, ok: d.ok, why: d.why || '', signed: Boolean(d.signed) } : null };
+  } catch { proxyCache = { at: now, key, v: null }; }
   return proxyCache.v;
 }
 export const cachedProxy = () => proxyCache.v;
@@ -185,13 +190,17 @@ function crewTile({ root = REPO_ROOT, launched = [], supervisor = null }) {
 
 // ---- the owner proxy ------------------------------------------------------------------------------------------------
 
-async function ownerProxy({ events, now = Date.now() }) {
-  const d = await loadProxy(now);
+let decCache = { key: '', list: [] };
+async function ownerProxy({ events, now = Date.now(), root = REPO_ROOT }) {
+  const d = await loadProxy(now, root);
   const used = events.filter((e) => e.type === 'delegation.used' && ts(e) >= now - 7 * 24 * H).map((e) => ({ at: e.ts, who: e.agent, what: String(e.msg || '').slice(0, 220), action: e.meta?.action || null, task: e.task || null, kind: 'used' }));
   let decided = [];
   try {
-    const { readLog } = await import('./decisions-log.mjs');
-    decided = readLog().decisions.filter((r) => /^delegation\b|^autonomous$/.test(String(r.as || '')) && (Date.parse(r.at) || 0) >= now - 7 * 24 * H).map((r) => ({ at: r.at, who: r.by, what: `${r.action}${r.subject ? ` ${r.subject}` : ''}${r.why ? `: ${r.why}` : ''}`.slice(0, 220), action: r.action, task: /^[A-Z]+-\d+$/.test(String(r.subject || '')) ? r.subject : null, kind: r.as === 'autonomous' ? 'autonomous' : 'decision', id: r.id }));
+    const { readLog, decisionsFile } = await import('./decisions-log.mjs');
+    let k = '-';
+    try { const x = fs.statSync(decisionsFile()); k = `${x.mtimeMs}:${x.size}`; } catch {}
+    if (decCache.key !== k) decCache = { key: k, list: readLog().decisions };
+    decided = decCache.list.filter((r) => /^delegation\b|^autonomous$/.test(String(r.as || '')) && (Date.parse(r.at) || 0) >= now - 7 * 24 * H).map((r) => ({ at: r.at, who: r.by, what: `${r.action}${r.subject ? ` ${r.subject}` : ''}${r.why ? `: ${r.why}` : ''}`.slice(0, 220), action: r.action, task: /^[A-Z]+-\d+$/.test(String(r.subject || '')) ? r.subject : null, kind: r.as === 'autonomous' ? 'autonomous' : 'decision', id: r.id }));
   } catch {}
   const recent = [...used, ...decided].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 15);
   const workarounds = events.filter((e) => /^workaround\./.test(e.type) && ts(e) >= now - 24 * H).length;
@@ -253,9 +262,10 @@ export async function warRoomState(hud = {}, { root = REPO_ROOT, env = process.e
   if (!cache.v || now - cache.at > 5000) {
     const events = readRecentEvents(20000);
     const trains = [webTrain(root, events, now), await unityTrain(root)].filter(Boolean);
-    cache = { at: now, v: { events, trains, ownerProxy: await ownerProxy({ events, now }) } };
+    cache = { at: now, v: { events, trains } };
   }
-  const { events, trains, ownerProxy: proxy } = cache.v;
+  const { events, trains } = cache.v;
+  const proxy = await ownerProxy({ events, now, root });
   const launched = hud.launched || [];
   return {
     crew: crewTile({ root, launched, supervisor: hud.supervisor }),
