@@ -146,7 +146,7 @@ const token = crypto.randomBytes(24).toString('hex');
 let hubLog = '';
 // 2.74.0: the hub can be stopped and started again (the live-refresh check), on the same port.
 const startHub = () => {
-  const h = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const h = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
   h.stdout.on('data', (d) => (hubLog += d));
   h.stderr.on('data', (d) => (hubLog += d));
   return h;
@@ -286,7 +286,7 @@ const agentChecks = async (page) => {
 const sleepers = [];
 const NO_AGENT = (e) => { const o = { ...e }; for (const k of ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI', 'STUDIO_ROLE', 'STUDIO_LOCK_OWNER', 'STUDIO_AGENT', 'STUDIO_TRACK']) delete o[k]; return o; };
 const pairCode = (by = 'hatch') => {
-  const r = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', by], { cwd: dir, env: { ...NO_AGENT(env), HUB_PORT: String(port) }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', by], { windowsHide: true, cwd: dir, env: { ...NO_AGENT(env), HUB_PORT: String(port) }, encoding: 'utf8' });
   return { out: `${r.stdout}${r.stderr}`, code: (/code=([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.stdout || '') || [])[1] || null, status: r.status };
 };
 function seed274() {
@@ -294,7 +294,7 @@ function seed274() {
   const now = Date.now();
   const iso = (msAgo) => new Date(now - msAgo).toISOString();
   // A supervisor that halted (its process: a sleeper we own), started 3 h ago with 45 h to go.
-  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3600000)'], { stdio: 'ignore' });
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3600000)'], { windowsHide: true, stdio: 'ignore' });
   sleepers.push(sleeper);
   fs.writeFileSync(path.join(st, 'supervisor.json'), JSON.stringify({ pid: sleeper.pid, status: 'running', startedAt: iso(3 * 3600000), opts: { until: new Date(now + 45 * 3600000).toISOString() }, sessions: 6, tasksDone: 3, hubDown: [], last: { at: iso(30000), started: [], why: ['builder: free memory 2.1 GB is under the 3 GB floor'] }, halted: { at: iso(600000), code: 1, why: 'two sessions in a row ended with exit 1 (builder-q1, builder-q2): see their logs' } }));
   // A merge train verifying three lanes (one already handed back), one lane held for a person's release, a last train.
@@ -339,7 +339,7 @@ async function warRoom274() {
   });
   await ctx0.close();
   // Pairing: a one-time code from the terminal, never the token; the link pairs the browser.
-  const refused = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', 'hatch'], { cwd: dir, env: { ...NO_AGENT(env), CLAUDECODE: '1' }, encoding: 'utf8' });
+  const refused = spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', 'hatch'], { windowsHide: true, cwd: dir, env: { ...NO_AGENT(env), CLAUDECODE: '1' }, encoding: 'utf8' });
   check('2.74.0: npm run hub -- pair is refused in a coding agent\'s shell', refused.status === 1 && /coding agent/.test(`${refused.stdout}${refused.stderr}`), `${refused.status} ${refused.stdout}${refused.stderr}`);
   const pc = pairCode('hatch');
   check('2.74.0: npm run hub -- pair prints a one-time code and a link, never the HUB token', pc.status === 0 && Boolean(pc.code) && !pc.out.includes(token), pc.out.replace(token, '(token)'));

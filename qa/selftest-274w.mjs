@@ -30,7 +30,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
   }
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv() });
+  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const nm = path.join(dir, 'node_modules');
   const TOKEN = 'w274'.repeat(8);
@@ -72,14 +72,14 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
   const startHub = async (S, env) => {
     const port = await freePort();
     let log = '';
-    const h = spawn(process.execPath, ['hub/server.mjs'], { cwd: S, env: { ...env, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const h = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: S, env: { ...env, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
     h.stdout.on('data', (d) => { log += d; });
     h.stderr.on('data', (d) => { log += d; });
     kids.push(h);
     for (let i = 0; i < 80; i++) { if ((await req(port, { path: '/health' })).status === 200) break; await sleep(150); }
     return { h, port, log: () => log };
   };
-  const pairCli = (S, env, by, extra = {}) => spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', by], { cwd: S, env: { ...env, ...extra }, encoding: 'utf8' });
+  const pairCli = (S, env, by, extra = {}) => spawnSync(process.execPath, ['hub/server.mjs', 'pair', '--by', by], { windowsHide: true, cwd: S, env: { ...env, ...extra }, encoding: 'utf8' });
   const codeOf = (r) => (/code=([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.stdout || '') || [])[1] || null;
   const claim = (port, code, headers = { 'X-Hub-Paired': '1' }) => req(port, { method: 'POST', path: '/pair/claim', headers, body: { code } });
   const cookieOf = (r) => String((r.headers['set-cookie'] || [])[0] || '').split(';')[0];
@@ -118,7 +118,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
       await guard('274w pairing: a paired write needs the cookie AND the X-Hub-Paired header AND a loopback origin; a wrong token is refused; HUB_TOKEN still works for scripts (fails on 2.73.0: no paired writes)', () => [
         me.json?.paired === true && me.json.by === 'hatch' && cookieOnly.status === 401 && foreign.status === 401 && good.status === 201 && wrong.status === 401 && scripted.status === 201,
         `me ${me.text}; cookie only ${cookieOnly.status}; foreign ${foreign.status}; good ${good.status} ${good.text}; wrong ${wrong.status}; token ${scripted.status}`]);
-      const un = spawnSync(process.execPath, ['hub/server.mjs', 'unpair', '--by', 'hatch'], { cwd: S, env, encoding: 'utf8' });
+      const un = spawnSync(process.execPath, ['hub/server.mjs', 'unpair', '--by', 'hatch'], { windowsHide: true, cwd: S, env, encoding: 'utf8' });
       const after = await req(hub.port, { method: 'POST', path: '/api/events', headers: { cookie, 'X-Hub-Paired': '1' }, body });
       await guard('274w pairing: `hub unpair --by hatch` forgets it; the browser is read-only at once (fails on 2.73.0: no unpair)', () => [
         un.status === 0 && /Forgot 1 paired browser/.test(un.stdout) && after.status === 401, `${un.status} ${un.stdout}${un.stderr}; after ${after.status}`]);
@@ -128,7 +128,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
     // ---- Act: resume, hold, revoke run the CLI's code as the paired person ----
     {
       const { S, ev, env } = studio('act');
-      const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
+      const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { windowsHide: true, stdio: 'ignore' });
       kids.push(sleeper);
       fs.writeFileSync(path.join(S, '.studio', 'supervisor.json'), JSON.stringify({ pid: sleeper.pid, status: 'running', startedAt: new Date(Date.now() - 3600000).toISOString(), sessions: 2, tasksDone: 0, hubDown: [], halted: { at: new Date().toISOString(), code: 1, why: 'two sessions in a row ended with exit 1 (b1, b2): test' } }));
       // The hub was started from an agent's shell (B-60): the paired person's button must still work.
@@ -148,7 +148,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
       g(S, ['add', 'studio/delegation.json']); g(S, ['commit', '-qm', 'delegate', '--no-verify']);
       const task = (/\*\*(T-\d+)\*\*/.exec(read(S, 'studio/NEXT.md')) || [])[1] || 'T-001';
       const hold = await req(hub.port, { method: 'POST', path: '/api/act', headers: H, body: { action: 'hold', task, why: 'waits for the chain' } });
-      const cli = spawnSync(process.execPath, ['harness/task.mjs', 'unhold', task, '--by', 'hatch'], { cwd: S, env, encoding: 'utf8' });
+      const cli = spawnSync(process.execPath, ['harness/task.mjs', 'unhold', task, '--by', 'hatch'], { windowsHide: true, cwd: S, env, encoding: 'utf8' });
       const revoke = await req(hub.port, { method: 'POST', path: '/api/act', headers: H, body: { action: 'revoke' } });
       const bad = await req(hub.port, { method: 'POST', path: '/api/act', headers: H, body: { action: 'rm -rf' } });
       const ev2 = events(ev);
@@ -183,7 +183,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
       for (let i = 0; i < 40 && hub.h.exitCode === null && hub.h.signalCode === null; i++) await sleep(100);
       const log2 = read(S, '.studio/logs/hub-exit.log');
       const second = await startHub(S, env);
-      const busy = spawn(process.execPath, ['hub/server.mjs'], { cwd: S, env: { ...env, HUB_PORT: String(second.port) }, stdio: 'ignore' });
+      const busy = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: S, env: { ...env, HUB_PORT: String(second.port) }, stdio: 'ignore' });
       kids.push(busy);
       for (let i = 0; i < 60 && busy.exitCode === null; i++) await sleep(100);
       const log3 = read(S, '.studio/logs/hub-exit.log');
@@ -220,7 +220,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
           && mod.backoffMs(1) === 30000 && mod.backoffMs(2) === 60000 && mod.backoffMs(9) === 600000,
         JSON.stringify({ a, b, c, d, e, spawned, keep: state.hubKeep, down: state.hubDown, emitted: emitted.map((x) => x.type) })]);
       const st2 = {};
-      const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
+      const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { windowsHide: true, stdio: 'ignore' });
       kids.push(sleeper);
       fs.writeFileSync(path.join(S, '.studio', 'hub.json'), JSON.stringify({ pid: sleeper.pid, port: 3847 }));
       const other = await mod.keepHub({ state: st2, port: 1, child: null, now: t0, root: S, healthy: async () => false, spawnHub, emit, loopMs: 60000 });
@@ -235,7 +235,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
         other.action === 'other-hub' && spawnedThen === 2 && ended.action === 'ended' && hung.exitCode === 143 && re.action === 'restarted' && /didn't answer \/health for 6 min/.test(re.why),
         JSON.stringify({ other, ended, re, spawned })]);
       fs.writeFileSync(path.join(S, '.studio', 'supervisor.json'), JSON.stringify({ pid: 999999, status: 'stopped', startedAt: new Date(t0).toISOString(), sessions: 1, tasksDone: 0, hubDown: [{ from: new Date(t0).toISOString(), to: new Date(t0 + 90000).toISOString() }], hubKeep: state.hubKeep }));
-      const status = spawnSync(process.execPath, ['harness/supervisor.mjs', 'status'], { cwd: S, env, encoding: 'utf8' });
+      const status = spawnSync(process.execPath, ['harness/supervisor.mjs', 'status'], { windowsHide: true, cwd: S, env, encoding: 'utf8' });
       await guard('274w keeper: studio:status says when the hub last restarted, why, and how many times (fails on 2.73.0: only the down spans)', () => [
         /Hub last restarted 12:00 UTC \(uncaught exception: TypeError: x is not a function\); 2 restarts this run\./.test(status.stdout), `${status.stdout}${status.stderr}`]);
       const sup = read(S, 'harness/supervisor.mjs');
@@ -286,7 +286,7 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
         require('fs').writeFileSync('studio/divisions.json', JSON.stringify({ divisions: [{ id: 'engine', name: 'Engine Transfer', active: false }] }));
         const eng = listDivisions().find((d) => d.id === 'engine');
         console.log(JSON.stringify({ s, steps, rooms, eng }));`;
-      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);${code}`], { cwd: S, env: { ...env, AGENT_EVENTS_FILE: ev }, encoding: 'utf8' });
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);${code}`], { windowsHide: true, cwd: S, env: { ...env, AGENT_EVENTS_FILE: ev }, encoding: 'utf8' });
       let j = null;
       try { j = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {}
       const web = j?.s?.trains?.find((t) => t.kind === 'web');
