@@ -4304,6 +4304,17 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.71.1 (B): process hygiene against the red team's attacks: the gates' env and git scrubbed (S03/T06/G10/G16), replace
+// refs and grafts fail the protected check, quote-safe and case-folded protected paths (G14/W01), lock release bound to
+// the holder (K01), gate output fenced and capped (L01/I01), the task on every session end, node_modules drift (S04) and
+// `upgrade --rollback` (qa/selftest-2711b.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2711B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2711b.mjs')).href);
+  await selftest2711B({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

@@ -6,6 +6,10 @@ Every token number the harness shows is one a tool reported. Nothing is estimate
   result usage, Codex's turn totals, or a plain usage line): input, output and cache reads. `npm run tokens`
   and the War Room's "Tokens used" panel sum them by role, model, agent or tool, for the last 5 hours, today or
   the whole log. The run report's "Tokens by role" table uses the same events.
+- **Per task (2.71.1):** every `agent.session.end` the launcher writes names the session's task (the task it was
+  started on, else its one task lock, else its last `task start`), so `npm run tokens -- --by task` sums tokens per task
+  and the autonomy card's cost block adds `byTask` (tokens per landed task from the sessions that name it, and how many
+  sessions do). Ends written before 2.71.1 name none and count as "(no task)".
 - **Not measured, and labelled so:** sessions whose tool reported no usage (listed by tool), and work outside
   the launcher (a person's own chat, IDE or terminal sessions).
 - **Dollar figures:** Claude's `total_cost_usd` is what the same use would cost at API prices; a subscription
