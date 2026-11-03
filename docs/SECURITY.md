@@ -41,7 +41,11 @@
 - `node harness/task.mjs start <ID> --agent <unique>` refuses a task that is already claimed; `done` only works for its owner.
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
-- Release with `node harness/lock.mjs release <key> --owner <agent>` when done.
+- Release with `node harness/lock.mjs release <key> --owner <agent>` when done. (2.71.1, K01) The release is bound to the
+  holder, not just the name: a lock records where it was claimed (`holder`: the lane copy, `STUDIO_LOCK_OWNER`), and a
+  release from someone else (another `STUDIO_LOCK_OWNER`, or another agent's lane copy) is refused naming the holder,
+  unless the holder's launched session is over (its record says ended, or its process is gone). Locks stay cooperative:
+  a person who unsets their name in the main checkout can still release by name.
 - (2.58.5) Claim files, not whole trees: a by-hand claim on a game's folder or source root (`game|web|engine/<name>`,
   `…/<name>/src`) or a folder of more than `STUDIO_LOCK_MAX_FILES` (50) tracked files needs `--wide "<why>"`.
 - (2.59.0) The launcher doesn't hold a too-broad lane (the same rule) as a 6-hour session lock either. In the agent's
@@ -78,6 +82,28 @@
   doesn't count) and `git ls-remote` must confirm the branch and its commit there (a remote-tracking ref moved by hand
   doesn't count). It asks the remote only when a commit is unstamped, and when it can't reach it the ref isn't used
   (the gate fails closed). The output names the ref and commit used, or why it wasn't. Remove it once the branch merges.
+- The gates' environment (2.71.1, S03/T06/G10/G16/T01): `scripts/run-gates.mjs` and `harness/game-gates.mjs` scrub their
+  own environment before anything runs (`harness/gate-env.mjs`): `NODE_OPTIONS` keeps only flags that load no code
+  (memory, warnings, certificate store, DNS order), `npm_config_node_options` goes, every git call runs with
+  `GIT_NO_REPLACE_OBJECTS=1` and without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, `GIT_NAMESPACE`, `GIT_GRAFT_FILE`, `GIT_REPLACE_REF_BASE`,
+  `GIT_SHALLOW_FILE` or `GIT_CONFIG*`. Task done, the train, the launcher's verify and the whole-game check start the
+  gates with the same environment. The protected gate fails while the git folder has replace refs (`git replace -l`) or
+  a grafts file: they would show other commits or files than the committed ones in every lane copy. A person who runs
+  `NODE_OPTIONS=--require … npm run verify` by hand preloads code into run-gates itself, which nothing inside it can
+  undo: its checks still run clean, it prints a WARN and the verify record says `nodeOptionsPreload` (out of scope
+  otherwise). `STUDIO_VERIFY_PRELOADED` carries that note from a verify to its detached run. node_modules that don't match
+  package-lock.json (versions, missing or extra packages, a plain file in `.bin` on macOS and Linux) get one WARN line.
+- Paths (2.71.1, G14/W01): the gates read git's file lists with `-z` and `core.quotePath=false` (a non-ASCII name is no
+  longer a quoted `"web/\340…"` that no glob matches), and the protected list matches in any case and spelling
+  (backslashes, `./`, Unicode form, trailing dots and spaces Windows drops): matching more is only stricter.
+- A gate's output (2.71.1, L01/I01): it goes to `.studio/gates/out/<gate>.log` whole (the gate writes the file itself, so
+  nothing is lost when a check exits right after a burst), and run-gates shows at most its first and last
+  `STUDIO_GATE_OUTPUT_LINES` (200) lines, saying how many were left out. A line from a gate that starts like run-gates'
+  own (`[gates] `, `[verify] `, after any spaces or colour codes) is shown as `| [gates] …`, so a check can't print a
+  verdict or a Fix line that reads as the harness's.
+- `npm run upgrade -- --rollback` (2.71.1) sets `STUDIO_UPGRADE_REVERT=<the update's merge commit>` for its own revert
+  commit only; `pre-commit` lets it through the guard only while `REVERT_HEAD` is exactly that commit (docs/RELEASE.md).
 - The main-checkout guard and a harness update (2.60.0, #3): `npm run upgrade -- --merge <ref> --by <person>` sets
   `STUDIO_UPGRADE_MERGE=<the merged commit>` for its own merge commit only; `pre-commit` lets a commit through the
   guard with it only while `MERGE_HEAD` is exactly that commit. Every other hook check still runs, and the merge is
@@ -142,11 +168,68 @@
 - It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
   `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
   --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.
-- Both checkers and the hooks are protected files (`studio/protected.json`).
+- Both checkers and the hooks are protected files (`studio/protected.json`). 2.71.1: in a lane copy `=off` is ignored
+  (see "What the gates trust" below).
 - Not caught: a stamp a forger computes by hand (the content gates still judge the change); `git revert`, a rebase with
   conflicts or squashes, and an `--amend -m` later rebased onto a moved base are flagged until re-committed; a weaker
   assert in the same count (`toBe` → `toBeTruthy`), an assert removed with an unrelated one added in the same place, a
   helper that always passes, a special case in the game code instead of the test, and tests outside the names above.
+
+## What the gates trust (2.71.1, red-team fixes)
+
+- Gate runners are protected (A01b/A01d/A03): `scripts/run-gates.mjs`, `harness/gate-spawn.mjs`, `harness/game-gates.mjs`,
+  `harness/silent-green.mjs`, the cartridge loader `harness/cartridge.mjs`, `harness/hash.mjs`, `harness/merge-lane.mjs`
+  (the protected check's glob matcher), `scripts/check-sim-*.mjs`, `qa/check-*.mjs`, `qa/fails-before.mjs`,
+  `qa/vertical-slice.mjs`, `qa/run-python.mjs`, `qa/test-golden.py`, `qa/selftest*.mjs` and the two modules below. Not all
+  of `harness/`: a lane changing other harness code is tier C in the train anyway. Running the runners from the main
+  checkout instead was not done: every runner finds its root from its own path, so it would need a root override in each.
+- Each game's test toolchain is protected (H03/H04/S02, `harness/test-toolchain.mjs`): under `game/` and `web/`, any
+  `vitest.config.*`, `vitest.workspace.*`, `vite.config.*`, `jest.config.*` and `.npmrc` (and the root `.npmrc`); the setup
+  files those configs name at the base (`setupFiles`, `setupFilesAfterEnv`, `globalSetup`, `globalTeardown`, also a
+  package.json `jest` key); and in a game's `package.json` only the test entries (scripts `test`, `test:*`, `pre`/`post`,
+  the scripts the game's manifest runs, the `jest` key), listed as `<path>#test-scripts`. A new dependency is a normal
+  change. The train sees the same (a lane changing them is tier C).
+- Weakened tests also flag (H10/H13): `skipIf`/`runIf` added to an existing test or on an env/CI condition (a new test that
+  runs on one OS only is fine), chained skips (`it.concurrent.skip`), an early return on CI or an env variable
+  (`env-skip`), and `expect`/`assert` redefined, renamed on import, wrapped in a Proxy or its library mocked
+  (`expect-shadowed`). The harness's own `qa/*.mjs` scripts are not judged by these three (they read env by design).
+- In a lane copy (`<main>/.lanes/<agent>`, or any worktree of a main checkout that has `.lanes/`; `harness/gate-trust.mjs`)
+  `STUDIO_PROTECT_BASE`, `GITHUB_BASE_REF`, `STUDIO_PROTECT_ROOT` and `STUDIO_WEAKENED_TESTS=off` are ignored, and the
+  protected and weakened-tests results say "ignored in a lane copy" (A09/A16/A01b). `STUDIO_MAIN_ROOT` counts only when it
+  is the main worktree `git worktree list` names, never the checkout itself (G12). `CI`/`GITHUB_ACTIONS` prove nothing
+  (S01). The main checkout and CI keep these settings.
+- Verify records (D01/T04, G15/T02): every record has a run id, and a full verify writes its run log
+  (`.studio/gates/runs/<id>.json`, the record's digest). Task done and the train reuse a record only when its run log
+  matches (a hand-written or edited record says why it isn't reused). A verify started beside untracked files, or
+  ignored ones outside build and dependency output (`node_modules`, `dist`, `build`, `coverage`, `.vite`, …), under the
+  game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/`, `hub/` or a runner config at the root, records
+  `dirty: true` and the files (`hidden`), and is never reused.
+- Signed verify records (2.73.0, `harness/verify-key.mjs`): each studio has a local verify key, made on first use and kept
+  outside every checkout and lane: `~/.studio-verify/<studio-id>.key` (mode 600; `<studio-id>` is a hash of the
+  repository's git folder, which the main checkout, its lanes and the train's copies share). `STUDIO_VERIFY_KEY_DIR`
+  names another folder; one inside the studio's checkout or a worktree is refused (nothing is signed then). run-gates signs
+  each run log (HMAC-SHA256 over the record's digest and the run log's fields); task done, the train, the one-lane train and
+  the tree records reuse a record only with a valid signature. Otherwise: "not reused: unsigned record (hand-written or from
+  an older harness)", and the verify just runs. Records from before 2.73.0 are unsigned: not reused once, no migration.
+  The key is never printed; run logs carry only a key id (a hash). `harness/verify-key.mjs` and
+  `harness/golden-report.mjs` are on the protected list. Limit: lanes run run-gates as the same user, so this
+  stops hand-written files (a record and a matching run log, or a copy from another studio), not a malicious process
+  running as that user, which can read the key.
+- A golden re-recorded by a lane with its own `Golden-Reason` is tier C (rule `golden-rerecord`, A13): a person, a
+  delegation or autonomous review releases it. The game's manifest (protected) may set it to B
+  (`"tiers": { "set": { "golden-rerecord": "B" } }`), for example for UI snapshots. Since 2.73.0
+  (`harness/golden-report.mjs`) the re-record carries the harness's first-divergence report: a red golden check
+  (`qa/check-golden.mjs`, or a game's golden check with a `"divergence"` contract that lists its `"goldens"`) and
+  `npm run golden -- --update` on a changed answer write `.studio/gates/divergence/<golden path, / as __>.json`, signed
+  with the verify key and tied to the recorded answer it replaces (and, for a cartridge golden, the new sha256). The
+  train's hold shows it ("first divergence for <golden>: tick N, <field> a -> b"); the release needs a releaser who is
+  not the lane's author (its agent or a `Studio-Agent` trailer of its commits): a person, a delegation or autonomous
+  review by another agent; and the decision log records each report's tick and field. Without a report (no golden check
+  ran before the re-record, the divergence couldn't run, or the entry is hand-written) the hold says so and only a person
+  releases it (a delegation or autonomous review is refused). The train's own re-records (pin refresh) and upgrade merges
+  are unchanged.
+- Still open: the runner protection only matters where an owner key enforces it; a process running as the studio's user
+  can read the verify key and sign a forged record or report (see above).
 
 ## Failures
 - Closed-loop writes the cartridge, seed, the tick the cartridge failed on, and every action to `.studio/last-seed-failure.json`.

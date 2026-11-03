@@ -41,6 +41,7 @@ export const SHIPPED_PROTECTED = [...new Set([
   ...DEFAULT_PROTECTED,
   'studio/game.json', 'game/*/studio.gates.json', 'web/*/studio.gates.json', 'studio/secrets-allow.json',
   'studio/delegation.json', // 2.67.0 (harness/delegation.mjs), also in DEFAULT_PROTECTED
+  'studio/policy.json', // 2.71.0 (harness/policy.mjs), also in DEFAULT_PROTECTED
 ])];
 const rank = (t) => TIERS.indexOf(t);
 export const higher = (a, b) => (rank(b) > rank(a) ? b : a);
@@ -51,9 +52,11 @@ export const higher = (a, b) => (rank(b) > rank(a) ? b : a);
  *   from      a manifest key whose globs are added to `paths` (simPaths, shared, unionFiles, registry, ui, irreversible)
  *   status    'A' added, 'M' changed, 'D' deleted (a rename is R: neither added nor deleted)
  *   kind      'test' (harness/test-weakening.mjs isTestPath), 'golden' (isGoldenPath), 'protected' (the protected list)
+ *           'ratchet-grow' (2.72.0: a purity baseline that grew, f.ratchetGrew from harness/ratchet.mjs markGrowth)
  *           'proposal-protected' (2.65.0: a studio-proposals/ file whose targets, classifyLane's `proposals`, match the
  *           protected list, or can't be read)
- * or lane-wide by `trailer` (a key in the lane's own commits' trailers). Every condition given must hold.
+ * or lane-wide by `trailer` (a key in the lane's own commits' trailers); `withTrailer` (2.71.1) adds a trailer the lane must
+ * carry to a file rule. Every condition given must hold.
  */
 export const DEFAULT_TIER_RULES = [
   { id: 'protected', tier: 'C', locked: true, kind: 'protected', why: 'a protected file (studio/protected.json and the shipped list): only the owner approves it' },
@@ -70,6 +73,13 @@ export const DEFAULT_TIER_RULES = [
   // call either: a game dev releases the lane, or an outside agent records their permission (train release).
   { id: 'silencer', tier: 'C', locked: true, paths: SILENCERS, why: `it changes a list that silences a check (${SILENCER_NAMES}): a game dev releases it, or an outside agent with their permission` },
   { id: 'config-proposal-silencer', tier: 'C', locked: true, kind: 'proposal-silencer', paths: ['studio-proposals/**'], why: `a config proposal for a list that silences a check (${SILENCER_NAMES}): a game dev releases it, or an outside agent with their permission` },
+  // 2.71.1 (A13): a lane that re-records goldens and writes its own Golden-Reason vouches for its own new answers (a bug
+  // re-recorded as the expected result passes every check). A person, a delegation or autonomous review releases it.
+  // Not locked: the owner can lower it in the game's manifest (a protected file), e.g. for UI snapshots.
+  { id: 'golden-rerecord', tier: 'C', kind: 'golden', status: 'M', withTrailer: 'Golden-Reason', why: 'it re-records goldens or snapshots with its own Golden-Reason: the train doesn\'t take a lane\'s word for its new recorded answers, so a person (or a delegation, or autonomous review) releases it' },
+  // 2.72.0 (b): a purity ratchet baseline (purity-baseline.json, harness/ratchet.mjs) that grew: it would accept new hits
+  // as standing ones. Shrinking it is tier A/B as usual; growing it is a person's (or a delegation's) decision.
+  { id: 'ratchet-grow', tier: 'C', locked: true, kind: 'ratchet-grow', why: 'it grows a purity ratchet baseline (purity-baseline.json lists hits main\'s doesn\'t): a baseline never grows from a lane; a person releases it, or records the hits on main with npm run purity -- baseline --write --by <person>' },
   { id: 'golden', tier: 'B', kind: 'golden', why: 'it moves a golden or snapshot (behaviour)' },
   { id: 'config-proposal', tier: 'B', paths: ['studio-proposals/**'], why: 'a studio config proposal (studio-proposals/): it changes main\'s studio/ config when it lands' },
   { id: 'pins', tier: 'B', trailer: 'Pin-Moves', why: 'it declares pin moves (Pin-Moves: trailer)' },
@@ -146,9 +156,11 @@ export function classifyLane({ files = [], trailers = {}, settings = {}, protect
   const has = (k) => Array.isArray(trailers[k]) && trailers[k].length > 0;
   const matches = (r, f) => {
     if (r.trailer) return false;
+    if (r.withTrailer && !has(r.withTrailer)) return false; // 2.71.1: a file rule that holds only with a trailer on the lane
     if (r.status && !String(f.status || '').startsWith(r.status)) return false;
     if (r.kind === 'test' && !isTestPath(f.path)) return false;
     if (r.kind === 'golden' && !isGoldenPath(f.path)) return false;
+    if (r.kind === 'ratchet-grow' && !f.ratchetGrew) return false; // 2.72.0 (b): set by harness/ratchet.mjs markGrowth
     if (r.kind === 'protected' && !(matchAny(f.path, prot) && !(String(f.status).startsWith('A') && matchAny(f.path, addOnly)))) return false;
     if (r.kind === 'proposal-silencer') {
       if (String(f.status).startsWith('D') || !Object.prototype.hasOwnProperty.call(proposals || {}, f.path)) return false;

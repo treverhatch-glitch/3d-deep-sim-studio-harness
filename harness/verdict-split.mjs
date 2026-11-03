@@ -64,7 +64,7 @@ export function isRenderTask(t = {}) {
 }
 
 // Owner types that say the work is not a render change (bug, whole and art keep the detection).
-export const NOT_RENDER_TYPES = ['change', 'chore', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'review', 'direction', 'idea', 'trick'];
+export const NOT_RENDER_TYPES = ['change', 'chore', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'trick'];
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 /** The game's render paths (globs) and the strict switch: studio/game.json, else the game's studio.gates.json. */
 export function renderPaths(root = REPO_ROOT, env = process.env) {

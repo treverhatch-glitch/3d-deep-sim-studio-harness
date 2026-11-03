@@ -133,6 +133,7 @@ export async function winddownOff({ by, permission = '', env = process.env } = {
   const d = await deciderCheck({ by, permission, env, what: 'end a usage wind-down' });
   if (!d.ok) return { code: 1, text: d.why };
   fs.rmSync(WINDDOWN_FILE(), { force: true });
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'winddown-end', subject: 'usage wind-down', by: d.by, as: dm.asOf(d), why: `ended the wind-down from ${st.at}`, evidence: st.file || '', undo: { kind: 'text', text: 'npm run studio:winddown -- --now --by <name>' } }); } catch {}
   emitEvent({ type: 'studio.winddown_resumed', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} ended the wind-down from ${st.at} before the reset${d.via !== 'person' ? ` (recorded by ${d.recordedBy})` : ''}. Restart log: ${st.file}`, meta: { restartLog: st.file, since: st.at, by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null } });
   return { code: 0, text: `Ended the wind-down (since ${st.at}); the supervisor starts sessions again on its next pass. Restart log: ${st.file}.` };
 }

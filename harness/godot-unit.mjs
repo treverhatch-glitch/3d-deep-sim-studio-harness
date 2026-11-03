@@ -19,6 +19,8 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { parseCheck, formatBroken } from './gdscript-parse.mjs';
 import { judgePass } from './silent-green.mjs';
+import { freshFile, logSignatures, exitAgrees, proofLine } from './engine-proof.mjs';
+import { engineFix } from './gate-fix.mjs';
 
 const CONFIG_FILE = path.join(REPO_ROOT, 'studio', 'godot-unit.json');
 const LAST_RUN_FILE = path.join(STUDIO_STATE_DIR, 'godot-unit-last.json');
@@ -61,6 +63,40 @@ export function runnerFor(projectPath, platform = process.platform) {
     return null;
   }
   return fs.existsSync(sh) ? { file: './addons/gdUnit4/runtest.sh', pre: [], shell: true } : null;
+}
+
+/** The report_* folders of a gdUnit4 reports folder (names only). */
+export function listReports(reportDir) {
+  try { return fs.readdirSync(reportDir).filter((d) => d.startsWith('report_')); } catch { return []; }
+}
+
+/**
+ * 2.72.0 (c): did this gdUnit4 run prove it ran? (harness/engine-proof.mjs) A report folder that didn't exist before the
+ * run (before: the names then) with a results.xml written since startedAt, more than 0 test cases (unless allowEmpty),
+ * no parse/compile error in the output, and an exit code that agrees with the results (gdUnit4: 0 all passed, 100 test
+ * failures, 105 script or discovery error). { ok, report: { tests, failures }, proof: [{ kind, text }], note, file }.
+ */
+export function judgeGodotRun({ reportDir, before = new Set(), startedAt = null, status, signal = null, output = '', allowEmpty = false }) {
+  const proof = [];
+  const all = listReports(reportDir);
+  const fresh = all.filter((d) => !before.has(d)).map((d) => ({ d, f: path.join(reportDir, d, 'results.xml') })).filter((x) => freshFile(x.f, startedAt).ok).sort((a, b) => fs.statSync(b.f).mtimeMs - fs.statSync(a.f).mtimeMs);
+  let report = { tests: 0, failures: [] };
+  let file = null;
+  if (fresh.length) { file = fresh[0].f; report = parseJUnit(fs.readFileSync(file, 'utf8')); }
+  else {
+    const old = all.filter((d) => fs.existsSync(path.join(reportDir, d, 'results.xml')));
+    if (old.length) proof.push({ kind: 'stale-results', text: `this run wrote no new report folder; ${old.length} older one(s) in ${path.basename(reportDir)}/ (newest ${old.sort().pop()}) were left by earlier runs and don't count` });
+    else proof.push({ kind: 'no-results', text: `this run wrote no report (no ${path.basename(reportDir)}/report_*/results.xml; exit ${status})` });
+  }
+  for (const sg of logSignatures(output, 'godot')) proof.push(sg);
+  if (file && !report.tests && !allowEmpty) proof.push({ kind: 'empty-run', text: 'the report counts 0 test cases: an empty run is not a check' });
+  if (report.failures.length) proof.push({ kind: 'test-failed', text: `${report.failures.length} test(s) failed: ${report.failures.slice(0, 3).map((f) => `${f.suite}::${f.name}`).join(', ')}` });
+  if (file && (report.tests || report.failures.length)) {
+    const ex = exitAgrees(status, { total: report.tests, failed: report.failures.length }, { signal, failCodes: [100] });
+    if (!ex.ok) proof.push({ kind: 'exit-mismatch', text: ex.why });
+  } else if (status !== 0 && file) proof.push({ kind: 'exit-mismatch', text: `gdUnit4 exited ${status} (100: test failures, 105: a script or discovery error) and its report counts no test` });
+  const note = file && !report.tests && allowEmpty ? '0 tests ran, allowed by studio/godot-unit.json "allowEmpty"' : '';
+  return { ok: proof.length === 0 && status === 0, report, proof, note, file };
 }
 
 const unxml = (t) => String(t || '').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
@@ -107,22 +143,23 @@ export function runGodotUnit({ changedOnly = false } = {}) {
     process.exit(1);
   }
   const runner = runnerFor(projectPath);
-  const startedAt = Date.now() - 2000;
+  const reportDir = path.join(projectPath, 'reports');
+  // 2.72.0 (c): the report folders that exist before the run; only a new one (gdUnit4 numbers them) counts.
+  const before = new Set(listReports(reportDir));
+  const startedAt = Date.now();
   const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
 
-  const reportDir = path.join(projectPath, 'reports');
   // 2.36.0: only a report this run wrote counts (an older one made a run that tested nothing look green).
-  const reports = fs.existsSync(reportDir) ? fs.readdirSync(reportDir).filter(d => d.startsWith('report_') && fs.statSync(path.join(reportDir, d)).mtimeMs >= startedAt).sort((x, y) => fs.statSync(path.join(reportDir, y)).mtimeMs - fs.statSync(path.join(reportDir, x)).mtimeMs) : [];
-  let reportData = { tests: 0, failures: [] };
-  if (reports.length > 0) {
-    const resultsXmlPath = path.join(reportDir, reports[0], 'results.xml');
-    if (fs.existsSync(resultsXmlPath)) reportData = parseJUnit(fs.readFileSync(resultsXmlPath, 'utf8'));
-  }
-  // 2.36.0: exit 0 with no tests counted (no fresh report, or 0 test cases) is a silent green.
-  const sg = result.status === 0 ? judgePass('godot-unit', { output: `${result.stdout || ''}${result.stderr || ''}`, count: reportData.tests }) : null;
-  if (sg?.note) console.log(`[godot-unit] WARN ${sg.note}`);
-  if (sg && !sg.ok) console.error(`[godot-unit] FAIL ${sg.why}`);
-  const ok = result.status === 0 && sg.ok;
+  // 2.72.0 (c): and the run has to prove it ran (harness/engine-proof.mjs judgeGodotRun).
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  const j = judgeGodotRun({ reportDir, before, startedAt, status: result.status, signal: result.signal || (result.error?.code === 'ETIMEDOUT' ? 'timeout' : null), output, allowEmpty: cfg.allowEmpty === true });
+  const reportData = j.report;
+  if (j.note) console.log(`[godot-unit] note: ${j.note}`);
+  for (const p of j.proof) { console.error(proofLine(p, 'godot')); console.error(`[engine-gate] Fix: ${engineFix(p.kind, 'godot')}`); }
+  // The silent-green guard (2.36.0) still logs its gate.silent_green event for the morning report.
+  if (result.status === 0 && !reportData.tests) judgePass('godot-unit', { output, count: reportData.tests });
+  const ok = j.ok;
+  if (!ok && !reportData.tests && result.status === 0) console.error('[godot-unit] FAIL godot-unit passed but ran no tests (it counted 0 tests): an empty run is not a check (studio/godot-unit.json "allowEmpty": true allows it)');
   console.log(`[godot-unit] ${ok ? 'PASS' : 'FAIL'} (exit code ${result.status}, ${reportData.tests} test(s))`);
 
   const lastRun = { at: new Date().toISOString(), ok, code: result.status, ...reportData, version: { gdunit: cfg.gdunit, godot: cfg.godot } };

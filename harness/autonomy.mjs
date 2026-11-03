@@ -10,8 +10,14 @@
  * landed for keepDays, over all judged tokens), the cost per kept change (also per task type) and the waste split
  * (reopened / reverted or redone / handed back / dropped / no task), with pending landings apart; --json: card.tokenWork.
  *   npm run autonomy -- level <L1|L2|L3|L4> --by <name> [--why "…"] [--permission "…"]   2.65.0: set the level (setLevel)
+ *   npm run autonomy -- mode autonomous on|off --by <game dev> [--agent <name>]   2.71.0: propose autonomous mode (the
+ *     owner confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
  *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
  *     (harness/impact.mjs)
+ *   npm run autonomy -- routing [--days 14] [--json]   2.73.0 (e): cheap-first routing's success rate and tokens per
+ *     landed change by task type and tier (harness/routing.mjs); the holdout is off
+ * 2.73.0 (e): the L3 bar's rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion and
+ * as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo.
  * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
  * person's round-trips per landed task and orchestrator interventions (conductor.note events).
  *
@@ -149,7 +155,7 @@ export function readAutonomyConfig(root = REPO_ROOT) {
   let raw = null;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
   const c = raw && typeof raw === 'object' ? raw : {};
-  return { level: /^L[0-4]$/.test(String(c.level || '')) ? c.level : DEFAULT_AUTONOMY.level, days: Number(c.days) > 0 ? Number(c.days) : DEFAULT_AUTONOMY.days, l3: { ...DEFAULT_AUTONOMY.l3, ...(c.l3 && typeof c.l3 === 'object' ? c.l3 : {}) }, keepDays: keepDaysOf(c), minSample: Number(c.minSample) >= 1 ? Math.round(Number(c.minSample)) : DEFAULT_MIN_SAMPLE, file: AUTONOMY_REL, exists: Boolean(raw) };
+  return { level: /^L[0-4]$/.test(String(c.level || '')) ? c.level : DEFAULT_AUTONOMY.level, days: Number(c.days) > 0 ? Number(c.days) : DEFAULT_AUTONOMY.days, l3: { ...DEFAULT_AUTONOMY.l3, ...(c.l3 && typeof c.l3 === 'object' ? c.l3 : {}) }, keepDays: keepDaysOf(c), minSample: Number(c.minSample) >= 1 ? Math.round(Number(c.minSample)) : DEFAULT_MIN_SAMPLE, ...(c.confidence !== undefined ? { confidence: c.confidence } : {}), file: AUTONOMY_REL, exists: Boolean(raw) };
 }
 
 /**
@@ -174,6 +180,54 @@ export function wilson(k, n, z = 1.96) {
   const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / den;
   return [Math.max(0, mid - half), Math.min(1, mid + half)];
 }
+/**
+ * 2.73.0 (e): the L3 bar's confidence. Point estimates let 10 lucky landings suggest L3; promotion now needs the one-
+ * sided bound at this confidence to clear each rate bar (the hands-free rate's LOWER bound at or above its bar, the
+ * reopen and redo rates' UPPER bounds at or below theirs). studio/autonomy.json "confidence" (the owner's), else
+ * STUDIO_L3_CONFIDENCE, else 0.9. 0 means point estimates (the old behaviour). Demotion always reads point estimates.
+ */
+export const DEFAULT_L3_CONFIDENCE = 0.9;
+export function l3Confidence(fileValue = undefined, env = process.env) {
+  for (const v of [fileValue, env.STUDIO_L3_CONFIDENCE]) {
+    if (v === undefined || v === null || v === '') continue;
+    const x = Number(v);
+    if (Number.isFinite(x) && x >= 0 && x < 1) return x;
+  }
+  return DEFAULT_L3_CONFIDENCE;
+}
+/** The standard normal quantile (Acklam's approximation, |error| < 1.2e-9): z with P(Z <= z) = p, 0 < p < 1. */
+export function normalQuantile(p) {
+  if (!(p > 0 && p < 1)) return p >= 1 ? Infinity : -Infinity;
+  const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239];
+  const b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
+  const c = [-0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  const d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416];
+  const lo = 0.02425;
+  if (p < lo) { const q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  if (p > 1 - lo) return -normalQuantile(1 - p);
+  const q = p - 0.5; const r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+/** One-sided Wilson bound at `confidence`: side 'lower' | 'upper'; null with n = 0; the point estimate with confidence 0. */
+export function wilsonBound(k, n, confidence, side) {
+  if (!(n > 0)) return null;
+  if (!(confidence > 0)) return Math.min(1, Math.max(0, k / n));
+  const w = wilson(k, n, normalQuantile(confidence));
+  return side === 'lower' ? w[0] : w[1];
+}
+/**
+ * How many more landings (or reviews) at the current rate would make the bound clear the bar: a count, 0 when it
+ * already clears, null when it never would at this rate (the rate itself is on the wrong side of the bar) or n = 0.
+ */
+export function moreToClear(k, n, bar, confidence, side, cap = 5000) {
+  if (!(n > 0)) return null;
+  const p = k / n;
+  const clears = (kk, nn) => { const b = wilsonBound(kk, nn, confidence, side); return side === 'lower' ? b >= bar - 1e-12 : b <= bar + 1e-12; };
+  if (clears(k, n)) return 0;
+  if (side === 'lower' ? p <= bar : p >= bar) return null;
+  for (let m = 1; m <= cap; m++) if (clears(p * (n + m), n + m)) return m;
+  return null;
+}
 /** A rate with its sample: { k, n, rate, low, high, enough, text }. Under minSample the text never shows a bare percentage. */
 export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   const w = wilson(k, n);
@@ -183,6 +237,29 @@ export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   return { k: round(k, 2), n: round(n, 2), rate: n > 0 ? round(k / n, 4) : null, low: w ? round(w[0], 4) : null, high: w ? round(w[1], 4) : null, enough, text };
 }
 const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * 2.71.1 (B): tokens per landed change from the sessions that name their task (agent.session.end's task, or meta.task):
+ * { sessions, named, tasks: landed tasks with at least one named session, tokensPerLandedNamed (their mean), top: the
+ * five costliest [{ task, tokens, sessions }] }. Sessions that name no task are left to the window average.
+ */
+export function tokensByLandedTask(ends, landedTasks, weightOf) {
+  const landed = new Set((landedTasks || []).map(String));
+  const per = new Map();
+  let named = 0;
+  for (const e of ends || []) {
+    const t = String(e.task || e.meta?.task || '');
+    if (!t) continue;
+    named += 1;
+    if (!landed.has(t)) continue;
+    const r = per.get(t) || { task: t, tokens: 0, sessions: 0 };
+    r.tokens += Number(weightOf(e)) || 0;
+    r.sessions += 1;
+    per.set(t, r);
+  }
+  const rows = [...per.values()].map((r) => ({ ...r, tokens: Math.round(r.tokens) })).sort((a, b) => b.tokens - a.tokens);
+  return { sessions: (ends || []).length, named, tasks: rows.length, tokensPerLandedNamed: rows.length ? Math.round(rows.reduce((n, r) => n + r.tokens, 0) / rows.length) : null, top: rows.slice(0, 5) };
+}
+
 /** Does this text name the task id as a whole word (T-1 is not T-12)? */
 export const namesTask = (text, id) => Boolean(id) && new RegExp(`(?<![\\w-])${reEsc(id)}(?![\\w])`).test(String(text || ''));
 /** A revert commit subject naming the task: `Revert "…<task>…"` (what git revert writes). */
@@ -701,7 +778,14 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const av = win.filter((e) => e.type === 'away.verdict' && actorOf(e, isPersonName).person).map((e) => e.status || e.meta?.verdict);
   const verdicts = { great: av.filter((v) => v === 'great').length, redo: av.filter((v) => v === 'redo').length, comment: av.filter((v) => v === 'comment').length };
   const vTotal = verdicts.great + verdicts.redo + verdicts.comment;
-  verdicts.redoRate = vTotal ? round(verdicts.redo / vTotal, 4) : null;
+  // 2.73.0 (e): audits (harness/audit.mjs): a failed audit of a hands-free landing or an autonomous decision counts as
+  // a Redo, a passed one as a review. The last verdict per audit item counts.
+  const auditLast = new Map();
+  for (const e of win) if (e.type === 'audit.verdict' && e.meta?.of && ['pass', 'fail'].includes(e.meta?.verdict)) auditLast.set(String(e.meta.of), e.meta.verdict);
+  verdicts.audited = auditLast.size;
+  verdicts.auditFailed = [...auditLast.values()].filter((x) => x === 'fail').length;
+  const rTotal = vTotal + verdicts.audited;
+  verdicts.redoRate = rTotal ? round((verdicts.redo + verdicts.auditFailed) / rTotal, 4) : null;
 
   // Tokens per landed task.
   const tokens = win.filter((e) => e.type === 'agent.session.end').reduce((s, e) => s + weight(e), 0);
@@ -713,6 +797,8 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const prevLanded = new Set();
   for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
   const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
+  // 2.71.1 (B): sessions that name their task (agent.session.end carries it since 2.71.1) are counted per landed task.
+  cost.byTask = tokensByLandedTask(win.filter((e) => e.type === 'agent.session.end'), landed.map((l) => l.task), weight);
   if (prices && typeof prices === 'object') {
     // 2.67.0: "prices from <file>, checked <date>"; with a table but no session it can price (or that reported its
     // cost) in the window, the card stays in tokens and says why instead of showing $0.
@@ -806,41 +892,72 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   };
 }
 
-/** Each L3 bar against a scorecard: [{ id, ok, value, bar, na }]. */
-export function l3Checks(card, l3 = DEFAULT_AUTONOMY.l3, days = DEFAULT_AUTONOMY.days) {
+/**
+ * Each L3 bar against a scorecard: [{ id, ok, value, bar, na }].
+ * 2.73.0 (e): with confidence > 0 (l3Confidence) the three rate bars read a one-sided Wilson bound: ok is the bound's
+ * verdict (promotion), pointOk the point estimate's (demotion); each also carries { point, bound, k, n, side,
+ * confidence, more } (more: landings or reviews at the current rate that would clear it, null: never at this rate).
+ * The redo rate counts the owner's Redo verdicts and failed audits (harness/audit.mjs) over verdicts plus audits.
+ */
+export function l3Checks(card, l3 = DEFAULT_AUTONOMY.l3, days = DEFAULT_AUTONOMY.days, confidence = 0) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
+  const conf = Number(confidence) > 0 && Number(confidence) < 1 ? Number(confidence) : 0;
+  const f2 = (x) => (x === null || x === undefined ? 'n/a' : (Math.round(x * 100) / 100).toFixed(2));
+  const v = card.verdicts || {};
+  const redoK = (v.redo || 0) + (v.auditFailed || 0);
+  const redoN = (v.great || 0) + (v.redo || 0) + (v.comment || 0) + (v.audited || 0);
+  const redoPoint = v.redoRate ?? null;
+  const unit = (id) => (id === 'redoRate' ? 'review' : 'landing');
+  const rated = (id, label, k, n, point, bar, side, naWhenEmpty) => {
+    const na = naWhenEmpty && !(n > 0);
+    const pointOk = na ? true : point !== null && (side === 'lower' ? point >= bar : point <= bar);
+    const pointBar = `${side === 'lower' ? 'at least' : 'at most'} ${pct(bar)}`;
+    if (!conf) return { id, ok: pointOk, pointOk, na, value: pct(point), bar: pointBar, pointBar, point, bound: point, k, n, side, confidence: 0 };
+    const bound = n > 0 ? round(wilsonBound(k, n, conf, side), 4) : null;
+    const ok = na ? true : bound !== null && (side === 'lower' ? bound >= bar - 1e-12 : bound <= bar + 1e-12);
+    const more = na || ok ? 0 : moreToClear(k, n, bar, conf, side);
+    const cp = `${Math.round(conf * 100)}%`;
+    const tail = na ? '' : ok ? ': clears' : more === null ? (n > 0 ? `: not yet; at this rate it never clears (the rate itself is ${side === 'lower' ? 'under' : 'over'} the bar)` : `: not yet (no ${unit(id)} yet)`) : `: not yet; about ${more} more ${unit(id)}${more === 1 ? '' : 's'} at this rate would clear it`;
+    const value = na ? `${label} n/a (n=0)` : `${label} ${f2(point)} (${side} bound ${f2(bound)} at ${cp}, n=${n})${tail}`;
+    return { id, ok, pointOk, na, value, pointBar, bar: `${side} bound ${side === 'lower' ? 'at least' : 'at most'} ${f2(bar)} at ${cp} (point ${side === 'lower' ? 'at least' : 'at most'} ${pct(bar)})`, point, bound, k, n, side, confidence: conf, more };
+  };
   return [
     { id: 'history', ok: card.window.historyDays >= days, value: `${card.window.historyDays} days of log`, bar: `${days} days` },
     { id: 'hoursBetweenInterventions', ok: card.hoursBetweenInterventions > l3.hoursBetweenInterventions, value: `${card.hoursBetweenInterventions} h`, bar: `more than ${l3.hoursBetweenInterventions} h` },
     { id: 'minLanded', ok: card.landed >= l3.minLanded, value: `${card.landed} landed`, bar: `at least ${l3.minLanded}` },
-    { id: 'handsFreeLandRate', ok: card.handsFreeLandRate !== null && card.handsFreeLandRate >= l3.handsFreeLandRate, value: pct(card.handsFreeLandRate), bar: `at least ${pct(l3.handsFreeLandRate)}` },
-    { id: 'reopenRate', ok: card.reopenRate !== null && card.reopenRate <= l3.reopenRate, value: pct(card.reopenRate), bar: `at most ${pct(l3.reopenRate)}` },
-    { id: 'redoRate', ok: card.verdicts.redoRate === null || card.verdicts.redoRate <= l3.redoRate, na: card.verdicts.redoRate === null, value: pct(card.verdicts.redoRate), bar: `at most ${pct(l3.redoRate)}` },
+    rated('handsFreeLandRate', 'hands-free', card.handsFree ?? 0, card.landed ?? 0, card.handsFreeLandRate, l3.handsFreeLandRate, 'lower', false),
+    rated('reopenRate', 'reopened', card.escaped ?? 0, card.landed ?? 0, card.reopenRate, l3.reopenRate, 'upper', false),
+    rated('redoRate', 'redo', redoK, redoN, redoPoint, l3.redoRate, 'upper', true),
     { id: 'tierCUnsigned', ok: card.tierCUnsigned === null || card.tierCUnsigned <= l3.tierCUnsigned, na: card.tierCUnsigned === null, value: card.tierCUnsigned === null ? 'n/a (no landing in the window carries a risk tier)' : `${card.tierCUnsigned}${card.tiers ? ` (tiers of ${card.tiers.A + card.tiers.B + card.tiers.C} landing(s): A ${card.tiers.A}, B ${card.tiers.B}, C ${card.tiers.C}${card.tiers.C ? `, released: ${card.tiers.C - card.tiers.cUnsigned}` : ''})` : ''}`, bar: `at most ${l3.tierCUnsigned}` },
   ];
 }
 
 /**
  * The badge and the suggestion. Never changes the level: the owner does, in studio/autonomy.json (signed).
- * { level, meets, checks, suggestion: { kind: 'promote'|'demote'|null, text } }
+ * { level, meets, checks, confidence, suggestion: { kind: 'promote'|'demote'|null, text } }
+ * 2.73.0 (e): promotion needs every bar at its confidence bound (fast to step down, slow to step up); demotion reads
+ * the point estimates (pointOk), so a studio at L3 isn't told to step down only because its sample is small.
  */
-export function levelBadge(card, cfg = DEFAULT_AUTONOMY) {
-  const checks = l3Checks(card, cfg.l3, cfg.days);
+export function levelBadge(card, cfg = DEFAULT_AUTONOMY, env = process.env) {
+  const confidence = l3Confidence(cfg.confidence, env);
+  const checks = l3Checks(card, cfg.l3, cfg.days, confidence);
   const failing = checks.filter((c) => !c.ok);
+  const pointFailing = checks.filter((c) => !(c.pointOk ?? c.ok));
   const meets = failing.length ? 'L2' : 'L3';
   const level = cfg.level || 'L2';
   const rank = (l) => Number(String(l).slice(1)) || 0;
+  const cw = confidence ? ` (rates at their one-sided ${Math.round(confidence * 100)}% bound)` : '';
   let suggestion = { kind: null, text: '' };
-  if (meets === 'L3' && rank(level) < 3) suggestion = { kind: 'promote', text: `Every L3 bar held for ${cfg.days} days${checks.some((c) => c.na) ? ` (${checks.filter((c) => c.na).map((c) => c.id).join(', ')}: n/a)` : ''}. Suggestion for the owner: move to L3. Your call: npm run autonomy -- level L3 --by <you> (a person, a Producer/Director session or an outside agent on your word); nothing changes on its own.` };
-  else if (rank(level) >= 3 && failing.length) suggestion = { kind: 'demote', text: `The studio is at ${level} but ${failing.map((c) => `${c.id} ${c.value} (bar: ${c.bar})`).join('; ')}. Suggestion for the owner: back to L2 until the numbers hold again (npm run autonomy -- level L2 --by <you>).` };
-  return { level, meets, checks, suggestion };
+  if (meets === 'L3' && rank(level) < 3) suggestion = { kind: 'promote', text: `Every L3 bar held for ${cfg.days} days${cw}${checks.some((c) => c.na) ? ` (${checks.filter((c) => c.na).map((c) => c.id).join(', ')}: n/a)` : ''}. Suggestion for the owner: move to L3. Your call: npm run autonomy -- level L3 --by <you> (a person, a Producer/Director session or an outside agent on your word); nothing changes on its own.` };
+  else if (rank(level) >= 3 && pointFailing.length) suggestion = { kind: 'demote', text: `The studio is at ${level} but ${pointFailing.map((c) => `${c.id} ${c.confidence ? pct1(c.point) : c.value} (bar: ${c.pointBar || c.bar})`).join('; ')}. Suggestion for the owner: back to L2 until the numbers hold again (npm run autonomy -- level L2 --by <you>).` };
+  return { level, meets, checks, confidence, suggestion };
 }
-
+const pct1 = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
 /** One line for the overnight page and the War Room. */
 export function autonomyLine(card, badge) {
   const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 100)}%`);
   const sug = badge.suggestion.kind ? ` · ${badge.suggestion.kind === 'promote' ? 'suggest L3 (your call)' : 'suggest back to L2'}` : '';
-  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.interventions ? ` · ${card.orchestrator.interventions} orchestrator interventions (${card.orchestrator.conductorNotes} conductor notes)` : card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${card.orchestrator?.usage?.sessions ? ` · outside work ${Math.round(card.orchestrator.usage.tokens / 1000)}k tokens` : ''}${sug}`;
+  return `Autonomy (${card.window.days} d): ${badge.level}${badge.meets === 'L3' ? ', meets the L3 bar' : ''} · ${card.hoursBetweenInterventions} h between interventions (${card.interventions.unplanned} unplanned, ${card.interventions.planned} planned) · hands-free ${pct(card.handsFreeLandRate)}${(() => { const h = (badge.checks || []).find((c) => c.id === 'handsFreeLandRate'); return h?.confidence && h.bound !== null && h.bound !== undefined ? ` (lower bound ${pct(h.bound)} at ${Math.round(h.confidence * 100)}%)` : ''; })()} of ${card.landed} landed · forced ${pct(card.forcedRate)} · reopened ${pct(card.reopenRate)} · Redo ${pct(card.verdicts.redoRate)} · ${card.tokensPerLanded === null ? 'no task landed' : `${Math.round(card.tokensPerLanded / 1000)}k tokens per landed task${card.cost?.previousTokensPerLanded ? ` (was ${Math.round(card.cost.previousTokensPerLanded / 1000)}k)` : ''}${card.cost?.priced ? (card.cost.dollarsPerLanded !== null ? `, $${card.cost.dollarsPerLanded}` : '') : card.cost ? ', tokens only' : ''}`}${card.roundTripsPerLanded !== null && card.roundTripsPerLanded !== undefined ? ` · ${card.roundTripsPerLanded} person round-trips per landed task` : ''}${card.orchestrator?.interventions ? ` · ${card.orchestrator.interventions} orchestrator interventions (${card.orchestrator.conductorNotes} conductor notes)` : card.orchestrator?.conductorNotes ? ` · ${card.orchestrator.conductorNotes} conductor notes` : ''}${card.orchestrator?.usage?.sessions ? ` · outside work ${Math.round(card.orchestrator.usage.tokens / 1000)}k tokens` : ''}${sug}`;
 }
 
 /** 2.66.0: the CLI's short "Tokens" block (lines). */
@@ -904,6 +1021,7 @@ export async function setLevel(level, { by, why = '', permission = '', env = pro
   fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
   const how = rec.recordedBy ? (rec.permission ? ` (recorded by ${rec.recordedBy} on ${who}'s permission: "${rec.permission.slice(0, 120)}")` : ` (a ${rec.via} session: ${rec.recordedBy})`) : '';
   emitEvent({ type: 'autonomy.level', agent: (rec.recordedBy || who).slice(0, 60), to: 'producer', msg: `Autonomy level ${from} -> ${to} by ${who}${how}${note ? `: ${note}` : ''}`.slice(0, 600), meta: { by: who.slice(0, 60), from, to, why: note || null, via: rec.via, ...(rec.recordedBy ? { recordedBy: rec.recordedBy } : {}), ...(rec.permission ? { permission: rec.permission } : {}) } });
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'autonomy-level', subject: AUTONOMY_REL, by: who, as: dm.asOf({ via: rec.via, permission: rec.permission }), why: note || `${from} -> ${to}`, evidence: `${from} -> ${to}`, undo: { kind: 'text', text: `npm run autonomy -- level ${from} --by <name>` } }); } catch {}
   return { ok: true, from, to, message: `Autonomy level ${from} -> ${to} in ${AUTONOMY_REL}, set by ${who}${how}${note ? ` (${note})` : ''}. Commit ${AUTONOMY_REL} so the change is on record.` };
 }
 
@@ -940,7 +1058,7 @@ export async function autonomyReport({ now = Date.now(), days = null, since = nu
   } catch {}
   const card = buildAutonomy(evs, { now, days: d, isPersonName, attempts, weigh, prices: readPrices(root), priceMultipliers: readPriceMultipliers(root), priceInfo: readPriceInfo(root), keepDays: cfg.keepDays, minSample: cfg.minSample, reverts, typeOfTask, zone: studioZone(), supervisorRunning });
   const badge = levelBadge(card, { ...cfg, days: round(d, 2) });
-  return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, keepDays: cfg.keepDays, minSample: cfg.minSample, protected: await configProtected() } };
+  return { card, badge, line: autonomyLine(card, badge), config: { file: cfg.file, exists: cfg.exists, level: cfg.level, l3: cfg.l3, confidence: badge.confidence, keepDays: cfg.keepDays, minSample: cfg.minSample, protected: await configProtected() } };
 }
 
 let cached = null;
@@ -963,6 +1081,35 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await setLevel(argv[1], { by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
+  }
+  // 2.71.0 (x): `mode autonomous on|off --by <game dev>`: on writes a proposal the owner confirms (npm run policy --
+  // confirm); off pauses autonomous mode at once (harness/policy.mjs). Never turns anything on by itself.
+  if (argv[0] === 'mode') {
+    if (argv[1] !== 'autonomous' || !['on', 'off'].includes(argv[2])) { console.error('Usage: npm run autonomy -- mode autonomous on --agent <name> --by <game dev> [--actions …] [--review-h 72] [--why "…"] [--permission "…"]\n       npm run autonomy -- mode autonomous off --by <name> [--why "…"]'); process.exit(2); }
+    const r = await (await import('./policy-rules.mjs')).proposeMode({ on: argv[2] === 'on', agent: flag('agent') || '', actions: flag('actions'), reviewH: flag('review-h'), by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+  // 2.73.0 (e): cheap-first routing's measures (harness/routing.mjs): success rate and tokens per landed change by task
+  // type and tier, from session ends; the holdout is off until the owner turns it on.
+  if (argv[0] === 'routing') {
+    const rt = await import('./routing.mjs');
+    const { readPolicy } = await import('./policy-rules.mjs');
+    const rp = rt.routingPolicy(readPolicy());
+    const evs = readRecentEvents(200000);
+    let typeOfTask = null;
+    try {
+      const dc = await import('./done-check.mjs');
+      const info = new Map();
+      for (const e of evs) if (e.type === 'task.added' && e.task) { const m = String(e.msg || '').match(/^Queued \S+ \[[^\]]*\] \(([^)]*)\): ([\s\S]*)$/); info.set(e.task, { id: e.task, title: m ? m[2] : String(e.meta?.title || ''), role: m ? m[1] : null }); }
+      typeOfTask = (id) => dc.typeOf(info.get(id) || { id, title: '', role: null }).type;
+    } catch {}
+    let weight = null;
+    try { const { weightedTokens: wt } = await import('./budget.mjs'); weight = (e) => wt(e); } catch {}
+    const st = rt.routingStats(evs, { now: flag('now') ? Date.parse(flag('now')) : Date.now(), days: Number(flag('days')) > 0 ? Number(flag('days')) : 14, typeOfTask, weight, holdout: rp.holdout || 0 });
+    if (argv.includes('--json')) { console.log(JSON.stringify({ routing: rp, ...st }, null, 2)); process.exit(0); }
+    console.log(rt.routingText(st, rp));
+    process.exit(0);
   }
   // 2.68.0: the release impact report (harness/impact.mjs): the same measures before vs after a harness upgrade.
   if (argv[0] === 'impact') {
@@ -988,6 +1135,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (oh) console.log(`  Open halt: since ${oh.atLocal} (${oh.ageH} h), by ${oh.who}: ${oh.cause}. ${oh.stale ? 'Stale: ' : ''}${oh.clear}.`);
   console.log(`Gate catches: ${c.gateCatches.trainReds} train reds, ${c.gateCatches.notDone} done-check refusals (${c.gateCatches.perLanded ?? '-'} per landed task).`);
   console.log(`Away verdicts: ${c.verdicts.great} great, ${c.verdicts.redo} redo, ${c.verdicts.comment} comment (Redo ${pct(c.verdicts.redoRate)}). Tokens: ${c.tokens.toLocaleString()} (${c.tokensPerLanded === null ? '-' : c.tokensPerLanded.toLocaleString()} per landed task).`);
+  if (c.cost?.byTask?.tasks) console.log(`Tokens per landed task, from the sessions that name it: ${c.cost.byTask.tokensPerLandedNamed.toLocaleString()} (${c.cost.byTask.tasks} task(s); ${c.cost.byTask.named} of ${c.cost.byTask.sessions} session(s) name their task).`);
   if (c.cost) console.log(`Cost per landed task: ${c.cost.tokensPerLanded === null ? '-' : `${c.cost.tokensPerLanded.toLocaleString()} tokens`}${c.cost.previousTokensPerLanded ? ` (the ${r.card.window.days} days before: ${c.cost.previousTokensPerLanded.toLocaleString()})` : ''}${c.cost.priced ? `, $${c.cost.dollarsPerLanded ?? '-'} (${c.cost.note})` : ` (${c.cost.note})`}.`);
   const o = c.orchestrator;
   console.log(`Person round-trips per landed task: ${c.roundTripsPerLanded ?? '-'}. Orchestrator interventions: ${o.conductorNotes} conductor note(s)${o.conductorNotes ? ` (${Object.entries(o.by).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}${o.interventions ? `; ${o.interventions} step(s) in all by an outside agent or in a conductor note, ${o.planned} planned, ${o.unplanned} unplanned (${Object.entries(o.byType).map(([k, v]) => `${k} ${v}`).join(', ')}; ${Object.entries(o.who).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}.`);
@@ -997,6 +1145,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(c.zone.source === 'default' ? `Days (UTC${c.zone.machine && c.zone.machine !== 'UTC' && !/^Etc\/(UTC|GMT)$/.test(c.zone.machine) ? `; this computer is on ${c.zone.machine}: set STUDIO_TZ=${c.zone.machine} for local days` : ''}):` : `Days (local, ${c.zone.zone}, from ${c.zone.source}):`);
   for (const b of c.buckets) console.log(`  ${b.day}${b.utc ? ` (${b.utc})` : ''}: supervisor ${b.supervisorHours} h, ${b.unplanned} unplanned / ${b.planned} planned, ${b.landed} landed (${b.handsFree} hands-free, ${b.forced} forced)`);
   console.log(`L3 bar (${r.config.file}${r.config.exists ? '' : ', defaults: no file'}${r.config.protected ? '; protected: owner-signed changes only' : '; set by a person, a Producer or Director session or an outside agent, never a worker'}):`);
+  console.log(r.badge.confidence ? `  Rates are judged at their one-sided ${Math.round(r.badge.confidence * 100)}% Wilson bound for a promotion (${r.config.file} "confidence", else STUDIO_L3_CONFIDENCE; 0 = point estimates); a demotion reads the point estimates.` : '  Rates are judged as point estimates ("confidence": 0).');
   for (const k of r.badge.checks) console.log(`  ${k.ok ? 'ok  ' : 'MISS'} ${k.id}: ${k.value} (bar: ${k.bar})${k.na ? ' n/a' : ''}`);
+  if (c.verdicts.audited) console.log(`  Audits counted in the redo rate: ${c.verdicts.audited} (${c.verdicts.auditFailed} failed).`);
   if (r.badge.suggestion.kind) console.log(r.badge.suggestion.text);
 }

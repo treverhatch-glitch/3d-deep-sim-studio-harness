@@ -43,13 +43,38 @@ jobs:
         with:
           python-version: '3.13'
       - run: npm ci --no-audit --no-fund # typescript: map find and the size check parse with it
-      # Syntax, every required gate (incl. the self-test that proves each gate can fail),
-      # the closed-loop failure proof, read-only gates, and the changelog entry.
-      - name: npm run release
-        run: node scripts/release.mjs
+      # Syntax, every required gate, the closed-loop failure proof, read-only gates, and the changelog entry.
+      # 2.72.0 (d): the self-test (the gate that proves each gate can fail) runs in the parallel shards below.
+      - name: npm run release (the self-test runs in release-gate-selftest)
+        run: node scripts/release.mjs --except selftest
       - name: Optional gates (report only)
         if: always()
         run: node scripts/run-gates.mjs --only balance,fun,renderer-budget,hud
+
+  # 2.72.0 (d): the self-test in 4 parallel shards per Node version (`--shard i/4` runs every 4th unit of
+  # qa/selftest.mjs in file order; units that must stay together share a group). `node qa/selftest.mjs --list-shards 4`
+  # shows the split. The name starts with release-gate, so a check pattern for release-gate covers the shards too.
+  release-gate-selftest:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the self-test reads the template's folders from the merge base
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: npm ci --no-audit --no-fund
+      - name: Self-test shard ${{ matrix.shard }}/4
+        run: node qa/selftest.mjs --shard ${{ matrix.shard }}/4
 
   # The engine track's Godot template, with a real Godot: its port matches the web game seed by seed,
   # and its headless gate passes.
@@ -148,8 +173,47 @@ jobs:
         with:
           python-version: '3.13'
       - run: npm ci --no-audit --no-fund
-      - name: npm run verify (required gates)
-        run: node scripts/run-gates.mjs --required-only --deep
+      # 2.72.0 (d): the self-test (most of this job's ~45 min) runs in windows-selftest's shards.
+      - name: npm run verify (required gates; the self-test runs in windows-selftest)
+        run: node scripts/run-gates.mjs --required-only --deep --except selftest
+
+  # 2.72.0 (d): the self-test on Windows in 4 parallel shards.
+  windows-selftest:
+    if: vars.HARNESS_RUNNER != 'self-hosted'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: npm ci --no-audit --no-fund
+      - name: Self-test shard ${{ matrix.shard }}/4
+        run: node qa/selftest.mjs --shard ${{ matrix.shard }}/4
+
+  # 2.72.0 (d): one result for the release gate: red when the release checks or any self-test shard failed (or was
+  # cancelled or skipped), on Linux or Windows.
+  release-gate-summary:
+    if: always() && vars.HARNESS_RUNNER != 'self-hosted'
+    needs: [release-gate, release-gate-selftest, windows, windows-selftest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every release-gate job and self-test shard passed
+        env:
+          RESULTS: ${{ needs.release-gate.result }} ${{ needs.release-gate-selftest.result }} ${{ needs.windows.result }} ${{ needs.windows-selftest.result }}
+        run: |
+          echo "release-gate, release-gate-selftest, windows, windows-selftest: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then echo "::error::a release-gate job or self-test shard did not pass ($RESULTS)"; exit 1; fi
+          done
 
   # Drives the War Room in Chromium: all three views, desktop and phone, every button.
   war-room-browser:

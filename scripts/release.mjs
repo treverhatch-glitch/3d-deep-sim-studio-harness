@@ -2,9 +2,10 @@
 /**
  * scripts/release.mjs — the one command to run before you tag, merge or hand off.  `npm run release`
  * `npm run release -- <version>` ships a release end to end instead: scripts/release-ship.mjs.
+ * `npm run release -- predict --metric <name> --expect "-30%"` (2.73.0) records a predicted scorecard change instead.
  *
  * 1. Syntax-checks every JS module and Python tool.
- * 2. Runs every required gate (scripts/run-gates.mjs --required-only).
+ * 2. Runs every required gate (scripts/run-gates.mjs --required-only; --except <ids> leaves some to CI jobs of their own).
  * 3. Proves the closed loop still records and exits 1 on a failure.
  * 4. Fails if any gate modified a tracked file (gates must be read-only).
  * 5. Checks CHANGELOG.md has an entry for the package.json version.
@@ -17,6 +18,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 2.73.0 (f): `npm run release -- predict --metric <name> --expect "-30%"` records what the release expects to move
+// (docs/releases/<version>.json, harness/release-predict.mjs); `npm run autonomy -- impact` scores it.
+if (process.argv[2] === 'predict') {
+  const { predictCli } = await import('../harness/release-predict.mjs');
+  const r = predictCli(process.argv.slice(3), { root, version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version });
+  (r.code ? console.error : console.log)(r.text);
+  process.exit(r.code);
+}
 // 2.30c: `npm run release -- <version>` ships (scripts/release-ship.mjs); with no version, this is the check CI runs.
 if (/^\d+\.\d+\.\d+/.test(process.argv[2] || '')) {
   const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'release-ship.mjs'), ...process.argv.slice(2)], { cwd: root, stdio: 'inherit' });
@@ -56,8 +65,12 @@ const tracked = () => (isGit ? run('git', ['diff', '--name-only']).stdout.trim()
 const before = tracked();
 
 // 2. Gates
-const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep'], { cwd: root, stdio: 'inherit' });
-step('required gates', gates.status === 0);
+// 2.72.0 (d): `--except selftest` (CI only) leaves gates out for jobs of their own: the self-test runs in parallel
+// shards (node qa/selftest.mjs --shard i/N) and a summary job fails the run when any shard failed.
+const exceptArg = process.argv.includes('--except') ? String(process.argv[process.argv.indexOf('--except') + 1] || '') : null;
+if (exceptArg !== null) console.log(`[release] note: --except ${exceptArg}: those gates run in jobs of their own; this alone is not a full release check`);
+const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep', ...(exceptArg !== null ? ['--except', exceptArg] : [])], { cwd: root, stdio: 'inherit' });
+step(exceptArg !== null ? `required gates (except ${exceptArg})` : 'required gates', gates.status === 0);
 
 // 3. Closed loop still fails loudly
 const loop = run(process.execPath, [path.join(root, 'harness', 'closed-loop.mjs'), '--simulate-fail']);

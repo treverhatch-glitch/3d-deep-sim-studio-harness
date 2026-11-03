@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
- *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--except id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
  * In a lane copy the game checks are scoped to the lane's changes (2.31.0); --all runs every one.
  * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
  *
@@ -9,6 +9,7 @@
  *   since its last pass is skipped (cache keyed by content hash). A fast run never counts as a full verify.
  * --tier merge: runs a full, deep verify and never reads from cache (same as --full --deep).
  * --tier slow (2.69.0): the game's slow tier only (harness/slow-tier.mjs; `npm run gates -- --tier slow`, nightly).
+ * --canaries (2.72.0): each game check run on its must-fail canary (harness/canaries.mjs); report only.
  * --deep (or STUDIO_VERIFY_DEEP=1) runs harness self-checks; npm run release and CI do.
  * --full runs every gate a Full studio would.
  * Everyday verify (no tier) skips the deep gates, as before, and never reads the cache.
@@ -25,10 +26,20 @@ import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
 import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
 import { selfIdentity, pidAlive as idAlive } from '../harness/proc-identity.mjs';
+import { applyGateEnv, nodeModulesDrift, porcelainZ } from '../harness/gate-env.mjs';
+import { createFence, fenceLine } from '../harness/gate-output.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
 const argv = process.argv.slice(2);
+// 2.71.1 (B, S03/T06/G10/G16): the gates and everything they start run without code-loading NODE_OPTIONS (or npm's
+// node-options), with git pointed only at this checkout and replace refs ignored (harness/gate-env.mjs). Done in place
+// before anything is spawned, so every git call (whichever helper makes it) and every child inherits it. A preload
+// into this very process (NODE_OPTIONS=... npm run verify by hand) has already run: it is named, and recorded.
+const gateEnvApplied = applyGateEnv();
+if (gateEnvApplied.dropped.length && !process.env.STUDIO_VERIFY_RUN) console.log(`[gates] note: the gates run without ${gateEnvApplied.dropped.join(', ')} (harness/gate-env.mjs)`);
+if (gateEnvApplied.preload.length) process.env.STUDIO_VERIFY_PRELOADED = [...new Set([...String(process.env.STUDIO_VERIFY_PRELOADED || '').split(' ').filter(Boolean), ...gateEnvApplied.preload])].join(' ');
+if (gateEnvApplied.preload.length) console.log(`[gates] WARN this run was started with NODE_OPTIONS that load code into it (${gateEnvApplied.preload.join(' ')}): its checks run without them, but this process's own exit code can't be trusted; the verify record says nodeOptionsPreload`);
 
 // 2.58.0 (F1): verify survives being reaped. Claude Code's low-memory guard killed an agent's background
 // `npm run verify` four times while the session sat idle (foreground runs survived). `npm run verify` now starts
@@ -53,10 +64,19 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
   // 2.69.0 (p): `npm run gates -- --tier slow` is the nightly slow tier (harness/slow-tier.mjs): the game's slow checks and
   // slow tests only, on this checkout, one bug task per new failure. It is never a verify and writes no verify record.
   if (argv.includes('--tier') && argv[argv.indexOf('--tier') + 1] === 'slow') process.exit(await (await import('../harness/slow-tier.mjs')).slowTierCli(argv, { root }));
+  // 2.72.0 (b): `npm run gates -- --canaries` runs each game check against its must-fail canary (harness/canaries.mjs);
+  // report only, never a verify, no verify record.
+  if (argv.includes('--canaries')) process.exit(await (await import('../harness/canaries.mjs')).canariesCli(argv, { root }));
   const detachEnv = String(process.env.STUDIO_VERIFY_DETACH || '');
   const detach = !argv.includes('--no-detach') && !process.env.STUDIO_VERIFY_RUN && !/^(off|0|false|no)$/i.test(detachEnv)
     && (argv.includes('--detach') || /^(on|1|true|yes)$/i.test(detachEnv) || process.env.npm_lifecycle_event === 'verify');
   const wait = argv.includes('--wait') && !process.env.STUDIO_VERIFY_RUN;
+  // 2.72.0 (b): the two-round cap (harness/round-cap.mjs): a task handed back for being red twice in a row on the same
+  // failure gets no third verify in the same session.
+  if (!wait && !process.env.STUDIO_VERIFY_RUN) {
+    const capWhy = await (await import('../harness/round-cap.mjs')).verifyRefusal();
+    if (capWhy) { console.error(`[gates] refused (STUDIO_ROUND_CAP): ${capWhy}. Nothing was run.`); process.exit(1); }
+  }
   // 2.59.0 (#6): a lane copy runs its own committed harness/ and scripts/. When the studio's branch changed them since
   // the lane branched, its gates would judge with the old code (T-061 failed the hooks gate again after the fix had
   // landed on main): refuse and name the files and the fix (rebase). The studio's branch holds the reviewed harness; a
@@ -77,7 +97,11 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
   if (wait) process.exit(await flushed(await waitForVerify()));
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));
 }
-const only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+let only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+// 2.72.0 (d): --except id,id leaves those gates out (CI runs the self-test in parallel shards of its own jobs:
+// `node scripts/run-gates.mjs --required-only --deep --except selftest` beside `node qa/selftest.mjs --shard i/N`).
+// It is a partial run, like --only: never a verify record, never the full verify.
+const except = exceptGates(argv, cfg.gates || []);
 // 2.65.3 (B-43): a merge train's focused re-check (STUDIO_GATE_FOCUS, harness/train-focus.mjs) is read only by an
 // --only run, which stands for no verify; any other run drops it, so a verify always runs the whole game check.
 const focusRun = Boolean(only && String(process.env.STUDIO_GATE_FOCUS || '').trim());
@@ -115,7 +139,9 @@ const gates = all.filter((g) => {
   if (!deep && DEEP.has(g.id)) return skipped.push(`${g.id} (deep)`), false;
   if (scope === 'lite' && !LITE.has(g.id) && !isFastTier) return skipped.push(g.id), false;
   return true;
-});
+}).filter((g) => !except?.has(g.id) || (skipped.push(`${g.id} (--except)`), false));
+// An --except run stands for no verify: from here on it is treated as the --only run of the gates it kept.
+if (except) only = new Set(gates.map((g) => g.id));
 
 // 2.60.0 (#5): a run that takes machine:heavy runs as the leader of a process group of its own (POSIX; a re-run of
 // this script that this one waits for), so `node harness/heavy.mjs stop` and a later take kill every gate it started
@@ -128,6 +154,14 @@ if ((!only && !isFastTier) || gates.some(isHeavyGate)) {
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
 console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); ${realCartridges.length ? `its cartridge${realCartridges.length === 1 ? '' : 's'} (${realCartridges.join(', ')}) get${realCartridges.length === 1 ? 's' : ''} the cartridge gates that check every cartridge, the rest are skipped` : 'the cartridge gates are skipped'}` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
+// 2.71.1 (B, S03/S04): node_modules that don't match package-lock.json (a stale install, or a test runner swapped for a
+// shim) are named once; cheap (two JSON reads per folder), never a failure.
+try {
+  for (const d of [...new Set([root, sg?.root ? path.resolve(root, sg.root) : null].filter(Boolean))]) {
+    const why = nodeModulesDrift(d);
+    if (why) console.log(`[gates] WARN node_modules in ${path.relative(root, d).split(path.sep).join('/') || '.'} doesn't match its package-lock.json (a stale install, or changed by hand): ${why}. The checks may not run what the lockfile names: run npm ci there`);
+  }
+} catch { /* a help, never a failure */ }
 // 2.31.0: in a lane copy, verify tests what this lane changed against the studio's branch (committed and
 // not), the same scope `task done` uses. Before, verify had no diff, so a Godot-only lane ran every web
 // game check (~11 min in the Marina run) and never ran the Godot gate, which only runs for changed paths.
@@ -140,8 +174,8 @@ else if (!argv.includes('--all')) {
     const { inLaneCopy, laneDiff } = await import('../harness/worktree.mjs');
     if (inLaneCopy()) {
       const ld = laneDiff();
-      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8' }).stdout || '';
-      const dirty = st.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+      // 2.71.1 (B, G14): -z names: a non-ASCII path is no longer a quoted "web/\340..." that no glob matches.
+      const dirty = porcelainZ(spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '').map((e) => e.file);
       const files = [...new Set([...(ld?.changed || []), ...dirty])];
       if (files.length) {
         changedFiles = files;
@@ -208,20 +242,28 @@ let heavyLock = null;
 const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
 // 2.58.3 (O3, crew P-035): nor does a tracked file that differs only in line endings (harness/eol-only.mjs).
 const { splitEolOnly } = await import('../harness/eol-only.mjs');
-const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, s.split('\n').filter((l) => l.length > 3).filter((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, '')))).real.length > 0; };
+// 2.71.1 (B, G14): names read with -z (never quoted), so a non-ASCII engine cache file is recognised as one.
+const treeDirty = () => { const s = gitOut(['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, porcelainZ(s).filter((e) => !isEngineChurn(e.file)).map((e) => `${e.xy} ${e.file}`)).real.length > 0; };
 const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
 // 2.58.5 (H-3): the tree it tests too (with dirty=false, the files the gates saw), so task done can let this verify
 // stand in for its game checks on the same tree; with what scoped the game gate (its paths, related tests only).
 const treeAtStart = headAtStart ? gitOut(['rev-parse', 'HEAD^{tree}'])?.trim() || null : null;
 const gatePathsAtStart = String(process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
 const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsOn();
-const dirtyAtStart = treeDirty();
+// 2.71.1 (G15/T02): untracked files, and ignored files outside build and dependency output, under the game and the paths
+// the checks read count as dirty too: a config or setup file no commit holds changes what the checks run, and a record
+// of a "clean" run beside one must never be reused (harness/gate-trust.mjs hiddenInputs).
+const trust = await import('../harness/gate-trust.mjs');
+const hiddenAtStart = trust.hiddenInputs(root, [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine', 'hub'], { skip: isEngineChurn });
+if (hiddenAtStart?.length) console.log(`[gates] note: ${hiddenAtStart.length} untracked or ignored file(s) the checks may read (${hiddenAtStart.slice(0, 5).join(', ')}${hiddenAtStart.length > 5 ? ', …' : ''}): this verify counts as dirty, so it can't stand in for task done's checks or a train's verify. Commit them, or delete them (or add build output to .gitignore under a dist/, build/ or coverage/ folder).`);
+const dirtyAtStart = hiddenAtStart?.length ? true : treeDirty();
 const { runGateCommand } = await import('../harness/gate-spawn.mjs');
 const rows = [];
 let cachedCount = 0;
 const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '');
 // 2.58.0 (F2): the tracked files as they are before any gate runs, to name the ones this verify changes.
 const trackedBefore = trackedSnapshot();
+let firstRed = null;
 for (const gate of gates) {
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
@@ -244,20 +286,37 @@ for (const gate of gates) {
   // carry every passing gate's log into every later turn (verify was ~3k chars a call in the Marina run).
   // 2.65.0: on Windows, while this run holds machine:heavy, the gate's shell is recorded in the holder's tree so its
   // children that outlive it are found by `heavy stop` and the next take; POSIX runs exactly as before (spawnSync).
-  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock });
+  // 2.71.1 (B, L01/I01): every gate's output goes through a fence (harness/gate-output.mjs): kept whole in
+  // .studio/gates/out/<gate>.log, at most its first and last STUDIO_GATE_OUTPUT_LINES (200) lines shown, and a line that
+  // looks like run-gates' own ([gates] ..., [verify] ...) shown as `| [gates] ...`, so no check prints our verdict or Fix.
+  const outName = `.studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log`;
+  const fence = createFence({ show: compact ? null : (t) => process.stdout.write(t), logName: outName, pick: /^\[game-gates\] WARN game:/ });
+  const outTmp = path.join(root, `${outName}.${process.pid}.tmp`);
+  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock, outFile: outTmp, onData: (d) => fence.push(d) });
+  try { fs.renameSync(outTmp, path.join(root, outName)); } catch { try { fs.rmSync(outTmp, { force: true }); } catch {} }
+  const fenced = fence.end();
   if (compact) {
-    const text = `${res.stdout || ''}${res.stderr || ''}`;
-    try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
     // 2.67.0 (B-48): a passing game gate's advisory checks (game:test-rng, game:det-math in warn mode) still show.
-    if (res.status === 0) for (const l of text.split('\n').filter((x) => /^\[game-gates\] WARN game:/.test(x)).slice(0, 5)) console.log(`${l} (advisory; full: .studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log)`);
-    if (res.status !== 0) { const lines = text.trimEnd().split('\n'); const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40); console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${lines.length} lines; full: .studio/gates/out/${gate.id}.log)`); console.log(lines.slice(-n).join('\n')); }
+    if (res.status === 0) for (const l of fenced.picked) console.log(`${l} (advisory; full: ${outName})`);
+    if (res.status !== 0) {
+      const lines = [...fenced.head, ...fenced.tail];
+      while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+      const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40);
+      console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${fenced.lines} lines; full: ${outName})`);
+      console.log(lines.slice(-n).map(fenceLine).join('\n'));
+    }
   }
   const ms = Date.now() - start;
   const ok = res.status === 0;
   const required = gate.required !== false;
-  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name });
+  // 2.72.0 (a): which part failed (sub-ids: game:test:<file>, golden:<file>), the files a timeout-only red re-ran green
+  // alone, and a red golden's first divergence, read from the gate's own output (harness/gate-subids.mjs).
+  const facts = await gateRowFacts(gate.id, ok, fenced.text);
+  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts });
+  if (!ok && required && !firstRed) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
-  if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: `${res.stdout || ''}${res.stderr || ''}`, compact })}`); // 2.66.0 (d): one next step per failure
+  if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
+  if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: fenced.text, compact })}`); // 2.66.0 (d): one next step per failure
 
   if (cacheable && !isMergeTier && !focusRun && !sparseRun?.partial) {
     if (ok) set(gate, ms);
@@ -289,11 +348,19 @@ try {
   const headNow = headAtStart;
   const dirtyEnd = treeDirty();
   const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
-  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
+  // 2.71.1 (D01/T04): every record carries a run id, and a full run also writes its run log (.studio/gates/runs/<id>.json,
+  // the record's digest): reuse needs the two to match (harness/gate-trust.mjs recordTrust).
+  const runId = /^[\w.-]{6,80}$/.test(process.env.STUDIO_VERIFY_RUN || '') ? process.env.STUDIO_VERIFY_RUN : trust.newRunId();
+  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
+  // 2.73.0 (g): the run log is signed with the studio's verify key (outside every checkout); unsigned, it is never reused.
+  const runLog = !only && !isFastTier ? trust.writeRunLog(path.join(root, '.studio'), JSON.parse(rec), { root: CHECKOUT.real, owner: process.env.STUDIO_LOCK_OWNER || null }) : null;
+  if (runLog && !runLog.signed) console.log(`[gates] note: this verify's record is not signed (${runLog.why}), so task done and the train won't reuse it`);
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;
-  const inCopy = Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== root;
+  // 2.71.1 (G12): a checkout whose .studio/ is a link (a lane or train copy) is a copy whatever STUDIO_MAIN_ROOT says, so a
+  // lane naming itself can't write the studio-wide records.
+  const inCopy = (Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== root) || CHECKOUT.file !== 'full.json';
   if (!inCopy) fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), rec);
   // A full run is kept apart, so one agent's --only run never wipes the full verify another agent's
   // done-check needs (test #2).
@@ -317,7 +384,7 @@ try {
 // 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
 try {
   const { emitEvent } = await import('../harness/event.mjs');
-  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
   // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
   if (!only && !isFastTier) {
     const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);
@@ -326,6 +393,22 @@ try {
   }
 } catch {
   // the event log is a help, never a blocker
+}
+// 2.72.0 (b): one round of the owner's task (a full verify only) and, red twice in a row on one failure, its hand-back.
+if (!only && !isFastTier && rows.length) await (await import('../harness/round-cap.mjs')).verifyRound({ ok: !rows.some((r) => !r.ok && r.required), failGate: firstRed?.id || null, failText: firstRed?.text || '' });
+// 2.72.0 (c): error-signature memory (harness/error-memory.mjs): a red on the owner's task is kept as pending; a later green of
+// that gate on the same task records the fix (commit, summary, files) for the next agent who meets the same red.
+try {
+  const em = await import('../harness/error-memory.mjs');
+  const task = await em.taskOfOwner(process.env.STUDIO_LOCK_OWNER);
+  if (task) {
+    const outOf = (id) => { try { return fs.readFileSync(path.join(root, '.studio', 'gates', 'out', `${String(id).replace(/[^\w.-]/g, '_')}.log`), 'utf8'); } catch { return ''; } };
+    const seen = await em.observeVerify({ task, rows, outputOf: outOf, cwd: root, head: headAtStart });
+    for (const f of seen.fixed) console.log(`[gates] note: remembered the fix of ${f.sub || f.gate}'s red for ${task} (${f.commit}; .studio/error-memory.jsonl)`);
+    for (const l of em.seenLinesFor(seen.pending.map((x) => x.key))) console.log(`[gates] ${l}`);
+  }
+} catch {
+  // a help, never a blocker
 }
 // 2.31.0: fail closed. A verify where no gate ran checked nothing; it used to print "0/0 passed, all
 // required gates green" and count as a full verify.
@@ -339,6 +422,29 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`[gates] ${rows.filter((r) => r.ok).length}/${rows.length} passed, all required gates green`);
+
+// ---- 2.72.0 (a): sub-ids, timeout-flakes and first divergences in the rows and the gates.run event ----
+
+/** { sub, timeoutFlakes, divergence } for one gate's row (only the keys that have something). Never throws. */
+async function gateRowFacts(id, ok, text) {
+  try {
+    const out = {};
+    if (!ok) out.sub = (await import('../harness/gate-subids.mjs')).subIdsFor(id, text, { roots: [root] });
+    const tf = (await import('../harness/timeout-rerun.mjs')).timeoutFlakesFromLog(text);
+    if (Object.keys(tf).length) out.timeoutFlakes = tf;
+    if (!ok) { const d = (await import('../harness/divergence.mjs')).divergenceFromLog(text); if (d.length) out.divergence = d.slice(0, 5); }
+    return out;
+  } catch { return {}; }
+}
+
+/** The gates.run event's meta additions: subIds (the required failures' parts), timeoutFlakes, divergence. */
+function gatesRunFacts(list) {
+  const red = list.filter((r) => !r.ok && r.required);
+  const subIds = [...new Set(red.flatMap((r) => (r.sub?.length ? r.sub : [r.id])))].slice(0, 40);
+  const tf = Object.assign({}, ...list.map((r) => r.timeoutFlakes || {}));
+  const div = red.flatMap((r) => r.divergence || []).slice(0, 5);
+  return { ...(subIds.length ? { subIds } : {}), ...(Object.keys(tf).length ? { timeoutFlakes: tf } : {}), ...(div.length ? { divergence: div } : {}) };
+}
 
 // ---- 2.58.0 (F2): tracked files a verify changed ----
 
@@ -674,4 +780,17 @@ async function waitForVerify() {
   console.log(`[verify] ${what} stopped before it finished (${st.hostPid ? `its process ${st.hostPid} is gone` : 'it never started'}) and wrote no result: run npm run verify again. Its output so far:`);
   await printTail(st.log);
   return 1;
+}
+
+/** 2.72.0 (d): the gate ids after --except (a Set), or null. An id that isn't a gate stops the run (a typo would run it). */
+function exceptGates(args, gateList) {
+  if (!args.includes('--except')) return null;
+  const ids = String(args[args.indexOf('--except') + 1] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const known = new Set(gateList.map((g) => g.id));
+  const bad = ids.filter((x) => !known.has(x));
+  if (!ids.length || bad.length) {
+    console.error(`[gates] --except needs gate ids from studio/gates.json${bad.length ? `; not a gate: ${bad.join(', ')}` : ''}`);
+    process.exit(2);
+  }
+  return new Set(ids);
 }

@@ -45,6 +45,7 @@ import { contractChecks } from './contracts.mjs';
 import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs';
 import { activeGame } from './cartridge.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
+import { checkResearch, ensureResearchTemplate } from './research.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -92,6 +93,8 @@ const PREFIX = [
   [/^(bug|fix)\b/i, 'bug'],
   [/^system\b/i, 'system'],
   [/^study\b/i, 'study'],
+  // 2.71.0 (y): a research write-up with its sources (harness/research.mjs).
+  [/^research\b/i, 'research'],
   [/^balance\b/i, 'balance'],
   [/^fun\b/i, 'fun'],
   [/^playtest\b/i, 'playtest'],
@@ -134,6 +137,7 @@ export const TYPES = {
   fun: { skill: 'studio/skills/playtest.md', means: 'a fun report newer than the task start and the last game change' },
   playtest: { skill: 'studio/skills/playtest.md', means: 'a playtest report on the current build with seed, ticks, hash, and the failing tick if it failed' },
   study: { skill: 'studio/skills/study.md', means: 'a study.md of 120+ words under studio/research/, written after the task started' },
+  research: { skill: 'studio/skills/research.md', means: 'a write-up at docs/research/<ID>.md (or the game\'s docs/research/) with a Sources section holding at least one link; the template (question, sources, findings, unverified, recommendation) is written at task start' },
   review: { skill: 'studio/skills/review.md', means: 'a review note naming the task or commit it reviewed, with a verdict' },
   docs: { skill: 'studio/skills/docs.md', means: 'a changed .md file, and a full `npm run verify` after the last change' },
   direction: { skill: 'studio/skills/direction.md', means: 'a dated review in studio/bible/reviews/ since the task started, naming the phase, what it checked, a verdict, and next tasks' },
@@ -247,7 +251,9 @@ function filesUnder(rel, test, deep = false) {
 const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 
 // ---- what changed, and when ----
-const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
+// 2.73.0: the harness's own records (the harness-task queue a forced done adds to, 2.71.0 z; pending reviews and holds)
+// are no task's change: another task's forced done wrote HARNESS-TASKS.md and it counted as this task's edit.
+const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|HARNESS-TASKS\.md$|pending-review\.json$|task-holds\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
   const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
@@ -754,6 +760,14 @@ export function checkDone(task, since = startedAt(task.id)) {
     const good = reps.filter(({ f, j }) => mtime(f) >= fresh && j.stage1.seed != null && j.stage1.ticksRun != null && isSha256(j.stage1.finalSha256) && (j.passed || j.stage1.failingTick != null));
     check('Report covers the current build with seed, ticks and hash (and the failing tick if it failed)', good.length, 'no report on the current build with a seed, ticks, a hash and (if it failed) the failing tick; run the playtest again');
   }
+  // 2.71.0 (y): research is paperwork: its write-up, with a Sources section and at least one link (harness/research.mjs).
+  if (type === 'research') {
+    const r = checkResearch(task);
+    let wrote = null;
+    if (!r.exists) { try { wrote = ensureResearchTemplate(task); } catch { wrote = null; } }
+    check(`Research write-up at ${r.file}`, r.exists, wrote ? `no write-up yet: the template is now at ${wrote}; fill it in (the question, sources with links, findings, what is UNVERIFIED, a recommendation) and commit it` : `no write-up at ${r.file}`);
+    if (r.exists) check('The write-up has a Sources section with at least one link', r.ok, `${r.why}: list each source with its link (https://…); research without sources is not done`);
+  }
   if (type === 'study') {
     const studies = newestSince(filesUnder('studio/research', (n) => n === 'study.md', true), since);
     check('study.md written since the task started', studies.length, 'no study.md under studio/research/ since this task started (layout ideas: docs/GAME-STUDY.md)');
@@ -853,7 +867,9 @@ export function checkDone(task, since = startedAt(task.id)) {
   // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
   // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {
-    const k = contractChecks(task, type);
+    // 2.72.0 (c): in a lane that lands through the merge train, an unverified must-item waits for the reviewer there
+    // (tier C, harness/train.mjs laneTier) instead of blocking done here; elsewhere it blocks as before.
+    const k = contractChecks(task, type, { defer: inLaneCopy() && !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_TRAIN || '')) });
     for (const c of k.checks) check(c.label, c.ok, c.why);
     notes.push(...k.notes);
   }

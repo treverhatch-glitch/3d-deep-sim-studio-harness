@@ -91,6 +91,7 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   const permRec = onPerm && onPerm.via !== 'person' ? { permission: perm.slice(0, 300), recordedBy: onPerm.recordedBy } : {};
   fs.writeFileSync(RESUME, `${JSON.stringify({ by: who.slice(0, 60), why: note, via: 'cli', at: new Date().toISOString(), ...permRec })}\n`);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'studio-resume', subject: 'supervisor', by: who.slice(0, 60), as: dm.asOf({ via: permRec.recordedBy ? 'outside agent' : 'person', permission: permRec.permission }), why: note || 'try again', evidence: `halted: ${String(s.halted.why || '').slice(0, 120)}`, undo: null }); } catch {}
   emitEvent({ type: 'supervisor.resume_asked', agent: who.slice(0, 60), to: 'supervisor', msg: `${who} asked the supervisor to try again${permRec.recordedBy ? ` (recorded by ${permRec.recordedBy} on ${who}'s permission: "${permRec.permission.slice(0, 120)}")` : ''}${note ? `: ${note}` : ''} (it stopped: ${s.halted.why || 'see npm run studio:status'})`.slice(0, 600), meta: { ...permRec, by: who.slice(0, 60), why: note || null, via: 'cli', cleared: s.halted.why || null } });
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
 }
@@ -199,6 +200,14 @@ export async function supervise(opts, state, now = Date.now()) {
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
   if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  // 2.71.0 (y): the owner's reports to a webhook (harness/report-post.mjs): the digest once a day at STUDIO_REPORT_HOUR,
+  // the what's-next board when the queue changed a lot; before the halt and window checks, so a halted studio still reports.
+  if (!opts.watcher) {
+    try {
+      const rp = await (await import('./report-post.mjs')).reportPass({ now, inline: Boolean(opts.deps?.reportInline), deps: opts.deps?.reportDeps || {} });
+      if (rp?.line) console.log(`[supervisor] ${rp.line}`);
+    } catch { /* a report, never a crash */ }
+  }
   if (opts.until && now >= opts.until) {
     if (!state.halted) { try { await checkBadEnds(opts, state, now); } catch { /* the stop stands */ } }
     return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
@@ -275,6 +284,14 @@ export async function supervise(opts, state, now = Date.now()) {
       const w = await uw.supervisorWatch({ now, dryRun: opts.dryRun });
       if (w?.line) why.push(w.line);
     } catch { /* a watch, never a crash */ }
+  }
+  // 2.73.0 (f): the weekly harness scout (harness/harness-scout.mjs): one research task on STUDIO_SCOUT_DAY, off by
+  // default (STUDIO_HARNESS_SCOUT=on, the owner's).
+  if (!opts.watcher) {
+    try {
+      const sc = await (await import('./harness-scout.mjs')).scoutPass({ now, dryRun: opts.dryRun, deps: opts.deps?.scoutDeps || {} });
+      if (sc?.line) why.push(sc.line);
+    } catch { /* paperwork, never a crash */ }
   }
   // 2.70.0 (w): the janitor's stale-lane proposals (a dry run, never deletes) and the lane disk report, at most every
   // STUDIO_JANITOR_LANES_MIN (360) minutes, in a detached child (harness/lane-disk.mjs).
@@ -566,6 +583,9 @@ async function main(argv) {
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
+    // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
+    await import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})).catch(() => {});
     // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
     // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
     if (!r.stop) await trainDaemonTick(state, r);

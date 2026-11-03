@@ -18,6 +18,11 @@
  *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
  *     both sides have enough data (npm run autonomy -- impact), as a line;
  *   - 2.70.0 (v): assets waiting for a review of their previews, oldest first (harness/asset-review.mjs);
+ *   - 2.71.0 (x): autonomous decisions waiting for review past the policy's reviewWithinH, and a proposal of
+ *     autonomous mode waiting for the owner; then a line with the autonomous decisions (harness/decisions.mjs);
+ *   - 2.71.0 (y): research tasks finished in the last 24 h, each with its write-up and recommendation, as a line;
+ *   - 2.71.0 (z): workarounds per day, the top 5 signatures, the trend after the latest upgrade and the open harness
+ *     tasks (harness/workaround.mjs), as a line;
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -90,6 +95,13 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const line = (await import('./asset-review.mjs')).pendingReviewsLine(root);
     if (line) out.push({ kind: 'review', line });
   });
+  // 2.71.0 (x): autonomous decisions past the policy's reviewWithinH (harness/decisions.mjs); work never waited for them.
+  await tryAdd(async () => { out.push(...await (await import('./decisions-log.mjs')).overdueNeeds({ now })); });
+  await tryAdd(async () => {
+    const pol = await import('./policy-rules.mjs');
+    const p = readJson(path.join((await import('./worktree.mjs')).mainRoot(), pol.PROPOSAL_REL));
+    if (p?.autonomous?.agent) out.push({ kind: 'policy', line: `${p.by} proposes autonomous mode for ${p.autonomous.agent} (${(p.autonomous.actions || []).join(', ')}): npm run policy -- confirm --by <you> (or decline)` });
+  });
   out.push(...fuzzSuggestions(ev, now));
   const declined = ev.filter((e) => e.type === 'selftriage.declined' && (Date.parse(e.ts) || 0) >= now - DAY);
   for (const e of declined.slice(-3)) { const why = String(e.meta?.why || e.msg || ''); out.push({ kind: 'halt', line: `self-triage left for you (${e.meta?.fix || 'a fix'}, ${e.meta?.cause || 'a cause'}): ${why.length > 110 ? `${why.slice(0, 109)}…` : why}` }); }
@@ -134,6 +146,8 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
   const fuzzLine = fuzzFiledLine(ev, now);
   const flakeLine = unityFlakeLine(ev, now); // 2.67.1 (k)
+  let canaryLine = ''; // 2.72.0 (b): the newest must-fail canary run (harness/canaries.mjs): silently green checks
+  try { canaryLine = (await import('./canaries.mjs')).canaryDigestLine(ev, now); } catch { canaryLine = ''; }
   let diskLine = ''; // 2.68.0 (m): the studio's disk under STUDIO_DISK_MIN_FREE_GB in the last 24 h
   try { diskLine = (await import('./machine.mjs')).diskDigestLine(ev, now); } catch { diskLine = ''; }
   // 2.68.0: the latest harness upgrade's verdict, once enough data exists on both sides (harness/impact.mjs).
@@ -144,18 +158,30 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
   let delegLine = '';
   try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
+  // 2.71.0 (x): autonomous mode: decisions per day, approved vs reverted, the review list, time saved (harness/decisions.mjs).
+  let autoLine = '';
+  try { autoLine = await (await import('./decisions-log.mjs')).autonomyDigestLine({ events: ev, now }); } catch { autoLine = ''; }
+  let auditLine = ''; // 2.73.0 (e): audit items picked, waiting, passed and failed (harness/audit.mjs)
+  try { auditLine = await (await import('./audit.mjs')).auditDigestLine({ events: ev, now }); } catch { auditLine = ''; }
   // 2.66.0 (c): the top blocked commands (harness/denials.mjs) as allowlist candidates; a person decides, nothing is added.
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
   let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
   let quarLine = ''; // 2.69.0 (r): tests the flake triager quarantined (harness/flakes.mjs), with their evidence
   try { quarLine = (await import('./flakes.mjs')).quarantineDigestLine(ev, { now, root }); } catch { quarLine = ''; }
+  let researchLine = ''; // 2.71.0 (y): research tasks finished in the last 24 h, with their write-ups (harness/research.mjs)
+  try { researchLine = (await import('./research.mjs')).researchDigestLine(ev, { now, root }); } catch { researchLine = ''; }
   let buildLine = ''; // 2.70.0 (t): the latest playable build and clip after a landing in the last 24 h
   try { const l = (await import('./landing-build.mjs')).landingLine(ev, { since: now - DAY }); buildLine = l ? `${l} (npm run play).` : ''; } catch { buildLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  // 2.71.0 (z): workarounds per day, the top signatures, the trend after the latest upgrade and the open harness tasks
+  // (harness/workaround.mjs; the harness maintainer's queue, never a game task).
+  let workMod = null; let workPts = []; let workLine = '';
+  try { workMod = await import('./workaround.mjs'); workPts = await workMod.upgradesSeen({ events: ev, now, root }); workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts }); } catch { workLine = ''; }
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(canaryLine ? [canaryLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ...(auditLine ? [auditLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
+  if (words(text) >= MAX_WORDS && workLine && workMod) { workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts, brief: true }); text = compose(items); }
   if (words(text) >= MAX_WORDS && candLine) { candLine = `Allowlist candidates: ${cands.length} (npm run denials; never added automatically).`; text = compose(items); }
   while (words(text) >= MAX_WORDS && items.length > 1) { items = items.slice(0, -1); text = compose(items).replace(/Needs you \((\d+)\):/, `Needs you ($1; ${need.length - items.length} more: npm run digest -- --all):`); }
   if (words(text) >= MAX_WORDS) { line = line.split(' · ').slice(0, 3).join(' · '); text = compose(items); }

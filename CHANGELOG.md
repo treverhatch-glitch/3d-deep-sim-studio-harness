@@ -4,6 +4,167 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.73.0] — 2026-11-03
+2.73.0, "autonomy, safely": a measured, reversible way to hand more to the overseer, and the last red-team holes the
+outside review left open (the dev plan's 2.73, the verified Grok dossier and the owner's overseer roadmap; P-213 to P-218).
+### Added
+- **Upgrade preflight and smoke (f).** `npm run upgrade -- --preflight` (read-only, PASS/WARN/FAIL with Fix lines: node
+  and git, the board committed, the owner key and signatures, disk and RAM, Unity/Godot paths, the webhook set (never
+  printed), the policy and delegation files, lanes with unlanded work) before an update, and `--smoke` right after it
+  (a tiny verify and train on a made-up task in a scratch copy, the machine scan, a dry supervisor pass).
+- **Before snapshot and predictions (f).** `--merge` writes `.studio/upgrades/<from>-to-<to>.json` (landed/h, false reds
+  per train, red-verify %, tokens per landed change by task, workarounds/day), which `npm run autonomy -- impact`
+  compares against; `npm run release -- predict --metric <m> --expect "<-30%>"` records what a release should move and
+  impact scores it.
+- **The overseer's stages (f).** `studio/overseer.json` (protected; stage 0 by default, only the owner raises it);
+  `npm run overseer` says whether the next stage's criteria hold (a suggestion); `npm run workaround -- repro`
+  scaffolds a failing-test PR in a separate harness clone (stage 1+). A weekly harness scout research task, off by
+  default (`STUDIO_HARNESS_SCOUT=on`).
+- **Confidence bounds on the L3 bar (e).** Promotion needs one-sided 90% Wilson bounds to clear the bar (hands-free lower
+  bound >= 0.8, reopen and redo upper bounds under their caps) and says how many more landings would clear it;
+  demotion stays on point estimates (`"confidence"` in studio/autonomy.json or `STUDIO_L3_CONFIDENCE`; 0 = old rule).
+- **Audit sampling (e).** A seeded share of hands-free landings and autonomous decisions (`"audit": { "rate" }`, default
+  0.1 in autonomous mode) goes on the review list and in the digest, never blocking work; the auditor can't be anyone
+  who did the work; a failed audit counts as a Redo.
+- **Cheap-first routing (e).** Task types the policy lists start on the cheapest listed model tier and step up after a
+  red round, only to models the policy lists; `npm run autonomy -- routing` shows success and tokens per landed change
+  by tier. The holdout is built but off until API credit is available (the owner's decision).
+- **Signed verify records (g).** Each studio gets a local verify key outside every checkout
+  (`~/.studio-verify/<studio-id>.key`, `STUDIO_VERIFY_KEY_DIR`); run-gates signs each run log (HMAC-SHA256) and reuse
+  needs a valid signature, so a hand-written record and run log are no longer accepted. Older records are just not
+  reused once. (A process running as the same user can still read the key: see docs/SECURITY.md.)
+- **Golden re-records with evidence and a second signer (g).** A lane's golden re-record carries the harness's signed
+  first-divergence report; the train shows it to the releaser; the lane's own author can't release it; without a
+  report only a person can; the decision log records the tick and field.
+
+### Fixed (found by this release's CI)
+- `task done`: the harness's own records (studio/HARNESS-TASKS.md, which a forced done adds to since 2.71.0, and
+  studio/pending-review.json, studio/task-holds.json) no longer count as the next task's changes; two forced tasks
+  were filed under different causes.
+- The verify key folder check resolves a folder that isn't there yet through its nearest existing parent: on Windows
+  an 8.3 short temp path (RUNNER~1) let the first verify make its key inside the checkout.
+- The logic library's checksums ignore line endings: a Windows checkout (core.autocrlf) read the example module as
+  "changed since it was confirmed".
+- `upgrade -- --smoke` names the check that blocked the tiny train.
+
+### Untested
+- Windows: the smoke copy's junction and removal, the key file's permissions (Windows ignores mode 600), `where`
+  lookups. The launcher's routing call is checked from source only (the routing logic itself is fully tested).
+- The default overseer criteria are a first guess; the owner edits them in studio/overseer.json.
+
+---
+
+## [2.72.0] — 2026-11-03
+2.72.0, "better reds, better games": a red says where and why, a flaky timeout or an old lint hit stops costing a round,
+engine gates prove they ran, a fixed red is remembered, and code a game already landed can be found before it is written
+again (the verified Grok dossier, the dev plan's 2.72 and the owner's logic-library idea; P-204 to P-212).
+### Added
+- **First divergence (a).** A red golden prints where it first went wrong ("first divergence: tick 23,
+  resources.credits 1936 -> 1937") against the commit that recorded it, only on a red; games get the same through a
+  `"divergence"` command printing per-tick digests (`STUDIO_GOLDEN_DIVERGENCE`).
+- **Sub-ids (a).** Gate failures carry what failed (`game:test:<file>`, `golden:<file>`) in `gates.run` (`meta.subIds`),
+  the train's events and the hand-back facts.
+- **Timeout-only re-run (a).** A red whose only failures are per-test timeouts re-runs those files alone at low load:
+  green alone is a `timeout-flake` (green for that file only, in `flakes.jsonl` and the digest); red alone or mixed
+  stays red (`STUDIO_TIMEOUT_RERUN=off`).
+- **Purity ratchet (b).** A committed `purity-baseline.json` per game holds its standing purity/lint hits; only new hits
+  fail and only they are printed; fixed hits leave it at task done; it never grows from a lane (tier C);
+  `npm run purity -- baseline --write --by <person>` (delegable as `purity-baseline`).
+- **Must-fail canaries (b).** A game check may declare a `"canary"`; `npm run gates -- --canaries` (also nightly) reports
+  silently green and unproven checks and files a harness task for a silent one.
+- **Two-round cap (b).** Red twice in a row on the same failure: handed back with a summary and a restart-from-the-spec
+  note; a third try in that session is refused (`STUDIO_ROUND_CAP`, default 2).
+- **Engine gates prove they ran (c).** Unity and Godot runs count only with results written by this run, more than 0
+  tests unless `allowEmpty`, no compile-error / licence / "Aborting batchmode" line, and an exit code that agrees;
+  each failure kind has its own `[engine-gate]` line and Fix. An empty Godot run now fails by default.
+- **State probe (c).** A game's `stateProbe` digests are compared with main's baseline (`game:state-probe`); a change
+  without Golden-Reason is red at the first differing tick.
+- **Completeness rubric (c).** Contracts take test-name criteria and should-items; unverified must-items are listed for
+  the reviewer and hold a train lane at tier C until signed.
+- **Error-signature memory (c).** A fixed red is remembered (`.studio/error-memory.jsonl`), and the next one like it
+  shows "seen before: fixed in <commit> by changing <files>".
+- **Gameplay logic library (d).** `npm run logic -- need "<what>"` finds code the studio already landed before anyone
+  writes it again; modules join only after landing, with a language-neutral spec, confirmed by someone other than the
+  author; outside code follows the licence rules (GPL family needs the owner); modules unused for 90 days are flagged.
+- **CI shards (d).** The selftest runs in 4 parallel jobs per platform (`--shard i/N`, `--list-shards`), the other gates
+  with `--except selftest`, and a summary job is red if any job failed.
+
+### Untested
+- Windows: the divergence worktree and junction, real vitest/jest timeout output (node --test was real), the round
+  cap's hand-back subprocess, the shard jobs on real GitHub. Real Unity and gdUnit4 log wording (stand-ins were used).
+- A real full verify recording a round (the test calls it directly).
+
+---
+
+## [2.71.1] — 2026-11-03
+2.71.1, "close the gate holes": the red-team holes an outside review found (Grok's dossier, re-tested on 2.70.0 by our
+own verifier) that an agent could fall into by accident or on purpose, closed before the crew restarts (P-197 to P-203).
+### Fixed
+- **Gate runners protected (A).** The scripts that run the gates and what they load are on the protected list, so a
+  lane can't edit a runner to pass itself (A01b/A01d/A03).
+- **Test toolchain protected (A).** Each game's test configs, the setup files they name, `.npmrc` and the test entries
+  of its `package.json` (by key: adding a dependency stays a normal change) (H03/H04/S02).
+- **Weakened tests (A)** also catches `skipIf`/`runIf` on an existing test or a CI condition, chained skips, early
+  returns on CI and a shadowed or proxied `expect` (H10/H13).
+- **Overrides in a lane (A).** `STUDIO_PROTECT_BASE/ROOT`, `GITHUB_BASE_REF` and `STUDIO_WEAKENED_TESTS=off` are ignored
+  in a lane copy (said in the output); `STUDIO_MAIN_ROOT` must be the main checkout; CI variables are never proof.
+- **Verify-record trust (A).** A record is reused only with a matching run log the harness wrote, from a run with no
+  hidden untracked or ignored inputs under the game or its checks (D01/T04/G15/T02; 2.69's tree reuse had widened
+  these). A golden re-recorded on the lane's own Golden-Reason is tier C (A13, first part).
+- **Clean gate environment (B).** No code-loading `NODE_OPTIONS` or npm node-options, no git redirects, replace refs
+  ignored; the protected gate fails on replace refs or grafts (S03/G10/G16/T01). A WARN when `node_modules` doesn't
+  match the lockfile (S04). Protected paths are matched quote-safe and in any case (G14/W01).
+- **Lock release is bound to its holder (B, K01).**
+- **Gate output fenced and capped (B, L01/I01).** Kept whole on disk, shown as the first and last 200 lines
+  (`STUDIO_GATE_OUTPUT_LINES`); child lines that imitate `[gates]`/`[verify]` are shown as `| …`.
+- **Every session end names its task (B)**, so tokens per landed change count per task (`npm run tokens -- --by task`).
+- **One-command rollback (B).** `npm run upgrade -- --rollback --by <person>` reverts the last update's merge
+  (`git revert -m 1`, never a reset, no branch deleted).
+
+### Still open
+- T06 (code preloaded into run-gates itself by hand), S01 (a forged CI environment) and a hand-written record AND run
+  log in `.studio/`: signed verify records come in 2.73. Golden re-records with a first-divergence report and a second
+  signer come in 2.72/2.73.
+
+### Untested
+- Windows: lane detection and path comparisons, NTFS case folding, the gate log rename while a process holds it, the
+  revert hook path. Protecting `vite.config.*` means build-only config edits now need the owner's signature.
+
+---
+
+## [2.71.0] — 2026-11-03
+2.71.0, "the owner layer": one log of every owner and game-dev decision, a studio policy file, an opt-in autonomous
+mode the owner reviews afterwards, the overseer's paperwork as commands, and a record of every time the harness had to
+be worked around (the owner's request of 2026-11-02 and the overseer's duties 9, 10, 12, 16, 19, 20; P-193 to P-196).
+### Added
+- **Decision log (x).** Every owner and game-dev decision (train release, type, visual, yes, hold, asset review,
+  quarantine, stale lanes, train/upgrade auto, crew and studio resume, autonomy level, delegation, autonomous mode)
+  writes one record to `.studio/decisions.jsonl` with who, as what (person, delegation, permission, autonomous), why
+  and how to undo it; `npm run decisions`.
+- **Studio policy (x).** `studio/policy.json` (protected; `npm run policy`) holds the owner's rules; agents get a
+  one-line pointer; a `never` word rules an action out for any agent, a delegated one included. No file: unchanged.
+- **Autonomous mode (x, opt-in).** Only the owner turns it on (directly, or by confirming a game dev's proposal); the
+  named overseer then takes the listed decisions without waiting, each logged `autonomous` on a review list that never
+  blocks work: `npm run decisions -- review | approve | revert (runs the undo) | edit`. Never covered: protected files,
+  gates, the policy file, money, deletes (stale lanes included), visibility, keys. The agent that decided can't review
+  itself. The digest and War Room show the count, the oldest, the revert rate and time saved.
+- **Overseer paperwork (y).** `npm run next-board` (what's next on one screen); `npm run report -- post` sends the
+  status, board or digest to the owner's webhook (`STUDIO_REPORT_WEBHOOK`, in `.env`, never printed or passed to
+  agents) as Discord, Slack or JSON, with one retry; the supervisor posts at `STUDIO_REPORT_HOUR` and when the queue
+  changes a lot. `npm run brief -- builder --write` generates the builder brief from the studio's real rules (the
+  kickoff keeps it current). `--type research` tasks need a linked Sources section to be done.
+- **Self-repair loop (z).** `npm run workaround -- log` records a workaround; the harness also detects hand edits of
+  the board and train queue, `--force`, a refused command re-run 3 times in 10 minutes, a quick supervisor restart and
+  a launcher killed outside the harness. A repeat opens one task in `studio/HARNESS-TASKS.md` for the harness
+  maintainer (never on the board); after an upgrade, one unseen for 7 days is marked "maybe fixed". Digest and
+  `autonomy -- impact` show the trend; `workaround -- export` writes one redacted file for the maintainer.
+
+### Untested
+- Windows: all of it, including the policy commit and signing on a real studio, the detached report child, `.env`
+  with CRLF, write-stamp timing on coarse-mtime filesystems. Real Discord/Slack endpoints (a local stand-in was used).
+
+---
+
 ## [2.70.0] — 2026-11-02
 2.70.0, "use the idle hardware": GPU work beside CPU work, faster Unity runs, a check on asset previews, and lanes
 that fit the disk (from the hardware findings and the overseer's duty 15; P-188 to P-192).

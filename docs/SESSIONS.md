@@ -18,6 +18,12 @@ The studio's files are the memory, not the chat.
   it at once (up to `STUDIO_REFRESH_RELAUNCH`, default 5, in a row). No failover, no cooldown, and it
   doesn't count toward parking a looping task.
 - The brief shows the newest 3k characters of a task's notes (`studio/handoffs/<ID>.md` keeps them all).
+- **Seen before (2.72.0).** A verify on a claimed task keeps a failing gate's signature: the gate (or the game
+  check's sub-id) and its first FAIL line, normalised. When a later verify on that task passes the gate, it records
+  the fix in `.studio/error-memory.jsonl`: the commit, its subject, and the files changed since the red. A later red
+  with the same signature, on any task, shows `- Seen before: fixed in <commit> by changing <files> (<summary>)` in
+  the hand-back facts and a line in the kickoff (`harness/error-memory.mjs`). The memory keeps the newest
+  `STUDIO_ERROR_MEMORY_MAX` (500) signatures. `STUDIO_ERROR_MEMORY=off` turns it off. No model is called.
 - **Hand-back facts (2.66.0).** Every hand-back (`task pause`, the merge train's drop, the watcher, a session that
   ended holding its task) starts with a block the harness writes, not the agent (harness/handback-facts.mjs): the
   files changed since the task's start commit (`git diff --name-only`, untracked files too, at most 30 named plus a

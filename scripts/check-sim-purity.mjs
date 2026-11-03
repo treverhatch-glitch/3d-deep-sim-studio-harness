@@ -18,6 +18,11 @@
  *   node scripts/check-sim-purity.mjs [--det-math-only] [--all]
  *     --det-math-only  only the deterministic-math rule, every scope (the game:det-math check runs this)
  *     --all            print every warning, not the first 25
+ *     --hits-json      print every failing hit as JSON ({ lines }), no baseline and no runtime probe (npm run purity)
+ *
+ * 2.72.0 (b): the ratchet (harness/ratchet.mjs). A game with a committed purity-baseline.json (cartridges/<name>/ or the
+ * studio game's folder) fails only on hits that baseline doesn't list; only those are printed, the standing ones are
+ * counted. No baseline: every hit fails, as before.
  */
 
 import fs from 'node:fs';
@@ -28,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const detOnly = argv.includes('--det-math-only');
+const hitsJson = argv.includes('--hits-json');
 const WARN_LINES = argv.includes('--all') ? Infinity : 25;
 
 const RULES = [
@@ -87,11 +93,43 @@ async function detMath() {
   return { failing, scanned, scopes };
 }
 
+// 2.72.0 (b): failing lines judged against the games' baselines: { fail: [lines that fail], notes: [lines] }.
+async function ratchet(lines) {
+  const rat = await import('../harness/ratchet.mjs');
+  if (!rat.knownBaselines(REPO_ROOT, rat.PURITY_SECTION).length) return { fail: lines, notes: [] };
+  const hits = rat.parseHits(lines.join('\n'), { root: REPO_ROOT });
+  const asHit = new Set(hits.map((h) => h.text));
+  const other = lines.filter((l) => !asHit.has(String(l).trim())); // not a hit line (a scope with no files): always fails
+  let gameRoot = null;
+  try { gameRoot = (await (await import('../harness/game-gates.mjs')).studioGame())?.root || null; } catch {}
+  const j = rat.judgeHits(hits, { root: REPO_ROOT, relOf: (h) => rat.baselineRelFor(h.file, { gameRoot }), base: await rat.laneBase() });
+  return { fail: [...other, ...j.fresh.map((h) => h.text)], notes: rat.ratchetLines(j, { label: '[sim-purity] ratchet:', list: false }) }; // the FAIL list names them
+}
+
+if (hitsJson) {
+  const files = [path.join(REPO_ROOT, 'src', 'sim'), path.join(REPO_ROOT, 'cartridges')].flatMap((d) => collect(d));
+  const lines = [];
+  for (const file of files) {
+    stripComments(fs.readFileSync(file, 'utf8')).split('\n').forEach((line, i) => {
+      for (const rule of RULES) if (rule.re.test(line)) lines.push(`${path.relative(REPO_ROOT, file).split(path.sep).join('/')}:${i + 1} [${rule.id}] ${rule.reason}`);
+    });
+  }
+  const origLog = console.log;
+  console.log = () => {}; // the det-math warnings are not hits
+  const det = await detMath();
+  console.log = origLog;
+  lines.push(...det.failing);
+  console.log(JSON.stringify({ lines }));
+  process.exit(0);
+}
+
 if (detOnly) {
   const det = await detMath();
-  if (det.failing.length) {
+  const rj = await ratchet(det.failing);
+  for (const n of rj.notes) console.log(n);
+  if (rj.fail.length) {
     console.error('[sim-purity] FAIL deterministic math (mode required):');
-    for (const v of det.failing) console.error(`  x ${v}`);
+    for (const v of rj.fail) console.error(`  x ${v}`);
     process.exit(1);
   }
   console.log(`[sim-purity] deterministic math PASS — ${det.scanned} file(s) in ${det.scopes.filter((s) => s.mode !== 'off').length} scope(s)`);
@@ -109,15 +147,17 @@ for (const file of files) {
   const lines = stripComments(fs.readFileSync(file, 'utf8')).split('\n');
   lines.forEach((line, i) => {
     for (const rule of RULES) {
-      if (rule.re.test(line)) violations.push(`${path.relative(REPO_ROOT, file)}:${i + 1} [${rule.id}] ${rule.reason}`);
+      if (rule.re.test(line)) violations.push(`${path.relative(REPO_ROOT, file).split(path.sep).join('/')}:${i + 1} [${rule.id}] ${rule.reason}`);
     }
   });
 }
 const det = await detMath();
 violations.push(...det.failing);
-if (violations.length) {
+const judged = await ratchet(violations);
+for (const n of judged.notes) console.log(n);
+if (judged.fail.length) {
   console.error('[sim-purity] FAIL static scan:');
-  for (const v of violations) console.error(`  x ${v}`);
+  for (const v of judged.fail) console.error(`  x ${v}`);
   process.exit(1);
 }
 console.log(`[sim-purity] static PASS — ${files.length} file(s)`);

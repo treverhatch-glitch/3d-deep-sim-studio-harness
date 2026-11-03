@@ -56,6 +56,17 @@ Every verify compares the tracked files (outside `studio/`) before and after its
 rewriting a snapshot's line endings, a generated file) are named in a warning and listed as `changedByVerify` in
 the verify record; the exit code is unchanged. Game checks run with `CI=true` so test runners don't write snapshots.
 
+### Two rounds, then restart from the spec (2.72.0)
+
+Each full verify of a task by the agent that holds it, and each merge-train hand-back of its lane, is one round
+(a `task.round` event with the failing check's sub-id, e.g. `game:unit`, and its first FAIL line as the signature).
+When the last `STUDIO_ROUND_CAP` (default 2; `0` turns it off) rounds of a task in one agent's session are red with
+the same signature, the task is handed back with a summary the harness writes (files touched, gates, the sub-id, both
+red signatures, the decisions logged on the task) and a note to restart from the spec instead of patching the last
+attempt (`task.round_cap`). In that session a third attempt is refused: `npm run verify` while the agent still holds
+the task, and `task start` of it again. A new session (after `agent.session.start` or `.end`) may take it; an agent
+outside the launcher counts the last 12 hours as its session. `--force` on `task start` is a person's reassignment.
+
 ## Landing lanes: the merge train (2.59.0)
 
 A lane copy's work reaches the studio's branch through a merge train (`harness/train.mjs`). Before 2.59.0 every
@@ -201,7 +212,11 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `task done --train`, in the train log and in a `task.train.tier` event.
   - **C, needs the owner** (a closed lane, not a threshold): a protected file (`studio/protected.json` at main's tip
     plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
-    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`). It is held in the queue
+    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`); 2.71.1: a golden or snapshot the lane
+    re-records with its own `Golden-Reason:` (rule `golden-rerecord`: a person, a delegation or autonomous review releases
+    it; the game's manifest may set it to B; 2.73.0: the hold shows the harness's first-divergence report, the releaser
+    can't be the lane's author, and without a report only a person releases it: docs/SECURITY.md), and a game's test toolchain (its test configs, the setup files they name,
+    `.npmrc`, package.json's test scripts; docs/SECURITY.md). It is held in the queue
     (`task.train.held`, `task train status` says NEEDS THE OWNER) and lands only after
     `npm run task -- train release <ID> --by <name> [--permission "<their words or a link>"]`: a person in their own
     terminal, or a Producer/Director session or an agent outside the harness recording a person's direct permission
@@ -253,6 +268,23 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
   flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
   (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+- Timeout-only reds (2.72.0, `harness/timeout-rerun.mjs`): in any game check (a verify, a train's verify or
+  re-check, task done), a red whose ONLY failures are per-test timeouts (vitest "Test timed out in N ms", jest
+  "Exceeded timeout of N ms", `node --test` `testTimeoutFailure` / "test timed out after", each in a named file, the
+  runner's own failure count agreeing) re-runs just those files, each once ALONE at low load (one test worker), through
+  the check's focus command. Every file green alone: the check counts green, each file labelled `timeout-flake` in
+  `.studio/flakes.jsonl` (a `test.timeout_flake` event, the digest's flake line, `meta.timeoutFlakes` on `gates.run`,
+  `timeout-flake in <check>: [...]` in the log) and counted toward quarantine like any flaky label; the lane is not
+  blamed for it. A file red alone: a real red, naming only the red files. A mixed red (a timeout plus a real failure),
+  output the harness can't read, or more files than `STUDIO_FLAKE_MAX_FILES`: a real red, as before. A file that was
+  not re-run green never counts green. `STUDIO_TIMEOUT_RERUN=off` keeps 2.71.1's behaviour; the flake triager's own
+  runs set it off (they want the raw answer).
+- Sub-ids (2.72.0, `harness/gate-subids.mjs`): a failed gate names its parts: `game:<check>:<test file>` (paths
+  relative to the checkout), `game:<check>` for a check that names no file, `golden:<file>` for a red golden,
+  `<gate>:<file>` for another gate whose output names failing test files, else the gate id. They are in the run's
+  rows (`sub`), the `gates.run` event (`meta.subIds`, beside the unchanged `meta.failed`), a `[gates] <id> failed in:`
+  line, the train's `red` and `verify` events and the hand-back facts ("Failing sub-ids"). `subIdsOf(event)` reads
+  them (falling back to `meta.failed` for older events).
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or

@@ -1093,3 +1093,104 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
   showed only when someone ran the janitor.
 - **Fix:** sparse lanes with widening, `lanes disk`, the supervisor's proposal pass. qa/selftest-270w.mjs.
 
+### P-193 — owner decisions had no single record and no autonomous path · fixed in 2.71.0
+- **Evidence:** decisions were spread over task-types.json, the train queue, the hold file and permission quotes;
+  nothing listed them, so nothing could be reviewed or measured; the owner asked for an overseer that decides and is
+  reviewed afterwards.
+- **Fix:** the decision log, `studio/policy.json`, opt-in autonomous mode with a review list. qa/selftest-271x.mjs.
+
+### P-194 — status and what's-next were posted by hand · fixed in 2.71.0
+- **Evidence:** the overseer pasted them into Discord each session (duties 9, 10).
+- **Fix:** next-board, report post through a webhook, the supervisor pass. qa/selftest-271y.mjs.
+
+### P-195 — builder briefs drifted from the rules; research had no shape · fixed in 2.71.0
+- **Evidence:** briefs rewritten by hand each session (duty 12); research write-ups sometimes without sources (duty 16).
+- **Fix:** the generated, hash-checked builder brief; the research task type. qa/selftest-271y.mjs.
+
+### P-196 — workarounds of the harness were recorded only in the overseer's notes · fixed in 2.71.0
+- **Evidence:** most of 2.65-2.70 came from those notes (retries, hand edits, killed processes, restarts).
+- **Fix:** the workaround log, detected signals, the maintainer's task queue, the export. qa/selftest-271z.mjs.
+
+### P-197 — a lane could edit the gate runners that judge it · fixed in 2.71.1
+- **Evidence:** a neutered `check-golden.mjs` / run-gates exit flip went green (outside red team; re-tested on 2.70.0).
+- **Fix:** the runners and their loader on the protected list. qa/selftest-2711a.mjs.
+
+### P-198 — test configs, setup files and .npmrc were open · fixed in 2.71.1
+- **Evidence:** a shadow vitest.config, a vi.mock in the setup file and .npmrc node-options landed a real bug green.
+- **Fix:** harness/test-toolchain.mjs protects them (package.json by key). qa/selftest-2711a.mjs.
+
+### P-199 — skipIf(CI), early returns on CI and a proxied expect weren't weakened tests · fixed in 2.71.1
+- **Fix:** new weakened-tests rules. qa/selftest-2711a.mjs.
+
+### P-200 — gate-weakening env overrides worked inside a lane · fixed in 2.71.1
+- **Evidence:** STUDIO_PROTECT_BASE=HEAD, STUDIO_PROTECT_ROOT, STUDIO_WEAKENED_TESTS=off, STUDIO_MAIN_ROOT=the lane.
+- **Fix:** harness/gate-trust.mjs ignores them in lane copies. qa/selftest-2711a.mjs.
+
+### P-201 — hand-written or dirty-tree verify records were reused · fixed in 2.71.1 (partly)
+- **Evidence:** a forged record accepted; hidden untracked config then a real verify reused (2.69 tree reuse widened it).
+- **Fix:** run ids with run logs; hidden inputs make a run dirty. A forged record plus a forged log stays open (2.73).
+  qa/selftest-2711a.mjs.
+
+### P-202 — NODE_OPTIONS, git replace and quoted paths fooled the gates · fixed in 2.71.1
+- **Fix:** harness/gate-env.mjs; the protected gate fails on replace refs or grafts; `-z` and case-folded matching.
+  qa/selftest-2711b.mjs.
+
+### P-203 — locks, output floods, untracked session costs, no rollback · fixed in 2.71.1
+- **Evidence:** anyone could release another's lock by name; a 122 MB flood and a forged Fix line printed; 0 of 170
+  session ends on the owner's PC named their task; undoing an upgrade took manual git.
+- **Fix:** holder-bound release, fenced and capped output, task on every session end, `upgrade -- --rollback`.
+  qa/selftest-2711b.mjs.
+
+### P-204 — a red golden said only "hash differs" · fixed in 2.72.0
+- **Fix:** first divergence on a red (tick, subsystem, field). qa/selftest-272a.mjs.
+
+### P-205 — every game red was "game" · fixed in 2.72.0
+- **Evidence:** 83 of 91 failed gate runs on the owner's PC carried the single id `game`.
+- **Fix:** sub-ids. qa/selftest-272a.mjs.
+
+### P-206 — timeouts under load blamed the lane · fixed in 2.72.0
+- **Evidence:** red runs of a clean game copy were all timeouts in long sim suites.
+- **Fix:** the timeout-only re-run alone at low load. qa/selftest-272a.mjs.
+
+### P-207 — standing purity hits drowned new ones; nothing stopped new hits · fixed in 2.72.0
+- **Evidence:** a median task saw ~470 standing hits vs 8 new; a ratchet that only hid hits let them grow 143 -> 543.
+- **Fix:** the purity ratchet where any new hit fails. qa/selftest-272b.mjs.
+
+### P-208 — a game check couldn't prove it can fail · fixed in 2.72.0
+- **Fix:** must-fail canaries. qa/selftest-272b.mjs.
+
+### P-209 — patch loops on the same red · fixed in 2.72.0
+- **Fix:** the two-round cap. qa/selftest-272b.mjs.
+
+### P-210 — engine gates could pass without proof · fixed in 2.72.0
+- **Evidence:** Unity ignored the exit code, compile errors and aborts once a results file existed; Godot counted a
+  touched old report and passed exit 0 with failing tests.
+- **Fix:** harness/engine-proof.mjs; the state probe. qa/selftest-272c.mjs.
+
+### P-211 — contract items went unseen; the same red was re-diagnosed from scratch · fixed in 2.72.0
+- **Fix:** the completeness rubric; error-signature memory. qa/selftest-272c.mjs.
+
+### P-212 — game logic was written again per game; CI was one long serial run · fixed in 2.72.0
+- **Fix:** the gameplay logic library; selftest shards. qa/selftest-272d.mjs.
+
+### P-213 — no check before or after a big harness update · fixed in 2.73.0
+- **Evidence:** the crew's PC jumps 2.66 -> 2.73 in one step; problems were found only once agents were working.
+- **Fix:** `upgrade --preflight` and `--smoke`. qa/selftest-273f.mjs.
+
+### P-214 — upgrades made no measurable claims and had no clean "before" · fixed in 2.73.0
+- **Fix:** the before snapshot; `release -- predict` scored by impact. qa/selftest-273f.mjs.
+
+### P-215 — the overseer's stages existed only on paper · fixed in 2.73.0
+- **Fix:** studio/overseer.json (protected), `npm run overseer`, `workaround -- repro`, the weekly scout. qa/selftest-273f.mjs.
+
+### P-216 — a lucky week could suggest L3; autonomous work was reviewed only by choice · fixed in 2.73.0
+- **Evidence:** 12 clean landings suggested L3 on point estimates.
+- **Fix:** Wilson bounds for promotion; seeded audit sampling. qa/selftest-273e.mjs.
+
+### P-217 — every task used the same model tier · fixed in 2.73.0
+- **Fix:** policy-limited cheap-first routing with per-tier measurement (holdout off). qa/selftest-273e.mjs.
+
+### P-218 — a forged record + run log was reused; an author could release its own golden re-record · fixed in 2.73.0
+- **Evidence:** the red team's D01/T04 remainder and A13 (re-tested by our verifier on 2.70.0).
+- **Fix:** signed verify records; signed first-divergence reports and a second signer. qa/selftest-273g.mjs.
+

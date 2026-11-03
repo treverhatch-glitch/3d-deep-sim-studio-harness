@@ -21,6 +21,9 @@ import { REPO_ROOT, STUDIO_STATE_DIR } from './event.mjs';
 import { SHARED_OWNERS } from './lock.mjs';
 import { readMode, scopeOf } from './mode.mjs';
 import { constraintsBlock } from './learning-edge.mjs';
+import { ensureRoleBrief } from './role-brief.mjs';
+import { latestFacts } from './handback-facts.mjs';
+import { pendingReds, seenLinesFor } from './error-memory.mjs';
 
 /**
  * Headless launch lines per agent tool, checked against each tool's docs (see docs/AGENT-TOOLS.md).
@@ -96,6 +99,12 @@ export function kickoffParts(opts, { named = false } = {}) {
   // ran npm run verify in the background and then asked the done-check about a run that hadn't finished).
   if (opts.launched) text = text.replace(/Set up once in your shell: `export STUDIO_LOCK_OWNER=(\S+) STUDIO_AGENT_MODEL=(\S+)( STUDIO_PRODUCER_NAME=\S+)?`/, (_, a, m, p) => `The launcher already set STUDIO_LOCK_OWNER and STUDIO_AGENT_MODEL${p ? ' and STUDIO_PRODUCER_NAME' : ''} for you; don't set them again.`);
   if (scopeOf(readMode()) === 'lite') text = text.replace('Read `AGENTS.md`', 'Read `AGENTS.lite.md`');
+  // 2.71.0 (y): a saved builder brief generated from the studio's rule files (harness/role-brief.mjs; refreshed here when
+  // a source changed or it was edited) is read first; the AGENTS file stays the whole text. No saved brief: as before.
+  if (String(opts.role || '').toLowerCase() === 'builder') {
+    const rb = ensureRoleBrief();
+    if (rb) text = text.replace(/Read `(AGENTS(?:\.lite)?\.md)`/, (_, f) => `Read \`${rb}\` (your rules, generated from \`${f}\`, the pitfalls, the protected list and the gates; open \`${f}\` only for what it says it cut)`);
+  }
   // How long the verify takes here, so nobody sends it to the background and ends the session under it.
   // It changes with every full verify, so it goes in the volatile part, never mid-prefix.
   let volatile = '';
@@ -120,7 +129,25 @@ export function kickoffParts(opts, { named = false } = {}) {
       if (box) volatile += `${opts.task}'s inbox has ${box.total} follow-up(s) (${box.unread} unread: CI or merge-train results, messages tied to the task). Read them first: npm run thread -- inbox ${opts.task}\n`;
     } catch {}
   }
+  // 2.72.0 (c): the task's red seen before (harness/error-memory.mjs): its newest hand-back's failure signature, or a red
+  // verify not handed back yet.
+  if (opts.task) {
+    try { for (const l of seenBeforeFor(opts.task)) volatile += `${opts.task}'s failure was ${l}\n`; } catch {}
+  }
   return { stable: text, volatile };
+}
+
+/** 2.72.0 (c): "seen before" lines for a task's red signatures: [sig …] in its newest hand-back facts, and pending reds. */
+export function seenBeforeFor(task) {
+  if (!/^[A-Z]+-\d+$/.test(String(task || ''))) return [];
+  const keys = [];
+  try {
+    const h = fs.readFileSync(path.join(REPO_ROOT, 'studio', 'handoffs', `${task}.md`), 'utf8');
+    const block = latestFacts(h)?.block || '';
+    if (!/^- Seen before:/m.test(block)) keys.push(...[...block.matchAll(/\[sig ([0-9a-f]{8})\]/g)].map((m) => m[1]));
+  } catch { /* no hand-off */ }
+  keys.push(...pendingReds(task).map((x) => x.key));
+  return seenLinesFor(keys).map((l) => l.replace(/^(.+?): seen before: /, 'seen before ($1): '));
 }
 
 

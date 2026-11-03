@@ -50,9 +50,10 @@ import { mainRoot, inLaneCopy } from './worktree.mjs';
 import { resolveBase, ownerPublicKey, ownerKeyPath, verifyApproval, OWNER_KEY_HOWTO, APPROVALS_REL } from './approve.mjs';
 import { agentOnPermission, permissionText, permittedSetter } from './permission.mjs';
 import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs';
+import { logDecision, asOf } from './decisions-log.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
-export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
+export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
 const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <type> --by <owner> --why "…"; harness/reclassify.mjs). Written by that command from the owner\'s terminal; an entry set by an agent\'s commit (Studio-Agent trailer) is ignored, and once the studio has an owner key only signed reclassifications (studio/approvals/type-<ID>.json) count.';
 
 // The agent-name shapes the launcher, fun verdicts and the agy allow-list use, and a "-bot" suffix.
@@ -304,6 +305,12 @@ function commitRecord(files, msg, why) {
   return { committed, commitNote: committed ? '' : ` Committing it failed (${String(r.stderr || r.stdout).trim().split('\n').pop() || `exit ${r.status}`}): commit ${files.join(' and ')} yourself, from this terminal.` };
 }
 
+/** 2.71.0 (x): one decision-log record per type/visual decision (harness/decisions.mjs). */
+function logDecisionFor(action, taskId, who, entry, { evidence, undo }) {
+  const d = who.delegation ? who.delegation : who.onPerm ? { via: who.onPerm.via, permission: who.perm } : { via: 'person' };
+  logDecision({ action, subject: taskId, by: who.delegation ? who.delegation.agent : entry.by, as: asOf(d), why: entry.why, evidence, undo });
+}
+
 export function reclassify({ task, from, to, by, why, permission = '', commit = true, env = process.env }) {
   const who = callerCheck(by, permission, env, 'type');
   if (!who.ok) return { ok: false, message: who.message };
@@ -331,6 +338,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
     files.push(approvalRel);
   }
   const rec = readRecord(REPO_ROOT);
+  const prevType = rec.tasks[task.id]?.type || null; // 2.71.0 (x): the decision log's undo
   rec.note = NOTE;
   if (auto) {
     delete rec.tasks[task.id];
@@ -341,6 +349,7 @@ export function reclassify({ task, from, to, by, why, permission = '', commit = 
   memo.delete(`type|${task.id}`);
   if (who.delegation) recordUse(who.delegation, { action: 'type', task: task.id, detail: auto ? 'back to the title\'s type' : `${from} to ${target}` });
   emitEvent({ type: 'task.retyped', agent: entry.by, task: task.id, msg: auto ? `${entry.by} put ${task.id} back to its title's type (${from}): ${entry.why}` : `${entry.by} reclassified ${task.id} from ${from} to ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`.slice(0, 400), meta: { from, to: auto ? from : target, signed: Boolean(pub && !auto), at } });
+  logDecisionFor('type', task.id, who, entry, { evidence: auto ? `back to the title's type (${from})` : `${prevType || from} -> ${target}`, undo: { kind: 'retype', task: task.id, to: prevType || 'auto', text: `npm run task -- type ${task.id} ${prevType || 'auto'} --by <name> --why "…"` } });
   const msg = auto ? `${task.id}: back to the title's type (${from}), by ${entry.by}` : `${task.id}: owner reclassified it from ${from} to ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
   const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (from your terminal, not an agent\'s); until the studio has an owner key it is a record, not a signature.';
@@ -386,6 +395,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   const rec = readRecord(REPO_ROOT);
   rec.note = NOTE;
   rec.visual = rec.visual && typeof rec.visual === 'object' ? rec.visual : {};
+  const prevVisual = rec.visual[task.id]?.visual || null; // 2.71.0 (x): the decision log's undo
   if (auto) {
     delete rec.visual[task.id];
     if (fs.existsSync(path.join(REPO_ROOT, approvalRel))) { fs.rmSync(path.join(REPO_ROOT, approvalRel)); files.push(approvalRel); }
@@ -397,6 +407,7 @@ export function setVisual({ task, to, by, why, permission = '', commit = true, e
   if (who.delegation) recordUse(who.delegation, { action: 'visual', task: task.id, detail: `visual proof ${target}` });
   const words = auto ? `${entry.by} put ${task.id}'s visual proof back to the detection: ${entry.why}` : `${onPerm ? `${onPerm.recordedBy} on ${entry.by}'s permission` : entry.by} set ${task.id}'s visual proof ${target}${pub ? ' (signed)' : ' (recorded; no owner key yet)'}: ${entry.why}`;
   emitEvent({ type: 'task.visual_set', agent: onPerm ? onPerm.recordedBy : entry.by, task: task.id, msg: words.slice(0, 400), meta: { to: target, by: entry.by, signed: Boolean(pub && !auto), at, ...(onPerm ? { permission: entry.permission, recordedBy: entry.recordedBy } : {}) } });
+  logDecisionFor('visual', task.id, who, entry, { evidence: `visual proof ${prevVisual || 'auto'} -> ${target}`, undo: { kind: 'visual', task: task.id, to: prevVisual || 'auto', text: `npm run task -- visual ${task.id} ${prevVisual || 'auto'} --by <name> --why "…"` } });
   const msg = auto ? `${task.id}: visual proof back to the detection, by ${entry.by}` : `${task.id}: owner set visual proof ${target} (${entry.by})`;
   const { committed, commitNote } = commit ? commitRecord(files, msg, entry.why) : { committed: false, commitNote: '' };
   const counts = pub ? 'It counts once the approval file is on the studio\'s main branch.' : 'It counts once committed (by a person, or by the Producer/Director/outside agent that recorded it on permission; never a worker\'s commit); until the studio has an owner key it is a record, not a signature.';

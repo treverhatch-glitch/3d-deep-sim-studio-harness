@@ -6,6 +6,12 @@
  *   node qa/check-golden.mjs            check (fails on mismatch, stub hash, or a game with no golden)
  *   node qa/check-golden.mjs --update   rewrite hashes after an intended sim change (commit them together)
  *
+ * 2.72.0 (a): a sha256 red also prints where the run first went wrong (harness/divergence.mjs): "first divergence:
+ *   tick N, <subsystem>.<field> a -> b", against the commit that recorded the golden. STUDIO_GOLDEN_DIVERGENCE=off: not.
+ * 2.73.0 (g, A13): that result is also the golden's signed first-divergence report (.studio/gates/divergence/, harness/
+ *   golden-report.mjs), written on a red and by --update before it overwrites a changed answer: the merge train shows it
+ *   to whoever releases the lane's re-record, and without it only a person can release.
+ *
  * Golden shapes:
  *   replay:   { "cartridge", "seed", "tick", "actions": [{ "tick", "action" }], "hash" }
  *   scenario: { "cartridge", "scenario": "start-to-win", "seed"?, "expect": { "outcome", "tick" }, "hash" }
@@ -17,8 +23,11 @@ import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
 import { hash64, isHash64, isSha256 } from '../harness/hash.mjs';
 import { checkRecordingId, gameIdFor } from '../harness/game-id.mjs';
+import { divergenceOn, divergenceLines, goldenDivergence } from '../harness/divergence.mjs';
+import { writeGoldenReport } from '../harness/golden-report.mjs';
 
 const GOLDEN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'golden');
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const update = process.argv.includes('--update');
 
 const files = fs.existsSync(GOLDEN_DIR) ? fs.readdirSync(GOLDEN_DIR).filter((f) => f.endsWith('.json')).sort() : [];
@@ -59,6 +68,13 @@ for (const file of files) {
     continue;
   }
   if (update) {
+    // 2.73.0 (g): a re-record that changes the answer gets the harness's first-divergence report first (before the file changes).
+    if (isSha256(spec.sha256) && result.sha256 !== spec.sha256 && divergenceOn()) {
+      const rel = path.relative(REPO, full).split(path.sep).join('/');
+      const d = await goldenDivergence({ root: REPO, file, rel, spec, cart });
+      for (const l of divergenceLines('[golden]', d)) console.log(l);
+      writeGoldenReport(REPO, [rel], d, { answer: result.sha256 });
+    }
     spec.cartridge = name;
     if (gameIdFor(name)) spec.gameId = gameIdFor(name);
     spec.hash = result.hash;
@@ -80,6 +96,13 @@ for (const file of files) {
   }
   if (result.sha256 !== spec.sha256) {
     fail(`${file}: sha256 expected ${spec.sha256} got ${result.sha256}`);
+    // 2.72.0 (a): only on a red, where it first went wrong (harness/divergence.mjs): the tick, subsystem and field.
+    if (divergenceOn()) {
+      const rel = path.relative(REPO, full).split(path.sep).join('/');
+      const d = await goldenDivergence({ root: REPO, file, rel, spec, cart });
+      for (const l of divergenceLines('[golden]', d)) console.error(l);
+      writeGoldenReport(REPO, [rel], d, { answer: result.sha256 }); // 2.73.0 (g): the signed report a re-record of this golden carries
+    }
     continue;
   }
   if (!isHash64(spec.hash) || result.hash !== spec.hash) {

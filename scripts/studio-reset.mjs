@@ -96,6 +96,7 @@ for (const f of rolledEvents) {
   }
 }
 fs.rmSync(path.join(root, '.studio', 'locks'), { recursive: true, force: true });
+fs.rmSync(path.join(root, '.studio', 'write-stamps'), { recursive: true, force: true }); // 2.71.0 (z): the new board isn't a hand edit
 for (const f of ['meeting.json', 'watch-last.json', 'gates-last.json', 'gates-last-full.json', 'last-seed-failure.json', 'closed-loop-state.json']) fs.rmSync(path.join(root, '.studio', f), { force: true });
 
 const date = new Date();

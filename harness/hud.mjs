@@ -63,6 +63,7 @@ import { listWaves, wavesOn } from './waves.mjs';
 import { readAlerts } from './alerts.mjs';
 import { readPhone } from './phone.mjs';
 import { pidAlive } from './proc-identity.mjs';
+import { reviewCard } from './decisions-log.mjs';
 
 const readJson = (rel, fallback = null) => {
   try {
@@ -632,6 +633,8 @@ export function buildHudState() {
     ...st.asks.open.filter((a) => !a.to || /human|dev|you/i.test(a.to)).map((a) => ({ what: `${a.id}: ${a.question}`, owner: 'you', why: 'a question' })),
     // 2.30c (#8): a task the circuit breaker parked waits for someone to fix the reason and Unblock.
     ...breakerCards().map((c) => ({ what: `${c.task}: tripped`, owner: 'you', why: c.msg })),
+    // 2.71.0 (x): autonomous decisions past the policy's review window (harness/decisions.mjs); work went on without them.
+    ...((() => { try { const r = reviewCard(); return r.overdue ? [{ what: `${r.overdue} autonomous decision${r.overdue === 1 ? '' : 's'} to review (oldest ${r.oldest.id}: ${r.oldest.action} ${r.oldest.subject || ''})`.trim(), owner: 'you', why: `waited more than ${r.reviewWithinH} h: npm run decisions -- review` }] : []; } catch { return []; } })()),
   ];
   const waitingOnOthers = st.queue.backlog.filter((t) => t.waitOwner && t.waitOwner !== 'the dev').map((t) => ({ what: t.id, owner: t.waitOwner, why: t.hold }));
   const building = st.launched.filter((l) => l.running).map((l) => ({ agent: l.agent, task: l.task, model: l.model }));

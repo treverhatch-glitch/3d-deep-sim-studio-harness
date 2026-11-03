@@ -74,9 +74,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { protectRoot } from './gate-trust.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : path.resolve(HERE, '..');
+const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..'); // 2.71.1 (A16): never in a lane copy
 export const TRAILER = 'Studio-Hooks';
 export const HARNESS_TRAILER = 'Studio-Harness';
 /** Commits the harness itself makes without the hooks: the kind, and a trailer such a commit always carries too. */

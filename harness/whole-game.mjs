@@ -25,6 +25,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, linkDir, nodeModuleDirs } from './worktree.mjs';
+import { gateEnv } from './gate-env.mjs';
 
 export const WHOLE_TITLE = 'Whole-game check red';
 export const WHOLE_RE = /^Whole-game check red\b/i;
@@ -109,7 +110,7 @@ export async function runWhole({ sha = null, root = mainRoot(), env = process.en
     return finish({ sha, at: new Date(now).toISOString(), ok: false, result: 'error', failed: [], why: copy.error });
   }
   const cmd = env.STUDIO_WHOLE_CMD || 'node scripts/run-gates.mjs --all --full --required-only';
-  const runEnv = { ...env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: 'whole-game', STUDIO_COMPACT_OUTPUT: 'on', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '' };
+  const runEnv = { ...gateEnv(env), STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: 'whole-game', STUDIO_COMPACT_OUTPUT: 'on', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '' };
   const { withGateSlot } = await import('./merge-lane.mjs');
   const exec = (c) => withGateSlot(root, 'whole-game', () => spawnSync(c, { cwd: copy.dir, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 256 * 1024 * 1024, timeout: Number(env.STUDIO_WHOLE_TIMEOUT_MS || 3600000) }), { env });
   const started = Date.now();

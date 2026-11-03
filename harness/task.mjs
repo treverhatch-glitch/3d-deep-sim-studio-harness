@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
+import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
@@ -25,6 +26,7 @@ import { overlapCheck } from './task-overlap.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
+import { recordTrust } from './gate-trust.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
@@ -39,6 +41,10 @@ import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
+import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
+import { gateEnv } from './gate-env.mjs';
+import { shrinkAtDone } from './ratchet.mjs';
+import { capRefusal } from './round-cap.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -262,6 +268,10 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   const wasNext = read(NEXT_FILE);
   let wasDone = read(DONE_FILE);
+  // 2.71.0 (z): a board file changed by something other than the harness since its last write (a hand edit) is a
+  // detected workaround (harness/workaround.mjs); every write is stamped first. Under the board lock; never a refusal.
+  try { checkStamped(NEXT_FILE, { text: wasNext }); checkStamped(DONE_FILE, { text: wasDone }); } catch { /* evidence only */ }
+  const put = (file, text) => { try { stampWrite(file, text); } catch { /* the write goes ahead unstamped */ } writeAtomic(file, text); };
   const onDisk = { next: parseQueueText(wasNext), done: parseQueueText(wasDone, 'done') };
   const nextOpen = new Set([...onDisk.next.inProgress, ...onDisk.next.backlog].map((t) => t.id));
   const inDoneFile = new Set(onDisk.done.done.map((t) => t.id));
@@ -277,13 +287,13 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   if (moving) writeAtomic(MOVES_FILE, `${JSON.stringify({ moves, at: new Date().toISOString(), pid: process.pid })}\n`, { fsync: false });
   if (toDone.length) {
     const first = renderDone([...tasks.done, ...onDisk.done.done.filter((t) => toOpen.includes(t.id))], kept.done);
-    if (first !== wasDone) writeAtomic(DONE_FILE, first);
+    if (first !== wasDone) put(DONE_FILE, first);
     wasDone = first;
   }
   // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
-  writeAtomic(NEXT_FILE, renderNext(tasks, kept.next));
+  put(NEXT_FILE, renderNext(tasks, kept.next));
   const doneText = renderDone(tasks.done, kept.done);
-  if (wasDone !== doneText) writeAtomic(DONE_FILE, doneText);
+  if (wasDone !== doneText) put(DONE_FILE, doneText);
   if (moving || fs.existsSync(MOVES_FILE)) try { fs.rmSync(MOVES_FILE, { force: true }); } catch { /* stale notes only matter for a task in both files */ }
   // 2.58.0 (P-057): say once which lines were set aside (they stay in the file, under UNREADABLE).
   const fresh = [...kept.next.filter((u) => u.fresh).map((u) => ['studio/NEXT.md', u.line]), ...kept.done.filter((u) => u.fresh).map((u) => ['studio/DONE.md', u.line])];
@@ -424,6 +434,9 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
   const overWhy = stopIfOverBudget(taskId, { by: 'budget' });
   if (overWhy) return { error: 'over-budget', message: `${taskId} can't start: ${overWhy}` };
+  // 2.72.0 (b): handed back by the two-round cap in this agent's session: no third attempt here (harness/round-cap.mjs).
+  const capWhy = force ? '' : capRefusal(taskId, agent);
+  if (capWhy) { emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: refused by the round cap` }); return { error: 'round-cap', message: `${taskId} can't start: ${capWhy}.` }; }
   // 2.58.5 (H-5): a claim that ran out under an owner still at work is that owner's (--force: a person reassigns it).
   if (!force && !lockStatus(`task:${taskId}`).locked) {
     const live = liveOwner(taskId, agent, null, { waiting: !parseNextQueue().inProgress.some((t) => t.id === taskId) });
@@ -489,7 +502,17 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   } catch {
     // the brief is a help, never a blocker
   }
-  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}) };
+  const research = researchAtStart(target);
+  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}), ...(research ? { research } : {}) };
+}
+
+/** 2.71.0 (y): a research task's write-up template, written where the task is worked (harness/research.mjs). */
+function researchAtStart(target) {
+  try {
+    if (taskType(target) !== 'research') return null;
+    const rel = ensureResearchTemplate(target);
+    return rel || researchRel(target.id);
+  } catch { return null; }
 }
 
 /**
@@ -707,7 +730,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       ['weakened-tests', 'harness/test-weakening.mjs', [], 'put the test back, or hand the task back with a note saying which test and why; only the owner approves weakening a test'],
     ];
     const start = taskBase(target.id);
-    const safetyEnv = { ...process.env, ...(start ? { STUDIO_TASK_BASE: start } : {}) };
+    // 2.71.1 (B): the checks run as the gates do, without code-loading NODE_OPTIONS or git redirects (harness/gate-env.mjs).
+    const safetyEnv = gateEnv({ ...process.env, ...(start ? { STUDIO_TASK_BASE: start } : {}) });
     for (const [id, rel, args] of SAFETY) {
       const file = path.join(REPO_ROOT, rel);
       if (!fs.existsSync(file)) { failed.push({ id, rel, why: `${rel} is missing` }); continue; }
@@ -724,6 +748,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     }
   }
 
+  // 2.72.0 (b): fixed purity hits leave the baseline (harness/ratchet.mjs), committed in this copy before it lands.
+  if (trainCheck) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
   if (trainCheck) {
     const g = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
     return { trainReady: true, id: target.id, type: check.type, all: check.type === 'whole', head: g('rev-parse', 'HEAD'), tree: g('rev-parse', 'HEAD^{tree}'), branch: g('symbolic-ref', '--short', 'HEAD') };
@@ -742,7 +768,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const callerChanged = String(process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
     const changed = ld?.changed?.length ? ld.changed : callerChanged.length ? callerChanged : null;
     const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
-    const ggEnv = { ...process.env };
+    const ggEnv = gateEnv(); // 2.71.1 (B): as the gates run
     delete ggEnv.STUDIO_GATE_CHANGED;
     // 2.43.0: the game's checks that passed in a full verify are not run a second time at done (on a real 236k-line
     // game that was another 6 minutes per task, right after the same checks passed).
@@ -763,7 +789,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' });
       const clean = st.status === 0 && !String(st.stdout || '').trim();
       const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
-      return { rec, ...judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) }) };
+      const j = judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) });
+      return { rec, ...(j.ok ? reuseTrusted(rec, j) : j) };
     })();
     let plan = null;
     if (reuse?.ok) {
@@ -796,6 +823,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       return { error: 'game-gates', failed, message: `${target.id} is not done: the game's checks fail.\n${failed.map((f) => `  FAIL ${f.id}: ${f.why}`).join('\n')}\nFix it, commit, and run task done again (node harness/game-gates.mjs${paths.length ? ` --paths ${paths.join(',')}` : ''} runs them).` };
     }
   }
+
+  // 2.72.0 (b): the game's checks passed: fixed purity hits leave the baseline (a commit of that file only) before it lands.
+  if (!force) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
 
   // 2.63.0: task done --train on a Unity-track task: every check above passed; the Unity merge train
   // (harness/unity-train.mjs) lands its branch with others on one land run and closes it then. Nothing is closed here.
@@ -1508,6 +1538,14 @@ function parseFlags(argv) {
   return flags;
 }
 
+/** 2.71.0 (x): one decision-log record for a board decision (hold, unhold, yes; harness/decisions.mjs). Never throws. */
+async function logTaskDecision({ action, subject, by, dg = null, why = '', evidence = '', undo = null }) {
+  try {
+    const dm = await import('./decisions-log.mjs');
+    dm.logDecision({ action, subject, by, as: dg && dg.ok !== false && (dg.ok || dg.via) ? dm.asCaller(dg) : dm.asCaller(null), why, evidence, undo });
+  } catch { /* the board's own record stands */ }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   // 2.67.0 (B-47): --help / -h prints usage and exits before anything reads the board or acts (train --help ran a train).
   const help = await import('./task-usage.mjs');
@@ -1517,6 +1555,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   const flags = parseFlags(process.argv.slice(2));
+  // 2.71.0 (z): --force and a refused command re-run again and again are detected workarounds (harness/workaround.mjs).
+  try { watchCommand('task', process.argv.slice(2), { agent: (typeof flags.agent === 'string' && flags.agent) || (typeof flags.by === 'string' && flags.by) || whoAmI({}, REPO_ROOT, { ...process.env, STUDIO_LOCK_OWNER: '' }) || process.env.STUDIO_LOCK_OWNER || null }); } catch { /* evidence only */ }
   const [cmd = 'next', arg1] = flags._;
   const q = parseNextQueue();
 
@@ -1681,6 +1721,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // notes, at most 3k characters) replaces re-reading the whole hand-off history.
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
+    if (started.research) console.error(`Research task: write it up in ${started.research} (the template is there): every source with its link; task done refuses a write-up without them.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
     for (const l of startOv?.lines || []) console.error(l); // 2.69.0 (s): overlap advice, once the task is started
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
@@ -1788,7 +1829,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
       try {
         const tr = await import('./train.mjs');
-        const c = await tr.laneTier(mainRoot(), { head: pre.head });
+        const c = await tr.laneTier(mainRoot(), { head: pre.head, task: pre.id });
         console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
         if (c.tier === 'C') {
           tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
@@ -1823,7 +1864,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const { laneTier } = await import('./train.mjs');
         const { tierLine } = await import('./tiers.mjs');
         let tier = null;
-        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
+        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(), task: targetId }); } catch {}
         // 2.65.0 (B-40): a config proposal that can't be applied (or conflicts with main) is the first thing to fix.
         let cpBad = null;
         try { const lb = laneConfigBefore(mainRoot(), { task: targetId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward }); if (lb.refuse) cpBad = lb.refuse; } catch {}
@@ -1991,19 +2032,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.67.0: under the owner's standing delegation the record says so (harness/delegation.mjs).
     const dl = await import('./delegation.mjs');
     const dg = dl.delegationFor({ action: 'hold', by });
-    const under = dg.ok ? ` (${dl.delegationWords({ at: dg.at, by: dg.owner }).slice(0, 160)})` : '';
+    const under = dg.ok ? ` (${(dg.autonomous ? dg.permission : dl.delegationWords({ at: dg.at, by: dg.owner })).slice(0, 160)})` : '';
     if (dg.ok) dl.recordUse(dg, { action: 'hold', task: t.id, detail: cmd });
     if (cmd === 'unhold') {
       if (!readHolds()[t.id]?.held) { console.log(`${t.id} isn't held.`); process.exit(0); }
+      const wasHeld = readHolds()[t.id]?.held;
       setHold(t.id, { held: null });
-      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again${under}`, ...(dg.ok ? { meta: { delegation: dg.at, owner: dg.owner } } : {}) });
+      emitEvent({ type: 'task.unheld', agent: by, task: t.id, msg: `${by} released ${t.id}: its claim clock runs again${under}`, ...(dg.ok ? { meta: { delegation: dg.at, owner: dg.owner, ...(dg.autonomous ? { autonomous: true } : {}) } } : {}) });
+      await logTaskDecision({ action: 'hold', subject: t.id, by, dg, why: `unhold (was held: ${wasHeld?.why || '?'})`, evidence: 'unhold', undo: { kind: 'hold', task: t.id, held: wasHeld || null, text: `npm run task -- hold ${t.id} --by <name> --why "…"` } });
       console.log(`${t.id} is no longer held: its claim clock runs again.`);
       process.exit(0);
     }
     const why = String(flags.why).trim();
     const was = readHolds()[t.id]?.parked;
     setHold(t.id, { held: { by, why, at: new Date().toISOString(), ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
-    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing${under}: ${why}`.slice(0, 400), meta: { why, ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}) } });
+    emitEvent({ type: 'task.held', agent: by, task: t.id, to: 'producer', msg: `${by} holds ${t.id} for landing${under}: ${why}`.slice(0, 400), meta: { why, ...(dg.ok ? { delegation: dg.at, owner: dg.owner } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
+    await logTaskDecision({ action: 'hold', subject: t.id, by, dg, why, evidence: 'hold for landing', undo: { kind: 'unhold', task: t.id, text: `npm run task -- unhold ${t.id} --by <name>` } });
     // A stop by the claim clock while it waited to land wasn't a stuck lane: the park is lifted (and the budget count
     // starts again), and its waiting rescues are closed.
     if (was?.budget) setHold(t.id, { parked: null }, { by, msg: `${by} unparked ${t.id}: held for landing, not stuck (${why})`.slice(0, 400) });
@@ -2079,15 +2123,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.67.0: the owner's standing delegation (harness/delegation.mjs): the named outside agent says yes with --by <agent>.
     const dl = await import('./delegation.mjs');
     const dg = dl.delegationFor({ action: 'yes', by: typeof flags.by === 'string' ? flags.by : '' });
-    if (dg.ok) { flags.by = dg.owner; flags.quote = dg.permission; flags.source = dl.DELEGATION_REL; }
+    if (dg.ok) { flags.by = dg.owner; flags.quote = dg.permission; flags.source = dg.autonomous ? 'studio/policy.json' : dl.DELEGATION_REL; }
     const who = dg.ok ? { ok: true, relayedBy: dg.agent } : devSays(typeof flags.by === 'string' ? flags.by : null, { quote: flags.quote || '', source: flags.source || '' });
     if (!who.ok) {
       console.error(`${who.message}${dg.why ? ` (${dg.why})` : ''}`);
       process.exit(1);
     }
     if (dg.ok) dl.recordUse(dg, { action: 'yes', task: arg1 });
+    const neededYes = readHolds()[arg1]?.needsYes || null; // 2.71.0 (x): the decision log's undo
     setHold(arg1, { needsYes: null }, { by: flags.by, msg: `${flags.by} said yes to ${arg1}${who.relayedBy ? ` (relayed by ${who.relayedBy}: "${flags.quote}", ${flags.source})` : ''}` });
-    emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}`, meta: who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {} });
+    emitEvent({ type: 'task.dev_yes', agent: flags.by, task: arg1, msg: `${flags.by} said yes to ${arg1}: ${t.title}${dg.autonomous ? ' (autonomous mode: on the review list)' : ''}`, meta: { ...(who.relayedBy ? { relayedBy: who.relayedBy, quote: flags.quote, source: flags.source } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
+    await logTaskDecision({ action: 'yes', subject: arg1, by: dg.ok ? dg.agent : flags.by, dg: dg.ok ? dg : (who.relayedBy ? { via: 'outside agent', permission: `${flags.quote} (${flags.source})` } : null), why: t.title, evidence: neededYes ? `proposed by ${neededYes.by || '?'}` : 'no yes was pending', undo: neededYes ? { kind: 'needs-yes', task: arg1, needsYes: neededYes, text: `the task waits for the dev's yes again` } : null });
     console.log(`${arg1} can start.`);
     process.exit(0);
   }
@@ -2155,13 +2201,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // --start/--claim are switches: a title word the parser took as their value is part of the title.
     const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
       process.exit(1);
     }
     // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'chore', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, balance, fun, playtest, review, docs, idea or system.`);
+    if (type && !['bug', 'chore', 'study', 'research', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, research, balance, fun, playtest, review, docs, idea or system.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
@@ -2232,4 +2278,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+}
+
+/**
+ * 2.71.1 (D01/T04, G15/T02): a verify record that passes the reuse rules counts only when run-gates wrote it: its run log
+ * (.studio/gates/runs/<id>.json) matches it and it didn't run beside untracked or ignored inputs (harness/gate-trust.mjs).
+ */
+function reuseTrusted(rec, judged) {
+  const t = recordTrust(rec, [path.join(REPO_ROOT, '.studio')]);
+  return t.ok ? judged : { ok: false, why: t.why };
 }

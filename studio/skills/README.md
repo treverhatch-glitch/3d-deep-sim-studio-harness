@@ -42,6 +42,7 @@ after it, main moved (which task landed when), or it was run under another name 
 | balance | role `designer-calibrator`, `balancer`, or title `Balance:` | [balance.md](balance.md) |
 | playtest / fun | role `qa-playtester`, `playtester`, `fun-tester`, or title `Playtest:` / `Fun:` | [playtest.md](playtest.md) |
 | study | role `reference-scout`, or title `Study:` | [study.md](study.md) |
+| research | title starts with `Research` (or `--type research`). 2.71.0: the write-up `docs/research/<ID>.md` (or the game's `docs/research/`), its template written at `task start`; done refuses it without a Sources section holding at least one link. No verify | [research.md](research.md) |
 | review | role `reviewer`, or title `Review:` | [review.md](review.md) |
 | docs | title `Docs:` | [docs.md](docs.md) |
 | none | role `producer` or `human` | coordination work, no check |

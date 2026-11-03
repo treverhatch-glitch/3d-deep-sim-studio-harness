@@ -378,6 +378,25 @@ Each of these is a setting. The ones that rest on Unity behaviour nobody has che
   - The cache line measures the copy, for example `in 7 s (parallel copy, 16 at a time, 30123 file(s), 830 MB)`.
   - If the parallel copy fails, the harness copies serially and says why.
 
+### An editor run has to prove it ran (2.72.0)
+
+A green results file is not enough. The gate counts a run (Edit Mode, Play Mode, the one-editor start, the Graphics
+split's two starts, and the Godot unit gate too) only when all of these hold (`harness/engine-proof.mjs`):
+
+- **Fresh results.** The editor is told to write `TestResults-<platform>-<nonce>.xml`, a name with this run's nonce, and
+  older results files are removed first. The file must also be newer than the run's start.
+- **Tests ran.** More than 0 test cases, unless `studio/game.json` `engines.unity.allowEmpty` is `true` or lists the
+  platform (`["PlayMode"]`). That file is the owner's. Godot: `"allowEmpty": true` in `studio/godot-unit.json`.
+- **A clean log.** No compile error (`error CS…`), licence problem or `Aborting batchmode` line, even when a
+  results file was written.
+- **One story.** The exit code agrees with the results. A non-zero exit, a kill or a timeout behind results that say
+  every test passed is not a pass. For gdUnit4, exit 0 with a failing test in the report is not one either.
+
+Each kind of failure prints its own line, `[engine-gate] FAIL <kind> (unity|godot): …`, and its own
+`[engine-gate] Fix: …` (`harness/gate-fix.mjs` `ENGINE_FIXES`). The kinds are `stale-results`, `no-results`,
+`empty-run`, `compile-error`, `licence`, `aborted`, `exit-mismatch` and `test-failed`. The Godot gate counts only a
+`reports/report_*` folder that did not exist before the run. A folder the run only touched is `stale-results`.
+
 ### Several Unity passes per gate, as board tasks (for a crew orchestrator)
 
 Don't hand-roll a gate script that runs Unity once per branch. File each Unity pass as a board task, and let the

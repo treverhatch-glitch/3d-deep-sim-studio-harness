@@ -36,6 +36,7 @@
  * or STUDIO_AGENT_TOOL / STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings } from './agy-allow.mjs';
@@ -44,6 +45,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { escalationFor } from './model-tiers.mjs';
+import { launchRoute } from './routing.mjs';
 import { sessionReasoningOnly, rerouteFor } from './reasoning-only.mjs';
 import { kickoffParts } from './kickoff.mjs';
 import { sweepThreads } from './threads.mjs';
@@ -79,6 +81,7 @@ import { STOP_NOTE, loopHandBacks, parkOnce } from './busy.mjs';
 import { sessionOutcome, parkIfNoWork } from './session-outcome.mjs';
 import { writeAtomic } from './fsafe.mjs';
 import { selfIdentity, spawnedIdentity, pidAlive, recordAlive, pidExists, readStarts, sameProcess } from './proc-identity.mjs';
+import { gateEnv } from './gate-env.mjs';
 
 export const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const WIP_DIR = path.join(STUDIO_STATE_DIR, 'wip');
@@ -322,13 +325,34 @@ export async function releaseDeadLocks(list = sessions()) {
  * a crash, a reboot) are marked ended, so the War Room and agent list stop showing them and the watcher
  * hands their task back and frees their claims (test #3). Returns the agents marked.
  */
+/**
+ * 2.71.1 (B): the task a session worked on, for its agent.session.end event (tokens per landed change, per task): the
+ * launcher's own record (the task it was started on), else the one task lock the agent holds. null: neither says.
+ */
+export function sessionTask(s, locks = null) {
+  if (s?.task) return String(s.task);
+  try {
+    const held = (locks || listLocks()).filter((l) => l.owner === s?.agent && l.key.startsWith('task:')).map((l) => l.key.slice(5));
+    return held.length === 1 ? held[0] : null;
+  } catch { return null; }
+}
+
+/** The last task this agent claimed (task.start) since its session started, from the event log; null if none. */
+export function claimedSince(agent, startedAt, events = null) {
+  try {
+    const from = Date.parse(startedAt || '') || 0;
+    const mine = (events || readRecentEvents(5000)).filter((e) => e.type === 'task.start' && e.agent === agent && e.task && Date.parse(e.ts) >= from - 1000);
+    return mine.length ? String(mine[mine.length - 1].task) : null;
+  } catch { return null; }
+}
+
 export function markGone() {
   const gone = [];
   for (const s of sessions()) {
     if (s.status !== 'running' || s.running) continue;
     const at = new Date().toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
-    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone' } });
+    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: sessionTask(s) || claimedSince(s.agent, s.startedAt) || undefined, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.
@@ -533,7 +557,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -566,7 +590,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
-  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'verify failed' };
@@ -1217,7 +1241,7 @@ function endAsDead(s, v, by) {
   }
   for (const l of listLocks().filter((x) => x.owner === s.agent)) release(l.key, s.agent);
   if (cur.copy) removeLaneCopy(s.agent, { keepBranch: unmerged(cur.copy.branch) > 0, ifIdle: true });
-  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, task: s.task || cur.task || held[0] || claimedSince(s.agent, s.startedAt) || undefined, status: stop ? 'ok' : 'error', msg: `${s.agent} ended: ${what}${held.length ? `; handed back ${held.join(', ')}` : ''}`, meta: { role: s.role, tool: s.tool, reason: v.kind, by, handed: held, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
   jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: stop ? 'stopped' : 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: String(what || '').slice(0, 300), log: s.log || null, extra: { role: s.role || null, handed: held } });
   if (v.kind === 'reused' || v.kind === 'stale') {
     emitEvent({ type: 'agent.pid_reused', agent: by, status: 'warn', msg: `${s.agent}: ${v.why}; its session is marked ended${held.length ? ` and ${held.join(', ')} handed back` : ''}`, meta: { session: s.agent, pid: v.pid, target: v.target, verified: v.kind === 'reused', now: v.cmd || undefined } });
@@ -1517,8 +1541,28 @@ export function startAgent(opts, { detach = false } = {}) {
       // the rescue model is a preference, never a blocker
     }
   }
-  // 2.30d (plan #3): a task that came back without being done starts one model tier up.
+  // 2.73.0 (e): cheap-first routing (harness/routing.mjs, studio/policy.json "routing"): a listed task type/track starts
+  // on the cheapest tier the policy lists and goes one tier up per red round; only models the policy lists, picked at
+  // session start (never mid-task). A routed task skips the tier-up and reroute below (they could pick unlisted models).
+  let routed = null;
   if (opts.task && !opts.model) {
+    try {
+      const q = parseNextQueue();
+      const t = [...q.inProgress, ...q.backlog].find((x) => x.id === opts.task);
+      if (t) {
+        const evs = readRecentEvents(20000);
+        const track = evs.filter((e) => e.type === 'task.added' && e.task === t.id).pop()?.meta?.track || '';
+        const r = launchRoute({ id: t.id, type: taskType(t), track, role: t.role || role }, { events: evs });
+        if (r && r.arm !== 'none') {
+          routed = r;
+          if (r.model) model = r.model;
+          emitEvent({ type: 'model.routed', agent: opts.by || 'launcher', task: t.id, msg: `${t.id} (${r.matched}): ${r.arm === 'holdout' ? `holdout: starts on the default model ${model}` : `starts on ${r.model} (${r.tier} tier)`}: ${r.why}`.slice(0, 400), meta: { ...r, model: r.model || model } });
+        }
+      }
+    } catch { /* routing is a preference, never a blocker */ }
+  }
+  // 2.30d (plan #3): a task that came back without being done starts one model tier up.
+  if (opts.task && !opts.model && !routed) {
     const esc = escalationFor(opts.task);
     if (esc && esc.tier !== esc.from) {
       if (esc.applied) model = esc.model;
@@ -1526,7 +1570,7 @@ export function startAgent(opts, { detach = false } = {}) {
     }
   }
   // 2.30h (3): the last hand-off was reasoning only: the Director's reroute moves the task to another family.
-  if (opts.task && !opts.model) {
+  if (opts.task && !opts.model && !routed) {
     const rr = rerouteFor(opts.task, readRecentEvents(5000));
     if (rr) {
       if (rr.applied) {

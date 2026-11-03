@@ -6,11 +6,16 @@
  *   - a Producer or Director session, or an agent outside the harness, on a person's direct permission
  *     (--by <the person> --permission "<their words or a link>", harness/permission.mjs);
  *   - never a worker (a launched builder, qa, … session, or a worker's name in --by or STUDIO_LOCK_OWNER).
+ * 2.71.0 (x): in autonomous mode (studio/policy.json) the overseer agent, for the actions the policy lists: via 'autonomous'.
  * deciderCheck() returns { ok, via, by, recordedBy, permission, delegation, why }. Every import is dynamic, so this
  * module can be loaded from anywhere without a cycle.
  */
 
-export async function deciderCheck({ by, permission = '', action = 'hold', env = process.env, what = 'do this' } = {}) {
+export async function deciderCheck({ by, permission = '', action, env = process.env, what = 'do this' } = {}) {
+  // 2.71.0 (x): autonomous mode (harness/policy.mjs) applies only where the caller names its action; the decisions that
+  // borrow hold's people (crew resume, ending a wind-down: they spend usage) are never autonomous.
+  const autonomy = Boolean(action);
+  action = action || 'hold';
   const who = String(by || '').trim();
   if (!who) return { ok: false, why: `Say who decides: --by <name>.` };
   const { DECIDER_ROLES, WORKER_NAME, AGENT_SHELL, agentOnPermission, permissionText } = await import('./permission.mjs');
@@ -22,8 +27,9 @@ export async function deciderCheck({ by, permission = '', action = 'hold', env =
   if (worker) return { ok: false, why: `Refused: ${worker} is a worker agent; workers never ${what}.` };
   try {
     const dl = await import('./delegation.mjs');
-    const dg = dl.delegationFor({ action, by: who, env });
-    if (dg.ok) return { ok: true, via: 'delegation', by: who, recordedBy: who, permission: dg.permission, delegation: { at: dg.at, owner: dg.owner } };
+    const dg = dl.delegationFor({ action, by: who, env, autonomy });
+    if (dg.ok && dg.autonomous) return { ok: true, via: 'autonomous', autonomous: true, by: who, recordedBy: who, permission: dg.permission, at: dg.at };
+    if (dg.ok) return { ok: true, via: 'delegation', by: who, recordedBy: who, permission: dg.permission, delegation: { at: dg.at, owner: dg.owner }, at: dg.at };
   } catch { /* no delegation module or file: the other rules apply */ }
   const { agentLikeName } = await import('./agent-env.mjs');
   const agent = Boolean(role || marker || owner);

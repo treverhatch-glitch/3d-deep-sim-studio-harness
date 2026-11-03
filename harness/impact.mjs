@@ -14,10 +14,19 @@
  * The verdict: better / worse / same (within 10%) per measure; overall "better" when more measures improved than got
  * worse, "worse" the other way, "mixed" otherwise, "not enough data" with no measure judged. The digest names the
  * latest upgrade's verdict once one measure has enough data. A script over the log and git: no model, no tokens.
+ *
+ * 2.73.0 (f): when `upgrade --merge` left a before snapshot for this release (.studio/upgrades/<from>-to-<to>.json,
+ * harness/upgrade-baseline.mjs), its numbers are the before side (marked *), and false reds per train, tokens per landed
+ * change (also by task) and workarounds per day are compared too (not in the verdict). A release's predictions
+ * (docs/releases/<version>.json, `npm run release -- predict`, harness/release-predict.mjs) are scored: hit / miss with
+ * the measured change, or not scored while a side has too little data.
  */
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { weightedTokens } from './token-weight.mjs';
+import { perDayIn, workaroundStats, workaroundTrend } from './workaround-stats.mjs';
+import { baselineMeasures, readSnapshot } from './upgrade-baseline.mjs';
+import { readPredictions, scorePredictions } from './release-predict.mjs';
 
 const DAY = 86400000;
 const ts = (e) => Date.parse(e?.ts) || 0;
@@ -90,10 +99,10 @@ export function measures(sorted, from, to, { card = null } = {}) {
 export const MEASURE_NAMES = { landedPerHour: 'landed per hour', verifyP50Min: 'train verify p50 (min)', verifyP90Min: 'train verify p90 (min)', redVerifyPct: 'red verify %', handBacksPerLanded: 'hand-backs per landed', tokensPerKept: 'tokens per kept change', roundTripsPerLanded: 'owner round-trips per landed', noWorkPct: 'no-work sessions %' };
 
 /** Compare before/after: { rows: [{ key, name, before, after, verdict }], verdict, judged }. */
-export function compare(before, after, { minN = 30 } = {}) {
+export function compare(before, after, { minN = 30, names = MEASURE_NAMES } = {}) {
   const rows = [];
   let up = 0; let down = 0;
-  for (const k of Object.keys(MEASURE_NAMES)) {
+  for (const k of Object.keys(names)) {
     const b = before[k]; const a = after[k];
     let verdict;
     if (!b || !a || b.n < minN || a.n < minN || b.value === null || a.value === null) verdict = `not enough data (n=${b?.n ?? 0} before, ${a?.n ?? 0} after; needs ${minN})`;
@@ -103,7 +112,7 @@ export function compare(before, after, { minN = 30 } = {}) {
       if (Math.abs(change) <= 0.1) verdict = 'same';
       else { const good = b.better === 'up' ? change > 0 : change < 0; verdict = good ? 'better' : 'worse'; if (good) up += 1; else down += 1; }
     }
-    rows.push({ key: k, name: MEASURE_NAMES[k], before: b?.value ?? null, after: a?.value ?? null, nBefore: b?.n ?? 0, nAfter: a?.n ?? 0, verdict });
+    rows.push({ key: k, name: names[k], before: b?.value ?? null, after: a?.value ?? null, nBefore: b?.n ?? 0, nAfter: a?.n ?? 0, verdict });
   }
   const judged = rows.filter((r) => !r.verdict.startsWith('not enough')).length;
   const verdict = !judged ? 'not enough data' : up > down ? 'better' : down > up ? 'worse' : 'mixed';
@@ -128,15 +137,67 @@ export function impactReport({ events = [], root = REPO_ROOT, release = null, da
   const sorted = [...events].sort((a, b) => ts(a) - ts(b));
   const before = measures(sorted, bFrom, p.at, { card });
   const after = measures(sorted, p.at, aTo, { card });
+  // 2.73.0 (f): the before snapshot `upgrade --merge` took (harness/upgrade-baseline.mjs) is the before side when it is
+  // there: the numbers the studio had at that moment, not ones recomputed from today's (rolled, appended) log.
+  const snap = readSnapshot(root, p.version);
+  const baseline = snapshotBefore(before, snap);
   const cmp = compare(before, after, { minN: impactMinN(env) });
-  return { ok: true, release: p.version, from: p.from || null, source: p.source, commit: p.commit || null, at: new Date(p.at).toISOString(), before: { from: new Date(bFrom).toISOString(), to: new Date(p.at).toISOString() }, after: { from: new Date(p.at).toISOString(), to: new Date(aTo).toISOString() }, days: Number(days) || 3, ...cmp };
+  const extra = extraRows(snap, sorted, bFrom, p.at, aTo, { minN: impactMinN(env), env });
+  const predictions = scorePredictions(readPredictions(root, p.version), [...cmp.rows, ...extra.rows]);
+  // 2.71.0 (z): workarounds (harness.workaround events, harness/workaround.mjs) per day either side, the top 5 signatures
+  // after it and the trend after each of the last 5 upgrades. Fewer workarounds: the upgrade worked. Not in the verdict.
+  const wb = perDayIn(sorted, bFrom, p.at); const wa = perDayIn(sorted, p.at, aTo);
+  const trend = workaroundTrend(sorted, pts, { now, days: Number(days) || 3 });
+  const workarounds = { before: wb, after: wa, verdict: trend.find((t) => t.version === p.version)?.verdict || null, top: workaroundStats(sorted, { now: aTo, days: Math.max(0.01, (aTo - p.at) / 86400000) }).top, trend: trend.slice(-5) };
+  return { ok: true, workarounds, baseline, extra: extra.rows, tokensByTask: extra.tokensByTask, predictions, release: p.version, from: p.from || null, source: p.source, commit: p.commit || null, at: new Date(p.at).toISOString(), before: { from: new Date(bFrom).toISOString(), to: new Date(p.at).toISOString() }, after: { from: new Date(p.at).toISOString(), to: new Date(aTo).toISOString() }, days: Number(days) || 3, ...cmp };
+}
+
+/** Put the snapshot's numbers in the before side (in place); returns { file, takenAt, window, keys } or null. */
+export function snapshotBefore(before, snap) {
+  if (!snap?.doc?.measures) return null;
+  const keys = [];
+  for (const k of Object.keys(MEASURE_NAMES)) {
+    const m = snap.doc.measures[k];
+    if (m && typeof m === 'object' && 'value' in m && Number.isFinite(Number(m.n))) { before[k] = { value: m.value, n: Number(m.n), better: before[k]?.better || m.better, from: 'snapshot' }; keys.push(k); }
+  }
+  return { file: snap.file, takenAt: snap.doc.takenAt, window: snap.doc.window, from: snap.doc.from, keys };
+}
+
+export const EXTRA_NAMES = { falseRedsPerTrain: 'false reds per train', tokensPerLanded: 'tokens per landed change', workaroundsPerDay: 'workarounds per day' };
+/**
+ * 2.73.0 (f): the snapshot's own numbers (false reds per train, tokens per landed, workarounds per day) before vs after,
+ * judged like the rows (not in the verdict), and tokens per landed change by task. Before: the snapshot's, else the log's.
+ */
+export function extraRows(snap, sorted, bFrom, at, aTo, { minN = 30, env = process.env } = {}) {
+  const b = snap?.doc?.measures || baselineMeasures(sorted, bFrom, at, { env });
+  const a = baselineMeasures(sorted, at, aTo, { env });
+  const c = compare(b, a, { minN, names: EXTRA_NAMES });
+  return { rows: c.rows, tokensByTask: { before: b.tokensByTask || null, after: a.tokensByTask || null } };
 }
 
 export function impactText(r) {
   if (!r.ok) return `Impact: ${r.why}.`;
   const L = [`Harness ${r.release}${r.from ? ` (from ${r.from})` : ''} reached the studio ${r.at} (${r.source}${r.commit ? ` ${String(r.commit).slice(0, 10)}` : ''}). ${r.days} day(s) before vs after:`];
-  for (const x of r.rows) L.push(`  ${x.name}: ${x.before ?? '-'} -> ${x.after ?? '-'} (n ${x.nBefore}/${x.nAfter}): ${x.verdict}`);
+  if (r.baseline) L.push(`Before: the snapshot ${r.baseline.file} taken ${r.baseline.takenAt} (upgrade --merge), ${r.baseline.window?.days ?? '?'} day(s); * marks its numbers.`);
+  const star = (k) => (r.baseline?.keys?.includes(k) ? '*' : '');
+  for (const x of r.rows) L.push(`  ${x.name}: ${x.before ?? '-'}${star(x.key)} -> ${x.after ?? '-'} (n ${x.nBefore}/${x.nAfter}): ${x.verdict}`);
   L.push(`Verdict: ${r.verdict}${r.judged ? ` (${r.better} better, ${r.worse} worse of ${r.judged} judged)` : ''}.`);
+  if (r.extra?.length) {
+    L.push(`Also (not in the verdict)${r.baseline ? ', before from the snapshot' : ''}:`);
+    for (const x of r.extra) L.push(`  ${x.name}: ${x.before ?? '-'} -> ${x.after ?? '-'} (n ${x.nBefore}/${x.nAfter}): ${x.verdict}`);
+    const tb = r.tokensByTask;
+    if (tb?.before?.tasks || tb?.after?.tasks) L.push(`  tokens per landed change by task (sessions naming their task): ${tb.before?.tokensPerLandedNamed ?? '-'} -> ${tb.after?.tokensPerLandedNamed ?? '-'} (tasks ${tb.before?.tasks ?? 0}/${tb.after?.tasks ?? 0})${tb.after?.top?.length ? `; costliest after: ${tb.after.top.slice(0, 3).map((t) => `${t.task} ${t.tokens}`).join(', ')}` : ''}`);
+  }
+  if (r.predictions?.length) {
+    L.push(`Predictions for ${r.release} (npm run release -- predict): ${r.predictions.filter((p) => p.result === 'hit').length} hit, ${r.predictions.filter((p) => p.result === 'miss').length} miss, ${r.predictions.filter((p) => p.result === 'not scored').length} not scored:`);
+    for (const p of r.predictions) L.push(`  ${p.metric} expected ${p.expect}: ${p.result}${p.result === 'not scored' ? ` (${p.why})` : ` (measured ${p.delta > 0 ? '+' : ''}${p.delta}%: ${p.before} -> ${p.after})`}`);
+  }
+  const w = r.workarounds;
+  if (w && (w.before.n || w.after.n || w.trend.some((t) => t.before.n || t.after.n))) {
+    L.push(`Workarounds per day (npm run workaround -- list): ${w.before.perDay} -> ${w.after.perDay} (n ${w.before.n}/${w.after.n})${w.verdict ? `: ${w.verdict}` : ''}.`);
+    if (w.top.length) L.push(`  top after it: ${w.top.map((t) => `${t.signature} (${t.n})`).join('; ')}`);
+    for (const t of w.trend) L.push(`  after ${t.version} (${t.at.slice(0, 10)}): ${t.before.perDay} -> ${t.after.perDay}/day (${t.verdict})`);
+  }
   return L.join('\n');
 }
 
