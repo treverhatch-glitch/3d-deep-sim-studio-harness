@@ -204,11 +204,32 @@
   ignored ones outside build and dependency output (`node_modules`, `dist`, `build`, `coverage`, `.vite`, …), under the
   game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/`, `hub/` or a runner config at the root, records
   `dirty: true` and the files (`hidden`), and is never reused.
+- Signed verify records (2.73.0, `harness/verify-key.mjs`): each studio has a local verify key, made on first use and kept
+  outside every checkout and lane: `~/.studio-verify/<studio-id>.key` (mode 600; `<studio-id>` is a hash of the
+  repository's git folder, which the main checkout, its lanes and the train's copies share). `STUDIO_VERIFY_KEY_DIR`
+  names another folder; one inside the studio's checkout or a worktree is refused (nothing is signed then). run-gates signs
+  each run log (HMAC-SHA256 over the record's digest and the run log's fields); task done, the train, the one-lane train and
+  the tree records reuse a record only with a valid signature. Otherwise: "not reused: unsigned record (hand-written or from
+  an older harness)", and the verify just runs. Records from before 2.73.0 are unsigned: not reused once, no migration.
+  The key is never printed; run logs carry only a key id (a hash). `harness/verify-key.mjs` and
+  `harness/golden-report.mjs` are on the protected list. Limit: lanes run run-gates as the same user, so this
+  stops hand-written files (a record and a matching run log, or a copy from another studio), not a malicious process
+  running as that user, which can read the key.
 - A golden re-recorded by a lane with its own `Golden-Reason` is tier C (rule `golden-rerecord`, A13): a person, a
   delegation or autonomous review releases it. The game's manifest (protected) may set it to B
-  (`"tiers": { "set": { "golden-rerecord": "B" } }`), for example for UI snapshots.
-- Still open: the runner protection only matters where an owner key enforces it; a forger who writes both a record and
-  its run log in `.studio/` (any agent can) is not stopped, only the hand-written record alone.
+  (`"tiers": { "set": { "golden-rerecord": "B" } }`), for example for UI snapshots. Since 2.73.0
+  (`harness/golden-report.mjs`) the re-record carries the harness's first-divergence report: a red golden check
+  (`qa/check-golden.mjs`, or a game's golden check with a `"divergence"` contract that lists its `"goldens"`) and
+  `npm run golden -- --update` on a changed answer write `.studio/gates/divergence/<golden path, / as __>.json`, signed
+  with the verify key and tied to the recorded answer it replaces (and, for a cartridge golden, the new sha256). The
+  train's hold shows it ("first divergence for <golden>: tick N, <field> a -> b"); the release needs a releaser who is
+  not the lane's author (its agent or a `Studio-Agent` trailer of its commits): a person, a delegation or autonomous
+  review by another agent; and the decision log records each report's tick and field. Without a report (no golden check
+  ran before the re-record, the divergence couldn't run, or the entry is hand-written) the hold says so and only a person
+  releases it (a delegation or autonomous review is refused). The train's own re-records (pin refresh) and upgrade merges
+  are unchanged.
+- Still open: the runner protection only matters where an owner key enforces it; a process running as the studio's user
+  can read the verify key and sign a forged record or report (see above).
 
 ## Failures
 - Closed-loop writes the cartridge, seed, the tick the cartridge failed on, and every action to `.studio/last-seed-failure.json`.
