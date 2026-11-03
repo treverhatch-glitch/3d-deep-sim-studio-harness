@@ -1141,3 +1141,35 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Fix:** holder-bound release, fenced and capped output, task on every session end, `upgrade -- --rollback`.
   qa/selftest-2711b.mjs.
 
+### P-204 — a red golden said only "hash differs" · fixed in 2.72.0
+- **Fix:** first divergence on a red (tick, subsystem, field). qa/selftest-272a.mjs.
+
+### P-205 — every game red was "game" · fixed in 2.72.0
+- **Evidence:** 83 of 91 failed gate runs on the owner's PC carried the single id `game`.
+- **Fix:** sub-ids. qa/selftest-272a.mjs.
+
+### P-206 — timeouts under load blamed the lane · fixed in 2.72.0
+- **Evidence:** red runs of a clean game copy were all timeouts in long sim suites.
+- **Fix:** the timeout-only re-run alone at low load. qa/selftest-272a.mjs.
+
+### P-207 — standing purity hits drowned new ones; nothing stopped new hits · fixed in 2.72.0
+- **Evidence:** a median task saw ~470 standing hits vs 8 new; a ratchet that only hid hits let them grow 143 -> 543.
+- **Fix:** the purity ratchet where any new hit fails. qa/selftest-272b.mjs.
+
+### P-208 — a game check couldn't prove it can fail · fixed in 2.72.0
+- **Fix:** must-fail canaries. qa/selftest-272b.mjs.
+
+### P-209 — patch loops on the same red · fixed in 2.72.0
+- **Fix:** the two-round cap. qa/selftest-272b.mjs.
+
+### P-210 — engine gates could pass without proof · fixed in 2.72.0
+- **Evidence:** Unity ignored the exit code, compile errors and aborts once a results file existed; Godot counted a
+  touched old report and passed exit 0 with failing tests.
+- **Fix:** harness/engine-proof.mjs; the state probe. qa/selftest-272c.mjs.
+
+### P-211 — contract items went unseen; the same red was re-diagnosed from scratch · fixed in 2.72.0
+- **Fix:** the completeness rubric; error-signature memory. qa/selftest-272c.mjs.
+
+### P-212 — game logic was written again per game; CI was one long serial run · fixed in 2.72.0
+- **Fix:** the gameplay logic library; selftest shards. qa/selftest-272d.mjs.
+

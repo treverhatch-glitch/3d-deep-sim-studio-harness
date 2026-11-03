@@ -4,6 +4,48 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.72.0] — 2026-11-03
+2.72.0, "better reds, better games": a red says where and why, a flaky timeout or an old lint hit stops costing a round,
+engine gates prove they ran, a fixed red is remembered, and code a game already landed can be found before it is written
+again (the verified Grok dossier, the dev plan's 2.72 and the owner's logic-library idea; P-204 to P-212).
+### Added
+- **First divergence (a).** A red golden prints where it first went wrong ("first divergence: tick 23,
+  resources.credits 1936 -> 1937") against the commit that recorded it, only on a red; games get the same through a
+  `"divergence"` command printing per-tick digests (`STUDIO_GOLDEN_DIVERGENCE`).
+- **Sub-ids (a).** Gate failures carry what failed (`game:test:<file>`, `golden:<file>`) in `gates.run` (`meta.subIds`),
+  the train's events and the hand-back facts.
+- **Timeout-only re-run (a).** A red whose only failures are per-test timeouts re-runs those files alone at low load:
+  green alone is a `timeout-flake` (green for that file only, in `flakes.jsonl` and the digest); red alone or mixed
+  stays red (`STUDIO_TIMEOUT_RERUN=off`).
+- **Purity ratchet (b).** A committed `purity-baseline.json` per game holds its standing purity/lint hits; only new hits
+  fail and only they are printed; fixed hits leave it at task done; it never grows from a lane (tier C);
+  `npm run purity -- baseline --write --by <person>` (delegable as `purity-baseline`).
+- **Must-fail canaries (b).** A game check may declare a `"canary"`; `npm run gates -- --canaries` (also nightly) reports
+  silently green and unproven checks and files a harness task for a silent one.
+- **Two-round cap (b).** Red twice in a row on the same failure: handed back with a summary and a restart-from-the-spec
+  note; a third try in that session is refused (`STUDIO_ROUND_CAP`, default 2).
+- **Engine gates prove they ran (c).** Unity and Godot runs count only with results written by this run, more than 0
+  tests unless `allowEmpty`, no compile-error / licence / "Aborting batchmode" line, and an exit code that agrees;
+  each failure kind has its own `[engine-gate]` line and Fix. An empty Godot run now fails by default.
+- **State probe (c).** A game's `stateProbe` digests are compared with main's baseline (`game:state-probe`); a change
+  without Golden-Reason is red at the first differing tick.
+- **Completeness rubric (c).** Contracts take test-name criteria and should-items; unverified must-items are listed for
+  the reviewer and hold a train lane at tier C until signed.
+- **Error-signature memory (c).** A fixed red is remembered (`.studio/error-memory.jsonl`), and the next one like it
+  shows "seen before: fixed in <commit> by changing <files>".
+- **Gameplay logic library (d).** `npm run logic -- need "<what>"` finds code the studio already landed before anyone
+  writes it again; modules join only after landing, with a language-neutral spec, confirmed by someone other than the
+  author; outside code follows the licence rules (GPL family needs the owner); modules unused for 90 days are flagged.
+- **CI shards (d).** The selftest runs in 4 parallel jobs per platform (`--shard i/N`, `--list-shards`), the other gates
+  with `--except selftest`, and a summary job is red if any job failed.
+
+### Untested
+- Windows: the divergence worktree and junction, real vitest/jest timeout output (node --test was real), the round
+  cap's hand-back subprocess, the shard jobs on real GitHub. Real Unity and gdUnit4 log wording (stand-ins were used).
+- A real full verify recording a round (the test calls it directly).
+
+---
+
 ## [2.71.1] — 2026-11-03
 2.71.1, "close the gate holes": the red-team holes an outside review found (Grok's dossier, re-tested on 2.70.0 by our
 own verifier) that an agent could fall into by accident or on purpose, closed before the crew restarts (P-197 to P-203).
