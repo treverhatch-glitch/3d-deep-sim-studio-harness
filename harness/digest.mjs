@@ -21,6 +21,8 @@
  *   - 2.71.0 (x): autonomous decisions waiting for review past the policy's reviewWithinH, and a proposal of
  *     autonomous mode waiting for the owner; then a line with the autonomous decisions (harness/decisions.mjs);
  *   - 2.71.0 (y): research tasks finished in the last 24 h, each with its write-up and recommendation, as a line;
+ *   - 2.71.0 (z): workarounds per day, the top 5 signatures, the trend after the latest upgrade and the open harness
+ *     tasks (harness/workaround.mjs), as a line;
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -167,10 +169,15 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   try { researchLine = (await import('./research.mjs')).researchDigestLine(ev, { now, root }); } catch { researchLine = ''; }
   let buildLine = ''; // 2.70.0 (t): the latest playable build and clip after a landing in the last 24 h
   try { const l = (await import('./landing-build.mjs')).landingLine(ev, { since: now - DAY }); buildLine = l ? `${l} (npm run play).` : ''; } catch { buildLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  // 2.71.0 (z): workarounds per day, the top signatures, the trend after the latest upgrade and the open harness tasks
+  // (harness/workaround.mjs; the harness maintainer's queue, never a game task).
+  let workMod = null; let workPts = []; let workLine = '';
+  try { workMod = await import('./workaround.mjs'); workPts = await workMod.upgradesSeen({ events: ev, now, root }); workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts }); } catch { workLine = ''; }
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
+  if (words(text) >= MAX_WORDS && workLine && workMod) { workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts, brief: true }); text = compose(items); }
   if (words(text) >= MAX_WORDS && candLine) { candLine = `Allowlist candidates: ${cands.length} (npm run denials; never added automatically).`; text = compose(items); }
   while (words(text) >= MAX_WORDS && items.length > 1) { items = items.slice(0, -1); text = compose(items).replace(/Needs you \((\d+)\):/, `Needs you ($1; ${need.length - items.length} more: npm run digest -- --all):`); }
   if (words(text) >= MAX_WORDS) { line = line.split(' · ').slice(0, 3).join(' · '); text = compose(items); }

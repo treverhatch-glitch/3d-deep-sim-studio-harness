@@ -18,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { weightedTokens } from './token-weight.mjs';
+import { perDayIn, workaroundStats, workaroundTrend } from './workaround-stats.mjs';
 
 const DAY = 86400000;
 const ts = (e) => Date.parse(e?.ts) || 0;
@@ -129,7 +130,12 @@ export function impactReport({ events = [], root = REPO_ROOT, release = null, da
   const before = measures(sorted, bFrom, p.at, { card });
   const after = measures(sorted, p.at, aTo, { card });
   const cmp = compare(before, after, { minN: impactMinN(env) });
-  return { ok: true, release: p.version, from: p.from || null, source: p.source, commit: p.commit || null, at: new Date(p.at).toISOString(), before: { from: new Date(bFrom).toISOString(), to: new Date(p.at).toISOString() }, after: { from: new Date(p.at).toISOString(), to: new Date(aTo).toISOString() }, days: Number(days) || 3, ...cmp };
+  // 2.71.0 (z): workarounds (harness.workaround events, harness/workaround.mjs) per day either side, the top 5 signatures
+  // after it and the trend after each of the last 5 upgrades. Fewer workarounds: the upgrade worked. Not in the verdict.
+  const wb = perDayIn(sorted, bFrom, p.at); const wa = perDayIn(sorted, p.at, aTo);
+  const trend = workaroundTrend(sorted, pts, { now, days: Number(days) || 3 });
+  const workarounds = { before: wb, after: wa, verdict: trend.find((t) => t.version === p.version)?.verdict || null, top: workaroundStats(sorted, { now: aTo, days: Math.max(0.01, (aTo - p.at) / 86400000) }).top, trend: trend.slice(-5) };
+  return { ok: true, workarounds, release: p.version, from: p.from || null, source: p.source, commit: p.commit || null, at: new Date(p.at).toISOString(), before: { from: new Date(bFrom).toISOString(), to: new Date(p.at).toISOString() }, after: { from: new Date(p.at).toISOString(), to: new Date(aTo).toISOString() }, days: Number(days) || 3, ...cmp };
 }
 
 export function impactText(r) {
@@ -137,6 +143,12 @@ export function impactText(r) {
   const L = [`Harness ${r.release}${r.from ? ` (from ${r.from})` : ''} reached the studio ${r.at} (${r.source}${r.commit ? ` ${String(r.commit).slice(0, 10)}` : ''}). ${r.days} day(s) before vs after:`];
   for (const x of r.rows) L.push(`  ${x.name}: ${x.before ?? '-'} -> ${x.after ?? '-'} (n ${x.nBefore}/${x.nAfter}): ${x.verdict}`);
   L.push(`Verdict: ${r.verdict}${r.judged ? ` (${r.better} better, ${r.worse} worse of ${r.judged} judged)` : ''}.`);
+  const w = r.workarounds;
+  if (w && (w.before.n || w.after.n || w.trend.some((t) => t.before.n || t.after.n))) {
+    L.push(`Workarounds per day (npm run workaround -- list): ${w.before.perDay} -> ${w.after.perDay} (n ${w.before.n}/${w.after.n})${w.verdict ? `: ${w.verdict}` : ''}.`);
+    if (w.top.length) L.push(`  top after it: ${w.top.map((t) => `${t.signature} (${t.n})`).join('; ')}`);
+    for (const t of w.trend) L.push(`  after ${t.version} (${t.at.slice(0, 10)}): ${t.before.perDay} -> ${t.after.perDay}/day (${t.verdict})`);
+  }
   return L.join('\n');
 }
 
