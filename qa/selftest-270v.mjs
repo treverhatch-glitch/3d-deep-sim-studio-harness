@@ -208,7 +208,11 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
     const keyRel = 'studio/keys/owner-ed25519.pub.pem';
     const hadKey = fs.existsSync(path.join(dir, keyRel));
     if (hadKey) { g('rm', '-q', '--cached', keyRel); fs.renameSync(path.join(dir, keyRel), path.join(dir, `${keyRel}.270v`)); g('commit', '-qm', 'test: no owner key for the delegation check', '--no-verify'); }
-    const gr = run(dir, 'node harness/delegation.mjs grant opus-bot --actions asset-review --hours 2 --by pat --why "asset reviews while the crew runs"', base);
+    // The grant commits studio/delegation.json with the machine's git identity; a CI runner has none (no global
+    // user.name/email), so the commit failed and the delegation didn't count (CI release-gate, 2.70.0). The owner's
+    // terminal has one: give the grant one here.
+    const ident = { GIT_AUTHOR_NAME: 'Pat', GIT_AUTHOR_EMAIL: 'pat@example.invalid', GIT_COMMITTER_NAME: 'Pat', GIT_COMMITTER_EMAIL: 'pat@example.invalid' };
+    const gr = run(dir, 'node harness/delegation.mjs grant opus-bot --actions asset-review --hours 2 --by pat --why "asset reviews while the crew runs"', { ...base, ...ident });
     // Why the delegation does or doesn't count, printed first when this check fails (CI only: the shared studio differs).
     const delegWhy = (() => { const r = run(dir, `node -e "import('./harness/delegation.mjs').then((m) => { const d = m.readDelegation({ root: process.cwd() }); console.log(JSON.stringify({ ok: d.ok, why: d.why, signed: d.signed, commit: d.commit })); })"`, base); return out(r).trim().slice(-400); })();
     const dl = asset('review dock-barrel --pass --by opus-bot', { CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'opus-bot' });
