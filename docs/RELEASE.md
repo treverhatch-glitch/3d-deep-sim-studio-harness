@@ -52,6 +52,16 @@ then use `node .studio/upgrade-guard.mjs` wherever the steps below say `npm run 
 `git show <ref>:harness/upgrade-guard.mjs > .studio/upgrade-guard.mjs` does the same; PowerShell 5's `>` writes UTF-16,
 which node can't run, so use the line above there.) The guard finds the studio by git from the folder it runs in.
 
+0. **Preflight (2.73.0):** `npm run upgrade -- --preflight [--ref <ref>] [--json]` (or `node .studio/upgrade-guard.mjs
+   --preflight --ref <ref>` on an older studio: the guard takes its helper from the ref). Read-only. One line per item,
+   PASS / WARN / FAIL / INFO, a `Fix:` line under each WARN and FAIL, exit 1 on any FAIL: node against the ref's
+   `engines`, git (`STUDIO_PREFLIGHT_MIN_GIT`, default 2.34), the main checkout (on a branch, nothing in progress, the ref
+   resolves), the board committed (stash entries with board rows: WARN), the owner key committed
+   (`studio/keys/owner-ed25519.pub.pem`; FAIL without it; WARN when the private key is on this machine), the protected
+   check's signatures, disk from the machine scan (FAIL under `STUDIO_DISK_MIN_FREE_GB`) and memory headroom (WARN under
+   `STUDIO_PREFLIGHT_MIN_RAM_GB`, default 4), `STUDIO_UNITY` / `GODOT_BIN` resolving when set (Unity, Blender and ffmpeg on
+   the PATH as INFO), `STUDIO_REPORT_WEBHOOK` set (never printed; FAIL when `.env` is tracked by git), `studio/policy.json`,
+   `delegation.json`, `autonomy.json` and `overseer.json` readable, and each lane copy with unlanded work (WARN, listed).
 1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the
@@ -80,13 +90,23 @@ which node can't run, so use the line above there.) The guard finds the studio b
    (targeted tests fail) or skipped (a running session, uncommitted work, a merge in progress: never touched). The
    upgrade passes either way. `STUDIO_UPGRADE_REFRESH=off` skips the refresh (run it yourself later);
    `STUDIO_UPGRADE_REFRESH=no-tests` merges without running the lanes' targeted tests.
+   **Before snapshot (2.73.0):** just before it merges, `--merge` writes `.studio/upgrades/<from>-to-<to>.json`: the
+   studio's numbers over the `STUDIO_UPGRADE_SNAPSHOT_DAYS` (3) days before the update (landed per hour, false reds per
+   train, tokens per landed change and by task, red verify %, workarounds per day, verify minutes, hand-backs, no-work
+   sessions; harness/upgrade-baseline.mjs). A merge stopped on a conflict keeps the first one for `--continue`.
+   `npm run autonomy -- impact` uses it as the before side (docs/AUTONOMY.md "Release impact").
 5. A stash that did take board changes: `npm run upgrade -- --check` names it. Restore by merge:
    `npm run upgrade -- --restore-stash <sha> --by <you>` (board committed first) three-way merges the stash's board
    files into the board, keeping both sides' rows (conflicting task rows of `studio/NEXT.md` and `studio/DONE.md` are
    all kept), and commits. Any other conflict refuses and lists the files, writing nothing. It never drops the stash:
    it prints the `git stash drop stash@{n}` to run once the board has every row.
-6. `npm run verify`, then `npm run task -- drain off --by <you>`.
-7. **Roll back (2.71.1):** `npm run upgrade -- --rollback --by <you> [--permission "…"]` returns the studio to the
+6. **Smoke (2.73.0):** `npm run upgrade -- --smoke [--keep] [--json]` right after the merge: a tiny verify and a tiny
+   train on a throwaway made-up task in a scratch copy of the studio's harness (the OS temp folder, a fresh empty board,
+   never the real one), the machine scan, and one supervisor pass in dry run (no agent starts). PASS / FAIL per item with
+   `Fix:` lines, exit 1 on a FAIL, an `upgrade.smoke` event. `--keep` keeps the copy to look into. A FAIL: read its Fix
+   line, or `npm run upgrade -- --rollback --by <you>`.
+7. `npm run verify`, then `npm run task -- drain off --by <you>`.
+8. **Roll back (2.71.1):** `npm run upgrade -- --rollback --by <you> [--permission "…"]` returns the studio to the
    harness it had before the last update (`backup/pre-<version>`) in one step: it reverts that update's merge commit
    (`git revert -m 1`, never a reset), so work that landed since stays. It goes through the hooks (the main-checkout
    guard opens for exactly that revert: `STUDIO_UPGRADE_REVERT=<the merge>`, checked against `REVERT_HEAD`), adds
@@ -96,6 +116,17 @@ which node can't run, so use the line above there.) The guard finds the studio b
    conflict with later work (the revert is undone and the files named; resolving it is the owner's call). It never
    deletes a branch. Who may run it is the same as `--merge`. Take the update again with `--merge` (or revert the
    rollback commit).
+
+### A release's predictions (2.73.0)
+
+Whoever ships a release can say what it should move: `npm run release -- predict --metric <name> --expect "-30%"
+[--release <version>] [--why "…"] [--by <you>]` writes `docs/releases/<version>.json` (the version defaults to
+package.json's; a second predict of the same metric replaces it; `--list` shows them). Metrics: the impact report's
+(`landedPerHour`, `redVerifyPct`, `tokensPerKept`, `verifyP50Min`, …) and the snapshot's (`falseRedsPerTrain`,
+`tokensPerLanded`, `workaroundsPerDay`), or short names (`landed/h`, `false-reds`, `workarounds/day`). `"-30%"` is a hit
+when the measured change is -30% or lower, `"+10%"` when +10% or higher, `"~0%"` within 10 points; `<=`, `<`, `>=`, `>`
+work as written. The file ships with the harness; a studio's `npm run autonomy -- impact` scores each prediction of the
+release it reports on (hit / miss with the measured change, or not scored while a side has too little data).
 
 ### The upgrade watch (2.69.0)
 
