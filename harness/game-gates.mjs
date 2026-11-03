@@ -206,7 +206,7 @@ function runGodot(project) {
   const steps = [['--headless', '--path', project, '--import']];
   if (fs.existsSync(path.join(REPO_ROOT, project, 'tools', 'gate.gd'))) steps.push(['--headless', '--path', project, '--script', 'res://tools/gate.gd']);
   for (const args of steps) {
-    const r = spawnSync(opts.shell ? `"${bin}"` : bin, args, opts);
+    const r = spawnSync(opts.shell ? `"${bin}"` : bin, args, { windowsHide: true, ...opts });
     const text = `${r.stdout || ''}\n${r.stderr || ''}`;
     if (r.error) return { ok: false, why: `could not run Godot (${bin}): ${r.error.code || r.error.message}`, notes };
     const bad = text.split('\n').find((l) => ERR.test(l));
@@ -479,7 +479,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${extraEnv?.STUDIO_TEST_WORKERS || tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${extraEnv?.STUDIO_TEST_WORKERS ? 'low load for the timeout-only re-run' : tw.why})`);
       const t0 = Date.now();
-      const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
+      const res = spawnSync(cmd, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
       // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
       // also its lastPass at any factor, which stands in for the floor only while no quiet run is recorded.
       if (res.status === 0 && !curRelated && !plan.slowTier?.run) {

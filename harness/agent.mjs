@@ -526,7 +526,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
   for (const id of tasks) {
     const hasCommit = ahead > 0 || (() => {
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
-      const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { cwd, encoding: 'utf8' });
+      const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { windowsHide: true, cwd, encoding: 'utf8' });
       return git.status === 0 && git.stdout.trim().length > 0;
     })();
     let af = null;
@@ -566,7 +566,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
     if (oTask) {
       const t0 = s0.startedAt || new Date(Date.now() - 86400000).toISOString();
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
-      const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { cwd, encoding: 'utf8' });
+      const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
       outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
       if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
@@ -607,26 +607,26 @@ export function autoFinish(agent, id, copyDir, mine, code) {
   if (cwd === REPO_ROOT) {
     const paths = mine.filter((l) => l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean);
     if (!paths.length) return { ok: false, output: 'no claims' };
-    const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { cwd, encoding: 'utf8' }).stdout || '';
+    const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { windowsHide: true, cwd, encoding: 'utf8' }).stdout || '';
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
-  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
+  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'verify failed' };
   }
-  const gitLog = spawnSync('git', ['log', '-1', '--format=%h', '--grep', id], { cwd, encoding: 'utf8' });
+  const gitLog = spawnSync('git', ['log', '-1', '--format=%h', '--grep', id], { windowsHide: true, cwd, encoding: 'utf8' });
   const sha = gitLog.status === 0 && gitLog.stdout.trim() ? gitLog.stdout.trim() : 'none';
   const ext = code === 0 ? 'clean exit' : `exit code ${code}`;
   const note = `closed by the launcher: session ended without task done (${ext}), verify passed in the foreground, commit ${sha}`;
-  const done = spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', note], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  const done = spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', note], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
   if (done.status !== 0) {
     const out = `${done.stderr || ''}${done.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'task done failed' };
   }
   if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_POST_BROWSER_PLAY || '')) {
-    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
+    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
     emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? 'passed' : 'failed or skipped'}` });
   }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
@@ -957,7 +957,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const t0 = Date.now();
   if (custom && copy) fs.writeSync(out, `[launcher] the custom command runs in this agent's own copy (${path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/')}); the main checkout is $STUDIO_MAIN_ROOT, {mainRoot} in the command; {addDirs} gives the --add-dir pair for its studio/ and .studio/\n`);
   const child = custom
-    ? spawn(line, { cwd, shell: true, env, stdio: ['ignore', out, out] })
+    ? spawn(line, { windowsHide: true, cwd, shell: true, env, stdio: ['ignore', out, out] })
     : spawnPlan(plan, { cwd, env, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
   // PU-17 (P-039, P-045): when the agent's process started, for a later stop to check the number is still the agent.
   // In-process only (no child process, nothing slow): the spawn time and the program's name; /proc ticks on Linux.
@@ -1145,7 +1145,7 @@ export function failedSessionEvidence({ agent, logFile, from = 0, code, tool, mo
  */
 function killTree(pid, { group = false } = {}) {
   try {
-    if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     else if (group) {
       try {
         process.kill(-pid);
@@ -1310,7 +1310,7 @@ export function wipSummary(agent) {
   const paths = listLocks().filter((l) => l.owner === agent && l.key.startsWith('path:')).map((l) => l.key.slice(5));
   const copy = readJson(sessionFile(agent))?.copy;
   const cwd = copy?.dir && fs.existsSync(path.join(REPO_ROOT, copy.dir)) ? path.join(REPO_ROOT, copy.dir) : REPO_ROOT;
-  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { windowsHide: true, cwd, encoding: 'utf8' });
   if (r.status !== 0) return null;
   const rows = r.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')).filter(([, , f]) => f && !/^(studio\/(NEXT|CURRENT_TASK)\.md|\.studio\/)/.test(f));
   const add = rows.reduce((n, [a]) => n + (Number(a) || 0), 0);
@@ -1440,7 +1440,7 @@ export function stopAllAgents(by = 'war-room-human', reason = '') {
 export function otherAgents() {
   if (IS.win) return { checked: false, list: [] };
   const known = new Set(sessions().filter((x) => x.running).flatMap((x) => [x.pid, x.supervisor]).filter(Boolean));
-  const ps = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+  const ps = spawnSync('ps', ['-eo', 'pid=,args='], { windowsHide: true, encoding: 'utf8' });
   if (ps.status !== 0) return { checked: false, list: [] };
   const list = [];
   for (const line of ps.stdout.split('\n')) {
@@ -1456,7 +1456,7 @@ export function otherAgents() {
     try {
       cwd = fs.readlinkSync(`/proc/${m[1]}/cwd`);
     } catch {
-      const l = spawnSync('lsof', ['-a', '-p', m[1], '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+      const l = spawnSync('lsof', ['-a', '-p', m[1], '-d', 'cwd', '-Fn'], { windowsHide: true, encoding: 'utf8' });
       cwd = (l.stdout || '').split('\n').find((x) => x.startsWith('n'))?.slice(1) || '';
     }
     if (cwd && (cwd === REPO_ROOT || cwd.startsWith(`${REPO_ROOT}${path.sep}`))) list.push({ pid: Number(m[1]), command: m[2].slice(0, 120) });
@@ -1635,7 +1635,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
     const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
-    const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
+    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
     // PU-17: the launcher's spawn time (in-process, no OS query), for a stop that comes while it is still starting.
     const supId = spawnedIdentity(sup.pid, process.execPath);

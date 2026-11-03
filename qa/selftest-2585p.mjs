@@ -22,9 +22,9 @@ export async function selftest2585P({ dir, run, report, tmpRoot }) {
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_WEAKENED_TESTS: '', STUDIO_LOCK_OWNER: '', STUDIO_HOOKS_MAX_BUFFER: '', GIT_TRACE: '' };
   const SMALL = String(1024 * 1024); // 1 MB: each art file below is 3 MB, its binary diff about 4 MB
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const write = (rel, data) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), data); };
-  const commit = (msg, flags = [], extra = {}) => { g('add', '-A'); return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', msg, ...flags], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, ...extra } }); };
+  const commit = (msg, flags = [], extra = {}) => { g('add', '-A'); return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', msg, ...flags], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, ...extra } }); };
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
   const stampOf = (rev) => (g('log', '-1', '--format=%B', rev).stdout.match(/^Studio-Hooks: v[0-9a-f]{8} t([0-9a-f]{12}) ([ps])([0-9a-f]{12})$/m) || []);
   const json = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return { _raw: out(r).slice(-1500) }; } };
@@ -120,7 +120,7 @@ export async function selftest2585P({ dir, run, report, tmpRoot }) {
   write('game/demo/art/local.bin', crypto.randomBytes(3 * 1024 * 1024));
   commit('local art before the upgrade', ['--no-verify']);
   const localArt = head();
-  const want = (spawnSync('git', ['patch-id', '--verbatim'], { cwd: dir, encoding: 'utf8', input: g('-c', 'core.quotePath=true', 'show', '--format=commit %H', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-algorithm=myers', '--indent-heuristic', '-U3', '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--binary', '--ignore-submodules=none', '--submodule=short', localArt).stdout, maxBuffer: 256 * 1024 * 1024 }).stdout.trim().split(/\s+/)[0].slice(0, 12));
+  const want = (spawnSync('git', ['patch-id', '--verbatim'], { windowsHide: true, cwd: dir, encoding: 'utf8', input: g('-c', 'core.quotePath=true', 'show', '--format=commit %H', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-algorithm=myers', '--indent-heuristic', '-U3', '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/', '--binary', '--ignore-submodules=none', '--submodule=short', localArt).stdout, maxBuffer: 256 * 1024 * 1024 }).stdout.trim().split(/\s+/)[0].slice(0, 12));
   const gf = traced('node harness/hook-stamp.mjs grandfather --json', { STUDIO_HOOKS_MAX_BUFFER: SMALL });
   let listed = {};
   try { listed = JSON.parse(fs.readFileSync(path.join(dir, '.git', 'studio-hooks-grandfather.json'), 'utf8')); } catch {}

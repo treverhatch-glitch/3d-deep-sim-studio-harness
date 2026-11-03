@@ -106,7 +106,7 @@ export const clearStall = (agent) => fs.rmSync(stateFile(agent), { force: true }
 
 /** What the session has produced so far, as one hash. */
 export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentEvents(5000)) {
-  const g = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
   const head = g('rev-parse', 'HEAD').stdout?.trim() || '';
   const st = g('status', '--porcelain', '--untracked-files=all').stdout || '';
   // mtimes of changed files, so a rewrite of an already-dirty file counts as a write
@@ -264,7 +264,7 @@ const under = (f, p) => { const a = norm(f).toLowerCase(); const b = norm(p).toL
 
 /** The working copy's changed files: [{ file, mtime|null }], plus HEAD and its commit time. */
 function workingState(cwd) {
-  const g = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
   const head = g('rev-parse', 'HEAD').stdout?.trim() || '';
   const headAt = (Number(g('log', '-1', '--format=%ct').stdout?.trim()) || 0) * 1000;
   const files = (g('status', '--porcelain', '--untracked-files=all').stdout || '').split('\n').filter((l) => l.length > 3)
@@ -288,7 +288,7 @@ function stateAt(ws, t, skip = new Set()) {
 /** Files the session committed (its own Studio-Agent trailer) since its first observation. */
 function ownCommits(cwd, base, agent) {
   if (!base) return [];
-  const r = spawnSync('git', ['log', '--no-merges', '--format=%x1e%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only', `${base}..HEAD`], { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', ['log', '--no-merges', '--format=%x1e%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only', `${base}..HEAD`], { windowsHide: true, cwd, encoding: 'utf8' });
   if (r.status !== 0) return [];
   const out = [];
   for (const block of r.stdout.split('\x1e').slice(1)) {
@@ -387,12 +387,12 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
  * tagged Studio-Task: <that task> and not this one. Returns [{ task, commits: [sha], via: 'branch'|'trailer' }].
  */
 export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardRoot = REPO_ROOT } = {}) {
-  const g = (...a) => { const r = spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
+  const g = (...a) => { const r = spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
   const board = boardStates(boardRoot);
   if (!board) return [];
   const common = g('rev-parse', '--path-format=absolute', '--git-common-dir');
   const mainDir = common && path.basename(common) === '.git' ? path.dirname(common) : boardRoot;
-  const mr = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: mainDir, encoding: 'utf8' });
+  const mr = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: mainDir, encoding: 'utf8' });
   const main = mr.status === 0 ? mr.stdout.trim() : '';
   if (!main || !g('rev-parse', '--verify', '-q', `refs/heads/${main}`)) return [];
   const mine = new Set(g('rev-list', `refs/heads/${main}..HEAD`).split('\n').filter(Boolean));

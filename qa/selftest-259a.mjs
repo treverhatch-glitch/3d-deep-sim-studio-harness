@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest259A({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const mark = path.join(tmpRoot, `train-runs-259a-${process.pid}.txt`);
   const events = path.join(dir, '.studio', 'events-259a.jsonl');
@@ -59,7 +59,7 @@ export async function selftest259A({ dir, run, report, tmpRoot }) {
     const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
     write(ld, rel, text);
     g(ld, 'add', rel);
-    const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`, ...(noVerify ? ['--no-verify'] : [])], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`, ...(noVerify ? ['--no-verify'] : [])], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
@@ -114,7 +114,7 @@ export async function selftest259A({ dir, run, report, tmpRoot }) {
   const qh = queueIt(h);
   write(h.dir, 'game/demo/notes/h.md', '# H\n\nand more, committed without the hooks\n');
   g(h.dir, 'add', 'game/demo/notes/h.md');
-  spawnSync('git', ['commit', '-qm', `${h.id}: more`, '--no-verify'], { cwd: h.dir, encoding: 'utf8', env: { ...process.env, ...h.as } });
+  spawnSync('git', ['commit', '-qm', `${h.id}: more`, '--no-verify'], { windowsHide: true, cwd: h.dir, encoding: 'utf8', env: { ...process.env, ...h.as } });
   const tipBefore = g(dir, 'rev-parse', 'main').stdout.trim();
   const r3 = runs();
   const t4 = train();

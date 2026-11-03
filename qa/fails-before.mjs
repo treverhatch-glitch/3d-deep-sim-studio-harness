@@ -33,7 +33,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, '.studio', 'cache', 'fails-before.json');
-const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+const git = (args, cwd = ROOT) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8' });
 
 // ---- 2.59.0: "kind": "test" regressions (a seeded game unit test, run by the game's own test runner) ----
 
@@ -140,8 +140,8 @@ export function runRegressionTest(spec, root = ROOT, runner = regressionTestRunn
     const limit = runner.timeoutMs || Number(process.env.STUDIO_FAILS_BEFORE_TIMEOUT_MS || 120000);
     const env = { ...process.env, CI: 'true', STUDIO_TEST_SEED: String(spec.seed), STUDIO_TEST_NAME: name, STUDIO_TEST_FILE: file, AGENT_EVENTS_FILE: path.join(junitDir, '.events.jsonl') };
     const r = shell
-      ? spawnSync([bin, ...words.slice(1)].map(q).join(' '), { cwd, shell: true, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env })
-      : spawnSync(bin, words.slice(1), { cwd, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env });
+      ? spawnSync([bin, ...words.slice(1)].map(q).join(' '), { windowsHide: true, cwd, shell: true, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env })
+      : spawnSync(bin, words.slice(1), { windowsHide: true, cwd, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env });
     const tail = String(`${r.stderr || ''}\n${r.stdout || ''}`).replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim().slice(-300);
     if (r.error?.code === 'ETIMEDOUT' || r.signal) return { ran: false, passed: null, why: `the test run timed out or was killed after ${Math.round(limit / 1000)} s (STUDIO_FAILS_BEFORE_TIMEOUT_MS)` };
     if (r.error) return { ran: false, passed: null, why: `couldn't run ${words[0]} (${r.error.code || r.error.message})` };
@@ -247,7 +247,7 @@ console.log('FAILS_BEFORE_RESULT ' + JSON.stringify(out));
     const specFile = path.join(tmp, '.fails-before-spec.json');
     fs.writeFileSync(specFile, JSON.stringify(spec));
     const limit = Number(process.env.STUDIO_FAILS_BEFORE_TIMEOUT_MS || 120000);
-    const run = spawnSync(process.execPath, [probe, specFile], { cwd: tmp, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AGENT_EVENTS_FILE: path.join(tmp, '.events.jsonl') } });
+    const run = spawnSync(process.execPath, [probe, specFile], { windowsHide: true, cwd: tmp, encoding: 'utf8', timeout: limit, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, AGENT_EVENTS_FILE: path.join(tmp, '.events.jsonl') } });
     const line = String(run.stdout || '').split('\n').reverse().find((l) => l.startsWith('FAILS_BEFORE_RESULT '));
     let before = null;
     try { before = line ? JSON.parse(line.slice('FAILS_BEFORE_RESULT '.length)) : null; } catch { before = null; }

@@ -174,7 +174,7 @@ if (!carts.length) {
 let failed = 0;
 for (const name of carts) {
   try {
-    const out = execFileSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'sim-runtime-probe.mjs'), name], { cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' });
+    const out = execFileSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'sim-runtime-probe.mjs'), name], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' });
     process.stdout.write(out);
   } catch (err) {
     process.stderr.write(String(err.stderr || err.stdout || err.message));

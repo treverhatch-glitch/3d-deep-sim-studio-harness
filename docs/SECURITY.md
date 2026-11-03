@@ -98,6 +98,17 @@
   undo: its checks still run clean, it prints a WARN and the verify record says `nodeOptionsPreload` (out of scope
   otherwise). `STUDIO_VERIFY_PRELOADED` carries that note from a verify to its detached run. node_modules that don't match
   package-lock.json (versions, missing or extra packages, a plain file in `.bin` on macOS and Linux) get one WARN line.
+- Console windows on Windows (2.73.1, B-59): every process the harness starts passes `windowsHide: true` (harness/,
+  hub/, scripts/, tools/, qa/, the hooks; qa/selftest-2731c.mjs fails on a call without it). Only the engine and visual
+  capture runs, which render frames in a real window, are left visible. So a `NODE_OPTIONS=--require <file>` preload
+  that forces windowsHide is no longer needed, and it is exactly what the scrub above drops from gate children (and
+  WARNs about in run-gates' own process). After taking 2.73.1, remove it wherever it was set and start the studio again
+  from a fresh terminal: this window `Remove-Item Env:NODE_OPTIONS`; for the user
+  `[Environment]::SetEnvironmentVariable('NODE_OPTIONS', $null, 'User')` (or `setx NODE_OPTIONS ""` in cmd.exe, then
+  delete it under System Properties > Environment Variables); and any `NODE_OPTIONS=` line in `.env`. Keep any memory
+  flag it carried (`--max-old-space-size=…` is allowed). Then close the harness task that recorded the stopgap
+  (`npm run workaround -- close <H-id> --by <you> --note "2.73.1 hides every child"`). Starting the supervisor in a
+  hidden console (`Start-Process -WindowStyle Hidden`) is no longer needed either.
 - Paths (2.71.1, G14/W01): the gates read git's file lists with `-z` and `core.quotePath=false` (a non-ASCII name is no
   longer a quoted `"web/\340…"` that no glob matches), and the protected list matches in any case and spelling
   (backslashes, `./`, Unicode form, trailing dots and spaces Windows drops): matching more is only stricter.

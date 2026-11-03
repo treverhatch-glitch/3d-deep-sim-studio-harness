@@ -32,7 +32,7 @@ import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSpars
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 /** The main checkout: this one, or the one a lane copy was made from. */
 // 2.30n: a lane copy lives at <main>/.lanes/<agent>; that path names the main checkout even when the
@@ -459,7 +459,7 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
           console.log(`[deliver] ${taskId}: checks re-run after rebase: ${reuse.why}`);
           // 2.58.5 (H-3): with the lane's pass recorded for its pre-rebase commit, only the game checks whose inputs main changed run again.
           const env = { ...process.env, ...(changed.length ? { STUDIO_GATE_CHANGED: changed.join(','), STUDIO_GATE_PATHS: process.env.STUDIO_GATE_PATHS || changed.join(',') } : {}), ...landingRecheckEnv(root, taskId, rec, { preHead, incoming }) };
-          const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+          const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
           if (g.status !== 0) {
             const red = [...new Set((g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]))].slice(0, 4).join(', ');
             return { ok: false, message: `Your work was rebased on the latest ${main}, and the checks now fail${red ? ` (${red})` : ''}. Fix it in your copy, commit, run npm run verify, then task done again.` };
@@ -509,7 +509,7 @@ export function restampAfterRebase(taskId, { tip, before, preHead }) {
   if (/^(off|0|false|no)$/i.test(process.env.STUDIO_HOOKS_RESTAMP || '')) return { ok: true, replayed: 0 };
   const script = path.join(REPO_ROOT, 'harness', 'hook-stamp.mjs');
   if (!fs.existsSync(script)) return { ok: true, replayed: 0 };
-  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
   let j = null;
   try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch {}
   if (j?.ok) {

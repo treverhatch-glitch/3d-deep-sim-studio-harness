@@ -181,7 +181,7 @@ export function checkSettings(root = ROOT) {
   return { ok: missing.length === 0 && grown.length === 0, missing, grown, prunable, baseline: baseline ? baseline.length : null, names: rows.length, stale };
 }
 
-const gitOut = (root, args) => { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? String(r.stdout || '') : null; };
+const gitOut = (root, args) => { const r = spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8' }); return r.status === 0 ? String(r.stdout || '') : null; };
 /** The main branch to compare the baseline with: the main checkout's branch (a lane copy's main), or null. */
 function mainRef() {
   try { return mainBranch() || null; } catch { return null; }

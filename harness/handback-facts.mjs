@@ -42,7 +42,7 @@ const slash = (p) => String(p || '').split(path.sep).join('/');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const mainRootOf = () => (process.env.STUDIO_MAIN_ROOT ? path.resolve(process.env.STUDIO_MAIN_ROOT) : REPO_ROOT);
 const safeName = (s) => String(s || '').replace(/[^\w.-]/g, '_');
 

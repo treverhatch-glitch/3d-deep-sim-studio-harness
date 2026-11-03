@@ -160,7 +160,7 @@ console.log(JSON.stringify({ calls, routed: r.routed }));
     "process.exit(bad ? 1 : 0);", ''].join('\n'));
   for (const n of ['a', 'b', 'c']) write(`game/demo/tests/${n}.test.mjs`, `// ${n}\n`);
   write('game/demo/notes/n.md', 'CROWD b.test.mjs\nBREAKS c.test.mjs\n');
-  const g = (...x) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...x], { cwd: dir, encoding: 'utf8' });
+  const g = (...x) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...x], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   g('init', '-q', '-b', 'main'); g('config', 'core.autocrlf', 'false'); g('add', '-A'); g('commit', '-qm', 'studio', '--no-verify');
   // The "verify": the game's whole check, red on b (only beside the others) and c (always).
   const verify = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);

@@ -318,7 +318,7 @@ function isWriteAuthorized(req) {
 
 function runCommandCapture(cmd, cwd = REPO_ROOT, timeoutMs = 25000) {
   return new Promise((resolve) => {
-    exec(cmd, { cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
+    exec(cmd, { windowsHide: true, cwd, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({
         ok: !err,
         code: err ? err.code || 1 : 0,

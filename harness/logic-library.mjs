@@ -50,8 +50,8 @@ const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 // CRLF, and the example module read as "changed since it was confirmed". Binary files (a NUL byte) are hashed as they are.
 const fileSha = (file) => { const b = fs.readFileSync(file); return sha(b.includes(0) ? b : Buffer.from(b.toString('latin1').replace(/\r\n/g, '\n'), 'latin1')); };
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-const gitBuf = (cwd, ...args) => spawnSync('git', args, { cwd, maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const gitBuf = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, maxBuffer: 64 * 1024 * 1024 });
 const safeName = (s) => /^[a-z0-9][a-z0-9-]{1,60}$/.test(String(s || ''));
 
 async function mainRootOf() {

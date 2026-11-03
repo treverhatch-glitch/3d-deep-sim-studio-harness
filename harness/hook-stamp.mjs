@@ -120,7 +120,7 @@ const idModeOf = (mode) => String(mode || 'p').replace(/^z/, '');
 // 2.58.5 (H-7): no diff is read into memory any more (patch-ids stream, below); what is still read whole is small
 // (commit messages, names). STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the limit, for tests that prove that.
 export const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
-const git = (args, { cwd = ROOT, input } = {}) => spawnSync('git', [...GIT_CFG, ...args], { cwd, encoding: 'utf8', input, maxBuffer: MAX_BUFFER });
+const git = (args, { cwd = ROOT, input } = {}) => spawnSync('git', [...GIT_CFG, ...args], { windowsHide: true, cwd, encoding: 'utf8', input, maxBuffer: MAX_BUFFER });
 /** git(), but an output too big to read is an error, never a silently cut list (spawnSync stops at maxBuffer). */
 function gitAll(args, opts) {
   let r;
@@ -476,7 +476,7 @@ export function harnessRefCommits(base, env = process.env, root = ROOT) {
   if (!remotes.includes(remote)) return no(`"${remote}" is not a configured remote (git remote -v)`);
   const tracking = git(['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}^{commit}`], { cwd: root }).stdout.trim();
   if (!isSha(tracking)) return no(`there is no remote-tracking branch ${remote}/${branch} (git fetch ${remote} ${branch}); a local branch of that name doesn't count`);
-  const ls = spawnSync('git', ['ls-remote', '--heads', remote, `refs/heads/${branch}`], { cwd: root, encoding: 'utf8', timeout: Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) > 0 ? Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) : 20000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  const ls = spawnSync('git', ['ls-remote', '--heads', remote, `refs/heads/${branch}`], { windowsHide: true, cwd: root, encoding: 'utf8', timeout: Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) > 0 ? Number(env.STUDIO_HARNESS_REF_TIMEOUT_MS) : 20000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
   if (ls.status !== 0) return no(`couldn't reach ${remote} to confirm it has ${branch} (${String(ls.stderr || ls.error?.code || 'timed out').trim().split('\n')[0].slice(0, 120)})`);
   const line = ls.stdout.split('\n').find((l) => l.endsWith(`\trefs/heads/${branch}`));
   const sha = line ? line.split('\t')[0].trim() : '';
@@ -592,7 +592,7 @@ export function laneOf(root = ROOT, env = process.env) {
   // Inside a git hook, git exports GIT_DIR / GIT_INDEX_FILE for the checkout committing: never let them point a command
   // meant for another checkout (the main one) back at this one.
   const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
-  const git = (args, { cwd }) => spawnSync('git', [...GIT_CFG, ...args], { cwd, encoding: 'utf8', env: clean });
+  const git = (args, { cwd }) => spawnSync('git', [...GIT_CFG, ...args], { windowsHide: true, cwd, encoding: 'utf8', env: clean });
   const gd = git(['rev-parse', '--absolute-git-dir'], { cwd: root }).stdout.trim();
   const cd = git(['rev-parse', '--git-common-dir'], { cwd: root }).stdout.trim();
   if (!gd || !cd) return null;
@@ -718,7 +718,7 @@ export async function restamp({ cwd = ROOT, auto = false, all = false, base: giv
     const empty = parent && treeOf(parent) === want;
     const prevHead = g(['rev-parse', 'HEAD']).stdout.trim();
     // The real hooks, from this checkout: pre-commit checks the change, commit-msg stamps it. Its output is shown.
-    const c = spawnSync('git', [...ident, '-c', `core.hooksPath=${hooksDir}`, 'commit', '-q', '-C', sha, ...(empty ? ['--allow-empty'] : [])], { cwd, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+    const c = spawnSync('git', [...ident, '-c', `core.hooksPath=${hooksDir}`, 'commit', '-q', '-C', sha, ...(empty ? ['--allow-empty'] : [])], { windowsHide: true, cwd, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
     const after = commitInfo('HEAD', cwd);
     const out = `${c.stdout || ''}${c.stderr || ''}`.trim();
     if (c.status !== 0 || !after || after.sha === prevHead || after.parents[0] !== prevHead) {

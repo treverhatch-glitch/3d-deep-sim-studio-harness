@@ -53,7 +53,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.60.0: a file the game's protected manifest exempts (studio.gates.json "sizeRule") is listed only past its hard cap.
   const { sizeRuleFor } = await import('../harness/size-rule.mjs');
   const { spawnSync } = await import('node:child_process');
-  const ref = ['main', 'origin/main', 'HEAD'].find((b) => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${b}^{commit}`], { cwd: root }).status === 0) || null;
+  const ref = ['main', 'origin/main', 'HEAD'].find((b) => spawnSync('git', ['rev-parse', '--verify', '--quiet', `${b}^{commit}`], { windowsHide: true, cwd: root }).status === 0) || null;
   const cache = new Map();
   found = found.filter((x) => {
     if (x.kind !== 'file' || !ref) return true;

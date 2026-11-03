@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest237({ dir, run, report, tmpRoot }) {
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const evFile = path.join(dir, '.studio', 'events-237.jsonl');
   const env = { AGENT_EVENTS_FILE: evFile, STUDIO_GATE_SLOTS: '0', STUDIO_WHOLE_GAME: 'on', STUDIO_WHOLE_CMD: 'node wcheck.mjs', STUDIO_HEALTH_CI: 'off', STUDIO_MAIN_ROOT: '' };
   let n = 0;
@@ -50,7 +50,7 @@ console.log(JSON.stringify(await runWhole()));`);
   const wt = path.join(dir, '.studio', 'whole-wt');
   fs.writeFileSync(path.join(wt, 'leftover.txt'), 'junk from an earlier run');
   const statusMain = g('status', '--porcelain').stdout.trim();
-  report('2.37.0: a green whole-game run checks the exact commit in its own copy (.studio/whole-wt) and leaves the main checkout untouched', green.result === 'green' && green.lastGreen?.sha === sha1 && spawnSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).stdout.trim() === sha1 && statusMain === '', JSON.stringify({ green, statusMain }));
+  report('2.37.0: a green whole-game run checks the exact commit in its own copy (.studio/whole-wt) and leaves the main checkout untouched', green.result === 'green' && green.lastGreen?.sha === sha1 && spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: wt, encoding: 'utf8' }).stdout.trim() === sha1 && statusMain === '', JSON.stringify({ green, statusMain }));
 
   // 3. Red after a landing: re-run alone first, then a P0 fix task naming the check and the landed task.
   const sha2 = commit('broken', 'T-7 work');

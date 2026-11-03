@@ -46,7 +46,7 @@ console.log(JSON.stringify({ freed, left: listLocks().map((x) => x.key + ' ' + x
   report('2.55.0 (P-028): the watcher\'s hand-back for an ended session skips a claim made after that session ended', /2\.55\.0 \(P-028\)/.test(watchSrc) && /staleRecord/.test(watchSrc), '');
 
   // P-030: --sync --dry-run writes nothing.
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-255.jsonl'), STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0' };
   const src = path.join(tmpRoot, `pier-255-${process.pid}`);
   fs.mkdirSync(path.join(src, 'src'), { recursive: true });

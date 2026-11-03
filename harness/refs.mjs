@@ -133,12 +133,12 @@ export function framesRef(id, { every = 2, max = 8 } = {}) {
   if (!r) return { ok: false, message: `No reference ${id}.` };
   const video = r.files.findLast((f) => /\.(mp4|mov|webm|mkv|m4v|avi)$/i.test(f));
   if (!video) return { ok: false, message: `${id} has no video kept. Attach one first: npm run ref -- attach ${id} <file>` };
-  if (spawnSync('ffmpeg', ['-version']).status !== 0) return { ok: false, message: 'ffmpeg is not installed (https://ffmpeg.org/download.html).' };
+  if (spawnSync('ffmpeg', ['-version'], { windowsHide: true }).status !== 0) return { ok: false, message: 'ffmpeg is not installed (https://ffmpeg.org/download.html).' };
   const dir = folderFor(r);
   const out = path.join(dir, 'frames');
   fs.mkdirSync(out, { recursive: true });
   const start = r.at ? ['-ss', String(r.at)] : [];
-  const res = spawnSync('ffmpeg', ['-y', ...start, '-i', path.join(dir, video), '-vf', `fps=1/${every}`, '-frames:v', String(max), path.join(out, 'still-%02d.jpg')], { encoding: 'utf8' });
+  const res = spawnSync('ffmpeg', ['-y', ...start, '-i', path.join(dir, video), '-vf', `fps=1/${every}`, '-frames:v', String(max), path.join(out, 'still-%02d.jpg')], { windowsHide: true, encoding: 'utf8' });
   if (res.status !== 0) return { ok: false, message: `ffmpeg failed: ${res.stderr.split('\n').slice(-3).join(' ')}` };
   r.frames = fs.readdirSync(out).filter((f) => f.endsWith('.jpg')).sort();
   writeRefs(list);

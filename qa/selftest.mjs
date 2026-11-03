@@ -63,7 +63,7 @@ function buildingAGame(base, git) {
 let IGNORED = null;
 function ignoredPaths() {
   if (IGNORED) return IGNORED;
-  const r = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const list = r.status === 0 ? String(r.stdout).split('\0').filter(Boolean).map((x) => x.replace(/\\/g, '/')) : [];
   IGNORED = { files: new Set(list.filter((x) => !x.endsWith('/'))), dirs: list.filter((x) => x.endsWith('/')) };
   return IGNORED;
@@ -74,7 +74,7 @@ const isIgnored = (rel) => {
 };
 function templateTree() {
   if (TEMPLATE) return TEMPLATE;
-  const git = (args, input) => spawnSync('git', args, { cwd: root, ...(input === undefined ? { encoding: 'utf8' } : {}), input, maxBuffer: 256 * 1024 * 1024 });
+  const git = (args, input) => spawnSync('git', args, { windowsHide: true, cwd: root, ...(input === undefined ? { encoding: 'utf8' } : {}), input, maxBuffer: 256 * 1024 * 1024 });
   const base = String(git(['merge-base', 'HEAD', 'origin/main']).stdout || '').trim();
   const building = buildingAGame(base, git);
   const rev = building ? base : '';
@@ -133,12 +133,12 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off',
   // 2.73.0 (g): the copies' verify keys (harness/verify-key.mjs) live in the self-test's temp folder, never in the user's home.
   STUDIO_VERIFY_KEY_DIR: path.join(tmpRoot, 'verify-keys') };
-const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+const run = (dir, cmd, env = {}) => spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
 const runAsync = (dir, cmd, env = {}) =>
   new Promise((resolve) => {
-    const c = spawn(cmd, { cwd: dir, shell: true, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
+    const c = spawn(cmd, { windowsHide: true, cwd: dir, shell: true, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
     let stdout = '';
     let stderr = '';
     c.stdout.on('data', (d) => (stdout += d));
@@ -216,7 +216,7 @@ const SABOTAGE = {
   // 2.32.0: a branch changes a scenario's expected outcome while main has an owner key, with no approval.
   protected: (d) => {
     const env = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', STUDIO_OWNER_KEY: path.join(d, '..', `owner-sab-${path.basename(d)}.pem`) };
-    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, ...env } });
+    const sh = (cmd) => spawnSync(cmd, { windowsHide: true, cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, ...env } });
     sh('git init -q -b main && git add -A && git commit -qm base && node harness/approve.mjs keygen && git add -A && git commit -qm key && git checkout -q -b sab');
     const qa = path.join(d, 'cartridges', 'example-sim', 'qa.mjs');
     fs.writeFileSync(qa, fs.readFileSync(qa, 'utf8').replace("expect: 'won' }", "expect: 'lost' }"));
@@ -267,7 +267,7 @@ const SABOTAGE = {
   secrets: (d) => fs.writeFileSync(path.join(d, 'leak.txt'), `OPENAI_API_KEY=${'sk-'}${'a'.repeat(24)}\n`),
   // 2.58.2 (PU-29): with the hooks installed, a branch commit made with --no-verify (no Studio-Hooks stamp).
   hooks: (d) => {
-    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    const sh = (cmd) => spawnSync(cmd, { windowsHide: true, cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
     sh('git init -q -b main && git config core.hooksPath scripts/hooks && git add -A && git commit -qm base --no-verify && git checkout -q -b sab');
     fs.writeFileSync(path.join(d, 'sab.txt'), 'sab\n');
     sh('git add sab.txt && git commit -qm "sab skipped the hooks" --no-verify');
@@ -275,7 +275,7 @@ const SABOTAGE = {
   },
   // 2.58.2 (PU-29): a branch skips a test that runs on main (the word is put together here, so this file has none).
   'weakened-tests': (d) => {
-    const sh = (cmd) => spawnSync(cmd, { cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    const sh = (cmd) => spawnSync(cmd, { windowsHide: true, cwd: d, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
     fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
     fs.writeFileSync(path.join(d, 'tests/sab.test.mjs'), "test('sab', () => {\n  expect(1).toBe(1);\n});\n");
     sh('git init -q -b main && git add -A && git commit -qm base --no-verify && git checkout -q -b sab');
@@ -812,7 +812,7 @@ if (inShard()) {
 const content = 'phase:1 | How fast does moss spread after rain?\\nnot-a-layer | Is this kept?\\ntech-tree | What does research unlock?\\nphase:2 | What does a visitor do on a path?';
 const s = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 10 } })); }); });
 s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
-  const server = spawn(process.execPath, [fake], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const server = spawn(process.execPath, [fake], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
   const m = await runAsync(dir, 'node harness/intake.mjs --followups --model --json', { ...env, OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' });
   server.kill();
@@ -1102,7 +1102,7 @@ if (inShard()) {
   run(dir, 'node harness/mode.mjs set precise --by hatch', env);
   run(dir, 'node harness/agent.mjs start --role builder --agent builder-1 --model fake-1 --detach', waitEnv);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 * SLOW && !/running/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/running/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true });
   const second = run(dir, 'node harness/agent.mjs start --role builder --agent builder-2 --model fake-1 --detach', waitEnv);
   report('the mode caps how many agents of a role run at once', second.status !== 0 && /allows 1/.test(second.stderr), second.stdout + second.stderr);
   run(dir, 'node harness/mode.mjs boost on --by hatch --hours 1', env);
@@ -1139,11 +1139,11 @@ if (inShard()) {
   run(dir, 'node harness/task.mjs add "Floor one props" --role builder --lane docs/lane-a', env);
   run(dir, 'node harness/task.mjs add "Floor two props" --role builder --lane docs/lane-b', env);
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
-  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['harness/supervisor.mjs', '--no-hub', '--lanes', 'auto', '--until', '6s', '--foreground'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...wenv }, stdio: 'ignore' });
   const t0 = Date.now();
   let lanes = [];
   while (Date.now() - t0 < 8000 * SLOW && lanes.length < 2) {
-    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)']);
+    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},400)'], { windowsHide: true });
     lanes = fs.readdirSync(path.join(dir, '.studio/locks')).map((f) => fs.readFileSync(path.join(dir, '.studio/locks', f), 'utf8')).filter((x) => /path:docs\/lane-[ab]/.test(x));
   }
   report('with --lanes auto, each lane gets its own agent holding that folder', lanes.length === 2, lanes.join('\n'));
@@ -1165,7 +1165,7 @@ if (inShard()) {
   const op = run(dir, 'node harness/division.mjs open hacks --reason "the game hitches between floors" --by hatch', env);
   report('a division opens with a reason, logged', op.status === 0 && /Dev Hacker Lab is open/.test(op.stdout) && /opened Dev Hacker Lab: the game hitches/.test(fs.readFileSync(path.join(dir, 'studio/decisions/divisions.md'), 'utf8')), op.stdout + op.stderr);
   run(dir, 'node harness/watch.mjs', env);
-  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},500)']);
+  spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},500)'], { windowsHide: true });
   run(dir, 'node harness/watch.mjs', env);
   const q1 = fs.readFileSync(path.join(dir, 'studio/NEXT.md'), 'utf8');
   report('with the lab open, the watcher queues one low-priority trick hunt for the dev hacker', (q1.match(/\[P3\] \(`dev-hacker`\) — Trick hunt:/g) || []).length === 1, q1.split('\n').filter((l) => /Trick/.test(l)).join('\n'));
@@ -1186,7 +1186,7 @@ if (inShard()) {
   const henv = { ...env, STUDIO_SOUND_DESIGNER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
   const hire = run(dir, `node harness/agent.mjs hire --role sound-designer --agent zed-1 --division sound --task ${tid} --by hatch --note "keep it subtle" --detach`, henv);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 * SLOW && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/zed-1/.test(run(dir, 'node harness/lock.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true });
   fs.writeFileSync(path.join(dir, 'hudjson.mjs'), "import { buildHudState } from './harness/hud.mjs';\nconsole.log(JSON.stringify(buildHudState()));\n");
   const hud = JSON.parse(run(dir, 'node hudjson.mjs', env).stdout || '{}');
   const zed = (hud.agents || []).find((a) => a.name === 'zed-1');
@@ -1216,7 +1216,7 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`]);
+  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1390,7 +1390,7 @@ if (inShard()) {
   git('init -q');
   git('add -A');
   git('commit -q -m init --no-verify');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`]);
+  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_HEARTBEAT_SEC: '1', STUDIO_SUPERVISOR_SEC: '1' };
   const id = (cmd) => JSON.parse(run(dir, cmd, env).stdout).id;
   const quotaFile = path.join(dir, '.studio/tool-quota.json');
@@ -1454,7 +1454,7 @@ if (inShard()) {
   run(dir, 'node harness/mode.mjs autostart on --by hatch', env);
   for (const t of JSON.parse(run(dir, 'node harness/task.mjs list', env).stdout).backlog.filter((x) => x.role === 'builder')) run(dir, `node harness/task.mjs park ${t.id} --by prod-1 --why "not this round"`, env);
   for (const t of ['Lobby doors', 'Lobby lights']) run(dir, `node harness/task.mjs add "${t}" --role builder --lane docs/lobby`, env);
-  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'ignore' });
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { windowsHide: true, stdio: 'ignore' });
   fs.writeFileSync(path.join(dir, '.studio/supervisor.json'), JSON.stringify({ status: 'running', pid: sleeper.pid }));
   const wenv = { ...env, STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} {task} wait' };
   const f1 = run(dir, 'node harness/agent.mjs fill', wenv);
@@ -1615,10 +1615,10 @@ if (inShard()) {
   fs.writeFileSync(path.join(vb, 'build.json'), JSON.stringify({ id: '209901010000-vite', at: '2099-01-01T00:00:00Z', page: 'index.html', cartridge: 'tin-moon', outcome: 'won', ticks: 1 }));
   fs.writeFileSync(path.join(vb, 'index.html'), '<script type="module" src="/assets/index-abc.js"></script>\n');
   fs.writeFileSync(path.join(vb, 'assets/index-abc.js'), 'console.log("a bundled game");\n');
-  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`]);
+  const pause = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { windowsHide: true });
   const hport = 3900 + Math.floor(Math.random() * 90);
-  const hubP = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...CLEAN_ENV, HUB_PORT: String(hport), HUB_TOKEN: 'selftest-token' }, stdio: 'ignore' });
-  const get = (p) => spawnSync(process.execPath, ['-e', `fetch('http://127.0.0.1:${hport}${p}').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40))).catch((e) => console.log('ERR', e.message))`], { encoding: 'utf8' }).stdout.trim();
+  const hubP = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: dir, env: { ...CLEAN_ENV, HUB_PORT: String(hport), HUB_TOKEN: 'selftest-token' }, stdio: 'ignore' });
+  const get = (p) => spawnSync(process.execPath, ['-e', `fetch('http://127.0.0.1:${hport}${p}').then(async (r) => console.log(r.status, (await r.text()).slice(0, 40))).catch((e) => console.log('ERR', e.message))`], { windowsHide: true, encoding: 'utf8' }).stdout.trim();
   const th = Date.now();
   while (Date.now() - th < 10000 * SLOW && /^ERR/.test(get('/health'))) pause(300);
   const page = get('/play/209901010000-vite/index.html');
@@ -1626,15 +1626,15 @@ if (inShard()) {
   hubP.kill();
   report('the Arcade plays a bundled build whose files load from the root (/assets/…), not only from /play/<id>/', /^200/.test(page) && /^200 console\.log\("a bundled game"\)/.test(asset), `${page} | ${asset}`);
   // The real thing, when a Godot is installed: the template's port matches the web game, and its gate passes.
-  const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot']).status === 0 ? 'godot' : null);
+  const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot'], { windowsHide: true }).status === 0 ? 'godot' : null);
   if (godot) {
     const tpl = path.join(dir, 'engine/_godot');
-    spawnSync(godot, ['--headless', '--path', tpl, '--import'], { encoding: 'utf8', timeout: 180000 });
-    const out = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/parity.gd', '--', '1,2,3,1337'], { encoding: 'utf8', timeout: 180000 });
+    spawnSync(godot, ['--headless', '--path', tpl, '--import'], { windowsHide: true, encoding: 'utf8', timeout: 180000 });
+    const out = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/parity.gd', '--', '1,2,3,1337'], { windowsHide: true, encoding: 'utf8', timeout: 180000 });
     const lines = String(out.stdout).split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
     const web = JSON.parse(node('webp.mjs', "import { loadCartridge, runScenario } from './harness/cartridge.mjs';\nconst cart = await loadCartridge('example-sim');\nconsole.log(JSON.stringify([1, 2, 3, 1337].map((s) => { const r = runScenario(cart, 'start-to-win', { seed: s }); return { seed: s, outcome: r.outcome, tick: r.ticksRun, 'resources.credits': r.state.resources.credits }; })));\n").stdout || '[]');
     report('with Godot installed: the shipped Godot port matches the web game on outcome, tick and credits (seeds 1, 2, 3, 1337)', lines.length === 4 && JSON.stringify(lines.map((l) => [l.seed, l.outcome, l.tick, l['resources.credits']])) === JSON.stringify(web.map((w) => [w.seed, w.outcome, w.tick, w['resources.credits']])), JSON.stringify(lines) + JSON.stringify(web) + out.stderr);
-    const gate = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 180000 });
+    const gate = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { windowsHide: true, encoding: 'utf8', timeout: 180000 });
     report('with Godot installed: the template\'s gate runs its tests and a smoke run, and passes', gate.status === 0 && /\[gate\] PASS: [1-9]\d* test script\(s\), 0 failure/.test(gate.stdout) && !/SCRIPT ERROR/.test(gate.stdout + gate.stderr), gate.stdout + gate.stderr);
   } else console.log('[selftest] note: no Godot (set STUDIO_GODOT) so the real template parity and gate were not run');
 }
@@ -1716,7 +1716,7 @@ if (inShard()) {
   const wenv = { ...env, STUDIO_HEARTBEAT_SEC: '1', STUDIO_RND_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-001 wait' };
   const up = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
   const t0 = Date.now();
-  while (Date.now() - t0 < 8000 * SLOW && !/rnd-1/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']);
+  while (Date.now() - t0 < 8000 * SLOW && !/rnd-1/.test(run(dir, 'node harness/agent.mjs list', env).stdout)) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true });
   const again = JSON.parse(run(dir, 'node wake.mjs rnd T-001', wenv).stdout);
   report('a pitch or message starts the role\'s agent, and a second one finds it already running', up.started === true && /R&D is starting now as rnd-1/.test(up.next) && again.started === false && /is running/.test(again.next), `${up.next} | ${again.next}`);
   run(dir, 'node harness/agent.mjs stop rnd-1', env);
@@ -1727,7 +1727,7 @@ let n = 0;
 const replies = ['What should the player see first?', 'BRIEF {"kind":"idea","title":"Fireflies at dusk","summary":"Fireflies light the garden at dusk.","detail":""}', 'BRIEF {"kind":"idea","title":"Fireflies at dusk, only in summer","summary":"Fireflies light the garden at dusk in summer.","detail":""}'];
 const s = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: 'fake-cheap', choices: [{ message: { content: replies[Math.min(n++, 2)] } }], usage: { prompt_tokens: 5, completion_tokens: 5 } })); }); });
 s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
-  const server = spawn(process.execPath, [fake], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const server = spawn(process.execPath, [fake], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
   fs.writeFileSync(path.join(dir, 'chat.mjs'), "import { chatTurn } from './harness/liaison.mjs';\nconst out = [];\nlet m = [{ role: 'user', content: 'fireflies please' }];\nlet r = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'the garden, at dusk' }];\nr = await chatTurn({ messages: m, from: 'hatch' }); out.push(r);\nm = [...m, { role: 'assistant', content: r.reply }, { role: 'user', content: 'only in summer' }];\nout.push(await chatTurn({ messages: m, from: 'hatch', pending: r.brief }));\nconsole.log(JSON.stringify(out));\n");
   const chat = await runAsync(dir, 'node chat.mjs', { ...env, OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' });
@@ -2016,7 +2016,7 @@ const s = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b
 }); });
 s.listen(0, '127.0.0.1', () => console.log(s.address().port));`);
   const reply = path.join(dir, 'fake-reply.md');
-  const server = spawn(process.execPath, [fake, reply], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const server = spawn(process.execPath, [fake, reply], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise((r) => server.stdout.once('data', (d) => r(String(d).trim())));
   const env = { OLLAMA_BASE_URL: `http://127.0.0.1:${port}/v1`, STUDIO_PREPARE_CHAIN: 'ollama-local' };
   fs.writeFileSync(reply, `## Goal\nFix ${id}: vehicles overlap at tick 40.\n\n## Relevant history\n- 40 tries changed spawn spacing; the seed 1337 replay still overlaps.\n\n## Known pitfalls\n- Spacing alone doesn't fix it; look at the queue refill.\n\n## Files to touch\n- cartridges/example-sim/index.mjs\n\n## Verify\n- node harness/done-check.mjs ${id}\n`);
@@ -3237,7 +3237,7 @@ console.log(JSON.stringify({ same: a.stable === b.stable, named: /claude-a|codex
   report('2.30g: the kickoff prefix is byte-identical across agents and models of a role, and the paste-ready kickoff still names the agent', k.same === true && k.named === false && k.paste === true && k.h === true, JSON.stringify(k).slice(0, 800));
   report('2.30g: the prefix ledger flags a changed prefix and reports stability per role', k.r2 === false && k.r3 === true && k.st?.sessions === 3 && k.st?.changes === 1 && Math.abs(k.st.stableRate - 0.5) < 1e-9, JSON.stringify(k.st));
   report('2.30g: cache hit vs write comes from Claude\'s result usage', k.c?.cacheRead === 8000 && k.c?.cacheWrite === 1990 && Math.abs(k.c.hitRate - 0.8) < 1e-9, JSON.stringify(k.c));
-  const hook = (name, input, env = {}) => spawnSync(process.execPath, [path.join(dir, '.claude', 'hooks', name)], { cwd: dir, input: JSON.stringify(input), encoding: 'utf8', env: { ...CLEAN_ENV, CLAUDE_PROJECT_DIR: dir, ...env } });
+  const hook = (name, input, env = {}) => spawnSync(process.execPath, [path.join(dir, '.claude', 'hooks', name)], { windowsHide: true, cwd: dir, input: JSON.stringify(input), encoding: 'utf8', env: { ...CLEAN_ENV, CLAUDE_PROJECT_DIR: dir, ...env } });
   const big = Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\n') + '\nError: planted failure\n' + Array.from({ length: 60 }, (_, i) => `tail ${i}`).join('\n');
   const t = hook('trim-output.mjs', { tool_name: 'Bash', tool_use_id: 'tu1', tool_response: { stdout: big, stderr: '' } });
   let to = null;
@@ -4486,6 +4486,16 @@ if (inShard('selftest-2731b')) {
   const dir = copyRepo();
   const { selftest2731B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731b.mjs')).href);
   await selftest2731B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.73.1 (c, B-59): no console window flashes on Windows: every child_process call in harness/, hub/, scripts/, tools/,
+// qa/ and .claude/hooks/ passes windowsHide (a static scan with a short list of calls that show a window on purpose),
+// detached children too, the launcher, and two commands under a recorder (qa/selftest-2731c.mjs).
+if (inShard('selftest-2731c')) {
+  const dir = copyRepo();
+  const { selftest2731C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2731c.mjs')).href);
+  await selftest2731C({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

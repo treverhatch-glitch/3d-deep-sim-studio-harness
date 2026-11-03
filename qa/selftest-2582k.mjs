@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
   // A file git restored comes back with CRLF on Windows (core.autocrlf); edits match LF text, and git stores LF either way.
@@ -30,7 +30,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const hooks = (extra = {}) => { const r = run(dir, 'node harness/hook-stamp.mjs check --json', { ...env, ...extra }); return { status: r.status, ...json(r), _out: out(r) }; };
   const hooksText = (extra = {}) => run(dir, 'node harness/hook-stamp.mjs check', { ...env, ...extra });
   const weak = (extra = {}) => { const r = run(dir, 'node harness/test-weakening.mjs --json', { ...env, ...extra }); return { status: r.status, ...json(r), _out: out(r) }; };
-  const commit = (msg, ...flags) => { g('add', '-A'); return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', ...(msg === null ? [] : ['-m', msg]), ...flags], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }); };
+  const commit = (msg, ...flags) => { g('add', '-A'); return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', ...(msg === null ? [] : ['-m', msg]), ...flags], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }); };
   const stampOf = (rev = 'HEAD') => (g('log', '-1', '--format=%B', rev).stdout.match(/^Studio-Hooks: .+$/m) || [''])[0];
   const kinds = (w) => (w.findings || []).map((f) => f.kind);
   const reset = () => { g('checkout', '-q', '--', '.'); g('clean', '-qfd', '--', 'game'); };
@@ -126,7 +126,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   write('game/demo/src/n.mjs', 'export const n = 1;\n');
   commit('main moves again');
   g('switch', '-q', 'feat');
-  const mg = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'merge', '-q', '--no-edit', 'main'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
+  const mg = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'merge', '-q', '--no-edit', 'main'], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
   const mergeMsg = g('log', '-1', '--format=%B').stdout;
   const h4b = hooks();
   report('2.58.2 (PU-29): no false flags after a clean rebase onto a moved main (the stamp\'s patch-id still matches) or after a merge made with the hooks (a merge stamp on its own line)',
@@ -160,7 +160,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
 
   // H7: CI's own merge of a pull request is judged by the PR head; the switch turns the gate off.
   g('switch', '-q', '-c', 'ci', 'main');
-  spawnSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci@example.invalid', 'merge', '-q', '--no-ff', '--no-verify', '--no-edit', 'feat'], { cwd: dir, encoding: 'utf8' });
+  spawnSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci@example.invalid', 'merge', '-q', '--no-ff', '--no-verify', '--no-edit', 'feat'], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const ciHead = head();
   const ciEnv = { STUDIO_PROTECT_BASE: 'main' };
   const h7a = hooks(ciEnv);
@@ -245,7 +245,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   const plant = () => write('.studio/gates/k-1-full.json', JSON.stringify({ at: new Date(Date.now() + 2000).toISOString(), partial: false, scope: 'full', head: head(), dirty: false, rows: [{ id: 'protected', ok: true, required: true }, { id: 'secrets', ok: true, required: true }] }));
   write('game/demo/src/t.mjs', 'export const t = 1;\n');
   edit(TEST, '  expect(s.x).toBeLessThan(100);\n', '');
-  g('add', 'game/demo/src/t.mjs', TEST); spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--no-verify', '-m', `tune\n\nStudio-Task: ${tid}`], { cwd: dir });
+  g('add', 'game/demo/src/t.mjs', TEST); spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--no-verify', '-m', `tune\n\nStudio-Task: ${tid}`], { windowsHide: true, cwd: dir });
   plant();
   const d1 = run(dir, `node harness/task.mjs done ${tid} --agent k-1`, as);
   report('2.58.2 (PU-29): task done runs the hooks check itself: a commit made with --no-verify and a removed assert each stop it, even with an "all ok" verify of this commit',
@@ -257,7 +257,7 @@ export async function selftest2582K({ dir, run, report, tmpRoot, root }) {
   {
     const up = path.join(tmpRoot, 'p068');
     fs.cpSync(dir, up, { recursive: true, filter: (src) => !/[\\/](node_modules|\.git|\.studio)$/.test(src) });
-    const ug = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: up, encoding: 'utf8', env: { ...process.env, ...env } });
+    const ug = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: up, encoding: 'utf8', env: { ...process.env, ...env } });
     const realMsgHook = fs.readFileSync(path.join(up, 'scripts', 'hooks', 'commit-msg'));
     fs.writeFileSync(path.join(up, 'scripts', 'hooks', 'commit-msg'), '#!/bin/sh\nexit 0\n'); // the hooks before stamping
     ug('init', '-q', '-b', 'main'); ug('add', '-A'); ug('commit', '-q', '--no-verify', '-m', 'studio on the old harness');

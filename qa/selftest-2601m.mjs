@@ -37,9 +37,9 @@ export async function selftest2601M({ dir, run, report, tmpRoot }) {
   const sleepF = path.join(tmpRoot, `sleep-2601m-${process.pid}.mjs`);
   fs.writeFileSync(sleepF, 'setTimeout(() => {}, Number(process.argv[2] || 1000));\n');
   const kids = [];
-  const spawnGit = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const spawnGit = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const holder = (ms, label = 'holder-2601m') => {
-    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
     const up = until(() => readJson(lockF)?.label === label, 15000 * SLOW);
     return { c, up, gone: () => until(() => readJson(lockF)?.pid !== c.pid, 30000 * SLOW) };

@@ -124,7 +124,7 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
     // A bundled game (Vite and the like): build it, then play the build, never the dev server.
     if (b.build) {
       const { spawnSync } = await import('node:child_process');
-      const built = spawnSync(b.build, { cwd: REPO_ROOT, shell: true, encoding: 'utf8' });
+      const built = spawnSync(b.build, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8' });
       if (built.status !== 0) {
         await browser.close();
         fail('BROWSER-BUILD-FAILED', `\`${b.build}\` failed: ${(built.stderr || built.stdout).trim().split('\n').slice(-2).join(' ')}`);

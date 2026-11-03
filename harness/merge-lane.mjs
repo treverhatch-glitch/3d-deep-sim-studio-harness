@@ -92,7 +92,7 @@ export function scopeOf(ranGates, shared = []) {
   return [...new Set([...ranGates.flatMap((g) => g.paths), ...shared, ...ALWAYS_SHARED])];
 }
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8' });
 export const changedSince = (cwd, base, head = 'HEAD') => {
   if (!base) return [];
   // 2.71.1 (B, G14): -z and core.quotePath=false, so a non-ASCII path is its name, not a quoted "web/\340..." no glob matches.

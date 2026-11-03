@@ -33,7 +33,7 @@ const DIFF_CAP = 24000;
 const VERDICT_WORDS = /\b(approve[sd]?|lgtm|request(ed)? changes|changes requested|reject(ed)?|blocking)\b/gi;
 
 function diffOf(hash) {
-  const r = spawnSync('git', ['show', '--format=%s%n', '--patch', hash, '--', '.', ':(exclude)studio/reviews', ':(exclude).studio', ':(exclude)package-lock.json'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', ['show', '--format=%s%n', '--patch', hash, '--', '.', ':(exclude)studio/reviews', ':(exclude).studio', ':(exclude)package-lock.json'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return r.status === 0 ? r.stdout : '';
 }
 

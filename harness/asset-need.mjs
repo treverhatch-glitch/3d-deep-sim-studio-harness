@@ -225,7 +225,7 @@ export async function runConfigured(name, cmd, vars, { heavy = true, timeoutMs =
   const argv = splitArgs(cmd).map((a) => a.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m)));
   const prog = findProgram(argv[0]);
   if (!prog) return { ran: false, note: `${name}: ${argv[0]} is not installed here; skipped (configure studio/assets.json commands.${name} or install it)` };
-  const go = () => spawnSync(prog, argv.slice(1), { cwd: REPO_ROOT, encoding: 'utf8', timeout: timeoutMs, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(prog) });
+  const go = () => spawnSync(prog, argv.slice(1), { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', timeout: timeoutMs, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(prog) });
   let r;
   if (heavy) { const { withHeavy } = await import('./heavy.mjs'); r = withHeavy(REPO_ROOT, `asset ${name}`, go, { owner: actor() }); } else r = go();
   const ok = r.status === 0;

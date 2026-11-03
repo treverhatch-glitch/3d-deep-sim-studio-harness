@@ -171,7 +171,7 @@ let rtkCache = { at: 0, value: undefined };
 function rtkGain() {
   // rtk measures how much shell output it filtered. Cached for a minute; null when rtk is absent.
   if (Date.now() - rtkCache.at < 60000) return rtkCache.value;
-  const res = spawnSync('rtk', ['gain'], { encoding: 'utf8', timeout: 3000 });
+  const res = spawnSync('rtk', ['gain'], { windowsHide: true, encoding: 'utf8', timeout: 3000 });
   rtkCache = { at: Date.now(), value: res.status === 0 ? String(res.stdout).trim().split('\n').slice(0, 6).join('\n') : null };
   return rtkCache.value;
 }
@@ -410,7 +410,7 @@ export function buildHudState() {
   }
   // Golden changes someone should look at: the reason, and which recorded numbers moved.
   const okGolden = new Set((readJson('studio/decisions/golden-approvals.json', { approved: [] })?.approved || []).map((a) => a.sha));
-  const glog = spawnSync('git', ['log', '-n', '12', '--since=14 days ago', '--format=%h%x1f%an%x1f%(trailers:key=Golden-Reason,valueonly,separator=%x20)%x1f%(trailers:key=Golden-Diff,valueonly,separator=%x20)%x1f%(trailers:key=Studio-Agent,valueonly)', '--', 'qa/golden'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const glog = spawnSync('git', ['log', '-n', '12', '--since=14 days ago', '--format=%h%x1f%an%x1f%(trailers:key=Golden-Reason,valueonly,separator=%x20)%x1f%(trailers:key=Golden-Diff,valueonly,separator=%x20)%x1f%(trailers:key=Studio-Agent,valueonly)', '--', 'qa/golden'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   for (const line of (glog.status === 0 ? glog.stdout : '').split('\n').filter(Boolean)) {
     const [sha, author, reason, diff, agent] = line.split('\x1f').map((x) => x.trim());
     // Only the studio's own changes: a commit by an agent (Studio-Agent) or one that gave a reason.

@@ -16,11 +16,11 @@ const RES = env.SCREEN_RES || '1280x720x24';
 const VNC = env.VNC_PORT || '5999';
 const NOVNC = env.NOVNC_PORT || '6080';
 const WEB = env.NOVNC_WEB_DIR || '/usr/share/novnc';
-const has = (bin) => spawnSync('which', [bin]).status === 0;
-const running = (pattern) => spawnSync('pgrep', ['-f', pattern]).status === 0;
+const has = (bin) => spawnSync('which', [bin], { windowsHide: true }).status === 0;
+const running = (pattern) => spawnSync('pgrep', ['-f', pattern], { windowsHide: true }).status === 0;
 const start = (bin, args, log) => {
   const out = fs.openSync(log, 'a');
-  spawn(bin, args, { detached: true, stdio: ['ignore', out, out], env: { ...env, DISPLAY } }).unref();
+  spawn(bin, args, { windowsHide: true, detached: true, stdio: ['ignore', out, out], env: { ...env, DISPLAY } }).unref();
 };
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 

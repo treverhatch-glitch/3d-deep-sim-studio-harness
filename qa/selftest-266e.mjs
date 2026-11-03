@@ -25,7 +25,7 @@ export async function selftest266E({ dir, run, report }) {
     JSON.stringify({ direct: direct.tier, viaProposal: viaProposal.tier, other: other.tier, lowered: lowered.tier }));
 
   // The baseline ratchet: a git copy whose main has the baseline; a branch that adds a name fails check-docs.
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'base', '--no-verify');
   const before = run(dir, 'node scripts/settings-map.mjs --check', { STUDIO_SETTINGS_BASE_REF: '' });
   const bf = path.join(dir, 'docs', 'settings-baseline.json');

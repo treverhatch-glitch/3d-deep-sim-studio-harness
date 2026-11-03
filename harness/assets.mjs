@@ -210,13 +210,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } else if (['review', 'reviews'].includes(cmd)) {
     // 2.70.0 (v): the review of an asset's previews, in its own process (it imports task.mjs, which imports it).
     const { spawnSync } = await import('node:child_process');
-    const r = spawnSync(process.execPath, [fileURLToPath(new URL('./asset-review.mjs', import.meta.url)), ...argv], { stdio: 'inherit' });
+    const r = spawnSync(process.execPath, [fileURLToPath(new URL('./asset-review.mjs', import.meta.url)), ...argv], { windowsHide: true, stdio: 'inherit' });
     process.exit(r.status ?? 1);
   } else if (['need', 'needs', 'library'].includes(cmd)) {
     // 2.67.1 (l): one asset flow, in its own process: harness/asset-need.mjs imports this module, and this CLI's
     // top-level await would deadlock a dynamic import of it from here.
     const { spawnSync } = await import('node:child_process');
-    const r = spawnSync(process.execPath, [fileURLToPath(new URL('./asset-need.mjs', import.meta.url)), ...argv], { stdio: 'inherit' });
+    const r = spawnSync(process.execPath, [fileURLToPath(new URL('./asset-need.mjs', import.meta.url)), ...argv], { windowsHide: true, stdio: 'inherit' });
     process.exit(r.status ?? 1);
   } else {
     const m = readManifest();

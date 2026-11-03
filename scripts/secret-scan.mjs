@@ -55,7 +55,7 @@ const ROOT = path.resolve(rest[0] || '.');
 const FALLBACK_COMMITS = 50;
 const BLOB_CAP = 4 * 1024 * 1024; // history: a file git calls binary is read back only up to this size
 
-const git = (a, opts = {}) => spawnSync('git', a, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, ...opts });
+const git = (a, opts = {}) => spawnSync('git', a, { windowsHide: true, cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, ...opts });
 
 // Where ROOT sits in git: inGit, the path from the repo's top to ROOT ('' at the top, 'sub/dir/' below it), the top.
 const where = git(['rev-parse', '--is-inside-work-tree', '--show-prefix', '--show-toplevel']);
@@ -138,7 +138,7 @@ function readBlobs(oids) {
   const out = new Map();
   const uniq = [...new Set(oids)];
   if (!uniq.length) return out;
-  const r = spawnSync('git', ['cat-file', '--batch'], { cwd: ROOT, input: `${uniq.join('\n')}\n`, maxBuffer: 2 ** 31 - 1 });
+  const r = spawnSync('git', ['cat-file', '--batch'], { windowsHide: true, cwd: ROOT, input: `${uniq.join('\n')}\n`, maxBuffer: 2 ** 31 - 1 });
   if (r.error || r.status !== 0) throw new Error(`git cat-file failed: ${String(r.error?.message || r.stderr || '').trim().slice(0, 200)}`);
   const buf = r.stdout;
   for (let at = 0; at < buf.length; ) {
@@ -275,7 +275,7 @@ function resolveRange() {
   tries.push('refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/master');
   const local = [];
   if (process.env.STUDIO_MAIN_ROOT) {
-    const b = spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: process.env.STUDIO_MAIN_ROOT, encoding: 'utf8' }).stdout?.trim();
+    const b = spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { windowsHide: true, cwd: process.env.STUDIO_MAIN_ROOT, encoding: 'utf8' }).stdout?.trim();
     if (b) local.push(`refs/heads/${b}`);
   }
   local.push('refs/heads/main', 'refs/heads/master');

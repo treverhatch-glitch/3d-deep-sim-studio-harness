@@ -47,7 +47,7 @@ console.log(JSON.stringify({ ids: out }));`, { AGENT_EVENTS_FILE: evFile(n), ...
     return () => (was === null ? fs.rmSync(trigFile, { force: true }) : fs.writeFileSync(trigFile, was));
   };
   const nextBefore = fs.readFileSync(path.join(dir, 'studio', 'NEXT.md'), 'utf8');
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   if (!fs.existsSync(path.join(dir, '.git'))) { g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'studio', '--no-verify'); }
 
   // A fake gh: CI on any sha is red, also after its one re-run.
@@ -101,7 +101,7 @@ process.exit(1);`);
     const ok = /T-004 handed back: golden hash moved/.test(t4) && /is red \(golden\)/.test(t4) && /is red \(golden\)/.test(t2) && !/handed back/.test(t2) && !/verify 1 red/.test(t4 + t2) && notice;
     report('2.64.0 (l): a red merge train lands in its lanes\' inboxes (train id -> lanes from task.train.start) and the lane handed back gets its own line; the holder gets a notice (respond)', ok, `${out(sw)}\nT-004: ${t4}\nT-002: ${t2}\nnotice ${notice}`);
 
-    const hook = (env) => spawnSync(process.execPath, [path.join(dir, '.claude', 'hooks', 'inbox-notice.mjs')], { cwd: dir, encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env } });
+    const hook = (env) => spawnSync(process.execPath, [path.join(dir, '.claude', 'hooks', 'inbox-notice.mjs')], { windowsHide: true, cwd: dir, encoding: 'utf8', input: '{}', env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env } });
     const h1 = hook({ STUDIO_LOCK_OWNER: 'builder-s9' });
     const h2 = hook({ STUDIO_LOCK_OWNER: 'builder-s9' });
     let ctx = '';
@@ -208,7 +208,7 @@ console.log(JSON.stringify({ vol: k.volatile, stable: k.stable.includes('inbox h
     const restore = setTriggers((t) => { t.live = ['ci', 'train', 'hub']; });
     const port = await new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
     const token = crypto.randomBytes(24).toString('hex');
-    const child = spawn(process.execPath, [path.join(dir, 'hub', 'server.mjs')], { cwd: dir, env: { ...process.env, ...base, HUB_PORT: String(port), HUB_HOST: '127.0.0.1', HUB_TOKEN: token, HUB_ALLOWED_HOSTS: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_THREADS: 'on', AGENT_EVENTS_FILE: evFile('hub') }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [path.join(dir, 'hub', 'server.mjs')], { windowsHide: true, cwd: dir, env: { ...process.env, ...base, HUB_PORT: String(port), HUB_HOST: '127.0.0.1', HUB_TOKEN: token, HUB_ALLOWED_HOSTS: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_THREADS: 'on', AGENT_EVENTS_FILE: evFile('hub') }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     child.stdout.on('data', (d) => (log += d)); child.stderr.on('data', (d) => (log += d));
     const req = (body, headers = {}) => new Promise((resolve) => {

@@ -180,7 +180,7 @@ if (cargo) engine.push(/bevy/.test(cargo) ? 'Bevy (Rust)' : 'Rust');
 if (/pygame/.test(read('requirements.txt') || '') || /pygame/.test(read('pyproject.toml') || '')) engine.push('Pygame');
 
 const git = (...a) => {
-  const r = spawnSync('git', ['-C', game, ...a], { encoding: 'utf8' });
+  const r = spawnSync('git', ['-C', game, ...a], { windowsHide: true, encoding: 'utf8' });
   return r.status === 0 ? r.stdout.trim() : null;
 };
 const repo = { remote: git('remote', 'get-url', 'origin'), branch: git('rev-parse', '--abbrev-ref', 'HEAD'), lastCommit: git('log', '-1', '--format=%ci %s'), commits: git('rev-list', '--count', 'HEAD') };

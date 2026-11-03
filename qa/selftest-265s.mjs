@@ -24,7 +24,7 @@ export async function selftest265S({ dir, run, report, tmpRoot, root }) {
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const events = path.join(dir, '.studio', 'events-265s.jsonl');
@@ -88,7 +88,7 @@ console.log(JSON.stringify({ reason: d?.hookSpecificOutput?.permissionDecisionRe
     const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
     for (const [rel, text] of Object.entries(typeof files === 'function' ? files(id) : files)) write(ld, rel, text);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const proposal = (changes, why = 'tune the demo for the next playtest') => `${JSON.stringify({ changes, why }, null, 2)}\n`;
@@ -112,19 +112,19 @@ console.log(JSON.stringify({ reason: d?.hookSpecificOutput?.permissionDecisionRe
 
     // The hooks gate exempts exactly that commit (only studio/*.json and studio-proposals/), not a forged one.
     const cfgSha = g(dir, 'rev-parse', 'main').stdout.trim();
-    const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: 'export const x = 1;\n', encoding: 'utf8' }).stdout.trim();
+    const blob = spawnSync('git', ['hash-object', '-w', '--stdin'], { windowsHide: true, cwd: dir, input: 'export const x = 1;\n', encoding: 'utf8' }).stdout.trim();
     const idx = path.join(tmpRoot, `idx-265s-${process.pid}`);
     const ie = { ...process.env, ...env, GIT_INDEX_FILE: idx };
-    spawnSync('git', ['read-tree', cfgSha], { cwd: dir, env: ie });
-    spawnSync('git', ['update-index', '--add', '--cacheinfo', `100644,${blob},game/demo/sneak.mjs`], { cwd: dir, env: ie });
-    const tree2 = spawnSync('git', ['write-tree'], { cwd: dir, env: ie, encoding: 'utf8' }).stdout.trim();
-    const forged2 = spawnSync('git', ['commit-tree', tree2, '-p', cfgSha, '-m', `sneak code\n\nConfig-From: ${l1.id}\nStudio-Harness: config-from`], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }).stdout.trim();
+    spawnSync('git', ['read-tree', cfgSha], { windowsHide: true, cwd: dir, env: ie });
+    spawnSync('git', ['update-index', '--add', '--cacheinfo', `100644,${blob},game/demo/sneak.mjs`], { windowsHide: true, cwd: dir, env: ie });
+    const tree2 = spawnSync('git', ['write-tree'], { windowsHide: true, cwd: dir, env: ie, encoding: 'utf8' }).stdout.trim();
+    const forged2 = spawnSync('git', ['commit-tree', tree2, '-p', cfgSha, '-m', `sneak code\n\nConfig-From: ${l1.id}\nStudio-Harness: config-from`], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }).stdout.trim();
     // A config-from commit as the harness makes it (only studio/tuning.json), made here by hand on top of main.
-    const blob3 = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: '{ "speed": { "max": 6 } }\n', encoding: 'utf8' }).stdout.trim();
-    spawnSync('git', ['read-tree', cfgSha], { cwd: dir, env: ie });
-    spawnSync('git', ['update-index', '--add', '--cacheinfo', `100644,${blob3},studio/tuning.json`], { cwd: dir, env: ie });
-    const tree3 = spawnSync('git', ['write-tree'], { cwd: dir, env: ie, encoding: 'utf8' }).stdout.trim();
-    const byHand = spawnSync('git', ['commit-tree', tree3, '-p', cfgSha, '-m', `config from ${l1.id}: studio/tuning.json\n\nConfig-From: ${l1.id}\nStudio-Harness: config-from`], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }).stdout.trim();
+    const blob3 = spawnSync('git', ['hash-object', '-w', '--stdin'], { windowsHide: true, cwd: dir, input: '{ "speed": { "max": 6 } }\n', encoding: 'utf8' }).stdout.trim();
+    spawnSync('git', ['read-tree', cfgSha], { windowsHide: true, cwd: dir, env: ie });
+    spawnSync('git', ['update-index', '--add', '--cacheinfo', `100644,${blob3},studio/tuning.json`], { windowsHide: true, cwd: dir, env: ie });
+    const tree3 = spawnSync('git', ['write-tree'], { windowsHide: true, cwd: dir, env: ie, encoding: 'utf8' }).stdout.trim();
+    const byHand = spawnSync('git', ['commit-tree', tree3, '-p', cfgSha, '-m', `config from ${l1.id}: studio/tuning.json\n\nConfig-From: ${l1.id}\nStudio-Harness: config-from`], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } }).stdout.trim();
     const hs = probe('hooks', `import { checkHookStamps } from ${u('harness/hook-stamp.mjs')};
 const env = { ...process.env, STUDIO_HOOKS_CHECK: 'on' };
 const a = await checkHookStamps({ env, range: { base: ${JSON.stringify(cfgSha)} + '~1', head: ${JSON.stringify(cfgSha)} } });

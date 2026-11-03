@@ -214,7 +214,7 @@ async function checkBadEnds(opts, state, now) {
     const roleOf = String(last2[0].meta?.role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
     const tool = metaTool === 'custom' ? String(process.env[`STUDIO_${roleOf}_CMD`] || process.env.STUDIO_AGENT_CMD || 'the custom command').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') : metaTool;
     // A program that isn't on the PATH: exit 127 (9009, or 1 under cmd.exe on Windows), or one `which` can't find.
-    const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' }).status !== 0);
+    const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { windowsHide: true, encoding: 'utf8' }).status !== 0);
     const hint = missing ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
     const names = groups.map((g) => (g.length > 1 ? `${g.map((e) => e.agent).join(' + ')} together` : g[0].agent));
     const causes = groups.flat().map((e) => ({ agent: e.agent, ...(e.meta?.exitCause ? { kind: e.meta.exitCause.kind, signal: e.meta.exitCause.signal || null } : { kind: 'unknown' }), code: e.meta?.code ?? null }));
@@ -647,7 +647,7 @@ async function main(argv) {
       if (!downSince) downSince = Date.now();
       if (!hub || hub.exitCode !== null) {
         const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'hub.log'), 'a');
-        hub = spawn(process.execPath, [path.join(REPO_ROOT, 'hub', 'server.mjs')], { cwd: REPO_ROOT, stdio: ['ignore', log, log], env: process.env });
+        hub = spawn(process.execPath, [path.join(REPO_ROOT, 'hub', 'server.mjs')], { windowsHide: true, cwd: REPO_ROOT, stdio: ['ignore', log, log], env: process.env });
       }
     } else if (downSince) {
       if (Date.now() - downSince > LOOP_MS) {
@@ -685,7 +685,7 @@ async function main(argv) {
  */
 export function loginNode() {
   if (process.env.STUDIO_NODE) return process.env.STUDIO_NODE;
-  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { encoding: 'utf8' });
+  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { windowsHide: true, encoding: 'utf8' });
   const found = (r.stdout || '').split(/\r?\n/).map((x) => x.trim()).find(Boolean);
   return found || process.execPath;
 }
@@ -702,43 +702,43 @@ function install(argv, remove = false) {
   const node = loginNode();
   // The agent tool must be findable from the PATH the login job gets; say so now rather than loop on exit 127.
   const tool = process.env.STUDIO_AGENT_TOOL || 'claude';
-  const has = spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' });
+  const has = spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { windowsHide: true, encoding: 'utf8' });
   const warn = has.status === 0 ? '' : `\nWarning: \`${tool}\` isn't on this terminal's PATH, so the supervisor won't find it either. Run this from a terminal where \`${tool} --version\` works.`;
   if (process.platform === 'darwin') {
     const label = `com.studio.${slug}`;
     const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
     if (remove) {
-      spawnSync('launchctl', ['unload', '-w', plist]);
+      spawnSync('launchctl', ['unload', '-w', plist], { windowsHide: true });
       fs.rmSync(plist, { force: true });
       return `Removed ${plist}`;
     }
     const xml = launchdPlist({ label, node, args });
     fs.mkdirSync(path.dirname(plist), { recursive: true });
-    spawnSync('launchctl', ['unload', '-w', plist]);
+    spawnSync('launchctl', ['unload', '-w', plist], { windowsHide: true });
     fs.writeFileSync(plist, xml);
-    spawnSync('launchctl', ['load', '-w', plist]);
+    spawnSync('launchctl', ['load', '-w', plist], { windowsHide: true });
     return `Installed ${plist} (node ${node}, this terminal's PATH and HOME): the supervisor starts at login and after a restart. Remove: npm run studio:start -- --uninstall${warn}`;
   }
   if (process.platform === 'win32') {
     const name = `Studio ${slug}`;
     if (remove) {
-      spawnSync('schtasks', ['/Delete', '/F', '/TN', name]);
+      spawnSync('schtasks', ['/Delete', '/F', '/TN', name], { windowsHide: true });
       return `Removed the scheduled task "${name}"`;
     }
     const cmd = [node, ...args].map((a) => `"${a}"`).join(' ');
-    const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { encoding: 'utf8' });
+    const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { windowsHide: true, encoding: 'utf8' });
     return r.status === 0 ? `Installed the scheduled task "${name}": the supervisor starts when you log in. Remove: npm run studio:start -- --uninstall${warn}` : `Task Scheduler said: ${r.stderr || r.stdout}`;
   }
   const unit = path.join(os.homedir(), '.config', 'systemd', 'user', `studio-${slug}.service`);
   if (remove) {
-    spawnSync('systemctl', ['--user', 'disable', '--now', `studio-${slug}.service`]);
+    spawnSync('systemctl', ['--user', 'disable', '--now', `studio-${slug}.service`], { windowsHide: true });
     fs.rmSync(unit, { force: true });
     return `Removed ${unit}`;
   }
   fs.mkdirSync(path.dirname(unit), { recursive: true });
   fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nEnvironment="PATH=${process.env.PATH || ''}" "HOME=${process.env.HOME || os.homedir()}"\nExecStart=${[node, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\nRestartSec=60\n\n[Install]\nWantedBy=default.target\n`);
-  spawnSync('systemctl', ['--user', 'daemon-reload']);
-  spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`]);
+  spawnSync('systemctl', ['--user', 'daemon-reload'], { windowsHide: true });
+  spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`], { windowsHide: true });
   return `Installed ${unit} (systemd --user, this terminal's PATH): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall${warn}`;
 }
 

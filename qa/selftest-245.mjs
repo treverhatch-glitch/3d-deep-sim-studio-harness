@@ -18,7 +18,7 @@ export async function selftest245({ dir, run, report, tmpRoot }) {
   fs.mkdirSync(path.join(src, 'src'), { recursive: true });
   fs.writeFileSync(path.join(src, 'package.json'), JSON.stringify({ name: 'kite', scripts: { dev: 'vite', test: 'vitest run' }, devDependencies: { vite: '^8.0.0', vitest: '^5.0.0' } }));
   fs.writeFileSync(path.join(src, 'src/main.ts'), 'export const kite = 1;\n');
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   g(src, 'init', '-q', '-b', 'main'); g(src, 'add', '-A'); g(src, 'commit', '-qm', 'start');
   const ad = run(dir, `node scripts/onboard-game.mjs --path "${src}" --name Kite --adopt`, env);
   const bf = path.join(dir, 'game/kite/studio.browser.json');

@@ -109,7 +109,7 @@ const mechanical = (x) => ['command', 'file', 'test'].includes(x?.check?.kind);
 /** The studio's task types that need an agreed contract (studio/game.json "contracts": { "required": [...] }). */
 export function requiredTypes(root = REPO_ROOT) {
   const roots = [root];
-  try { const main = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).stdout.trim(); if (main && path.basename(main) === '.git') roots.push(path.dirname(main)); } catch { /* not git */ }
+  try { const main = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout.trim(); if (main && path.basename(main) === '.git') roots.push(path.dirname(main)); } catch { /* not git */ }
   const out = new Set();
   for (const r of roots) {
     try { const req = JSON.parse(fs.readFileSync(path.join(r, 'studio', 'game.json'), 'utf8'))?.contracts?.required; if (Array.isArray(req)) for (const t of req) out.add(String(t).toLowerCase()); } catch { /* no manifest */ }
@@ -184,7 +184,7 @@ export function testCheck(check, root = REPO_ROOT) {
     if (!fs.existsSync(full)) return { ok: false, why: `${rel} doesn't exist` };
     files = [rel];
   } else {
-    const r = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const r = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     files = r.status === 0 ? r.stdout.split('\0').filter((f) => f && isTestPath(f)) : [];
   }
   const n = escRe(name);
@@ -212,7 +212,7 @@ export function testCheck(check, root = REPO_ROOT) {
  * copy of the index (its stat cache keeps this fast); null outside a git checkout.
  */
 export function workState(root = REPO_ROOT) {
-  const g = (args, env) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: env || process.env, maxBuffer: 64 * 1024 * 1024 });
+  const g = (args, env) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', env: env || process.env, maxBuffer: 64 * 1024 * 1024 });
   if (g(['rev-parse', '--verify', '-q', 'HEAD']).status !== 0) return null;
   const idx = path.join(os.tmpdir(), `studio-contract-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.idx`);
   try {
@@ -248,7 +248,7 @@ export function runChecks(id, { root = REPO_ROOT, env = process.env, log = () =>
     let r;
     if (x.check?.kind === 'command') {
       log(`[contract] ${x.id}: ${x.check.command}`);
-      const p = spawnSync(String(x.check.command), { cwd: root, shell: true, encoding: 'utf8', env, timeout: timeoutMs(), maxBuffer: 32 * 1024 * 1024 });
+      const p = spawnSync(String(x.check.command), { windowsHide: true, cwd: root, shell: true, encoding: 'utf8', env, timeout: timeoutMs(), maxBuffer: 32 * 1024 * 1024 });
       const tail = `${p.stdout || ''}${p.stderr || ''}`.trim().split('\n').slice(-6).join('\n');
       r = { ok: p.status === 0, why: p.status === 0 ? '' : p.error?.code === 'ETIMEDOUT' ? `timed out after ${timeoutMs() / 1000} s (STUDIO_CONTRACT_TIMEOUT_S)` : `exit ${p.status}${tail ? `: ${tail.slice(-400)}` : ''}` };
     } else if (x.check?.kind === 'file') {
@@ -389,7 +389,7 @@ const signerMade = (s, rec, env) => deciderMade(s, rec, env) || Boolean(s?.agent
  */
 export function contractFindings({ base, root = REPO_ROOT, git, env = process.env }) {
   if (!base) return [];
-  const run = git || ((args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+  const run = git || ((args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
   const isContract = (f) => new RegExp(`^${CONTRACTS_REL}/[^/]+\\.json$`).test(f);
   const changed = run(['diff', '--name-only', '-z', '--no-renames', base, '--', CONTRACTS_REL]).stdout.split('\0');
   const untracked = run(['ls-files', '-o', '--exclude-standard', '-z', '--', CONTRACTS_REL]).stdout.split('\0');
@@ -475,7 +475,7 @@ function manualFindings(rel, task, B, C, setter, env) {
 
 function commitOne(id, message, root = REPO_ROOT) {
   const rel = contractRel(id);
-  const g = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: root, encoding: 'utf8' });
   if (g('rev-parse', '--verify', '-q', 'HEAD').status !== 0) return 'not committed (not a git checkout)';
   g('add', '--', rel);
   const r = g('commit', '-q', '-m', message, '--', rel);

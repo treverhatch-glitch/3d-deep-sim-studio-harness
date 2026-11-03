@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest271Y({ dir, run, report, tmpRoot }) {
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const events = path.join(dir, '.studio', 'events-271y.jsonl');
@@ -67,7 +67,7 @@ http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; })
   const hookLog = path.join(tmpRoot, `hook-271y-${process.pid}.jsonl`);
   const planFile = path.join(tmpRoot, `hook-271y-plan-${process.pid}.txt`);
   fs.writeFileSync(planFile, '200');
-  const srv = spawn(process.execPath, [srvFile, hookLog, planFile], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const srv = spawn(process.execPath, [srvFile, hookLog, planFile], { windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise((resolve) => { let buf = ''; srv.stdout.on('data', (c) => { buf += c; const m = buf.match(/listening (\d+)/); if (m) resolve(Number(m[1])); }); setTimeout(() => resolve(0), 10000); });
   const HOOK = `http://127.0.0.1:${port}/api/hooks/9911/${TOKEN}`;
   const reqs = () => { try { return fs.readFileSync(hookLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };

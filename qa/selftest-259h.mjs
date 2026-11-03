@@ -334,7 +334,7 @@ setTimeout(write, 15000);
     return { ...env, PATH: `${bin}${path.delimiter}${was}`, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', STUDIO_ARGV_OUT: rec, STUDIO_HEARTBEAT_SEC: '1', ...extra };
   };
   // Straight to node, no shell, so the note reaches the harness exactly as written on every OS.
-  const start = (cwd, args, extra) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', ...args], { cwd, encoding: 'utf8', env: envWith(extra), timeout: 180000 });
+  const start = (cwd, args, extra) => spawnSync(process.execPath, ['harness/agent.mjs', 'start', ...args], { windowsHide: true, cwd, encoding: 'utf8', env: envWith(extra), timeout: 180000 });
   const got = (name) => {
     try {
       return JSON.parse(fs.readFileSync(path.join(rec, `${name}.json`), 'utf8'));
@@ -405,7 +405,7 @@ console.log(JSON.stringify({ want: ALLOWED.map(([, q]) => 'Bash(' + q + ')') }))
     env.PATH = `${rt}${path.delimiter}${env.PATH}`;
     const viaCmd = L.spawnAgentSync(['rt', ...TABLE], { env, encoding: 'utf8', timeout: 60000 });
     const line = L.cmdCommandLine(process.execPath, [path.join(rt, 'rt.js'), ...TABLE], { passes: 1 });
-    const direct = spawnSync(env.ComSpec || process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { env, encoding: 'utf8', windowsVerbatimArguments: true, timeout: 60000 });
+    const direct = spawnSync(env.ComSpec || process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsHide: true, env, encoding: 'utf8', windowsVerbatimArguments: true, timeout: 60000 });
     const parse = (r) => {
       try {
         return JSON.parse(r.stdout);

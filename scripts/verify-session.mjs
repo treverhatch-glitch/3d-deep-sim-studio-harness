@@ -34,7 +34,7 @@ if (!agents.includes('lock.mjs')) {
   failed += 1;
 }
 try {
-  const hooks = execFileSync('git', ['config', '--get', 'core.hooksPath'], { cwd: root, encoding: 'utf8' }).trim();
+  const hooks = execFileSync('git', ['config', '--get', 'core.hooksPath'], { windowsHide: true, cwd: root, encoding: 'utf8' }).trim();
   if (hooks !== 'scripts/hooks') console.warn('[session] note: pre-commit hook not installed. Run: npm run hooks:install');
 } catch {
   console.warn('[session] note: pre-commit hook not installed. Run: npm run hooks:install');

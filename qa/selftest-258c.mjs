@@ -52,8 +52,8 @@ export async function selftest258C({ dir, run, report, tmpRoot }) {
   Object.assign(env, { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off' });
   delete env.NODE_PATH;
   const g = path.join(tmpRoot, `repo-258c-${process.pid}`);
-  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: g, encoding: 'utf8', env });
-  const node = (cwd, ...a) => seen(spawnSync(process.execPath, a, { cwd, encoding: 'utf8', env }));
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { windowsHide: true, cwd: g, encoding: 'utf8', env });
+  const node = (cwd, ...a) => seen(spawnSync(process.execPath, a, { windowsHide: true, cwd, encoding: 'utf8', env }));
   const w = (root, rel, data) => {
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), data);
@@ -208,10 +208,10 @@ export async function selftest258C({ dir, run, report, tmpRoot }) {
     const fp = (v) => crypto.createHash('sha256').update(v).digest('hex');
     const ownerKey = path.join(tmpRoot, `owner-258c-${process.pid}.pem`);
     const owner = { ...env, STUDIO_OWNER_KEY: ownerKey };
-    const protectedCheck = () => seen(spawnSync(process.execPath, ['qa/protected-check.mjs'], { cwd: g, encoding: 'utf8', env: owner }));
+    const protectedCheck = () => seen(spawnSync(process.execPath, ['qa/protected-check.mjs'], { windowsHide: true, cwd: g, encoding: 'utf8', env: owner }));
     git('config', 'core.autocrlf', 'false');
     fs.rmSync(ownerKey, { force: true });
-    const kg = spawnSync(process.execPath, ['harness/approve.mjs', 'keygen'], { cwd: g, encoding: 'utf8', env: owner });
+    const kg = spawnSync(process.execPath, ['harness/approve.mjs', 'keygen'], { windowsHide: true, cwd: g, encoding: 'utf8', env: owner });
     git('add', 'studio/keys');
     git('commit', '-qm', 'owner key', '--no-verify');
     git('update-ref', 'refs/remotes/origin/main', 'HEAD'); // the base holds the owner key
@@ -238,7 +238,7 @@ export async function selftest258C({ dir, run, report, tmpRoot }) {
     w(g, 'studio/secrets-allow.json', `${JSON.stringify({ allow: [entry] }, null, 2)}\n`);
     const allowed = node(g, 'scripts/secret-scan.mjs');
     const unsigned = protectedCheck();
-    const signed = spawnSync(process.execPath, ['harness/approve.mjs', 'protected', '--note', 'the owner allows one fixture false alarm'], { cwd: g, encoding: 'utf8', env: owner });
+    const signed = spawnSync(process.execPath, ['harness/approve.mjs', 'protected', '--note', 'the owner allows one fixture false alarm'], { windowsHide: true, cwd: g, encoding: 'utf8', env: owner });
     git('add', '-A');
     git('commit', '-qm', 'allow the fixture false alarm', '--no-verify');
     const approved = protectedCheck();

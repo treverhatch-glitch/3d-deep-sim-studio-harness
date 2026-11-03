@@ -58,8 +58,8 @@ export function buildRunReport({ final = false } = {}) {
   const count = (type) => events.filter((e) => e.type === type).length;
   const first = events.find((e) => e.ts)?.ts || null;
   const pkg = json('package.json') || {};
-  const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || null;
-  const commits = Number(spawnSync('git', ['rev-list', '--count', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || 0);
+  const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || null;
+  const commits = Number(spawnSync('git', ['rev-list', '--count', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || 0);
   const bible = json('studio/bible/bible.json');
   const gates = json('.studio/gates-last.json');
   const reports = fs.existsSync(path.join(REPO_ROOT, 'qa/reports')) ? fs.readdirSync(path.join(REPO_ROOT, 'qa/reports')).filter((f) => /^qa_.*\.json$/.test(f)).sort() : [];

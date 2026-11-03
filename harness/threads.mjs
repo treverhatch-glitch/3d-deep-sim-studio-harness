@@ -206,7 +206,7 @@ export function boardState(root = REPO_ROOT) {
 /** The task a commit is tagged with (its Studio-Task trailer), exact, or []. */
 function taggedTasks(sha) {
   if (!/^[0-9a-f]{7,40}$/i.test(sha)) return [];
-  const r = spawnSync('git', ['log', '-1', '--format=%(trailers:key=Studio-Task,valueonly,separator=%x2C)', sha], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const r = spawnSync('git', ['log', '-1', '--format=%(trailers:key=Studio-Task,valueonly,separator=%x2C)', sha], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   return r.status === 0 ? String(r.stdout).split(/[,\s]+/).filter((t) => TASK_ID.test(t)) : [];
 }
 

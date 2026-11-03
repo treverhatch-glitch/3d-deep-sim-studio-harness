@@ -35,7 +35,7 @@ const NOT_CODE = /^(\.studio\/|studio\/|qa\/(reports|regressions)\/|docs\/)/;
 
 /** Commits with their Studio-Task / Studio-Model trailers and the files they touched (newest last). */
 export function taggedCommits(limit = 3000) {
-  const r = spawnSync('git', ['log', `-n${limit}`, '--reverse', '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Model,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const r = spawnSync('git', ['log', `-n${limit}`, '--reverse', '--format=%x1e%H%x09%ct%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Model,valueonly,separator=%x2C)%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   if (r.status !== 0) return [];
   return r.stdout.split('\x1e').slice(1).map((block) => {
     const [head, ...names] = block.trim().split('\n');

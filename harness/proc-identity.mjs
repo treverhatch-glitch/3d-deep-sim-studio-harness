@@ -160,7 +160,7 @@ function linuxStarts(pids) {
 }
 
 function macStarts(pids) {
-  const r = spawnSync('ps', ['-o', 'pid=', '-o', 'lstart=', '-o', 'comm=', '-p', pids.join(',')], { encoding: 'utf8', timeout: READ_TIMEOUT_MS, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
+  const r = spawnSync('ps', ['-o', 'pid=', '-o', 'lstart=', '-o', 'comm=', '-p', pids.join(',')], { windowsHide: true, encoding: 'utf8', timeout: READ_TIMEOUT_MS, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
   // ps exits 1 when one of the pids is gone, and still prints the others.
   if (r.error || (r.status !== 0 && r.status !== 1)) throw new Error(r.error?.code || `ps exit ${r.status}`);
   const out = new Map();
@@ -299,7 +299,7 @@ function linuxStat(pid) {
 export function processGroup(pid = process.pid) {
   if (process.platform === 'win32') return null;
   if (process.platform === 'linux') return linuxStat(pid)?.pgid ?? null;
-  const r = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: READ_TIMEOUT_MS });
+  const r = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], { windowsHide: true, encoding: 'utf8', timeout: READ_TIMEOUT_MS });
   const g = Number(String(r.stdout || '').trim());
   return Number.isInteger(g) && g > 0 ? g : null;
 }
@@ -356,7 +356,7 @@ export function listProcesses() {
     if (r.error || r.status !== 0) throw new Error(r.error?.code || `powershell exit ${r.status}`);
     return winProcsFrom(r.stdout, t0);
   }
-  const r = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'lstart=', '-o', 'comm='], { encoding: 'utf8', timeout: READ_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
+  const r = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'lstart=', '-o', 'comm='], { windowsHide: true, encoding: 'utf8', timeout: READ_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' } });
   if (r.error || r.status !== 0) throw new Error(r.error?.code || `ps exit ${r.status}`);
   const out = [];
   for (const line of String(r.stdout || '').split('\n')) {
@@ -388,7 +388,7 @@ export function processArgs(pids, { procs = null } = {}) {
       for (const line of String(r.stdout || '').split(/\r?\n/)) { const m = line.match(/^(\d+)\|(.*)$/); if (m && m[2].trim()) out[Number(m[1])] = m[2].trim(); }
       return out;
     }
-    const r = spawnSync('ps', ['-o', 'pid=', '-o', 'args=', '-p', want.join(',')], { encoding: 'utf8', timeout: READ_TIMEOUT_MS });
+    const r = spawnSync('ps', ['-o', 'pid=', '-o', 'args=', '-p', want.join(',')], { windowsHide: true, encoding: 'utf8', timeout: READ_TIMEOUT_MS });
     for (const line of String(r.stdout || '').split('\n')) { const m = line.match(/^\s*(\d+)\s+(.*)$/); if (m) out[Number(m[1])] = m[2].trim(); }
   } catch {}
   return out;

@@ -29,7 +29,7 @@ import { readIdea } from './bible.mjs';
 
 export const EXP_DIR = path.join(REPO_ROOT, 'studio', 'experiments');
 const now = () => new Date().toISOString();
-const git = (args, input) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+const git = (args, input) => spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
 
 export function readExperiments() {
   if (!fs.existsSync(EXP_DIR)) return [];
@@ -127,7 +127,7 @@ export function dropExperiment(id, { by, only = null }) {
   git(['add', '-A', '--', ...files]);
   // 2.58.2 (PU-29): committed without the hooks, so it says so (Studio-Harness), and the hooks gate lets it through.
   const msg = `Drop ${id}${paths ? ` (only ${paths.join(', ')})` : ''}: ${x.title}\n\nStudio-Experiment-Drop: ${id}\nStudio-Harness: experiment-drop`;
-  const commit = spawnSync('git', ['-c', `user.name=${by}`, '-c', 'user.email=studio@localhost', 'commit', '-q', '--no-verify', '-m', msg, '--', ...files], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const commit = spawnSync('git', ['-c', `user.name=${by}`, '-c', 'user.email=studio@localhost', 'commit', '-q', '--no-verify', '-m', msg, '--', ...files], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   if (commit.status !== 0) return { ok: false, message: commit.stderr || 'git commit failed' };
   x.undone = undone;
   if (!paths) x.status = 'dropped';

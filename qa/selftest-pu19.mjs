@@ -28,7 +28,7 @@ export async function selftestPU19({ dir, run, report }) {
   const quota = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, '.studio/tool-quota.json'), 'utf8')); } catch { return {}; } };
   // Slower platforms (Windows) get more time, as in qa/selftest.mjs; wait for a detached session to end.
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const waitFor = (fn, ms = 30000 * SLOW) => { const t = Date.now(); while (!fn() && Date.now() - t < ms) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']); return fn(); };
+  const waitFor = (fn, ms = 30000 * SLOW) => { const t = Date.now(); while (!fn() && Date.now() - t < ms) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true }); return fn(); };
   const holds = () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'studio/task-holds.json'), 'utf8')).tasks || {}; } catch { return {}; } };
 
   // 1. The table: each message is a usage limit (a plain stderr line and a stream-json error result), with its reset.
@@ -93,7 +93,7 @@ console.log(JSON.stringify({ rows, negs, quoted, extra, zone: Intl.DateTimeForma
 
   // 2. End to end. A studio copy with git, a fast pace, one tool in the order, and stand-in agents. The real
   // claude is never called: its launch command is the fake, and the quota probe is off.
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   if (!fs.existsSync(path.join(dir, '.git'))) {
     g('init', '-q', '-b', 'main');
     g('add', '-A');

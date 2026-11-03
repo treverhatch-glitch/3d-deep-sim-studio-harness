@@ -84,7 +84,7 @@ export const DEFAULT_PROTECTED = [
 // 2.71.1 (A16): never in a lane copy (harness/gate-trust.mjs): there the checker judges the lane itself.
 const ROOT = protectRoot(REPO_ROOT) || REPO_ROOT;
 // 2.71.1 (B, G10/G16): every git call here sees only this checkout, with replace refs ignored (harness/gate-env.mjs).
-const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() });
+const git = (args, cwd = ROOT) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() });
 /**
  * 2.58.5 (H-11): how the owner key gets made, said the same way wherever a check finds none. An agent asked to make it
  * on the agents' PC rightly refused (every agent there could then sign its own approvals); this says what to do instead.
@@ -120,7 +120,7 @@ function studioBranchOfLane(env = process.env) {
   if (env.STUDIO_MAIN_ROOT && mainRootTrust(ROOT, env.STUDIO_MAIN_ROOT).ok) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) return b; }
   try {
     const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
-    const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8', env: clean }).stdout.trim();
+    const g = (args, cwd) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: clean }).stdout.trim();
     const real = (p) => { try { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; } catch { return path.resolve(p); } };
     const gd = g(['rev-parse', '--absolute-git-dir'], ROOT);
     const cd = g(['rev-parse', '--git-common-dir'], ROOT);

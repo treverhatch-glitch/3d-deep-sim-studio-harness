@@ -116,8 +116,8 @@ export function parseJUnit(xmlText) {
 
 export function runGodotUnit({ changedOnly = false } = {}) {
   const cfg = readConfig();
-  const gitDiff = spawnSync('git', ['diff', '--name-only', 'HEAD'], { encoding: 'utf8', cwd: REPO_ROOT });
-  const gitLs = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], { encoding: 'utf8', cwd: REPO_ROOT });
+  const gitDiff = spawnSync('git', ['diff', '--name-only', 'HEAD'], { windowsHide: true, encoding: 'utf8', cwd: REPO_ROOT });
+  const gitLs = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], { windowsHide: true, encoding: 'utf8', cwd: REPO_ROOT });
   const inGit = gitDiff.status === 0;
   // Outside git (a copied tree) or with STUDIO_GODOT_UNIT_ALL=1, every run is a full run.
   const changedFiles = changedOnly && inGit && process.env.STUDIO_GODOT_UNIT_ALL !== '1' ? [...gitDiff.stdout.split('\n'), ...gitLs.stdout.split('\n')].filter(Boolean).map(f => f.replace(/\\/g, '/')) : null;
@@ -147,7 +147,7 @@ export function runGodotUnit({ changedOnly = false } = {}) {
   // 2.72.0 (c): the report folders that exist before the run; only a new one (gdUnit4 numbers them) counts.
   const before = new Set(listReports(reportDir));
   const startedAt = Date.now();
-  const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
+  const result = spawnSync(runner.file, [...runner.pre, '--godot_binary', godotBin, '-a', cfg.tests, '-c'], { windowsHide: true, cwd: projectPath, timeout: 600 * 1000, encoding: 'utf8', shell: runner.shell });
 
   // 2.36.0: only a report this run wrote counts (an older one made a run that tested nothing look green).
   // 2.72.0 (c): and the run has to prove it ran (harness/engine-proof.mjs judgeGodotRun).

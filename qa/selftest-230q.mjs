@@ -21,7 +21,7 @@ export async function selftest230q({ dir, run, report, tmpRoot }) {
     try { return JSON.parse(r.stdout.trim().split('\n').pop()); } catch { return { error: out(r) }; }
   };
   const base = { STUDIO_LOCK_OWNER: 'builder-q1', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_DONE_NOOP: 'allow', STUDIO_REFILL_WAKE: 'off', STUDIO_WATCHDOG_LAUNCH: 'off', STUDIO_GAMEDEV_WAKE_DIRECTOR: 'off', STUDIO_DEV_CYCLE_WAKE: 'off', STUDIO_VISUAL_GATE: 'off' };
-  const g = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
 
   // ---- #5: land through the merge worktree ----
   const mkRepo = (name) => {
@@ -71,7 +71,7 @@ console.log(JSON.stringify(landFastForward(${JSON.stringify(r)}, 'marina', 'lane
   fs.writeFileSync(lockF, '');
   const remover = path.join(tmpRoot, `q5-rm-${process.pid}.cjs`);
   fs.writeFileSync(remover, `setTimeout(() => require('fs').rmSync(${JSON.stringify(lockF)}, { force: true }), 1500);`);
-  const child = (await import('node:child_process')).spawn(process.execPath, [remover], { detached: true, stdio: 'ignore' });
+  const child = (await import('node:child_process')).spawn(process.execPath, [remover], { windowsHide: true, detached: true, stdio: 'ignore' });
   child.unref();
   const c = land(rC);
   report('2.30q #5: an index.lock held for 1.5 s in the main checkout is waited out and the land completes', c.ok === true && g(rC, 'rev-parse', 'marina').stdout.trim() === g(rC, 'rev-parse', 'lane/b').stdout.trim() && fs.readFileSync(path.join(rC, 'f.txt'), 'utf8') === 'lane\n', JSON.stringify(c));

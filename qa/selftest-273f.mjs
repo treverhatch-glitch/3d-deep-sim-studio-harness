@@ -33,7 +33,7 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv() });
+  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const nm = path.join(dir, 'node_modules');
   const base = {
@@ -227,7 +227,7 @@ export async function selftest273F({ dir, run, report, tmpRoot, root }) {
     const testText = fs.existsSync(path.join(C, testRel)) ? fs.readFileSync(path.join(C, testRel), 'utf8') : '';
     const body = (() => { try { return fs.readFileSync(path.join(C, '.studio', 'repro', 'H-001-PR.md'), 'utf8'); } catch { return ''; } })();
     const msg = g(C, ['log', '-1', '--format=%B']).stdout;
-    const check = spawnSync(process.execPath, ['--check', path.join(C, testRel)], { encoding: 'utf8' });
+    const check = spawnSync(process.execPath, ['--check', path.join(C, testRel)], { windowsHide: true, encoding: 'utf8' });
     await guard('273f repro: refused for the studio itself and a folder inside it; in a separate clone: branch repro/h-001-<sig>, a selftest-style failing test (selftestReproH001, the evidence in its header, the safe recorded command run as node) committed with Repro-Of / Overseer-By, the PR body with the checklist and trailers; the studio untouched; an event (fails on 2.71.1)', () => [
       self.status === 1 && /SEPARATE clone/.test(out(self)) && inner.status === 1 && /SEPARATE clone/.test(out(inner))
         && ok.status === 0 && /^repro\/h-001-[\w-]+$/.test(branch) && /export async function selftestReproH001\(\{ dir, run, report, tmpRoot \}\)/.test(testText) && /"node harness\/task\.mjs next"/.test(testText) && /it was refused/.test(testText) && check.status === 0

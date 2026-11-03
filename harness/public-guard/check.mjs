@@ -16,9 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const root = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).stdout.trim() || process.cwd();
+const root = spawnSync('git', ['rev-parse', '--show-toplevel'], { windowsHide: true, encoding: 'utf8' }).stdout.trim() || process.cwd();
 const staged = process.argv.includes('--staged');
-const list = spawnSync('git', staged ? ['diff', '--cached', '--name-only', '--diff-filter=ACMR'] : ['ls-files'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).stdout.split('\n').filter(Boolean);
+const list = spawnSync('git', staged ? ['diff', '--cached', '--name-only', '--diff-filter=ACMR'] : ['ls-files'], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).stdout.split('\n').filter(Boolean);
 const SELF = 'tools/public-guard/check.mjs';
 
 // Files that must never be in a public repo, by name.

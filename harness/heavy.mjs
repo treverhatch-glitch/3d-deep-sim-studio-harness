@@ -370,7 +370,7 @@ export async function heavyOwnGroup({ env = process.env, argv = process.argv.sli
   if (heldByParent(heavyDir(await heavyRoot()), env)) return null;
   const g = processGroup(process.pid);
   if (g === null || g === process.pid) return null;
-  const child = spawn(process.execPath, [...process.execArgv, ...argv], { stdio: 'inherit', detached: true, env: { ...env, STUDIO_HEAVY_REEXEC: String(process.pid) } });
+  const child = spawn(process.execPath, [...process.execArgv, ...argv], { windowsHide: true, stdio: 'inherit', detached: true, env: { ...env, STUDIO_HEAVY_REEXEC: String(process.pid) } });
   const fwd = (sig) => () => { try { process.kill(-child.pid, sig); } catch {} };
   const sigs = ['SIGINT', 'SIGTERM', 'SIGHUP'].map((s) => [s, fwd(s)]);
   for (const [s, f] of sigs) process.on(s, f);

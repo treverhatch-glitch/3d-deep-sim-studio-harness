@@ -33,7 +33,7 @@ const version = argv[0];
 const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
 const has = (k) => argv.includes(`--${k}`);
 const dry = has('dry-run');
-const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
+const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
 const git = (...a) => sh('git', a);
 const report = { version, steps: [], tests: {}, sha: null, ci: null, backup: null, shots: null };
 const step = (label, ok, detail = '', state = ok ? 'pass' : 'fail') => {

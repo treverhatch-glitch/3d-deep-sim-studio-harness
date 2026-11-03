@@ -35,7 +35,7 @@ const freePort = () =>
 async function startHub(env) {
   const port = await freePort();
   const child = spawn(process.execPath, [path.join(root, 'hub', 'server.mjs')], {
-    cwd: root,
+    windowsHide: true, cwd: root,
     env: { ...process.env, HUB_PORT: String(port), AGENT_EVENTS_FILE: path.join(tmp, `events-${port}.jsonl`), HUB_ALLOWED_HOSTS: '', STUDIO_WATCH_INTERVAL: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

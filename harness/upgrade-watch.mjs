@@ -38,7 +38,7 @@ import { spawnSync } from 'node:child_process';
 import { emitEvent } from './event.mjs';
 
 export const UPGRADE_REL = 'studio/upgrade.json';
-const git = (root, args, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...opts });
+const git = (root, args, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...opts });
 const out1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const stateFile = (root) => path.join(root, '.studio', 'upgrade-watch.json');

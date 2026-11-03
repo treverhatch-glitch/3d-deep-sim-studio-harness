@@ -108,8 +108,8 @@ export async function runSlowTier({ root, env = process.env, log = (m) => consol
     return { ok: true, none: true, failures: [], filed: [], known: [], over: [], canaries };
   }
   const t0 = Date.now();
-  const head = (spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout || '').trim() || null;
-  const main = (spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout || '').trim() || 'main';
+  const head = (spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout || '').trim() || null;
+  const main = (spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout || '').trim() || 'main';
   const at = new Date().toISOString();
   updateSlowState(root, (s) => { s.lastStart = { at, date: localDate(Date.now()), head }; s.running = { pid: process.pid, at }; });
   log(`[slow-tier] running the slow tier on ${main} at ${String(head || '?').slice(0, 8)}: ${[...tier.gates, ...(tier.globs.length ? [`tests ${tier.globs.join(', ')}`] : [])].join('; ')}`);

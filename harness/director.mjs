@@ -126,7 +126,7 @@ function maybeStartDirector() {
   const cap = dailyCap();
   if (cap > 0 && spendToday() >= cap) return { started: false, why: 'the daily spend cap is reached' };
   const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'director-run.log'), 'a');
-  const child = spawn(cmd, { cwd: REPO_ROOT, shell: true, detached: true, stdio: ['ignore', log, log], env: { ...process.env } });
+  const child = spawn(cmd, { windowsHide: true, cwd: REPO_ROOT, shell: true, detached: true, stdio: ['ignore', log, log], env: { ...process.env } });
   child.unref();
   emitEvent({ type: 'director.started', agent: 'director', to: 'producer', msg: `Started a Director agent (STUDIO_DIRECTOR_CMD); output in .studio/director-run.log` });
   return { started: true };

@@ -59,14 +59,14 @@ if (browser.error) {
 
 // A throwaway studio: tracked files only, sharing node_modules.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-check-'));
-const listed = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' });
+const listed = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { windowsHide: true, cwd: root, encoding: 'utf8' });
 const files = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : [];
 if (files.length) for (const f of files) fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }), fs.existsSync(path.join(root, f)) && fs.copyFileSync(path.join(root, f), path.join(dir, f));
 else fs.cpSync(root, dir, { recursive: true, filter: (s) => !/[\\/](node_modules|\.git|\.studio)([\\/]|$)/.test(path.relative(root, s) ? `/${path.relative(root, s)}` : '') });
 fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
 const env = { ...process.env, STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', STUDIO_WATCH_INTERVAL: '0', STUDIO_BACKUP_DIR: '', STUDIO_HEARTBEAT_SEC: '1', STUDIO_BUILDER_CMD: 'node qa/fixtures/agents/fake-agent.mjs {agent} T-003 wait' };
-const sh = (...args) => spawnSync(process.execPath, args, { cwd: dir, env, encoding: 'utf8' });
-const git = (...args) => spawnSync('git', ['-c', 'user.name=hud', '-c', 'user.email=hud@example.com', ...args], { cwd: dir, encoding: 'utf8' });
+const sh = (...args) => spawnSync(process.execPath, args, { windowsHide: true, cwd: dir, env, encoding: 'utf8' });
+const git = (...args) => spawnSync('git', ['-c', 'user.name=hud', '-c', 'user.email=hud@example.com', ...args], { windowsHide: true, cwd: dir, encoding: 'utf8' });
 git('init', '-q');
 git('add', '-A');
 git('commit', '-q', '-m', 'init', '--no-verify');
@@ -143,7 +143,7 @@ const port = await new Promise((resolve) => {
   });
 });
 const token = crypto.randomBytes(24).toString('hex');
-const hub = spawn(process.execPath, ['hub/server.mjs'], { cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+const hub = spawn(process.execPath, ['hub/server.mjs'], { windowsHide: true, cwd: dir, env: { ...env, HUB_TOKEN: token, HUB_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
 let hubLog = '';
 hub.stdout.on('data', (d) => (hubLog += d));
 hub.stderr.on('data', (d) => (hubLog += d));
@@ -572,7 +572,7 @@ try {
       const msg = await text(page, '#o-actmsg');
       return { ok: hidden && /Nothing changed/.test(msg), seen: `box ${hidden ? 'hidden' : 'still shown'} | message: ${msg}` };
     });
-    const kept = fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).stdout || '');
+    const kept = fs.existsSync(path.join(dir, 'cartridges/example-sim/index.mjs')) && !/archive\//.test(spawnSync('git', ['tag', '-l'], { windowsHide: true, cwd: dir, encoding: 'utf8' }).stdout || '');
     check('the restart button warns twice, and Cancel on the second warning changes nothing', warn1.ok && warn2.ok && cancelled.ok && kept, [warn1, warn2, cancelled].map((r) => (r.ok ? r.seen : r.message)).join(' / ') + (kept ? '' : ' / the game or the tags changed'));
     // 2.30c: the breaker card with Unblock, the Producer's wake line and the overnight summary in Ops.
     await goTo(page, 'ops');
@@ -602,7 +602,7 @@ try {
     await page.setViewportSize({ width: 1280, height: 800 });
     const tileText = async (id) => (await page.locator(`#o-ledger [data-tile="${id}"]`).innerText({ timeout: 1000 }).catch(() => '')).replace(/\s+/g, ' ');
     // The no-done share counts every session in this run's events (earlier steps start and pause agents), so compare with the ledger's own number.
-    const ledgerNoDone = () => { try { return Math.round(JSON.parse(spawnSync(process.execPath, [path.join(dir, 'harness/ledger.mjs'), '--json'], { cwd: dir, encoding: 'utf8' }).stdout).noDonePct); } catch { return 'x'; } };
+    const ledgerNoDone = () => { try { return Math.round(JSON.parse(spawnSync(process.execPath, [path.join(dir, 'harness/ledger.mjs'), '--json'], { windowsHide: true, cwd: dir, encoding: 'utf8' }).stdout).noDonePct); } catch { return 'x'; } };
     const tilesNow = async () => ({ count: await page.locator('#o-ledger .tile').count(), task: await tileText('tokens-per-task'), nodone: await tileText('no-done'), turns: await tileText('turns'), budget: await tileText('budget'), note: await page.locator('#o-ledger .tiles-note').innerText({ timeout: 1000 }).catch(() => '') });
     await expect('the ledger tiles show tokens per finished task, no-done %, turns p50/p95 and the budget', async () => {
       const tiles = await tilesNow();

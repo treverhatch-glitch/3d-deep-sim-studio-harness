@@ -21,7 +21,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const spawnSyncSleep = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`]);
+const spawnSyncSleep = (ms) => spawnSync(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { windowsHide: true });
 
 // A made-up value: the checks look for it where it must not be.
 const FAKE_KEY = 'fake-nim-key-for-selftest-2585r';

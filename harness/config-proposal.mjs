@@ -49,7 +49,7 @@ const TARGET_RX = /^studio\/[^/]+\.json$/;
 const BAD_SEG = new Set(['__proto__', 'constructor', 'prototype']);
 const OWN_KEYS = new Set(['changes', 'why', 'task', 'base', 'held']);
 
-const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+const git = (cwd, args, opts = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 
 /** A key's path: a JSON pointer ("/a/b", "~1" is "/", "~0" is "~") or a dotted key ("a.b"). null when invalid. */

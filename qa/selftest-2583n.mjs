@@ -172,7 +172,7 @@ console.log(JSON.stringify({ which: ${JSON.stringify(which)}, parks: runs.flatMa
     fs.writeFileSync(f, code('process'));
     const { spawn } = await import('node:child_process');
     const procs = [0, 1, 2].map(() => new Promise((res) => {
-      const c = spawn(process.execPath, [f], { cwd: dir, env: { ...process.env, ...base, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const c = spawn(process.execPath, [f], { windowsHide: true, cwd: dir, env: { ...process.env, ...base, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
       let o = '';
       c.stdout.on('data', (d) => (o += d));
       c.on('exit', () => res(o));

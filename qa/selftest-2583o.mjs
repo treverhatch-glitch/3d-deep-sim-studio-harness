@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest2583O({ dir, run, report, tmpRoot }) {
   const u = (p, base = dir) => JSON.stringify(pathToFileURL(path.join(base, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
   const write = (rel, text, base = dir) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };

@@ -54,7 +54,7 @@ export const DELEGATION_REL = 'studio/delegation.json';
 export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'logic-library', 'purity-baseline'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
-const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 // 2.73.1 (B-67): a proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); a 2.67 grant's body is unchanged.
 const body = (d) => grantBody(d);
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');

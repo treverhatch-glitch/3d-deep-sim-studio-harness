@@ -13,7 +13,7 @@ const ts = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 const logDir = path.join(ROOT, '.studio', 'session-logs');
 fs.mkdirSync(logDir, { recursive: true });
 const current = path.join(ROOT, 'studio', 'CURRENT_TASK.md');
-const git = spawnSync('git', ['-C', ROOT, 'status', '--short'], { encoding: 'utf8', shell: false });
+const git = spawnSync('git', ['-C', ROOT, 'status', '--short'], { windowsHide: true, encoding: 'utf8', shell: false });
 const entry = [
   '='.repeat(68),
   `COMPACTION SNAPSHOT @ ${ts}`,

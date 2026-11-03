@@ -303,7 +303,7 @@ export function probeTool(tool, { timeoutMs = 90000 } = {}) {
   // P-066: no shell for the tool (harness/launch.mjs); on Windows "Reply with the word OK." reached claude word by word.
   // 2.58.5 (H-2): agy reads the probe's prompt on stdin like a session's kickoff (agy.exe split -p's text on spaces).
   const input = tool === 'agy' && !argv.includes('-p') ? AGY_PROBE_PROMPT : null;
-  const r = custom ? spawnSync(custom, { shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, ...(input === null ? { stdio: ['ignore', 'pipe', 'pipe'] } : { input, stdio: ['pipe', 'pipe', 'pipe'] }) });
+  const r = custom ? spawnSync(custom, { windowsHide: true, shell: true, encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT }) : spawnAgentSync(argv, { encoding: 'utf8', timeout: timeoutMs, cwd: REPO_ROOT, ...(input === null ? { stdio: ['ignore', 'pipe', 'pipe'] } : { input, stdio: ['pipe', 'pipe', 'pipe'] }) });
   const out = `${r.stdout || ''}\n${r.stderr || ''}`;
   // 2.30 (J12): the provider's own limit message only; a word like "quota" anywhere in the answer isn't one.
   const said = limitLine(r.stderr, r.stdout, r.status);

@@ -29,7 +29,7 @@ import { mainRoot, mainBranch, laneCopies } from './worktree.mjs';
 import { listLocks } from './lock.mjs';
 import { withLandLock } from './merge-lane.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
 const NEAR = 2;

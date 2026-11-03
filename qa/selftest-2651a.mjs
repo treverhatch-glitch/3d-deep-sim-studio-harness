@@ -134,7 +134,7 @@ console.log(JSON.stringify({ win, linux }));`, { STUDIO_TEST_LOADAVG: '' });
     fs.rmSync(path.join(repo, 'studio', 'game.json'), { force: true });
     const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
     const genv = () => { const e = { ...process.env, ...ident }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-    const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', env: genv() });
+    const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: repo, encoding: 'utf8', env: genv() });
     const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
     w('game/uni/studio.gates.json', `${JSON.stringify({ gates: [{ id: 'check', command: 'node -e 0' }], unionFiles: ['game/uni/index.mjs'] }, null, 2)}\n`);
     w('game/uni/index.mjs', "export * from './a.mjs';\n");
@@ -162,7 +162,7 @@ const u1 = tp.predictLane(root, { lane: { task: 'T-901', head: rev('lane/u1') },
 const u2 = tp.predictLane(root, { lane: { task: 'T-902', head: rev('lane/u2') }, tip, unionFiles: ['game/uni/index.mjs'] });
 const rows = Object.fromEntries(t.lanes.map((r) => [r.task, r.conflicts]));
 console.log(JSON.stringify({ rows, notes: t.notes, u1: { mode: u1.mode, why: u1.why, main: u1.main, union: u1.union }, u2: { mode: u2.mode, why: u2.why, main: u2.main } }));`);
-      const r = spawnSync(process.execPath, [f], { cwd: repo, encoding: 'utf8', env: { ...genv(), ...base, STUDIO_GAME: 'uni', AGENT_EVENTS_FILE: path.join(repo, '.studio', 'ev.jsonl'), ...env } });
+      const r = spawnSync(process.execPath, [f], { windowsHide: true, cwd: repo, encoding: 'utf8', env: { ...genv(), ...base, STUDIO_GAME: 'uni', AGENT_EVENTS_FILE: path.join(repo, '.studio', 'ev.jsonl'), ...env } });
       fs.rmSync(f, { force: true });
       try { return { ...JSON.parse(String(r.stdout).trim().split('\n').pop()), _out: out(r) }; } catch { return { _out: out(r).slice(-2000) }; }
     };

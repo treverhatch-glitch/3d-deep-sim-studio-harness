@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'effects-'));
-const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...process.env, AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events.jsonl'), ...env }, maxBuffer: 64 * 1024 * 1024 });
+const run = (dir, cmd, env = {}) => spawnSync(cmd, { windowsHide: true, cwd: dir, shell: true, encoding: 'utf8', env: { ...process.env, AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events.jsonl'), ...env }, maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
 
 function copy(name) {
   const dir = path.join(tmp, name);
-  const files = spawnSync('git', ['ls-files', '-co', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const files = spawnSync('git', ['ls-files', '-co', '--exclude-standard'], { windowsHide: true, cwd: ROOT, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
   for (const f of files) {
     const src = path.join(ROOT, f);
     if (!fs.existsSync(src) || fs.statSync(src).isDirectory()) continue;
