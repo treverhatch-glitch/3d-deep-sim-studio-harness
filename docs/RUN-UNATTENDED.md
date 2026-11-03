@@ -16,7 +16,7 @@ npm run studio:stop                                   # agents finish their task
 npm run studio:status
 ```
 
-Every minute it keeps the War Room hub up (and logs how long it was down), then starts a fresh agent
+Every minute it keeps the War Room hub up (and logs how long it was down; 2.74.0: harness/hub-keeper.mjs, below), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
 ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the
 window, past `--until`, or past the budget. The Ops view shows "Running unattended", and the run
@@ -41,6 +41,15 @@ Scheduler (Windows); `--uninstall` removes it.
   `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
   what the temp-file janitor can free when it is installed.
 
+- **The hub keeper (2.74.0, B-70).** The hub counts as up when `/health` answers within 5 s (it was 2 s, so a busy hub
+  building a big page was logged as down). A hub process of the supervisor's that is still there but silent is left
+  alone for `STUDIO_HUB_HANG_MIN` (5) minutes, then ended and restarted; a hub someone else started (the pid in
+  `.studio/hub.json`, alive) is never touched. A dead hub is started again (hidden on Windows) at most once per
+  backoff step (30 s, 1, 2, 4, 8, then every 10 minutes; the steps start over after 10 minutes up), each restart a
+  `supervisor.hub_restart` event with its cause. The cause is the hub's own line in `.studio/logs/hub-exit.log`: the hub
+  writes one on every exit (a signal, an uncaught error, `port … is in use`), on an error it survived (a request whose
+  handler threw now answers 500 instead of ending the hub), and when building `/api/hud` took over 2 s.
+  `npm run studio:status` ends with "Hub last restarted 12:05 UTC (<cause>); 3 restarts this run."
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
@@ -48,7 +57,8 @@ Scheduler (Windows); `--uninstall` removes it.
   Run #1 looped on exit 127 because launchd's PATH had no `~/.local/bin`.
 - **Two identical failures stop it.** When two sessions in a row end with the same exit code (127: tool not
   found), the supervisor stops starting agents and shows one "Needs you" card with the reason. Fix the
-  cause, then press "Fixed it: try again", or from a terminal (2.59.0, no hub token needed):
+  cause, then press "Fixed it: try again" (2.74.0: in a paired browser it runs this same command as the paired person
+  and shows its answer, docs/WAR-ROOM-V3.md), or from a terminal (2.59.0, no hub token needed):
   `npm run studio:resume -- --by <your name> [--why "what you fixed"]`. It prints the halt it cleared, and the next
   pass's `supervisor.resumed` event names who asked (`meta.by`, `meta.why`). Not halted: it says so and does nothing.
   A person decides to retry after repeated failures, so it refuses inside a launched agent session (`STUDIO_ROLE` set)
