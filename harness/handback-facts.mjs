@@ -31,6 +31,7 @@ import { testRngFacts } from './test-rng.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { divergenceFromLog, divergenceText } from './divergence.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
+import { seenBefore, seenLine } from './error-memory.mjs';
 
 export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent\'s or the train\'s):';
 export const FACTS_END = 'End of hand-back facts.';
@@ -206,7 +207,10 @@ export function buildFacts(taskId, { agent = null, dir = null, note = '', root =
   }
   // 2.67.0 (B-48): the game's test-randomness findings in the task's copy (advisory unless the game requires it).
   const testRng = testRngFacts(cwd);
-  return { task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
+  // 2.72.0 (c): the same red fixed before (harness/error-memory.mjs).
+  let seen = null;
+  try { seen = signature ? seenBefore(signature.key) : null; } catch { seen = null; }
+  return { ...(seen ? { seenBefore: seen } : {}), task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
 }
 
 /** The block, as written into the hand-back. */
@@ -221,6 +225,7 @@ export function renderFacts(f) {
   if (f.subIds?.length) L.push(`- Failing sub-ids: ${f.subIds.slice(0, 10).join(', ')}${f.subIds.length > 10 ? ` (+${f.subIds.length - 10} more)` : ''}`);
   if (f.divergence) L.push(`- First divergence: ${divergenceText(f.divergence)}${f.divergence.ref ? ` vs ${String(f.divergence.ref).slice(0, 8)}` : ''}`);
   if (f.timeoutFlakes?.length) L.push(`- Timeout-flakes (timed out, passed alone at low load; not counted against the lane): ${f.timeoutFlakes.slice(0, 5).join(', ')}`);
+  if (f.seenBefore) L.push(`- Seen before: ${seenLine(f.seenBefore).replace(/^seen before: /, '')}`);
   if (f.seed !== null && f.seed !== undefined) L.push(`- Failing seed: ${f.seed}`);
   if (f.testRng?.count) L.push(`- Test randomness (${f.testRng.mode === 'required' ? 'required' : 'advisory'}, node harness/test-rng.mjs): ${f.testRng.count} finding(s): ${f.testRng.items.slice(0, 5).join(', ')}${f.testRng.count > 5 ? ` (+${f.testRng.count - 5} more)` : ''}`);
   L.push(`- Last verify log: ${f.log || 'none'}`);
