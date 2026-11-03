@@ -40,6 +40,32 @@ export function globRe(glob) {
 export const matchAny = (file, globs = []) => globs.some((g) => globRe(g).test(norm(file)));
 
 /**
+ * 2.71.1 (B, W01/G14): a path as the protected list compares it, whatever spelling reached the check: one git quoted
+ * ("qa/caf\303\251.json"), backslashes, a leading ./, Unicode in either normal form, the trailing dots and spaces
+ * Windows drops from a name, and any case (Windows and macOS folders ignore it). Matching more is only stricter.
+ */
+export function foldPath(p) {
+  let s = String(p || '').trim();
+  if (/^".*"$/.test(s)) {
+    try {
+      const bytes = [];
+      const body = s.slice(1, -1);
+      const esc = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 };
+      for (let i = 0; i < body.length; i++) {
+        if (body[i] === '\\' && /^[0-7]{3}$/.test(body.slice(i + 1, i + 4))) { bytes.push(parseInt(body.slice(i + 1, i + 4), 8)); i += 3; }
+        else if (body[i] === '\\' && esc[body[i + 1]] !== undefined) { bytes.push(esc[body[i + 1]]); i += 1; }
+        else bytes.push(...Buffer.from(body[i], 'utf8'));
+      }
+      s = Buffer.from(bytes).toString('utf8');
+    } catch { /* keep it as it was */ }
+  }
+  s = s.normalize('NFC').replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/+/g, '/');
+  return s.split('/').map((seg) => (seg === '.' || seg === '..' ? seg : seg.replace(/[. ]+$/, ''))).join('/').replace(/\/+$/, '').toLowerCase();
+}
+/** matchAny for the protected list: both sides folded (foldPath). */
+export const matchAnyFold = (file, globs = []) => { const f = foldPath(file); return globs.some((g) => globRe(foldPath(g)).test(f)); };
+
+/**
  * Which gates a change runs. changed: repo-relative files (null/empty = unknown → everything runs).
  * Returns { run, skipped: [{ id, why }], all: bool }.
  */
@@ -69,8 +95,9 @@ export function scopeOf(ranGates, shared = []) {
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
 export const changedSince = (cwd, base, head = 'HEAD') => {
   if (!base) return [];
-  const r = git(cwd, 'diff', '--name-only', `${base}..${head}`);
-  return r.status === 0 ? r.stdout.split('\n').map(norm).filter(Boolean) : [];
+  // 2.71.1 (B, G14): -z and core.quotePath=false, so a non-ASCII path is its name, not a quoted "web/\340..." no glob matches.
+  const r = git(cwd, '-c', 'core.quotePath=false', 'diff', '--name-only', '-z', '--no-renames', `${base}..${head}`);
+  return r.status === 0 ? r.stdout.split('\0').map(norm).filter(Boolean) : [];
 };
 
 // ---- lane verify results -------------------------------------------------------------------------

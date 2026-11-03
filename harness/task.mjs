@@ -41,6 +41,7 @@ import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
 import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
+import { gateEnv } from './gate-env.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -723,7 +724,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       ['weakened-tests', 'harness/test-weakening.mjs', [], 'put the test back, or hand the task back with a note saying which test and why; only the owner approves weakening a test'],
     ];
     const start = taskBase(target.id);
-    const safetyEnv = { ...process.env, ...(start ? { STUDIO_TASK_BASE: start } : {}) };
+    // 2.71.1 (B): the checks run as the gates do, without code-loading NODE_OPTIONS or git redirects (harness/gate-env.mjs).
+    const safetyEnv = gateEnv({ ...process.env, ...(start ? { STUDIO_TASK_BASE: start } : {}) });
     for (const [id, rel, args] of SAFETY) {
       const file = path.join(REPO_ROOT, rel);
       if (!fs.existsSync(file)) { failed.push({ id, rel, why: `${rel} is missing` }); continue; }
@@ -758,7 +760,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     const callerChanged = String(process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);
     const changed = ld?.changed?.length ? ld.changed : callerChanged.length ? callerChanged : null;
     const paths = [...new Set([...claimed, ...lanePaths, ...(changed || [])])];
-    const ggEnv = { ...process.env };
+    const ggEnv = gateEnv(); // 2.71.1 (B): as the gates run
     delete ggEnv.STUDIO_GATE_CHANGED;
     // 2.43.0: the game's checks that passed in a full verify are not run a second time at done (on a real 236k-line
     // game that was another 6 minutes per task, right after the same checks passed).

@@ -42,7 +42,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
-import { matchAny } from './merge-lane.mjs';
+import { matchAny, matchAnyFold } from './merge-lane.mjs';
+import { gitEnv, gitRedirects, gitRedirectsWhy } from './gate-env.mjs';
 
 export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const APPROVALS_REL = 'studio/approvals';
@@ -66,7 +67,8 @@ export const DEFAULT_PROTECTED = [
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout
 // (STUDIO_PROTECT_ROOT), so a branch can't weaken the check that judges it.
 const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : REPO_ROOT;
-const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+// 2.71.1 (B, G10/G16): every git call here sees only this checkout, with replace refs ignored (harness/gate-env.mjs).
+const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() });
 /**
  * 2.58.5 (H-11): how the owner key gets made, said the same way wherever a check finds none. An agent asked to make it
  * on the agents' PC rightly refused (every agent there could then sign its own approvals); this says what to do instead.
@@ -173,11 +175,14 @@ const inBase = (base, f) => git(['cat-file', '-e', `${base}:${f}`]).status === 0
 
 /** Protected files changed since base (committed or not), each with its content hash now. */
 export function protectedChanges(base, globs = protectedGlobs(base)) {
-  const committed = git(['diff', '--name-only', `${base}...HEAD`]).stdout.split('\n');
-  const dirty = git(['status', '--porcelain', '--untracked-files=all']).stdout.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+  // 2.71.1 (B, G14/W01): names as git stores them (-z, never quoted), both sides of a rename, and globs matched in any
+  // case and spelling (merge-lane.mjs matchAnyFold): a non-ASCII or case-variant path no longer slips past the list.
+  const committed = git(['-c', 'core.quotePath=false', 'diff', '--name-only', '-z', '--no-renames', `${base}...HEAD`]).stdout.split('\0');
+  const st = git(['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']).stdout.split('\0');
+  const dirty = st.filter((e) => e.length > 3).map((e) => e.slice(3));
   const addOnly = addOnlyGlobs(base);
-  const files = [...new Set([...committed, ...dirty].map((f) => f.trim()).filter(Boolean))]
-    .filter((f) => matchAny(f, globs))
+  const files = [...new Set([...committed, ...dirty].filter((f) => f && f.trim()))]
+    .filter((f) => matchAnyFold(f, globs))
     .filter((f) => !(matchAny(f, addOnly) && !inBase(base, f) && fs.existsSync(path.join(ROOT, f))))
     .sort();
   return files.map((f) => ({ path: f, sha256: blobSha(f) }));
@@ -201,6 +206,10 @@ export function verifyApproval(doc, publicPem) {
 
 /** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
 export function checkProtected({ env = process.env } = {}) {
+  // 2.71.1 (B, G10/G16/T01): replace refs or grafts make git show other commits or files than the committed ones (the
+  // base branch's protected list, its owner key, main itself), in every lane copy of this git folder: never a pass.
+  const redirects = gitRedirectsWhy(gitRedirects(ROOT));
+  if (redirects) return { enforced: true, ok: false, changes: [], redirect: true, why: `${redirects}. Remove them (git replace -d <sha> for each, delete the grafts file) or hand the task back if you didn't add them` };
   const b = resolveBase(env);
   if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet; ${OWNER_KEY_HOWTO}` };
   const pub = ownerPublicKey(b.base);
