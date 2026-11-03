@@ -30,7 +30,19 @@ const git = (cwd, args) => {
   } catch { return null; }
 };
 const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-const real = (p) => { try { return norm(fs.realpathSync.native(p)); } catch { return norm(path.resolve(p)); } };
+// A folder that isn't there yet (a key folder before its first key) resolves through its nearest existing parent:
+// on Windows the temp folder can be a short 8.3 name (RUNNER~1) that only the real path spells out (2.73.0, CI).
+const real = (p) => {
+  let cur = path.resolve(p);
+  const rest = [];
+  for (;;) {
+    try { return norm(path.join(fs.realpathSync.native(cur), ...rest)); } catch { /* not there: try its parent */ }
+    const up = path.dirname(cur);
+    if (up === cur) return norm(path.resolve(p));
+    rest.unshift(path.basename(cur));
+    cur = up;
+  }
+};
 const under = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 

@@ -46,6 +46,9 @@ const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, '
 const writeJson = (f, j) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`); };
 const posix = (p) => String(p).split(path.sep).join('/');
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+// A module file's checksum ignores line endings (2.73.0): a Windows checkout with core.autocrlf turns the spec's LF into
+// CRLF, and the example module read as "changed since it was confirmed". Binary files (a NUL byte) are hashed as they are.
+const fileSha = (file) => { const b = fs.readFileSync(file); return sha(b.includes(0) ? b : Buffer.from(b.toString('latin1').replace(/\r\n/g, '\n'), 'latin1')); };
 const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const gitBuf = (cwd, ...args) => spawnSync('git', args, { cwd, maxBuffer: 64 * 1024 * 1024 });
@@ -158,7 +161,7 @@ export const staleDays = (env = process.env) => {
 const lastUsedMs = (m) => Math.max(Date.parse(m.landedAt || m.addedAt || '') || 0, ...(m.uses || []).map((u) => Date.parse(u.at) || 0));
 /** Files changed since the module's checksums were recorded (relative to the library folder). */
 export function changedFiles(root, m) {
-  return Object.entries(m.hashes || {}).filter(([rel, h]) => { try { return sha(fs.readFileSync(path.join(libDir(root), ...rel.split('/')))) !== h; } catch { return true; } }).map(([rel]) => rel);
+  return Object.entries(m.hashes || {}).filter(([rel, h]) => { try { return fileSha(path.join(libDir(root), ...rel.split('/'))) !== h; } catch { return true; } }).map(([rel]) => rel);
 }
 /** { usable, label, stale } for a module. Usable: confirmed by someone other than its author, files unchanged. */
 export function moduleState(root, m, { now = Date.now(), env = process.env } = {}) {
@@ -343,11 +346,11 @@ export async function addModule(target, o = {}) {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.copyFileSync(f, out);
     files.push(rel);
-    hashes[rel] = sha(fs.readFileSync(out));
+    hashes[rel] = fileSha(out);
   }
   const specRel = `${destRel}/spec.json`;
   fs.copyFileSync(specAbs, path.join(dest, 'spec.json'));
-  hashes[specRel] = sha(fs.readFileSync(path.join(dest, 'spec.json')));
+  hashes[specRel] = fileSha(path.join(dest, 'spec.json'));
   let game = String(o.game || '').trim();
   if (!game) game = readJson(path.join(root, 'studio', 'game.json'), {})?.game || 'unknown';
   const harness = readJson(path.join(root, 'package.json'), {})?.version || '?';
@@ -383,7 +386,7 @@ export async function confirmModule(name, { by = '', permission = '', env = proc
   if (!d.ok) return { ok: false, why: d.why };
   const ch = Object.keys(m.hashes || {}).length ? changedFiles(root, m) : [];
   const hashes = {};
-  for (const rel of [...(m.files || []), m.spec].filter(Boolean)) { try { hashes[rel] = sha(fs.readFileSync(path.join(libDir(root), ...rel.split('/')))); } catch {} }
+  for (const rel of [...(m.files || []), m.spec].filter(Boolean)) { try { hashes[rel] = fileSha(path.join(libDir(root), ...rel.split('/'))); } catch {} }
   m.status = 'confirmed';
   m.confirmedBy = d.by;
   m.confirmedAt = new Date().toISOString();

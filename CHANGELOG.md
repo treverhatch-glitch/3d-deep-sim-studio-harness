@@ -37,6 +37,16 @@ outside review left open (the dev plan's 2.73, the verified Grok dossier and the
   first-divergence report; the train shows it to the releaser; the lane's own author can't release it; without a
   report only a person can; the decision log records the tick and field.
 
+### Fixed (found by this release's CI)
+- `task done`: the harness's own records (studio/HARNESS-TASKS.md, which a forced done adds to since 2.71.0, and
+  studio/pending-review.json, studio/task-holds.json) no longer count as the next task's changes; two forced tasks
+  were filed under different causes.
+- The verify key folder check resolves a folder that isn't there yet through its nearest existing parent: on Windows
+  an 8.3 short temp path (RUNNER~1) let the first verify make its key inside the checkout.
+- The logic library's checksums ignore line endings: a Windows checkout (core.autocrlf) read the example module as
+  "changed since it was confirmed".
+- `upgrade -- --smoke` names the check that blocked the tiny train.
+
 ### Untested
 - Windows: the smoke copy's junction and removal, the key file's permissions (Windows ignores mode 600), `where`
   lookups. The launcher's routing call is checked from source only (the routing logic itself is fully tested).
