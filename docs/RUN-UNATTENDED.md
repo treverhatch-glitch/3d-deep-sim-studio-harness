@@ -34,6 +34,7 @@ npm run studio:start -- --install --window 09:00-23:00   # come back after a res
 npm run studio:stop                                   # agents finish their task; nothing new starts
 npm run studio:status
 npm run studio:extend -- --until 2026-11-05T11:52:00Z --by <your name>   # move a running supervisor's end time
+npm run studio:reload-env -- --by <your name>         # running processes pick up what you changed in .env now
 ```
 
 **Changing the end time (2.73.1).** `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
@@ -42,6 +43,19 @@ the end time). It writes `.studio/supervisor-extend.json`; the next pass (within
 `supervisor.extended` event (from, to, who). Who may: a person; an agent the owner's delegation covers for
 `supervisor-extend`; a Producer or Director session or an outside agent on a person's direct permission
 (`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
+
+**Changing a setting in .env while the studio runs (2.73.2, B-74).** The long-running loops re-read `.env` when its
+mtime or size changed: each supervisor pass (with the train daemon's pass in it), each launcher heartbeat (the stall
+limits, the idle exit), the watchdog's pass and the watch pass. So a raised `STUDIO_STALL_MIN` reaches the sessions
+already running at their next heartbeat, not only new ones. `npm run studio:reload-env` asks for a reload now; a
+running supervisor answers within seconds with what changed. Each change is logged once (`env.reloaded`, naming the
+keys; values of keys that look secret, `*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks, are never written).
+Precedence: a variable set in the environment a process was started with (your shell, a scheduled task's
+environment) still wins over `.env`; a value that came from `.env`, in the process or through its parent (a launcher
+inherits the supervisor's; `STUDIO_ENV_FROM_FILE` is the internal note of which names those are, never their values),
+follows the file; a line removed from `.env` gives that setting its default back. Identity settings (`STUDIO_LOCK_OWNER`,
+`STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
+needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
 
 Every minute it keeps the War Room hub up (and logs how long it was down), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session

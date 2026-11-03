@@ -72,6 +72,7 @@
     "studio:status": "node harness/supervisor.mjs status",
     "studio:resume": "node harness/supervisor.mjs resume",
     "studio:extend": "node harness/supervisor.mjs extend",
+    "studio:reload-env": "node harness/env-reload.mjs",
     "studio:winddown": "node harness/winddown.mjs",
     "flakes": "node harness/flakes.mjs",
     "crew": "node harness/crew-watch.mjs",
