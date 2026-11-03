@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * scripts/run-gates.mjs — run every gate in studio/gates.json and report.
- *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
+ *   node scripts/run-gates.mjs [--required-only] [--only id,id] [--except id,id] [--deep] [--full] [--tier fast|merge|slow] [--no-cache] [--all]
  * In a lane copy the game checks are scoped to the lane's changes (2.31.0); --all runs every one.
  * Exit 1 when a required gate fails. Optional gates are reported as WARN and never fail the run.
  *
@@ -87,7 +87,11 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
   if (wait) process.exit(await flushed(await waitForVerify()));
   if (detach) process.exit(await flushed(await detachVerify(argv.filter((a) => !['--wait', '--detach', '--no-detach'].includes(a)))));
 }
-const only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+let only = argv.includes('--only') ? new Set(argv[argv.indexOf('--only') + 1].split(',')) : null;
+// 2.72.0 (d): --except id,id leaves those gates out (CI runs the self-test in parallel shards of its own jobs:
+// `node scripts/run-gates.mjs --required-only --deep --except selftest` beside `node qa/selftest.mjs --shard i/N`).
+// It is a partial run, like --only: never a verify record, never the full verify.
+const except = exceptGates(argv, cfg.gates || []);
 // 2.65.3 (B-43): a merge train's focused re-check (STUDIO_GATE_FOCUS, harness/train-focus.mjs) is read only by an
 // --only run, which stands for no verify; any other run drops it, so a verify always runs the whole game check.
 const focusRun = Boolean(only && String(process.env.STUDIO_GATE_FOCUS || '').trim());
@@ -125,7 +129,9 @@ const gates = all.filter((g) => {
   if (!deep && DEEP.has(g.id)) return skipped.push(`${g.id} (deep)`), false;
   if (scope === 'lite' && !LITE.has(g.id) && !isFastTier) return skipped.push(g.id), false;
   return true;
-});
+}).filter((g) => !except?.has(g.id) || (skipped.push(`${g.id} (--except)`), false));
+// An --except run stands for no verify: from here on it is treated as the --only run of the gates it kept.
+if (except) only = new Set(gates.map((g) => g.id));
 
 // 2.60.0 (#5): a run that takes machine:heavy runs as the leader of a process group of its own (POSIX; a re-run of
 // this script that this one waits for), so `node harness/heavy.mjs stop` and a later take kill every gate it started
@@ -717,4 +723,17 @@ async function waitForVerify() {
   console.log(`[verify] ${what} stopped before it finished (${st.hostPid ? `its process ${st.hostPid} is gone` : 'it never started'}) and wrote no result: run npm run verify again. Its output so far:`);
   await printTail(st.log);
   return 1;
+}
+
+/** 2.72.0 (d): the gate ids after --except (a Set), or null. An id that isn't a gate stops the run (a typo would run it). */
+function exceptGates(args, gateList) {
+  if (!args.includes('--except')) return null;
+  const ids = String(args[args.indexOf('--except') + 1] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const known = new Set(gateList.map((g) => g.id));
+  const bad = ids.filter((x) => !known.has(x));
+  if (!ids.length || bad.length) {
+    console.error(`[gates] --except needs gate ids from studio/gates.json${bad.length ? `; not a gate: ${bad.join(', ')}` : ''}`);
+    process.exit(2);
+  }
+  return new Set(ids);
 }
