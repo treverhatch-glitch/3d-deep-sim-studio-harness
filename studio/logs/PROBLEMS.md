@@ -1194,3 +1194,30 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** the red team's D01/T04 remainder and A13 (re-tested by our verifier on 2.70.0).
 - **Fix:** signed verify records; signed first-divergence reports and a second signer. qa/selftest-273g.mjs.
 
+### P-219 — the crew stopped three times in an hour waiting for owner-only actions · fixed in 2.73.1
+- **Evidence:** B-67 (crew notes, 2026-11-03): tier-C releases, a halt and parked tasks waited on the owner; a delegation lasted at most 72 h and never covered approvals.
+- **Fix:** the standing owner proxy (`delegate -- proxy`), approvals with the owner's recorded yes. qa/selftest-2731o.mjs.
+
+### P-220 — builders were ended mid-verify by the stall watchdog · fixed in 2.73.1
+- **Evidence:** B-68: builder-s125 ended after 16 min quiet while its verify was running.
+- **Fix:** a session's own running verify or background task done holds the stall clock (capped). qa/selftest-2731a.mjs.
+
+### P-221 — two same-second deaths halted the studio and its train · fixed in 2.73.1
+- **Evidence:** B-66: builder-s120/s121 exited in the same second; the supervisor and the train daemon halted.
+- **Fix:** grouped ends, exit causes recorded, a builder halt doesn't stop trains. qa/selftest-2731a.mjs.
+
+### P-222 — an agent name in the studio's .env made the owner's terminal an agent · fixed in 2.73.1
+- **Evidence:** B-60: `.env` line 158 `STUDIO_LOCK_OWNER=opus-1`; the owner was refused for 45 min.
+- **Fix:** identity settings are never read from .env, with a warning. qa/selftest-2731b.mjs.
+
+### P-223 — empty folders in .lanes counted as lanes · fixed in 2.73.1
+- **Evidence:** B-51: the preflight listed old empty builder folders as unlanded work; a refresh read main's board files.
+- **Fix:** only registered worktrees are lanes. qa/selftest-2731b.mjs.
+
+### P-224 — restarting the studio took the owner 2.5 h · fixed in 2.73.1
+- **Evidence:** B-69 (16:10 upgrade to the 18:52 real start).
+- **Fix:** `npm run studio:boot`. qa/selftest-2731b.mjs.
+
+### P-225 — console windows flashed for every process on Windows · fixed in 2.73.1
+- **Evidence:** B-59: 452 of 534 process starts had no windowsHide.
+- **Fix:** windowsHide on every start, a source scan in the selftest. qa/selftest-2731c.mjs.
