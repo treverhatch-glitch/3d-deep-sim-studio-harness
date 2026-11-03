@@ -26,6 +26,7 @@ import { overlapCheck } from './task-overlap.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
+import { recordTrust } from './gate-trust.mjs';
 import { isEngineChurn, engineGates, relatedTestsOn } from './game-gates.mjs';
 import { isMechanic, originOf, devSays } from './intent.mjs';
 import { checkBreaker, isFailureNote, reasonKey, unblockTask } from './breaker.mjs';
@@ -779,7 +780,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' });
       const clean = st.status === 0 && !String(st.stdout || '').trim();
       const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
-      return { rec, ...judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) }) };
+      const j = judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) });
+      return { rec, ...(j.ok ? reuseTrusted(rec, j) : j) };
     })();
     let plan = null;
     if (reuse?.ok) {
@@ -2264,4 +2266,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
 
   console.log('Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]');
+}
+
+/**
+ * 2.71.1 (D01/T04, G15/T02): a verify record that passes the reuse rules counts only when run-gates wrote it: its run log
+ * (.studio/gates/runs/<id>.json) matches it and it didn't run beside untracked or ignored inputs (harness/gate-trust.mjs).
+ */
+function reuseTrusted(rec, judged) {
+  const t = recordTrust(rec, [path.join(REPO_ROOT, '.studio')]);
+  return t.ok ? judged : { ok: false, why: t.why };
 }
