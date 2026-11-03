@@ -30,6 +30,7 @@ import { modelFamily } from '../harness/families.mjs';
 import { worktreeSupport, laneCopies, removeLaneCopy, laneLive } from '../harness/worktree.mjs';
 import { sessions } from '../harness/agent.mjs';
 import { savePatch } from '../harness/wip.mjs';
+import { identityLines } from '../harness/dotenv.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
@@ -152,6 +153,9 @@ export function preflight() {
   const fromFile = (k) => [...envText.matchAll(new RegExp(`^${k}=(.*)$`, 'gm'))].map((m) => m[1].trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).at(-1) || '';
   const envVal = (k) => (process.env[k] || fromFile(k)).trim();
   row(envText ? 'ok' : 'fail', '.env exists', envText ? '' : 'run with --fix (copies .env.example with a fresh HUB token)');
+  // 2.73.1 (B-60): who a shell is comes from its session, never from the shared .env (the harness ignores these there).
+  const idLines = identityLines(envText);
+  if (idLines.length) row('warn', `.env sets ${[...new Set(idLines.map((h) => h.key))].join(', ')} (ignored: identity settings belong to a session, not the studio's .env)`, `remove line${idLines.length === 1 ? '' : 's'} ${idLines.map((h) => h.line).join(', ')} from .env`);
   const token = envVal('HUB_TOKEN');
   row(token.length >= 24 && !/change-me/.test(token) ? 'ok' : 'warn', 'HUB token is strong (War Room buttons work)', token.length >= 24 ? '' : 'npm run setup, or set HUB_TOKEN to 24+ random characters');
   const producer = envVal('STUDIO_PRODUCER_NAME');

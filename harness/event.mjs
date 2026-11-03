@@ -16,6 +16,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { appendLine } from './fsafe.mjs';
+import { isSessionIdentity, warnIdentityOnce } from './dotenv.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -31,11 +32,14 @@ export const STUDIO_STATE_DIR = path.join(REPO_ROOT, '.studio');
   } catch {
     return;
   }
+  // 2.73.1 (B-60): who a shell is (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning
+  // names the line instead (harness/dotenv.mjs).
+  warnIdentityOnce(path.join(REPO_ROOT, '.env'), text);
   // The last non-empty line for a name wins, so a value added at the bottom beats the example's empty one.
   const found = {};
   for (const line of text.split(/\r?\n/)) {
     const m = line.match(/^\s*((?:STUDIO|HUB|AGENT|PLAYTEST)_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (!m) continue;
+    if (!m || isSessionIdentity(m[1])) continue;
     const v = m[2].replace(/^['"]|['"]$/g, '');
     if (v !== '' || !(m[1] in found)) found[m[1]] = v;
   }

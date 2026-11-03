@@ -19,6 +19,8 @@
  *                 FAIL when .env is tracked by git (the webhook is a secret)
  *   policy        studio/policy.json, studio/delegation.json, studio/autonomy.json, studio/overseer.json: each one there
  *                 must parse (FAIL otherwise); missing: INFO (defaults)
+ *   dotenv-identity 2.73.1 (B-60): a .env line setting STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT or STUDIO_MAIN_ROOT
+ *                 (WARN, the line numbers): identity settings belong to a session; the harness ignores them in .env
  *   lanes         lane copies (.lanes/<name>) with uncommitted work or commits not on the studio's branch (WARN, listed):
  *                 the update's lane refresh skips a lane with uncommitted work
  *
@@ -43,9 +45,30 @@ export function readDotEnv(root) {
   try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return o; }
   for (const l of text.split(/\r?\n/)) {
     const m = l.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (m) o[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (m && !IDENTITY.includes(m[1].toUpperCase())) o[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
   }
   return o;
+}
+
+// 2.73.1 (B-60): the session identity the launcher sets (harness/dotenv.mjs SESSION_IDENTITY_KEYS; repeated here, as this
+// file imports nothing of the harness). The harness ignores these in .env.
+const IDENTITY = ['STUDIO_LOCK_OWNER', 'STUDIO_ROLE', 'STUDIO_AGENT', 'STUDIO_MAIN_ROOT'];
+/** [{ line, key }] of the .env lines setting a session identity to a non-empty value. */
+export function dotEnvIdentityLines(root) {
+  let text = '';
+  try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return []; }
+  const out = [];
+  text.split('\n').forEach((l, i) => {
+    const m = l.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (m && IDENTITY.includes(m[1].toUpperCase()) && m[2].trim().replace(/^['"]|['"]$/g, '') !== '') out.push({ line: i + 1, key: m[1].toUpperCase() });
+  });
+  return out;
+}
+function checkDotEnvIdentity(root) {
+  const hits = dotEnvIdentityLines(root);
+  if (!hits.length) return [];
+  const lines = hits.map((h) => h.line).join(', ');
+  return [item('dotenv-identity', 'WARN', `.env sets ${[...new Set(hits.map((h) => h.key))].join(', ')} (line${hits.length === 1 ? '' : 's'} ${lines}): identity settings belong to a session, not the studio's .env (ignored there; while an older harness read it, every shell, the owner's own included, was labelled that agent)`, `remove line${hits.length === 1 ? '' : 's'} ${lines} from the studio's .env (the owner edits it; the launcher sets these for each agent session)`)];
 }
 
 /** "1.2.3" against ">=1.2.0" (only >= / plain versions; anything else: null). */
@@ -222,7 +245,7 @@ export async function preflight({ root, ref = null, env = process.env, deps = {}
   // The environment wins over .env, except where it is empty (an empty value is no value).
   const e = { ...readDotEnv(root) };
   for (const [k, v] of Object.entries(env)) if (String(v ?? '').trim() !== '' || !(k in e)) e[k] = v;
-  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkPolicy(root), ...checkLanes(root)];
+  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root)];
   return { ok: !items.some((i) => i.status === 'FAIL'), items, lines: itemLines('preflight', items) };
 }
 

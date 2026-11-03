@@ -73,6 +73,8 @@ which node can't run, so use the line above there.) The guard finds the studio b
    `STUDIO_PREFLIGHT_MIN_RAM_GB`, default 4), `STUDIO_UNITY` / `GODOT_BIN` resolving when set (Unity, Blender and ffmpeg on
    the PATH as INFO), `STUDIO_REPORT_WEBHOOK` set (never printed; FAIL when `.env` is tracked by git), `studio/policy.json`,
    `delegation.json`, `autonomy.json` and `overseer.json` readable, and each lane copy with unlanded work (WARN, listed).
+   2.73.1: `dotenv-identity` WARNs when `.env` sets `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`
+   (B-60: identity settings belong to a session; every loader ignores them there and warns, naming the line).
 1. `npm run task -- drain on --by <you>`, then `npm run task -- drain wait` (no landing mid-update).
 2. **Commit the board first.** `npm run upgrade -- --check` refuses (exit 1) while `studio/NEXT.md`, `studio/DONE.md`,
    `studio/task-holds.json`, `studio/pending-review.json` or `studio/handoffs/` has uncommitted changes, and prints the

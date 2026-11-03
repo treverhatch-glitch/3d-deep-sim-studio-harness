@@ -40,6 +40,10 @@
 - Use `node harness/lock.mjs claim <key> --owner <agent>` before editing shared files or starting a task.
 - `node harness/task.mjs start <ID> --agent <unique>` refuses a task that is already claimed; `done` only works for its owner.
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
+- (2.73.1, B-60) Who a shell is comes from its session, never from the studio's `.env`: `STUDIO_LOCK_OWNER`,
+  `STUDIO_ROLE`, `STUDIO_AGENT` and `STUDIO_MAIN_ROOT` in `.env` are ignored by every loader (`harness/dotenv.mjs`), with a
+  one-line warning on stderr naming the line to remove (`npm run preflight` and `upgrade -- --preflight` WARN too). A
+  line there had labelled the owner's own terminal as an agent, so every owner-only command was refused.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done. (2.71.1, K01) The release is bound to the
   holder, not just the name: a lock records where it was claimed (`holder`: the lane copy, `STUDIO_LOCK_OWNER`), and a
