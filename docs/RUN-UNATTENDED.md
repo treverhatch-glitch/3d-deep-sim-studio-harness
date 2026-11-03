@@ -28,6 +28,19 @@ Scheduler (Windows); `--uninstall` removes it.
   pass says why in its status and a `supervisor.ram_low` event (at most every 15 min); running agents are never
   stopped. The watcher's and the Director's auto-start use the same pass; an agent a person starts is not held.
 
+- **The machine scan and resource monitor (2.68.0).** `npm run machine` (`--json`, `--cached`) reads the hardware the
+  studio runs on (harness/machine.mjs): OS, logical and performance/efficiency cores, RAM and (Windows) the commit
+  charge, GPUs with VRAM and busy (nvidia-smi; macOS system_profiler), the studio's disk, the power source and the
+  top 10 processes by memory (names only). Each probe has a timeout (`STUDIO_MACHINE_PROBE_TIMEOUT_MS`, 15000) and
+  fails soft (null + reason). It writes `.studio/machine.json`; `STUDIO_MACHINE_SCAN=off` turns it all off. The
+  supervisor samples it every `STUDIO_MACHINE_SAMPLE_S` (300) into a `machine.sample` event and
+  `.studio/machine-history.jsonl` (kept under `STUDIO_MACHINE_HISTORY_KB`, 256). `status --brief`, `npm run lanes`
+  and the War Room's `/api/state` (`machine`) show "Machine: RAM 26/32 GB (commit 55/60), CPU 32%, GPU 1% (1.8/12 GB),
+  disk 130 GB free". On Windows the memory floor uses the smaller of free memory and commit headroom.
+  **Disk budget:** under `STUDIO_DISK_MIN_FREE_GB` (default max(20, 5% of the disk)) the supervisor emits
+  `machine.disk_low` (at most every 6 h), the daily digest has a line, and `task start` and the train warn, naming
+  what the temp-file janitor can free when it is installed.
+
 - **It runs on its own.** `studio:start` detaches by default, so it outlives the terminal or agent shell that
   started it (run #1: every agent died when the host shell restarted). Its output goes to `.studio/supervisor.log`.
 - **Install from a terminal where the agent tool works.** The login job gets that terminal's PATH and HOME
@@ -119,6 +132,44 @@ regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regre
 
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
 (`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back.
+
+## Crew watchdog, futility cap, wind-down and janitor (2.68.0)
+
+Each supervisor pass (code only, no model) also does three things:
+
+- **Crew watchdog** (`harness/crew-watch.mjs`): per role, over the last `STUDIO_CREW_WINDOW_MIN` (60) minutes, its
+  sessions, sessions with no commit, short exits (under `STUDIO_CREW_SHORT_SEC`, 180 s), tokens and tasks landed. More
+  than `STUDIO_CREW_MAX_SESSIONS` (6) sessions and 0 landed: the role isn't launched (running sessions go on), one
+  `crew.unhealthy` event goes to the Producer with the evidence, and the digest and `npm run status -- --brief` show it.
+  It resumes on its own when a task the role worked lands or new work for it appears, or on
+  `npm run crew -- resume <role> --by <name>` (a person, an agent under the owner's delegation for hold, or a
+  Producer/Director session or outside agent with `--permission "<the person's words>"`; never a worker). `npm run crew`
+  shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off.
+- **Futility cap, shadow first** (`harness/futility.mjs`): a running session past the 90th percentile of its task
+  type's successful sessions (weighted tokens, or wall time) raises one `futility.check` ("past the p90 of good runs").
+  Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=shadow` (default)
+  stops nothing; when the session ends, `futility.shadow` and `.studio/futility-log.jsonl` record what a cap would have
+  saved and whether it would have cut a good run short. `=on` also hands the task back (the diff is saved, the lane copy
+  kept); `=off` turns it off.
+- **Usage wind-down** (`harness/winddown.mjs`): with `STUDIO_USAGE_WINDDOWN_PCT` set (unset: off), when the highest
+  share of a tool's week used (`npm run budget`; a tool out of quota counts as 100%) reaches it, no new session starts,
+  the running ones finish, `.studio/restart-log.md` lists what was running, queued and held with the next steps, and a
+  `studio.winddown` event says so. When the usage resets the supervisor resumes and its `studio.winddown_resumed` event
+  links the restart log. `npm run studio:winddown -- --now --by <name>` does it on demand (until the soonest known
+  reset); `npm run studio:winddown -- --off --by <name>` ends it early.
+
+**Temp-file janitor** (`npm run janitor`, `harness/janitor.mjs`): a dry run by default (what, and how much);
+`--yes` deletes only the harness's own temporary files: train scratch copies left by a train that is no longer running
+(clean, nothing of their own), `.studio/tmp` entries older than `STUDIO_JANITOR_TMP_H` (24) hours, train logs beyond
+the newest `STUDIO_JANITOR_KEEP_LOGS` (40) or `STUDIO_JANITOR_LOGS_MB` (200), temp folders the harness marked for this
+studio (`.studio-temp.json`; in the system temp folder or `STUDIO_JANITOR_TMPDIR`) once old and their process gone,
+and the oldest cache entries while `.studio/unity-cache` and `.studio/assets/library` are over `STUDIO_CACHE_MAX_GB`
+(20). It never deletes a lane copy with commits not on main, uncommitted changes, a running session or a held or parked
+task. Lane copies that are merely stale (untouched for `STUDIO_JANITOR_LANE_H`, 24 h, clean, nothing unique, nobody in
+them) are listed with `npm run janitor -- --lanes` and deleted only with `--lanes --yes --by <name>` (the same deciders
+as above). One `janitor.run` event. After each train or verify job it runs `--yes` by itself, at most every
+`STUDIO_JANITOR_EVERY_MIN` (30) minutes (never lanes); `STUDIO_JANITOR=off` turns that off. `janitorEstimate()` gives a
+disk-low warning its "the janitor can free N GB" line.
 
 ## What the owner sees
 

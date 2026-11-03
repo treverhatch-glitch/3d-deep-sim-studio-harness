@@ -264,6 +264,41 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
   EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
 
+## Heavy work shares the machine by budget (2.68.0)
+
+Full verifies, Unity editor runs, browser playtests, Blender previews and asset round trips take the `machine:heavy`
+lock (`harness/heavy.mjs`). It is a budgeted pool now (`harness/heavy-budget.mjs`): each job declares a claim and
+starts when the claim fits what the last machine scan (`.studio/machine.json`, from the machine scan or the
+supervisor's monitor) says is free. Default claims: game verify 1 GB + 0.45 GB per test worker; Unity editor 8 GB
+and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 GB VRAM (GPU only); asset round trip
+1 GB; anything else wrapped with `node harness/heavy.mjs run` 4 GB (`--kind <kind>`, `--ram-gb`, `--vram-gb`,
+`--gpu-only` change it). `studio/machine-budget.json` overrides them: `{ "jobs": { "unity": { "ramGb": 10 } } }`.
+
+- **RAM**: the scan's free memory (commit headroom on Windows) less `STUDIO_RESERVE_RAM_GB` (default 4 GB or 10% of
+  RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less
+  `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
+  `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
+  the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify.
+- **Per kind**: at most one Unity editor run and one browser playtest at a time, whatever the slots (others: no cap
+  within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
+  (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap
+  waits: `waiting: 1 unity job already running (max 1)`.
+- A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
+  8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
+  alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.
+- No scan, a scan older than `STUDIO_MACHINE_MAX_AGE_MIN` (15), or `STUDIO_MACHINE_SCAN=off`: one slot and the
+  `STUDIO_RAM_FLOOR_GB` floor, as in 2.67.
+- A job killed for memory (Windows 0xC0000017, Node's "JavaScript heap out of memory", exit 137 elsewhere) is queued
+  once more with a note instead of counting red (`heavy run`, game checks, the Unity land gate, the asset round trip;
+  `STUDIO_HEAVY_OOM_RETRY=off` turns it off). A second one counts.
+- Game checks get `STUDIO_TEST_WORKERS` and `VITEST_MAX_WORKERS`: free RAM for the job / `STUDIO_TEST_WORKER_GB`
+  (0.45), between 2 and cores - 2. Inside a verify that is the verify's claim; a lane's check shares the free budget
+  with the other lane checks running. `STUDIO_TEST_WORKERS` sets it; 2 with no scan. The game's test config reads it
+  (docs/ONBOARDING-A-GAME.md).
+- The supervisor starts at most (RAM - reserve - heavy claims) / `STUDIO_SESSION_RAM_GB` (0.6) agent sessions, and
+  says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
+  `none`).
+
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 
 ```markdown

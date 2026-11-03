@@ -363,7 +363,7 @@ async function runRoundTrip(root, cfg, models, { env, log }) {
   const { acquireHeavy, heavyRoot } = await import('./heavy.mjs');
   let lk;
   try {
-    lk = acquireHeavy(await heavyRoot(), 'asset round trip', { log, env });
+    lk = acquireHeavy(await heavyRoot(), 'asset round trip', { log, env, kind: 'asset-roundtrip' });
   } catch (err) {
     if (err.code !== 'HEAVY_BUSY') throw err;
     return { busy: true, why: `the machine:heavy lock stayed busy: ${err.message.replace(/^\[heavy\]\s*/, '')}` };
@@ -372,7 +372,11 @@ async function runRoundTrip(root, cfg, models, { env, log }) {
   try {
     for (const { f, cmd } of cmds) {
       log(`[asset-gate] round trip: ${cmd}`);
-      const r = spawnSync(cmd, { cwd: root, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: '1' }, timeout: timeoutMin * 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+      const once = () => spawnSync(cmd, { cwd: root, shell: true, encoding: 'utf8', env: { ...env, STUDIO_HEAVY_HELD: '1' }, timeout: timeoutMin * 60000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+      let r = once();
+      // 2.68.0 (n): killed for memory (heavy-budget.mjs oomSignature): run once more, with a note.
+      const oom = /^(off|0|false|no)$/i.test(String(env.STUDIO_HEAVY_OOM_RETRY || '')) ? '' : (await import('./heavy-budget.mjs')).oomSignature(r);
+      if (oom) { log(`[asset-gate] round trip died out of memory (${oom}): running it once more`); r = once(); }
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trimEnd().split('\n').slice(-8).join('\n');
       if (r.error?.code === 'ETIMEDOUT') failures.push({ file: f, why: `the round-trip command timed out after ${timeoutMin} min`, tail });
       else if (r.status !== 0) failures.push({ file: f, why: `the round-trip command exited ${r.status ?? r.signal}`, tail });

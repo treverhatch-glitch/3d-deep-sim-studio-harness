@@ -24,6 +24,9 @@
  * any other halt still waits for a person (studio:resume or the War Room).
  * With --lanes auto, tasks that name a lane (task add --lane game/x/src/floors) get one agent per lane,
  * each holding that folder, so builders never edit the same files.
+ * 2.68.0: each pass also runs the crew watchdog (harness/crew-watch.mjs: a role launching sessions that land nothing is
+ * paused), the futility cap (harness/futility.mjs, shadow mode by default) and the usage wind-down
+ * (harness/winddown.mjs, STUDIO_USAGE_WINDDOWN_PCT). Code only: no model, no tokens.
  * Status: .studio/supervisor.json, the War Room's Ops view, and the run report.
  */
 import fs from 'node:fs';
@@ -212,8 +215,24 @@ export async function supervise(opts, state, now = Date.now()) {
   }
   if (state.halted) return { started: [], why: [`halted: ${state.halted.why}`] };
   if (await checkBadEnds(opts, state, now)) return { started: [], why: [`halted: ${state.halted.why}`] };
+  // 2.68.0: the futility cap (harness/futility.mjs): a running session past the p90 of its type's good runs raises a
+  // Check (shadow mode by default; STUDIO_FUTILITY=on hands it back, its diff kept).
+  if (!opts.watcher) {
+    try {
+      const { futilityPass } = await import('./futility.mjs');
+      futilityPass({ sessions: sessions(), events: readRecentEvents(20000), now, dryRun: opts.dryRun, pause: opts.deps?.pauseAgent || (await import('./agent.mjs')).pauseAgent });
+    } catch { /* a check, never a crash */ }
+  }
   // Budget: tokens since the supervisor started, or a share of the plan's week (studio/budget.json).
   const st = budgetStatus(now);
+  // 2.68.0: usage wind-down (harness/winddown.mjs): at STUDIO_USAGE_WINDDOWN_PCT start nothing new, let the running
+  // sessions finish, write .studio/restart-log.md; resume (and link the log) when the usage resets.
+  try {
+    const { winddownPass } = await import('./winddown.mjs');
+    const { readHolds } = await import('./task-hold.mjs');
+    const wd = winddownPass({ now, rows: st, dryRun: opts.dryRun, lists: () => ({ live: sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, task: s.task })), queued: (parseNextQueue().backlog || []).map((t) => ({ id: t.id, role: t.role, title: t.title })), held: Object.entries(readHolds()).filter(([, h]) => h?.held).map(([id, h]) => ({ id, why: h.held.why || 'held' })) }) });
+    if (wd.active) return { started: [], why: [wd.why], winddown: true };
+  } catch { /* the wind-down is a guard, never a crash */ }
   const { weightedTokens } = await import('./budget.mjs');
   const spentHere = Math.round(readRecentEvents(50000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= state.startedAt).reduce((n, e) => n + weightedTokens(e), 0));
   state.tokens = spentHere;
@@ -226,8 +245,13 @@ export async function supervise(opts, state, now = Date.now()) {
   const mode = effectiveMode();
   const extra = opts.budget && under ? 2 : 0;
   const live = sessions().filter((s) => s.running);
-  let room = Math.min(12, mode.maxAgents + extra) - live.length;
-  if (room <= 0) return { started: [], why: [`${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  const configured = Math.min(12, mode.maxAgents + extra);
+  // 2.68.0 (n): the session cap by RAM (harness/heavy-budget.mjs sessionCap): the RAM budget less the heavy jobs' claims,
+  // STUDIO_SESSION_RAM_GB (0.6) a session; no machine scan: the pace's cap as before.
+  const ramCap = await sessionCapNow(configured);
+  let room = ramCap.cap - live.length;
+  if (room <= 0) return { started: [], why: [ramCap.cap < configured ? `${live.length} agent${live.length === 1 ? '' : 's'} running; no more start: ${ramCap.why}` : `${live.length} agents running, the cap (${mode.label}${extra ? ' + 2 for the budget' : ''})`] };
+  if (ramCap.cap < configured) why.push(`at most ${ramCap.cap} session${ramCap.cap === 1 ? '' : 's'} now: ${ramCap.why}`);
   // Waiting work, grouped by role and lane.
   const q = parseNextQueue();
   const held = [];
@@ -284,12 +308,26 @@ export async function supervise(opts, state, now = Date.now()) {
   if (Object.keys(waitingOn).length) why.push(`waiting: ${Object.entries(waitingOn).slice(0, 4).map(([id, b]) => `${id} ${b.why}`).join('; ')}`);
   if (!opts.dryRun) writeWaiting(waitingOn);
   const canStart = new Set(launchableRoles([...new Set(waiting.map((t) => t.role))]));
+  // 2.68.0: the crew watchdog (harness/crew-watch.mjs): a role with more than STUDIO_CREW_MAX_SESSIONS sessions in the
+  // last hour and nothing landed isn't launched until the cause clears or someone resumes it (npm run crew -- resume).
+  let crewPaused = {};
+  if (!opts.watcher) {
+    try {
+      const byRole = {};
+      for (const t of waiting) (byRole[t.role] ||= []).push(t.id);
+      crewPaused = (await import('./crew-watch.mjs')).crewPass({ events: evs, now, waitingByRole: byRole, dryRun: opts.dryRun }).paused || {};
+    } catch { crewPaused = {}; }
+  }
   const started = [];
   let ram = null;
   // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
   const ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
   for (const g of ordered) {
     if (room <= 0) break;
+    if (crewPaused[g.role]) {
+      why.push(`${g.role}: paused by the crew watchdog (${String(crewPaused[g.role].why || '').slice(0, 120)}; npm run crew -- resume ${g.role} --by <name>)`);
+      continue;
+    }
     if (!canStart.has(g.role)) {
       why.push(`${g.role}: no tool set to start it (STUDIO_AGENT_TOOL or STUDIO_${g.role.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_TOOL)`);
       continue;
@@ -383,6 +421,16 @@ export async function supervise(opts, state, now = Date.now()) {
   return { started, why };
 }
 
+/** 2.68.0 (n): the session cap by RAM, { cap, why }; the configured cap when anything fails. */
+async function sessionCapNow(configured) {
+  try {
+    const hb = await import('./heavy-budget.mjs');
+    const h = await import('./heavy.mjs');
+    const root = await h.heavyRoot();
+    return hb.sessionCap({ configured, profile: hb.machineProfile(root), holders: h.heavyHolders(root), root: REPO_ROOT });
+  } catch { return { cap: configured, why: '' }; }
+}
+
 // 2.59.0 (#11c) ramCheck lives in harness/ram.mjs (2.64.0: heavy.mjs uses it too, and importing this module from
 // heavy.mjs made a cycle with this file's top-level await). Re-exported for existing callers.
 export { ramCheck } from './ram.mjs';
@@ -471,6 +519,8 @@ async function main(argv) {
     if (r.started.length) emitEvent({ type: 'supervisor.started', agent: 'supervisor', to: 'producer', msg: `Started ${r.started.join(', ')}` });
     // 2.30h (2): the Director's flow pass sees what the supervisor couldn't start, and why (no model, no tokens).
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
+    // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
+    await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
     save();
     if (r.stop) finish(r.why[0]);
   };

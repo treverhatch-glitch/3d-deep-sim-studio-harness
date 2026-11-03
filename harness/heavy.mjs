@@ -56,6 +56,13 @@
  *     ramCheck, 3; 0 turns it off): under it the job
  *     waits, saying so, up to STUDIO_HEAVY_RAM_WAIT_MIN (10, at most STUDIO_HEAVY_WAIT_MIN), then fails HEAVY_BUSY.
  *
+ * 2.68.0 (n): a budgeted pool (harness/heavy-budget.mjs). Each job declares a claim ({ ramGb, cpuThreads, gpu, label };
+ * acquireHeavy's kind: verify, unity, browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy) and starts
+ * when it fits the free RAM, GPU and CPU of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from
+ * the scan; 1 with none, as before). Waiters queue (a landing first, then first come) and say what they wait for. The
+ * record keeps its claim; identity, trees, stop and reaping are unchanged. `heavy run --kind/--ram-gb/--vram-gb/
+ * --gpu-only` sets a wrapped command's claim, and a command killed for memory runs once more (STUDIO_HEAVY_OOM_RETRY).
+ *
  * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
  * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
  * average exists); STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the process list; STUDIO_TEST_FREEMEM_MB for free
@@ -69,8 +76,8 @@ import { fileURLToPath } from 'node:url';
 import { selfIdentity, spawnedIdentity, pidAlive, processGroup, listProcesses, sameProcess, processArgs } from './proc-identity.mjs';
 import { DECIDER_ROLES, WORKER_NAME } from './permission.mjs';
 import { emitEvent } from './event.mjs';
-import { landingWaiters } from './merge-lane.mjs';
 import { ramCheck } from './ram.mjs';
+import { machineProfile, slotsFor, budgetState, jobClaim, admit, claimOf, describeBudget, oomSignature, maxConcurrent } from './heavy-budget.mjs';
 
 const PREFIX = 'machine-heavy';
 const SLOT_RE = /^machine-heavy-(\d+)\.lock$/;
@@ -85,7 +92,8 @@ export async function heavyRoot() {
   try { return (await import('./worktree.mjs')).mainRoot(); } catch { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); }
 }
 export const heavyDir = (root) => path.join(root, '.studio', 'locks');
-export const heavySlots = (env = process.env) => num(env.STUDIO_HEAVY_SLOTS, 1);
+/** 2.68.0 (n): STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
+export const heavySlots = (env = process.env, profile = null) => slotsFor(profile, env);
 const staleOf = (env) => num(env.STUDIO_HEAVY_STALE_MIN, 240) * 60000;
 
 /** Linux: a process that has ended but whose parent hasn't collected it yet (a zombie) still answers kill(pid, 0). */
@@ -381,14 +389,28 @@ function heldByParent(dir, env) {
   return h && Number(h.pid) === Number(m[2]) && holderLive(h, { staleMs: staleOf(env) }) ? h : null;
 }
 
+/** 2.68.0 (n): the claim of the machine:heavy hold this process runs inside (STUDIO_HEAVY_HELD), or null. */
+export function heldClaim(root, env = process.env) {
+  try { const h = heldByParent(heavyDir(root), env); return h?.claim ? { ...h.claim, label: h.claim.label || h.label } : null; } catch { return null; }
+}
+
 /**
- * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, skipped?, inside? }. Throws an
+ * Take a machine:heavy slot (sync; waits). Returns { release(), held, waitedMs, claim, skipped?, inside? }. Throws an
  * Error with code HEAVY_BUSY when the wait limit passes. While held, process.env.STUDIO_HEAVY_HELD names the slot
  * so the processes this one starts don't wait for it.
+ * 2.68.0 (n): a budgeted pool (harness/heavy-budget.mjs). The job declares a claim (opts.kind: verify, unity,
+ * browser-playtest, gpu-playtest, blender-preview, asset-roundtrip, heavy; or opts.claim) and starts when it fits the
+ * free RAM, GPU and CPU areas of the last machine scan and a slot is free (STUDIO_HEAVY_SLOTS, computed from the scan;
+ * 1 with no scan). Waiters queue in order (machine-heavy-queue-<pid>.wait: a landing first, then first come), each
+ * class apart (a GPU-only job doesn't queue behind a CPU verify). A job that doesn't fit waits, saying for what
+ * ("waiting for RAM: needs 8 GB, 3.1 free"), up to STUDIO_HEAVY_WAIT_MIN like any wait. With no scan, the 2.67 rules:
+ * one slot and the STUDIO_RAM_FLOOR_GB floor (STUDIO_HEAVY_RAM_WAIT_MIN). The record keeps its claim (status shows it).
  */
-export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined } = {}) {
-  const n = heavySlots(env);
-  const none = { release: () => {}, update: () => false, held: null, waitedMs: 0 };
+export function acquireHeavy(root, label, { log = () => {}, env = process.env, owner = null, freemem = undefined, kind = 'heavy', claim: givenClaim = null, machine = undefined, ramGb, vramGb, gpuOnly } = {}) {
+  const profileNow = () => { try { return machineProfile(root, { env, machine }); } catch { return null; } };
+  let profile = profileNow();
+  const n = slotsFor(profile, env);
+  const none = { release: () => {}, update: () => false, held: null, waitedMs: 0, claim: null };
   if (!(n > 0)) return { ...none, skipped: true };
   const dir = heavyDir(root);
   fs.mkdirSync(dir, { recursive: true });
@@ -396,17 +418,22 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   if (parent) return { ...none, inside: parent };
   const staleMs = staleOf(env);
   const waitMs = num(env.STUDIO_HEAVY_WAIT_MIN, 60) * 60000;
-  // 2.60.1 (B-35): free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long.
+  // 2.60.1 (B-35): free memory under STUDIO_RAM_FLOOR_GB holds the start back, for at most this long (no scan only).
   const ramWaitMs = Math.min(waitMs, num(env.STUDIO_HEAVY_RAM_WAIT_MIN, 10) * 60000);
   const poll = num(env.STUDIO_HEAVY_POLL_MS, 2000);
   const remind = num(env.STUDIO_HEAVY_REMIND_MS, 5 * 60000);
   const landing = String(env.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing';
-  const marker = landing ? path.join(dir, `${PREFIX}-landing-${process.pid}.wait`) : null;
   const t0 = Date.now();
+  const firstClaim = givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly });
+  const queueFile = path.join(dir, `${PREFIX}-queue-${process.pid}.wait`);
+  try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly) })); } catch {}
   let mine = null;
+  let claim = firstClaim;
   let toldAt = 0;
+  let toldWhy = '';
   let holders = [];
   let ram = { low: false };
+  let adm = { ok: false, line: '' };
   // STUDIO_HEAVY_RAM_FLOOR_GB, when set, is heavy work's own floor; else the agents' STUDIO_RAM_FLOOR_GB (3).
   const ownFloor = env.STUDIO_HEAVY_RAM_FLOOR_GB !== undefined && env.STUDIO_HEAVY_RAM_FLOOR_GB !== '';
   const ramVar = ownFloor ? 'STUDIO_HEAVY_RAM_FLOOR_GB' : 'STUDIO_RAM_FLOOR_GB';
@@ -414,8 +441,10 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   let ramTold = false;
   try {
     while (!mine) {
-      const ahead = landing ? [] : landingWaiters(dir, { staleMs, prefix: PREFIX });
-      try { ram = ramCheck(freemem ? { freemem } : {}, ramEnv); } catch { ram = { low: false }; }
+      profile = profileNow();
+      if (!profile) {
+        try { ram = ramCheck(freemem ? { freemem } : {}, ramEnv); } catch { ram = { low: false }; }
+      } else ram = { low: false };
       const ramWhy = ram.low ? `free memory is ${ram.freeGb} GB, under the floor (${ramVar}=${ram.floorGb})` : '';
       if (ram.low && Date.now() - t0 >= ramWaitMs) {
         throw Object.assign(new Error(`[heavy] ${label} did not start: ${ramWhy} and stayed there for ${span(Date.now() - t0)} (STUDIO_HEAVY_RAM_WAIT_MIN). Heavy work never starts that low on memory (a Unity editor run takes 6-7 GB). Close what holds the memory (an open editor, a browser playtest) or run it again later; ${ramVar}=0 turns the check off.`), { code: 'HEAVY_BUSY', ram: true, holders });
@@ -426,46 +455,43 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         toldAt = Date.now();
       }
       if (!ram.low && ramTold) { log(`[heavy] ${label}: free memory is back over the floor (${ram.freeGb ?? '?'} GB)`); ramTold = false; }
-      holders = [];
-      for (let i = 1; i <= n && !mine; i += 1) {
-        const f = path.join(dir, `${PREFIX}-${i}.lock`);
-        const h = readJson(f);
-        if (h && holderLive(h, { staleMs })) { holders.push(h); continue; }
-        if (fs.existsSync(f)) {
-          // Stale (dead holder, reused pid, too old) or unreadable for more than a moment: take it over.
-          if (h || Date.now() - (fs.statSync(f, { throwIfNoEntry: false })?.mtimeMs || 0) > 5000) {
-            if (h) log(`[heavy] ${describeHolder(h)} is gone: its machine:heavy slot is free again`);
-            // 2.60.0 (#5): what its tree left running (a killed parent's children) goes first.
-            if (h && holderGone(h)) reapOrphans(h, { log, env });
-            try { fs.rmSync(f, { force: true }); } catch {}
-          } else continue;
-        }
-        if (ahead.length || ram.low) continue;
-        try {
-          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
-          mine = f;
-        } catch (err) {
-          if (err.code !== 'EEXIST') throw err;
+      holders = collectHolders(dir, { staleMs, log, env });
+      const state = budgetState(profile, holders, { env });
+      claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly });
+      const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
+      adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }) });
+      if (adm.ok && !ram.low) {
+        for (let i = 1; i <= n + 16 && !mine; i += 1) {
+          const f = path.join(dir, `${PREFIX}-${i}.lock`);
+          try {
+            fs.writeFileSync(f, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: Date.now(), label, owner: owner || env.STUDIO_LOCK_OWNER || null, tree: selfTree(), ...(landing ? { landing: true } : {}), ...(profile ? { claim } : { claim: { ...claim, unscanned: true } }) }), { flag: 'wx' });
+            mine = f;
+          } catch (err) {
+            if (err.code !== 'EEXIST') throw err;
+          }
         }
       }
       if (mine) break;
       if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
-      const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `a landing waiting first (${ahead.map((w) => w.label).join(', ')})` : 'unknown';
+      const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `${ahead.some((w) => w.landing) && !landing ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
+      const why = ['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) ? adm.line : '';
       if (Date.now() - t0 >= waitMs) {
-        throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders });
+        throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${why ? `${why}; ` : ''}${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders, ...(why ? { area: adm.area } : {}) });
       }
-      if (marker && !fs.existsSync(marker)) { try { fs.writeFileSync(marker, JSON.stringify({ pid: process.pid, at: Date.now(), label })); } catch {} }
-      if (!toldAt || Date.now() - toldAt >= remind) {
-        log(`[heavy] ${label} waits for the machine:heavy lock (${n} slot${n === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS), held by ${busyWith}${landing ? '; a landing: it takes the next free slot ahead of other waiters' : ''}; waiting up to ${span(waitMs)}, which doesn't count toward its own timeouts`);
+      if (!toldAt || Date.now() - toldAt >= remind || (why && why !== toldWhy)) {
+        if (why) log(`[heavy] ${label} ${why}; held by ${busyWith}; waiting up to ${span(waitMs)}, which doesn't count toward its own timeouts`);
+        else log(`[heavy] ${label} waits for the machine:heavy lock (${n} slot${n === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS), held by ${busyWith}${landing ? '; a landing: it takes the next free slot ahead of other waiters' : ''}; waiting up to ${span(waitMs)}, which doesn't count toward its own timeouts`);
         toldAt = Date.now();
+        toldWhy = why;
       }
       sleep(poll);
     }
   } finally {
-    if (marker) try { fs.rmSync(marker, { force: true }); } catch {}
+    try { fs.rmSync(queueFile, { force: true }); } catch {}
   }
   const waitedMs = Date.now() - t0;
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
+  if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
   const token = `${path.basename(mine)}:${process.pid}`;
   const prevEnv = process.env.STUDIO_HEAVY_HELD;
   process.env.STUDIO_HEAVY_HELD = token;
@@ -486,7 +512,46 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       return true;
     } catch { return false; }
   };
-  return { release, update, held: path.basename(mine), waitedMs };
+  return { release, update, held: path.basename(mine), waitedMs, claim };
+}
+
+/** 2.68.0 (n): the live holders in every slot file; a stale one (dead, reused pid, too old) is cleared after its tree is reaped. */
+function collectHolders(dir, { staleMs, log, env }) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const nm of names.filter((x) => SLOT_RE.test(x))) {
+    const f = path.join(dir, nm);
+    const h = readJson(f);
+    if (h && holderLive(h, { staleMs })) { out.push(h); continue; }
+    // Stale (dead holder, reused pid, too old) or unreadable for more than a moment: take it over.
+    if (h || Date.now() - (fs.statSync(f, { throwIfNoEntry: false })?.mtimeMs || 0) > 5000) {
+      if (h) log(`[heavy] ${describeHolder(h)} is gone: its machine:heavy slot is free again`);
+      // 2.60.0 (#5): what its tree left running (a killed parent's children) goes first.
+      if (h && holderGone(h)) reapOrphans(h, { log, env });
+      try { if (!h || readJson(f)?.pid === h.pid) fs.rmSync(f, { force: true }); } catch {}
+    } else out.push({ pid: 0, label: 'a slot being written', at: Date.now() });
+  }
+  return out;
+}
+
+/** 2.68.0 (n): live waiters ahead of this one in its class: a landing first, then first come. A dead or stale entry is removed. */
+function queueAhead(dir, { landing, at, gpuOnly, classed, staleMs, self = process.pid }) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const nm of names) {
+    const m = nm.match(/^machine-heavy-queue-(\d+)\.wait$/);
+    if (!m || Number(m[1]) === self) continue;
+    const f = path.join(dir, nm);
+    const w = readJson(f);
+    if (!w) { try { if (Date.now() - fs.statSync(f).mtimeMs > 5000) fs.rmSync(f, { force: true }); } catch {} continue; }
+    if (!pidAlive(w.pid, w.identity) || zombie(w.pid) || Date.now() - Number(w.at || 0) > staleMs) { try { fs.rmSync(f, { force: true }); } catch {} continue; }
+    if (classed && Boolean(w.gpuOnly) !== gpuOnly) continue;
+    const first = (w.landing && !landing) || (Boolean(w.landing) === landing && (Number(w.at) < at || (Number(w.at) === at && Number(w.pid) < self)));
+    if (first) out.push({ pid: w.pid, label: w.label, landing: Boolean(w.landing) });
+  }
+  return out;
 }
 
 /** Run fn under machine:heavy (a returned promise is waited for before the slot is freed). */
@@ -511,6 +576,11 @@ function otherGateSlots(root, env) {
   try { names = fs.readdirSync(dir); } catch { return []; }
   const staleMs = num(env.STUDIO_GATE_SLOT_STALE_MIN, 120) * 60000;
   return names.filter((n) => /^gate-slot-\d+\.lock$/.test(n)).map((n) => readJson(path.join(dir, n))).filter((h) => h?.pid && h.pid !== process.pid && pidAlive(h.pid, h.identity) && Date.now() - Number(h.at || 0) <= staleMs);
+}
+
+/** 2.68.0 (n): game checks running now in other processes (gate-slot holders): a lane's share of the budget divides by them + 1. */
+export function laneChecksRunning(root, env = process.env) {
+  try { return otherGateSlots(root, env).length; } catch { return 0; }
 }
 
 // ---- 2.60.1 (B-17, B-35): what loads the machine outside the lock ----
@@ -714,30 +784,52 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const label = opt('--label') || 'heavy command';
     const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
     if (!cmd.length) { console.error('Usage: node harness/heavy.mjs run --label <what> -- <command> [args]'); process.exit(2); }
-    let lk;
     const t0Run = Date.now();
-    try {
-      lk = acquireHeavy(root, label, { log: (m) => console.error(m) });
-    } catch (err) {
-      if (err.code !== 'HEAVY_BUSY') throw err;
-      console.error(err.message);
-      process.exit(3);
+    // 2.68.0 (n): the job's claim: --kind (browser-playtest, gpu-playtest, blender-preview, unity, asset-roundtrip,
+    // verify; default heavy), --ram-gb / --vram-gb / --gpu-only to override it.
+    const claimOpts = { kind: opt('--kind') || 'heavy', ...(opt('--ram-gb') ? { ramGb: Number(opt('--ram-gb')) } : {}), ...(opt('--vram-gb') ? { vramGb: Number(opt('--vram-gb')) } : {}), ...(argv.slice(0, sep >= 0 ? sep : argv.length).includes('--gpu-only') ? { gpuOnly: true } : {}) };
+    const runOnce = async () => {
+      let lk;
+      try {
+        lk = acquireHeavy(root, label, { log: (m) => console.error(m), ...claimOpts });
+      } catch (err) {
+        if (err.code !== 'HEAVY_BUSY') throw err;
+        console.error(err.message);
+        process.exit(3);
+      }
+      // One command line, run by the shell as written (no glob of ours; quoting is the caller's). 2.60.0 (#5): in a
+      // process group of its own on POSIX (recorded in the holder's tree), so `stop` and a later take find what it
+      // started even after this process is killed; on Windows taskkill /T from this process covers it.
+      const posix = process.platform !== 'win32';
+      const child = spawn(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: ['inherit', 'inherit', 'pipe'], windowsHide: true, detached: posix });
+      // On Windows the shell itself is recorded: it dies with this process (Node's job object), its children don't.
+      if (!posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), children: { ...(cur.tree?.children || {}), [child.pid]: spawnedIdentity(child.pid, 'cmd') } } }));
+      if (posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), groups: [...new Set([...(cur.tree?.groups || []), child.pid])], groupIds: { ...(cur.tree?.groupIds || {}), [child.pid]: spawnedIdentity(child.pid, 'sh') }, kill: 'the process groups' } }));
+      const fwd = (sig) => () => { try { if (posix) process.kill(-child.pid, sig); else child.kill(sig); } catch {} };
+      for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, fwd(s));
+      // 2.68.0 (n): stderr is passed through and its tail kept, to spot "JavaScript heap out of memory".
+      let stderrTail = '';
+      child.stderr?.on('data', (d) => { process.stderr.write(d); stderrTail = (stderrTail + d.toString()).slice(-8192); });
+      const code = await new Promise((resolve) => {
+        child.on('error', (e) => { console.error(`[heavy] could not run ${label}: ${e.message}`); resolve(1); });
+        child.on('exit', (c, sig) => {
+          const done = () => resolve(c ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1));
+          // The last of stderr, without waiting on a grandchild that keeps the pipe open.
+          if (!child.stderr || child.stderr.readableEnded) done(); else { const t = setTimeout(done, 2000); child.stderr.once('end', () => { clearTimeout(t); done(); }); }
+        });
+      });
+      lk.release();
+      return { code, stderrTail };
+    };
+    // 2.68.0 (n): a job killed for memory (heavy-budget.mjs oomSignature) is queued once more, with a note, not red.
+    let { code, stderrTail } = await runOnce();
+    const oom = oomSignature({ status: code, stderr: stderrTail });
+    if (oom && !off(process.env.STUDIO_HEAVY_OOM_RETRY)) {
+      console.error(`[heavy] ${label} died out of memory (${oom}): queued once more (it waits for the budget again); STUDIO_HEAVY_OOM_RETRY=off turns this off`);
+      safeEvent({ type: 'heavy.oom_retry', agent: process.env.STUDIO_LOCK_OWNER || 'heavy', status: 'warn', msg: `machine:heavy: ${label} died out of memory (${oom}); re-queued once`.slice(0, 400), meta: { label, signature: oom } });
+      ({ code, stderrTail } = await runOnce());
+      if (oomSignature({ status: code, stderr: stderrTail })) console.error(`[heavy] ${label} died out of memory again: not retried a second time`);
     }
-    // One command line, run by the shell as written (no glob of ours; quoting is the caller's). 2.60.0 (#5): in a
-    // process group of its own on POSIX (recorded in the holder's tree), so `stop` and a later take find what it
-    // started even after this process is killed; on Windows taskkill /T from this process covers it.
-    const posix = process.platform !== 'win32';
-    const child = spawn(cmd.join(' '), { cwd: process.cwd(), shell: true, stdio: 'inherit', windowsHide: true, detached: posix });
-    // On Windows the shell itself is recorded: it dies with this process (Node's job object), its children don't.
-    if (!posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), children: { ...(cur.tree?.children || {}), [child.pid]: spawnedIdentity(child.pid, 'cmd') } } }));
-    if (posix && child.pid) lk.update((cur) => ({ ...cur, tree: { ...(cur.tree || {}), groups: [...new Set([...(cur.tree?.groups || []), child.pid])], groupIds: { ...(cur.tree?.groupIds || {}), [child.pid]: spawnedIdentity(child.pid, 'sh') }, kill: 'the process groups' } }));
-    const fwd = (sig) => () => { try { if (posix) process.kill(-child.pid, sig); else child.kill(sig); } catch {} };
-    for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(s, fwd(s));
-    const code = await new Promise((resolve) => {
-      child.on('error', (e) => { console.error(`[heavy] could not run ${label}: ${e.message}`); resolve(1); });
-      child.on('exit', (c, sig) => resolve(c ?? (sig ? 128 + (os.constants.signals[sig] || 1) : 1)));
-    });
-    lk.release();
     // 2.65.0: the uniform job.done (harness/jobs.mjs) for a heavy run.
     try { (await import('./jobs.mjs')).jobDone({ kind: 'heavy', id: label, code, ms: Date.now() - t0Run, extra: { command: cmd.join(' ').slice(0, 200) } }); } catch {}
     process.exit(code);
@@ -756,9 +848,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     for (const r of left) console.error(`[heavy] ${describeHolder(r)} is gone but ${r.orphans.length} process(es) of its tree still run (pids ${r.orphans.join(', ')}): the next heavy take stops them, or node harness/heavy.mjs stop --all --by <name>`);
     // 2.60.1 (B-35): a Unity editor (STUDIO_HEAVY_PROGRAMS) running outside the lock is an implicit holder.
     const implicit = implicitHolders(root);
-    if (argv.includes('--json')) console.log(JSON.stringify({ slots: heavySlots(), holders, orphaned: left, implicit }));
+    // 2.68.0 (n): the budget (heavy-budget.mjs) and each holder's claim.
+    const profile = machineProfile(root);
+    const slots = heavySlots(process.env, profile);
+    const budget = budgetState(profile, holders);
+    const claimText = (h) => { const c = claimOf(h); return `claims ${c.ramGb} GB RAM${c.gpu?.vramGb ? `, ${c.gpu.vramGb} GB VRAM` : ''}${c.gpuOnly ? ' (GPU only)' : ''}${c.workers ? `, ${c.workers} test workers` : ''}`; };
+    if (argv.includes('--json')) console.log(JSON.stringify({ slots, holders, orphaned: left, implicit, budget }));
     else {
-      console.log(holders.length ? `machine:heavy (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${heavySlots()} slot${heavySlots() === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+      console.log(holders.length ? `machine:heavy (${slots} slot${slots === 1 ? '' : 's'}): ${holders.map((h) => `${describeHolder(h)}, ${claimText(h)}${h.tree ? `, tree root ${h.tree.root} (killed with ${h.tree.kill})` : ''}`).join('; ')}; node harness/heavy.mjs stop --by <name> stops it` : `machine:heavy is free (${slots} slot${slots === 1 ? '' : 's'}, STUDIO_HEAVY_SLOTS)`);
+      console.log(`budget: ${describeBudget(budget, slots)}`);
       if (implicit.length) console.log(`implicit holder${implicit.length === 1 ? '' : 's'} (outside the lock): ${implicit.map(describeImplicit).join('; ')}: counted as heavy work when game checks scale their timeouts; heavy jobs still start beside it. Run editor batch work with node harness/heavy.mjs run --label <what> -- <command> so it takes the lock`);
     }
   }

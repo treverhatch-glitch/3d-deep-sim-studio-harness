@@ -4,6 +4,39 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.68.0] — 2026-11-02
+2.68.0, "fit the machine": the harness measures the computer it runs on and sizes its work to it (the owner's ask;
+P-174 to P-180).
+### Added
+- **Machine scan (m).** `npm run machine` reads cores (performance/efficiency), RAM and the Windows commit charge,
+  GPUs and VRAM, the studio's disk, power source and the top processes by name (never command lines); each probe
+  fails soft; `.studio/machine.json`. The supervisor samples it every `STUDIO_MACHINE_SAMPLE_S` (300); `status
+  --brief`, `lanes` and the War Room show one "Machine:" line. Disk under `STUDIO_DISK_MIN_FREE_GB` warns (event,
+  digest, task start, train). On Windows the RAM floor uses commit headroom.
+- **Heavy work by budget (n).** machine:heavy is a pool: each job claims RAM, VRAM and CPU (verify 1 GB + 0.45 GB per
+  test worker; Unity 8 GB + 2 GB VRAM; browser playtest 5 GB + 1 GB VRAM) and starts when it fits the last scan less
+  a reserve; others queue and say why; GPU-only jobs run beside a verify; one Unity job and one browser playtest at a
+  time unless raised (`STUDIO_HEAVY_MAX_<KIND>`). A job killed for memory runs once more. Game checks get
+  `VITEST_MAX_WORKERS` sized to free memory; the supervisor caps sessions by RAM. With no scan, 2.67 behaviour.
+- **Crew watchdog (o).** A role launching more than `STUDIO_CREW_MAX_SESSIONS` (6) sessions an hour with nothing landed
+  is paused (`crew.unhealthy`; `npm run crew -- resume`). A futility cap in shadow mode flags sessions past the p90 of
+  good runs and logs what it would save.
+- **Usage wind-down (o).** `STUDIO_USAGE_WINDDOWN_PCT` stops new starts before the plan runs out, writes
+  `.studio/restart-log.md` and resumes at the reset; `npm run studio:winddown -- --now`.
+- **Janitor (o).** `npm run janitor` removes only the harness's own temporary files (dry run by default); never a lane
+  with work; stale lanes are proposals a person or a delegation confirms.
+- **Release impact report (o).** `npm run autonomy -- impact` compares the days before and after each upgrade.
+### Fixed
+- The supervisor records a two-bad-ends halt even on the pass that finds `--until` reached (CI Windows).
+- The 2.58 verify-output check ignores the new test-worker line, which is sized to the free memory of that moment
+  (CI: the detached and in-process runs printed different GB figures).
+
+### Untested
+- Windows: the PowerShell scan for real, OOM exit codes, the detached janitor. macOS/Linux scans are tested on
+  stubbed outputs only.
+
+---
+
 ## [2.67.2] — 2026-11-02
 2.67.2: stop the false alarms (the crew's B-50 and two day-two findings; P-170 to P-173).
 ### Fixed

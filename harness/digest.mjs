@@ -14,6 +14,8 @@
  *   - stops: a halted supervisor whose cause isn't on the self-triage list, and causes self-triage left for a person;
  *   - 2.66.0: fuzz findings suggested in the last 24 h (npm run fuzz's shadow week); filed ones get a count line;
  *   - 2.67.1: Unity Play Mode flakes (a test that failed, then passed on its one retry) in the last 24 h, as a line;
+ *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
+ *     both sides have enough data (npm run autonomy -- impact), as a line;
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -76,6 +78,11 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const pending = fs.existsSync(path.join(STUDIO_STATE_DIR, 'supervisor-resume'));
     if (s?.status === 'running' && s.halted && !pending) out.push({ kind: 'halt', line: `the supervisor is halted: ${String(s.halted.why || 'no reason recorded').slice(0, 120)} (npm run studio:resume -- --by <you>)` });
   });
+  // 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs): new work or a landing clears it, else a person.
+  await tryAdd(async () => {
+    const { pausedLines } = await import('./crew-watch.mjs');
+    for (const p of pausedLines()) out.push({ kind: 'crew', line: `crew: ${p.line}` });
+  });
   out.push(...fuzzSuggestions(ev, now));
   const declined = ev.filter((e) => e.type === 'selftriage.declined' && (Date.parse(e.ts) || 0) >= now - DAY);
   for (const e of declined.slice(-3)) { const why = String(e.meta?.why || e.msg || ''); out.push({ kind: 'halt', line: `self-triage left for you (${e.meta?.fix || 'a fix'}, ${e.meta?.cause || 'a cause'}): ${why.length > 110 ? `${why.slice(0, 109)}…` : why}` }); }
@@ -120,6 +127,11 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   const tri = fixes.length ? `Self-triage fixed ${fixes.length} routine stop${fixes.length === 1 ? '' : 's'} in 24 h: ${Object.entries(byFix).map(([k, v]) => `${k} ${v}`).join(', ')}.` : 'Self-triage: nothing to fix in 24 h.';
   const fuzzLine = fuzzFiledLine(ev, now);
   const flakeLine = unityFlakeLine(ev, now); // 2.67.1 (k)
+  let diskLine = ''; // 2.68.0 (m): the studio's disk under STUDIO_DISK_MIN_FREE_GB in the last 24 h
+  try { diskLine = (await import('./machine.mjs')).diskDigestLine(ev, now); } catch { diskLine = ''; }
+  // 2.68.0: the latest harness upgrade's verdict, once enough data exists on both sides (harness/impact.mjs).
+  let impactLine = '';
+  try { impactLine = (await import('./impact.mjs')).impactDigestLine({ events: ev, now, root }); } catch { impactLine = ''; }
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
   let delegLine = '';
   try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
@@ -127,7 +139,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
   let candLine = cands.length ? `Allowlist candidates (blocked commands, 7 days; suggestions only, never added to any settings or permission file automatically): ${cands.map((c) => `\`${c.key.length > 48 ? `${c.key.slice(0, 47)}…` : c.key}\` ${c.n}`).join(', ')} (npm run denials).` : '';
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(diskLine ? [diskLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);

@@ -1007,3 +1007,30 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-173 — the "Regression saved" refusal was vague · fixed in 2.67.2
 - **Evidence:** T-132 committed a fix and stopped at that refusal.
 - **Fix:** harness/regression-howto.mjs names the file, fields and commands. qa/selftest-2672a.mjs.
+
+### P-174 — the harness didn't know the machine it ran on · fixed in 2.68.0
+- **Evidence:** the owner's PC at 32% CPU, 82-92% RAM (55/60 GB committed), GPU 1-7%; settings were hand-tuned per machine.
+- **Fix:** harness/machine.mjs (scan, samples, disk budget). qa/selftest-268m.mjs.
+
+### P-175 — the RAM floor never tripped on Windows · fixed in 2.68.0
+- **Evidence:** "available" stayed 5.8 GB while commit was 55/60 GB. **Why:** os.freemem ignores the commit limit.
+- **Fix:** ramCheck uses min(free, commit headroom). qa/selftest-268m.mjs.
+
+### P-176 — heavy work ignored the machine's size · fixed in 2.68.0
+- **Evidence:** one fixed slot; every lane spawned cores-1 Vitest workers; a game check ran on 2 of 28 threads; an OOM kill was reported red.
+- **Fix:** harness/heavy-budget.mjs (claims, areas, per-kind caps, OOM retry, worker and session sizing). qa/selftest-268n.mjs.
+
+### P-177 — sessions burned with nothing landed; hopeless runs weren't flagged · fixed in 2.68.0
+- **Evidence:** 20 sessions in 35 min, 1.24M tokens, 0 landed (2026-11-02).
+- **Fix:** harness/crew-watch.mjs, harness/futility.mjs (shadow). qa/selftest-268o.mjs.
+
+### P-178 — usage ran out at the wall · fixed in 2.68.0
+- **Fix:** harness/winddown.mjs (wind-down, restart log, resume). qa/selftest-268o.mjs.
+
+### P-179 — temporary files piled up · fixed in 2.68.0
+- **Evidence:** a test machine's disk filled with leftover test copies; 90-100 GB of lanes on the owner's PC.
+- **Fix:** harness/janitor.mjs (own temp files only; lanes proposed). qa/selftest-268o.mjs.
+
+### P-180 — a halt was lost when --until came first · fixed in 2.68.0 (and 2.67.1/2.67.2)
+- **Evidence:** CI Windows, 2.67.1: halted undefined after two exit-127 sessions.
+- **Fix:** checkBadEnds() runs on the time-up pass too. qa/selftest-267e.mjs.
