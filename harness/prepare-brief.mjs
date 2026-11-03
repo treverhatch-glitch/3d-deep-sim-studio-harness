@@ -6,6 +6,7 @@
  *   npm run brief -- T-012 --model       let a cheap model draft it (local or free tier only)
  *   npm run brief -- T-012 --template    never call a model
  *   npm run brief -- T-012 --force       prepare even when the history is already short
+ *   npm run brief -- builder [--write]   2.71.0: the builder role's brief from the studio's rule files (harness/role-brief.mjs)
  *
  * The shape follows draft-then-verify and bounded replay:
  *   1. Gather a bounded window, never the full history: this task's last events, its hand-off notes,
@@ -254,6 +255,8 @@ export function buildPreparedBrief() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
+  // 2.71.0 (y): `npm run brief -- builder [--write]` is the builder role's generated brief (harness/role-brief.mjs).
+  if (argv[0] === 'builder') process.exit(await (await import('./role-brief.mjs')).roleBriefCli(argv.slice(1)));
   const id = argv.find((a) => /^T-\d+$/.test(a)) || null;
   const mode = argv.includes('--template') ? 'template' : argv.includes('--model') ? 'model' : 'auto';
   const res = await prepareBrief({ taskId: id, mode, force: argv.includes('--force') });
