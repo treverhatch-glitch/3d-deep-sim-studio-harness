@@ -4304,6 +4304,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.71.1 (A): the red team's holes in the protection gates: gate runners and each game's test toolchain protected,
+// skipIf/early return on CI and a stand-in expect flagged, env overrides ignored in a lane copy, verify records reused
+// only with their run log and from a clean run, a golden re-recorded on the lane's own word tier C (qa/selftest-2711a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest2711A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2711a.mjs')).href);
+  await selftest2711A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

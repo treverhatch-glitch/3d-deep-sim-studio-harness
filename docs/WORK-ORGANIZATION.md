@@ -201,7 +201,10 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `task done --train`, in the train log and in a `task.train.tier` event.
   - **C, needs the owner** (a closed lane, not a threshold): a protected file (`studio/protected.json` at main's tip
     plus the shipped list), `harness/`, `hub/`, `scripts/`, `qa/*.mjs`, a deleted test, golden or regression file, a
-    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`). It is held in the queue
+    file the game declares `irreversible`, an upgrade merge (`Upgrade-Ref:`); 2.71.1: a golden or snapshot the lane
+    re-records with its own `Golden-Reason:` (rule `golden-rerecord`: a person, a delegation or autonomous review releases
+    it; the game's manifest may set it to B), and a game's test toolchain (its test configs, the setup files they name,
+    `.npmrc`, package.json's test scripts; docs/SECURITY.md). It is held in the queue
     (`task.train.held`, `task train status` says NEEDS THE OWNER) and lands only after
     `npm run task -- train release <ID> --by <name> [--permission "<their words or a link>"]`: a person in their own
     terminal, or a Producer/Director session or an agent outside the harness recording a person's direct permission
