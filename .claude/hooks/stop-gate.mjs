@@ -58,7 +58,7 @@ function getLiteGates() {
 
 function runCommand(cmd, args, timeout = 30000) {
   return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { timeout, killSignal: 'SIGKILL', shell: false, cwd: process.env.CLAUDE_PROJECT_DIR || process.cwd() });
+    const proc = spawn(cmd, args, { windowsHide: true, timeout, killSignal: 'SIGKILL', shell: false, cwd: process.env.CLAUDE_PROJECT_DIR || process.cwd() });
     let stdout = '', stderr = '';
     proc.stdout.on('data', (c) => (stdout += c));
     proc.stderr.on('data', (c) => (stderr += c));

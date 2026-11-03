@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest244({ dir, run, report, tmpRoot }) {
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const evFile = path.join(dir, '.studio', 'events-244.jsonl');
   const env = { AGENT_EVENTS_FILE: evFile, STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0' };
 

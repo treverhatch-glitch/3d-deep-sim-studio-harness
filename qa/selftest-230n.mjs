@@ -76,7 +76,7 @@ export async function selftest230n({ dir, run, report, tmpRoot }) {
   report('2.30n: Godot import/editor cache files (.godot/, *.import, *.uid) are ignored as churn; scripts are not', out(churn).trim() === '[true,true,true,false]', out(churn));
 
   // Lane copies: identity from the lane's name; a lane whose main checkout can't be found refuses done.
-  const copyInto = (to) => { fs.mkdirSync(to, { recursive: true }); spawnSync('cp', ['-a', ...['harness', 'package.json', 'studio', 'qa', 'scripts'].map((x) => path.join(dir, x)), to]); };
+  const copyInto = (to) => { fs.mkdirSync(to, { recursive: true }); spawnSync('cp', ['-a', ...['harness', 'package.json', 'studio', 'qa', 'scripts'].map((x) => path.join(dir, x)), to], { windowsHide: true }); };
   const laneDir = path.join(dir, '.lanes', 'zz-builder');
   copyInto(laneDir);
   const who = run(laneDir, `node -e "import('./harness/task.mjs').then(t=>console.log(t.whoAmI({})))"`, { STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: 'someone-else' });
@@ -111,7 +111,7 @@ export async function selftest230n({ dir, run, report, tmpRoot }) {
   } else {
   const live = path.join(dir, '.lanes', 'zz-live');
   fs.mkdirSync(live, { recursive: true });
-  const p = spawn('sleep', ['30'], { cwd: live, stdio: 'ignore' });
+  const p = spawn('sleep', ['30'], { windowsHide: true, cwd: live, stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 200));
   const rm = () => run(dir, `node -e "import('./harness/worktree.mjs').then(m=>console.log(JSON.stringify(m.removeLaneCopy('zz-live',{ifIdle:true}))))"`, { STUDIO_LANE_LIVE_MIN: '0' });
   const kept = rm();

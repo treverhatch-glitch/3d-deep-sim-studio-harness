@@ -15,7 +15,7 @@ export async function selftest258F({ dir, run, report }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const waitFor = async (fn, ms = 20000) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await sleep(50); } };
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const readJson = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8')); } catch { return null; } };
   const stub = path.join(dir, 'game', 'stubgame');
   const runsOf = () => { try { return fs.readFileSync(path.join(stub, 'runs.log'), 'utf8').trim().split('\n').filter(Boolean); } catch { return []; } };
@@ -26,20 +26,20 @@ export async function selftest258F({ dir, run, report }) {
   const envFor = (owner, extra = {}) => ({ ...process.env, ...base, STUDIO_LOCK_OWNER: owner, ...extra });
   // As `npm run verify` starts it (npm sets npm_lifecycle_event), output collected as it comes.
   const start = (owner, args, extra = {}) => {
-    const p = spawn(process.execPath, ['scripts/run-gates.mjs', ...args], { cwd: dir, env: envFor(owner, { npm_lifecycle_event: 'verify', ...extra }), stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, ['scripts/run-gates.mjs', ...args], { windowsHide: true, cwd: dir, env: envFor(owner, { npm_lifecycle_event: 'verify', ...extra }), stdio: ['ignore', 'pipe', 'pipe'] });
     const h = { p, text: '', code: undefined };
     p.stdout.on('data', (d) => { h.text += d; });
     p.stderr.on('data', (d) => { h.text += d; });
     h.done = new Promise((r) => p.on('close', (code, sig) => { h.code = code ?? sig; r(h.code); }));
     return h;
   };
-  const sync = (owner, args, extra = {}) => spawnSync(process.execPath, ['scripts/run-gates.mjs', ...args], { cwd: dir, env: envFor(owner, extra), encoding: 'utf8', timeout: 60000 });
+  const sync = (owner, args, extra = {}) => spawnSync(process.execPath, ['scripts/run-gates.mjs', ...args], { windowsHide: true, cwd: dir, env: envFor(owner, extra), encoding: 'utf8', timeout: 60000 });
   // What a reaper does (tree-kill): every process under the foreground, found by parent pid, killed at once.
   const killTree = (pid) => {
     // Same shape on every OS: the pids it killed (Windows CI crashed on `.includes` of taskkill's result object).
     if (process.platform === 'win32') return spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).status === 0 ? [pid] : [];
     const kids = new Map();
-    for (const l of (spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }).stdout || '').split('\n')) {
+    for (const l of (spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { windowsHide: true, encoding: 'utf8' }).stdout || '').split('\n')) {
       const [c, pp] = l.trim().split(/\s+/).map(Number);
       if (c && pp) kids.set(pp, [...(kids.get(pp) || []), c]);
     }
@@ -168,7 +168,7 @@ console.log(' Tests  1 passed (1)');
     // A run still going (a failure above) would hold the copy open: stop it.
     for (const o of ['f1', 'f2', 'f3']) {
       const s = readJson(`.studio/verify-running/${o}.json`);
-      if (s?.hostPid && alive(s.hostPid)) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(s.hostPid), '/T', '/F'], { stdio: 'ignore' }); else try { process.kill(-s.hostPid, 'SIGKILL'); } catch {} }
+      if (s?.hostPid && alive(s.hostPid)) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(s.hostPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else try { process.kill(-s.hostPid, 'SIGKILL'); } catch {} }
     }
     await sleep(200);
   }

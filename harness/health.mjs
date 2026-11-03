@@ -149,7 +149,7 @@ export async function needsYou(events, { since = 0 } = {}) {
   // The main branch's CI on GitHub, when the GitHub CLI is there and signed in (a week of red CI went unseen).
   if (process.env.STUDIO_HEALTH_CI !== 'off') {
     try {
-      const r = spawnSync('gh', ['run', 'list', '--branch', 'main', '--workflow', 'ci.yml', '--limit', '1', '--json', 'conclusion,status,headSha,createdAt'], { encoding: 'utf8', timeout: 15000 });
+      const r = spawnSync('gh', ['run', 'list', '--branch', 'main', '--workflow', 'ci.yml', '--limit', '1', '--json', 'conclusion,status,headSha,createdAt'], { windowsHide: true, encoding: 'utf8', timeout: 15000 });
       const run = r.status === 0 ? JSON.parse(r.stdout || '[]')[0] : null;
       if (run) out.ci = { status: run.status, conclusion: run.conclusion, sha: String(run.headSha || '').slice(0, 7), at: run.createdAt };
     } catch {}

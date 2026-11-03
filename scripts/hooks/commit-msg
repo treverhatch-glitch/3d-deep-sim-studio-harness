@@ -18,7 +18,7 @@ GOLDEN_CHANGED="$(git diff --cached --name-only -- qa/golden)"
 if [ -n "$GOLDEN_CHANGED" ] && git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
   KEPT="$(cd "$ROOT" && node -e "
 const { execFileSync } = require('node:child_process');
-const g = (a) => execFileSync('git', a, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+const g = (a) => execFileSync('git', a, { windowsHide: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 const z = (s) => s.split('\0').filter(Boolean);
 const entries = (text, blobAt) => new Map(z(text).map((r) => { const t = r.indexOf('\t'); const f = r.slice(0, t).split(' '); return [r.slice(t + 1), f[0] + ' ' + f[blobAt]]; }));
 const staged = entries(g(['ls-files', '-s', '-z', '--', 'qa/golden']), 1);

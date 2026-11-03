@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const git = (...a) => spawnSync('git', a, { cwd: root, encoding: 'utf8' });
+const git = (...a) => spawnSync('git', a, { windowsHide: true, cwd: root, encoding: 'utf8' });
 const flat = (o, pre = '', out = {}) => {
   for (const [k, v] of Object.entries(o || {})) {
     const key = pre ? `${pre}.${k}` : k;

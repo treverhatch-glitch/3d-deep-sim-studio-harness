@@ -86,7 +86,7 @@ export function chromiumCandidates(env = process.env, platform = process.platfor
     for (const p of ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']) if (fs.existsSync(p)) add({ executablePath: p }, p);
   } else {
     for (const name of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', 'microsoft-edge']) {
-      const w = spawnSync('which', [name], { encoding: 'utf8' });
+      const w = spawnSync('which', [name], { windowsHide: true, encoding: 'utf8' });
       const p = (w.stdout || '').trim();
       if (w.status === 0 && p) add({ executablePath: p }, p);
     }

@@ -45,9 +45,9 @@ export function gdFiles(project) {
 export function parseCheck(project, { godot, timeoutMs = 60000, files = gdFiles(project) } = {}) {
   const broken = [];
   // Class names (class_name, addons such as gdUnit4) resolve from the import cache: build it once if missing.
-  if (files.length && !fs.existsSync(path.join(project, '.godot'))) spawnSync(godot, ['--headless', '--path', project, '--import'], { encoding: 'utf8', timeout: 300000 });
+  if (files.length && !fs.existsSync(path.join(project, '.godot'))) spawnSync(godot, ['--headless', '--path', project, '--import'], { windowsHide: true, encoding: 'utf8', timeout: 300000 });
   for (const f of files) {
-    const r = spawnSync(godot, ['--headless', '--path', project, '--check-only', '--script', `res://${f}`], { encoding: 'utf8', timeout: timeoutMs, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(godot) });
+    const r = spawnSync(godot, ['--headless', '--path', project, '--check-only', '--script', `res://${f}`], { windowsHide: true, encoding: 'utf8', timeout: timeoutMs, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(godot) });
     if (r.error) return { checked: files.length, broken, error: `could not run ${godot}: ${r.error.message}` };
     const out = `${r.stdout || ''}${r.stderr || ''}`;
     if (r.status !== 0 || PARSE_FAIL.test(out)) {

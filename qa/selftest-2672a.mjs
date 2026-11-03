@@ -20,7 +20,7 @@ export async function selftest2672A({ dir, run, report, tmpRoot }) {
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
   const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -76,7 +76,7 @@ export async function selftest2672A({ dir, run, report, tmpRoot }) {
     {
       const la = lane('lane-a', 'Docs: lane a notes');
       const laneEnv = { ...env, STUDIO_MAIN_ROOT: dir, STUDIO_LOCK_OWNER: 'lane-a' };
-      const first = spawn(process.execPath, ['scripts/run-gates.mjs', '--no-detach'], { cwd: la.dir, env: { ...process.env, ...laneEnv }, stdio: 'ignore' });
+      const first = spawn(process.execPath, ['scripts/run-gates.mjs', '--no-detach'], { windowsHide: true, cwd: la.dir, env: { ...process.env, ...laneEnv }, stdio: 'ignore' });
       kids.push(first);
       const vdir = path.join(dir, '.studio', 'verify-running');
       const upA = until(() => { try { return fs.readdirSync(vdir).filter((x) => /^full.*\.json$/.test(x)).some((x) => readJson(path.join(vdir, x))?.owner === 'lane-a'); } catch { return false; } }, 15000 * SLOW);
@@ -109,7 +109,7 @@ console.log(JSON.stringify({ ok: v.ok, noCheck: v.noCheck || false, busy: v.busy
       const lb = lane('lane-b', 'Docs: lane b notes');
       const lc = lane('lane-c', 'Docs: lane c notes');
       const lockF = path.join(dir, '.studio', 'locks', 'machine-heavy-1.lock');
-      const holder = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', 'builder-s74-verify', '--', 'node', `"${sleepF}"`, String(120000)], { cwd: dir, env: { ...process.env, ...env, STUDIO_HEAVY_SLOTS: '1' }, stdio: 'ignore' });
+      const holder = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', 'builder-s74-verify', '--', 'node', `"${sleepF}"`, String(120000)], { windowsHide: true, cwd: dir, env: { ...process.env, ...env, STUDIO_HEAVY_SLOTS: '1' }, stdio: 'ignore' });
       kids.push(holder);
       const up = until(() => readJson(lockF)?.label === 'builder-s74-verify', 15000 * SLOW);
       const tr = probe(`import { runTrain } from ${u('harness/train.mjs')};

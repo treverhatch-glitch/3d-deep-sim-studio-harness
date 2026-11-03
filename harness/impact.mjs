@@ -30,7 +30,7 @@ import { readPredictions, scorePredictions } from './release-predict.mjs';
 
 const DAY = 86400000;
 const ts = (e) => Date.parse(e?.ts) || 0;
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const impactMinN = (env = process.env) => (Number(env.STUDIO_IMPACT_MIN_N) >= 1 ? Math.round(Number(env.STUDIO_IMPACT_MIN_N)) : 30);
 const verOf = (text) => { try { return JSON.parse(text).version || null; } catch { return null; } };
 

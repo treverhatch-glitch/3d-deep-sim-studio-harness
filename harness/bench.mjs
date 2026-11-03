@@ -100,7 +100,7 @@ export function componentPresent(name, root = REPO_ROOT) {
 }
 
 // ---- small helpers ----
-const git = (cwd, args, opts = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
+const git = (cwd, args, opts = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, ...opts });
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const list = (v) => (Array.isArray(v) ? v : v ? [v] : []).flatMap((x) => String(x).split(',')).map((x) => x.trim()).filter(Boolean);
 const posix = (p) => String(p).split(path.sep).join('/');

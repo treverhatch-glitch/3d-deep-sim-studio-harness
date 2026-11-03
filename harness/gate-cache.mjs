@@ -34,7 +34,7 @@ function writeCache(cache) {
 // Every file a gate could read: git's list when this is a git checkout, else a walk of the folder (a copy
 // with no .git, as the self-test makes; an empty list would make every run look unchanged).
 function listFiles() {
-  const r = spawnSync('git', ['ls-files', '-co', '--exclude-standard'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', ['ls-files', '-co', '--exclude-standard'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (r.status === 0 && String(r.stdout).trim()) return String(r.stdout).split('\n').filter(Boolean);
   const out = [];
   const walk = (rel) => {

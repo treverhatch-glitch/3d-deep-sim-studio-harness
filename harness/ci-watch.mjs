@@ -25,7 +25,7 @@ import { routeNow } from './threads.mjs';
 
 export const CI_FILE = () => path.join(STUDIO_STATE_DIR, 'ci-watch.json');
 // STUDIO_GH may be a command line ("node fake-gh.mjs"); the arguments here never hold spaces or quotes.
-const gh = (args) => (process.env.STUDIO_GH ? spawnSync(`${process.env.STUDIO_GH} ${args.map((a) => `"${a}"`).join(' ')}`, { cwd: REPO_ROOT, encoding: 'utf8', shell: true }) : spawnSync('gh', args, { cwd: REPO_ROOT, encoding: 'utf8', shell: process.platform === 'win32' }));
+const gh = (args) => (process.env.STUDIO_GH ? spawnSync(`${process.env.STUDIO_GH} ${args.map((a) => `"${a}"`).join(' ')}`, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: true }) : spawnSync('gh', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', shell: process.platform === 'win32' }));
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 export function readCiWatch() {
@@ -61,7 +61,7 @@ function jobsOf(id) {
 }
 
 export function watchCi({ sha, timeoutMin = 60, pollSec = 30 } = {}) {
-  sha = sha || spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+  sha = sha || spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
   const rec = { sha, startedAt: new Date().toISOString(), state: 'watching', first: null, rerun: null };
   const save = () => {
     fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
@@ -116,7 +116,7 @@ export function watchCi({ sha, timeoutMin = 60, pollSec = 30 } = {}) {
   // to the Producer; in shadow mode (the default) it is only logged as thread.would_route. Never blocks the watch.
   try { rec.routed = routeNow(ev); save(); } catch {}
   if (red && process.env.STUDIO_CI_NOTIFY_CMD) {
-    const n = spawnSync(process.env.STUDIO_CI_NOTIFY_CMD, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, CI_SHA: sha, CI_STATE: rec.state, CI_SUMMARY: rec.summary } });
+    const n = spawnSync(process.env.STUDIO_CI_NOTIFY_CMD, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 30000, env: { ...process.env, CI_SHA: sha, CI_STATE: rec.state, CI_SUMMARY: rec.summary } });
     rec.notified = n.status === 0;
     save();
   }
@@ -127,7 +127,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const argv = process.argv.slice(2);
   const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
   if (argv.includes('--detach')) {
-    const c = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== '--detach')], { cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
+    const c = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== '--detach')], { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
     c.unref();
     console.log(`[ci-watch] watching in the background (pid ${c.pid}); result in .studio/ci-watch.json`);
     process.exit(0);

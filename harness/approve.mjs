@@ -42,6 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
+import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
 import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
 import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
@@ -83,7 +84,7 @@ export const DEFAULT_PROTECTED = [
 // 2.71.1 (A16): never in a lane copy (harness/gate-trust.mjs): there the checker judges the lane itself.
 const ROOT = protectRoot(REPO_ROOT) || REPO_ROOT;
 // 2.71.1 (B, G10/G16): every git call here sees only this checkout, with replace refs ignored (harness/gate-env.mjs).
-const git = (args, cwd = ROOT) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() });
+const git = (args, cwd = ROOT) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: gitEnv() });
 /**
  * 2.58.5 (H-11): how the owner key gets made, said the same way wherever a check finds none. An agent asked to make it
  * on the agents' PC rightly refused (every agent there could then sign its own approvals); this says what to do instead.
@@ -119,7 +120,7 @@ function studioBranchOfLane(env = process.env) {
   if (env.STUDIO_MAIN_ROOT && mainRootTrust(ROOT, env.STUDIO_MAIN_ROOT).ok) { const b = git(['symbolic-ref', '--short', 'HEAD'], env.STUDIO_MAIN_ROOT).stdout.trim(); if (b) return b; }
   try {
     const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES)$/.test(k)));
-    const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8', env: clean }).stdout.trim();
+    const g = (args, cwd) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: clean }).stdout.trim();
     const real = (p) => { try { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; } catch { return path.resolve(p); } };
     const gd = g(['rev-parse', '--absolute-git-dir'], ROOT);
     const cd = g(['rev-parse', '--git-common-dir'], ROOT);
@@ -229,7 +230,23 @@ export function readApprovals() {
   return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => { try { return { file: `${APPROVALS_REL}/${f}`, ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) }; } catch { return null; } }).filter(Boolean);
 }
 
+/** The Studio-Agent trailer of the last commit that touched rel ('' = a person's commit), or null when uncommitted. */
+function committedByAgent(rel) {
+  const r = git(['log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--', rel]);
+  const line = String(r.stdout || '').trim();
+  if (r.status !== 0 || !line) return null;
+  return String(line.split('\t')[1] || '').trim();
+}
 export function verifyApproval(doc, publicPem) {
+  // 2.73.1 (B-67): an approval the owner's proxy made (no signature; the owner-signed proxy grant embedded) counts while
+  // that grant is still the one on file and the owner's yes is recorded (harness/owner-proxy.mjs).
+  // A committed proxy approval also has to be the proxy's own commit (the commit-msg hook's Studio-Agent trailer: the
+  // proxy's name, or none for a person): a builder's lane can't carry one in.
+  if (!doc?.signature && doc?.proxy) {
+    if (!proxyApprovalOk(doc, publicPem)) return false;
+    const who = doc.file ? committedByAgent(doc.file) : null;
+    return who === null || who === '' || who.toLowerCase() === String(doc.proxy.grant.agent).toLowerCase();
+  }
   try {
     return crypto.verify(null, Buffer.from(canonicalBytes(doc.approval)), crypto.createPublicKey(publicPem), Buffer.from(String(doc.signature), 'base64'));
   } catch {
@@ -285,8 +302,25 @@ function sign(approval) {
   const privateKey = crypto.createPrivateKey(fs.readFileSync(keyFile, 'utf8'));
   return crypto.sign(null, Buffer.from(canonicalBytes(approval)), privateKey).toString('base64');
 }
+// 2.73.1 (B-67): the owner's yes the proxy records (--permission "<the owner's words, or a link to the message>").
+let proxyPermission = '';
+/**
+ * Signed with the owner key where it is; otherwise, in the owner proxy's own shell (harness/owner-proxy.mjs), an
+ * approval that carries the signed proxy grant and the owner's recorded yes instead of a signature.
+ */
+function signOrProxy(approval) {
+  if (fs.existsSync(ownerKeyPath())) return { approval, signature: sign(approval) };
+  const p = proxyShell({ allowLane: true });
+  if (!p.ok) return { approval, signature: sign(approval) }; // throws the usual "no owner key on this machine"
+  const yes = String(proxyPermission || '').trim();
+  if (yes.length < 10) throw new Error(`the owner proxy (${p.doc.agent}) signs approvals only with the owner's yes recorded: --permission "<the owner's words, or a link to the message>" (10+ characters)`);
+  const a = { ...approval, recordedBy: String(p.doc.agent), permission: yes.slice(0, 500), via: 'owner proxy' };
+  emitEvent({ type: 'delegation.used', agent: String(p.doc.agent), msg: `${p.doc.agent} approved ${approval.kind} as the owner's proxy on ${p.doc.by}'s yes: "${yes.slice(0, 160)}"`.slice(0, 400), meta: { proxy: true, action: `approve-${approval.kind}`, permission: yes.slice(0, 300), by: approval.by } });
+  import('./decisions-log.mjs').then((dm) => dm.logDecision({ action: `approve-${approval.kind}`, subject: approval.change || approval.task || approval.kind, by: String(approval.by || p.doc.by).slice(0, 60), as: dm.asOf ? dm.asOf({ via: 'outside agent', permission: yes }) : 'outside agent', why: String(approval.note || approval.reason || '').slice(0, 300), evidence: `owner proxy ${p.doc.agent}: ${yes.slice(0, 200)}`, undo: null })).catch(() => {});
+  return { approval: a, signature: null, proxy: { grant: p.doc } };
+}
 function writeApproval(name, approval) {
-  const doc = { approval, signature: sign(approval) };
+  const doc = signOrProxy(approval);
   const dir = path.join(ROOT, APPROVALS_REL);
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, `${name}.json`);
@@ -321,6 +355,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const flag = (n) => (a.includes(n) ? a[a.indexOf(n) + 1] : null);
   if (flag('--base')) process.env.STUDIO_PROTECT_BASE = flag('--base');
   const by = flag('--by') || process.env.USER || process.env.USERNAME || 'owner';
+  proxyPermission = flag('--permission') || '';
   const cmd = a[0] || 'show';
   try {
     if (cmd === 'keygen') {

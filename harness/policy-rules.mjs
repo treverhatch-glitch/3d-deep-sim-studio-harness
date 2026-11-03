@@ -63,7 +63,7 @@ export const NEVER_ACTIONS = { 'delete-lanes': ['janitor-lanes'], deletes: ['jan
  */
 export const NEVER_RELEASE_RULES = ['protected', 'harness', 'test-deleted', 'golden-deleted', 'regression-deleted', 'irreversible', 'upgrade', 'config-proposal-protected', 'silencer', 'config-proposal-silencer'];
 
-const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const strs = (a) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);

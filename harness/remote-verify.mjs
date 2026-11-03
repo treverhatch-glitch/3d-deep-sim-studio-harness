@@ -67,7 +67,7 @@ export function githubClient({ root, owner, repo, token, remote = 'origin', fetc
     async push(sha, branch) {
       if (!safeBranch(branch)) throw new Error(`refusing branch ${branch}`);
       const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}` };
-      const r = spawnSync('git', ['push', '--quiet', remote, `${sha}:refs/heads/${branch}`], { cwd: root, env, encoding: 'utf8', timeout: 10 * 60000 });
+      const r = spawnSync('git', ['push', '--quiet', remote, `${sha}:refs/heads/${branch}`], { windowsHide: true, cwd: root, env, encoding: 'utf8', timeout: 10 * 60000 });
       if (r.status !== 0) throw new Error(`git push exited ${r.status}: ${String(r.stderr || '').trim().split('\n').pop()}`);
     },
     async checkRuns(sha) { const j = await api('GET', `/commits/${sha}/check-runs?per_page=100`); return (j?.check_runs || []).map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion, url: c.html_url || null })); },
@@ -88,7 +88,7 @@ export async function remoteVerify({ root, id, sha, env = process.env, client = 
   if (!token && !client) return { used: false, why: 'no GH_TOKEN or GITHUB_TOKEN in the environment' };
   let c = client;
   if (!c) {
-    const u = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' });
+    const u = spawnSync('git', ['remote', 'get-url', 'origin'], { windowsHide: true, cwd: root, encoding: 'utf8' });
     const gh = parseGithubRemote(u.stdout);
     if (!gh) return { used: false, why: 'origin is not a github.com repo' };
     c = githubClient({ root, ...gh, token });

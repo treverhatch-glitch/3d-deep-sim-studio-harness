@@ -147,7 +147,7 @@ console.log(JSON.stringify({ md: r.md }));`);
     `${out(cli)}\n---\n${String(cliJson.stdout).slice(0, 400)}\n---\n${ov.md || ov._raw}`);
 
   // 2. Drift checks. Two lane copies (git repos), fake session records, synthetic verify events.
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: '2026-11-01T09:00:00Z', GIT_AUTHOR_DATE: '2026-11-01T09:00:00Z' } });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, GIT_COMMITTER_DATE: '2026-11-01T09:00:00Z', GIT_AUTHOR_DATE: '2026-11-01T09:00:00Z' } });
   const mkCopy = (name) => {
     const c = path.join(tmpRoot, `lane-264k-${name}-${process.pid}`);
     fs.mkdirSync(path.join(c, 'game', 'x', 'src', 'floors'), { recursive: true });

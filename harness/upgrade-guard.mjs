@@ -58,7 +58,7 @@ const SELF = fileURLToPath(import.meta.url);
 export const BOARD_FILES = ['studio/NEXT.md', 'studio/DONE.md', 'studio/task-holds.json', 'studio/pending-review.json', 'studio/handoffs'];
 // Board files whose conflicting rows are all kept (one task per line: list items and table rows).
 export const ROW_FILES = ['studio/NEXT.md', 'studio/DONE.md'];
-const git = (args, cwd, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
+const git = (args, cwd, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 const out1 = (r) => (r.status === 0 ? r.stdout.trim() : '');
 
 /** The checkout to work on: git's top level for the folder it runs in (never this file's folder: a copy runs anywhere). */
@@ -593,7 +593,7 @@ export async function restoreStash({ stash, by, permission = '', root = ROOT, en
       if (ours === null && base !== null) { refused.push(`${f}: the board no longer has it, the stash changes it`); continue; }
       if (ours === null) { results.push({ f, text: theirs }); continue; }
       const p = (n, t) => { const x = path.join(tmp, n); fs.writeFileSync(x, t); return x; };
-      const r = spawnSync('git', ['merge-file', '-p', '-L', 'board', '-L', 'stash base', '-L', 'stash', p('ours', ours), p('base', base ?? ''), p('theirs', theirs)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const r = spawnSync('git', ['merge-file', '-p', '-L', 'board', '-L', 'stash base', '-L', 'stash', p('ours', ours), p('base', base ?? ''), p('theirs', theirs)], { windowsHide: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (r.status === 0) { results.push({ f, text: r.stdout }); continue; }
       if (r.status === null || r.status < 0 || r.status > 127) { refused.push(`${f}: git merge-file failed (${(r.stderr || '').trim().slice(0, 120)})`); continue; }
       if (!ROW_FILES.includes(f)) { refused.push(`${f}: both sides changed the same lines (only rows of ${ROW_FILES.join(' and ')} are merged by keeping both)`); continue; }

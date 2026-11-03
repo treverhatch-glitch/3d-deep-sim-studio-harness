@@ -83,7 +83,7 @@ const base = `clip_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
 // Frames to an mp4 at the rate they were painted (ffmpeg). Without ffmpeg, keep the frames' last image.
 const fps = Math.min(30, Math.max(5, Math.round(r.video.frames / r.video.seconds)));
 let out = path.join(CLIPS, `${base}.mp4`);
-const ff = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', path.join(r.video.dir, 'frame_%05d.jpg'), '-vf', 'scale=960:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out], { encoding: 'utf8' });
+const ff = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(fps), '-i', path.join(r.video.dir, 'frame_%05d.jpg'), '-vf', 'scale=960:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out], { windowsHide: true, encoding: 'utf8' });
 if (ff.status !== 0) {
   out = path.join(CLIPS, `${base}.jpg`);
   fs.copyFileSync(path.join(r.video.dir, `frame_${String(r.video.frames - 1).padStart(5, '0')}.jpg`), out);

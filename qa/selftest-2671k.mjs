@@ -29,7 +29,7 @@ export async function selftest2671K({ dir, run, report, tmpRoot }) {
   fs.writeFileSync(sleepF, 'setTimeout(() => {}, Number(process.argv[2] || 1000));\n');
   const lockF = path.join(dir, '.studio', 'locks', 'machine-heavy-1.lock');
   const holder = (ms, label = 'holder-2671k') => {
-    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
     const up = until(() => readJson(lockF)?.label === label, 15000 * SLOW);
     return { c, up, gone: () => until(() => readJson(lockF)?.pid !== c.pid, 30000 * SLOW) };
@@ -152,7 +152,7 @@ else fs.writeFileSync(at('-testResults'), '<test-run total="2" passed="2" failed
 
       // Another run is copying this key's Library (a live holder of <cache>/<key>.lock): no sharing, no overwrite.
       reset();
-      const sl = spawn(process.execPath, [sleepF, String(20000 * SLOW)], { stdio: 'ignore' });
+      const sl = spawn(process.execPath, [sleepF, String(20000 * SLOW)], { windowsHide: true, stdio: 'ignore' });
       kids.push(sl);
       const keyNow = keyOf(project('lane-f', { manifest: '{ "dependencies": { "com.example.ui": "1.1.0" } }' }));
       const readMeta = () => { try { return fs.readFileSync(path.join(cacheRootDir, String(keyNow), 'meta.json'), 'utf8'); } catch { return null; } };

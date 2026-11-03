@@ -57,9 +57,9 @@ const mtime = (rel) => {
 const changed = (rel) => {
   const m = mtime(rel);
   if (m == null) return null;
-  const dirty = spawnSync('git', ['status', '--porcelain', '--', rel], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const dirty = spawnSync('git', ['status', '--porcelain', '--', rel], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   if (dirty.status !== 0 || dirty.stdout.trim()) return m;
-  const log = spawnSync('git', ['log', '-1', '--format=%ct', '--', rel], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const log = spawnSync('git', ['log', '-1', '--format=%ct', '--', rel], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   const t = Number(log.stdout.trim()) * 1000;
   return log.status === 0 && t ? t : m;
 };
@@ -74,7 +74,7 @@ const section = (text, heading) => {
   return m ? m[1].trim() : '';
 };
 const git = (...a) => {
-  const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' });
+  const r = spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   return r.status === 0 ? r.stdout.trim() : null;
 };
 

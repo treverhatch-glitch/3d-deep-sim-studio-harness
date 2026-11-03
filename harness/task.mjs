@@ -491,7 +491,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
   const handoff = readTaskHandoff(target.id);
   // The commit the work starts from, for the size ratchet (harness/done-check.mjs sizeGrowth).
-  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout?.trim() || null;
   emitEvent({ type: 'task.start', agent, model, task: target.id, status: 'editing', msg: `${handoff ? 'Picked up' : 'Started'} ${target.id}: ${target.title}`, meta: head ? { head } : {} });
   // 2.54.0 (PU-06): what was already red at claim (kept from the first claim when a task is picked up again).
   try { if (!readBaseline(target.id)) recordBaseline(target.id); } catch {}
@@ -587,8 +587,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       const start = taskBase(target.id);
       if (start) {
         const isCode = (f) => f && !/^(studio|\.studio|\.lanes|qa\/reports)\//.test(f) && !isEngineChurn(f);
-        const committed = spawnSync('git', ['diff', '--name-only', `${start}..HEAD`], { cwd: REPO_ROOT, encoding: 'utf8' });
-        const working = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+        const committed = spawnSync('git', ['diff', '--name-only', `${start}..HEAD`], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
+        const working = spawnSync('git', ['status', '--porcelain'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
         const lane = (() => { try { return laneDiff()?.changed || []; } catch { return []; } })();
         if (committed.status === 0) {
           const files = [...committed.stdout.split('\n'), ...(working.stdout || '').split('\n').filter((l) => l.length > 3).map((l) => l.slice(3)), ...lane].filter(isCode);
@@ -668,7 +668,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       scope = [f.renderer, f.sim].filter(Boolean);
     }
     if (scope.length) {
-      const st = spawnSync('git', ['status', '--porcelain', '--', ...scope], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const st = spawnSync('git', ['status', '--porcelain', '--', ...scope], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
       const lines = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !isEngineChurn(l.slice(3))) : [];
       // 2.58.3 (O3, crew P-035): a tracked file whose only difference is line endings (a test snapshot rewritten on
       // Windows) isn't uncommitted work: named in a note, never a refusal. Content changes, new and deleted files still are.
@@ -735,7 +735,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     for (const [id, rel, args] of SAFETY) {
       const file = path.join(REPO_ROOT, rel);
       if (!fs.existsSync(file)) { failed.push({ id, rel, why: `${rel} is missing` }); continue; }
-      const r = spawnSync(process.execPath, [file, ...args], { cwd: REPO_ROOT, encoding: 'utf8', env: safetyEnv, maxBuffer: 32 * 1024 * 1024 });
+      const r = spawnSync(process.execPath, [file, ...args], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: safetyEnv, maxBuffer: 32 * 1024 * 1024 });
       if (r.status !== 0) failed.push({ id, rel, why: `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}` });
     }
     for (const [id, name] of [['hooks', 'STUDIO_HOOKS_CHECK'], ['weakened-tests', 'STUDIO_WEAKENED_TESTS']]) {
@@ -751,7 +751,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.72.0 (b): fixed purity hits leave the baseline (harness/ratchet.mjs), committed in this copy before it lands.
   if (trainCheck) shrinkAtDone({ root: REPO_ROOT, task: target.id, agent });
   if (trainCheck) {
-    const g = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
+    const g = (...a) => { const r = spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
     return { trainReady: true, id: target.id, type: check.type, all: check.type === 'whole', head: g('rev-parse', 'HEAD'), tree: g('rev-parse', 'HEAD^{tree}'), branch: g('symbolic-ref', '--short', 'HEAD') };
   }
 
@@ -783,10 +783,10 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       if (/^(off|0|false|no)$/i.test(reuseEnv)) return null;
       const rec = lastFullRecord();
       if (!rec) return null;
-      const gitOut = (...a) => { const r = spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
+      const gitOut = (...a) => { const r = spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : ''; };
       const tree = gitOut('rev-parse', 'HEAD^{tree}');
       const recTree = rec.head && /^[0-9a-f]{40,64}$/.test(String(rec.head)) ? gitOut('rev-parse', '--verify', '--quiet', `${rec.head}^{tree}`) : '';
-      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', '.', ':(exclude)studio'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
       const clean = st.status === 0 && !String(st.stdout || '').trim();
       const hadPaths = Array.isArray(rec.gatePaths) ? rec.gatePaths : rec.scoped ? rec.changed || [] : [];
       const j = judgeVerifyReuse(rec, { tree, recTree: recTree || null, clean, changed, needEngine: engineGates(paths).map((e) => e.project), hadEngine: engineGates(hadPaths).map((e) => e.project), relatedNow: relatedTestsOn(), optIn: /^(on|1|true|yes)$/i.test(reuseEnv), maxAgeH: Number(process.env.STUDIO_DONE_REUSE_MAX_H || 24) });
@@ -795,7 +795,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     let plan = null;
     if (reuse?.ok) {
       // The checks this done would have run, and the scope that pass covers (for deliver's re-check after a rebase).
-      const pr = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--plan', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+      const pr = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--plan', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
       try { plan = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch { plan = null; }
       if (!Array.isArray(plan?.gates)) plan = null;
     }
@@ -807,7 +807,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     else if (reuse) console.log(`[task done] running the game's checks: the last verify can't stand in for them (${reuse.why})`);
     // Game checks run now (not reused) take the next free gate slot ahead of verifies (merge-lane.mjs withGateSlot).
     ggEnv.STUDIO_GATE_PRIORITY = 'landing';
-    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: plan.gates.map((id) => ({ id, ok: true, reused: true })), skipped: plan.skipped, scope: plan.scope }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
+    const gg = reused ? { status: 0, stdout: JSON.stringify({ ok: true, rows: plan.gates.map((id) => ({ id, ok: true, reused: true })), skipped: plan.skipped, scope: plan.scope }) } : spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'game-gates.mjs'), '--json', ...(paths.length ? ['--paths', paths.join(',')] : []), ...(changed ? ['--changed', changed.join(',')] : [])], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: ggEnv, maxBuffer: 32 * 1024 * 1024 });
     let res = null;
     try { res = JSON.parse((gg.stdout || '').trim().split('\n').pop()); } catch {}
     if (res?.skipped?.length) {
@@ -833,7 +833,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.59.0 (#16): a task on the Unity track (task add --track engine:unity) lands through the studio's Unity gate
   // (harness/unity-gate.mjs: its configured land command, under the machine:heavy lock); it closes only on a pass.
   if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track === 'engine:unity') {
-    const ug = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-gate.mjs'), '--json', '--task', target.id], { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
+    const ug = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-gate.mjs'), '--json', '--task', target.id], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
     let u = null;
     try { u = JSON.parse((ug.stdout || '').trim().split('\n').pop()); } catch {}
     if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
@@ -967,7 +967,7 @@ function assetGateAtDone(target, { agent = null, checkOnly = false } = {}) {
   try { if (inLaneCopy()) files = laneDiff()?.changed || null; } catch { /* git below */ }
   const base = files ? null : taskBase(target.id);
   const args = [path.join(REPO_ROOT, 'harness', 'asset-gate.mjs'), '--json', '--task', target.id, ...(files ? ['--files', files.join(',')] : []), ...(base ? ['--base', base] : []), ...(checkOnly ? ['--no-round-trip'] : [])];
-  const r = spawnSync(process.execPath, args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
   let res = null;
   try { res = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch { /* reported below */ }
   if (!res) return { error: 'asset-gate', message: `${target.id} is not done: the asset gate didn't report (${`${r.stderr || ''}${r.stdout || ''}`.trim().slice(-300) || `exit ${r.status}`}). node harness/asset-gate.mjs --task ${target.id} runs it.` };
@@ -1015,8 +1015,8 @@ export function closeTrainTask(taskId, agent, { train, head, laneHead, record = 
   const root = mainRoot();
   // 2.63.0: a Unity train's branch landed in the Unity repo (repo) on its target branch, not in the studio's branch.
   const gitRoot = repo || root;
-  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: gitRoot }).status === 0;
-  const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
+  const anc = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { windowsHide: true, cwd: gitRoot }).status === 0;
+  const mainTip = spawnSync('git', ['rev-parse', landTarget ? `refs/heads/${landTarget}` : 'HEAD'], { windowsHide: true, cwd: gitRoot, encoding: 'utf8' }).stdout.trim();
   if (!head || !laneHead || !anc(laneHead, head) || !anc(head, mainTip)) return { error: 'not-landed', message: `${taskId}'s lane (${String(laneHead).slice(0, 8)}) is not in the studio's branch through train ${train}` };
   // The train's verify: clean and full, with no red required check but one already red when this task was claimed.
   if (record && (record.dirty !== false || record.partial || judgeRed((record.rows || []).map((r) => ({ ...r, required: r.required !== false })), readBaseline(taskId) || { red: [] }).fresh.length)) return { error: 'not-verified', message: `train ${train}'s verify record is not a clean, green full verify` };
@@ -1059,7 +1059,7 @@ async function predictAtQueue(pre, agent) {
     const tp = await import('./train-predict.mjs');
     const { mainBranch } = await import('./worktree.mjs');
     const main = mainBranch(root);
-    const tip = spawnSync('git', ['rev-parse', `refs/heads/${main}`], { cwd: root, encoding: 'utf8' }).stdout?.trim() || '';
+    const tip = spawnSync('git', ['rev-parse', `refs/heads/${main}`], { windowsHide: true, cwd: root, encoding: 'utf8' }).stdout?.trim() || '';
     const settings = await tr.trainManifest(root, tip);
     const p = tp.predictLane(root, { lane: { task: pre.id, head: pre.head }, queue: tr.readQueue(root), tip, unionFiles: settings.unionFiles || [] });
     return tp.queueVerdict(p, { task: pre.id, agent, head: pre.head, main, lane: pre.branch || '', emit: emitEvent });
@@ -1626,7 +1626,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // In a child process: agent.mjs imports this module, so importing it here, while this module is still
     // running as the command, never settles (2.24-2.26: the command stopped nothing and exited 13).
     const { spawnSync } = await import('node:child_process');
-    const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'agent.mjs'), 'stop-all', '--by', s.by, '--reason', s.reason || ''], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env });
+    const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'agent.mjs'), 'stop-all', '--by', s.by, '--reason', s.reason || ''], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: process.env });
     const stopped = String(r.stdout || '').trim().split(/\s+/).filter(Boolean);
     console.log(`Studio stopped by ${s.by}. No task can start${stopped.length ? `; ${stopped.join(', ')} handed back their work and stopped` : ''}. Resume: npm run task -- resume --by <name>`);
     process.exit(0);
@@ -1855,7 +1855,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       // that tree counts). STUDIO_TRAIN=off, --force, or no commits of its own: the old path (deliver).
       const { trainOn } = await import('./train.mjs');
       let laneBranch = '';
-      try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
+      try { laneBranch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
       const viaTrain = inLaneCopy() && trainOn() && !flags.force && !flags['accepted-by'] && laneBranch && unmerged(laneBranch) > 0;
       // 2.63.0: a tier C lane (harness code, protected files, deleted tests or regressions, irreversible files, upgrade
       // merges) lands only through the merge train after a person releases it. STUDIO_TRAIN=off, --force and
@@ -1864,7 +1864,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const { laneTier } = await import('./train.mjs');
         const { tierLine } = await import('./tiers.mjs');
         let tier = null;
-        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(), task: targetId }); } catch {}
+        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(), task: targetId }); } catch {}
         // 2.65.0 (B-40): a config proposal that can't be applied (or conflicts with main) is the first thing to fix.
         let cpBad = null;
         try { const lb = laneConfigBefore(mainRoot(), { task: targetId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward }); if (lb.refuse) cpBad = lb.refuse; } catch {}

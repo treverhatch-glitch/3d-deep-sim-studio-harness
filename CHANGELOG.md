@@ -4,6 +4,41 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.73.1] — 2026-11-03
+2.73.1, an emergency patch for the crew's first hours on 2.73.0 (the owner's request list from the crew's orchestrator,
+B-51 and B-59 to B-69; P-219 to P-225).
+### Added
+- **The standing owner proxy (B-67).** `npm run delegate -- proxy <agent> --by <owner> [--days N]` (once, signed with the
+  owner key): in that agent's own shell (`STUDIO_LOCK_OWNER=<agent>`) every owner action is covered with `--by <agent>`
+  or `--by <owner>`, the grant stands in for `--permission`, and `npm run approve -- protected|tests|hooks|force` works
+  without the private key when the owner's yes is recorded (`--permission "<their words or a message link>"`). Such an
+  approval counts while the grant is the one on file, only in the proxy's or a person's commit; `npm run delegate --
+  revoke` ends it and voids approvals not yet landed. Never money, worker sessions, or granting itself another
+  delegation (harness/owner-proxy.mjs, docs/AUTONOMY.md "The standing owner proxy").
+- **`npm run studio:boot [-- --check|--shortcut]` (B-69):** the basics checked, lock files of dead processes cleared,
+  the hub and supervisor started hidden and only once, one status card.
+- **`npm run studio:extend -- --until <time|+8h|none>`:** moves a running supervisor's end time without a restart.
+### Fixed
+- **The stall watchdog no longer ends a session waiting on its own verify or background `task done` (B-68)**, up to
+  `STUDIO_STALL_VERIFY_MAX_MIN` (60).
+- **Halts (B-66):** sessions that die together (`STUDIO_HALT_SAME_DEATH_SEC`, 5) count as one end, the launcher's own
+  kills don't count, every session end records its exit cause, and a builder halt no longer stops the train daemon
+  (drain still does).
+- **Session identity is never read from the studio's `.env` (B-60):** `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`,
+  `STUDIO_AGENT`, `STUDIO_MAIN_ROOT` are skipped with a warning naming the line; both preflights flag it.
+- **A folder in `.lanes/` is a lane only when it is a registered worktree (B-51):** leftover folders are listed apart,
+  git never runs in them, `lanes refresh` refuses them.
+- **No console windows flash on Windows (B-59):** every process the harness starts passes `windowsHide: true` (capture
+  runs that draw in a real window excepted); a selftest fails on any new call without it. The NODE_OPTIONS preload
+  stopgap can go (docs/SECURITY.md).
+### Untested
+- On Windows: whether the flashes stop for git's bash hooks and agent CLIs, the hidden detached starts of `studio:boot`,
+  the Desktop shortcut, the exit cause of an outside kill (Windows reports exit 1).
+- The owner proxy trades the owner's signature for the proxy's recorded word: any agent that sets the proxy's name in
+  its own shell could act as it. Revoke when that matters (docs/AUTONOMY.md).
+
+---
+
 ## [2.73.0] — 2026-11-03
 2.73.0, "autonomy, safely": a measured, reversible way to hand more to the overseer, and the last red-team holes the
 outside review left open (the dev plan's 2.73, the verified Grok dossier and the owner's overseer roadmap; P-213 to P-218).

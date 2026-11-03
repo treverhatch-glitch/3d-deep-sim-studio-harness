@@ -12,7 +12,7 @@
  */
 import { spawnSync } from 'node:child_process';
 
-const diff = (cwd, args) => spawnSync('git', ['-c', 'core.quotepath=off', 'diff', '--no-ext-diff', '--no-color', '--no-textconv', ...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const diff = (cwd, args) => spawnSync('git', ['-c', 'core.quotepath=off', 'diff', '--no-ext-diff', '--no-color', '--no-textconv', ...args], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 /**
  * One side (the index against HEAD, or the working tree against the index) differs only in line endings: its diff

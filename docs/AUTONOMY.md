@@ -238,6 +238,38 @@ actions without the owner's words for each one, for a time the owner sets (harne
 - `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
   and never acts (B-47: `task train --help` used to run a train).
 
+### The standing owner proxy (2.73.1, B-67)
+
+The owner's request (2026-11-03): "make Opus be able to do everything if I say yes via discord". One grant makes one
+outside agent the owner's proxy for up to a year (harness/owner-proxy.mjs):
+
+    npm run delegate -- proxy opus-1 --by <owner> [--days 30] [--why "…"]      once, by the owner, where the key is
+
+It writes and commits `studio/delegation.json` as `{ agent, actions: ["*"], proxy: true, until, by, at, why }`, signed
+with the owner key when the studio has one (the same rules as a grant: the owner's own terminal only). While it counts,
+in the proxy's own shell (`STUDIO_LOCK_OWNER=opus-1`; not a launched session, not a worker's name):
+
+- **Every owner action:** `delegationFor` covers any action (release, type, yes, hold, resume, unpark, janitor, upgrade
+  switches …) with `--by opus-1` or `--by <owner>`; every command that takes "a person's direct permission" works with
+  `--by <owner>` and no `--permission` (the grant's words are recorded instead, harness/permission.mjs).
+- **Approvals without the private key:** `npm run approve -- protected|tests|hooks|force … --by <owner> --permission
+  "<the owner's yes: their words or a link to the message>"` writes an approval with no signature that carries the
+  signed grant and the owner's yes (refused without the yes, 10+ characters). It counts while that same grant is the one
+  on file in the main checkout, inside its window, made by the grant's agent, and, once committed, only in a commit
+  that is the proxy's own or a person's (the `Studio-Agent` trailer): a builder's lane can't carry one in. This covers
+  gates and the protected list too: the owner asked for everything. Each use is a `delegation.used` event and a line in
+  the decision log (`npm run decisions`).
+- **Never:** money (the harness spends none), worker sessions, a lane copy (except to approve a lane's own change),
+  granting itself another delegation.
+- **Ending it:** `npm run delegate -- revoke --by <name>` (anyone may). Approvals the proxy made that haven't landed
+  stop counting at once; what already landed stays. The owner turns the full rules back on by revoking: the protected
+  files, gates and approvals then need the owner's signature again, as before.
+
+What this trades away: an approval is the proxy's word that the owner said yes, not the owner's signature. The harness
+can't read Discord; the yes is kept in the record for the owner to check, and any agent able to set
+`STUDIO_LOCK_OWNER=opus-1` in its own shell could act as the proxy. Revoke when that matters (more agents, more
+machines, outside contributors).
+
 ## The decision log, the studio policy and autonomous mode (2.71.0)
 
 **One decision log.** Every decision the harness leaves to the owner or a game dev writes one record to

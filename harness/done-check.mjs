@@ -256,7 +256,7 @@ const newestSince = (files, since) => files.filter((f) => mtime(f) >= since);
 const BOOKKEEPING = /^(package-lock\.json$|\.studio\/|studio\/(task-types\.json$|HARNESS-TASKS\.md$|pending-review\.json$|task-holds\.json$|NEXT\.md|CURRENT_TASK\.md|handoffs\/|meetings\/|producer\/|game\/|memory\/retros\/|harness-notes\/|proof\/)|qa\/reports\/)/;
 const WORK_DIRS = ['cartridges', 'src', 'harness', 'hub', 'qa', 'scripts', 'tools', 'docs', 'studio'];
 const git = (...args) => {
-  const r = spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
+  const r = spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   return r.status === 0 ? r.stdout : null;
 };
 function walkSince(rel, since, out, depth = 0) {
@@ -352,13 +352,13 @@ export function taskBase(taskId) {
 }
 
 const isSha = (s) => /^[0-9a-f]{40}$/.test(String(s || ''));
-const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: REPO_ROOT }).status === 0;
+const isAncestor = (a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { windowsHide: true, cwd: REPO_ROOT }).status === 0;
 /** The studio's main branch as this checkout can name it (a lane copy: the main checkout's branch), never HEAD's own. */
 function studioMainBranches() {
   const own = (git('symbolic-ref', '-q', '--short', 'HEAD') || '').trim();
   const names = [];
   try {
-    if (inLaneCopy()) names.push(spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: mainRoot(), encoding: 'utf8' }).stdout.trim());
+    if (inLaneCopy()) names.push(spawnSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { windowsHide: true, cwd: mainRoot(), encoding: 'utf8' }).stdout.trim());
   } catch {
     // no main checkout to ask
   }
@@ -423,7 +423,7 @@ export function sizeGrowth(taskId, files, info = null) {
     const rule = sizeRuleFor(f, ruleRef, limits, cache);
     for (const w of rule.ignored) ignored.add(w);
     let before = null;
-    const r = spawnSync('git', ['show', `${base}:${f}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const r = spawnSync('git', ['show', `${base}:${f}`], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     if (r.status === 0) before = r.stdout;
     let now, was;
     try {

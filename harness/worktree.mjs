@@ -32,7 +32,7 @@ import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSpars
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 /** The main checkout: this one, or the one a lane copy was made from. */
 // 2.30n: a lane copy lives at <main>/.lanes/<agent>; that path names the main checkout even when the
@@ -314,7 +314,8 @@ export function laneLive(agent, root = mainRoot()) {
     if (held.length) return { live: true, why: `${agent} holds ${held[0].key}, renewed ${Math.round((now - Date.parse(held[0].renewedAt || held[0].claimedAt)) / 60000)} min ago` };
   } catch {}
   try {
-    const idx = git(dir, 'rev-parse', '--git-path', 'index').stdout?.trim();
+    // 2.73.1 (B-51): only a lane's own index (a leftover folder's git would read the main checkout's).
+    const idx = fs.existsSync(path.join(dir, '.git')) ? git(dir, 'rev-parse', '--git-path', 'index').stdout?.trim() : '';
     const times = [fs.statSync(dir).mtimeMs, idx ? fs.statSync(path.resolve(dir, idx)).mtimeMs : 0];
     const t = Math.max(...times);
     if (now - t < win) return { live: true, why: `changed ${Math.round((now - t) / 60000)} min ago` };
@@ -333,7 +334,8 @@ export function removeLaneCopy(agent, { keepBranch = false, ifIdle = false } = {
       return { kept: true, why: l.why };
     }
   }
-  const branch = fs.existsSync(dir) ? git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() : null;
+  // 2.73.1 (B-51): a leftover folder (no worktree) has no branch of its own: git there would name main's.
+  const branch = fs.existsSync(dir) && isLaneWorktree(dir, root) ? git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() : null;
   // Unlink the shared folders first so nothing can follow them while the copy is removed.
   for (const rel of ['studio', '.studio', ...nodeModuleDirs(root)]) {
     const p = path.join(dir, rel);
@@ -457,7 +459,7 @@ export function deliver(taskId, { runChecks = true, onLanded = null } = {}) {
           console.log(`[deliver] ${taskId}: checks re-run after rebase: ${reuse.why}`);
           // 2.58.5 (H-3): with the lane's pass recorded for its pre-rebase commit, only the game checks whose inputs main changed run again.
           const env = { ...process.env, ...(changed.length ? { STUDIO_GATE_CHANGED: changed.join(','), STUDIO_GATE_PATHS: process.env.STUDIO_GATE_PATHS || changed.join(',') } : {}), ...landingRecheckEnv(root, taskId, rec, { preHead, incoming }) };
-          const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+          const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
           if (g.status !== 0) {
             const red = [...new Set((g.stdout.match(/FAIL\s+(\S+)/g) || []).map((x) => x.split(/\s+/)[1]))].slice(0, 4).join(', ');
             return { ok: false, message: `Your work was rebased on the latest ${main}, and the checks now fail${red ? ` (${red})` : ''}. Fix it in your copy, commit, run npm run verify, then task done again.` };
@@ -507,7 +509,7 @@ export function restampAfterRebase(taskId, { tip, before, preHead }) {
   if (/^(off|0|false|no)$/i.test(process.env.STUDIO_HOOKS_RESTAMP || '')) return { ok: true, replayed: 0 };
   const script = path.join(REPO_ROOT, 'harness', 'hook-stamp.mjs');
   if (!fs.existsSync(script)) return { ok: true, replayed: 0 };
-  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [script, 'restamp', '--auto', '--json', '--base', tip, '--was', preHead, '--was-base', before], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024 });
   let j = null;
   try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch {}
   if (j?.ok) {
@@ -600,12 +602,34 @@ export function landFastForward(root, main, branch, { taskId = '' } = {}) {
   return { ok: true, stashed };
 }
 
-/** Lane copies on disk, for the War Room and preflight. */
+/**
+ * 2.73.1 (B-51): the registered worktrees of this repo (git worktree list --porcelain), resolved. `has(dir)`: dir is one
+ * of them AND has its own .git file. A folder in .lanes/ that isn't (an old lane folder emptied by hand, a copy whose
+ * worktree was pruned) is no lane: git run inside it walks up to the main checkout and answers for main (its dirty board
+ * files read as the folder's "uncommitted work", its branch as the folder's branch), so nothing runs git there.
+ */
+export function laneWorktrees(root = mainRoot()) {
+  const norm = (p) => { let r = path.resolve(p); try { r = fs.realpathSync.native(r); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
+  const list = (git(root, 'worktree', 'list', '--porcelain').stdout || '').split(/\r?\n/).filter((l) => l.startsWith('worktree ')).map((l) => norm(l.slice(9).trim()));
+  return { list, has: (dir) => fs.existsSync(path.join(dir, '.git')) && list.includes(norm(dir)) };
+}
+export const isLaneWorktree = (dir, root = mainRoot()) => laneWorktrees(root).has(dir);
+
+/** 2.73.1 (B-51): folders in .lanes/ that are not lanes (no registered worktree): [{ name, dir }]. Never touched here. */
+export function leftoverLaneFolders(root = mainRoot()) {
+  const d = path.join(root, LANES_DIR);
+  if (!fs.existsSync(d)) return [];
+  const wt = laneWorktrees(root);
+  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !wt.has(path.join(d, e.name))).map((e) => ({ name: e.name, dir: path.join(d, e.name) }));
+}
+
+/** Lane copies on disk, for the War Room and preflight. 2.73.1 (B-51): registered worktrees only (leftoverLaneFolders). */
 export function laneCopies(root = mainRoot()) {
   const d = path.join(root, LANES_DIR);
   if (!fs.existsSync(d)) return [];
+  const wt = laneWorktrees(root);
   // 2.59.0: a merge train's scratch copy (.lanes/_train-<id>, harness/train.mjs) is no agent's: the train removes it.
-  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_train-')).map((e) => {
+  return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('_train-') && wt.has(path.join(d, e.name))).map((e) => {
     const dir = path.join(d, e.name);
     const branch = git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim() || null;
     return { agent: e.name, dir, branch, unmerged: branch ? unmerged(branch, root) : 0, dirty: Boolean((git(dir, 'status', '--porcelain').stdout || '').trim()) };

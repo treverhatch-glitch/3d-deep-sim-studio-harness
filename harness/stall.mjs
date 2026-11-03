@@ -14,6 +14,12 @@
  *     STUDIO_SESSION_PLAN_MAX_MIN, 25)
  * A stalled session is ended and its task handed back with the reason (event session.stall). 0 turns a
  * limit off; STUDIO_STALL=off turns the whole check off.
+ * 2.73.1 (B-68): a session waiting on its own verify (npm run verify, detached or in-process: .studio/verify-running/
+ * <agent>.json or a full*.json it owns, with a live process and no result yet) or on its own background `task done`
+ * (.studio/done-running/, any task, by agent) is busy, not stalled: the stall clock is held and the wall-clock cap
+ * may run over while it waits. Bounded: a verify counts for at most STUDIO_STALL_VERIFY_MAX_MIN (60) minutes from its
+ * start (a done for STUDIO_DONE_RUNNING_MAX_MIN, 90), and the wall-clock cap stretches by at most
+ * STUDIO_STALL_VERIFY_MAX_MIN in all; after that the clocks run as before, so a hung verify can't keep a session alive.
  * 2.64.0: each observation also runs the drift checks (driftCheck below: the same gate failing the same way 3 times,
  * verify runs with no new diff, edits outside the task's lane and claims). Those only raise a Check to the Producer.
  *
@@ -26,6 +32,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { doneRunning } from './busy.mjs';
+import { pidAlive } from './proc-identity.mjs';
 import { laneOf, laneList } from './task-hold.mjs';
 import { listLocks } from './lock.mjs';
 import { boardStates } from './train-deps.mjs';
@@ -40,7 +47,50 @@ export function stallLimits(role, env = process.env) {
     maxMin: plan ? num(env.STUDIO_SESSION_PLAN_MAX_MIN, 25) : num(env.STUDIO_SESSION_MAX_MIN, 90),
     ratio: num(env.STUDIO_STALL_RATIO, 120),
     ratioWindow: num(env.STUDIO_STALL_RATIO_WINDOW_TOKENS, 300000),
+    busyMaxMin: num(env.STUDIO_STALL_VERIFY_MAX_MIN, 60),
   };
+}
+
+/**
+ * 2.73.1 (B-68): what the session is waiting on that it started itself, or null: its own running verify (the detached
+ * run's record .studio/verify-running/<agent>.json with no result for its runId and a live host process, or a
+ * full*.json in-process record it owns with a live pid) or its own background task done (.studio/done-running/<task>.json
+ * naming it, or its task's). { kind: 'verify'|'task done', since, pid, file }. A verify older than
+ * STUDIO_STALL_VERIFY_MAX_MIN (60) minutes, or a done past STUDIO_DONE_RUNNING_MAX_MIN (90), doesn't count.
+ */
+export function busyWait(session, { dir = STUDIO_STATE_DIR, now = Date.now(), env = process.env, alive = pidAlive } = {}) {
+  const agent = String(session?.agent || '');
+  if (!agent) return null;
+  const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const vmax = num(env.STUDIO_STALL_VERIFY_MAX_MIN, 60) * 60000;
+  const fresh = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) && now - t >= -60000 && now - t < vmax; };
+  const vdir = path.join(dir, 'verify-running');
+  if (/^[\w.-]+$/.test(agent)) {
+    const st = rd(path.join(vdir, `${agent}.json`));
+    const res = rd(path.join(vdir, `${agent}.result.json`));
+    if (st?.runId && (!st.owner || st.owner === agent) && res?.runId !== st.runId && st.state !== 'done' && fresh(st.startedAt)) {
+      // A run still starting has no host yet: the process that asked for it (by) stands in for a minute.
+      const pid = st.hostPid || (now - Date.parse(st.startedAt) < 60000 ? st.by : null);
+      if (pid && alive(pid)) return { kind: 'verify', since: st.startedAt, pid, file: `verify-running/${agent}.json` };
+    }
+  }
+  let names = [];
+  try { names = fs.readdirSync(vdir).filter((f) => /^full(\.[0-9a-f]+)?\.json$/.test(f)); } catch {}
+  for (const f of names) {
+    const r = rd(path.join(vdir, f));
+    if (r?.owner === agent && r.pid && fresh(r.startedAt) && alive(r.pid, r.identity)) return { kind: 'verify', since: r.startedAt, pid: r.pid, file: `verify-running/${f}` };
+  }
+  const own = session.task ? doneRunning(session.task, { dir, now, env }) : null;
+  if (own) return { kind: 'task done', since: own.at, pid: own.pid, file: `done-running/${own.task || session.task}.json` };
+  let dones = [];
+  try { dones = fs.readdirSync(path.join(dir, 'done-running')).filter((f) => f.endsWith('.json')); } catch {}
+  for (const f of dones) {
+    const r = rd(path.join(dir, 'done-running', f));
+    if (r?.agent !== agent) continue;
+    const d = doneRunning(f.slice(0, -5), { dir, now, env });
+    if (d) return { kind: 'task done', since: d.at, pid: d.pid, file: `done-running/${f}` };
+  }
+  return null;
 }
 
 const DIR = path.join(STUDIO_STATE_DIR, 'stall');
@@ -56,7 +106,7 @@ export const clearStall = (agent) => fs.rmSync(stateFile(agent), { force: true }
 
 /** What the session has produced so far, as one hash. */
 export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentEvents(5000)) {
-  const g = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
   const head = g('rev-parse', 'HEAD').stdout?.trim() || '';
   const st = g('status', '--porcelain', '--untracked-files=all').stdout || '';
   // mtimes of changed files, so a rewrite of an already-dirty file counts as a write
@@ -88,7 +138,10 @@ export function progressFingerprint(agent, cwd = REPO_ROOT, events = readRecentE
 export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role)) {
   const ran = (now - Date.parse(s.startedAt)) / 60000;
   const quiet = (now - Date.parse(s.lastProgressAt || s.startedAt)) / 60000;
-  if (lim.maxMin > 0 && ran >= lim.maxMin) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session` };
+  // 2.73.1 (B-68): waiting on its own verify or task done (s.busy, set by observe) stretches the wall-clock cap, by at
+  // most STUDIO_STALL_VERIFY_MAX_MIN in all.
+  const stretch = s.busy ? Math.max(0, num(lim.busyMaxMin, 60)) : 0;
+  if (lim.maxMin > 0 && ran >= lim.maxMin + stretch) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session${stretch ? ` (+${stretch} min while it waits on its own ${s.busy.kind}, STUDIO_STALL_VERIFY_MAX_MIN)` : ''}` };
   if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin})` };
   const wi = Number(s.windowIn || 0); const wo = Number(s.windowOut || 0);
   if (lim.ratio > 0 && lim.ratioWindow > 0 && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
@@ -116,12 +169,17 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const prev = readStall(session.agent);
   const fresh = !prev || prev.startedAt !== session.startedAt;
   let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
-  // 2.30q (#6): a session waiting on its own task done (gates, landing) is busy, not stalled.
-  const doing = session.task ? doneRunning(session.task, { dir: STUDIO_STATE_DIR, now }) : null;
+  // 2.30q (#6): a session waiting on its own task done (gates, landing) is busy, not stalled. 2.73.1 (B-68): so is one
+  // waiting on its own verify, and a done of any task it runs (busyWait above, bounded by STUDIO_STALL_VERIFY_MAX_MIN).
+  let doing = null;
+  try { doing = busyWait(session, { now }); } catch { doing = null; }
   if (!fresh && (fp !== prev.fp || doing)) s = { ...s, fp, lastProgressAt: new Date(now).toISOString(), baseIn: tokens.in, baseOut: tokens.out };
+  // While it waits, the wall-clock cap stretches (stallVerdict): never past the cap + STUDIO_STALL_VERIFY_MAX_MIN.
+  s.busy = doing ? { kind: doing.kind, since: doing.since, pid: doing.pid, file: doing.file } : null;
   s.tokensIn = tokens.in; s.tokensOut = tokens.out;
   s.windowIn = tokens.in - (s.baseIn || 0); s.windowOut = tokens.out - (s.baseOut || 0);
   const v = stallVerdict(s, now);
+  if (!v.stalled && s.busy) v.waiting = `on its own ${s.busy.kind} (pid ${s.busy.pid}, since ${String(s.busy.since || '').slice(11, 16)})`;
   s.verdict = v;
   writeStall(session.agent, s);
   return v;
@@ -206,7 +264,7 @@ const under = (f, p) => { const a = norm(f).toLowerCase(); const b = norm(p).toL
 
 /** The working copy's changed files: [{ file, mtime|null }], plus HEAD and its commit time. */
 function workingState(cwd) {
-  const g = (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
   const head = g('rev-parse', 'HEAD').stdout?.trim() || '';
   const headAt = (Number(g('log', '-1', '--format=%ct').stdout?.trim()) || 0) * 1000;
   const files = (g('status', '--porcelain', '--untracked-files=all').stdout || '').split('\n').filter((l) => l.length > 3)
@@ -230,7 +288,7 @@ function stateAt(ws, t, skip = new Set()) {
 /** Files the session committed (its own Studio-Agent trailer) since its first observation. */
 function ownCommits(cwd, base, agent) {
   if (!base) return [];
-  const r = spawnSync('git', ['log', '--no-merges', '--format=%x1e%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only', `${base}..HEAD`], { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', ['log', '--no-merges', '--format=%x1e%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', '--name-only', `${base}..HEAD`], { windowsHide: true, cwd, encoding: 'utf8' });
   if (r.status !== 0) return [];
   const out = [];
   for (const block of r.stdout.split('\x1e').slice(1)) {
@@ -329,12 +387,12 @@ export function driftCheck(session, { cwd = REPO_ROOT, now = Date.now(), events,
  * tagged Studio-Task: <that task> and not this one. Returns [{ task, commits: [sha], via: 'branch'|'trailer' }].
  */
 export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardRoot = REPO_ROOT } = {}) {
-  const g = (...a) => { const r = spawnSync('git', a, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
+  const g = (...a) => { const r = spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); return r.status === 0 ? String(r.stdout || '').trim() : ''; };
   const board = boardStates(boardRoot);
   if (!board) return [];
   const common = g('rev-parse', '--path-format=absolute', '--git-common-dir');
   const mainDir = common && path.basename(common) === '.git' ? path.dirname(common) : boardRoot;
-  const mr = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: mainDir, encoding: 'utf8' });
+  const mr = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: mainDir, encoding: 'utf8' });
   const main = mr.status === 0 ? mr.stdout.trim() : '';
   if (!main || !g('rev-parse', '--verify', '-q', `refs/heads/${main}`)) return [];
   const mine = new Set(g('rev-list', `refs/heads/${main}..HEAD`).split('\n').filter(Boolean));
@@ -367,5 +425,5 @@ export function borrowedCommits(cwd, task, { stateDir = STUDIO_STATE_DIR, boardR
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) import('./agent.mjs').then(({ sessions }) => {
   const rows = sessions().filter((s) => s.running).map((s) => ({ agent: s.agent, role: s.role, ...(readStall(s.agent)?.verdict || { stalled: false, why: 'not observed yet' }), checks: Object.keys(readDrift(s.agent)?.startedAt === s.startedAt ? readDrift(s.agent).raised || {} : {}) }));
   if (process.argv.includes('--json')) console.log(JSON.stringify(rows));
-  else console.log(rows.length ? rows.map((r) => `${r.agent} (${r.role}): ${r.stalled ? `STALLED ${r.why}` : `ok${r.quietMin != null ? `, quiet ${r.quietMin} min` : ''}`}${r.checks.length ? `; Check raised: ${r.checks.join(', ')}` : ''}`).join('\n') : 'No running sessions.');
+  else console.log(rows.length ? rows.map((r) => `${r.agent} (${r.role}): ${r.stalled ? `STALLED ${r.why}` : `ok${r.quietMin != null ? `, quiet ${r.quietMin} min` : ''}${r.waiting ? `, waiting ${r.waiting}` : ''}`}${r.checks.length ? `; Check raised: ${r.checks.join(', ')}` : ''}`).join('\n') : 'No running sessions.');
 });

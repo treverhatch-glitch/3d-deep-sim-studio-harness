@@ -18,7 +18,7 @@ import { REPO_ROOT } from '../harness/event.mjs';
 import { loadCartridge, runScenario } from '../harness/cartridge.mjs';
 import { dotnetBin, runSim, simPurity } from '../harness/unity.mjs';
 
-const has = spawnSync(dotnetBin(), ['--version'], { encoding: 'utf8' }).status === 0;
+const has = spawnSync(dotnetBin(), ['--version'], { windowsHide: true, encoding: 'utf8' }).status === 0;
 if (!has) {
   console.log('[unity-template] SKIP no .NET SDK (install .NET 8, or set STUDIO_DOTNET)');
   process.exit(0);
@@ -31,7 +31,7 @@ if (!sim.ok) problems.push(...sim.problems.map((p) => `sim: ${p}`));
 else console.log(`[unity-template] sim: purity clean, ${sim.total} test(s) passed with .NET`);
 
 const seeds = [1, 2, 3, 4, 5, 1337];
-const out = spawnSync(dotnetBin(), ['run', '--project', path.join(tpl, 'tools', 'SimCli'), '--', 'parity', seeds.join(',')], { encoding: 'utf8', timeout: 300000, env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' } });
+const out = spawnSync(dotnetBin(), ['run', '--project', path.join(tpl, 'tools', 'SimCli'), '--', 'parity', seeds.join(',')], { windowsHide: true, encoding: 'utf8', timeout: 300000, env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' } });
 const eng = Object.fromEntries(String(out.stdout).split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)).map((o) => [o.seed, o]));
 const cart = await loadCartridge('example-sim');
 for (const s of seeds) {

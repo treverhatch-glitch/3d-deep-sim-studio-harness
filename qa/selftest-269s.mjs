@@ -20,7 +20,7 @@ export async function selftest269S({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(extra) });
+  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
   const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
@@ -73,7 +73,7 @@ export async function selftest269S({ dir, run, report, tmpRoot }) {
     const ld = path.join(S, '.lanes', agent);
     write(ld, rel, text);
     g(ld, ['add', rel]);
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`], { cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: S }) });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: S }) });
     return { agent, id, dir: ld, ok: c.status === 0, log: out(c), head: head(ld) };
   };
   const board = (S) => fs.readFileSync(path.join(S, 'studio', 'NEXT.md'), 'utf8');
@@ -304,7 +304,7 @@ console.log(JSON.stringify({ states: Object.fromEntries(Object.entries(r).map(([
     const base = fs.mkdtempSync(path.join(tmpRoot, 'imc-'));
     const real = path.join(base, 'real');
     fs.mkdirSync(real);
-    const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+    const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
     gg(real, 'init', '-q'); fs.writeFileSync(path.join(real, 'a.txt'), 'a\n'); gg(real, 'add', '-A'); gg(real, 'commit', '-qm', 'a', '--no-verify');
     const link = path.join(base, 'link');
     let linked = true;

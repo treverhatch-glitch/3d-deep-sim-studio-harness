@@ -81,7 +81,7 @@ const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 
 const r = withGateSlot(${JSON.stringify(root)}, process.argv[2], () => { const a = Date.now(); sleep(700); return { a, b: Date.now() }; }, { log: (m) => console.error(m) });
 console.log(JSON.stringify(r));`);
     const pair = (slots) => Promise.all(['w1', 'w2'].map((name) => new Promise((resolve) => {
-      const c = spawn(process.execPath, [worker, name], { env: { ...process.env, STUDIO_GATE_SLOTS: String(slots), STUDIO_GATE_SLOT_POLL_MS: '50' } });
+      const c = spawn(process.execPath, [worker, name], { windowsHide: true, env: { ...process.env, STUDIO_GATE_SLOTS: String(slots), STUDIO_GATE_SLOT_POLL_MS: '50' } });
       let so = '';
       let se = '';
       c.stdout.on('data', (d) => (so += d));

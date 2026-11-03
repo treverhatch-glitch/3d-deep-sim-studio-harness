@@ -63,7 +63,7 @@ const ago = (ms) => `${Math.max(0, Math.round((Date.now() - ms) / 60000))} min`;
 // A free, mechanical summary for the next agent: what the last one said, and what is uncommitted.
 function trail(events, agent) {
   const said = events.filter((e) => e.agent === agent && e.msg).slice(-3).map((e) => `- ${e.ts.slice(11, 16)} ${e.type}: ${e.msg}${e.target ? ` (${e.target})` : ''}`);
-  const st = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const st = spawnSync('git', ['status', '--porcelain'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   const dirty = st.status === 0 ? st.stdout.split('\n').filter(Boolean).filter((l) => !/\s(\.studio|studio\/(NEXT\.md|DONE\.md|CURRENT_TASK\.md|handoffs|producer|meetings|game|memory\/retros|balance\/latest|fun\/latest))/.test(l)) : [];
   return [
     said.length ? `Its last words:\n${said.join('\n')}` : 'It left no messages.',
@@ -340,7 +340,7 @@ export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) 
       .then(({ dueOwed, markTried }) => {
         for (const o of dueOwed(now)) {
           markTried(o.task);
-          const c = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'review.mjs'), o.task], { cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
+          const c = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'review.mjs'), o.task], { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
           c.unref();
           emitEvent({ type: 'review.retry', agent: 'watch', task: o.task, msg: `Trying the owed review of ${o.task} again` });
         }

@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest2653A({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-2653a.jsonl');
   const ranLog = path.join(tmpRoot, `ran-2653a-${process.pid}.log`);
@@ -76,7 +76,7 @@ export async function selftest2653A({ dir, run, report, tmpRoot }) {
     const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
     for (const [rel, text] of Object.entries(files)) write(ld, rel, text);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
@@ -152,7 +152,7 @@ export async function selftest2653A({ dir, run, report, tmpRoot }) {
     { id: 'plain', command: 'node game/demo/run-tests.mjs --as plain' },
     { id: 'broken', command: 'node game/demo/run-tests.mjs --as broken', focus: 'node game/demo/no-such-runner.mjs {files}' },
   ]));
-  g(dir, 'add', '-A'); spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'fixture: more game checks', '--no-verify'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_MAIN_COMMIT: 'allow' } });
+  g(dir, 'add', '-A'); spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'fixture: more game checks', '--no-verify'], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_MAIN_COMMIT: 'allow' } });
   const ntB = path.join(dir, 'game', 'demo', 'nt', 'b.test.mjs').split(path.sep).join('/');
   const focus = JSON.stringify({ 'game:nt': [ntB], 'game:plain': ['game/demo/tests/a.test.mjs'], 'game:broken': ['game/demo/tests/a.test.mjs'] });
   resetRan();

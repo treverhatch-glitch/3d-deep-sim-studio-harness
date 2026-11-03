@@ -454,7 +454,27 @@ export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommi
 }
 
 /** After an agent exits: record it, and if it died holding work, hand the work back cleanly. */
-export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }) {
+/**
+ * 2.73.1 (B-66): how a session's process ended, as far as Node can tell: { kind, code, signal, at, by?, why? }.
+ *   stopped      a person or the Producer stopped or paused it (stopAgent's mark: a kill from its parent's side)
+ *   stall|idle|budget  this launcher ended it (the stall watchdog, the idle exit, the task's budget)
+ *   spawn-error  its program never started
+ *   signal       it was killed by a signal from outside (SIGKILL from the OOM killer, a SIGTERM to its tree, …)
+ *   exit         it exited by itself with this code. On Windows a kill from outside (taskkill /F) reads as exit 1:
+ *                Windows has no signals, so "exit 1" there may still be an outside kill.
+ * ranSec: how long its process ran (the halt rule merges only sessions that had got going, harness/supervisor.mjs).
+ * A session whose launcher died too is ended later by markGone/endAsDead with reason 'process gone' (no exit cause).
+ */
+export function exitCause({ code, exit = {}, stop = null } = {}) {
+  const base = { code: code ?? null, signal: exit.signal || null, at: exit.at || new Date().toISOString(), ...(Number.isFinite(exit.ranMs) ? { ranSec: Math.round(exit.ranMs / 1000) } : {}) };
+  if (stop) return { ...base, kind: 'stopped', by: stop.by, why: stop.kind || 'stop' };
+  if (exit.killedBy?.kind) return { ...base, kind: exit.killedBy.kind, by: 'launcher', why: String(exit.killedBy.why || '').slice(0, 200) };
+  if (exit.spawnError) return { ...base, kind: 'spawn-error', why: String(exit.spawnError).slice(0, 200) };
+  if (exit.signal) return { ...base, kind: 'signal', why: `killed by ${exit.signal} from outside the launcher` };
+  return { ...base, kind: 'exit' };
+}
+
+export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, exit = {} }) {
   const found = providerTrouble(log, code);
   // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
   // never this session's (test #2: claude was marked out of quota for agy's limit).
@@ -506,7 +526,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   for (const id of tasks) {
     const hasCommit = ahead > 0 || (() => {
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
-      const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { cwd, encoding: 'utf8' });
+      const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { windowsHide: true, cwd, encoding: 'utf8' });
       return git.status === 0 && git.stdout.trim().length > 0;
     })();
     let af = null;
@@ -546,7 +566,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
     if (oTask) {
       const t0 = s0.startedAt || new Date(Date.now() - 86400000).toISOString();
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
-      const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { cwd, encoding: 'utf8' });
+      const gl = spawnSync('git', ['log', `--since=${t0}`, '--grep', oTask, '--format=%h'], { windowsHide: true, cwd, encoding: 'utf8' });
       const commits = gl.status === 0 ? gl.stdout.split('\n').filter(Boolean).length : 0;
       outcome = sessionOutcome({ agent, task: oTask, startedAt: t0, events: readRecentEvents(20000), commits: Math.max(commits, finished.includes(oTask) ? 1 : 0), counts: !stop && !capped && !limit && !trouble && !reasoningOnly });
       if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
@@ -556,8 +576,9 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null }
   // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
-  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}`;
-  emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined } });
+  const cause = exitCause({ code, exit, stop });
+  const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
+  emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -586,26 +607,26 @@ export function autoFinish(agent, id, copyDir, mine, code) {
   if (cwd === REPO_ROOT) {
     const paths = mine.filter((l) => l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean);
     if (!paths.length) return { ok: false, output: 'no claims' };
-    const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { cwd, encoding: 'utf8' }).stdout || '';
+    const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { windowsHide: true, cwd, encoding: 'utf8' }).stdout || '';
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
   const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
-  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
+  const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'verify failed' };
   }
-  const gitLog = spawnSync('git', ['log', '-1', '--format=%h', '--grep', id], { cwd, encoding: 'utf8' });
+  const gitLog = spawnSync('git', ['log', '-1', '--format=%h', '--grep', id], { windowsHide: true, cwd, encoding: 'utf8' });
   const sha = gitLog.status === 0 && gitLog.stdout.trim() ? gitLog.stdout.trim() : 'none';
   const ext = code === 0 ? 'clean exit' : `exit code ${code}`;
   const note = `closed by the launcher: session ended without task done (${ext}), verify passed in the foreground, commit ${sha}`;
-  const done = spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', note], { cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
+  const done = spawnSync(process.execPath, [path.join(cwd, 'harness', 'task.mjs'), 'done', id, '--agent', agent, '--note', note], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 20 * 60000 });
   if (done.status !== 0) {
     const out = `${done.stderr || ''}${done.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
     return { ok: false, output: out || 'task done failed' };
   }
   if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_POST_BROWSER_PLAY || '')) {
-    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
+    const bp = spawnSync(process.execPath, [path.join(cwd, 'qa', 'browser-play.mjs')], { windowsHide: true, cwd, env, encoding: 'utf8', timeout: 5 * 60000 });
     emitEvent({ type: 'qa.browser_play', agent: 'launcher', task: id, status: bp.status === 0 ? 'ok' : 'warn', msg: `browser check after ${id}: ${bp.status === 0 ? 'passed' : 'failed or skipped'}` });
   }
   emitEvent({ type: 'agent.finished_for', agent: 'launcher', task: id, to: 'producer', msg: `${agent} ended without task done; its check passed, so the launcher closed ${id}` });
@@ -936,7 +957,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const t0 = Date.now();
   if (custom && copy) fs.writeSync(out, `[launcher] the custom command runs in this agent's own copy (${path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/')}); the main checkout is $STUDIO_MAIN_ROOT, {mainRoot} in the command; {addDirs} gives the --add-dir pair for its studio/ and .studio/\n`);
   const child = custom
-    ? spawn(line, { cwd, shell: true, env, stdio: ['ignore', out, out] })
+    ? spawn(line, { windowsHide: true, cwd, shell: true, env, stdio: ['ignore', out, out] })
     : spawnPlan(plan, { cwd, env, stdio: [cmd.stdin ? 'pipe' : 'ignore', out, out] });
   // PU-17 (P-039, P-045): when the agent's process started, for a later stop to check the number is still the agent.
   // In-process only (no child process, nothing slow): the spawn time and the program's name; /proc ticks on Linux.
@@ -950,6 +971,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
+  // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
+  let killedBy = null;
   const beat = setInterval(() => {
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
@@ -983,10 +1006,12 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (idle?.exit && !s.idleExit) {
       fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), idleExit: idle.why }, null, 2));
       emitEvent({ type: 'agent.idle_exit', agent, to: 'producer', msg: `${agent} ended: ${idle.why}; its slot is free (a new session starts only when a task is ready)` });
+      killedBy ||= { kind: 'idle', why: idle.why, at: new Date().toISOString() };
       stopChild(child);
     }
     if (stall?.stalled && !s.stalled) {
       logStall({ ...session, ...s }, stall);
+      killedBy ||= { kind: 'stall', why: stall.why, stallKind: stall.kind, at: new Date().toISOString() };
       stopChild(child);
     }
     // 2.31.0: the task this session holds used its budget across sessions: end the session, the task stays parked.
@@ -997,6 +1022,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
         if (over) {
           fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...readJson(sessionFile(agent)), budgetStop: over }, null, 2));
           emitEvent({ type: 'agent.budget_stop', agent, task: heldTask, to: 'producer', msg: `${agent} ended: ${over.split('. ')[0]}` });
+          killedBy ||= { kind: 'budget', why: over.split('. ')[0], at: new Date().toISOString() };
           stopChild(child);
         }
       }
@@ -1007,12 +1033,17 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     try { sweepThreads({ lockMs: 1000 }); } catch { /* routing is a help, never a crash */ }
     emitEvent({ type: 'agent.heartbeat', agent, model, status: 'running', msg: `${agent} alive${wip ? `: ${wip}` : ''}${s.now ? ` (now: ${s.now})` : ''}` });
   }, HEARTBEAT_MS);
+  let exitSignal = null;
+  let spawnError = null;
+  let exitedAt = null;
   const code = await new Promise((resolve) => {
     child.on('error', (err) => {
       fs.appendFileSync(logFile, `\n[launcher] could not start: ${err.message}\n`);
+      spawnError = err.message;
+      exitedAt = new Date().toISOString();
       resolve(127);
     });
-    child.on('exit', (c) => resolve(c ?? 1));
+    child.on('exit', (c, sig) => { exitSignal = sig || null; exitedAt = new Date().toISOString(); resolve(c ?? 1); });
   });
   clearInterval(beat);
   fs.closeSync(out);
@@ -1037,7 +1068,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
     }
   }
-  const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null });
+  const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
@@ -1114,7 +1145,7 @@ export function failedSessionEvidence({ agent, logFile, from = 0, code, tool, mo
  */
 function killTree(pid, { group = false } = {}) {
   try {
-    if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    if (IS.win) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     else if (group) {
       try {
         process.kill(-pid);
@@ -1279,7 +1310,7 @@ export function wipSummary(agent) {
   const paths = listLocks().filter((l) => l.owner === agent && l.key.startsWith('path:')).map((l) => l.key.slice(5));
   const copy = readJson(sessionFile(agent))?.copy;
   const cwd = copy?.dir && fs.existsSync(path.join(REPO_ROOT, copy.dir)) ? path.join(REPO_ROOT, copy.dir) : REPO_ROOT;
-  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', ['diff', '--numstat', 'HEAD', '--', ...(paths.length && cwd === REPO_ROOT ? paths : ['.'])], { windowsHide: true, cwd, encoding: 'utf8' });
   if (r.status !== 0) return null;
   const rows = r.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')).filter(([, , f]) => f && !/^(studio\/(NEXT|CURRENT_TASK)\.md|\.studio\/)/.test(f));
   const add = rows.reduce((n, [a]) => n + (Number(a) || 0), 0);
@@ -1409,7 +1440,7 @@ export function stopAllAgents(by = 'war-room-human', reason = '') {
 export function otherAgents() {
   if (IS.win) return { checked: false, list: [] };
   const known = new Set(sessions().filter((x) => x.running).flatMap((x) => [x.pid, x.supervisor]).filter(Boolean));
-  const ps = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+  const ps = spawnSync('ps', ['-eo', 'pid=,args='], { windowsHide: true, encoding: 'utf8' });
   if (ps.status !== 0) return { checked: false, list: [] };
   const list = [];
   for (const line of ps.stdout.split('\n')) {
@@ -1425,7 +1456,7 @@ export function otherAgents() {
     try {
       cwd = fs.readlinkSync(`/proc/${m[1]}/cwd`);
     } catch {
-      const l = spawnSync('lsof', ['-a', '-p', m[1], '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+      const l = spawnSync('lsof', ['-a', '-p', m[1], '-d', 'cwd', '-Fn'], { windowsHide: true, encoding: 'utf8' });
       cwd = (l.stdout || '').split('\n').find((x) => x.startsWith('n'))?.slice(1) || '';
     }
     if (cwd && (cwd === REPO_ROOT || cwd.startsWith(`${REPO_ROOT}${path.sep}`))) list.push({ pid: Number(m[1]), command: m[2].slice(0, 120) });
@@ -1604,7 +1635,7 @@ export function startAgent(opts, { detach = false } = {}) {
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
     const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
-    const sup = spawn(process.execPath, args, { cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
+    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
     sup.unref();
     // PU-17: the launcher's spawn time (in-process, no OS query), for a stop that comes while it is still starting.
     const supId = spawnedIdentity(sup.pid, process.execPath);

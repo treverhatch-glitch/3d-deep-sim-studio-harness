@@ -24,7 +24,7 @@ export async function selftest263J({ dir, run, report, tmpRoot }) {
   const guard = (name, fn) => { try { const [ok, detail] = fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const events = path.join(dir, '.studio', 'events-263j.jsonl');
   const base = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_HEAVY_SLOTS: '1', STUDIO_HEAVY_HELD: '', STUDIO_HEAVY_POLL_MS: '100', STUDIO_HEAVY_WAIT_MIN: '', STUDIO_GATE_PRIORITY: '', STUDIO_LOCK_OWNER: '', STUDIO_GAME: '', STUDIO_TRAIN: '', STUDIO_UNITY_TRAIN_RETRIES: '0', STUDIO_UNITY_TRAIN_RETRY_MIN: '0', STUDIO_DONE_GAME_GATES: 'skip', STUDIO_VISUAL_GATE: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_UNCOMMITTED: 'allow', STUDIO_REACHABILITY: 'off', STUDIO_HOOKS_CHECK: 'off', STUDIO_WEAKENED_TESTS: 'off', STUDIO_DONE_UNITY_GATE: '', npm_lifecycle_event: '', AGENT_EVENTS_FILE: events };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const h = (cwd, ref) => g(cwd, 'rev-parse', ref).stdout.trim();
   const anc = (cwd, a, b) => g(cwd, 'merge-base', '--is-ancestor', a, b).status === 0;
 
@@ -190,7 +190,7 @@ process.exit(0);
       resetCtl();
       const a = unityTask('slip', 'Slip.cs', 'slip\n');
       fs.writeFileSync(ctl('slow'), String(Math.round(5000 * SLOW)));
-      const c = spawn(process.execPath, ['harness/task.mjs', 'train', '--unity', '--by', 'first-263j'], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+      const c = spawn(process.execPath, ['harness/task.mjs', 'train', '--unity', '--by', 'first-263j'], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
       kids.push(c);
       const lockF = path.join(dir, '.studio', 'locks', 'unity-train.lock');
       const up = until(() => readJson(lockF)?.by === 'first-263j' && runs().length === 1, 20000 * SLOW);

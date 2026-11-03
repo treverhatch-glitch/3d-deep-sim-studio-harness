@@ -30,13 +30,14 @@ import { modelFamily } from '../harness/families.mjs';
 import { worktreeSupport, laneCopies, removeLaneCopy, laneLive } from '../harness/worktree.mjs';
 import { sessions } from '../harness/agent.mjs';
 import { savePatch } from '../harness/wip.mjs';
+import { identityLines } from '../harness/dotenv.mjs';
 
 const argv = process.argv.slice(2);
 const FIX = argv.includes('--fix');
 const QUICK = argv.includes('--quick');
 const rows = [];
 const row = (level, label, detail = '') => rows.push({ level, label, detail });
-const git = (...a) => spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8' });
+const git = (...a) => spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
 const FROZEN = path.join(STUDIO_STATE_DIR, 'harness-frozen');
 const ENV = path.join(REPO_ROOT, '.env');
 
@@ -108,7 +109,7 @@ export function preflight() {
     row('ok', `On branch ${branch}`, origin ? `cloned from ${origin.replace(/\/\/[^@]+@/, '//')}` : 'no origin remote');
     row(!origin || push !== origin ? 'ok' : 'warn', 'Pushing to the public repo is off', !origin || push !== origin ? '' : 'run with --fix (sets the push URL to DISABLED-during-test-run)');
     const hooks = git('config', 'core.hooksPath').stdout.trim();
-    if (hooks !== 'scripts/hooks' && FIX) spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'install-hooks.mjs')], { cwd: REPO_ROOT, stdio: 'ignore' });
+    if (hooks !== 'scripts/hooks' && FIX) spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'install-hooks.mjs')], { windowsHide: true, cwd: REPO_ROOT, stdio: 'ignore' });
     const hooksNow = git('config', 'core.hooksPath').stdout.trim() === 'scripts/hooks';
     row(hooksNow ? 'ok' : 'fail', 'Git hooks installed (secrets, locks, purity, frozen harness)', hooksNow ? '' : 'run with --fix, or npm run hooks:install');
     const tracked = git('ls-files', '--error-unmatch', '.env').status === 0;
@@ -152,6 +153,9 @@ export function preflight() {
   const fromFile = (k) => [...envText.matchAll(new RegExp(`^${k}=(.*)$`, 'gm'))].map((m) => m[1].trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).at(-1) || '';
   const envVal = (k) => (process.env[k] || fromFile(k)).trim();
   row(envText ? 'ok' : 'fail', '.env exists', envText ? '' : 'run with --fix (copies .env.example with a fresh HUB token)');
+  // 2.73.1 (B-60): who a shell is comes from its session, never from the shared .env (the harness ignores these there).
+  const idLines = identityLines(envText);
+  if (idLines.length) row('warn', `.env sets ${[...new Set(idLines.map((h) => h.key))].join(', ')} (ignored: identity settings belong to a session, not the studio's .env)`, `remove line${idLines.length === 1 ? '' : 's'} ${idLines.map((h) => h.line).join(', ')} from .env`);
   const token = envVal('HUB_TOKEN');
   row(token.length >= 24 && !/change-me/.test(token) ? 'ok' : 'warn', 'HUB token is strong (War Room buttons work)', token.length >= 24 ? '' : 'npm run setup, or set HUB_TOKEN to 24+ random characters');
   const producer = envVal('STUDIO_PRODUCER_NAME');
@@ -195,7 +199,7 @@ export function preflight() {
   const track = readTrack(game.name);
   if (track) {
     const bin = engineBin(track.engine);
-    const has = fs.existsSync(bin) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { encoding: 'utf8' }).status === 0;
+    const has = fs.existsSync(bin) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { windowsHide: true, encoding: 'utf8' }).status === 0;
     row(has ? 'ok' : 'warn', `Engine track: ${track.label} in ${track.folder}`, has ? '' : `${bin} isn't found: set ${{ godot: 'STUDIO_GODOT', unity: 'STUDIO_UNITY', unreal: 'STUDIO_UNREAL' }[track.engine] || 'its path'} in .env (npm run engine:gate needs it)`);
   }
 
@@ -291,7 +295,7 @@ export function preflight() {
     } catch {
       ids = [];
     }
-    const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs'), '--only', ids.join(',')], { cwd: REPO_ROOT, encoding: 'utf8' });
+    const g = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'run-gates.mjs'), '--only', ids.join(',')], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
     const failedIds = (g.stdout + g.stderr).match(/FAIL[^\n]*/g) || [];
     row(g.status === 0 ? 'ok' : 'fail', `Required gates (${ids.length}, self-test skipped)`, g.status === 0 ? '' : failedIds.slice(0, 3).join(' | '));
   }

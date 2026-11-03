@@ -20,7 +20,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest267G({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
   const events = path.join(dir, '.studio', 'events-267g.jsonl');
   const noKey = path.join(tmpRoot, `no-owner-key-267g-${process.pid}.pem`);
@@ -109,7 +109,7 @@ export async function selftest267G({ dir, run, report, tmpRoot }) {
   const expired = tm(`train release ${tD} --by opus-bot`);
   // agent-committed (no owner key): the agent writes a fresh one and commits it through the hooks
   fs.writeFileSync(delegFile, JSON.stringify({ ...doc, until: new Date(Date.now() + 3600000).toISOString() }, null, 2));
-  spawnSync('git', ['commit', '-q', '-m', 'agent grants itself', '--', 'studio/delegation.json'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...agent } });
+  spawnSync('git', ['commit', '-q', '-m', 'agent grants itself', '--', 'studio/delegation.json'], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...agent } });
   const trailer = /Studio-Agent: opus-bot/.test(g(dir, 'log', '-1', '--format=%B').stdout);
   const selfGranted = tm(`train release ${tD} --by opus-bot`);
   // revoked

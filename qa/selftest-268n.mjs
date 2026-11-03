@@ -117,7 +117,7 @@ if (mode === 'once' && n === 1) { process.exitCode = ${process.platform === 'win
     const genv = { ...base, STUDIO_GAME: 'workers268', STUDIO_GAME_GATE_CI: '' };
     const alone = run(dir, 'node harness/game-gates.mjs', { ...genv, STUDIO_TEST_MACHINE: machine({ free: 9 }) });
     // Another lane's game check running: a live gate-slot holder.
-    const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { windowsHide: true, stdio: 'ignore' });
     fs.mkdirSync(path.join(dir, '.studio', 'locks'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.studio', 'locks', 'gate-slot-1.lock'), JSON.stringify({ pid: other.pid, at: Date.now(), label: 'lane check' }));
     const shared = run(dir, 'node harness/game-gates.mjs', { ...genv, STUDIO_GATE_SLOTS: '4', STUDIO_TEST_MACHINE: machine({ free: 9 }) });

@@ -64,13 +64,13 @@ const hashFiles = (files, base) => {
 /** Save the build the browser gate just played. Skips when nothing changed since the last saved one. */
 export function snapshotBuild(cart, report = {}) {
   const b = cart.browser || {};
-  const sha = (spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim() || null;
-  const dirty = Boolean((spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim());
+  const sha = (spawnSync('git', ['rev-parse', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim() || null;
+  const dirty = Boolean((spawnSync('git', ['status', '--porcelain'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout || '').trim());
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'build-'));
   const files = [];
   let page;
   if (b.dist) {
-    if (b.build && !report.built) spawnSync(b.build, { cwd: REPO_ROOT, shell: true, stdio: 'ignore' });
+    if (b.build && !report.built) spawnSync(b.build, { windowsHide: true, cwd: REPO_ROOT, shell: true, stdio: 'ignore' });
     copyTree(path.join(REPO_ROOT, b.dist), tmp, files);
     page = b.distPage || 'index.html';
   } else if (b.page) {

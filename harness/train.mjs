@@ -101,7 +101,7 @@ import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFo
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
@@ -414,7 +414,7 @@ export function buildIntegration(sc, tip, lanes, { id, unionFiles = [] }) {
     const base = out(git(root, 'merge-base', tip, lane.head));
     const reasons = goldenReasons(root, base || tip, lane.head);
     const msg = [`train ${id}: land ${lane.task} (${lane.branch || String(lane.head).slice(0, 8)})`, '', ...(reasons.length ? [`Golden-Reason: carried from ${lane.task}'s own commits: ${reasons.join('; ').slice(0, 500)}`] : []), `Studio-Train: ${id} ${lane.task}`].join('\n');
-    const merge = (extra, message) => spawnSync('git', [...extra, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--ff', '--no-edit', '-m', message, lane.head], { cwd: dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
+    const merge = (extra, message) => spawnSync('git', [...extra, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--ff', '--no-edit', '-m', message, lane.head], { windowsHide: true, cwd: dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
     let m = merge([], msg);
     if (m.status === 0) { included.push({ ...lane, before, after: out(git(dir, 'rev-parse', 'HEAD')) }); continue; }
     const conflicted = out(git(dir, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
@@ -609,7 +609,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const t0 = Date.now();
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
   // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
-  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
   const recDir = path.join(root, TRAIN_DIR, 'records');
   fs.mkdirSync(recDir, { recursive: true });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}.log`);
@@ -683,7 +683,7 @@ function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games)
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
   const t0 = Date.now();
   log(`[train] ${id}: local safety gates of tree ${tree.slice(0, 8)} (${ids.join(', ')}); the game's checks may come from the repo's CI`);
-  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `local safety gates ${n}` });
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(','), ...(all ? ['--all'] : [])], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `local safety gates ${n}` });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}-local.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
   let rec = null;
@@ -761,7 +761,7 @@ function recheck(sc, o) {
   const s = recheckStart(sc, o);
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
-  const w = runGatesWaiting(() => spawnSync(process.execPath, job.args, job.opts), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  const w = runGatesWaiting(() => spawnSync(process.execPath, job.args, { windowsHide: true, ...job.opts }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
   return recheckEnd(sc, o, job, w);
 }
 
@@ -810,7 +810,7 @@ export function flakeTriage(sc, { id, tree, text, log }) {
       for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
       if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
       env.STUDIO_TIMEOUT_RERUN = 'off'; // 2.72.0 (a): the triager wants the raw answer, not the gate's own timeout re-run
-      const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+      const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
       try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
       for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
       return { ok: r.status === 0 };
@@ -827,7 +827,7 @@ function pinReport(sc, pins, { id, k, tree, cache, log }) {
   try { fs.rmSync(f, { force: true }); } catch {}
   const cmd = pins.report.split('{out}').join(`"${f}"`);
   const env = /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' };
-  const r = withGateSlot(sc.root, `train-${id}-pins`, () => spawnSync(cmd, { cwd: sc.dir, shell: true, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }), { log });
+  const r = withGateSlot(sc.root, `train-${id}-pins`, () => spawnSync(cmd, { windowsHide: true, cwd: sc.dir, shell: true, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) }), { log });
   let rep = null;
   try { rep = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
   const res = r.status === 0 && rep && typeof rep === 'object' && !Array.isArray(rep) ? { report: rep, file: f } : { error: `the pins' report ${r.status !== 0 ? `exited ${r.status}` : 'wrote no JSON object'} on tree ${tree.slice(0, 8)}: ${`${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` };
@@ -1103,13 +1103,13 @@ function pinPlan(ctx, { prefix, label, pinsOnly }) {
   if (!b) return { kind: 'none', why: 'the train no longer builds' };
   const cmd = pins.refresh.split('{in}').join(`"${reports[set.length].file}"`);
   const env = mergeEnv();
-  const rr = spawnSync(cmd, { cwd: sc.dir, shell: true, encoding: 'utf8', env: /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? env : { ...env, CI: 'true' }, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
+  const rr = spawnSync(cmd, { windowsHide: true, cwd: sc.dir, shell: true, encoding: 'utf8', env: /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? env : { ...env, CI: 'true' }, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
   if (rr.status !== 0) { save(); return { kind: 'none', why: `the pins' refresh exited ${rr.status}: ${`${rr.stdout || ''}${rr.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
   git(sc.dir, 'add', '-A');
   if (!out(git(sc.dir, 'diff', '--cached', '--name-only'))) { save(); return { kind: 'none', why: 'the pins\' refresh changed no file' }; }
   const lines = moved.map((p) => `  ${p}: ${short(movedBy[p].from)} -> ${short(movedBy[p].to)} (${movedBy[p].by.join(', ')})`);
   const msg = [`train ${id}: pin refresh`, '', `Pinned values moved by lanes of this train, each declared by the lane that moved it (Pin-Moves):`, ...lines, `Report (before/after per pin and per prefix): ${repRel}`, '', `Golden-Reason: pin refresh by merge train ${id}: values moved by ${lanesMoving.join(', ')} (declared Pin-Moves)`, `Pin-Refresh: ${lanesMoving.join(', ')}`, `Studio-Train: ${id} pin-refresh`].join('\n');
-  const c = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'commit', '-q', '-m', msg], { cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
+  const c = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'commit', '-q', '-m', msg], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
   if (c.status !== 0) { git(sc.dir, 'reset', '-q', '--hard', b.head); save(); return { kind: 'none', why: `the pin-refresh commit was refused: ${`${c.stdout || ''}${c.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
   const head = out(git(sc.dir, 'rev-parse', 'HEAD'));
   record.refreshed = true;
@@ -1423,7 +1423,7 @@ export function precheckChild(root, lane) {
   try { src = fs.readFileSync(script, 'utf8'); } catch {}
   if (!src.includes("flags['train-check']")) return { ok: false, error: 'old-harness', message: `${lane.task}'s lane copy runs a harness from before the merge train (2.59.0): merge the studio's branch into the copy (git merge ${mainBranch(root)}), commit, and queue it again, or land it with STUDIO_TRAIN=off npm run task -- done ${lane.task}` };
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent };
-  const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check'], { cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check'], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{"train')).pop();
   try { const j = JSON.parse(line); return { ...j, ok: Boolean(j.ok) }; } catch {}
   return { ok: false, error: 'check-failed', message: `${`${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-12).join('\n') || `exit ${r.status}`}` };
@@ -1723,7 +1723,7 @@ function tailRun(sc, { id, n, focus, changed, log }) {
   if (changed.length) { env.STUDIO_GATE_CHANGED = changed.join(','); env.STUDIO_GATE_PATHS = changed.join(','); }
   const gates = gameGateIds(root);
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const text = `${r.stdout || ''}${r.stderr || ''}`;
   const logFile = path.join(root, TRAIN_DIR, `${id}-chain-tail-${n}.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
@@ -1789,7 +1789,7 @@ async function chainTailCheck({ root, id, tip, set, settings, depInfo, log, res,
       if (settings.pins && rep && !rep.error && moved.length && failing.tests.length && failing.tests.every((t) => isPinTest(t, settings.pins.tests)) && moved.every((m) => m.declaredBy.length && !m.invariant)) {
         const cmd = settings.pins.refresh.split('{in}').join(`"${rep.file}"`);
         const env = mergeEnv();
-        const rr = spawnSync(cmd, { cwd: sc2.dir, shell: true, encoding: 'utf8', env: /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? env : { ...env, CI: 'true' }, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
+        const rr = spawnSync(cmd, { windowsHide: true, cwd: sc2.dir, shell: true, encoding: 'utf8', env: /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? env : { ...env, CI: 'true' }, maxBuffer: 64 * 1024 * 1024, timeout: Number(process.env.STUDIO_GAME_GATE_TIMEOUT_MS || 600000) });
         if (rr.status === 0) {
           const again = tailRun(sc2, { id, n: `${n}-refreshed`, focus: fx.focus, changed, log });
           if (again.ok) {

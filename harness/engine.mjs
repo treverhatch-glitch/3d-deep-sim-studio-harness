@@ -108,7 +108,7 @@ export function engineCommand(track, which, { seeds = [], frames = 120 } = {}) {
   // "engine/<game>/captures/frame.png" landed in engine/<game>/engine/<game>/captures/ (or failed). Make it absolute.
   if (which === 'capture') cmd = cmd.replace(/--write-movie\s+("?)([^"\s]+)\1/, (_, _q, p) => `--write-movie "${path.isAbsolute(p) ? p : path.join(REPO_ROOT, p)}"`);
   // Frames need a display; a Linux server without one gets a virtual one when xvfb-run is installed.
-  if (which === 'capture' && process.platform === 'linux' && !process.env.DISPLAY && spawnSync('which', ['xvfb-run']).status === 0) cmd = `xvfb-run -a -s "-screen 0 1280x720x24" ${cmd}`;
+  if (which === 'capture' && process.platform === 'linux' && !process.env.DISPLAY && spawnSync('which', ['xvfb-run'], { windowsHide: true }).status === 0) cmd = `xvfb-run -a -s "-screen 0 1280x720x24" ${cmd}`;
   return cmd;
 }
 
@@ -120,7 +120,7 @@ export function logEngine(line, agent = actor()) {
   const f = path.join(REPO_ROOT, 'studio', 'engine', 'LOG.md');
   fs.mkdirSync(path.dirname(f), { recursive: true });
   if (!fs.existsSync(f)) fs.writeFileSync(f, '# Engine track log (`studio/engine/LOG.md`)\n\n> Every gate, parity and capture run, newest last: when, who, on which commit, and the result.\n\n');
-  const sha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+  const sha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
   fs.appendFileSync(f, `- ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · ${agent}${sha ? ` · ${sha}` : ''} · ${line}\n`);
 }
 
@@ -162,7 +162,7 @@ export async function proposeEngine(engine, { by = actor(), why = '' } = {}) {
 export function portDrift(t = readTrack()) {
   if (!t?.portFrom?.sha) return { pinned: false, commits: [], files: [] };
   const src = portSources(t);
-  const g = (...a) => spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '';
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '';
   const commits = g('log', '--reverse', '--format=%h %s', `${t.portFrom.sha}..HEAD`, '--', ...src).split('\n').filter(Boolean);
   const files = g('diff', '--name-only', t.portFrom.sha, 'HEAD', '--', ...src).split('\n').filter(Boolean);
   return { pinned: true, base: t.portFrom.sha, sources: src, commits, files };
@@ -207,7 +207,7 @@ export async function linkEngine(engine, repo, { by = actor(), build = null, web
   if (engine === 'unity' && !fs.existsSync(path.join(abs, 'ProjectSettings', 'ProjectVersion.txt'))) return { ok: false, message: `${repo} is not a Unity project (no ProjectSettings/ProjectVersion.txt).` };
   const folder = path.relative(REPO_ROOT, abs).split(path.sep).join('/');
   const fill = (x) => (x ? x.replaceAll('{folder}', folder).replaceAll('{game}', game) : x);
-  const g = (...a) => spawnSync('git', a, { cwd: abs, encoding: 'utf8' }).stdout.trim();
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: abs, encoding: 'utf8' }).stdout.trim();
   const prev = readTrack(game) || {};
   const track = {
     ...prev,
@@ -304,7 +304,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.log(t.portFrom ? `The port follows the web rules at ${t.portFrom.sha} (pinned by ${t.portFrom.by}, ${t.portFrom.at.slice(0, 10)}): ${t.folder}/port-src/` : 'Not pinned: the port follows the live web rules. Pin with npm run engine -- port --from <sha>.');
       process.exit(0);
     }
-    const sha = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+    const sha = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
     if (!sha) {
       console.error(`${from} isn't a commit in this repo.`);
       process.exit(1);
@@ -314,7 +314,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (flag('source')) t.portSource = flag('source').split(',').map((x) => x.trim()).filter(Boolean);
     const srcs = portSources(t);
     const src = srcs[0];
-    const ls = spawnSync('git', ['ls-tree', '-r', '--name-only', sha, '--', ...srcs], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const ls = spawnSync('git', ['ls-tree', '-r', '--name-only', sha, '--', ...srcs], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     const files = String(ls.stdout).split('\n').filter(Boolean);
     if (!files.length) {
       console.error(`${srcs.join(', ')} doesn't exist at ${sha.slice(0, 7)}.`);
@@ -323,7 +323,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const out = path.join(REPO_ROOT, t.folder, 'port-src');
     fs.rmSync(out, { recursive: true, force: true }); // the harness's own previous pin copy
     for (const f of files) {
-      const b = spawnSync('git', ['show', `${sha}:${f}`], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
+      const b = spawnSync('git', ['show', `${sha}:${f}`], { windowsHide: true, cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 });
       const dest = path.join(out, srcs.length > 1 ? f : path.relative(src, f));
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, b.stdout);

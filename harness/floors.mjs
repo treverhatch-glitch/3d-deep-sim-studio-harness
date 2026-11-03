@@ -30,7 +30,7 @@ async function checkPhaseScenarios(phase) {
   if (!fs.existsSync(scenarioDir)) {
     return config?.requireScenarios ? { ok: false, why: `required scenario folder qa/scenarios/phase-${phase}/ is missing` } : { ok: true };
   }
-  const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-phase-scenarios.mjs'), '--phase', phase], { encoding: 'utf8', timeout: Number(process.env.STUDIO_SCENARIO_TIMEOUT_MS || 60000) + 5000 });
+  const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-phase-scenarios.mjs'), '--phase', phase], { windowsHide: true, encoding: 'utf8', timeout: Number(process.env.STUDIO_SCENARIO_TIMEOUT_MS || 60000) + 5000 });
   if (r.status !== 0) {
     return { ok: false, why: `phase-scenarios gate failed for Phase ${phase}: ${((r.stderr || '').match(/^(FAIL|ERROR).*$/gm) || [(r.stderr || r.stdout || '').trim().split('\n').pop()]).join('; ')}` };
   }

@@ -143,7 +143,7 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
 
   // 3-6. task done, the review, who answers
   {
-    const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false', ...a], { cwd: dir, encoding: 'utf8' });
+    const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
     fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n.studio/\n');
     g('init', '-q', '-b', 'main'); g('add', '-A'); g('commit', '-qm', 'start');
     const task = (cmd, env = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...base, ...env });

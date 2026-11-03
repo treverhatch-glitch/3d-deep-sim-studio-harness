@@ -97,8 +97,8 @@ function lastResultChange() {
 
 export function buildManifest({ by, note = '' }) {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
-  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || null;
-  const dirty = spawnSync('git', ['status', '--porcelain', '--', 'cartridges', 'src', 'qa/golden', 'qa/regressions'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() || null;
+  const dirty = spawnSync('git', ['status', '--porcelain', '--', 'cartridges', 'src', 'qa/golden', 'qa/regressions'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim();
   let gates = null;
   try {
     const g = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'gates-last.json'), 'utf8'));
@@ -190,7 +190,7 @@ export function verifyResult(file, { replay = false } = {}) {
       const cur = fs.existsSync(path.join(REPO_ROOT, g.file)) ? JSON.parse(fs.readFileSync(path.join(REPO_ROOT, g.file), 'utf8')).sha256 : null;
       if (cur !== g.sha256) problems.push(`${g.file}: the repo pins ${cur || 'nothing'}, the signed result says ${g.sha256}`);
     }
-    const rerun = [spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-golden.mjs')], { cwd: REPO_ROOT, encoding: 'utf8' }), spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-regressions.mjs')], { cwd: REPO_ROOT, encoding: 'utf8' })];
+    const rerun = [spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-golden.mjs')], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }), spawnSync(process.execPath, [path.join(REPO_ROOT, 'qa', 'check-regressions.mjs')], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' })];
     for (const g of [...doc.manifest.goldens, ...doc.manifest.regressions].filter((x) => x.fileSha256)) {
       const cur = fileSha(path.join(REPO_ROOT, g.file));
       if (cur && cur !== g.fileSha256) problems.push(`${g.file}: its inputs changed since signing (seed, tick, actions or scenario)`);
@@ -211,7 +211,7 @@ export function verifyResult(file, { replay = false } = {}) {
       ['vertical slice', 'qa/vertical-slice.mjs'],
     ];
     for (const [label, script] of checks) {
-      const r = spawnSync(process.execPath, [path.join(REPO_ROOT, script)], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const r = spawnSync(process.execPath, [path.join(REPO_ROOT, script)], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
       if (r.status !== 0) problems.push(`re-running the ${label} failed:\n${(r.stdout + r.stderr).trim().split('\n').slice(-4).join('\n')}`);
     }
     if (!problems.length) notes.push('re-ran every golden and regression, the purity and isolation checks and the vertical slice on the signed code: this code produces the signed results');

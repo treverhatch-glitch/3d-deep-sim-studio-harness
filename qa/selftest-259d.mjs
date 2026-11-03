@@ -39,7 +39,7 @@ export async function selftest259D({ dir, run, report, tmpRoot }) {
   const kids = [];
   // A live machine:heavy holder: `node harness/heavy.mjs run` around a sleep.
   const holder = (ms, label = 'holder-259d') => {
-    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${sleepF}"`, String(ms)], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
     const up = until(() => readJson(lockF)?.label === label, 15000 * SLOW);
     // Gone once its lock is (this process can't reap the child while it blocks, so its exit code isn't seen here).
@@ -121,7 +121,7 @@ console.log(JSON.stringify({ dead, reused }));`, { STUDIO_HEAVY_WAIT_MIN: '0.05'
 
       // #11b: two full verifies of one checkout (owners a and b, both in their shell's own process).
       const fullF = path.join(dir, '.studio', 'verify-running', 'full.json');
-      const first = spawn(process.execPath, ['scripts/run-gates.mjs'], { cwd: dir, env: { ...process.env, ...base, STUDIO_LOCK_OWNER: 'loop-a' }, stdio: 'ignore' });
+      const first = spawn(process.execPath, ['scripts/run-gates.mjs'], { windowsHide: true, cwd: dir, env: { ...process.env, ...base, STUDIO_LOCK_OWNER: 'loop-a' }, stdio: 'ignore' });
       kids.push(first);
       const upA = until(() => readJson(fullF)?.owner === 'loop-a', 15000 * SLOW);
       const second = verify({ STUDIO_LOCK_OWNER: 'loop-b' });

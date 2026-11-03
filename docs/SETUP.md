@@ -27,6 +27,7 @@ node harness/route.mjs --role builder --dry-run
 ## 4. Zero-Token War Room HUB (`hub/server.mjs`)
 
 ```bash
+npm run studio:boot     # hub + supervisor + status card in one go (docs/RUN-UNATTENDED.md); npm.cmd on Windows
 node hub/server.mjs
 # Open http://localhost:3847 (or http://localhost:4177)
 ```

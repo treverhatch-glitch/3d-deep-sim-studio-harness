@@ -29,7 +29,7 @@ import { gateEnv } from './gate-env.mjs';
 
 export const WHOLE_TITLE = 'Whole-game check red';
 export const WHOLE_RE = /^Whole-game check red\b/i;
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const stateFile = (root = mainRoot()) => path.join(root, '.studio', 'whole-game.json');
 const short = (sha) => String(sha || '').slice(0, 8);
 
@@ -112,7 +112,7 @@ export async function runWhole({ sha = null, root = mainRoot(), env = process.en
   const cmd = env.STUDIO_WHOLE_CMD || 'node scripts/run-gates.mjs --all --full --required-only';
   const runEnv = { ...gateEnv(env), STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: 'whole-game', STUDIO_COMPACT_OUTPUT: 'on', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '' };
   const { withGateSlot } = await import('./merge-lane.mjs');
-  const exec = (c) => withGateSlot(root, 'whole-game', () => spawnSync(c, { cwd: copy.dir, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 256 * 1024 * 1024, timeout: Number(env.STUDIO_WHOLE_TIMEOUT_MS || 3600000) }), { env });
+  const exec = (c) => withGateSlot(root, 'whole-game', () => spawnSync(c, { windowsHide: true, cwd: copy.dir, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 256 * 1024 * 1024, timeout: Number(env.STUDIO_WHOLE_TIMEOUT_MS || 3600000) }), { env });
   const started = Date.now();
   const first = exec(cmd);
   const out1 = `${first.stdout || ''}${first.stderr || ''}`;
@@ -165,7 +165,7 @@ export async function runWhole({ sha = null, root = mainRoot(), env = process.en
 export function wholeKick({ root = mainRoot(), env = process.env } = {}) {
   const due = wholeDue({ root, env });
   if (!due) return null;
-  const child = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'whole-game.mjs'), '--run', '--sha', due.sha], { cwd: root, detached: true, stdio: 'ignore', env: { ...env, STUDIO_MAIN_ROOT: root } });
+  const child = spawn(process.execPath, [path.join(REPO_ROOT, 'harness', 'whole-game.mjs'), '--run', '--sha', due.sha], { windowsHide: true, cwd: root, detached: true, stdio: 'ignore', env: { ...env, STUDIO_MAIN_ROOT: root } });
   child.unref();
   writeWhole({ running: { pid: child.pid, sha: due.sha, at: new Date().toISOString() } }, root);
   return { kind: 'whole', msg: `started the whole-game check on ${short(due.sha)}` };

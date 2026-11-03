@@ -35,7 +35,7 @@ import { readConsent, describeConsent } from './data-consent.mjs';
 const OUT_DIR = path.join(STUDIO_STATE_DIR, 'exports');
 
 function numstat(hash) {
-  const r = spawnSync('git', ['show', '--numstat', '--format=', hash], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const r = spawnSync('git', ['show', '--numstat', '--format=', hash], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   if (r.status !== 0) return { insertions: 0, deletions: 0 };
   return r.stdout.split('\n').filter(Boolean).reduce((a, l) => {
     const [ins, del] = l.split('\t');
@@ -44,7 +44,7 @@ function numstat(hash) {
 }
 
 function patch(hash) {
-  const r = spawnSync('git', ['show', '--format=', '--patch', hash, '--', '.', ':(exclude)studio', ':(exclude).studio', ':(exclude)package-lock.json'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', ['show', '--format=', '--patch', hash, '--', '.', ':(exclude)studio', ':(exclude).studio', ':(exclude)package-lock.json'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return r.status === 0 ? r.stdout.slice(0, 20000) : '';
 }
 

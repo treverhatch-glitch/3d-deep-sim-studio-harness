@@ -5,6 +5,25 @@ started again until someone asked. The supervisor fixes that.
 
 ## Start it
 
+After a restart, one command brings the studio up (2.73.1, B-69):
+
+```bash
+npm run studio:boot                    # Windows PowerShell: npm.cmd run studio:boot
+npm run studio:boot -- --check         # report only: nothing is cleared or started
+npm run studio:boot -- --until 46h     # --until, --window, --budget, --lanes go to the supervisor it starts
+npm run studio:boot -- --shortcut      # also put a "Studio boot" file on the Desktop (Windows: a .cmd running npm.cmd)
+```
+
+It checks node, npm (on Windows it says to type `npm.cmd` when the execution policy blocks `npm.ps1`) and `.env` (no
+session identity in it, a War Room token for the buttons); clears lock and status files whose process is gone
+(`train.lock`, `land.lock`, `unity-train.lock`, `verify-running/full.json`, `train/daemon.json`, a "running"
+`supervisor.json`), one `boot.stale_cleared` event each, never a lane copy or anyone's work; starts the hub and then
+the supervisor, each only when it isn't running already, detached and hidden, with output in `.studio/logs/`; the train
+daemon runs inside the supervisor's pass. Then one card: crew sessions, the train, halts, what needs you, outside agents
+seen lately, lane copies and leftover folders in `.lanes/`, and the War Room address (the link with your token is in
+`.studio/logs/hub.log`). Chat-based orchestrators outside the harness are not restarted. The hub and supervisor never
+get the shell's `STUDIO_LOCK_OWNER`, `STUDIO_ROLE`, `STUDIO_AGENT` or `STUDIO_MAIN_ROOT`.
+
 ```bash
 npm run studio:start -- --until 23:00                 # until 23:00 (or --until 8h); runs on its own
 npm run studio:start -- --until 23:00 --foreground    # stays attached to this terminal instead
@@ -14,7 +33,15 @@ npm run studio:start -- --until 8h --lanes auto       # one builder per lane, in
 npm run studio:start -- --install --window 09:00-23:00   # come back after a restart or login
 npm run studio:stop                                   # agents finish their task; nothing new starts
 npm run studio:status
+npm run studio:extend -- --until 2026-11-05T11:52:00Z --by <your name>   # move a running supervisor's end time
 ```
+
+**Changing the end time (2.73.1).** `npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name>
+[--why "…"]` moves a running supervisor's `--until` without a restart (`+8h` and `8h` count from now; `none` removes
+the end time). It writes `.studio/supervisor-extend.json`; the next pass (within a minute) applies it and logs a
+`supervisor.extended` event (from, to, who). Who may: a person; an agent the owner's delegation covers for
+`supervisor-extend`; a Producer or Director session or an outside agent on a person's direct permission
+(`--by <the person> --permission "<their words or a link>"`); never a worker session or a worker's name.
 
 Every minute it keeps the War Room hub up (and logs how long it was down), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
@@ -57,10 +84,28 @@ Scheduler (Windows); `--uninstall` removes it.
   in `.env` (off by default). A session someone stopped or paused (`agent stop`, Pause, Stop all)
   never counts: the stop is written down before the kill, so its end reads "stopped by <name>"
   (`meta.stoppedBy`), not "exit 1", and its hand-back says "a stop, not a failure" (no park, breaker or tier-up).
+  2.73.1 (B-66): sessions that end within `STUDIO_HALT_SAME_DEATH_SEC` (5; 0 = off) seconds of each other count as ONE
+  end for this rule (one outside cause took them together). Only sessions that had run a minute or more are merged,
+  and never exit 126, 127 or 9009 (the tool itself can't run): sessions that crash at launch each count,
+  and an end the launcher caused itself (the stall
+  watchdog, the idle exit, the task's budget) never counts, like a stop. Each `agent.session.end` records how the
+  process ended in `meta.exitCause` (`kind`: exit, signal, stall, idle, budget, stopped, spawn-error; with `code`,
+  `signal`, `at` and `ranSec`), and `supervisor.halted` lists the causes (`meta.causes`). On Windows a kill from outside
+  (taskkill /F) reads as exit 1, since Windows has no signals. A halt stops new sessions only: merge trains for lanes
+  already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
+- **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
+  `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
+  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.73.1 (B-68): a session
+  waiting on its own verify (`npm run verify`, its `.studio/verify-running/<agent>.json` or a `full*.json` it owns,
+  with a live process and no result yet) or on its own background `task done` (`.studio/done-running/`) is busy, not
+  stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most
+  `STUDIO_STALL_VERIFY_MAX_MIN` (60) minutes. A verify counts for at most that long from its start (a done for
+  `STUDIO_DONE_RUNNING_MAX_MIN`, 90), so a hung verify can't keep a session alive. `node harness/stall.mjs check`
+  shows "waiting on its own verify" for such a session.
 - **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
   is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
   and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,

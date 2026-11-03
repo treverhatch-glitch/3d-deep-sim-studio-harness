@@ -31,7 +31,7 @@ export async function selftest272D({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*)$/.test(k)) delete e[k]; return e; };
-  const g = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: gEnv() });
+  const g = (...args) => spawnSync('git', args, { windowsHide: true, cwd: dir, encoding: 'utf8', env: gEnv() });
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_LOCK_OWNER: '', STUDIO_ROLE: '', STUDIO_AGENT: '',

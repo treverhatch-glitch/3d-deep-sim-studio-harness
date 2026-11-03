@@ -176,7 +176,7 @@ export async function runUnityGate({ task = null, branch = null, branches = null
   if (many) br = many.length === 1 ? many[0] : null;
   if (br && !validBranch(br)) return finish({ status: 'error', ok: false, code: null, why: `"${br}" is not a branch name the land command can take (letters, digits, . _ / -)` });
   if (!many && !br && /\{branch\}/.test(cfg.land)) {
-    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder && fs.existsSync(folder) ? folder : cwd, encoding: 'utf8' });
+    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { windowsHide: true, cwd: folder && fs.existsSync(folder) ? folder : cwd, encoding: 'utf8' });
     const here = r.status === 0 ? r.stdout.trim() : '';
     return finish({ status: 'error', ok: false, code: null, why: `the land command needs {branch} and no Unity branch is known${task ? ` for ${task}` : ''}: ${task ? `node harness/unity-gate.mjs branch ${task} <branch> records it (or add the task with --branch <branch>)` : 'pass --branch <name>'}. The Unity folder's checked-out branch${here && here !== 'HEAD' ? ` (${here})` : ''} is not used: landing it could merge the target into itself` });
   }

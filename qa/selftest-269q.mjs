@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest269Q({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const href = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const parse = (r) => { try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return {}; } };
@@ -111,7 +111,7 @@ console.log(JSON.stringify({ res, w, pts: [karyPoints(0, 9, 3), karyPoints(0, 5,
     const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
     for (const [rel, text] of Object.entries(files)) write(ld, rel, text);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     const q = run(ld, `node harness/task.mjs done ${id} --agent ${agent} --train`, as);
     return { id, agent, ok: st.status === 0 && c.status === 0, log: `${out(st)}\n${out(c)}\n${out(q)}` };
   };

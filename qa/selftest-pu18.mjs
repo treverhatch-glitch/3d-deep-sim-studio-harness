@@ -175,7 +175,7 @@ export async function selftestPU18({ dir, run, report, tmpRoot }) {
   const g = path.join(tmpRoot, `secrets-pu18-${process.pid}-git`);
   fs.rmSync(g, { recursive: true, force: true });
   fs.mkdirSync(g, { recursive: true });
-  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: g, encoding: 'utf8' });
+  const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd: g, encoding: 'utf8' });
   git('init', '-q');
   fs.writeFileSync(path.join(g, 'readme.txt'), 'hello\n');
   git('add', '-A');

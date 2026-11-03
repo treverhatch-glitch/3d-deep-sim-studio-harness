@@ -90,7 +90,7 @@ export async function selftest2582J({ dir, report }) {
 
   // --only / --repeat: checked before Playwright loads, so these need no browser.
   {
-    const hc = (...args) => spawnSync(process.execPath, ['qa/hud-check.mjs', ...args], { cwd: dir, encoding: 'utf8', timeout: 120000, env: { ...process.env, PLAYWRIGHT_CHROMIUM: path.join(dir, 'no-such-chromium') } });
+    const hc = (...args) => spawnSync(process.execPath, ['qa/hud-check.mjs', ...args], { windowsHide: true, cwd: dir, encoding: 'utf8', timeout: 120000, env: { ...process.env, PLAYWRIGHT_CHROMIUM: path.join(dir, 'no-such-chromium') } });
     const noOnly = hc('--repeat', '3');
     const wrong = hc('--only', 'everything');
     const notNum = hc('--only', 'stop-pause', '--repeat', 'lots');

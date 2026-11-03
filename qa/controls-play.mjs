@@ -65,7 +65,7 @@ async function freePort() {
 function stopTree(child) {
   if (!child || child.exitCode !== null) return;
   try {
-    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     else process.kill(-child.pid, 'SIGTERM');
   } catch {}
 }
@@ -105,7 +105,7 @@ export async function controlsPlay({ root = REPO_ROOT, game = null, url = null, 
     const port = await freePort();
     const cmd = s.command.replaceAll('{port}', String(port));
     target = (s.url || 'http://127.0.0.1:{port}/').replaceAll('{port}', String(port));
-    server = spawn(cmd, { cwd: path.join(root, s.cwd || game.root), shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BROWSER: 'none', PORT: String(port) } });
+    server = spawn(cmd, { windowsHide: true, cwd: path.join(root, s.cwd || game.root), shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BROWSER: 'none', PORT: String(port) } });
     const keep = (d) => { serverLog.push(String(d)); if (serverLog.length > 40) serverLog.shift(); };
     server.stdout.on('data', keep);
     server.stderr.on('data', keep);

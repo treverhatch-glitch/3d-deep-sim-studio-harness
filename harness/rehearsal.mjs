@@ -67,7 +67,7 @@ export function rehearse({ tasks = 1, env = process.env, log = console.log } = {
     stats.started++;
     log(`[rehearsal] ${agent} takes ${task.id}: ${task.title}`);
     const r = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', agent, '--task', task.id, '--model', 'rehearsal'], {
-      cwd: REPO_ROOT,
+      windowsHide: true, cwd: REPO_ROOT,
       encoding: 'utf8',
       env: { ...env, STUDIO_REHEARSAL: '1', STUDIO_HEARTBEAT_SEC: env.STUDIO_HEARTBEAT_SEC || '1' },
       timeout: 120000,

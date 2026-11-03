@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest243({ dir, run, report, tmpRoot }) {
   const u = (rel) => JSON.stringify(pathToFileURL(path.join(dir, rel)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-243.jsonl'), STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off' };
 
   // 1. Secrets: "AKIA" + 16 capitals inside a run of base64 is encoded data; the same standing alone is a key.
@@ -73,7 +73,7 @@ export async function selftest243({ dir, run, report, tmpRoot }) {
   const patch = (out(ex).match(/patch: (studio\/game\/export-[\w-]+\.patch)/) || [])[1];
   const text = patch ? fs.readFileSync(path.join(dir, patch), 'utf8') : '';
   g(src, 'switch', '-q', '-c', 'studio/export', origin?.sha || 'develop');
-  const check = patch ? spawnSync('git', ['apply', '--check', path.join(dir, patch)], { cwd: src, encoding: 'utf8' }) : { status: 1 };
+  const check = patch ? spawnSync('git', ['apply', '--check', path.join(dir, patch)], { windowsHide: true, cwd: src, encoding: 'utf8' }) : { status: 1 };
   report('2.43.0: onboard --export writes the studio\'s committed changes to the adopted game as one patch, relative to the game\'s own repo and without studio.gates.json, that applies on a branch from the adopted commit', ex.status === 0 && /1 file\(s\) changed in game\/my-game/.test(out(ex)) && /a\/src\/main\.ts/.test(text) && !/studio\.gates\.json/.test(text) && check.status === 0 && /git switch -c studio\/export-/.test(out(ex)), `${out(ex)}\n${text}\n${check.stderr || ''}`);
 
   // 4. Pre-production for an existing game starts from its art and its build; an exact duplicate add returns the task.

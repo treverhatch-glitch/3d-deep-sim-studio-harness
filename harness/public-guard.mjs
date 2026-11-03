@@ -28,7 +28,7 @@ const FILES = [
 ];
 const LFS_HOOKS = ['post-checkout', 'post-commit', 'post-merge'];
 const lfsHook = (h) => `#!/bin/sh\n# Git LFS: kept here because core.hooksPath points at .githooks (the public guard's hooks folder).\ncommand -v git-lfs >/dev/null 2>&1 || exit 0\ngit lfs ${h} "$@"\n`;
-const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8' });
+const git = (cwd, ...a) => spawnSync('git', a, { windowsHide: true, cwd, encoding: 'utf8' });
 
 export function status(repo) {
   const files = FILES.map(([from, to]) => {
@@ -79,7 +79,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (cmd === 'check') {
     const g = path.join(repo, 'tools', 'public-guard', 'check.mjs');
-    const r = spawnSync(process.execPath, [fs.existsSync(g) ? g : path.join(SRC, 'check.mjs')], { cwd: repo, stdio: 'inherit' });
+    const r = spawnSync(process.execPath, [fs.existsSync(g) ? g : path.join(SRC, 'check.mjs')], { windowsHide: true, cwd: repo, stdio: 'inherit' });
     process.exit(r.status ?? 1);
   }
   console.error('usage: npm run public-guard -- install|check|status <path to a game repo>');

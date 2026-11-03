@@ -10,6 +10,8 @@
  *   npm run studio:status
  *   npm run studio:resume -- --by <your name> [--why "…"]   clear a halt ("Fixed it: try again" without the War Room)
  *     [--permission "<the person's words or a link>"]        2.59.1: a Producer/Director or an outside agent, for a person
+ *   npm run studio:extend -- --until <time|+8h|none> --by <your name> [--why "…"] [--permission "…"]
+ *                                                        2.73.1: move a running supervisor's end time, no restart
  *
  * Every minute it:
  *   1. keeps the War Room hub up (restarts it, and logs how long it was down);
@@ -96,6 +98,50 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
 }
 /**
+ * 2.73.1: `npm run studio:extend -- --until <time|+8h|none> --by <name> [--why "…"] [--permission "…"]` moves a running
+ * supervisor's end time (its --until) without a restart: it writes .studio/supervisor-extend.json, which the next pass
+ * reads (applyExtend: a supervisor.extended event). "none" removes the end time. Who may: the decider rules
+ * (harness/decider.mjs, action 'supervisor-extend'): a person; an agent the owner's delegation covers for
+ * 'supervisor-extend' (harness/delegation.mjs delegationFor); a Producer or Director session or an outside agent on a
+ * person's direct permission (--permission); never a worker session or a worker's name.
+ */
+export const EXTEND_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-extend.json');
+export async function extendCli({ until = null, by = null, why = null, permission = null, env = process.env, now = Date.now() } = {}) {
+  const raw = String(until || '').trim();
+  if (!raw) return { code: 1, text: 'Until when? npm run studio:extend -- --until <23:00 | +8h | 2026-11-05T11:52:00Z | none> --by <your name> [--why "…"]' };
+  const none = /^(none|off|never)$/i.test(raw);
+  const t = none ? null : parseUntil(raw, now);
+  if (!none && !Number.isFinite(t)) return { code: 1, text: `Not changed: "${raw}" isn't a time. Use 23:00, +8h, 90m, an ISO time (2026-11-05T11:52:00Z) or none.` };
+  if (!none && t <= now) return { code: 1, text: `Not changed: ${new Date(t).toISOString()} has passed. To stop now: npm run studio:stop.` };
+  const { deciderCheck } = await import('./decider.mjs');
+  const d = await deciderCheck({ by, permission, action: 'supervisor-extend', env, what: "change the supervisor's end time" });
+  if (!d.ok) return { code: 1, text: `Not changed: ${d.why.replace(/^Refused: /, '')}` };
+  const s = readStatus();
+  if (!s || s.status !== 'running' || !alive(s)) return { code: 1, text: `Not changed: no supervisor is running${s?.status === 'running' ? ' (its process is gone)' : ''}. Start one with the end time you want: npm run studio:start -- --until ${raw}` };
+  const from = s.opts?.until || null;
+  const rec = { until: none ? null : new Date(t).toISOString(), from, by: String(d.by).slice(0, 60), why: String(why || '').trim().slice(0, 300), via: d.via, at: new Date(now).toISOString(), ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: String(d.permission || '').slice(0, 300) } : {}) };
+  fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
+  fs.writeFileSync(EXTEND_FILE, `${JSON.stringify(rec, null, 2)}\n`);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'supervisor-extend', subject: 'supervisor', by: rec.by, as: dm.asOf(d), why: rec.why || 'new end time', evidence: `until ${from || 'none'} -> ${rec.until || 'none'}`, undo: from ? { kind: 'supervisor-extend', text: `npm run studio:extend -- --until ${from} --by <name>` } : null }); } catch {}
+  emitEvent({ type: 'supervisor.extend_asked', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'supervisor', msg: `${rec.by} asked the supervisor to run ${rec.until ? `until ${rec.until}` : 'with no end time'} (was ${from || 'no end time'})${d.via !== 'person' ? ` (recorded by ${d.recordedBy}, ${d.via})` : ''}${rec.why ? `: ${rec.why}` : ''}`.slice(0, 600), meta: rec });
+  return { code: 0, text: `The supervisor runs ${rec.until ? `until ${rec.until} (${new Date(t).toString().slice(0, 21)} here)` : 'with no end time'} from its next pass (within ${Math.round(LOOP_MS / 1000)} s); it was ${from || 'no end time'}. Its supervisor.extended event names ${rec.by}.` };
+}
+/** The loop's half: a waiting studio:extend request moves opts.until (and the status record's). Returns it or null. */
+export function applyExtend(opts, state, now = Date.now()) {
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(EXTEND_FILE, 'utf8')); } catch { return null; }
+  fs.rmSync(EXTEND_FILE, { force: true });
+  const t = rec?.until === null ? null : Date.parse(rec?.until || '');
+  if (!rec || (rec.until !== null && !Number.isFinite(t))) return null;
+  const from = opts.until ? new Date(opts.until).toISOString() : null;
+  opts.until = t;
+  state.opts = { ...(state.opts || {}), until: t ? new Date(t).toISOString() : null };
+  state.extended = { at: new Date(now).toISOString(), by: rec.by || null, from, to: state.opts.until };
+  emitEvent({ type: 'supervisor.extended', agent: 'supervisor', to: 'producer', msg: `Supervisor end time ${from || 'none'} -> ${state.opts.until || 'none'} (${rec.by || 'someone'} asked${rec.why ? `: ${rec.why}` : ''})`.slice(0, 600), meta: { by: rec.by || null, why: rec.why || null, via: rec.via || null, recordedBy: rec.recordedBy || null, from, to: state.opts.until } });
+  return state.extended;
+}
+
+/**
  * 2.67.0: a halt left open in the event log by a supervisor that is no longer running (it crashed, or the PC
  * restarted) kept the scorecard's "still waiting" counting for days, and studio:resume said "nothing to clear". Once
  * the halt is older than STUDIO_HALT_STALE_H (24) hours, studio:resume (the same people as above: a person, or a
@@ -118,10 +164,10 @@ async function clearStaleHalt({ who, why, permRec = {}, env = process.env, now =
 // names a reused number reads as not running.
 const alive = (st) => Boolean(st?.pid) && pidAlive(st.pid, st.identity, { eperm: false });
 
-/** "23:00" (today, or tomorrow if past), "8h", "90m", or an ISO time. */
+/** "23:00" (today, or tomorrow if past), "8h", "90m" (2.73.1: or "+8h"; from now), or an ISO time. */
 export function parseUntil(s, now = Date.now()) {
   if (!s) return null;
-  const rel = String(s).match(/^(\d+(?:\.\d+)?)\s*(h|m|s)$/i);
+  const rel = String(s).trim().match(/^\+?\s*(\d+(?:\.\d+)?)\s*(h|m|s)$/i);
   if (rel) return now + Number(rel[1]) * { h: 3600000, m: 60000, s: 1000 }[rel[2].toLowerCase()];
   const hm = String(s).match(/^(?:tonight\s+|today\s+)?(\d{1,2}):(\d{2})$/i);
   if (hm) {
@@ -153,19 +199,27 @@ async function checkBadEnds(opts, state, now) {
   // PU-19: a session that stopped at its usage limit waits for the reset (its tool is marked out); it isn't a bad end.
   // 2.58.3 (N1): nor is a session a person (or the Producer) stopped or paused: killing it ends it with exit 1 on
   // Windows (taskkill /F) and by a signal elsewhere; the launcher records who stopped it (meta.stoppedBy).
-  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy);
-  const last2 = mine.slice(-2);
+  // 2.73.1 (B-66): nor one its own launcher ended (meta.exitCause: the stall watchdog, the idle exit, the task's budget):
+  // like the watchdog's stop (stoppedBy) it ends with exit 1 or a signal, and those have their own handling (the breaker,
+  // the crew watchdog). And sessions that die within STUDIO_HALT_SAME_DEATH_SEC (5) of each other count as ONE end: one
+  // outside cause (a killed process tree, a crash of the machine's shell) took them together.
+  const mine = readRecentEvents(5000).filter((e) => e.type === 'agent.session.end' && Date.parse(e.ts) >= (state.haltCheckFrom || state.startedAt) && (state.names || []).includes(e.agent) && !e.meta?.usageLimit && !e.meta?.stoppedBy && !LAUNCHER_KILLS.has(e.meta?.exitCause?.kind));
+  const ends = groupSameDeaths(mine);
+  const last2 = ends.slice(-2).map((g) => g[g.length - 1]);
   if (last2.length === 2 && last2.every((e) => e.meta?.code && e.meta.code === last2[0].meta.code && (e.meta?.tool || '') === (last2[0].meta?.tool || ''))) {
     const code = last2[0].meta.code;
+    const groups = ends.slice(-2);
     // Name the program, not "custom" (test #2): the first word of STUDIO_<ROLE>_CMD or STUDIO_AGENT_CMD.
     const metaTool = last2[0].meta?.tool || 'the agent tool';
     const roleOf = String(last2[0].meta?.role || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_');
     const tool = metaTool === 'custom' ? String(process.env[`STUDIO_${roleOf}_CMD`] || process.env.STUDIO_AGENT_CMD || 'the custom command').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') : metaTool;
     // A program that isn't on the PATH: exit 127 (9009, or 1 under cmd.exe on Windows), or one `which` can't find.
-    const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' }).status !== 0);
+    const missing = code === 127 || code === 9009 || (/^[\w.-]+$/.test(tool) && spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { windowsHide: true, encoding: 'utf8' }).status !== 0);
     const hint = missing ? `${tool} wasn't found: the supervisor's PATH doesn't include it (reinstall with npm run studio:start -- --install from a terminal where \`${tool}\` works)` : code === 126 ? `${tool} isn't executable` : `check npm run agent -- logs ${last2[1].agent}`;
-    state.halted = { at: new Date(now).toISOString(), code, tool, why: `two sessions in a row ended with exit ${code} (${last2.map((e) => e.agent).join(', ')}): ${hint}`, ...(metaTool === 'custom' ? { custom: true } : {}), ...(missing ? { missing: true } : {}) };
-    emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}` });
+    const names = groups.map((g) => (g.length > 1 ? `${g.map((e) => e.agent).join(' + ')} together` : g[0].agent));
+    const causes = groups.flat().map((e) => ({ agent: e.agent, ...(e.meta?.exitCause ? { kind: e.meta.exitCause.kind, signal: e.meta.exitCause.signal || null } : { kind: 'unknown' }), code: e.meta?.code ?? null }));
+    state.halted = { at: new Date(now).toISOString(), code, tool, scope: 'builders', why: `two sessions in a row ended with exit ${code} (${names.join(', ')}): ${hint}`, causes, ...(metaTool === 'custom' ? { custom: true } : {}), ...(missing ? { missing: true } : {}) };
+    emitEvent({ type: 'supervisor.halted', agent: 'supervisor', to: 'human', status: 'blocked', msg: `Supervisor stopped starting agents: ${state.halted.why}. A halt stops new sessions only: the train daemon still lands lanes already queued.`, meta: { code, tool, scope: 'builders', causes, sameDeathSec: sameDeathSec() } });
     // 2.65.0: a halt whose cause is on the self-triage list (harness/self-triage.json: the tool isn't on PATH and another
     // tool is) is fixed and cleared as studio:resume would, by "self-triage"; the next pass resumes. Unknown causes,
     // and a cause already fixed once in the window, wait for a person as before.
@@ -179,6 +233,31 @@ async function checkBadEnds(opts, state, now) {
     return true;
   }
   return false;
+}
+
+/** 2.73.1 (B-66): ends the launcher caused itself (exitCause kinds), never a sign the tool is broken. */
+const LAUNCHER_KILLS = new Set(['stall', 'idle', 'budget', 'stopped']);
+export const sameDeathSec = (env = process.env) => { const v = String(env.STUDIO_HALT_SAME_DEATH_SEC ?? '').trim(); const n = Number(v); return v !== '' && Number.isFinite(n) && n >= 0 ? n : 5; };
+/**
+ * 2.73.1 (B-66): session ends (in order) grouped so that ends within STUDIO_HALT_SAME_DEATH_SEC of the group's first are
+ * one group: [[end, …], …]. The time is when the process exited (meta.exitCause.at), else the event's. 0 = no grouping.
+ * Only ends that record how long the process ran (meta.exitCause.ranSec) and had run at least SAME_DEATH_MIN_RUN_SEC
+ * (60) are merged: sessions that crash at launch, together or one after another, are each evidence the tool is broken.
+ * Nor is an exit that says the tool itself can't run (127 or 9009: not found; 126: not executable).
+ */
+const TOOL_MISSING = new Set([126, 127, 9009]);
+const SAME_DEATH_MIN_RUN_SEC = 60;
+const mergeable = (e) => !TOOL_MISSING.has(Number(e.meta?.code)) && Number(e.meta?.exitCause?.ranSec) >= SAME_DEATH_MIN_RUN_SEC;
+export function groupSameDeaths(ends, env = process.env) {
+  const win = sameDeathSec(env) * 1000;
+  const at = (e) => { const t = Date.parse(e.meta?.exitCause?.at || ''); return Number.isFinite(t) ? t : Date.parse(e.ts); };
+  const out = [];
+  for (const e of ends) {
+    const g = out[out.length - 1];
+    if (g && win > 0 && mergeable(e) && mergeable(g[0]) && Math.abs(at(e) - at(g[0])) <= win) g.push(e);
+    else out.push([e]);
+  }
+  return out;
 }
 
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
@@ -200,6 +279,8 @@ export async function supervise(opts, state, now = Date.now()) {
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
   if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  // 2.73.1: `npm run studio:extend` moved the end time (before the time-is-up check, so a late extend still counts).
+  if (!opts.watcher) { try { applyExtend(opts, state, now); } catch { /* the old end time stands */ } }
   // 2.71.0 (y): the owner's reports to a webhook (harness/report-post.mjs): the digest once a day at STUDIO_REPORT_HOUR,
   // the what's-next board when the queue changed a lot; before the halt and window checks, so a halted studio still reports.
   if (!opts.watcher) {
@@ -472,7 +553,8 @@ export async function supervise(opts, state, now = Date.now()) {
 
 /**
  * 2.69.0 (r): one train-daemon pass for the supervisor loop: what it decided goes in state.train (studio:status).
- * A halt, a wind-down (supervise's result) and "Stop all" keep it from starting a train. Never throws.
+ * A wind-down (supervise's result), "Stop all" and drain keep it from starting a train. 2.73.1 (B-66): the supervisor's
+ * own halt (scope 'builders') stops new sessions only; a train for lanes already queued still starts. Never throws.
  */
 export async function trainDaemonTick(state, r = {}, opts = {}) {
   try {
@@ -565,7 +647,7 @@ async function main(argv) {
       if (!downSince) downSince = Date.now();
       if (!hub || hub.exitCode !== null) {
         const log = fs.openSync(path.join(STUDIO_STATE_DIR, 'hub.log'), 'a');
-        hub = spawn(process.execPath, [path.join(REPO_ROOT, 'hub', 'server.mjs')], { cwd: REPO_ROOT, stdio: ['ignore', log, log], env: process.env });
+        hub = spawn(process.execPath, [path.join(REPO_ROOT, 'hub', 'server.mjs')], { windowsHide: true, cwd: REPO_ROOT, stdio: ['ignore', log, log], env: process.env });
       }
     } else if (downSince) {
       if (Date.now() - downSince > LOOP_MS) {
@@ -603,7 +685,7 @@ async function main(argv) {
  */
 export function loginNode() {
   if (process.env.STUDIO_NODE) return process.env.STUDIO_NODE;
-  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { encoding: 'utf8' });
+  const r = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { windowsHide: true, encoding: 'utf8' });
   const found = (r.stdout || '').split(/\r?\n/).map((x) => x.trim()).find(Boolean);
   return found || process.execPath;
 }
@@ -620,43 +702,43 @@ function install(argv, remove = false) {
   const node = loginNode();
   // The agent tool must be findable from the PATH the login job gets; say so now rather than loop on exit 127.
   const tool = process.env.STUDIO_AGENT_TOOL || 'claude';
-  const has = spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { encoding: 'utf8' });
+  const has = spawnSync(process.platform === 'win32' ? 'where' : 'which', [tool], { windowsHide: true, encoding: 'utf8' });
   const warn = has.status === 0 ? '' : `\nWarning: \`${tool}\` isn't on this terminal's PATH, so the supervisor won't find it either. Run this from a terminal where \`${tool} --version\` works.`;
   if (process.platform === 'darwin') {
     const label = `com.studio.${slug}`;
     const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
     if (remove) {
-      spawnSync('launchctl', ['unload', '-w', plist]);
+      spawnSync('launchctl', ['unload', '-w', plist], { windowsHide: true });
       fs.rmSync(plist, { force: true });
       return `Removed ${plist}`;
     }
     const xml = launchdPlist({ label, node, args });
     fs.mkdirSync(path.dirname(plist), { recursive: true });
-    spawnSync('launchctl', ['unload', '-w', plist]);
+    spawnSync('launchctl', ['unload', '-w', plist], { windowsHide: true });
     fs.writeFileSync(plist, xml);
-    spawnSync('launchctl', ['load', '-w', plist]);
+    spawnSync('launchctl', ['load', '-w', plist], { windowsHide: true });
     return `Installed ${plist} (node ${node}, this terminal's PATH and HOME): the supervisor starts at login and after a restart. Remove: npm run studio:start -- --uninstall${warn}`;
   }
   if (process.platform === 'win32') {
     const name = `Studio ${slug}`;
     if (remove) {
-      spawnSync('schtasks', ['/Delete', '/F', '/TN', name]);
+      spawnSync('schtasks', ['/Delete', '/F', '/TN', name], { windowsHide: true });
       return `Removed the scheduled task "${name}"`;
     }
     const cmd = [node, ...args].map((a) => `"${a}"`).join(' ');
-    const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { encoding: 'utf8' });
+    const r = spawnSync('schtasks', ['/Create', '/F', '/SC', 'ONLOGON', '/TN', name, '/TR', cmd], { windowsHide: true, encoding: 'utf8' });
     return r.status === 0 ? `Installed the scheduled task "${name}": the supervisor starts when you log in. Remove: npm run studio:start -- --uninstall${warn}` : `Task Scheduler said: ${r.stderr || r.stdout}`;
   }
   const unit = path.join(os.homedir(), '.config', 'systemd', 'user', `studio-${slug}.service`);
   if (remove) {
-    spawnSync('systemctl', ['--user', 'disable', '--now', `studio-${slug}.service`]);
+    spawnSync('systemctl', ['--user', 'disable', '--now', `studio-${slug}.service`], { windowsHide: true });
     fs.rmSync(unit, { force: true });
     return `Removed ${unit}`;
   }
   fs.mkdirSync(path.dirname(unit), { recursive: true });
   fs.writeFileSync(unit, `[Unit]\nDescription=Game studio supervisor (${slug})\n\n[Service]\nWorkingDirectory=${REPO_ROOT}\nEnvironment="PATH=${process.env.PATH || ''}" "HOME=${process.env.HOME || os.homedir()}"\nExecStart=${[node, ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\nRestart=on-failure\nRestartSec=60\n\n[Install]\nWantedBy=default.target\n`);
-  spawnSync('systemctl', ['--user', 'daemon-reload']);
-  spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`]);
+  spawnSync('systemctl', ['--user', 'daemon-reload'], { windowsHide: true });
+  spawnSync('systemctl', ['--user', 'enable', '--now', `studio-${slug}.service`], { windowsHide: true });
   return `Installed ${unit} (systemd --user, this terminal's PATH): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall${warn}`;
 }
 
@@ -669,7 +751,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       '  npm run studio:start -- --install | --uninstall      start it at login, or stop doing so',
       '  npm run studio:stop                                  stop the supervisor (agents finish their task)',
       '  npm run studio:status',
-      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt'].join('\n'));
+      '  npm run studio:resume -- --by <your name> [--why "…"]   clear a halt',
+      '  npm run studio:extend -- --until <23:00 | +8h | ISO time | none> --by <your name> [--why "…"]   move a running supervisor\'s end time'].join('\n'));
     process.exit(0);
   }
   if (argv[0] === 'stop') {
@@ -711,9 +794,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.code ? console.error : console.log)(r.text);
     process.exit(r.code);
   }
+  if (argv[0] === 'extend') {
+    const flag = (k) => (argv.includes(`--${k}`) ? argv[argv.indexOf(`--${k}`) + 1] : null);
+    const r = await extendCli({ until: flag('until'), by: flag('by'), why: flag('why'), permission: flag('permission') });
+    (r.code ? console.error : console.log)(r.text);
+    process.exit(r.code);
+  }
   if (argv[0] === 'status') {
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}` : 'The supervisor has not run here yet: npm run studio:start');
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

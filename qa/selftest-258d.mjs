@@ -47,7 +47,7 @@ export async function selftest258D({ dir, run, report, tmpRoot }) {
   const board = () => JSON.parse(run(dir, 'node harness/task.mjs list').stdout || '{}');
   const addTask = (title, role = 'builder') => JSON.parse(run(dir, `node harness/task.mjs add "${title}" --role ${role}`, { STUDIO_PRODUCER_NAME: 'producer' }).stdout || '{}').id;
   const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === 'win32' ? 2.5 : 1);
-  const waitFor = (fn, ms = 20000 * SLOW) => { const t = Date.now(); while (!fn() && Date.now() - t < ms) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)']); return fn(); };
+  const waitFor = (fn, ms = 20000 * SLOW) => { const t = Date.now(); while (!fn() && Date.now() - t < ms) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},300)'], { windowsHide: true }); return fn(); };
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
   // ---------- PU-36 (P-049): planted text only inside the marked block ----------
@@ -154,7 +154,7 @@ console.log(JSON.stringify(await fillAgents()));`, aenv);
     run(dir, 'git -c user.name=selftest -c user.email=selftest@example.invalid commit -q -m base');
   }
   fs.mkdirSync(path.join(dir, 'docs/stall-old'), { recursive: true });
-  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},180000)'], { stdio: 'ignore' });
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(()=>{},180000)'], { windowsHide: true, stdio: 'ignore' });
   const t1 = addTask('Stalled agent probe one');
   const t2 = addTask('Stalled agent probe two');
   run(dir, `node harness/task.mjs start ${t1} --agent stall-old`);

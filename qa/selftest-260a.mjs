@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function selftest260A({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-260a.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-260a-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
@@ -94,7 +94,7 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
     for (const [rel, text] of Object.entries(files)) write(ld, rel, typeof text === 'function' ? text(fs.existsSync(path.join(ld, rel)) ? fs.readFileSync(path.join(ld, rel), 'utf8') : '') : text);
     if (edit) edit(ld);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`, ...trailers.flatMap((t) => ['-m', t])], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`, ...trailers.flatMap((t) => ['-m', t])], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   /** A lane that moves pins: +1 on each named pin, its own expectations re-pinned against the main it started from. */
@@ -182,7 +182,7 @@ export async function selftest260A({ dir, run, report, tmpRoot }) {
   // ---- 7. a red main hands nobody back (prefix mode re-checks main first) ----
   write(dir, 'game/demo/notes/main-broken.md', 'BROKEN on main\n');
   g(dir, 'add', 'game/demo/notes/main-broken.md');
-  const mc = spawnSync('git', ['commit', '-qm', 'main: broken note'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_MAIN_COMMIT: 'allow' } });
+  const mc = spawnSync('git', ['commit', '-qm', 'main: broken note'], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_MAIN_COMMIT: 'allow' } });
   const n = lane('red-n', 'Docs: note n', { 'game/demo/notes/n.md': '# N\n' });
   const o = lane('red-o', 'Docs: note o', { 'game/demo/notes/o.md': '# O\n' });
   queueIt(n); queueIt(o);

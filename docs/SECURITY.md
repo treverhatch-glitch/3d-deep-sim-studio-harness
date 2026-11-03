@@ -40,6 +40,10 @@
 - Use `node harness/lock.mjs claim <key> --owner <agent>` before editing shared files or starting a task.
 - `node harness/task.mjs start <ID> --agent <unique>` refuses a task that is already claimed; `done` only works for its owner.
 - Shared owner names (`cursor`, `claude`, `builder`, …) are refused. A folder lock covers every file under it.
+- (2.73.1, B-60) Who a shell is comes from its session, never from the studio's `.env`: `STUDIO_LOCK_OWNER`,
+  `STUDIO_ROLE`, `STUDIO_AGENT` and `STUDIO_MAIN_ROOT` in `.env` are ignored by every loader (`harness/dotenv.mjs`), with a
+  one-line warning on stderr naming the line to remove (`npm run preflight` and `upgrade -- --preflight` WARN too). A
+  line there had labelled the owner's own terminal as an agent, so every owner-only command was refused.
 - `npm run hooks:install` wires `scripts/hooks/pre-commit`: staged secrets and files locked by another owner block the commit.
 - Release with `node harness/lock.mjs release <key> --owner <agent>` when done. (2.71.1, K01) The release is bound to the
   holder, not just the name: a lock records where it was claimed (`holder`: the lane copy, `STUDIO_LOCK_OWNER`), and a
@@ -94,6 +98,17 @@
   undo: its checks still run clean, it prints a WARN and the verify record says `nodeOptionsPreload` (out of scope
   otherwise). `STUDIO_VERIFY_PRELOADED` carries that note from a verify to its detached run. node_modules that don't match
   package-lock.json (versions, missing or extra packages, a plain file in `.bin` on macOS and Linux) get one WARN line.
+- Console windows on Windows (2.73.1, B-59): every process the harness starts passes `windowsHide: true` (harness/,
+  hub/, scripts/, tools/, qa/, the hooks; qa/selftest-2731c.mjs fails on a call without it). Only the engine and visual
+  capture runs, which render frames in a real window, are left visible. So a `NODE_OPTIONS=--require <file>` preload
+  that forces windowsHide is no longer needed, and it is exactly what the scrub above drops from gate children (and
+  WARNs about in run-gates' own process). After taking 2.73.1, remove it wherever it was set and start the studio again
+  from a fresh terminal: this window `Remove-Item Env:NODE_OPTIONS`; for the user
+  `[Environment]::SetEnvironmentVariable('NODE_OPTIONS', $null, 'User')` (or `setx NODE_OPTIONS ""` in cmd.exe, then
+  delete it under System Properties > Environment Variables); and any `NODE_OPTIONS=` line in `.env`. Keep any memory
+  flag it carried (`--max-old-space-size=…` is allowed). Then close the harness task that recorded the stopgap
+  (`npm run workaround -- close <H-id> --by <you> --note "2.73.1 hides every child"`). Starting the supervisor in a
+  hidden console (`Start-Process -WindowStyle Hidden`) is no longer needed either.
 - Paths (2.71.1, G14/W01): the gates read git's file lists with `-z` and `core.quotePath=false` (a non-ASCII name is no
   longer a quoted `"web/\340…"` that no glob matches), and the protected list matches in any case and spelling
   (backslashes, `./`, Unicode form, trailing dots and spaces Windows drops): matching more is only stricter.

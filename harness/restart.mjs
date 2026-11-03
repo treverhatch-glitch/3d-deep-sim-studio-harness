@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { activeCartridge, isTemplateCartridge, GAME_FILE } from './cartridge.mjs';
 
-const git = (args, env = {}) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...env } });
+const git = (args, env = {}) => spawnSync('git', args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...env } });
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 // Studio state that belongs to the game (studio:reset clears the board, Bible, reviews and logs itself).
 const GAME_STATE = ['studio/game.json', 'studio/art', 'studio/asks', 'studio/signed', 'studio/proof', 'studio/playtest', 'studio/tricks', 'studio/task-holds.json', 'studio/intake-answers.json', 'studio/assets', 'studio/references', 'studio/experiments', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md', 'studio/pitfalls.json', 'studio/reviews/OWED.json', 'studio/engine'];
@@ -129,7 +129,7 @@ export async function restartStudio({ by, ticket = null, confirmed = 0, name = n
   }
   // 4. A fresh board, Bible and log (studio:reset archives those to .studio/archive/ too).
   const fresh = name || 'New game';
-  const reset = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'studio-reset.mjs'), '--name', fresh, '--yes'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const reset = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'studio-reset.mjs'), '--name', fresh, '--yes'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
   // 5. Commit the clean slate so the history shows it, when the hooks allow.
   const specs = ['studio', 'cartridges', 'game', 'web', 'qa/golden', 'qa/regressions', 'assets'].filter((d) => exists(d) || git(['ls-files', '--', d]).stdout.trim());
   git(['add', '-A', '--', ...specs]);

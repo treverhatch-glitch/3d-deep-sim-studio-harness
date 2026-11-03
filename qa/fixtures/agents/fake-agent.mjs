@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const [agent, task, how] = process.argv.slice(2);
-const sh = (...a) => spawnSync(process.execPath, a, { encoding: 'utf8', env: process.env });
+const sh = (...a) => spawnSync(process.execPath, a, { windowsHide: true, encoding: 'utf8', env: process.env });
 sh('harness/task.mjs', 'start', task, '--agent', agent, '--model', process.env.STUDIO_AGENT_MODEL || 'fake-1');
 sh('harness/lock.mjs', 'claim', 'path:docs/fake', '--owner', agent);
 fs.mkdirSync('docs/fake', { recursive: true });
@@ -33,7 +33,7 @@ if (how === 'wait') {
   // 2.58.5 (H-9): a custom command now runs in its own lane copy like a built-in tool (STUDIO_MAIN_ROOT is the main
   // checkout); there, as a real agent must, it commits its work before task done.
   if (process.env.STUDIO_MAIN_ROOT && fs.existsSync('.git')) {
-    const git = (...a) => spawnSync('git', ['-c', `user.name=${agent}`, '-c', `user.email=${agent}@selftest.invalid`, ...a], { encoding: 'utf8', env: process.env });
+    const git = (...a) => spawnSync('git', ['-c', `user.name=${agent}`, '-c', `user.email=${agent}@selftest.invalid`, ...a], { windowsHide: true, encoding: 'utf8', env: process.env });
     git('add', '-A', 'docs/fake');
     git('commit', '-q', '-m', `${task}: fake agent's work`);
   }

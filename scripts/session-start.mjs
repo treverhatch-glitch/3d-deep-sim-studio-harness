@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // added to the context before that kickoff, so changing text here (the current task, the queue) broke the
 // prompt cache on every launch. Launched sessions get one fixed line; the checks still run, silently.
 const LAUNCHED = Boolean(process.env.STUDIO_ROLE && process.env.STUDIO_LOCK_OWNER) && process.env.STUDIO_SESSION_START_QUIET !== 'off';
-const run = (...args) => spawnSync(process.execPath, args, { cwd: ROOT, stdio: LAUNCHED ? 'ignore' : 'inherit' }).status ?? 1;
+const run = (...args) => spawnSync(process.execPath, args, { windowsHide: true, cwd: ROOT, stdio: LAUNCHED ? 'ignore' : 'inherit' }).status ?? 1;
 if (LAUNCHED) {
   console.log('Session start: launched by the studio; your kickoff has your task.');
   run('scripts/verify-session.mjs');

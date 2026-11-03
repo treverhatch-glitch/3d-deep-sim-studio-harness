@@ -71,7 +71,7 @@ export async function selftest246({ dir, run, report, tmpRoot }) {
   // 4b. The web game keeps growing while it is ported: the port follows a pinned commit, parity compares with that
   // pin (not the live rules), the web changes since it are listed and queued as port tasks, and the brief shows the lag.
   const { spawnSync: sp } = await import('node:child_process');
-  const git = (...a) => sp('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' });
+  const git = (...a) => sp('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   git('init', '-q', '-b', 'main'); git('add', '-A'); git('commit', '-qm', 'studio', '--no-verify');
   const pin = run(dir, 'node harness/engine.mjs port --from HEAD --by prod-1', env);
   git('add', '-A'); git('commit', '-qm', 'pin the port', '--no-verify');
@@ -104,7 +104,7 @@ export async function selftest246({ dir, run, report, tmpRoot }) {
   fs.writeFileSync(path.join(noSim, 'ProjectSettings/ProjectVersion.txt'), 'm_EditorVersion: 6000.0.85f1\n');
   fs.writeFileSync(path.join(noSim, 'Assets/Scripts/Plane.cs'), 'using UnityEngine; public class Plane : MonoBehaviour { void Update() { transform.position += Vector3.forward * Time.deltaTime * Random.value; } }\n');
   const { spawnSync } = await import('node:child_process');
-  const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   gg(noSim, 'init', '-q', '-b', 'main'); gg(noSim, 'add', '-A'); gg(noSim, 'commit', '-qm', 'start');
   const ad = run(dir, `node scripts/onboard-game.mjs --path "${noSim}" --name "Plain Runway" --adopt`, env);
   const ids = (g) => g.gates.map((x) => `${x.id}${x.required === false ? '?' : ''}`).join(',');

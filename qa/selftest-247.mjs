@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 export async function selftest247({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const env = { STUDIO_PRODUCER_NAME: 'prod-1', STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off' };
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
 
   // An adopted web game (not a cartridge) and its Unity port in a repo beside the studio.
   fs.mkdirSync(path.join(dir, 'game/runway'), { recursive: true });

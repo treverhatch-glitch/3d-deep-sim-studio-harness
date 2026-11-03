@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 export async function selftest258A({ dir, run, report, tmpRoot }) {
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const head = () => g('rev-parse', 'HEAD').stdout.trim();
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
   // GDScript, so the size check needs no parser package in the copy.

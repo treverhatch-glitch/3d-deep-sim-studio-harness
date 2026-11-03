@@ -62,7 +62,7 @@ setTimeout(() => {}, 600000);
     const f = path.join(tmpRoot, `pids-260d-${label}-${process.pid}.txt`);
     fs.rmSync(f, { force: true });
     pidFiles.push(f);
-    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${treeF}"`, `"${f}"`, '0'], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+    const c = spawn(process.execPath, ['harness/heavy.mjs', 'run', '--label', label, '--', 'node', `"${treeF}"`, `"${f}"`, '0'], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
     kids.push(c);
     const up = until(() => readJson(lockF)?.label === label && pidsOf(f).length === 3, 20000 * SLOW);
     return { c, f, up, tree: () => pidsOf(f), lock: () => readJson(lockF) };
@@ -128,7 +128,7 @@ setTimeout(() => {}, 600000);
       fs.rmSync(f, { force: true });
       pidFiles.push(f);
       fs.writeFileSync(gatesFile, JSON.stringify({ gates: [{ id: 'tree', command: `node "${treeF}" "${f}" 0`, required: true }] }, null, 2));
-      const v = spawn(process.execPath, ['scripts/run-gates.mjs', '--full'], { cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
+      const v = spawn(process.execPath, ['scripts/run-gates.mjs', '--full'], { windowsHide: true, cwd: dir, env: { ...process.env, ...base }, stdio: 'ignore' });
       kids.push(v);
       const up = until(() => readJson(lockF)?.label?.startsWith('full verify') && pidsOf(f).length === 3, 30000 * SLOW);
       const rec = readJson(lockF);
@@ -181,7 +181,7 @@ console.log(JSON.stringify({ a: { cmds: a.cmds, killed: ra.killed, survivors: ra
 
     // ---------- #6a: createLaneCopy refuses an unknown task id ----------
     {
-      const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+      const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
       if (!fs.existsSync(path.join(dir, '.git'))) { g('init', '-q', '-b', 'main'); g('config', 'core.autocrlf', 'false'); }
       g('add', '-A');
       g('commit', '-q', '--no-verify', '-m', 'base 260d');

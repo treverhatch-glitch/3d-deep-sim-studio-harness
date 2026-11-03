@@ -22,7 +22,7 @@ export async function selftest263I({ dir, run, report, tmpRoot, root }) {
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-263i.jsonl');
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_REACHABILITY: 'off', STUDIO_DONE_NOOP: 'allow', STUDIO_DONE_REUSE_VERIFY: '', STUDIO_GATE_INCOMING_FILE: '', STUDIO_GATE_PRIORITY: '', STUDIO_GATE_CHANGED: '', STUDIO_GATE_PATHS: '', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_MIN: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_WAIT_MIN: '', STUDIO_TRAIN_POLL_S: '', STUDIO_TRAIN_LOCK_WAIT_MIN: '', STUDIO_TRAIN_RIDE_ALONG: '', STUDIO_TRAIN_MAX_HANDBACKS: '', STUDIO_ROLE: '', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_COMPACT_OUTPUT: '', STUDIO_GAME_GATE_RETRY: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-263i-${process.pid}.pem`), AGENT_EVENTS_FILE: events, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
@@ -81,13 +81,13 @@ export async function selftest263I({ dir, run, report, tmpRoot, root }) {
     const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
     for (const [rel, text] of Object.entries(files)) write(ld, rel, text);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`, ...trailers.flatMap((t) => ['-m', t])], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`, ...trailers.flatMap((t) => ['-m', t])], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const queueIt = (l, extra = {}) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, { ...l.as, ...extra });
   const train = (extra = '', e = {}) => run(dir, `node harness/task.mjs train --by tester ${extra}`, { ...env, ...e });
   const trainAsync = (e = {}) => new Promise((resolve) => {
-    const p = spawn('node harness/task.mjs train --by tester', { cwd: dir, shell: true, env: { ...process.env, ...env, ...e } });
+    const p = spawn('node harness/task.mjs train --by tester', { windowsHide: true, cwd: dir, shell: true, env: { ...process.env, ...env, ...e } });
     let stdout = ''; let stderr = '';
     p.stdout.on('data', (d) => { stdout += d; }); p.stderr.on('data', (d) => { stderr += d; });
     p.on('close', (status) => resolve({ status, stdout, stderr }));
@@ -168,7 +168,7 @@ export async function selftest263I({ dir, run, report, tmpRoot, root }) {
   report('2.63.0 (i #2): with STUDIO_TRAIN_MIN=2 a train with one lane queued waits (task.train.waiting, nothing lands) until a second lane is queued, then lands both in ONE train with one verify; with STUDIO_TRAIN_MIN=3 and STUDIO_TRAIN_WAIT_MIN=0.05 (3 s) a lone lane waits about 3 s from its queueing, then lands by itself (fails on 2.60.0: the train ran at once with the first lane only)',
     p1.ok && p2.ok && p3.ok && waited && nothingYet && t4.status === 0 && isDone(p1.id) && isDone(p2.id) && s4.length === 1 && s4[0].meta?.lanes?.length === 2 && j4.verifies === 1
       && t4b.status === 0 && isDone(p3.id) && took >= 2500 && starts(since4b).length === 1 && evs().slice(since4b).some((e) => e.type === 'task.train.waiting'),
-    `waited=${waited} nothingYet=${nothingYet}\n${out(t4).slice(-1500)}\nstarts=${JSON.stringify(s4.map((e) => e.meta?.lanes))}\nt4b (started ${took} ms after queueing): ${out(t4b).slice(-800)}`);
+    `waited=${waited} nothingYet=${nothingYet}\n${out(t4).slice(-1500)}\nstarts=${JSON.stringify(s4.map((e) => e.meta?.lanes))}\nt4b (started ${took} ms after queueing): ${out(t4b).slice(-800)}\nparts=${JSON.stringify({ p: [p1.ok, p2.ok, p3.ok], waited, nothingYet, t4: t4.status, done12: [isDone(p1.id), isDone(p2.id)], s4: s4.length, lanes: s4[0]?.meta?.lanes?.length, v: j4.verifies, t4b: t4b.status, done3: isDone(p3.id), took, sB: starts(since4b).length, waitB: evs().slice(since4b).some((e) => e.type === 'task.train.waiting') })}`);
 
   // ---- 5. a run-alone lane (manifest runAlone.paths) trains by itself; the other lane gets the next train ----
   since = evs().length;

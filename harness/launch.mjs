@@ -246,7 +246,7 @@ const spawnOpts = (plan, options) => {
 };
 
 /** Start a planned launch (launchPlan) with Node's spawn, never through a shell. */
-export const spawnPlan = (plan, options = {}) => spawn(plan.file, plan.args, spawnOpts(plan, options));
+export const spawnPlan = (plan, options = {}) => spawn(plan.file, plan.args, { windowsHide: true, ...spawnOpts(plan, options) });
 
 /** The launch helper: start argv as planned by launchPlan. options: spawn's, plus promptAt / promptFile.
  * Returns { child, plan }. Throws LaunchError when the command can't be passed (see launchPlan). */
@@ -264,7 +264,7 @@ export function spawnAgentSync(argv, options = {}) {
   } catch (error) {
     return { status: null, signal: null, stdout: '', stderr: '', error, plan: null };
   }
-  return { ...spawnSync(plan.file, plan.args, spawnOpts(plan, options)), plan };
+  return { ...spawnSync(plan.file, plan.args, { windowsHide: true, ...spawnOpts(plan, options) }), plan };
 }
 
 // Values that need no quoting: sh, and cmd.exe (where , ; = and spaces split a batch file's arguments).

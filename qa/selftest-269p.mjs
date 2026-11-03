@@ -25,7 +25,7 @@ export async function selftest269P({ dir, run, report, tmpRoot, root }) {
     fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
   }
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const events = path.join(dir, '.studio', 'events-269p.jsonl');
   const ranLog = path.join(tmpRoot, `ran-269p-${process.pid}.log`);
@@ -90,7 +90,7 @@ export async function selftest269P({ dir, run, report, tmpRoot, root }) {
     write(ld, `game/demo/src/${n}.mjs`, `export const ${n} = 1;${breaks ? ' // BREAKS' : ''}\n`);
     write(ld, `game/demo/tests/${n}.test.mjs`, `// ${n}\n`);
     g(ld, 'add', '-A');
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: add ${n}`], { cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: add ${n}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
     return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(made)}\n${out(st)}\n${out(c)}` };
   };
   const verifyIn = (l) => run(l.dir, 'node scripts/run-gates.mjs --no-detach', l.as);

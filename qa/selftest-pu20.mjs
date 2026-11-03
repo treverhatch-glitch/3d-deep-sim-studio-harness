@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 
 export async function selftestPU20({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
-  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const ownerKey = path.join(tmpRoot, `owner-pu20-${process.pid}.pem`);
   const env = { STUDIO_OWNER_KEY: ownerKey };
   const check = () => run(dir, 'node qa/protected-check.mjs', env);
@@ -45,7 +45,7 @@ export async function selftestPU20({ dir, run, report, tmpRoot }) {
 
   // A remote whose main is HEAD.
   const bare = path.join(tmpRoot, `origin-pu20-${process.pid}.git`);
-  spawnSync('git', ['clone', '-q', '--bare', dir, bare], { encoding: 'utf8' });
+  spawnSync('git', ['clone', '-q', '--bare', dir, bare], { windowsHide: true, encoding: 'utf8' });
   g('remote', 'add', 'origin', bare); g('fetch', '-q', 'origin'); g('branch', '-q', '-u', 'origin/main');
   const bClean = check();
   edit('b');

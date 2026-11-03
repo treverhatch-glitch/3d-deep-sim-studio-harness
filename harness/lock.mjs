@@ -348,7 +348,7 @@ export function coveringLock(relFile, locks = listLocks()) {
 }
 
 const gitLines = (args, cwd) => {
-  try { return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean); } catch { return null; }
+  try { return execFileSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean); } catch { return null; }
 };
 
 /**
@@ -358,7 +358,7 @@ const gitLines = (args, cwd) => {
  * that came from main as it was. { files, merge } (merge: the number of heads merged, or 0).
  */
 export function stagedForLocks(cwd = REPO_ROOT) {
-  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMRD'], { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean);
   let heads = [];
   const mh = gitLines(['rev-parse', '--git-path', 'MERGE_HEAD'], cwd)?.[0];
   try { if (mh) heads = fs.readFileSync(path.resolve(cwd, mh), 'utf8').split(/\r?\n/).map((x) => x.trim()).filter((x) => /^[0-9a-f]{7,64}$/i.test(x)); } catch { /* not merging */ }
@@ -395,7 +395,7 @@ export function commitTasks({ owner = process.env.STUDIO_LOCK_OWNER || '', subje
   const lane = laneCopyName(root);
   if (lane) {
     let branch = '';
-    try { branch = execFileSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+    try { branch = execFileSync('git', ['symbolic-ref', '-q', '--short', 'HEAD'], { windowsHide: true, cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
     const found = new Set();
     const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
     if (branch) {

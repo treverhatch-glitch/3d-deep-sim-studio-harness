@@ -95,7 +95,7 @@ export function runLayoutGate({ gameDir, layoutFile, rulesFile, hook = true } = 
   if (!rf || !fs.existsSync(rf)) return { ok: true, skipped: true, rows: [], why: 'the game declares no layout rules' };
   const cfg = JSON.parse(fs.readFileSync(rf, 'utf8'));
   if (hook && cfg.hook) {
-    const h = spawnSync(cfg.hook, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 300000 });
+    const h = spawnSync(cfg.hook, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 300000 });
     if (h.status !== 0) return { ok: false, rows: [], why: `the layout hook failed (exit ${h.status}): ${`${h.stdout || ''}${h.stderr || ''}`.trim().slice(-300)}` };
   }
   const lf = layoutFile || path.resolve(REPO_ROOT, cfg.layout || '');

@@ -175,7 +175,7 @@ else if (!argv.includes('--all')) {
     if (inLaneCopy()) {
       const ld = laneDiff();
       // 2.71.1 (B, G14): -z names: a non-ASCII path is no longer a quoted "web/\340..." that no glob matches.
-      const dirty = porcelainZ(spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '').map((e) => e.file);
+      const dirty = porcelainZ(spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '').map((e) => e.file);
       const files = [...new Set([...(ld?.changed || []), ...dirty])];
       if (files.length) {
         changedFiles = files;
@@ -239,7 +239,7 @@ let heavyLock = null;
 // before the first gate, and the tree counts as dirty if it was dirty then or is at the end (an edit made while the
 // gates ran). Engine cache files a gate rewrites (.godot/, *.import, *.uid) don't count. task done trusts a verify
 // only for this commit on a clean tree (harness/done-check.mjs gatesAfter).
-const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
+const gitOut = (args) => { try { const r = spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
 // 2.58.3 (O3, crew P-035): nor does a tracked file that differs only in line endings (harness/eol-only.mjs).
 const { splitEolOnly } = await import('../harness/eol-only.mjs');
 // 2.71.1 (B, G14): names read with -z (never quoted), so a non-ASCII engine cache file is recognised as one.

@@ -26,13 +26,13 @@ if (!t) {
 const cmd = engineCommand(t, 'gate');
 // The program the gate runs: the engine (STUDIO_GODOT / godot on the PATH), or whatever engine.json names.
 const bin = (cmd.match(/^"([^"]+)"|^(\S+)/) || []).slice(1).find(Boolean) || engineBin(t.engine);
-const found = spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { encoding: 'utf8' }).status === 0 || fs.existsSync(bin);
+const found = spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { windowsHide: true, encoding: 'utf8' }).status === 0 || fs.existsSync(bin);
 if (!found) {
   console.error(`[engine] FAIL ${bin} isn't installed or on the PATH. Install ${ENGINES[t.engine]?.label || t.engine} (headless works), or set ${ENGINES[t.engine]?.env || 'its path'} in .env to the program's full path.`);
   process.exit(1);
 }
 const start = Date.now();
-const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 64 * 1024 * 1024 });
+const r = spawnSync(cmd, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: 20 * 60000, maxBuffer: 64 * 1024 * 1024 });
 const out = `${r.stdout || ''}${r.stderr || ''}`;
 fs.mkdirSync(path.join(REPO_ROOT, 'qa', 'reports'), { recursive: true });
 const logFile = path.join('qa', 'reports', `engine_${Date.now()}.log`);
@@ -44,7 +44,7 @@ let parse = { checked: 0, broken: [] };
 // The parse check needs Godot itself (STUDIO_GODOT or godot on the PATH), which may differ from the gate's
 // program (a wrapper script). Without one it is skipped with a note; the gate's own run still counts.
 const godot = t.engine === 'godot' ? engineBin('godot') : null;
-const haveGodot = godot && (fs.existsSync(godot) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [godot], { encoding: 'utf8' }).status === 0);
+const haveGodot = godot && (fs.existsSync(godot) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [godot], { windowsHide: true, encoding: 'utf8' }).status === 0);
 if (godot && !haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'project.godot'))) console.log(`[engine] note: GDScript parse check skipped: Godot not found (set STUDIO_GODOT)`);
 if (haveGodot && t.folder && fs.existsSync(path.join(REPO_ROOT, t.folder, 'project.godot'))) {
   parse = parseCheck(path.join(REPO_ROOT, t.folder), { godot });

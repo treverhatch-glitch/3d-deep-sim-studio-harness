@@ -38,7 +38,7 @@ export async function selftest272A({ dir, run, report, tmpRoot }) {
     const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop();
     try { return JSON.parse(line); } catch { return { _raw: out(r).slice(-2500) }; }
   };
-  const g = (...x) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.hooksPath=/dev/null', ...x], { cwd: dir, encoding: 'utf8' });
+  const g = (...x) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'core.hooksPath=/dev/null', ...x], { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const lastGatesRun = () => evs().filter((e) => e.type === 'gates.run').pop() || null;
   const flakeRows = () => read('.studio/flakes.jsonl').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 

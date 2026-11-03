@@ -59,7 +59,7 @@ const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <
 // The agent-name shapes the launcher, fun verdicts and the agy allow-list use, and a "-bot" suffix.
 const AGENTISH = /^(prod|producer|director|builder|rnd|qa|qa-playtester|playtester|reviewer|planner|art|artist|art-director|liaison|scout|reference-scout|designer|designer-calibrator|balancer|fun-tester|agent|watch|supervisor|launcher|unknown|codex|claude|gemini|agy|gpt|grok|opus|sonnet|haiku|cursor|aider|hermes|nim|dev-hacker|sound|composer|writer|engine|ui-)\b|(^|[-_])bot(\b|$)/i;
 const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
-const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /** The checkout whose record counts: the main checkout (a lane copy reads the owner's record there). */

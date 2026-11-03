@@ -267,7 +267,7 @@ func _process(_d: float) -> bool:
 `;
 }
 
-const has = (bin) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { stdio: 'ignore' }).status === 0;
+const has = (bin) => spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { windowsHide: true, stdio: 'ignore' }).status === 0;
 
 /** Capture a Godot project's named cameras into outDir. Returns { ok, files, why, log }. */
 export function captureGodot(project, outDir, { cams = [], frames = 30, bin = process.env.STUDIO_GODOT || 'godot', timeoutMs = num(process.env.STUDIO_GODOT_TIMEOUT_MS, 300000) } = {}) {
@@ -280,7 +280,7 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
   const shell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
   const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, shell };
   let log = '';
-  const imp = spawnSync(bin, ['--headless', '--path', proj, '--import'], opts);
+  const imp = spawnSync(bin, ['--headless', '--path', proj, '--import'], { windowsHide: true, ...opts });
   log += `${imp.stdout || ''}${imp.stderr || ''}`;
   if (imp.error) { fs.rmSync(scriptFile, { force: true }); return { ok: false, files: [], why: `could not run Godot (${bin}): ${imp.error.code || imp.error.message}`, log }; }
   const runArgs = ['--path', proj, '--rendering-driver', process.env.STUDIO_GODOT_CAPTURE_DRIVER || 'opengl3', '--resolution', process.env.STUDIO_GODOT_CAPTURE_SIZE || '1280x720', '--script', scriptFile, '--', '--out', path.resolve(outDir), '--frames', String(frames), ...(cams.length ? ['--cams', cams.join(',')] : [])];

@@ -22,7 +22,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(extra) });
+  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
   const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
@@ -53,7 +53,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     const ld = path.join(dir, '.lanes', agent);
     write(ld, rel, text);
     g(ld, ['add', rel]);
-    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`, ...(msg ? ['-m', msg] : [])], { cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: dir }) });
+    const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`, ...(msg ? ['-m', msg] : [])], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: dir }) });
     return { agent, id, dir: ld, ok: c.status === 0, log: out(c), head: head(ld) };
   };
   const A = mkLane('bld-a', ids.a, 'game/demo/shared.txt', 'one\nTWO-A\nthree\n', 'Pin-Moves: speed');
@@ -142,7 +142,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
     const ld = path.join(dir, '.lanes', 'bld-e');
     write(ld, 'game/demo/e.txt', 'e\n');
     g(ld, ['add', 'game/demo/e.txt']);
-    const c = spawnSync('git', ['commit', '-q', '--no-verify', '-m', `${id}: e`], { cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: dir }) });
+    const c = spawnSync('git', ['commit', '-q', '--no-verify', '-m', `${id}: e`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: dir }) });
     const before = head(ld);
     const tree = head(ld, 'HEAD^{tree}');
     write(dir, 'game/demo/later.txt', 'later\n');
@@ -237,7 +237,7 @@ export async function selftest265P({ dir, run, report, tmpRoot }) {
   await guard('2.65.0 (conductor, events wait): `npm run events -- wait --type job.done --match kind=heavy --match id=w1` blocks until that event is written and prints it (exit 0); a wait with nothing coming exits 2 with {"timeout":true}; --since last with the same --cursor returns an event written between two waits; job.done alerts only for train/verify and only with STUDIO_ALERT_JOBS=on (fails on 2.64.0: no events command)', async () => {
     const wenv = { ...process.env, ...env, STUDIO_EVENTS_WAIT_POLL_MS: '100' };
     const waitAsync = (args) => new Promise((resolve) => {
-      const p = spawn(process.execPath, ['harness/jobs.mjs', 'wait', ...args], { cwd: dir, env: wenv });
+      const p = spawn(process.execPath, ['harness/jobs.mjs', 'wait', ...args], { windowsHide: true, cwd: dir, env: wenv });
       let so = ''; let se = '';
       p.stdout.on('data', (d) => { so += d; }); p.stderr.on('data', (d) => { se += d; });
       p.on('exit', (code) => resolve({ code, stdout: so, stderr: se }));

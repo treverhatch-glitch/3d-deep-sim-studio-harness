@@ -186,7 +186,7 @@ console.log('Passed!  - Failed: 0, Passed: 3');
       // (b) a previous gate's Edit Mode pass on the same clean tree and the same Unity: reused; a changed tree runs it.
       const r = project('dup-tree');
       const repo = path.dirname(r);
-      const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd: repo, encoding: 'utf8' });
+      const git = (...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { windowsHide: true, cwd: repo, encoding: 'utf8' });
       git('init', '-q');
       fs.writeFileSync(path.join(repo, '.gitignore'), 'Library/\n');
       git('add', '-A');

@@ -57,7 +57,7 @@ if (simulateFail) {
   for (const key of ['--scenario', '--seed', '--ticks']) if (flag(key)) args.push(key, flag(key));
   try {
     fs.rmSync(REPORT_FILE, { force: true });
-    execFileSync(process.execPath, args, { cwd: REPO_ROOT, stdio: 'pipe', encoding: 'utf8' });
+    execFileSync(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, stdio: 'pipe', encoding: 'utf8' });
   } catch (err) {
     const report = readJson(REPORT_FILE, null);
     const s1 = report?.stage1;

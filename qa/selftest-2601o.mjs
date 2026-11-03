@@ -21,7 +21,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(extra) });
+  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
   const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
@@ -86,7 +86,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
       const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
       write(ld, rel, text);
       g(ld, ['add', rel]);
-      const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: gEnv(as) });
+      const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv(as) });
       const q = run(ld, `node harness/task.mjs done ${id} --agent ${agent} --train`, as);
       return { id, agent, dir: ld, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0 && q.status === 0, log: `${out(made)}\n${out(st).slice(-300)}\n${out(c)}\n${out(q).slice(-600)}` };
     };
@@ -150,7 +150,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
     g(d, ['config', 'core.hooksPath', 'scripts/hooks']);
     // A first commit through the hooks (it lists the commits the checkout already had as exempt, as on taking the hooks).
     write(d, 'studio/notes/first.md', '# first\n'); g(d, ['add', 'studio/notes/first.md']);
-    const c0 = spawnSync('git', ['commit', '-qm', 'first stamped commit'], { cwd: d, encoding: 'utf8', env: gEnv(env) });
+    const c0 = spawnSync('git', ['commit', '-qm', 'first stamped commit'], { windowsHide: true, cwd: d, encoding: 'utf8', env: gEnv(env) });
     const origin = path.join(tmpRoot, `2601o-origin-${process.pid}.git`);
     g(tmpRoot, ['init', '-q', '--bare', origin]);
     g(d, ['remote', 'add', 'origin', origin]); g(d, ['push', '-q', 'origin', 'main']); g(d, ['fetch', '-q', 'origin']);
@@ -161,7 +161,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
     const ld = path.join(d, '.lanes', 'bld-x');
     g(d, ['worktree', 'add', '-q', '-b', 'lane/bld-x', ld, 'main']);
     write(ld, 'docs/lane-x.md', '# lane x\n'); g(ld, ['add', 'docs/lane-x.md']);
-    const c = spawnSync('git', ['commit', '-qm', 'lane x work'], { cwd: ld, encoding: 'utf8', env: gEnv(env) });
+    const c = spawnSync('git', ['commit', '-qm', 'lane x work'], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv(env) });
     const stamped = /Studio-Hooks:/.test(g(ld, ['log', '-1', '--format=%B']).stdout);
 
     let chk = null;
@@ -181,7 +181,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
     await guard('2.60.1 (B-30): outside a lane, a branch whose local main is ahead of a stale origin/main judges from local main (main\'s own unpushed commit is not the branch\'s); on main itself origin/main is still the base, naming what is not pushed yet (fails on 2.60.0: origin/main for the branch too)', () => {
       g(d, ['checkout', '-q', '-b', 'feat/y', 'main']);
       write(d, 'docs/feat-y.md', '# y\n'); g(d, ['add', 'docs/feat-y.md']);
-      const cf = spawnSync('git', ['commit', '-qm', 'feat y'], { cwd: d, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_COMMIT: 'allow' }) });
+      const cf = spawnSync('git', ['commit', '-qm', 'feat y'], { windowsHide: true, cwd: d, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_COMMIT: 'allow' }) });
       const onBranch = run(d, 'node harness/hook-stamp.mjs check', env);
       g(d, ['checkout', '-q', 'main']);
       const onMain = run(d, 'node harness/hook-stamp.mjs check --json', env);
@@ -201,14 +201,14 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
     g(d, ['init', '-q', '-b', 'main']); g(d, ['config', 'core.autocrlf', 'false']);
     g(d, ['add', '-A']); g(d, ['commit', '-qm', 'studio', '--no-verify']);
     g(d, ['config', 'core.hooksPath', 'scripts/hooks']);
-    const commit = (args) => spawnSync('git', ['commit', '-q', ...args], { cwd: d, encoding: 'utf8', env: gEnv(env) });
+    const commit = (args) => spawnSync('git', ['commit', '-q', ...args], { windowsHide: true, cwd: d, encoding: 'utf8', env: gEnv(env) });
     g(d, ['branch', 'lane/a']); g(d, ['branch', 'lane/b']);
     write(d, gold, '{ "win": 12 }\n'); g(d, ['add', gold]);
     const cm = commit(['-m', 'retune the win tick', '-m', 'Golden-Reason: the bounds fix moves the win tick']);
     g(d, ['checkout', '-q', 'lane/a']);
     write(d, 'docs/lane-a.md', '# a\n'); g(d, ['add', 'docs/lane-a.md']); commit(['-m', 'lane a work']);
     await guard('2.60.1 (B-31): merging main into a lane, a golden main changed (with its own Golden-Reason) and that arrives unchanged needs no Golden-Reason on the merge commit (fails on 2.60.0: the commit-msg hook diffed the staged goldens against the lane\'s HEAD and refused)', () => {
-      const m = spawnSync('git', ['merge', '--no-edit', '-m', 'merge main into lane a', 'main'], { cwd: d, encoding: 'utf8', env: gEnv(env) });
+      const m = spawnSync('git', ['merge', '--no-edit', '-m', 'merge main into lane a', 'main'], { windowsHide: true, cwd: d, encoding: 'utf8', env: gEnv(env) });
       const merged = g(d, ['rev-parse', '-q', '--verify', 'HEAD^2']).status === 0 && g(d, ['show', `HEAD:${gold}`]).stdout.includes('12');
       return [cm.status === 0 && m.status === 0 && merged, `${out(cm).slice(-300)}\nmerge ${m.status}: ${out(m).slice(-800)}`];
     });
@@ -216,7 +216,7 @@ export async function selftest2601O({ dir, run, report, tmpRoot }) {
       g(d, ['checkout', '-q', 'lane/b']);
       write(d, gold, '{ "win": 11 }\n'); g(d, ['add', gold]);
       const own = commit(['-m', 'lane b retune', '-m', 'Golden-Reason: lane b moves it']);
-      const m = spawnSync('git', ['merge', '--no-edit', 'main'], { cwd: d, encoding: 'utf8', env: gEnv(env) });
+      const m = spawnSync('git', ['merge', '--no-edit', 'main'], { windowsHide: true, cwd: d, encoding: 'utf8', env: gEnv(env) });
       write(d, gold, '{ "win": 13 }\n'); g(d, ['add', gold]);
       const bare = commit(['--no-edit']);
       const stillMerging = g(d, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']).status === 0;

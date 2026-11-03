@@ -54,7 +54,7 @@ const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..');
 const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
 const git = (args, input) => {
   let r;
-  try { r = spawnSync('git', ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', ...args], { cwd: ROOT, encoding: 'utf8', input, maxBuffer: MAX_BUFFER }); } catch (e) { throw new Error(`could not read git ${args[0]}: output too big (${e.code || e.message})`); }
+  try { r = spawnSync('git', ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', ...args], { windowsHide: true, cwd: ROOT, encoding: 'utf8', input, maxBuffer: MAX_BUFFER }); } catch (e) { throw new Error(`could not read git ${args[0]}: output too big (${e.code || e.message})`); }
   if (r.error) throw new Error(`could not read git ${args[0]}: ${r.error.code === 'ENOBUFS' ? `output over ${MAX_BUFFER} bytes` : r.error.message}`);
   return r;
 };

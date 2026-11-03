@@ -333,8 +333,8 @@ export function changedAssetFiles(root, cfg, { files = null, base = null } = {})
     if (env.length) list = env;
   }
   if (!list && base) {
-    const d = spawnSync('git', ['diff', '--name-only', '--diff-filter=AMR', `${base}`, 'HEAD', '--', ...cfg.paths], { cwd: root, encoding: 'utf8' });
-    const u = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '--', ...cfg.paths], { cwd: root, encoding: 'utf8' });
+    const d = spawnSync('git', ['diff', '--name-only', '--diff-filter=AMR', `${base}`, 'HEAD', '--', ...cfg.paths], { windowsHide: true, cwd: root, encoding: 'utf8' });
+    const u = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '--', ...cfg.paths], { windowsHide: true, cwd: root, encoding: 'utf8' });
     list = [...(d.status === 0 ? d.stdout.split('\n') : []), ...(u.status === 0 ? u.stdout.split('\n') : [])];
   }
   return [...new Set((list || []).map((f) => slash(String(f).trim())).filter(Boolean))].filter((f) => isAssetFile(f) && underPaths(f, cfg.paths) && fs.existsSync(path.join(root, f)));

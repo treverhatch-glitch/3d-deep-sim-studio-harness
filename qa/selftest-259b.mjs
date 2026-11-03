@@ -19,12 +19,12 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   const env = { STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '',
     GITHUB_BASE_REF: '', GITHUB_EVENT_NAME: '', GITHUB_SHA: '', STUDIO_HOOKS_CHECK: '', STUDIO_LOCK_OWNER: '', STUDIO_LANE_HARNESS: '', STUDIO_HOOKS_RESTAMP: '',
     STUDIO_LANE_LOCKS: '', STUDIO_MAIN_COMMIT: '', STUDIO_WORKTREES: '', STUDIO_AGENT_MODEL: '', STUDIO_EXPERIMENT: '', AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-259b.jsonl') };
-  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+  const gIn = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { windowsHide: true, cwd, encoding: 'utf8' });
   const g = (...a) => gIn(dir, ...a);
   const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
   const commitIn = (cwd, msgs, extra = {}, flags = []) => {
     gIn(cwd, 'add', '-A');
-    return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', ...[].concat(msgs).flatMap((m) => ['-m', m]), ...flags], { cwd, encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
+    return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', ...[].concat(msgs).flatMap((m) => ['-m', m]), ...flags], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
   };
   const msgOf = (cwd, rev = 'HEAD') => gIn(cwd, 'log', '-1', '--format=%B', rev).stdout;
   const sha = (cwd, rev = 'HEAD') => gIn(cwd, 'rev-parse', rev).stdout.trim();
@@ -36,7 +36,7 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   const oldStamp = (cwd) => {
     const f = path.join(tmpRoot, `msg-259b-${process.pid}.txt`);
     fs.writeFileSync(f, msgOf(cwd).split('\n').filter((l) => !/^Studio-Patch-U0:/.test(l)).join('\n'));
-    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--amend', '--no-verify', '-F', f], { cwd, encoding: 'utf8', env: { ...process.env, ...env } });
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--amend', '--no-verify', '-F', f], { windowsHide: true, cwd, encoding: 'utf8', env: { ...process.env, ...env } });
     fs.rmSync(f, { force: true });
     return r;
   };
@@ -68,7 +68,7 @@ export async function selftest259B({ dir, run, report, tmpRoot }) {
   // An edited commit still fails: one added line differs (the message, stamps and all, kept).
   edit(dir, A, 'export const v10 = 100;', 'export const v10 = 101;');
   gIn(dir, 'add', '-A');
-  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--amend', '--no-verify', '-C', 'HEAD'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--amend', '--no-verify', '-C', 'HEAD'], { windowsHide: true, cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
   const h2 = check(dir, { STUDIO_PROTECT_BASE: 'main' });
   // And a stamp without the -U0 id (made before 2.59.0) keeps the old rule after the same kind of rebase.
   g('reset', '-q', '--hard', 'main');

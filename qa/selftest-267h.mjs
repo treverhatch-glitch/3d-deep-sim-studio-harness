@@ -21,7 +21,7 @@ export async function selftest267H({ dir, run, report, tmpRoot }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = (extra = {}) => { const e = { ...process.env, ...ident, ...extra }; for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k]; return e; };
-  const g = (cwd, args, extra = {}) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv(extra) });
+  const g = (cwd, args, extra = {}) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv(extra) });
   const head = (cwd, ref = 'HEAD') => g(cwd, ['rev-parse', ref]).stdout.trim();
   const write = (base, rel, text) => { fs.mkdirSync(path.dirname(path.join(base, rel)), { recursive: true }); fs.writeFileSync(path.join(base, rel), text); };
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, ok, detail); } catch (e) { report(name, false, e.stack || String(e)); } };
@@ -122,7 +122,7 @@ console.log(JSON.stringify({ text: renderFacts(buildFacts('T-990', { dir: proces
       const ld = path.join(S, '.lanes', agent);
       write(ld, rel, text);
       g(ld, ['add', rel]);
-      const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`], { cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: S }) });
+      const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${rel}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv({ ...env, STUDIO_MAIN_ROOT: S }) });
       return { agent, id, dir: ld, ok: c.status === 0, log: out(c), head: head(ld) };
     };
     const X = mkLane('bld-x', ids.x, 'game/demo/x.txt', 'x\n');
@@ -210,7 +210,7 @@ console.log(JSON.stringify({ text: renderFacts(buildFacts('T-990', { dir: proces
       const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
       write(ld, rel, text);
       g(ld, ['add', rel]);
-      const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`], { cwd: ld, encoding: 'utf8', env: gEnv(as) });
+      const c = spawnSync('git', ['commit', '-qm', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: gEnv(as) });
       const q = run(ld, `node harness/task.mjs done ${id} --agent ${agent} --train`, as);
       return { id, agent, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0 && q.status === 0, log: `${out(made)}\n${out(st).slice(-300)}\n${out(c)}\n${out(q).slice(-600)}` };
     };

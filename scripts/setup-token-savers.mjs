@@ -12,10 +12,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const install = process.argv.includes('--install');
 const win = process.platform === 'win32';
 const where = (bin) => {
-  const r = spawnSync(win ? 'where' : 'which', [bin], { encoding: 'utf8' });
+  const r = spawnSync(win ? 'where' : 'which', [bin], { windowsHide: true, encoding: 'utf8' });
   return r.status === 0 ? r.stdout.split(/\r?\n/)[0].trim() : null;
 };
-const sh = (cmd, args) => spawnSync(cmd, args, { stdio: 'inherit', shell: win }).status === 0;
+const sh = (cmd, args) => spawnSync(cmd, args, { windowsHide: true, stdio: 'inherit', shell: win }).status === 0;
 
 const TOOLS = [
   ['rtk', 'cargo install --git https://github.com/rtk-ai/rtk (or brew install rtk-ai/tap/rtk)'],

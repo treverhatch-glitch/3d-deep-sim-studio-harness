@@ -78,7 +78,7 @@ console.log(JSON.stringify({
   const worker = path.join(tmpRoot, `p230p-lockw-${process.pid}.mjs`);
   fs.writeFileSync(worker, `import fs from 'node:fs'; import { withLandLock } from ${u('harness/merge-lane.mjs')};
 for (let i = 0; i < 5; i++) withLandLock(${JSON.stringify(dir)}, () => { const v = Number(fs.readFileSync(${JSON.stringify(counter)}, 'utf8')); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); fs.writeFileSync(${JSON.stringify(counter)}, String(v + 1)); });`);
-  const spawnP = (cmd, env = {}) => new Promise((resolve) => { const c = spawn(cmd, { cwd: dir, shell: true, env: { ...process.env, ...env } }); let s = ''; c.stdout.on('data', (d) => (s += d)); c.stderr.on('data', (d) => (s += d)); c.on('close', (status) => resolve({ status, out: s })); });
+  const spawnP = (cmd, env = {}) => new Promise((resolve) => { const c = spawn(cmd, { windowsHide: true, cwd: dir, shell: true, env: { ...process.env, ...env } }); let s = ''; c.stdout.on('data', (d) => (s += d)); c.stderr.on('data', (d) => (s += d)); c.on('close', (status) => resolve({ status, out: s })); });
   const ws = await Promise.all([1, 2, 3, 4].map(() => spawnP(`node "${worker}"`)));
   const total = Number(fs.readFileSync(counter, 'utf8'));
   fs.mkdirSync(path.join(dir, '.studio', 'locks'), { recursive: true });

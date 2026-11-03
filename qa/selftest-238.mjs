@@ -55,7 +55,7 @@ console.log(JSON.stringify(unreached(${JSON.stringify(gfiles)})));`);
 
   // 4. The done-check: a build task whose new module nothing reaches gets a note by default, a failing check
   // with STUDIO_REACHABILITY=fail, and passes the check once it is wired.
-  const g = (...a) => spawnSync('git', a, { cwd: dir, encoding: 'utf8' });
+  const g = (...a) => spawnSync('git', a, { windowsHide: true, cwd: dir, encoding: 'utf8' });
   const env = { AGENT_EVENTS_FILE: path.join(dir, '.studio', 'events-238.jsonl'), STUDIO_TASK_BUDGET: 'off', STUDIO_REFILL_WAKE: 'off', STUDIO_VISUAL_GATE: 'off' };
   g('init', '-q', '-b', 'main');
   g('config', 'core.autocrlf', 'false');

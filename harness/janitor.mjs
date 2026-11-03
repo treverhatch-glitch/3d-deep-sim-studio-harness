@@ -41,7 +41,7 @@ import { REPO_ROOT, emitEvent, getEventPaths } from './event.mjs';
 const H = 3600000;
 const num = (v, d) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 export const MARKER = '.studio-temp.json';
 const gb = (b) => Math.round((b / 1024 ** 3) * 100) / 100;
 export const human = (b) => (b >= 1024 ** 3 ? `${gb(b)} GB` : b >= 1024 ** 2 ? `${Math.round(b / 1024 ** 2)} MB` : `${Math.round(b / 1024)} KB`);

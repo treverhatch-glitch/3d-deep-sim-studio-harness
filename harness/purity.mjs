@@ -22,7 +22,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import * as rat from './ratchet.mjs';
 
-const git = (...a) => spawnSync('git', a, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (...a) => spawnSync('git', a, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const flag = (a, k) => (a.includes(k) ? String(a[a.indexOf(k) + 1] || '') : '');
 
 /** Why this caller may not grow a baseline as `by`, or '' (with `as`: how the decision counts). */

@@ -41,6 +41,7 @@ import { WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
 import { logDecision } from './decisions-log.mjs';
+import { grantBody, isProxyGrant, PROXY_MAX_DAYS, PROXY_DEFAULT_DAYS, PROXY_NEVER } from './owner-proxy.mjs';
 
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
@@ -53,9 +54,9 @@ export const DELEGATION_REL = 'studio/delegation.json';
 export const DELEGABLE = ['train-release', 'type', 'visual', 'yes', 'hold', 'upgrade-auto', 'asset-review', 'janitor-lanes', 'logic-library', 'purity-baseline'];
 export const NEVER_DELEGATED = 'signing protected-file approvals (npm run approve), changing gates or the protected list, and money';
 export const MAX_HOURS = 72;
-const FIELDS = ['agent', 'actions', 'until', 'by', 'at', 'why'];
-const git = (root, ...args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-const body = (d) => Object.fromEntries(FIELDS.map((k) => [k, d[k]]));
+const git = (root, ...args) => spawnSync('git', args, { windowsHide: true, cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+// 2.73.1 (B-67): a proxy grant also signs `proxy: true` (harness/owner-proxy.mjs); a 2.67 grant's body is unchanged.
+const body = (d) => grantBody(d);
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
 
 /** The commands each action names (npm and node forms), for the Claude Code allow rules. */
@@ -103,7 +104,7 @@ function ownerPub(root) {
 function shapeError(d) {
   if (!d || typeof d !== 'object') return 'it isn\'t a JSON object';
   if (!/^[\w.-]{1,60}$/.test(String(d.agent || ''))) return 'it names no agent';
-  if (!Array.isArray(d.actions) || !d.actions.length || d.actions.some((a) => !DELEGABLE.includes(a))) return `its actions must be some of ${DELEGABLE.join(', ')}`;
+  if (d.proxy === true ? !isProxyGrant(d) : (!Array.isArray(d.actions) || !d.actions.length || d.actions.some((a) => !DELEGABLE.includes(a)))) return d.proxy === true ? 'an owner proxy grant has actions ["*"]' : `its actions must be some of ${DELEGABLE.join(', ')}`;
   if (!Number.isFinite(Date.parse(d.until)) || !Number.isFinite(Date.parse(d.at))) return 'it has no valid at/until times';
   if (!String(d.by || '').trim()) return 'it doesn\'t say which person granted it';
   if (WORKER_NAME.test(d.agent)) return `${d.agent} is a worker agent's name; workers are never covered`;
@@ -166,13 +167,20 @@ export function delegationFor({ action, by, env = process.env, root = mainRoot()
   return { ok: false, why: d.why || a.why };
 }
 function delegationOnly({ action, by, env, root, now, lane }) {
-  const who = String(by || '').trim();
+  let who = String(by || '').trim();
   if (!who) return { ok: false, why: '' };
   const d = readDelegation({ root, now });
   if (!d.doc) return { ok: false, why: '' };
-  if (who.toLowerCase() !== String(d.doc.agent).toLowerCase()) return { ok: false, why: '' };
+  const proxy = isProxyGrant(d.doc);
+  // 2.73.1 (B-67): the owner proxy's own shell (STUDIO_LOCK_OWNER=<agent>) may also act --by <the owner> (the person it
+  // stands in for), so every command reads the same for the owner and the proxy.
+  const shellIsProxy = proxy && String(env.STUDIO_LOCK_OWNER || '').trim().toLowerCase() === String(d.doc.agent).toLowerCase();
+  const asOwner = shellIsProxy && who.toLowerCase() === String(d.doc.by).toLowerCase();
+  if (who.toLowerCase() !== String(d.doc.agent).toLowerCase() && !asOwner) return { ok: false, why: '' };
   if (!d.ok) return { ok: false, why: `no delegation applies: ${d.why}` };
-  if (!d.doc.actions.includes(action)) return { ok: false, why: `no delegation applies: the delegation to ${d.doc.agent} covers ${d.doc.actions.join(', ')}, not ${action}` };
+  if (proxy && PROXY_NEVER.includes(String(action || '').toLowerCase())) return { ok: false, why: `no delegation applies: the owner proxy never covers ${action}` };
+  if (asOwner) who = String(d.doc.agent);
+  if (!proxy && !d.doc.actions.includes(action)) return { ok: false, why: `no delegation applies: the delegation to ${d.doc.agent} covers ${d.doc.actions.join(', ')}, not ${action}` };
   const role = String(env.STUDIO_ROLE || '').trim();
   if (role) return { ok: false, why: `no delegation applies: a launched ${role} session is never covered` };
   if (lane) return { ok: false, why: 'no delegation applies: a lane copy is never covered' };
@@ -180,7 +188,7 @@ function delegationOnly({ action, by, env, root, now, lane }) {
   const worker = [who, owner].find((n) => n && WORKER_NAME.test(n));
   if (worker) return { ok: false, why: `no delegation applies: ${worker} is a worker agent` };
   if (owner && owner.toLowerCase() !== who.toLowerCase()) return { ok: false, why: `no delegation applies: this shell works as ${owner}, not ${d.doc.agent}` };
-  return { ok: true, owner: String(d.doc.by), agent: String(d.doc.agent), at: d.doc.at, until: d.doc.until, signed: d.signed, permission: delegationWords(d.doc).slice(0, 500), why: '', doc: d.doc };
+  return { ok: true, owner: String(d.doc.by), agent: String(d.doc.agent), at: d.doc.at, until: d.doc.until, signed: d.signed, proxy, permission: delegationWords(d.doc).slice(0, 500), why: '', doc: d.doc };
 }
 
 /**
@@ -193,7 +201,7 @@ export function embeddedDelegationOk(doc, pub, { action, agent, at } = {}) {
   if (!doc || shapeError(doc) || !doc.signature || !pub) return false;
   if (!verifyApproval({ approval: body(doc), signature: doc.signature }, pub)) return false;
   const t = Date.parse(at);
-  return doc.actions.includes(action) && String(agent || '').toLowerCase() === String(doc.agent).toLowerCase() && t >= Date.parse(doc.at) - 5 * 60000 && t <= Date.parse(doc.until);
+  return (isProxyGrant(doc) ? !PROXY_NEVER.includes(String(action || '').toLowerCase()) : doc.actions.includes(action)) && String(agent || '').toLowerCase() === String(doc.agent).toLowerCase() && t >= Date.parse(doc.at) - 5 * 60000 && t <= Date.parse(doc.until);
 }
 
 /** One delegation.used event per use (the daily digest counts them). */
@@ -227,7 +235,7 @@ function commitFile(root, msg, why) {
 }
 
 /** `delegate grant`: the owner, in their own terminal. Returns { ok, message, doc? }. */
-export function grantDelegation({ agent, actions, hours, by, why = '', commit = true, env = process.env, root = mainRoot(), lane = inLaneCopy(), now = Date.now() } = {}) {
+export function grantDelegation({ agent, actions, hours, by, why = '', commit = true, env = process.env, root = mainRoot(), lane = inLaneCopy(), now = Date.now(), proxy = false, days = null } = {}) {
   const refuse = (m) => ({ ok: false, message: `Not granted: ${m}. Only the owner grants a delegation, in their own terminal (npm run delegate -- grant <agent> --actions … --hours N --by <owner>); an agent never grants itself one.` });
   const shell = ownerShellRefusal({ env, lane });
   if (shell) return refuse(shell);
@@ -237,13 +245,17 @@ export function grantDelegation({ agent, actions, hours, by, why = '', commit = 
   const name = String(agent || '').trim();
   if (!/^[\w.-]{1,60}$/.test(name)) return refuse('name the outside agent: grant <agent-name>');
   if (WORKER_NAME.test(name)) return refuse(`${name} is a worker agent's name; workers and launched sessions are never covered`);
-  const list = [...new Set(String(actions || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
-  const unknown = list.filter((a) => !DELEGABLE.includes(a));
-  if (!list.length || unknown.length) return refuse(`${unknown.length ? `${unknown.join(', ')} can't be delegated` : 'say which actions'}: --actions takes some of ${DELEGABLE.join(', ')} (never ${NEVER_DELEGATED})`);
-  const h = Number(hours);
-  if (!(h > 0 && h <= MAX_HOURS)) return refuse(`--hours takes how long it lasts, more than 0 and at most ${MAX_HOURS}`);
+  // 2.73.1 (B-67): `delegate proxy <agent>`: the owner's standing proxy, every action (harness/owner-proxy.mjs), for days.
+  const list = proxy ? ['*'] : [...new Set(String(actions || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
+  const unknown = proxy ? [] : list.filter((a) => !DELEGABLE.includes(a));
+  if (!list.length || unknown.length) return refuse(`${unknown.length ? `${unknown.join(', ')} can't be delegated` : 'say which actions'}: --actions takes some of ${DELEGABLE.join(', ')} (never ${NEVER_DELEGATED}; npm run delegate -- proxy <agent> makes a standing owner proxy that covers everything)`);
+  const dd = days == null || days === '' ? PROXY_DEFAULT_DAYS : Number(days);
+  if (proxy && !(dd > 0 && dd <= PROXY_MAX_DAYS)) return refuse(`--days takes how long the proxy lasts, more than 0 and at most ${PROXY_MAX_DAYS} (default ${PROXY_DEFAULT_DAYS})`);
+  const h = proxy ? dd * 24 : Number(hours);
+  if (!proxy && !(h > 0 && h <= MAX_HOURS)) return refuse(`--hours takes how long it lasts, more than 0 and at most ${MAX_HOURS}`);
   const at = new Date(now).toISOString();
-  const doc = { agent: name, actions: list, until: new Date(now + h * 3600000).toISOString(), by: owner.slice(0, 60), at, why: String(why || '').trim().slice(0, 300) || 'the owner\'s standing delegation (npm run delegate)' };
+  const doc = { agent: name, actions: list, until: new Date(now + h * 3600000).toISOString(), by: owner.slice(0, 60), at, why: String(why || '').trim().slice(0, 300) || (proxy ? 'the owner\'s standing proxy (npm run delegate -- proxy)' : 'the owner\'s standing delegation (npm run delegate)') };
+  if (proxy) doc.proxy = true;
   const pub = ownerPub(root);
   if (pub) {
     const keyFile = ownerKeyPath(env);
@@ -258,6 +270,7 @@ export function grantDelegation({ agent, actions, hours, by, why = '', commit = 
   const c = commit ? commitFile(root, `delegate: ${doc.by} lets ${name} run ${list.join(', ')} until ${doc.until}`, doc.why) : { committed: false, note: ` Not committed (--no-commit): it counts once you commit ${DELEGATION_REL} from this terminal.` };
   emitEvent({ type: 'delegation.granted', agent: doc.by, to: name, msg: `${doc.by} lets ${name} run ${list.join(', ')} until ${short(doc.until)}${pub ? ' (signed)' : ''}: ${doc.why}`.slice(0, 400), meta: { agent: name, actions: list, at, until: doc.until, signed: Boolean(pub) } });
   logDecision({ action: 'delegate', subject: DELEGATION_REL, by: doc.by, as: 'person', why: doc.why, evidence: `${name}: ${list.join(', ')} until ${short(doc.until)}`, undo: { kind: 'text', text: 'npm run delegate -- revoke --by <name>' }, root });
+  if (proxy) return { ok: true, doc, committed: c.committed, message: `${name} is your owner proxy until ${short(doc.until)} (${dd} day(s)), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} From its own shell (STUDIO_LOCK_OWNER=${name}) it may do everything you can in the harness, with --by ${name} or --by ${doc.by}; approvals (protected files, gates, tests, hooks, forced dones) also need your yes: --permission "<your words or a message link>". Never covered: money, worker sessions, lane copies. Every use is logged; npm run delegate -- revoke ends it at once and voids approvals not yet landed.`.replace(/\s+/g, ' ').trim() };
   return { ok: true, doc, committed: c.committed, message: `${name} may run ${list.join(', ')} with --by ${name} until ${short(doc.until)} (${h} h), ${pub ? 'signed with the owner key' : 'recorded (no owner key yet: a record, not a signature)'}. ${c.committed ? `Committed ${DELEGATION_REL}.` : ''}${c.note} Every use is recorded "${delegationWords(doc).slice(0, 80)}…" and shows in the digest. Never covered: ${NEVER_DELEGATED}. Claude Code rules for these commands: npm run delegate -- claude-settings.`.replace(/\s+/g, ' ').trim() };
 }
 
@@ -307,6 +320,7 @@ export function writeClaudeRules(rules, { root = mainRoot(), remove = false } = 
 }
 
 export const USAGE = `Usage: npm run delegate -- grant <agent> --actions ${DELEGABLE.join(',')} --hours <1-${MAX_HOURS}> --by <owner> [--why "…"] [--no-commit]
+       npm run delegate -- proxy <agent> --by <owner> [--days <1-${PROXY_MAX_DAYS}, default ${PROXY_DEFAULT_DAYS}>] [--why "…"] [--no-commit]   the standing owner proxy (2.73.1): everything but money
        npm run delegate -- list
        npm run delegate -- revoke [--by <name>] [--no-commit]
        npm run delegate -- claude-settings [--actions …] [--write] [--remove]
@@ -323,10 +337,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
   }
+  if (cmd === 'proxy') {
+    const r = grantDelegation({ proxy: true, agent: argv[1] && !argv[1].startsWith('--') ? argv[1] : '', days: opt('--days'), by: opt('--by'), why: opt('--why') || '', commit: !argv.includes('--no-commit') });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
   if (cmd === 'list') {
     const d = readDelegation();
     if (!d.doc) { console.log(d.why === 'no delegation on file' ? 'No delegation on file (npm run delegate -- grant …).' : d.why); process.exit(0); }
-    console.log(`${d.doc.agent} may run ${d.doc.actions.join(', ')} with --by ${d.doc.agent}, granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
+    if (isProxyGrant(d.doc)) console.log(`${d.doc.agent} is the owner proxy (everything but money), granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
+    else console.log(`${d.doc.agent} may run ${d.doc.actions.join(', ')} with --by ${d.doc.agent}, granted by ${d.doc.by} at ${short(d.doc.at)}, until ${short(d.doc.until)}${d.signed ? ' (signed)' : d.commit ? ` (commit ${d.commit})` : ''}: ${d.doc.why}`);
     console.log(d.ok ? 'It counts now.' : `It doesn't count: ${d.why}.`);
     if (d.note) console.log(`note: ${d.note}`);
     process.exit(0);
@@ -338,7 +358,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   }
   if (cmd === 'claude-settings') {
     const d = readDelegation();
-    const list = opt('--actions') ? String(opt('--actions')).split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean) : (d.doc?.actions || []);
+    const list = opt('--actions') ? String(opt('--actions')).split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean) : (isProxyGrant(d.doc) ? DELEGABLE : (d.doc?.actions || []));
     const unknown = list.filter((a) => !DELEGABLE.includes(a));
     if (!list.length || unknown.length) { console.error(`${unknown.length ? `${unknown.join(', ')} can't be delegated. ` : 'No delegation on file: grant one first, or pass --actions. '}Actions: ${DELEGABLE.join(', ')}.`); process.exit(1); }
     const rules = claudeRules(list);

@@ -147,7 +147,7 @@ export function parseNUnit(xml) {
   return { total: num('total') || num('testcasecount'), passed: num('passed'), failed: num('failed'), skipped: num('skipped') + num('inconclusive'), result: attr(run[1], 'result') || '', failures };
 }
 
-const which = (bin) => fs.existsSync(bin) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { encoding: 'utf8' }).status === 0;
+const which = (bin) => fs.existsSync(bin) || spawnSync(process.platform === 'win32' ? 'where' : 'which', [bin], { windowsHide: true, encoding: 'utf8' }).status === 0;
 export const unityBin = () => process.env.STUDIO_UNITY || 'unity';
 export const dotnetBin = () => process.env.STUDIO_DOTNET || 'dotnet';
 
@@ -177,7 +177,7 @@ export function runSim(dir, { log = console.log } = {}) {
   if (!which(dotnetBin())) return { ok: false, step: 'tests', problems: [`.NET isn't installed (dotnet not on the PATH; or set STUDIO_DOTNET): the sim's tests need the .NET 8 SDK, not Unity`] };
   const results = path.join(proj, 'TestResults');
   fs.rmSync(results, { recursive: true, force: true });
-  const r = spawnSync(dotnetBin(), ['test', proj, '--logger', 'trx;LogFileName=sim.trx', '--results-directory', results], { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' }, timeout: 10 * 60000, maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(dotnetBin(), ['test', proj, '--logger', 'trx;LogFileName=sim.trx', '--results-directory', results], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' }, timeout: 10 * 60000, maxBuffer: 64 * 1024 * 1024 });
   const out = `${r.stdout || ''}${r.stderr || ''}`;
   // Counted from the run's own results file, so "nothing ran" can't pass.
   const trx = read(path.join(results, 'sim.trx')) || '';
@@ -206,7 +206,7 @@ export function runUnityTests(dir, platform, { controlsOut = null, extraArgs = [
   let startedAt = null;
   const args = (file) => ['-batchmode', ...(graphics ? [] : ['-nographics']), '-projectPath', dir, '-runTests', '-testPlatform', platform, ...(category ? ['-testCategory', category] : []), '-testResults', file, '-logFile', '-', ...extraArgs];
   // Under machine:heavy (2.60.1, B-35); STUDIO_HEAVY_HELD (set while held) reaches the editor's own children.
-  const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => { startedAt = Date.now(); return spawnSync(unityBin(), args(resultsFile), { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }); }, heavyOpts);
+  const h = underHeavy(`unity ${platform} tests (${rel(dir) || '.'})`, () => { startedAt = Date.now(); return spawnSync(unityBin(), args(resultsFile), { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: 30 * 60000, maxBuffer: 256 * 1024 * 1024 }); }, heavyOpts);
   if (h.busy) return { ok: false, busy: true, platform, results: null, problems: [`${platform}: did not run: ${h.busy}`], log: '' };
   const r = h.value;
   return { ...judgeRun(platform, resultsFile, `${r.stdout || ''}${r.stderr || ''}`, r.status, { startedAt, allowEmpty, signal: r.signal || (r.error?.code === 'ETIMEDOUT' ? 'timeout' : null) }), resultsFile: rel(resultsFile) };
@@ -291,7 +291,7 @@ export function build(dir, target = 'windows', { out = null, release = false, en
   const h = underHeavy(`unity ${t[0]} build (${rel(dir) || '.'})`, () => {
     const seed = seedLibrary(dir, { mainRoot });
     if (seed.status !== 'off' && seed.status !== 'skipped') say(cacheLine(seed, 'before the editor'));
-    const r = spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, ...speed.args, '-logFile', '-', ...acc.args], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 });
+    const r = spawnSync(unityBin(), ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', `StudioBuild.${t[0]}`, '-out', dest, ...speed.args, '-logFile', '-', ...acc.args], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', timeout: 60 * 60000, maxBuffer: 256 * 1024 * 1024 });
     if (r.status === 0 && /\[build\] PASS/.test(`${r.stdout || ''}${r.stderr || ''}`)) {
       const saved = saveLibrary(dir, { mainRoot });
       if (saved.status !== 'off' && saved.status !== 'skipped') say(cacheLine(saved, 'after the passing build'));
@@ -719,7 +719,7 @@ export function runOneEditor(dir, { controlsOut = null, extraArgs = [], category
     fs.writeFileSync(path.join(sdir, 'StudioHarnessTemp.asmdef'), ONE_EDITOR_ASMDEF);
     const args = ['-batchmode', '-nographics', '-projectPath', dir, '-executeMethod', 'StudioHarnessRunAll.Run', '-studioEditModeResults', files.EditMode, '-studioPlayModeResults', files.PlayMode, ...(category ? ['-studioTestCategory', category] : []), '-logFile', '-', ...extraArgs];
     startedAt = Date.now();
-    r = spawnSync(unityBin(), args, { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: timeoutMin * 60000, maxBuffer: 256 * 1024 * 1024 });
+    r = spawnSync(unityBin(), args, { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, ...(controlsOut ? { STUDIO_CONTROLS_OUT: controlsOut } : {}) }, timeout: timeoutMin * 60000, maxBuffer: 256 * 1024 * 1024 });
   } finally {
     removeOneEditorFiles(dir);
   }

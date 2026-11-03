@@ -13,13 +13,13 @@ import { REPO_ROOT } from '../harness/event.mjs';
 import { loadCartridge, runScenario } from '../harness/cartridge.mjs';
 import { parseCheck } from '../harness/gdscript-parse.mjs';
 
-const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot']).status === 0 ? 'godot' : null);
+const godot = process.env.STUDIO_GODOT || (spawnSync(process.platform === 'win32' ? 'where' : 'which', ['godot'], { windowsHide: true }).status === 0 ? 'godot' : null);
 if (!godot) {
   console.log('[engine-template] SKIP no Godot (set STUDIO_GODOT to the program)');
   process.exit(0);
 }
 const tpl = path.join(REPO_ROOT, 'engine', '_godot');
-const g = (args) => spawnSync(godot, ['--headless', '--path', tpl, ...args], { encoding: 'utf8', timeout: 300000 });
+const g = (args) => spawnSync(godot, ['--headless', '--path', tpl, ...args], { windowsHide: true, encoding: 'utf8', timeout: 300000 });
 g(['--import']);
 const seeds = [1, 2, 3, 4, 5, 1337];
 const out = g(['--script', 'res://tools/parity.gd', '--', seeds.join(',')]);
@@ -41,7 +41,7 @@ if (gate.status !== 0 || /SCRIPT ERROR/.test(gate.stdout + gate.stderr)) problem
   const fs = await import('node:fs');
   const os = await import('node:os');
   const ctlOut = path.join(os.tmpdir(), `engine-template-controls-${process.pid}.json`);
-  const ok = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 300000, env: { ...process.env, STUDIO_CONTROLS_OUT: ctlOut } });
+  const ok = spawnSync(godot, ['--headless', '--path', tpl, '--script', 'res://tools/gate.gd'], { windowsHide: true, encoding: 'utf8', timeout: 300000, env: { ...process.env, STUDIO_CONTROLS_OUT: ctlOut } });
   let res = null;
   try { res = JSON.parse(fs.readFileSync(ctlOut, 'utf8')); } catch {}
   const ids = (res?.controls || []).filter((c) => c.ok).map((c) => c.id).sort().join(',');
@@ -50,8 +50,8 @@ if (gate.status !== 0 || /SCRIPT ERROR/.test(gate.stdout + gate.stderr)) problem
   fs.cpSync(tpl, broken, { recursive: true, filter: (s) => !/[\\/]\.godot([\\/]|$)/.test(s) });
   const mainGd = path.join(broken, 'main.gd');
   fs.writeFileSync(mainGd, fs.readFileSync(mainGd, 'utf8').replace('buy_button.pressed.connect(buy)', 'pass # unwired for the dead-control check'));
-  spawnSync(godot, ['--headless', '--path', broken, '--import'], { encoding: 'utf8', timeout: 300000 });
-  const dead = spawnSync(godot, ['--headless', '--path', broken, '--script', 'res://tools/gate.gd'], { encoding: 'utf8', timeout: 300000 });
+  spawnSync(godot, ['--headless', '--path', broken, '--import'], { windowsHide: true, encoding: 'utf8', timeout: 300000 });
+  const dead = spawnSync(godot, ['--headless', '--path', broken, '--script', 'res://tools/gate.gd'], { windowsHide: true, encoding: 'utf8', timeout: 300000 });
   if (dead.status === 0 || !/control buy-button did nothing/.test(dead.stdout + dead.stderr)) problems.push('a template with the Buy button unwired still passed its gate: the real-input controls check is not working');
   fs.rmSync(broken, { recursive: true, force: true });
 }

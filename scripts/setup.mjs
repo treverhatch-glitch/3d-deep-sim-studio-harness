@@ -48,7 +48,7 @@ if (!fs.existsSync(envFile) && fs.existsSync(envExample)) {
 
 // Install the pre-commit hook (secret scan + lock check + sim gates)
 try {
-  execSync('node scripts/install-hooks.mjs', { cwd: rootDir, stdio: 'inherit' });
+  execSync('node scripts/install-hooks.mjs', { windowsHide: true, cwd: rootDir, stdio: 'inherit' });
 } catch {
   console.warn('[setup] could not install git hooks; run npm run hooks:install');
 }
@@ -71,7 +71,7 @@ if (process.argv.includes('--install') || !fs.existsSync(path.join(rootDir, 'nod
   // in every agent's hand-back in Jed's runs).
   const ci = fs.existsSync(path.join(rootDir, 'package-lock.json'));
   console.log(`[setup] Installing packages (npm ${ci ? 'ci' : 'install'})...`);
-  execSync(ci ? 'npm ci --no-audit --no-fund' : 'npm install', { cwd: rootDir, stdio: 'inherit' });
+  execSync(ci ? 'npm ci --no-audit --no-fund' : 'npm install', { windowsHide: true, cwd: rootDir, stdio: 'inherit' });
 }
 
 // The browser checks (play:browser, the HUD check, Stage 2 playtests) need Playwright's Chromium.
@@ -86,7 +86,7 @@ if (!process.argv.includes('--no-browsers') && fs.existsSync(path.join(rootDir, 
   else {
     console.log('[setup] Installing Playwright Chromium (npx playwright install chromium)...');
     try {
-      execSync('npx playwright install chromium', { cwd: rootDir, stdio: 'inherit' });
+      execSync('npx playwright install chromium', { windowsHide: true, cwd: rootDir, stdio: 'inherit' });
     } catch {
       console.warn('[setup] Could not install Chromium; the browser checks will fail until you run: npx playwright install chromium');
     }

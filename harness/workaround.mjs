@@ -344,7 +344,7 @@ const HARNESS_REWRITES = /^(upgrade\.(merged|stash_restored|merge_conflict|auto)
 function gitHeadCopy(file) {
   try {
     const real = fs.realpathSync(file);
-    const r = spawnSync('git', ['show', `HEAD:./${path.basename(real)}`], { cwd: path.dirname(real), encoding: 'utf8', timeout: 10000, maxBuffer: 32 * 1024 * 1024 });
+    const r = spawnSync('git', ['show', `HEAD:./${path.basename(real)}`], { windowsHide: true, cwd: path.dirname(real), encoding: 'utf8', timeout: 10000, maxBuffer: 32 * 1024 * 1024 });
     return r.status === 0 ? r.stdout : null;
   } catch { return null; }
 }

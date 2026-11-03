@@ -74,7 +74,7 @@ export function decideEdit(tool, input = {}, { env = process.env, dir } = {}) {
  * the board commands write are left out.
  */
 export function mainConfigChanges(main, since = 0) {
-  const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'studio'], { cwd: main, encoding: 'utf8' });
+  const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'studio'], { windowsHide: true, cwd: main, encoding: 'utf8' });
   if (r.status !== 0) return [];
   const out = [];
   for (const line of String(r.stdout || '').split('\n').filter((l) => l.length > 3)) {

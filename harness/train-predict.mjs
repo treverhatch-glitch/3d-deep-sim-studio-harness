@@ -39,7 +39,7 @@ function mainPlus(root, tip, head, unionFiles) {
   const m = mergeTree(root, tip, head, { unionFiles });
   if (m.error || !m.clean) return { conflict: true };
   if (m.union.length || !isSha(m.tree)) return { union: true };
-  const c = spawnSync('git', ['-c', 'user.name=train-predict', '-c', 'user.email=train-predict@studio.local', 'commit-tree', m.tree, '-p', tip, '-p', head, '-m', 'train-predict (not a ref)'], { cwd: root, encoding: 'utf8' });
+  const c = spawnSync('git', ['-c', 'user.name=train-predict', '-c', 'user.email=train-predict@studio.local', 'commit-tree', m.tree, '-p', tip, '-p', head, '-m', 'train-predict (not a ref)'], { windowsHide: true, cwd: root, encoding: 'utf8' });
   return c.status === 0 && isSha(c.stdout.trim()) ? { commit: c.stdout.trim() } : { union: true };
 }
 

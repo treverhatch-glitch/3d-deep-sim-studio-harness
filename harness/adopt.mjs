@@ -22,7 +22,7 @@ import { REPO_ROOT } from './event.mjs';
 import { splitEolOnly } from './eol-only.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', 'Build', 'Builds', '.godot', '.import', 'Library', 'Temp', 'obj', 'bin', 'target', '.venv', 'venv', '__pycache__', 'coverage', '.next', '.turbo', '.cache']);
-const git = (cwd, ...a) => spawnSync('git', ['-C', cwd, ...a], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+const git = (cwd, ...a) => spawnSync('git', ['-C', cwd, ...a], { windowsHide: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
 export const slugOf = (name) => String(name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'game';
 export const originFile = (root = REPO_ROOT) => path.join(root, 'studio', 'game', 'ORIGIN.json');
@@ -51,7 +51,7 @@ export function copyGame(src, dest, { ref = null } = {}) {
     const sha = git(src, 'rev-parse', '--verify', '--quiet', `${r}^{commit}`).stdout.trim();
     if (!sha) return { error: `${r} is not a commit in ${src} (fetch it first: git -C "${src}" fetch origin ${r})` };
     const q = (s) => `"${String(s).replace(/"/g, '\\"')}"`;
-    const p = spawnSync(`git -C ${q(src)} archive --format=tar ${sha} | tar -x -C ${q(dest)}`, { shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const p = spawnSync(`git -C ${q(src)} archive --format=tar ${sha} | tar -x -C ${q(dest)}`, { windowsHide: true, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     if (p.status !== 0) return { error: `copying ${r} failed: ${(p.stderr || '').trim().split('\n').pop()}` };
     const branch = ref || git(src, 'rev-parse', '--abbrev-ref', 'HEAD').stdout.trim();
     return { git: true, ref: branch, sha, remote: git(src, 'remote', 'get-url', 'origin').stdout.trim() || null };
@@ -213,7 +213,7 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
   const diff = git(o.source, 'diff', '--binary', o.sha, tip, '--', '.', ':(exclude)studio.gates.json', ':(exclude)studio.browser.json');
   if (diff.status !== 0) return { error: `git diff in ${o.source} failed: ${(diff.stderr || '').trim()}` };
   if (diff.stdout.trim()) {
-    const ap = spawnSync('git', ['apply', '--3way', '--whitespace=nowarn', `--directory=${o.path}`], { cwd: root, input: diff.stdout, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+    const ap = spawnSync('git', ['apply', '--3way', '--whitespace=nowarn', `--directory=${o.path}`], { windowsHide: true, cwd: root, input: diff.stdout, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     if (ap.status !== 0) return { error: `the game's changes didn't apply cleanly to ${o.path}: ${(ap.stderr || '').trim().split('\n').slice(-4).join(' | ')} (fix the conflicts, then commit)`, conflicts: true };
   }
   const next = { ...readOrigin(root), ref: want, sha: tip, previousSha: o.sha, syncedAt: now.toISOString() };
@@ -228,7 +228,7 @@ export function syncGame({ root = REPO_ROOT, ref = null, force = false, commit =
     const env = { ...process.env, STUDIO_MAIN_COMMIT: 'allow' };
     if (!id('user.name') && !env.GIT_AUTHOR_NAME) Object.assign(env, { GIT_AUTHOR_NAME: 'studio', GIT_COMMITTER_NAME: 'studio' });
     if (!id('user.email') && !env.GIT_AUTHOR_EMAIL) Object.assign(env, { GIT_AUTHOR_EMAIL: 'studio@localhost', GIT_COMMITTER_EMAIL: 'studio@localhost' });
-    const c = spawnSync('git', ['commit', '-q', '-m', `Sync ${o.name || o.slug} from ${want} (${o.sha.slice(0, 8)}..${tip.slice(0, 8)}, ${commits.length} commit(s))`], { cwd: root, encoding: 'utf8', env });
+    const c = spawnSync('git', ['commit', '-q', '-m', `Sync ${o.name || o.slug} from ${want} (${o.sha.slice(0, 8)}..${tip.slice(0, 8)}, ${commits.length} commit(s))`], { windowsHide: true, cwd: root, encoding: 'utf8', env });
     committed = c.status === 0;
     if (!committed) commitError = `${c.stderr || c.stdout || ''}`.trim().split('\n').slice(-2).join(' | ');
   }

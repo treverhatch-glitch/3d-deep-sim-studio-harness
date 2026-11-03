@@ -19,8 +19,12 @@
  *                 FAIL when .env is tracked by git (the webhook is a secret)
  *   policy        studio/policy.json, studio/delegation.json, studio/autonomy.json, studio/overseer.json: each one there
  *                 must parse (FAIL otherwise); missing: INFO (defaults)
+ *   dotenv-identity 2.73.1 (B-60): a .env line setting STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT or STUDIO_MAIN_ROOT
+ *                 (WARN, the line numbers): identity settings belong to a session; the harness ignores them in .env
  *   lanes         lane copies (.lanes/<name>) with uncommitted work or commits not on the studio's branch (WARN, listed):
- *                 the update's lane refresh skips a lane with uncommitted work
+ *                 the update's lane refresh skips a lane with uncommitted work. 2.73.1 (B-51): a lane is a registered
+ *                 worktree of this repo (git worktree list) with its own .git; any other folder there is a "leftover
+ *                 folder (not a lane)" (INFO), never asked for git status (git would answer for the main checkout)
  *
  * No harness imports (only node's): an old studio runs this from the ref through the upgrade guard (docs/RELEASE.md).
  * The guard passes its own checkUpgrade / isMainCheckout in. UNTESTED on Windows: `where` for the PATH lookups.
@@ -43,9 +47,41 @@ export function readDotEnv(root) {
   try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return o; }
   for (const l of text.split(/\r?\n/)) {
     const m = l.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (m) o[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (m && !IDENTITY.includes(m[1].toUpperCase())) o[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
   }
   return o;
+}
+
+// 2.73.1 (B-60): the session identity the launcher sets (harness/dotenv.mjs SESSION_IDENTITY_KEYS; repeated here, as this
+// file imports nothing of the harness). The harness ignores these in .env.
+const IDENTITY = ['STUDIO_LOCK_OWNER', 'STUDIO_ROLE', 'STUDIO_AGENT', 'STUDIO_MAIN_ROOT'];
+/** [{ line, key }] of the .env lines setting a session identity to a non-empty value. */
+export function dotEnvIdentityLines(root) {
+  let text = '';
+  try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return []; }
+  const out = [];
+  text.split('\n').forEach((l, i) => {
+    const m = l.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (m && IDENTITY.includes(m[1].toUpperCase()) && m[2].trim().replace(/^['"]|['"]$/g, '') !== '') out.push({ line: i + 1, key: m[1].toUpperCase() });
+  });
+  return out;
+}
+function checkDotEnvIdentity(root) {
+  const hits = dotEnvIdentityLines(root);
+  if (!hits.length) return [];
+  const lines = hits.map((h) => h.line).join(', ');
+  return [item('dotenv-identity', 'WARN', `.env sets ${[...new Set(hits.map((h) => h.key))].join(', ')} (line${hits.length === 1 ? '' : 's'} ${lines}): identity settings belong to a session, not the studio's .env (ignored there; while an older harness read it, every shell, the owner's own included, was labelled that agent)`, `remove line${hits.length === 1 ? '' : 's'} ${lines} from the studio's .env (the owner edits it; the launcher sets these for each agent session)`)];
+}
+
+/**
+ * 2.73.1 (B-51): the registered worktrees of this repo (git worktree list --porcelain), as resolved paths. A folder in
+ * .lanes/ is a lane only when it is one of them AND has its own .git file: an old, emptied lane folder has neither, and
+ * git run inside it answers for the main checkout (its dirty board counted once per leftover folder).
+ */
+export function registeredWorktrees(root) {
+  const norm = (p) => { let r = path.resolve(p); try { r = fs.realpathSync.native(r); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
+  const list = String(git(['worktree', 'list', '--porcelain'], root).stdout || '').split(/\r?\n/).filter((l) => l.startsWith('worktree ')).map((l) => norm(l.slice(9).trim()));
+  return { has: (dir) => fs.existsSync(path.join(dir, '.git')) && list.includes(norm(dir)), list };
 }
 
 /** "1.2.3" against ">=1.2.0" (only >= / plain versions; anything else: null). */
@@ -206,15 +242,18 @@ function checkLanes(root) {
   try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name); } catch { return [item('lanes', 'PASS', 'no lane copies')]; }
   const branch = out1(git(['symbolic-ref', '-q', '--short', 'HEAD'], root)) || 'main';
   const busy = [];
+  const wt = registeredWorktrees(root);
+  const leftover = names.filter((n) => !wt.has(path.join(dir, n)));
+  names = names.filter((n) => !leftover.includes(n));
+  const left = leftover.length ? [item('lanes-leftover', 'INFO', `${leftover.length} leftover folder${leftover.length === 1 ? '' : 's'} (not a lane: no git worktree): ${leftover.slice(0, 8).join(', ')}${leftover.length > 8 ? ` and ${leftover.length - 8} more` : ''}`)] : [];
   for (const n of names) {
     const ld = path.join(dir, n);
-    if (!out1(git(['rev-parse', '--show-toplevel'], ld))) continue;
     const dirty = String(git(['status', '--porcelain', '--untracked-files=normal'], ld).stdout || '').split('\n').filter((l) => l.length > 3 && !/\snode_modules\/?$/.test(l)).length;
     const ahead = Number(out1(git(['rev-list', '--count', `${branch}..HEAD`], ld))) || 0;
     if (dirty || ahead) busy.push(`${n} (${[ahead ? `${ahead} commit(s) not on ${branch}` : '', dirty ? `${dirty} uncommitted file(s)` : ''].filter(Boolean).join(', ')})`);
   }
-  if (!busy.length) return [item('lanes', 'PASS', `${names.length} lane cop${names.length === 1 ? 'y' : 'ies'}, none with unlanded work`)];
-  return [item('lanes', 'WARN', `${busy.length} lane(s) hold unlanded work: ${busy.slice(0, 8).join('; ')}${busy.length > 8 ? ` and ${busy.length - 8} more` : ''}`, 'land them first (npm run task -- train --by <you>), or let their agents commit: the update\'s lane refresh skips a lane with uncommitted work, and its agent merges main in later')];
+  if (!busy.length) return [item('lanes', 'PASS', `${names.length} lane cop${names.length === 1 ? 'y' : 'ies'}, none with unlanded work`), ...left];
+  return [...left, item('lanes', 'WARN', `${busy.length} lane(s) hold unlanded work: ${busy.slice(0, 8).join('; ')}${busy.length > 8 ? ` and ${busy.length - 8} more` : ''}`, 'land them first (npm run task -- train --by <you>), or let their agents commit: the update\'s lane refresh skips a lane with uncommitted work, and its agent merges main in later')];
 }
 
 /** The preflight: { ok, items, lines }. deps: { checkUpgrade, isMainCheckout } (the guard's). */
@@ -222,7 +261,7 @@ export async function preflight({ root, ref = null, env = process.env, deps = {}
   // The environment wins over .env, except where it is empty (an empty value is no value).
   const e = { ...readDotEnv(root) };
   for (const [k, v] of Object.entries(env)) if (String(v ?? '').trim() !== '' || !(k in e)) e[k] = v;
-  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkPolicy(root), ...checkLanes(root)];
+  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root)];
   return { ok: !items.some((i) => i.status === 'FAIL'), items, lines: itemLines('preflight', items) };
 }
 

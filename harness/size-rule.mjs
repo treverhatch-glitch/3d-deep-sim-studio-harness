@@ -28,7 +28,7 @@ import { protectedGlobs } from './approve.mjs';
 import { globRe, matchAny } from './merge-lane.mjs';
 
 const gitShow = (ref, rel) => {
-  const r = spawnSync('git', ['show', `${ref}:${rel}`], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const r = spawnSync('git', ['show', `${ref}:${rel}`], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   return r.status === 0 ? r.stdout : null;
 };
 const parse = (text) => { try { return JSON.parse(text); } catch { return null; } };
@@ -134,7 +134,7 @@ export function importLines(lines) {
  * copy of `file`: { lines, bytes }. Lines inside one hunk are judged together, so a whole import block counts.
  */
 export function freeImportLines(base, file) {
-  const r = spawnSync('git', ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', base, '--', file], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-renames', base, '--', file], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (r.status !== 0) return { lines: 0, bytes: 0 };
   let addN = 0; let addB = 0; let delN = 0; let delB = 0;
   const flush = (plus, minus) => {

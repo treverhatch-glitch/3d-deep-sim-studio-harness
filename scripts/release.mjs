@@ -28,11 +28,11 @@ if (process.argv[2] === 'predict') {
 }
 // 2.30c: `npm run release -- <version>` ships (scripts/release-ship.mjs); with no version, this is the check CI runs.
 if (/^\d+\.\d+\.\d+/.test(process.argv[2] || '')) {
-  const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'release-ship.mjs'), ...process.argv.slice(2)], { cwd: root, stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'release-ship.mjs'), ...process.argv.slice(2)], { windowsHide: true, cwd: root, stdio: 'inherit' });
   process.exit(r.status ?? 1);
 }
 const steps = [];
-const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
+const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { windowsHide: true, cwd: root, encoding: 'utf8', ...opts });
 const step = (label, ok, detail = '') => {
   steps.push({ label, ok });
   console.log(`[release] ${ok ? 'PASS' : 'FAIL'} ${label}${ok || !detail ? '' : `\n${detail}`}`);
@@ -69,7 +69,7 @@ const before = tracked();
 // shards (node qa/selftest.mjs --shard i/N) and a summary job fails the run when any shard failed.
 const exceptArg = process.argv.includes('--except') ? String(process.argv[process.argv.indexOf('--except') + 1] || '') : null;
 if (exceptArg !== null) console.log(`[release] note: --except ${exceptArg}: those gates run in jobs of their own; this alone is not a full release check`);
-const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep', ...(exceptArg !== null ? ['--except', exceptArg] : [])], { cwd: root, stdio: 'inherit' });
+const gates = spawnSync(process.execPath, [path.join(root, 'scripts', 'run-gates.mjs'), '--required-only', '--deep', ...(exceptArg !== null ? ['--except', exceptArg] : [])], { windowsHide: true, cwd: root, stdio: 'inherit' });
 step(exceptArg !== null ? `required gates (except ${exceptArg})` : 'required gates', gates.status === 0);
 
 // 3. Closed loop still fails loudly
