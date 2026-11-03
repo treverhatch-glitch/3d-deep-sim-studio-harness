@@ -25,10 +25,20 @@ import { fileURLToPath } from 'node:url';
 import { get, set, del, getKey } from '../harness/gate-cache.mjs';
 import { writeAtomic, withFileLock, pidAlive } from '../harness/fsafe.mjs';
 import { selfIdentity, pidAlive as idAlive } from '../harness/proc-identity.mjs';
+import { applyGateEnv, nodeModulesDrift, porcelainZ } from '../harness/gate-env.mjs';
+import { createFence, fenceLine } from '../harness/gate-output.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cfg = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8'));
 const argv = process.argv.slice(2);
+// 2.71.1 (B, S03/T06/G10/G16): the gates and everything they start run without code-loading NODE_OPTIONS (or npm's
+// node-options), with git pointed only at this checkout and replace refs ignored (harness/gate-env.mjs). Done in place
+// before anything is spawned, so every git call (whichever helper makes it) and every child inherits it. A preload
+// into this very process (NODE_OPTIONS=... npm run verify by hand) has already run: it is named, and recorded.
+const gateEnvApplied = applyGateEnv();
+if (gateEnvApplied.dropped.length && !process.env.STUDIO_VERIFY_RUN) console.log(`[gates] note: the gates run without ${gateEnvApplied.dropped.join(', ')} (harness/gate-env.mjs)`);
+if (gateEnvApplied.preload.length) process.env.STUDIO_VERIFY_PRELOADED = [...new Set([...String(process.env.STUDIO_VERIFY_PRELOADED || '').split(' ').filter(Boolean), ...gateEnvApplied.preload])].join(' ');
+if (gateEnvApplied.preload.length) console.log(`[gates] WARN this run was started with NODE_OPTIONS that load code into it (${gateEnvApplied.preload.join(' ')}): its checks run without them, but this process's own exit code can't be trusted; the verify record says nodeOptionsPreload`);
 
 // 2.58.0 (F1): verify survives being reaped. Claude Code's low-memory guard killed an agent's background
 // `npm run verify` four times while the session sat idle (foreground runs survived). `npm run verify` now starts
@@ -128,6 +138,14 @@ if ((!only && !isFastTier) || gates.some(isHeavyGate)) {
 const { activeCartridge } = await import('../harness/cartridge.mjs');
 const active = activeCartridge();
 console.log(gameOwnsGates ? `[gates] testing the studio's game "${sg.name}" with its own checks (${declaredGates(sg).map((x) => x.id).join(', ')}); ${realCartridges.length ? `its cartridge${realCartridges.length === 1 ? '' : 's'} (${realCartridges.join(', ')}) get${realCartridges.length === 1 ? 's' : ''} the cartridge gates that check every cartridge, the rest are skipped` : 'the cartridge gates are skipped'}` : `[gates] testing the game "${active.name || 'none'}"${active.from ? ` (from ${active.from})` : ''}; goldens and regressions cover every cartridge`);
+// 2.71.1 (B, S03/S04): node_modules that don't match package-lock.json (a stale install, or a test runner swapped for a
+// shim) are named once; cheap (two JSON reads per folder), never a failure.
+try {
+  for (const d of [...new Set([root, sg?.root ? path.resolve(root, sg.root) : null].filter(Boolean))]) {
+    const why = nodeModulesDrift(d);
+    if (why) console.log(`[gates] WARN node_modules in ${path.relative(root, d).split(path.sep).join('/') || '.'} doesn't match its package-lock.json (a stale install, or changed by hand): ${why}. The checks may not run what the lockfile names: run npm ci there`);
+  }
+} catch { /* a help, never a failure */ }
 // 2.31.0: in a lane copy, verify tests what this lane changed against the studio's branch (committed and
 // not), the same scope `task done` uses. Before, verify had no diff, so a Godot-only lane ran every web
 // game check (~11 min in the Marina run) and never ran the Godot gate, which only runs for changed paths.
@@ -140,8 +158,8 @@ else if (!argv.includes('--all')) {
     const { inLaneCopy, laneDiff } = await import('../harness/worktree.mjs');
     if (inLaneCopy()) {
       const ld = laneDiff();
-      const st = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8' }).stdout || '';
-      const dirty = st.split('\n').filter((l) => l.length > 3).map((l) => l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, ''));
+      // 2.71.1 (B, G14): -z names: a non-ASCII path is no longer a quoted "web/\340..." that no glob matches.
+      const dirty = porcelainZ(spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout || '').map((e) => e.file);
       const files = [...new Set([...(ld?.changed || []), ...dirty])];
       if (files.length) {
         changedFiles = files;
@@ -208,7 +226,8 @@ let heavyLock = null;
 const gitOut = (args) => { try { const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return r.status === 0 ? r.stdout : null; } catch { return null; } };
 // 2.58.3 (O3, crew P-035): nor does a tracked file that differs only in line endings (harness/eol-only.mjs).
 const { splitEolOnly } = await import('../harness/eol-only.mjs');
-const treeDirty = () => { const s = gitOut(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, s.split('\n').filter((l) => l.length > 3).filter((l) => !isEngineChurn(l.slice(3).replace(/^.* -> /, '').replace(/^"|"$/g, '')))).real.length > 0; };
+// 2.71.1 (B, G14): names read with -z (never quoted), so a non-ASCII engine cache file is recognised as one.
+const treeDirty = () => { const s = gitOut(['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=no', '--', '.', ':(exclude)studio']); return s === null ? null : splitEolOnly(root, porcelainZ(s).filter((e) => !isEngineChurn(e.file)).map((e) => `${e.xy} ${e.file}`)).real.length > 0; };
 const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
 // 2.58.5 (H-3): the tree it tests too (with dirty=false, the files the gates saw), so task done can let this verify
 // stand in for its game checks on the same tree; with what scoped the game gate (its paths, related tests only).
@@ -250,20 +269,32 @@ for (const gate of gates) {
   // carry every passing gate's log into every later turn (verify was ~3k chars a call in the Marina run).
   // 2.65.0: on Windows, while this run holds machine:heavy, the gate's shell is recorded in the holder's tree so its
   // children that outlive it are found by `heavy stop` and the next take; POSIX runs exactly as before (spawnSync).
-  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock });
+  // 2.71.1 (B, L01/I01): every gate's output goes through a fence (harness/gate-output.mjs): kept whole in
+  // .studio/gates/out/<gate>.log, at most its first and last STUDIO_GATE_OUTPUT_LINES (200) lines shown, and a line that
+  // looks like run-gates' own ([gates] ..., [verify] ...) shown as `| [gates] ...`, so no check prints our verdict or Fix.
+  const outName = `.studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log`;
+  const fence = createFence({ show: compact ? null : (t) => process.stdout.write(t), logName: outName, pick: /^\[game-gates\] WARN game:/ });
+  const outTmp = path.join(root, `${outName}.${process.pid}.tmp`);
+  const res = await runGateCommand(gate.command, { cwd: root, compact, lk: heavyLock, outFile: outTmp, onData: (d) => fence.push(d) });
+  try { fs.renameSync(outTmp, path.join(root, outName)); } catch { try { fs.rmSync(outTmp, { force: true }); } catch {} }
+  const fenced = fence.end();
   if (compact) {
-    const text = `${res.stdout || ''}${res.stderr || ''}`;
-    try { fs.mkdirSync(path.join(root, '.studio', 'gates', 'out'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'gates', 'out', `${String(gate.id).replace(/[^\w.-]/g, '_')}.log`), text); } catch {}
     // 2.67.0 (B-48): a passing game gate's advisory checks (game:test-rng, game:det-math in warn mode) still show.
-    if (res.status === 0) for (const l of text.split('\n').filter((x) => /^\[game-gates\] WARN game:/.test(x)).slice(0, 5)) console.log(`${l} (advisory; full: .studio/gates/out/${String(gate.id).replace(/[^\w.-]/g, '_')}.log)`);
-    if (res.status !== 0) { const lines = text.trimEnd().split('\n'); const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40); console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${lines.length} lines; full: .studio/gates/out/${gate.id}.log)`); console.log(lines.slice(-n).join('\n')); }
+    if (res.status === 0) for (const l of fenced.picked) console.log(`${l} (advisory; full: ${outName})`);
+    if (res.status !== 0) {
+      const lines = [...fenced.head, ...fenced.tail];
+      while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+      const n = Number(process.env.STUDIO_COMPACT_FAIL_LINES || 40);
+      console.log(`[gates] ${gate.id} output (last ${Math.min(n, lines.length)} of ${fenced.lines} lines; full: ${outName})`);
+      console.log(lines.slice(-n).map(fenceLine).join('\n'));
+    }
   }
   const ms = Date.now() - start;
   const ok = res.status === 0;
   const required = gate.required !== false;
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name });
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
-  if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: `${res.stdout || ''}${res.stderr || ''}`, compact })}`); // 2.66.0 (d): one next step per failure
+  if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: fenced.text, compact })}`); // 2.66.0 (d): one next step per failure
 
   if (cacheable && !isMergeTier && !focusRun && !sparseRun?.partial) {
     if (ok) set(gate, ms);
@@ -298,7 +329,7 @@ try {
   // 2.71.1 (D01/T04): every record carries a run id, and a full run also writes its run log (.studio/gates/runs/<id>.json,
   // the record's digest): reuse needs the two to match (harness/gate-trust.mjs recordTrust).
   const runId = /^[\w.-]{6,80}$/.test(process.env.STUDIO_VERIFY_RUN || '') ? process.env.STUDIO_VERIFY_RUN : trust.newRunId();
-  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}) }, null, 2);
+  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
   if (!only && !isFastTier) trust.writeRunLog(path.join(root, '.studio'), JSON.parse(rec), { root: CHECKOUT.real, owner: process.env.STUDIO_LOCK_OWNER || null });
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
