@@ -2,6 +2,7 @@
 /**
  * scripts/release.mjs — the one command to run before you tag, merge or hand off.  `npm run release`
  * `npm run release -- <version>` ships a release end to end instead: scripts/release-ship.mjs.
+ * `npm run release -- predict --metric <name> --expect "-30%"` (2.73.0) records a predicted scorecard change instead.
  *
  * 1. Syntax-checks every JS module and Python tool.
  * 2. Runs every required gate (scripts/run-gates.mjs --required-only; --except <ids> leaves some to CI jobs of their own).
@@ -17,6 +18,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 2.73.0 (f): `npm run release -- predict --metric <name> --expect "-30%"` records what the release expects to move
+// (docs/releases/<version>.json, harness/release-predict.mjs); `npm run autonomy -- impact` scores it.
+if (process.argv[2] === 'predict') {
+  const { predictCli } = await import('../harness/release-predict.mjs');
+  const r = predictCli(process.argv.slice(3), { root, version: JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version });
+  (r.code ? console.error : console.log)(r.text);
+  process.exit(r.code);
+}
 // 2.30c: `npm run release -- <version>` ships (scripts/release-ship.mjs); with no version, this is the check CI runs.
 if (/^\d+\.\d+\.\d+/.test(process.argv[2] || '')) {
   const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'release-ship.mjs'), ...process.argv.slice(2)], { cwd: root, stdio: 'inherit' });

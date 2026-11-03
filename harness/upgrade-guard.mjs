@@ -31,6 +31,11 @@
  *   npm run upgrade -- --rollback --by <person> [--permission "…"]   (2.71.1)
  *       back to the harness before the last update: reverts that update's merge commit (upgradeRollback), never a reset.
  *
+ * 2.73.0 (f): `--preflight [--ref <ref>]` before an update (harness/upgrade-preflight.mjs, read-only) and `--smoke [--keep]`
+ * right after one (harness/upgrade-smoke.mjs); `--merge` writes the "before" snapshot .studio/upgrades/<from>-to-<to>.json
+ * (harness/upgrade-baseline.mjs) that `npm run autonomy -- impact` compares against. The two helpers without harness
+ * imports load from beside this file, the studio, or the ref (loadHelper), as permission.mjs does.
+ *
  * 2.67.0 (B-49): a merged update ends with `npm run lanes -- refresh --all` (the updated harness's), reported per lane:
  *   refreshed / conflicted (merge aborted, files named) / red (targeted tests) / skipped (a running session, uncommitted
  *   work: never touched). STUDIO_UPGRADE_REFRESH=off keeps the old behaviour; =no-tests skips the targeted tests.
@@ -154,6 +159,50 @@ async function loadPermission(root, ref = null) {
   }
   return null;
 }
+/**
+ * 2.73.0 (f): a helper module with no harness imports (upgrade-baseline.mjs, upgrade-preflight.mjs): beside this file, in
+ * the studio, or (a studio older than the helper, running this guard from the ref) from the ref, copied into .studio/.
+ */
+export async function loadHelper(name, root, ref = null) {
+  const beside = path.join(path.dirname(SELF), name);
+  // Beside this file only when this file is a harness's own (a copy run from .studio/ may sit beside an older copy).
+  const first = path.basename(path.dirname(SELF)) === 'harness' ? [beside] : [];
+  for (const f of [...first, path.join(root, 'harness', name)]) {
+    if (fs.existsSync(f)) { try { return await importFile(f); } catch {} }
+  }
+  if (ref) {
+    const r = git(['show', `${ref}:harness/${name}`], root);
+    if (r.status === 0 && r.stdout) {
+      const f = path.join(root, '.studio', name);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, r.stdout);
+      try { return await importFile(`${f}`); } catch {}
+    }
+  }
+  if (!first.length && fs.existsSync(beside)) { try { return await importFile(beside); } catch {} }
+  return null;
+}
+
+/** The studio's event log (its own harness/event.mjs), or [] when it can't be read. */
+async function studioEvents(root, limit = 200000) {
+  const f = path.join(root, 'harness', 'event.mjs');
+  if (!fs.existsSync(f)) return [];
+  try { const m = await importFile(f); return m.readRecentEvents ? m.readRecentEvents(limit) : []; } catch { return []; }
+}
+
+/**
+ * 2.73.0 (f): the "before" snapshot (harness/upgrade-baseline.mjs) just before an update merges, so the impact report
+ * compares against the studio's numbers at that moment. Never stops the update: a failure is one line.
+ */
+export async function beforeSnapshot({ root, from, to, ref, sha, by, env = process.env, now = new Date() }) {
+  try {
+    const b = await loadHelper('upgrade-baseline.mjs', root, ref);
+    if (!b?.writeSnapshot) return { lines: ['[upgrade] before snapshot: not taken (harness/upgrade-baseline.mjs was not found beside the guard, in the studio or on the ref)'] };
+    const s = b.writeSnapshot({ root, from, to, ref, sha, by: String(by || '').trim().slice(0, 60) || null, events: await studioEvents(root), now: now.getTime(), env });
+    return { file: s.file, lines: [b.snapshotLine(s)] };
+  } catch (e) { return { lines: [`[upgrade] before snapshot: not taken (${String(e.message || e).slice(0, 200)})`] }; }
+}
+
 async function agentLike(root, who) {
   const f = path.join(root, 'harness', 'agent-env.mjs');
   if (fs.existsSync(f)) { try { const m = await importFile(f); if (m.agentLikeName) return m.agentLikeName(who, { stateDir: path.join(root, '.studio') }); } catch {} }
@@ -254,6 +303,9 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   const to = versionAt(root, sha);
   if (!cont && git(['merge-base', '--is-ancestor', sha, 'HEAD'], root).status === 0) return { ok: true, code: 0, lines: [...lines, `[upgrade] ${branch} already has ${ref} (${sha.slice(0, 10)}): nothing to merge.`] };
 
+  // 2.73.0 (f): the scorecard just before the update (.studio/upgrades/<from>-to-<to>.json; kept on --continue).
+  const snap = await beforeSnapshot({ root, from, to, ref, sha, by, env, now });
+  lines.push(...snap.lines);
   // A backup of the branch as it was (reused when it already points there).
   let backup = `backup/pre-${to}`;
   const head = out1(git(['rev-parse', 'HEAD'], root));
@@ -308,7 +360,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
   await emit(root, {
     type: 'upgrade.merged', agent: String(by).trim().slice(0, 60),
     msg: `harness update ${ref} (${from} -> ${to}) merged into ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission: "${who.permission.slice(0, 120)}")` : ''}; backup ${backup}`.slice(0, 600),
-    meta: { ref, sha, from, to, branch, backup, commit, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, goldens: g.fromRef.length + g.combined.length },
+    meta: { ref, sha, from, to, branch, backup, commit, by: String(by).trim().slice(0, 60), recordedBy: who.recordedBy, permission: who.permission || null, goldens: g.fromRef.length + g.combined.length, ...(snap.file ? { baseline: snap.file } : {}) },
   });
   // 2.67.0 (B-49): every lane copy takes the update now, so the next train doesn't hand each one back as stale.
   const lanes = refreshLanesAfterUpgrade({ root, by: String(by).trim(), env });
@@ -319,6 +371,26 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
       ...lanes.lines,
       '[upgrade] Next: npm run verify -- --all, then npm run task -- drain off --by <you>. Undo: git reset --hard ' + backup + ' (only before anything else lands).'],
   };
+}
+
+/**
+ * 2.73.0 (f): `--preflight [--ref <ref>]` (harness/upgrade-preflight.mjs: read-only, before an update) or `--smoke
+ * [--keep]` (harness/upgrade-smoke.mjs: right after one). Returns { ok, items, lines, scratch? }.
+ */
+export async function prePost({ root = ROOT, smokeRun = false, ref = null, keep = false, env = process.env } = {}) {
+  if (smokeRun) {
+    const f = path.join(root, 'harness', 'upgrade-smoke.mjs');
+    if (!fs.existsSync(f)) return { ok: false, items: [], lines: ['[upgrade smoke] FAIL: this studio has no harness/upgrade-smoke.mjs (2.73.0+): take the update first (npm run upgrade -- --merge <ref> --by <you>)'] };
+    const sm = await importFile(f);
+    const pf = await loadHelper('upgrade-preflight.mjs', root);
+    const r = await sm.smoke({ root, env, keep });
+    const lines = pf?.itemLines ? pf.itemLines('smoke', r.items) : r.items.map((i) => `[upgrade smoke] ${i.status} ${i.id}: ${i.detail}${i.fix && i.status === 'FAIL' ? `\n  Fix: ${i.fix}` : ''}`);
+    if (r.scratch) lines.push(`[upgrade smoke] the scratch copy is kept at ${r.scratch} (remove it when done)`);
+    return { ...r, lines };
+  }
+  const pf = await loadHelper('upgrade-preflight.mjs', root, ref);
+  if (!pf?.preflight) return { ok: false, items: [], lines: ['[upgrade preflight] FAIL: harness/upgrade-preflight.mjs was not found (beside this guard, in the studio or on --ref <ref>)'] };
+  return pf.preflight({ root, ref, env, deps: { checkUpgrade, isMainCheckout } });
 }
 
 /**
@@ -563,11 +635,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF)) {
       '       npm run upgrade -- --merge <ref> --by <person> [--permission "<their words or a link>"] [--golden-reason "<why>"] [--continue]',
       '       npm run upgrade -- --restore-stash <sha> --by <person>',
       '       npm run upgrade -- --rollback --by <person> [--permission "<their words or a link>"]   (2.71.1: reverts the last update\'s merge; never resets or deletes)',
+      '       npm run upgrade -- --preflight [--ref <ref>] [--json]   (2.73.0: before an update, read-only: PASS/WARN/FAIL per item, exit 1 on a FAIL)',
+      '       npm run upgrade -- --smoke [--keep] [--json]            (2.73.0: right after one: a tiny verify and train in a scratch copy, the machine scan, a dry supervisor pass)',
       '       npm run upgrade -- watch [--json] | watch status | watch auto on --by <person> [--permission "…"] [--ref <remote>/<branch>] | watch auto off',
       '         (2.69.0, harness/upgrade-watch.mjs: a newer harness on the harness remote, its CI, and STUDIO_UPGRADE_WINDOW)',
       'docs/RELEASE.md "Taking a harness update into a studio" has the steps, and the one-liner for a studio too old to have these.',
     ].join('\n'));
     process.exit(0);
+  }
+  // 2.73.0 (f): the preflight (before an update, read-only) and the smoke (right after one).
+  if (a.includes('--preflight') || a.includes('--smoke')) {
+    const root = repoRoot();
+    if (!root) { console.error('[upgrade] not a git checkout: run it in the studio\'s main checkout'); process.exit(1); }
+    const r = await prePost({ root, smokeRun: a.includes('--smoke'), ref: flag('--ref'), keep: a.includes('--keep') });
+    if (a.includes('--json')) console.log(JSON.stringify({ ok: r.ok, items: r.items, ...(r.scratch ? { scratch: r.scratch } : {}) }, null, 2));
+    else for (const l of r.lines) (r.ok ? console.log : console.error)(l);
+    process.exit(r.ok ? 0 : 1);
   }
   // 2.69.0 (s): the upgrade watch (harness/upgrade-watch.mjs).
   if (a[0] === 'watch') {
