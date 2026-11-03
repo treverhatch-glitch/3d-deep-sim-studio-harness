@@ -162,12 +162,14 @@ export async function selftest263I({ dir, run, report, tmpRoot, root }) {
   const p3 = lane('batch-3', 'Docs: batch three', { 'docs/demo/batch-3.md': '# Three\n' });
   queueIt(p3);
   const queuedAt = Date.parse(queueRaw().find((e) => e.task === p3.id)?.at || '') || 0;
-  const t4b = train('', { STUDIO_TRAIN_MIN: '3', STUDIO_TRAIN_WAIT_MIN: '0.05', STUDIO_TRAIN_POLL_S: '0.3' });
+  // 2.75.0: a 9 s window (it was 3 s): a train process that takes over 3 s to start (Windows CI under load) found the
+  // window already over and ran without ever waiting, so the check couldn't see the wait it tests.
+  const t4b = train('', { STUDIO_TRAIN_MIN: '3', STUDIO_TRAIN_WAIT_MIN: '0.15', STUDIO_TRAIN_POLL_S: '0.3' });
   const startB = starts(since4b)[0];
   const took = startB ? Date.parse(startB.ts) - queuedAt : -1;
-  report('2.63.0 (i #2): with STUDIO_TRAIN_MIN=2 a train with one lane queued waits (task.train.waiting, nothing lands) until a second lane is queued, then lands both in ONE train with one verify; with STUDIO_TRAIN_MIN=3 and STUDIO_TRAIN_WAIT_MIN=0.05 (3 s) a lone lane waits about 3 s from its queueing, then lands by itself (fails on 2.60.0: the train ran at once with the first lane only)',
+  report('2.63.0 (i #2): with STUDIO_TRAIN_MIN=2 a train with one lane queued waits (task.train.waiting, nothing lands) until a second lane is queued, then lands both in ONE train with one verify; with STUDIO_TRAIN_MIN=3 and STUDIO_TRAIN_WAIT_MIN=0.15 (9 s) a lone lane waits about 9 s from its queueing, then lands by itself (fails on 2.60.0: the train ran at once with the first lane only)',
     p1.ok && p2.ok && p3.ok && waited && nothingYet && t4.status === 0 && isDone(p1.id) && isDone(p2.id) && s4.length === 1 && s4[0].meta?.lanes?.length === 2 && j4.verifies === 1
-      && t4b.status === 0 && isDone(p3.id) && took >= 2500 && starts(since4b).length === 1 && evs().slice(since4b).some((e) => e.type === 'task.train.waiting'),
+      && t4b.status === 0 && isDone(p3.id) && took >= 7500 && starts(since4b).length === 1 && evs().slice(since4b).some((e) => e.type === 'task.train.waiting'),
     `waited=${waited} nothingYet=${nothingYet}\n${out(t4).slice(-1500)}\nstarts=${JSON.stringify(s4.map((e) => e.meta?.lanes))}\nt4b (started ${took} ms after queueing): ${out(t4b).slice(-800)}\nparts=${JSON.stringify({ p: [p1.ok, p2.ok, p3.ok], waited, nothingYet, t4: t4.status, done12: [isDone(p1.id), isDone(p2.id)], s4: s4.length, lanes: s4[0]?.meta?.lanes?.length, v: j4.verifies, t4b: t4b.status, done3: isDone(p3.id), took, sB: starts(since4b).length, waitB: evs().slice(since4b).some((e) => e.type === 'task.train.waiting') })}`);
 
   // ---- 5. a run-alone lane (manifest runAlone.paths) trains by itself; the other lane gets the next train ----

@@ -192,7 +192,7 @@ const child = ${JSON.stringify(path.join(tmpRoot, `child-2732f-${process.pid}.mj
 fs.writeFileSync(child, \`import fs from 'node:fs';
 await import(${u(S, 'harness/event.mjs')});
 const before = { min: process.env.STUDIO_TRAIN_MIN, wait: process.env.STUDIO_TRAIN_WAIT_MIN, auto: process.env.STUDIO_TRAIN_AUTO };
-while (!fs.existsSync(${JSON.stringify(go)})) await new Promise((r) => setTimeout(r, 100));
+while (!fs.existsSync(${JSON.stringify(go.replace(/\\/g, '/'))})) await new Promise((r) => setTimeout(r, 100));
 const { trainDaemonPass } = await import(${u(S, 'harness/train-daemon.mjs')});
 const d = await trainDaemonPass({ root: process.cwd(), dryRun: true, auto: { on: true }, trainOn: true, queue: [], lock: null, running: null });
 console.log(JSON.stringify({ before, after: { min: process.env.STUDIO_TRAIN_MIN ?? null, wait: process.env.STUDIO_TRAIN_WAIT_MIN ?? null, auto: process.env.STUDIO_TRAIN_AUTO ?? null, scout: process.env.STUDIO_SCOUT_DAY ?? null, role: process.env.STUDIO_ROLE ?? null }, why: d.why }));\`);
