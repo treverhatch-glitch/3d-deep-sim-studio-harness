@@ -85,6 +85,7 @@ import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { delegationFor, recordUse } from './delegation.mjs';
 import { autonomousReleaseRefusal } from './policy-rules.mjs';
 import { logDecision, asOf } from './decisions-log.mjs';
+import { rerecordTier, rerecordRefusal, rerecordEvidence } from './golden-report.mjs';
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
@@ -1166,7 +1167,7 @@ function protectedAt(root, tip) {
  * The landing tier of a lane at `head` against main's `tip` (harness/tiers.mjs classifyLane on its own diff and its
  * own commits' trailers, with the game's manifest as main has it). Code only. Never throws.
  */
-export async function laneTier(root, { head, task = null }, { tip = null, settings = null } = {}) {
+export async function laneTier(root, { head, task = null, agent = null, dir = null }, { tip = null, settings = null } = {}) {
   const t = tip || out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`));
   const s = settings || await trainManifest(root, t);
   const base = out(git(root, 'merge-base', t, head)) || t;
@@ -1194,6 +1195,9 @@ export async function laneTier(root, { head, task = null }, { tip = null, settin
     if (said.length && c.tier === 'C') c.why = [...c.why, `it proposes ${said.join('; ').slice(0, 400)}`];
   }
   contractTier(root, task, c);
+  // 2.73.0 (g, A13): a re-recorded golden (rule golden-rerecord) carries the harness's first-divergence report, shown in
+  // the hold; its release needs a second signer (harness/golden-report.mjs).
+  rerecordTier(root, c, { base, head, agent, dirs: dir ? [dir] : [] });
   return c;
 }
 
@@ -1274,12 +1278,12 @@ export const heldNow = (e) => Boolean(e?.held) && !(e.released && e.released.hea
 const releasedFor = (e, head) => Boolean(e?.released) && e.released.head === head;
 
 /** Put a lane in the queue as "needs the owner" (or mark its entry so), with its tier and why. */
-export function holdLane(root, lane, { tier, why }) {
+export function holdLane(root, lane, { tier, why, rerecord = null }) {
   return withQueue(root, (q) => {
     let e = q.find((x) => x.task === lane.task);
     if (!e) { e = { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: lane.note || '', at: new Date().toISOString() }; q.push(e); }
     const fresh = !e.held || e.held.head !== lane.head || e.held.why !== why;
-    Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at } });
+    Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at, ...(rerecord ? { rerecord } : {}) } });
     if (e.released && e.released.head !== lane.head) delete e.released;
     return { entry: { ...e }, fresh };
   });
@@ -1330,6 +1334,10 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // 2.71.0 (x): autonomous mode never releases a lane held for protected files, gates, deletes … (harness/policy.mjs).
     const never = dg.autonomous ? autonomousReleaseRefusal(e.held.why) : '';
     if (never) return { ok: false, message: `Refused: ${never}. Nothing was released.` };
+    // 2.73.0 (g, A13): a re-recorded golden needs a releaser who isn't the lane's author, and, without the harness's
+    // first-divergence report, a person (harness/golden-report.mjs).
+    const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok });
+    if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
     e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}) };
     return { ok: true, entry: { ...e } };
   });
@@ -1338,7 +1346,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
   if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
   emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${dg.autonomous ? `${dg.agent} in autonomous mode (allowed by ${e.released.by}; on the review list)` : e.released.by}${dg.autonomous ? '' : e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
   // 2.71.0 (x): one record in the decision log (harness/decisions.mjs).
-  logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
+  logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.rerecord ? `${rerecordEvidence(e.held)}; ` : ''}${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
   return { ok: true, entry: e, message: `${task} is released (tier ${e.held.tier}: ${e.held.why}) by ${e.released.by}${e.released.recordedBy ? `, recorded by ${e.released.recordedBy}` : ''}, for ${String(e.head).slice(0, 8)}. It lands with the next train (npm run task -- train); new commits on the lane need a new release.` };
 }
 
@@ -1892,11 +1900,11 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     }
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
-  const hold = (lane, tier, why) => {
+  const hold = (lane, tier, why, extra = {}) => {
     res.held.push({ task: lane.task, tier, why, fresh: true });
     log(`[train] ${id}: ${lane.task} needs the owner (tier ${tier}: ${why}); it waits in the train queue until a person releases it: npm run task -- train release ${lane.task} --by <name>`);
     if (dryRun) return;
-    const h = holdLane(root, lane, { tier, why });
+    const h = holdLane(root, lane, { tier, why, ...extra });
     if (h.fresh) ev('held', id, `${lane.task} needs the owner (tier ${tier}): ${why}. It waits in the queue; a person releases it with npm run task -- train release ${lane.task} --by <name> [--permission "…"]`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why } });
   };
 
@@ -1914,7 +1922,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (now.error) { drop(lane, now.error, { handBack: false }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
-    const c = await laneTier(root, { head: now.head, task: lane.task }, { tip: tip0, settings: settings0 });
+    const c = await laneTier(root, { head: now.head, task: lane.task, agent: lane.agent, dir: lane.dir }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);
     const released = releasedFor(entry, now.head);
     res.tiers[lane.task] = c.tier;
@@ -1924,7 +1932,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     // 2.65.0 (B-40): a config proposal that can't be applied, or conflicts with main's value now, is handed back first.
     const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
     if (cp && !cp.ok) { drop(lane, cp.why); continue; }
-    if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; ')); continue; }
+    if (c.tier === 'C' && !released) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'C', c.why.join('; '), c.rerecord ? { rerecord: c.rerecord } : {}); continue; }
     if (c.needs.goldenReason.length) { drop(lane, `it is tier B and moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer on its commits: say why the recorded answers changed (git commit --amend, or a new commit, with -m "Golden-Reason: <why>"), then task done again`); continue; }
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
     if (c.tier === 'B' && !released) {

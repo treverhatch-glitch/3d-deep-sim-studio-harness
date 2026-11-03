@@ -36,6 +36,8 @@
     "harness/gate-trust.mjs",
     "harness/test-toolchain.mjs",
     "harness/ratchet.mjs",
+    "harness/verify-key.mjs",
+    "harness/golden-report.mjs",
     "scripts/check-sim-*.mjs",
     "qa/check-*.mjs",
     "qa/fails-before.mjs",
