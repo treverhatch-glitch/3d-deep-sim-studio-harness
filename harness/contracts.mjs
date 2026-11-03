@@ -69,7 +69,7 @@ const timeoutMs = () => (Number(process.env.STUDIO_CONTRACT_TIMEOUT_S) > 0 ? Num
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v ?? null));
 
-export const CONTRACT_USAGE = 'Usage: npm run task -- contract <TASK_ID> [show | add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --manual] | agree --by <name> [--permission "<the person\'s words or a link>"] [--why "…"] | check | sign <CID> pass|fail --by <name> | remove <CID> [--by <name> --why "…"]] [--no-commit]';
+export const CONTRACT_USAGE = 'Usage: npm run task -- contract <TASK_ID> [show | add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --test "<test name>" [--file <test file>] | --manual] [--should] | agree --by <name> [--permission "<the person\'s words or a link>"] [--why "…"] | check | sign <CID> pass|fail --by <name> | remove <CID> [--by <name> --why "…"]] [--no-commit]';
 
 // ---------------------------------------------------------------------------------------------------------------
 // The file
@@ -101,7 +101,10 @@ export const inForce = (c) => (isAgreed(c) ? c.criteria.filter((x) => x && x.sta
 const frozenPart = (x) => canon(Object.fromEntries(Object.entries(x || {}).filter(([k]) => !PASS_FIELDS.includes(k))));
 const agreeKey = (d) => canon([d?.agreedBy || null, d?.agreedAt || null, d?.recordedBy || null, d?.permission || null, (d?.amendments || []).length]);
 const nextId = (c) => `C${Math.max(0, ...c.criteria.map((x) => Number(String(x.id || '').replace(/^C/, '')) || 0)) + 1}`;
-const checkWords = (k) => (k?.kind === 'command' ? `command: ${k.command}` : k?.kind === 'file' ? `file: ${k.path}${k.contains ? ` contains "${k.contains}"` : ''}` : 'manual: a reviewer or a person signs it');
+const checkWords = (k) => (k?.kind === 'command' ? `command: ${k.command}` : k?.kind === 'file' ? `file: ${k.path}${k.contains ? ` contains "${k.contains}"` : ''}` : k?.kind === 'test' ? `test: "${k.name}"${k.file ? ` in ${k.file}` : ''}` : 'manual: a reviewer or a person signs it');
+/** 2.72.0 (c): a criterion is a must-item unless it says "must": false (a should-item: listed, never blocking). */
+export const isMust = (x) => x?.must !== false;
+const mechanical = (x) => ['command', 'file', 'test'].includes(x?.check?.kind);
 
 /** The studio's task types that need an agreed contract (studio/game.json "contracts": { "required": [...] }). */
 export function requiredTypes(root = REPO_ROOT) {
@@ -158,6 +161,51 @@ export function fileCheck(check, root = REPO_ROOT) {
   return { ok: true, why: '' };
 }
 
+// The test files, as harness/test-weakening.mjs isTestPath judges them (kept in step by hand: a static import of that
+// module would make a cycle with its CLI's top-level await, which imports this one).
+const isTestPath = (f) => !/(^|\/)(node_modules|\.git|addons\/gdUnit4)\//.test(f) && !/(^|\/)(golden|goldens|__snapshots__)\//i.test(f)
+  && (/(^|\/)[^/]+\.(test|spec)\.[^/]+$/i.test(f) || /(^|\/)(tests?|__tests__|specs?|qa)\//i.test(f) || /(^|\/)[^/]*(\.Tests?|Tests)\//.test(f)
+    || /(^|\/)(test_[^/]+\.(py|gd)|[^/]+_test\.(py|gd|go|rs|js|ts|mjs)|[^/]+Tests?\.(cs|gd|java|kt))$/.test(f));
+const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * 2.72.0 (c): a test criterion, judged now: a test named `name` is defined, and not skipped, in a test file (check.file,
+ * else every tracked or untracked test file: harness/test-weakening.mjs isTestPath). Definitions: it/test/describe
+ * ('<name>' …) in JS/TS, def/func <name>( in Python/GDScript/Go, void|fn <name>( in C#/Java/Rust. { ok, why, where }.
+ * That the test passes is the verify's job (task done needs a green one); this ties the criterion to a real test.
+ */
+export function testCheck(check, root = REPO_ROOT) {
+  const name = String(check?.name || '').trim();
+  if (!name) return { ok: false, why: 'the test criterion names no test' };
+  let files = [];
+  if (check.file) {
+    const rel = String(check.file).replace(/\\/g, '/');
+    const full = path.resolve(root, rel);
+    if (path.isAbsolute(rel) || path.relative(root, full).startsWith('..')) return { ok: false, why: `"${rel}" is not a path inside the studio` };
+    if (!fs.existsSync(full)) return { ok: false, why: `${rel} doesn't exist` };
+    files = [rel];
+  } else {
+    const r = spawnSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    files = r.status === 0 ? r.stdout.split('\0').filter((f) => f && isTestPath(f)) : [];
+  }
+  const n = escRe(name);
+  const def = new RegExp(`\\bx?(?:it|test|describe|Deno\\.test)(?:\\.(?:only|skip|todo))?\\s*\\(\\s*(['"\`])${n}\\1|\\b(?:def|func|fn|void|Task|async\\s+Task)\\s+${n}\\s*\\(`);
+  const skipSame = /\b(?:it|test|describe)\.(?:skip|todo)\b|\bx(?:it|test|describe)\s*\(/;
+  const skipPrev = /@pytest\.mark\.skip|\[Ignore\b|@Disabled\b|@Ignore\b|#\[ignore\]|\bskip\s*\(/;
+  let skipped = null;
+  for (const f of files) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(root, f), 'utf8'); } catch { continue; }
+    if (!text.includes(name)) continue;
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (!def.test(lines[i])) continue;
+      if (skipSame.test(lines[i]) || (i > 0 && skipPrev.test(lines[i - 1]))) { skipped = `${f}:${i + 1}`; continue; }
+      return { ok: true, why: '', where: `${f}:${i + 1}` };
+    }
+  }
+  return { ok: false, why: skipped ? `the test "${name}" is skipped (${skipped})` : `no test named "${name}" is defined in ${check.file || 'any test file'}` };
+}
+
 /**
  * The work as it is now, contracts aside: the tree git would commit from the working files (tracked and untracked,
  * ignored files left out), without studio/contracts/ (so writing `passes` doesn't make the evidence stale). Uses a
@@ -205,6 +253,8 @@ export function runChecks(id, { root = REPO_ROOT, env = process.env, log = () =>
       r = { ok: p.status === 0, why: p.status === 0 ? '' : p.error?.code === 'ETIMEDOUT' ? `timed out after ${timeoutMs() / 1000} s (STUDIO_CONTRACT_TIMEOUT_S)` : `exit ${p.status}${tail ? `: ${tail.slice(-400)}` : ''}` };
     } else if (x.check?.kind === 'file') {
       r = fileCheck(x.check, root);
+    } else if (x.check?.kind === 'test') {
+      r = testCheck(x.check, root);
     } else {
       r = { ok: x.passes === true && signerOk(x.signed), why: x.signed?.verdict === 'fail' ? `signed fail by ${x.signed.by}` : 'not signed yet (a reviewer or a person: npm run task -- contract ' + id + ' sign ' + x.id + ' pass --by <name>)', manual: true };
     }
@@ -226,14 +276,20 @@ export function runChecks(id, { root = REPO_ROOT, env = process.env, log = () =>
 }
 
 /**
- * done-check's contract section: { checks: [{ label, ok, why }], notes: [] }. A task with no contract (and whose
- * type the studio doesn't require one for) gets nothing. Command criteria count from the last `contract check`
- * only when it ran on the work as it is now (workState) with the agreed command; file criteria are read now;
+ * done-check's contract section: { checks: [{ label, ok, why }], notes: [], unverified: [] }. A task with no contract
+ * (and whose type the studio doesn't require one for) gets nothing. Command criteria count from the last `contract check`
+ * only when it ran on the work as it is now (workState) with the agreed command; file and test criteria are read now;
  * manual criteria need a reviewer's or a person's signature.
+ * 2.72.0 (c), the completeness rubric: every criterion tied to a command, a file or a test name is checked mechanically;
+ * the ones it can't verify (manual, not signed yet) are listed as "unverified, for the reviewer" (`unverified`). With
+ * defer (the task lands through the merge train: a lane copy with the train on), an unverified must-item doesn't block
+ * done: the train holds the lane as tier C until a reviewer signs it (or a person releases it): unverifiedMust. A
+ * should-item ("must": false) never blocks; a signed fail always does.
  */
-export function contractChecks(task, type, { root = REPO_ROOT } = {}) {
+export function contractChecks(task, type, { root = REPO_ROOT, defer = false } = {}) {
   const checks = [];
   const notes = [];
+  const unverified = [];
   const id = task.id;
   const rel = contractRel(id);
   const c = readContract(id, root);
@@ -242,18 +298,19 @@ export function contractChecks(task, type, { root = REPO_ROOT } = {}) {
   const howAgree = `the Producer writes it (npm run task -- contract ${id} add "<what done means>" --check "<command>") and agrees it (npm run task -- contract ${id} agree --by <name>)`;
   if (!c) {
     if (required) checks.push({ label: `An agreed acceptance contract (studio/game.json requires one for "${type}" tasks)`, ok: false, why: `no ${rel}: ${howAgree}` });
-    return { checks, notes };
+    return { checks, notes, unverified };
   }
-  if (c.invalid) { checks.push({ label: `Acceptance contract ${rel} is readable`, ok: false, why: `${rel}: ${c.invalid}` }); return { checks, notes }; }
+  if (c.invalid) { checks.push({ label: `Acceptance contract ${rel} is readable`, ok: false, why: `${rel}: ${c.invalid}` }); return { checks, notes, unverified }; }
   const proposed = c.criteria.filter((x) => x?.status === 'proposed');
   if (!isAgreed(c)) {
     if (required) checks.push({ label: `An agreed acceptance contract (studio/game.json requires one for "${type}" tasks)`, ok: false, why: `${rel} isn't agreed yet: ${howAgree.split(' and ')[1]}` });
     else notes.push(`${rel} has ${c.criteria.length} criteria nobody has agreed yet, so none is in force (npm run task -- contract ${id} agree --by <name>)`);
-    return { checks, notes };
+    return { checks, notes, unverified };
   }
   const evidence = readEvidence(id, root);
   let state;
   const now = () => (state === undefined ? (state = workState(root)) : state);
+  const shoulds = [];
   for (const x of inForce(c)) {
     let ok = false;
     let why = '';
@@ -266,22 +323,47 @@ export function contractChecks(task, type, { root = REPO_ROOT } = {}) {
       const r = fileCheck(x.check, root);
       ok = r.ok;
       why = r.why;
+    } else if (x.check?.kind === 'test') {
+      const r = testCheck(x.check, root);
+      ok = r.ok;
+      why = r.why;
     } else {
       ok = x.passes === true && signerOk(x.signed);
       why = x.signed?.verdict === 'fail' ? `signed fail by ${x.signed.by}${x.signed.note ? `: ${x.signed.note}` : ''}` : x.passes === true ? `passes: true without a reviewer's or a person's signature (${x.signed?.by ? `${x.signed.by} is a builder` : 'none'})` : `a reviewer or a person signs it: npm run task -- contract ${id} sign ${x.id} pass --by <name>`;
+      if (!ok && x.signed?.verdict !== 'fail') {
+        unverified.push({ id: x.id, text: String(x.text), must: isMust(x) });
+        // An unverified must-item waits for the reviewer at landing (tier C) when the task lands through the train.
+        if (defer || !isMust(x)) continue;
+      }
     }
+    if (!isMust(x)) { if (!ok) shoulds.push(`${x.id} (${why.slice(0, 160)})`); continue; }
     checks.push({ label: `Contract ${x.id}: ${String(x.text).slice(0, 120)} (${x.check?.kind || 'manual'})`, ok, why });
   }
+  if (unverified.length) notes.push(`${rel}: unverified, for the reviewer: ${unverified.map((u) => `${u.id} (${u.must ? 'must' : 'should'}) "${u.text.slice(0, 80)}"`).join('; ')}${unverified.some((u) => u.must) ? (defer ? ` (the merge train holds the lane, tier C, until a reviewer signs the must-items: npm run task -- contract ${id} sign <CID> pass|fail --by <reviewer>, or a person releases it)` : '') : ' (should-items never block)'}`);
+  if (shoulds.length) notes.push(`${rel}: should-items not met (they never block; the reviewer weighs them): ${shoulds.join('; ')}`);
   if (proposed.length) notes.push(`${rel}: ${proposed.map((x) => x.id).join(', ')} proposed by ${[...new Set(proposed.map((x) => x.proposedBy || 'a worker'))].join(', ')}, not in force until the contract is agreed again (npm run task -- contract ${id} agree --by <name> --why "…")`);
-  return { checks, notes };
+  return { checks, notes, unverified };
 }
+
+/** 2.72.0 (c): the contract's must-items nobody has verified yet (manual, in force, not signed pass by a reviewer or a person). */
+export function unverifiedMust(id, root = REPO_ROOT) {
+  const c = readContract(id, root);
+  if (!isAgreed(c)) return [];
+  return inForce(c).filter((x) => isMust(x) && !mechanical(x) && !(x.passes === true && signerOk(x.signed))).map((x) => ({ id: x.id, text: String(x.text) }));
+}
+
+/** 2.72.0 (c): the train's tier-C reason for them (no "; " in it: the train joins reasons with that). */
+export const CONTRACT_HOLD = 'its acceptance contract has unverified must-items';
+export const contractHoldWhy = (id, items) => `${CONTRACT_HOLD} (${items.map((x) => x.id).join(', ')}: a reviewer signs them with npm run task -- contract ${id} sign <CID> pass|fail --by <reviewer>, or a person releases the lane)`;
+/** Is a held lane's reason only the contract's (so a reviewer's signature, not only a release, clears it)? */
+export const contractOnlyHold = (why) => String(why || '').split('; ').every((p) => p.startsWith(CONTRACT_HOLD));
 
 /** The contract for the reviewer's brief (harness/review.mjs): text, or '' when the task has none in force. */
 export function contractForReview(id, root = REPO_ROOT) {
   const c = readContract(id, root);
   if (!isAgreed(c) || !inForce(c).length) return '';
   return [`Acceptance contract (${contractRel(id)}, agreed by ${c.agreedBy} on ${String(c.agreedAt).slice(0, 10)}). Grade the work against each criterion; one not met means CHANGES:`,
-    ...inForce(c).map((x) => `- ${x.id}: ${x.text} [${checkWords(x.check)}; recorded passes: ${x.passes === true ? 'yes' : 'no'}]`)].join('\n');
+    ...inForce(c).map((x) => `- ${x.id}${isMust(x) ? '' : ' (should)'}: ${x.text} [${checkWords(x.check)}; recorded passes: ${x.passes === true ? 'yes' : 'no'}]${!mechanical(x) && !(x.passes === true && signerOk(x.signed)) ? ` UNVERIFIED: the harness can't check it; read the work and sign it (npm run task -- contract ${id} sign ${x.id} pass|fail --by <you>)${isMust(x) ? ': the lane lands only after your yes' : ''}` : ''}`)].join('\n');
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -432,10 +514,12 @@ export function contractCommand({ task, done = false, sub = 'show', args = [], f
     const text = args.join(' ').trim();
     if (text.length < 5) return { ok: false, message: `Say what done means, in words someone can check: npm run task -- contract ${id} add "<text>" [--check "<command>" | --file <path> [--contains "<text>"] | --manual]` };
     const check = typeof flags.check === 'string' && flags.check.trim() ? { kind: 'command', command: flags.check.trim() }
+      // 2.72.0 (c): a criterion tied to a test name (--test "<name>" [--file <test file>]).
+      : typeof flags.test === 'string' && flags.test.trim() ? { kind: 'test', name: flags.test.trim(), ...(typeof flags.file === 'string' && flags.file.trim() ? { file: flags.file.trim().replace(/\\/g, '/') } : {}) }
       : typeof flags.file === 'string' && flags.file.trim() ? { kind: 'file', path: flags.file.trim().replace(/\\/g, '/'), ...(typeof flags.contains === 'string' ? { contains: flags.contains } : {}) }
       : { kind: 'manual' };
     if (check.kind === 'file' && !fileCheck({ path: check.path }, root).ok && /not a path inside/.test(fileCheck({ path: check.path }, root).why)) return { ok: false, message: `--file must be a path inside the studio (got "${check.path}").` };
-    const x = { id: nextId(c), text, check, passes: false };
+    const x = { id: nextId(c), text, check, passes: false, ...(flags.should ? { must: false } : {}) };
     // A worker's criterion is always a proposal. Others draft freely before agreement; on an agreed contract a criterion
     // in force is an agreeing act (authority), and without it the criterion waits as a proposal too.
     const worker = caller.kind === 'worker' || caller.kind === 'reviewer';
