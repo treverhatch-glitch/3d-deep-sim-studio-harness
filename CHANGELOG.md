@@ -4,6 +4,42 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.71.1] — 2026-11-03
+2.71.1, "close the gate holes": the red-team holes an outside review found (Grok's dossier, re-tested on 2.70.0 by our
+own verifier) that an agent could fall into by accident or on purpose, closed before the crew restarts (P-197 to P-203).
+### Fixed
+- **Gate runners protected (A).** The scripts that run the gates and what they load are on the protected list, so a
+  lane can't edit a runner to pass itself (A01b/A01d/A03).
+- **Test toolchain protected (A).** Each game's test configs, the setup files they name, `.npmrc` and the test entries
+  of its `package.json` (by key: adding a dependency stays a normal change) (H03/H04/S02).
+- **Weakened tests (A)** also catches `skipIf`/`runIf` on an existing test or a CI condition, chained skips, early
+  returns on CI and a shadowed or proxied `expect` (H10/H13).
+- **Overrides in a lane (A).** `STUDIO_PROTECT_BASE/ROOT`, `GITHUB_BASE_REF` and `STUDIO_WEAKENED_TESTS=off` are ignored
+  in a lane copy (said in the output); `STUDIO_MAIN_ROOT` must be the main checkout; CI variables are never proof.
+- **Verify-record trust (A).** A record is reused only with a matching run log the harness wrote, from a run with no
+  hidden untracked or ignored inputs under the game or its checks (D01/T04/G15/T02; 2.69's tree reuse had widened
+  these). A golden re-recorded on the lane's own Golden-Reason is tier C (A13, first part).
+- **Clean gate environment (B).** No code-loading `NODE_OPTIONS` or npm node-options, no git redirects, replace refs
+  ignored; the protected gate fails on replace refs or grafts (S03/G10/G16/T01). A WARN when `node_modules` doesn't
+  match the lockfile (S04). Protected paths are matched quote-safe and in any case (G14/W01).
+- **Lock release is bound to its holder (B, K01).**
+- **Gate output fenced and capped (B, L01/I01).** Kept whole on disk, shown as the first and last 200 lines
+  (`STUDIO_GATE_OUTPUT_LINES`); child lines that imitate `[gates]`/`[verify]` are shown as `| …`.
+- **Every session end names its task (B)**, so tokens per landed change count per task (`npm run tokens -- --by task`).
+- **One-command rollback (B).** `npm run upgrade -- --rollback --by <person>` reverts the last update's merge
+  (`git revert -m 1`, never a reset, no branch deleted).
+
+### Still open
+- T06 (code preloaded into run-gates itself by hand), S01 (a forged CI environment) and a hand-written record AND run
+  log in `.studio/`: signed verify records come in 2.73. Golden re-records with a first-divergence report and a second
+  signer come in 2.72/2.73.
+
+### Untested
+- Windows: lane detection and path comparisons, NTFS case folding, the gate log rename while a process holds it, the
+  revert hook path. Protecting `vite.config.*` means build-only config edits now need the owner's signature.
+
+---
+
 ## [2.71.0] — 2026-11-03
 2.71.0, "the owner layer": one log of every owner and game-dev decision, a studio policy file, an opt-in autonomous
 mode the owner reviews afterwards, the overseer's paperwork as commands, and a record of every time the harness had to

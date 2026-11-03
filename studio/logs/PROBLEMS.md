@@ -1111,3 +1111,33 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** most of 2.65-2.70 came from those notes (retries, hand edits, killed processes, restarts).
 - **Fix:** the workaround log, detected signals, the maintainer's task queue, the export. qa/selftest-271z.mjs.
 
+### P-197 — a lane could edit the gate runners that judge it · fixed in 2.71.1
+- **Evidence:** a neutered `check-golden.mjs` / run-gates exit flip went green (outside red team; re-tested on 2.70.0).
+- **Fix:** the runners and their loader on the protected list. qa/selftest-2711a.mjs.
+
+### P-198 — test configs, setup files and .npmrc were open · fixed in 2.71.1
+- **Evidence:** a shadow vitest.config, a vi.mock in the setup file and .npmrc node-options landed a real bug green.
+- **Fix:** harness/test-toolchain.mjs protects them (package.json by key). qa/selftest-2711a.mjs.
+
+### P-199 — skipIf(CI), early returns on CI and a proxied expect weren't weakened tests · fixed in 2.71.1
+- **Fix:** new weakened-tests rules. qa/selftest-2711a.mjs.
+
+### P-200 — gate-weakening env overrides worked inside a lane · fixed in 2.71.1
+- **Evidence:** STUDIO_PROTECT_BASE=HEAD, STUDIO_PROTECT_ROOT, STUDIO_WEAKENED_TESTS=off, STUDIO_MAIN_ROOT=the lane.
+- **Fix:** harness/gate-trust.mjs ignores them in lane copies. qa/selftest-2711a.mjs.
+
+### P-201 — hand-written or dirty-tree verify records were reused · fixed in 2.71.1 (partly)
+- **Evidence:** a forged record accepted; hidden untracked config then a real verify reused (2.69 tree reuse widened it).
+- **Fix:** run ids with run logs; hidden inputs make a run dirty. A forged record plus a forged log stays open (2.73).
+  qa/selftest-2711a.mjs.
+
+### P-202 — NODE_OPTIONS, git replace and quoted paths fooled the gates · fixed in 2.71.1
+- **Fix:** harness/gate-env.mjs; the protected gate fails on replace refs or grafts; `-z` and case-folded matching.
+  qa/selftest-2711b.mjs.
+
+### P-203 — locks, output floods, untracked session costs, no rollback · fixed in 2.71.1
+- **Evidence:** anyone could release another's lock by name; a 122 MB flood and a forged Fix line printed; 0 of 170
+  session ends on the owner's PC named their task; undoing an upgrade took manual git.
+- **Fix:** holder-bound release, fenced and capped output, task on every session end, `upgrade -- --rollback`.
+  qa/selftest-2711b.mjs.
+
