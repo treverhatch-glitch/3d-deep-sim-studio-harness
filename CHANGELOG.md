@@ -4,6 +4,45 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.75.0] — 2026-11-03
+2.75.0 carries three releases at once for the crew's restart: 2.73.2 (the rest of the crew's emergency list, B-71 to
+B-76), 2.74.0 (the War Room refresh: working buttons, live pages, the hub kept up, B-62/B-63/B-70) and the War Room's
+new look (P-226 to P-233).
+### 2.73.2: the crew's emergency list, second half
+- **Per-test timeouts that fit the test workers (B-71):** when game-gates runs a game's tests with more workers than the
+  runner's default, it scales the per-test and hook timeouts to the load (never below the game's own;
+  `STUDIO_TEST_TIMEOUT_SCALE`, off to disable) and says so in the gate row. New games ship timeouts that fit.
+- **Main stuck red on a check (B-75):** a queued lane that changes that check's configuration (test configs, gate
+  settings, the test script) trains alone and first, automatically, with an event saying why.
+- **Unity waits for memory (B-73):** a Unity run waits under machine:heavy for `STUDIO_UNITY_MIN_FREE_GB` free RAM
+  (12, at most 60% of RAM); out of memory, a killed editor, a licence or launch failure, or an abort before results is
+  NOT RUN (exit 3), never a FAIL; a real test or compile failure still is. `npm run heavy -- wait|run|release` lets a
+  studio's own landing script wait first (docs/UNITY-TRACK.md).
+- **A session end is recorded once (B-72):** the watchdog no longer logs "Ended" every pass; a session whose agent
+  exited shows "ending", not STALLED; the watchdog's stall end counts as a stall, never toward the halt (B-76).
+- **.env changes reach running processes (B-74):** the long-running loops re-read `.env` when it changes (one
+  `env.reloaded` event, secret values never written); `npm run studio:reload-env` reloads now.
+### 2.74.0: the War Room refresh
+- **Pair a browser once (`npm run hub -- pair --by <name>`):** every Act button runs the harness's own command as that
+  person and shows its answer ("Fixed it: try again" is `studio:resume`); HUB_TOKEN still works for scripts.
+- **Live on every view** with a Reconnecting badge; **the hub survives handler errors**, logs every exit
+  (`.studio/logs/hub-exit.log`) and the supervisor restarts it with backoff (B-70).
+- **Control room:** Needs a person first, then Crew, the Train Room, Run clock, Machine and Owner proxy (with Revoke).
+### 2.75.0: the War Room's new look
+- One design system and one tab bar across every view; status colors that mean the same everywhere; light and dark;
+  no web fonts; phone width without sideways scroll.
+- **Studio floor:** short name plates over the role, a state badge on each person with a key, quiet dark rooms for
+  departments that are off, new rooms Rail Yard (the merge train, moving), Engine Bay (engine workers) and Watchtower
+  (the owner proxy's actions); **agents leave the floor** when their session ends or they've been idle with nothing
+  claimed (`STUDIO_FLOOR_IDLE_MIN`, 30).
+### Untested
+- On Windows: the hidden hub restart, the cookie on 127.0.0.1, the Bahnschrift headings, a Unity `editor-killed` exit
+  code, the PowerShell example for `heavy -- run`.
+- The harness can't stop a studio's own Unity landing script from writing a FAIL record: it has to call
+  `npm run heavy -- run` and exit 3 (docs/UNITY-TRACK.md).
+
+---
+
 ## [2.73.1] — 2026-11-03
 2.73.1, an emergency patch for the crew's first hours on 2.73.0 (the owner's request list from the crew's orchestrator,
 B-51 and B-59 to B-69; P-219 to P-225).
