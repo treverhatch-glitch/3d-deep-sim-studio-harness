@@ -12,7 +12,9 @@
  * 2. Verify records (D01/T04, G15/T02). A record stands in for task done's game checks or a train's verify only when
  *    scripts/run-gates.mjs wrote it: each full verify gets a run id and a run log (.studio/gates/runs/<id>.json) holding
  *    the digest of what it recorded, and a record whose digest doesn't match its run log (hand-written, or edited) is
- *    not reused. "Clean" also counts untracked files, and ignored files outside build and dependency output, under the
+ *    not reused. 2.73.0 (g): the run log is also signed (HMAC-SHA256) with the studio's verify key, kept outside every
+ *    checkout (harness/verify-key.mjs); an unsigned or badly signed one is not reused (a record AND a matching run log
+ *    written by hand used to pass). "Clean" also counts untracked files, and ignored files outside build and dependency output, under the
  *    game and the paths the checks read (hiddenInputs): a config left untracked or ignored changes what the checks do.
  *
  * Node built-ins only: approve.mjs, hook-stamp.mjs and test-weakening.mjs import this while their own top level runs.
@@ -21,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { signPayload, checkSignature } from './verify-key.mjs';
 
 const gitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM)$/.test(k)));
 const git = (cwd, args) => {
@@ -135,18 +138,35 @@ export function recordDigest(rec) {
 }
 export const newRunId = () => crypto.randomBytes(8).toString('hex');
 
-/** Write the run log for a record run-gates just wrote (studioDir = the checkout's .studio/). Keeps the newest 256. */
+/**
+ * 2.73.0 (g): what the run log's signature covers: the record's digest and the run log's own fields (a digest of them).
+ * The checkout whose key signs is the folder that holds the .studio/ (harness/verify-key.mjs: one key per studio).
+ */
+export function runLogPayload(log) {
+  const logDigest = crypto.createHash('sha256').update(JSON.stringify([log?.runId ?? null, log?.at ?? null, log?.head ?? null, log?.tree ?? null, log?.dirty ?? null, log?.writtenAt ?? null, log?.by ?? null, log?.root ?? null, log?.owner ?? null])).digest('hex');
+  return `run-log\n${log?.runId ?? ''}\n${log?.digest ?? ''}\n${logDigest}`;
+}
+
+/**
+ * Write the run log for a record run-gates just wrote (studioDir = the checkout's .studio/). Keeps the newest 256.
+ * 2.73.0 (g): signed with the studio's verify key (made on first use, outside every checkout). Returns
+ * { file, signed, why } (why: the reason it couldn't be signed: such a record is never reused), or null.
+ */
 export function writeRunLog(studioDir, rec, extra = {}) {
   if (!rec?.runId || !RUN_ID.test(rec.runId)) return null;
   const dir = path.join(studioDir, RUNS_DIR);
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, `${rec.runId}.json`);
-  fs.writeFileSync(f, JSON.stringify({ runId: rec.runId, at: rec.at, head: rec.head ?? null, tree: rec.tree ?? null, dirty: rec.dirty ?? null, digest: recordDigest(rec), pid: process.pid, writtenAt: new Date().toISOString(), by: 'scripts/run-gates.mjs', ...extra }, null, 2));
+  const log = { runId: rec.runId, at: rec.at, head: rec.head ?? null, tree: rec.tree ?? null, dirty: rec.dirty ?? null, digest: recordDigest(rec), pid: process.pid, writtenAt: new Date().toISOString(), by: 'scripts/run-gates.mjs', ...extra };
+  delete log.sig;
+  const sig = signPayload(path.dirname(path.resolve(studioDir)), runLogPayload(log), { create: true });
+  if (!sig.error) log.sig = sig;
+  fs.writeFileSync(f, JSON.stringify(log, null, 2));
   try {
     const old = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => ({ n, t: fs.statSync(path.join(dir, n)).mtimeMs })).sort((a, b) => b.t - a.t).slice(256);
     for (const o of old) fs.rmSync(path.join(dir, o.n), { force: true });
   } catch {}
-  return f;
+  return { file: f, signed: !sig.error, why: sig.error || '' };
 }
 
 /**
@@ -163,7 +183,11 @@ export function recordTrust(rec, studioDirs = []) {
     try { log = JSON.parse(fs.readFileSync(path.join(d, RUNS_DIR, `${rec.runId}.json`), 'utf8')); } catch { continue; }
     if (log?.runId !== rec.runId) continue;
     if (log.digest !== recordDigest(rec)) return { ok: false, why: `the verify record doesn't match the run log run-gates wrote for run ${rec.runId} (it was edited after the run): it isn't reused` };
-    return { ok: true, why: `run ${rec.runId}'s log matches` };
+    // 2.73.0 (g): and the harness signed the run log with this studio's verify key (harness/verify-key.mjs).
+    const s = checkSignature(path.dirname(path.resolve(d)), runLogPayload(log), log.sig);
+    if (!s.ok && s.why === 'unsigned') return { ok: false, why: `not reused: unsigned record (hand-written or from an older harness): run ${rec.runId}'s log carries no signature from this studio's verify key; the verify runs` };
+    if (!s.ok) return { ok: false, why: `not reused: run ${rec.runId}'s record is not signed by this studio's harness (${s.text}); the verify runs` };
+    return { ok: true, why: `run ${rec.runId}'s log matches and is signed` };
   }
   return { ok: false, why: `no run log for run ${String(rec.runId).slice(0, 40)} (.studio/${RUNS_DIR.split(path.sep).join('/')}/): the record wasn't written by the harness's run-gates, so it isn't reused` };
 }
