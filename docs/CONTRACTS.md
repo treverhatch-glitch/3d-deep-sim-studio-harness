@@ -73,6 +73,17 @@ branch before the lane starts. A builder who finds a gap at task start proposes 
   - **Manual criteria** need a signature from someone who isn't a builder.
 
   Proposals waiting for agreement are listed as a note.
+- **The completeness rubric (2.72.0).** A criterion can name a test (`contract add "<text>" --test "<test name>"
+  [--file <test file>]`). It passes when a test of that name is defined, and not skipped, in a test file (`it`/`test`
+  in JS/TS, `def`/`func` in Python, GDScript or Go, `void` in C#). The verify that `task done` needs is what runs it.
+  Every criterion is a must-item unless it was added with `--should` (`"must": false`). A should-item never blocks
+  `task done`; an unmet one is listed for the reviewer. done-check lists the items it can't check (manual ones
+  nobody has signed) as **"unverified, for the reviewer"**:
+  - In the main checkout, an unverified must-item blocks `task done` as before.
+  - In a lane that lands through the merge train, it doesn't block `task done`. The train makes the lane **tier C**
+    ("its acceptance contract has unverified must-items") until a reviewer signs them (`contract sign <CID>
+    pass|fail --by <reviewer>`), which clears the hold, or a person releases the lane. A signed fail always blocks.
+  - The reviewer's brief marks each one UNVERIFIED.
 - **The reviewer** (`npm run review -- <ID>`) gets the contract in its brief and adds one met/not met line per
   criterion. A criterion that isn't met means CHANGES.
 - **Required contracts**: `studio/game.json` `"contracts": { "required": ["change", "bug"] }` makes an agreed

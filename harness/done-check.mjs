@@ -865,7 +865,9 @@ export function checkDone(task, since = startedAt(task.id)) {
   // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
   // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {
-    const k = contractChecks(task, type);
+    // 2.72.0 (c): in a lane that lands through the merge train, an unverified must-item waits for the reviewer there
+    // (tier C, harness/train.mjs laneTier) instead of blocking done here; elsewhere it blocks as before.
+    const k = contractChecks(task, type, { defer: inLaneCopy() && !/^(off|0|false|no)$/i.test(String(process.env.STUDIO_TRAIN || '')) });
     for (const c of k.checks) check(c.label, c.ok, c.why);
     notes.push(...k.notes);
   }

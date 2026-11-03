@@ -78,6 +78,7 @@ import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
 import { recordRound, redSignature } from './round-cap.mjs';
+import { unverifiedMust, contractHoldWhy, contractOnlyHold, CONTRACT_HOLD } from './contracts.mjs';
 import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
@@ -1165,7 +1166,7 @@ function protectedAt(root, tip) {
  * The landing tier of a lane at `head` against main's `tip` (harness/tiers.mjs classifyLane on its own diff and its
  * own commits' trailers, with the game's manifest as main has it). Code only. Never throws.
  */
-export async function laneTier(root, { head }, { tip = null, settings = null } = {}) {
+export async function laneTier(root, { head, task = null }, { tip = null, settings = null } = {}) {
   const t = tip || out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`));
   const s = settings || await trainManifest(root, t);
   const base = out(git(root, 'merge-base', t, head)) || t;
@@ -1192,7 +1193,43 @@ export async function laneTier(root, { head }, { tip = null, settings = null } =
     }
     if (said.length && c.tier === 'C') c.why = [...c.why, `it proposes ${said.join('; ').slice(0, 400)}`];
   }
+  contractTier(root, task, c);
   return c;
+}
+
+/**
+ * 2.72.0 (c), the completeness rubric: a task whose acceptance contract (harness/contracts.mjs) has must-items the
+ * harness can't verify (manual, not signed by a reviewer or a person) is tier C: it lands only after a reviewer's yes
+ * (contract sign) or a person's release. Changes c in place. Never throws.
+ */
+function contractTier(root, task, c) {
+  if (!task) return;
+  try {
+    const items = unverifiedMust(task, root);
+    if (!items.length) return;
+    // The reasons of a lower tier don't say why it waits; a lane already tier C keeps its own.
+    const own = c.tier === 'C' ? c.why.filter((w) => !String(w).startsWith(CONTRACT_HOLD)) : [];
+    c.tier = 'C';
+    c.why = [...own, contractHoldWhy(task, items)];
+    c.rules = [...(c.rules || []), 'contract-unverified'];
+  } catch { /* no contract: no change */ }
+}
+
+/**
+ * 2.72.0 (c): a lane held only for its contract's unverified must-items is let go once a reviewer (or a person) has
+ * signed them all: the reviewer's yes is the release. The train classifies it again before it lands.
+ */
+export function clearContractHolds(root, lanes, log = () => {}) {
+  for (const l of lanes) {
+    if (!l.fromQueue || !heldNow(l) || !contractOnlyHold(l.held.why)) continue;
+    let left = null;
+    try { left = unverifiedMust(l.task, root); } catch { continue; }
+    if (left.length) continue;
+    withQueue(root, (q) => { const e = q.find((x) => x.task === l.task); if (e && e.held && contractOnlyHold(e.held.why)) delete e.held; });
+    delete l.held;
+    log(`[train] ${l.task}: its contract's must-items are signed now, so the hold for them is cleared (the train checks its tier again)`);
+    emitEvent({ type: 'task.train.unheld', agent: 'train', task: l.task, status: 'ok', msg: `${l.task}: every must-item of its acceptance contract is signed; the tier-C hold for them is cleared` });
+  }
 }
 
 // ---- 2.65.0 (B-40 full): a lane's studio config proposal (harness/config-proposal.mjs) ----------------------------
@@ -1812,6 +1849,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   const maxLanes = cap.length ? Math.min(...cap) : 0;
   let lanes = given ? given.map((l) => ({ ...l, own: oneLane })) : readQueue(root).map((l) => ({ ...l, fromQueue: true }));
   // 2.63.0: a lane held for the owner (tier C, or handed back too often) stays in the queue until a person releases it.
+  clearContractHolds(root, lanes, log); // 2.72.0 (c): a reviewer's signature clears a contract-only hold
   const stillHeld = lanes.filter((l) => l.fromQueue && heldNow(l));
   for (const l of stillHeld) { res.held.push({ task: l.task, tier: l.held.tier, why: l.held.why, fresh: false }); log(`[train] ${id}: ${l.task} needs the owner (tier ${l.held.tier}: ${l.held.why}); npm run task -- train release ${l.task} --by <name> lands it`); }
   lanes = lanes.filter((l) => !stillHeld.includes(l));
@@ -1876,7 +1914,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (now.error) { drop(lane, now.error, { handBack: false }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
-    const c = await laneTier(root, { head: now.head }, { tip: tip0, settings: settings0 });
+    const c = await laneTier(root, { head: now.head, task: lane.task }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);
     const released = releasedFor(entry, now.head);
     res.tiers[lane.task] = c.tier;

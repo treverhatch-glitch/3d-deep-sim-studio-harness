@@ -1829,7 +1829,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
       try {
         const tr = await import('./train.mjs');
-        const c = await tr.laneTier(mainRoot(), { head: pre.head });
+        const c = await tr.laneTier(mainRoot(), { head: pre.head, task: pre.id });
         console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
         if (c.tier === 'C') {
           tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
@@ -1864,7 +1864,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         const { laneTier } = await import('./train.mjs');
         const { tierLine } = await import('./tiers.mjs');
         let tier = null;
-        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim() }); } catch {}
+        try { tier = await laneTier(mainRoot(), { head: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(), task: targetId }); } catch {}
         // 2.65.0 (B-40): a config proposal that can't be applied (or conflicts with main) is the first thing to fix.
         let cpBad = null;
         try { const lb = laneConfigBefore(mainRoot(), { task: targetId, laneDir: REPO_ROOT, main: mainBranchOf(mainRoot()), ff: landFastForward }); if (lb.refuse) cpBad = lb.refuse; } catch {}
