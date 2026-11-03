@@ -202,10 +202,17 @@ export async function selftest270V({ dir, run, report, tmpRoot }) {
     const dB = task(`done ${B.id} --agent artist-270v-b`);
     const recB2 = rj('.studio/asset-reviews/dock-barrel.json');
     const bReviews = added((e) => e.meta?.assetReview === 'dock-barrel');
+    // The full selftest shares one studio: an earlier check (267g) commits an owner key, and with a key a delegation must
+    // be signed to count (CI release-gate, 2.70.0: the grant was ignored and opus-bot answered as a plain agent). This
+    // check is about the review, so the key is set aside here and put back after.
+    const keyRel = 'studio/keys/owner-ed25519.pub.pem';
+    const hadKey = fs.existsSync(path.join(dir, keyRel));
+    if (hadKey) { g('rm', '-q', '--cached', keyRel); fs.renameSync(path.join(dir, keyRel), path.join(dir, `${keyRel}.270v`)); g('commit', '-qm', 'test: no owner key for the delegation check', '--no-verify'); }
     const gr = run(dir, 'node harness/delegation.mjs grant opus-bot --actions asset-review --hours 2 --by pat --why "asset reviews while the crew runs"', base);
     const dl = asset('review dock-barrel --pass --by opus-bot', { CLAUDECODE: '1', STUDIO_LOCK_OWNER: 'opus-bot' });
     const recB3 = rj('.studio/asset-reviews/dock-barrel.json');
     const dB2 = task(`done ${B.id} --agent artist-270v-b`);
+    if (hadKey) { fs.renameSync(path.join(dir, `${keyRel}.270v`), path.join(dir, keyRel)); g('add', keyRel); g('commit', '-qm', 'test: owner key back', '--no-verify'); }
 
     const d3 = task(`done ${A.id} --agent artist-270v`);
     const wire = evs().filter((e) => e.type === 'asset.handoff' && e.meta?.from === A.id);

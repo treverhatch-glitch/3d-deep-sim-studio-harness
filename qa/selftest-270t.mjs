@@ -6,9 +6,16 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export async function selftest270T({ dir, run, report, tmpRoot }) {
+export async function selftest270T({ dir, run, report, tmpRoot, root }) {
+  // The real-Chromium check imports playwright: a copy made without node_modules (the full selftest's copyRepo) gets the
+  // harness's own, linked, as selftest-267f does (CI release-gate, 2.70.0: ERR_MODULE_NOT_FOUND).
+  const harnessRoot = root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  if (!fs.existsSync(path.join(dir, 'node_modules', 'playwright')) && fs.existsSync(path.join(harnessRoot, 'node_modules', 'playwright'))) {
+    try { fs.rmSync(path.join(dir, 'node_modules'), { force: true }); } catch {}
+    fs.symlinkSync(path.join(harnessRoot, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
+  }
   const u = (p) => JSON.stringify(pathToFileURL(path.join(dir, p)).href);
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
