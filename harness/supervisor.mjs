@@ -640,8 +640,12 @@ async function main(argv) {
   };
   process.on('SIGINT', () => finish('stopped by hand'));
   process.on('SIGTERM', () => finish('stopped by the system'));
+  // 2.73.2 (B-74): `npm run studio:reload-env` is answered within seconds; every pass also re-reads .env when it changed.
+  const { reloadEnvIfChanged, watchReloadRequests } = await import('./env-reload.mjs');
+  watchReloadRequests({ by: 'supervisor' });
   const tick = async () => {
     if (stopping) return;
+    reloadEnvIfChanged({ by: 'supervisor', ack: true });
     // 1. The hub: up, or restart it and remember how long it was down.
     if (opts.hub && !(await hubUp(port))) {
       if (!downSince) downSince = Date.now();

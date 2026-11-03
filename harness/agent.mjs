@@ -75,6 +75,7 @@ import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
 import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf } from './stall.mjs';
+import { reloadEnvIfChanged } from './env-reload.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
 import { pickTool, readBudget, budgetStopFor } from './budget.mjs';
@@ -1027,6 +1028,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
   const beat = setInterval(() => {
+    // 2.73.2 (B-74): limits changed in .env since this launcher started (STUDIO_STALL_MIN, ...) apply from this beat.
+    reloadEnvIfChanged({ by: `launcher ${agent}` });
     const now = new Date().toISOString();
     const s = readJson(sessionFile(agent)) || session;
     const wip = wipSummary(agent);

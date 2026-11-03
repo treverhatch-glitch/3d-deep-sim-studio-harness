@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { reloadEnvIfChanged } from './env-reload.mjs';
 
 export const WATCHDOG_FILE = path.join(STUDIO_STATE_DIR, 'watchdog.json');
 export function readWatchdog() {
@@ -129,7 +130,10 @@ export async function rescueClock(now = Date.now(), { file = path.join(STUDIO_ST
 }
 
 /** One pass. Returns what it did. Does nothing while off. */
-export async function watchdogPass(now = Date.now(), { events = readRecentEvents(5000), lim = watchdogLimits() } = {}) {
+export async function watchdogPass(now = Date.now(), { events = readRecentEvents(5000), lim = null } = {}) {
+  // 2.73.2 (B-74): settings changed in .env since the last pass (the stall limits, the idle stop) apply from this pass.
+  reloadEnvIfChanged({ by: 'watchdog' });
+  lim ||= watchdogLimits();
   const w = readWatchdog();
   // 2.30o: always on while a studio has an active game (STUDIO_WATCHDOG=off is the only way out), so
   // production never depends on someone attending. Away mode is no longer needed to turn it on.

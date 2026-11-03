@@ -45,6 +45,7 @@ import { sessions, fillAgents, startAgent, markGone, saveWorkOf, AGENTS_DIR } fr
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { expireAsks } from './ask.mjs';
 import { expireDesigns } from './art.mjs';
+import { reloadEnvIfChanged } from './env-reload.mjs';
 
 const readGatesLast = () => {
   try {
@@ -152,6 +153,8 @@ export function releaseStalled({ now = Date.now(), dryRun = false, events = read
 }
 
 export function watchPass({ stallMin = 30, waitMin = 60, dryRun = false } = {}) {
+  // 2.73.2 (B-74): settings changed in .env since the last pass apply from this pass (harness/env-reload.mjs).
+  if (!dryRun) reloadEnvIfChanged({ by: 'watch' });
   const now = Date.now();
   const findings = [];
   // 2.57.0 (PU-16, P-037): lock files nobody can read (an agent killed while writing one) are set aside to

@@ -16,7 +16,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { appendLine } from './fsafe.mjs';
-import { isSessionIdentity, warnIdentityOnce } from './dotenv.mjs';
+import { loadStudioEnvAtStart } from './dotenv.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -25,26 +25,11 @@ export const STUDIO_STATE_DIR = path.join(REPO_ROOT, '.studio');
 // Studio settings from .env (STUDIO_*, HUB_*, AGENT_*, PLAYTEST_*), so every command sees the same
 // backup folder, Producer name and caps, not only the HUB. Keys are read only by the router.
 // A value already in the environment wins.
-(function loadStudioSettings() {
-  let text = '';
-  try {
-    text = fs.readFileSync(path.join(REPO_ROOT, '.env'), 'utf8');
-  } catch {
-    return;
-  }
-  // 2.73.1 (B-60): who a shell is (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning
-  // names the line instead (harness/dotenv.mjs).
-  warnIdentityOnce(path.join(REPO_ROOT, '.env'), text);
-  // The last non-empty line for a name wins, so a value added at the bottom beats the example's empty one.
-  const found = {};
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*((?:STUDIO|HUB|AGENT|PLAYTEST)_[A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (!m || isSessionIdentity(m[1])) continue;
-    const v = m[2].replace(/^['"]|['"]$/g, '');
-    if (v !== '' || !(m[1] in found)) found[m[1]] = v;
-  }
-  for (const [k, v] of Object.entries(found)) if (process.env[k] === undefined) process.env[k] = v;
-})();
+// 2.73.1 (B-60): who a shell is (STUDIO_LOCK_OWNER, STUDIO_ROLE, ...) is never taken from the shared .env: a warning
+// names the line instead (harness/dotenv.mjs). The last non-empty line for a name wins, so a value added at the bottom
+// beats the example's empty one. 2.73.2 (B-74): the values taken from the file are noted (STUDIO_ENV_FROM_FILE), so the
+// long-running loops can re-read .env when it changes (harness/env-reload.mjs) without overriding what a person set.
+loadStudioEnvAtStart(path.join(REPO_ROOT, '.env'));
 /**
  * Who is acting, for attribution: an explicit name, then STUDIO_AGENT, then STUDIO_LOCK_OWNER (set by
  * the launcher and kickoff), then the Producer's name. An agent's notes and tasks are its own, never

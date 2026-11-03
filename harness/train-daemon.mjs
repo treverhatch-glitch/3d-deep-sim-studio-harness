@@ -139,6 +139,8 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
  * Says why it didn't start at most once per reason change (a task.train.auto_waiting event).
  */
 export async function trainDaemonPass({ root = null, env = process.env, now = Date.now(), halted = null, spawnTrain = spawnDaemonTrain, emit = emitEvent, dryRun = false, ...given } = {}) {
+  // 2.73.2 (B-74): STUDIO_TRAIN_* changed in .env since the last pass apply from this pass (harness/env-reload.mjs).
+  if (env === process.env) { try { (await import('./env-reload.mjs')).reloadEnvIfChanged({ by: DAEMON_BY }); } catch {} }
   root ||= (await import('./worktree.mjs')).mainRoot();
   if (off(env.STUDIO_TRAIN_AUTO)) return { started: false, why: 'STUDIO_TRAIN_AUTO is off' };
   const f = await daemonFacts(root, { env, now, halted, ...given });
