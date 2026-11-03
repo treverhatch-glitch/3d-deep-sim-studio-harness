@@ -12,6 +12,10 @@
  *                       commented out counts as removed; one moved unchanged (to another file too) doesn't
  *   skip-added          .skip / .todo / xit / xdescribe / test.todo / [Ignore] / [Explicit] / Skip = "…" / @Disabled /
  *                       @Ignore / pytest skip and xfail / t.Skip / gdUnit do_skip / { skip: true } / #[ignore], added
+ *                       (2.71.1: also chained, it.concurrent.skip; and skipIf / runIf added to an existing test or on an
+ *                       env/CI condition: a new test that runs on one OS only is fine)
+ *   env-skip            2.71.1: an early return on CI or an env variable (`if (process.env.CI) return`)
+ *   expect-shadowed     2.71.1: expect/assert redefined, renamed on import, wrapped in a Proxy or the library mocked
  *   only-added          .only / fit / fdescribe (every other test stops running)
  *   timeout-raised      a test timeout raised (same line, bigger number after the word timeout)
  *   tolerance-widened   toBeCloseTo / places / precision / digits lowered; eps, tol, delta, margin, atol, rtol, approx,
@@ -40,9 +44,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { protectRoot, trustedEnv } from './gate-trust.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.STUDIO_PROTECT_ROOT ? path.resolve(process.env.STUDIO_PROTECT_ROOT) : path.resolve(HERE, '..');
+// 2.71.1 (A16): STUDIO_PROTECT_ROOT is never used in a lane copy (harness/gate-trust.mjs).
+const ROOT = protectRoot(path.resolve(HERE, '..')) || path.resolve(HERE, '..');
 // 2.58.5 (H-7): STUDIO_HOOKS_MAX_BUFFER (bytes) lowers the read limit, for tests; an output over it is an error, never a
 // silently cut diff (spawnSync stops at maxBuffer and returns what it had).
 const MAX_BUFFER = Number(process.env.STUDIO_HOOKS_MAX_BUFFER) > 0 ? Number(process.env.STUDIO_HOOKS_MAX_BUFFER) : 512 * 1024 * 1024;
@@ -72,11 +78,22 @@ const norm = (l) => l.trim().replace(/\s+/g, ' ');
 const isComment = (l) => { const t = l.trim(); return /^(\/\/|\/\*|\*|--|;|<!--)/.test(t) || (/^#/.test(t) && !/^#\[/.test(t)); };
 const ASSERT = /\bexpect\s*[.(]|\bassert\w*!?\s*[.(]|\bassert\s+[^\s=(]|\bAssert(That)?\.\w+|\.[Ss]hould\b|\bshould\.\w+|\bt\.(is|not|ok|notOk|true|false|truthy|falsy|deepEqual|equal|same|throws|regex|match|snapshot)\s*\(|\brequire\.\w+\s*\(|\bt\.(Error|Errorf|Fatal|Fatalf|Fail)\b|\bfail\s*\(/;
 const SKIP = [
-  /\b(it|test|describe|context|suite|specify|bench)\.(skip|todo|fixme)\b/, /\b(xit|xtest|xdescribe|xcontext|xspecify)\s*\(/,
+  /\b(it|test|describe|context|suite|specify|bench)(\.\w+)*\.(skip|todo|fixme)\b/, /\b(xit|xtest|xdescribe|xcontext|xspecify)\s*\(/,
   /\[\s*(Ignore|Explicit)\b/, /\bSkip\s*=\s*["@$]/, /@Disabled\b/, /@Ignore\b/, /@pytest\.mark\.(skip|skipif|xfail)\b/, /\bpytest\.skip\s*\(/,
   /@unittest\.skip/, /\bself\.skipTest\s*\(/, /\bt\.Skip(f|Now)?\s*\(/, /\bdo_skip\s*:?=\s*true\b/, /[{,]\s*(skip|todo)\s*:\s*true\b/, /#\[ignore\]/,
   /\bmarkTestSkipped\s*\(/, /\bpending\s*\(\s*\)/,
 ];
+// 2.71.1 (H10, H13): a test that runs only under a condition, returns early on CI, or checks with a stand-in expect.
+const CONDITIONAL = /\b(it|test|describe|context|suite|specify|bench)(\.\w+)*\.(skipIf|runIf)\s*\(/;
+const STRIP_COND = /(\.\w+)*?\.(skipIf|runIf)\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\s*/g;
+const ENV_COND = /process\.env\b|import\.meta\.env\b|\bos\.environ\b|\bgetenv\s*\(|\b(Deno|Bun)\.env\b|\b(is_?)?CI\b|\bisCi\b|GITHUB_ACTIONS|\bVITEST\b|\bJEST_WORKER_ID\b/;
+const envReturn = (t, next = '') => /\bif\b/.test(t) && ENV_COND.test(t) && (/\breturn\b/.test(t) || (/[{:]\s*$/.test(t.trim()) && /^\s*return\b/.test(next)));
+const SHADOW = [
+  /\bfunction\s+(expect|assert)\s*[(<]/, /\b(const|let|var)\s+(expect|assert)\s*(:[^=]+)?=(?!=|\s*(require|chai|await\s+import)\b)/,
+  /\bexpect\s+as\s+\w+/, /[{,]\s*expect\s*:\s*\w+\s*[,}]/, /\b(globalThis|global|window|self)\s*\.\s*(expect|assert)\s*=[^=]/, /^\s*(expect|assert)\s*=[^=]/,
+  /\b(vi|jest)\.(mock|doMock|spyOn)\s*\(\s*['"`](vitest|@jest\/globals|chai|expect|node:assert|assert)['"`]/,
+];
+const shadowHit = (t) => SHADOW.some((p) => p.test(t)) || (/\bnew\s+Proxy\s*\(/.test(t) && /\b(expect|assert)\b/.test(t));
 const ONLY = [/\b(it|test|describe|context|suite|specify)\.only\b/, /\b(fit|fdescribe|fcontext)\s*\(/];
 const SEED = [
   /\bseed\w*\s*(===?|!==?)\s*-?\d/i, /-?\d+\s*(===?|!==?)\s*\w*seed\b/i, /\[[\d,\s]+\]\.includes\(\s*\w*seed/i,
@@ -161,6 +178,20 @@ export function weakeningsInDiff(files) {
       const rem = removed.filter((r) => hit(r.text));
       if (add.length > rem.length) for (const a of add) out.push(finding(kind, f.file, a.line, a.text, kind === 'only-added' ? 'every other test in the file stops running' : 'a test no longer runs'));
     }
+    // 2.71.1 (H10): skipIf / runIf added to an existing test (the same line before, without it), or on an env/CI condition.
+    // A new test that runs only on one OS (it.runIf(process.platform === 'win32')) is not flagged.
+    // The harness's own qa/*.mjs scripts read env variables by design (and are tier C / protected): not judged by these three.
+    const own = /^qa\/[^/]+\.mjs$/.test(f.file);
+    const removedHere = new Set(removed.map((r) => norm(r.text)));
+    const cond = own ? [] : unmatched(added.filter((a) => CONDITIONAL.test(a.text) && (ENV_COND.test(a.text) || removedHere.has(norm(a.text.replace(STRIP_COND, ''))))), removedAll);
+    for (const a of cond) out.push(finding('skip-added', f.file, a.line, a.text, ENV_COND.test(a.text) ? 'the test runs only when an env variable (CI…) says so' : 'an existing test now runs only under a condition'));
+    // 2.71.1 (H10): an early return on CI or an env variable (if (process.env.CI) return): the test passes without checking.
+    for (const h of own ? [] : f.hunks) {
+      const hits = h.added.filter((a, i) => !isComment(a.text) && envReturn(a.text, h.added[i + 1]?.text || ''));
+      for (const a of unmatched(hits, removedAll)) out.push(finding('env-skip', f.file, a.line, a.text, 'the test returns early on CI or an env variable, so it passes without checking'));
+    }
+    // 2.71.1 (H13): expect / assert shadowed, renamed on import, wrapped in a Proxy or mocked: checks that can't fail.
+    for (const a of own ? [] : unmatched(added.filter((x) => shadowHit(x.text)), removedAll)) out.push(finding('expect-shadowed', f.file, a.line, a.text, 'the test\'s expect/assert is replaced, renamed or wrapped, so a failed check may not fail the test'));
     const seedHit = (t) => (SEED.some((p) => p.test(t)) && !assertsOnSeed(t)) || (TICK.test(t) && /\b(return|continue|break|skip\w*)\b/.test(t));
     const sAdd = unmatched(added.filter((a) => seedHit(a.text)), removedAll);
     const sRem = removed.filter((r) => seedHit(r.text));
@@ -249,7 +280,13 @@ const truthy = (v) => /^(on|1|true|yes)$/i.test(String(v || ''));
 const falsy = (v) => /^(off|0|false|no)$/i.test(String(v || ''));
 
 /** The gate: { ok, enforced, off, base, findings (unapproved), approved, why }. */
-export async function checkWeakening({ env = process.env } = {}) {
+export async function checkWeakening({ env: envIn = process.env } = {}) {
+  // 2.71.1 (A01b): in a lane copy STUDIO_WEAKENED_TESTS=off (and a named base) is ignored, and the result says so.
+  const { env, note } = trustedEnv(ROOT, envIn);
+  const r = await checkWeakeningWith(env);
+  return note ? { ...r, note } : r;
+}
+async function checkWeakeningWith(env) {
   if (falsy(env.STUDIO_WEAKENED_TESTS)) return { ok: true, off: true, enforced: false, findings: [], why: 'off (STUDIO_WEAKENED_TESTS=off): tests are not checked for weakening' };
   const { base: b, findings } = await findWeakenings({ env });
   if (!b) return { ok: true, enforced: false, findings: [], why: 'no base branch to compare with, so no change to check' };
@@ -284,6 +321,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(1);
   }
   if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
+  if (r.note) console.error(`[tests] note: ${r.note}`);
   if (r.off) { console.log(`[tests] ${r.why}`); process.exit(0); }
   if (!r.ok) {
     console.error(`[tests] FAIL ${r.why}:`);
