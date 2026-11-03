@@ -53,6 +53,7 @@ import { machineProfile, testWorkers, oomSignature } from './heavy-budget.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
 import { quarantineEnvValue } from './flakes.mjs';
+import { gateEnv, applyGateEnv } from './gate-env.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -191,7 +192,7 @@ function runGodot(project) {
   // for the controls check (qa/controls-check.mjs).
   const reports = path.join(REPO_ROOT, 'qa', 'reports');
   fs.mkdirSync(reports, { recursive: true });
-  const env = { ...process.env, STUDIO_CONTROLS_OUT: path.join(reports, `controls-godot-${project.replace(/[^\w.-]+/g, '_')}.json`) };
+  const env = { ...gateEnv(), STUDIO_CONTROLS_OUT: path.join(reports, `controls-godot-${project.replace(/[^\w.-]+/g, '_')}.json`) };
   const opts = { cwd: REPO_ROOT, encoding: 'utf8', env, timeout: Number(process.env.STUDIO_GODOT_TIMEOUT_MS || 300000), maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) };
   const steps = [['--headless', '--path', project, '--import']];
   if (fs.existsSync(path.join(REPO_ROOT, project, 'tools', 'gate.gd'))) steps.push(['--headless', '--path', project, '--script', 'res://tools/gate.gd']);
@@ -351,7 +352,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // 2.58.0 (F2): the game's checks run with CI=true, so test runners (Vitest, Jest, ...) never write or rewrite
     // snapshots during a verify (on Windows each verify rewrote a snapshot's line endings on main). Updating
     // snapshots is a deliberate run with -u. STUDIO_GAME_GATE_CI=off leaves CI as it is.
-    const env = /^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' };
+    // 2.71.1 (B, S03): and without code-loading NODE_OPTIONS, git redirects or replace refs (harness/gate-env.mjs).
+    const env = gateEnv(/^(off|0|false|no)$/i.test(process.env.STUDIO_GAME_GATE_CI || '') ? process.env : { ...process.env, CI: 'true' });
     // 2.59.0 (#2): the timeout is scaled for load, judged once the check has its slot (harness/heavy.mjs
     // scaledTimeout): other heavy work running (a full verify, the Unity gate, a browser playtest), other game checks,
     // a high load average. Never below STUDIO_GAME_GATE_TIMEOUT_MS (600 s), at most STUDIO_GAME_GATE_TIMEOUT_MAX_FACTOR
@@ -531,6 +533,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  applyGateEnv(); // 2.71.1 (B): every git call and check this run makes, as run-gates does
   const a = process.argv.slice(2);
   const paths = String(a.includes('--paths') ? a[a.indexOf('--paths') + 1] || '' : process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
   const ch = String(a.includes('--changed') ? a[a.indexOf('--changed') + 1] || '' : process.env.STUDIO_GATE_CHANGED || '').split(',').filter(Boolean);

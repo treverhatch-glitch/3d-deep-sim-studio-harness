@@ -94,6 +94,7 @@ import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './re
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 import { checkStamped, stampWrite } from './workaround.mjs';
+import { gateEnv } from './gate-env.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -603,7 +604,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const t0 = Date.now();
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
   // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
-  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
   const recDir = path.join(root, TRAIN_DIR, 'records');
   fs.mkdirSync(recDir, { recursive: true });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}.log`);
@@ -675,7 +676,7 @@ function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games)
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
   const t0 = Date.now();
   log(`[train] ${id}: local safety gates of tree ${tree.slice(0, 8)} (${ids.join(', ')}); the game's checks may come from the repo's CI`);
-  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `local safety gates ${n}` });
+  const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', ids.join(','), ...(all ? ['--all'] : [])], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `local safety gates ${n}` });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}-local.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}
   let rec = null;
@@ -732,7 +733,7 @@ function recheckStart(sc, { id, tree, gates, changed, all, cache, log, res, labe
   writeTrainStatus(sc.root, id, { step: 'recheck', text: line, lanes: res.trainLanes || null, round: res.round || 1, recheck: n, eta });
   ev('recheck', id, line, { meta: { n, about: about || null, question, gates, tree, focus: focus || null, eta: eta ? { ms: eta.ms, text: eta.text } : null } });
   const args = [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(','), ...(all ? ['--all'] : [])];
-  return { job: { key, owner, env, n, args, t0: Date.now(), opts: { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 } } };
+  return { job: { key, owner, env, n, args, t0: Date.now(), opts: { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 } } };
 }
 
 function recheckEnd(sc, { cache, res, tree, log = () => {} }, job, { r, text, busy, noCheck }, { triage = true } = {}) {
@@ -790,7 +791,7 @@ export function flakeTriage(sc, { id, tree, text, log }) {
       const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
       for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
       if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
-      const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+      const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
       try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
       for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
       return { ok: r.status === 0 };
@@ -1658,7 +1659,7 @@ function tailRun(sc, { id, n, focus, changed, log }) {
   if (changed.length) { env.STUDIO_GATE_CHANGED = changed.join(','); env.STUDIO_GATE_PATHS = changed.join(','); }
   const gates = gameGateIds(root);
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const text = `${r.stdout || ''}${r.stderr || ''}`;
   const logFile = path.join(root, TRAIN_DIR, `${id}-chain-tail-${n}.log`);
   try { fs.mkdirSync(path.dirname(logFile), { recursive: true }); fs.writeFileSync(logFile, text); } catch {}

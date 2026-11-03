@@ -20,6 +20,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (!r.ok) {
     console.error(`[protected] FAIL ${r.why}:`);
     for (const c of r.changes) console.error(`  ${c.path}`);
+    // 2.71.1 (B): replace refs or grafts in the git folder (harness/gate-env.mjs gitRedirects): git can't be trusted here.
+    if (r.redirect) { console.error('[protected] Fix: list them with git replace -l (and .git/info/grafts); remove each with git replace -d <sha> and delete the grafts file. Nothing in a studio needs them.'); process.exit(1); }
     console.error('[protected] Only the owner can approve these: on the owner\'s machine, npm run approve -- protected --note "why", then commit the approval file. An agent should hand the task back instead of working around it.');
     process.exit(1);
   }
