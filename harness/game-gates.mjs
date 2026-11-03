@@ -317,6 +317,65 @@ export function loadReading(label, t, base) {
   return `[game-gates] ${label}: ${parts.join('; ')}`;
 }
 
+/**
+ * 2.72.0 (a): the timeout-only re-run of one failed check (harness/timeout-rerun.mjs). Returns null (not timeout-only,
+ * switched off, too many files, no way to run one file) or { green: [files], red: [files], allGreen }. Each file runs
+ * once, alone, through the check's focus command (2.65.3), with one test worker; a pass that ran no test isn't green.
+ */
+export async function timeoutOnlyRerun({ g, r, runOnce, log = () => {}, root = REPO_ROOT, setRelated = () => {}, env = process.env }) {
+  const tr = await import('./timeout-rerun.mjs');
+  if (!tr.timeoutRerunOn(env)) return null;
+  const text = `${r.stdout || ''}${r.stderr || ''}`;
+  const t0 = tr.timeoutOnly(text);
+  if (!t0.ok) { if (t0.blocks.some((b) => b.timeout)) log(`[game-gates] ${g.id}: not re-run for timeouts: ${t0.why}`); return null; }
+  const { repoRel } = await import('./gate-subids.mjs');
+  const t = { ...t0, files: [...new Set(t0.files.map((f) => repoRel(f, [REPO_ROOT])))] }; // node --test prints absolute paths
+  const { flakeRules, recordTimeoutFlakes } = await import('./flakes.mjs');
+  const max = flakeRules(env).maxFiles;
+  if (t.files.length > max) { log(`[game-gates] ${g.id}: timeout-only red in ${t.files.length} files, more than STUDIO_FLAKE_MAX_FILES (${max}): not re-run, it stays red`); return null; }
+  const plans = t.files.map((f) => ({ f, fc: focusCommand(g, [f]) }));
+  const cant = plans.find((p) => !p.fc.cmd);
+  if (cant) { log(`[game-gates] ${g.id}: timeout-only red, but ${cant.f} can't be run alone (${cant.fc.why}): it stays red`); return null; }
+  log(`[game-gates] ${g.id}: timeout-only red (${t.why}): re-running ${t.files.length} file(s), each alone at low load (one test worker; STUDIO_TIMEOUT_RERUN=off: no re-run)`);
+  const green = [];
+  const red = [];
+  setRelated(true); // a single-file run is never the check's quiet-run time
+  for (const { f, fc } of plans) {
+    const x = await runOnce(fc.cmd, null, { STUDIO_TEST_WORKERS: '1', VITEST_MAX_WORKERS: '1', STUDIO_TIMEOUT_RERUN: 'off' });
+    const out = `${x.stdout || ''}${x.stderr || ''}`;
+    const ok = x.status === 0 && !judgePass(g.id, { output: out, env: { ...env, STUDIO_SILENT_GREEN: 'warn' } }).note;
+    (ok ? green : red).push(f);
+    log(`[game-gates] ${g.id}: ${f} alone at low load: ${ok ? 'green (timeout-flake)' : `red (${x.status === 0 ? 'passed having run no test' : `exit ${x.status ?? x.signal ?? '?'}`})`}`);
+  }
+  if (green.length) recordTimeoutFlakes(root, { check: g.id, files: green, env, log });
+  if (red.length) log(`[game-gates] ${g.id}: ${red.length} timed-out file(s) red alone too: a real red (${red.join(', ')})`);
+  else log(`[game-gates] ${g.id}: every timed-out file passed alone: counted green for those files only (the rest of the check had passed)`);
+  return { green, red, allGreen: !red.length };
+}
+
+/** 2.72.0 (a): the manifest's "divergence" ({ command, gate?, state?, goldens? }) or null. */
+export function divergenceConfOf(game) {
+  if (!game?.root) return null;
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, game.root, 'studio.gates.json'), 'utf8')).divergence;
+    return d && typeof d === 'object' && !Array.isArray(d) && typeof d.command === 'string' && d.command.trim() ? d : null;
+  } catch { return null; }
+}
+
+/** 2.72.0 (a): run the game's divergence contract for a failed check it applies to, printing its two lines. Never throws. */
+async function divergenceForCheck(game, g, log) {
+  try {
+    const conf = divergenceConfOf(game);
+    if (!conf) return null;
+    const applies = conf.gate ? [String(conf.gate), `game:${conf.gate}`].includes(g.id) : /golden/i.test(g.id);
+    const dv = await import('./divergence.mjs');
+    if (!applies || !dv.divergenceOn()) return null;
+    const res = await dv.gameDivergence({ root: REPO_ROOT, game, conf, gate: g.id });
+    for (const l of dv.divergenceLines('[game-gates]', { ...res, gate: g.id })) log(l);
+    return res;
+  } catch (e) { log(`[game-gates] first divergence: not found (${String(e.message || e).slice(0, 160)})`); return null; }
+}
+
 /** Run the game's checks and the engine gate for these paths. */
 export async function runGameGates({ paths = [], changed = null, incoming = null, quiet = false } = {}) {
   const plan = await planGameGates({ paths, changed, incoming });
@@ -379,7 +438,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
         return testWorkers({ profile: machineProfile(slotRoot), env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT });
       } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2` }; }
     };
-    const runOnce = (cmd, forceMs = null) => slot(cmdLabel, () => {
+    const runOnce = (cmd, forceMs = null, extraEnv = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated || plan.slowTier?.run ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
       if (forceMs) timing = { ...timing, ms: Math.max(timing.ms, forceMs), rerun: true };
@@ -398,6 +457,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
       const tw = workersNow();
       runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
+      // 2.72.0 (a): the timeout-only re-run's low load (one test worker), applied last.
+      if (extraEnv) runEnv = { ...runEnv, ...extraEnv };
       // 2.69.0 (p): the slow tier's test globs: left out of a verify (STUDIO_TEST_EXCLUDE), the only ones in the slow tier.
       const ste = slowTierEnv(plan.slowTier, curGate);
       if (Object.keys(ste).length) { runEnv = { ...runEnv, ...ste }; console.error(`[game-gates] ${cmdLabel}: slow tier: ${ste.STUDIO_TEST_ONLY ? `only ${ste.STUDIO_TEST_ONLY} (STUDIO_TEST_ONLY)` : `skips ${plan.slowTier.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run nightly on main)`}`); }
@@ -405,7 +466,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // list of test files for the game's runner to skip; unset when nothing is quarantined.
       const quarantined = quarantineEnvValue(REPO_ROOT);
       if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
-      console.error(`[game-gates] ${cmdLabel}: ${tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${tw.why})`);
+      console.error(`[game-gates] ${cmdLabel}: ${extraEnv?.STUDIO_TEST_WORKERS || tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${extraEnv?.STUDIO_TEST_WORKERS ? 'low load for the timeout-only re-run' : tw.why})`);
       const t0 = Date.now();
       const res = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
       // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
@@ -481,6 +542,18 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           if (timedOut(r)) r.stderr = `${first}\n${r.stderr || ''}${timeoutLine()}`;
         } else if (timing.factor > 1 || tr.reason) console.error(`[game-gates] ${g.id}: no re-run (${tr.why})`);
       }
+      // 2.72.0 (a): a red whose only failures are per-test timeouts re-runs just those files, each alone at low load
+      // (harness/timeout-rerun.mjs). All green alone: the check counts green, each file a "timeout-flake"; any red alone:
+      // red, naming only the red files. Mixed reds, unreadable output, STUDIO_TIMEOUT_RERUN=off: red as before.
+      let timeoutFlake = null;
+      let redAlone = null;
+      if (r.status !== 0 && !timedOut(r)) {
+        const save = curRelated;
+        const t = await timeoutOnlyRerun({ g, r, runOnce, log, root: slotRoot, setRelated: (v) => { curRelated = v; } });
+        curRelated = save;
+        if (t?.green) { timeoutFlake = t.green; if (t.allGreen) r = { ...r, status: 0, signal: null, error: undefined }; }
+        if (t?.red) redAlone = t.red;
+      }
       // 2.44.0: STUDIO_GAME_GATE_RETRY=on (opt-in): a failed check runs once more before it counts. Passing the
       // second time is logged as flaky (gate.flaky), a real game's 30-day test failed on a busy box only.
       let flaky = null;
@@ -494,6 +567,9 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
           r = again;
         } else r = again;
       }
+      // 2.72.0 (a): a red golden-type check of a game whose manifest declares "divergence": where it first went wrong
+      // (harness/divergence.mjs gameDivergence: the game's per-tick digests on this tree and the reference commit).
+      if (r.status !== 0) await divergenceForCheck(game, g, log);
       const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
       // 2.36.0: exit 0 with "nothing was run" is a silent green (harness/silent-green.mjs; warn by default).
       // A related run with no related tests is fine: the whole suite runs after landing.
@@ -501,8 +577,11 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
       // 2.54.0 (PU-06): the failing test names, so a task is judged only on failures that are new since it was claimed.
       const failures = r.status === 0 ? null : (await import('./baseline.mjs')).failingTests(`${r.stdout || ''}${r.stderr || ''}`);
-      const failFiles = r.status === 0 ? [] : failingTestFiles(`${r.stdout || ''}${r.stderr || ''}`);
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}) });
+      let failFiles = r.status === 0 ? [] : failingTestFiles(`${r.stdout || ''}${r.stderr || ''}`);
+      // 2.72.0 (a): after a timeout-only re-run, the failing files are the ones red alone (the green ones are timeout-flakes).
+      // (Every failure was one of the timed-out files, so the files red alone are exactly the failing ones.)
+      if (r.status !== 0 && redAlone) failFiles = [...redAlone];
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.
@@ -525,6 +604,8 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     if (!r.ok && r.failures?.length) log(`[game-gates] failing tests in ${r.id}: ${JSON.stringify(r.failures)}`);
     // 2.65.3 (B-43): the failing test files, for a red merge train's focused re-checks (harness/train-focus.mjs).
     if (!r.ok && r.failingFiles?.length) log(`[game-gates] failing test files in ${r.id}: ${JSON.stringify(r.failingFiles)}`);
+    // 2.72.0 (a): files that timed out and passed alone at low load (read by run-gates and the train: timeoutFlakesFromLog).
+    if (r.timeoutFlake?.length) log(`[game-gates] timeout-flake in ${r.id}: ${JSON.stringify(r.timeoutFlake)}`);
   }
   for (const s of skipped) log(`[game-gates] SKIP ${s.id}: ${s.why}`);
   if (!rows.length && !skipped.length) log(`[game-gates] no studio game set${game ? '' : ' (or it is a cartridge)'}; the cartridge gates cover it`);

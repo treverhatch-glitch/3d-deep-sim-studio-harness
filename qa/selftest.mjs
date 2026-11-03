@@ -4397,6 +4397,16 @@ if (inShard('selftest-272d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.72.0 (a): a red golden's first divergence (tick, subsystem, field; the cartridge goldens and a game's "divergence"
+// contract), sub-ids for the game gate (game:<check>:<file>, golden:<file>) in the row, gates.run and the hand-back facts,
+// and a timeout-only red re-run alone at low load (timeout-flake) (qa/selftest-272a.mjs).
+{
+  const dir = copyRepo();
+  const { selftest272A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-272a.mjs')).href);
+  await selftest272A({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

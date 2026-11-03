@@ -10,6 +10,8 @@
  *                (harness/test-rng.mjs findings, 2.67.0); no second run is needed;
  *   load-flake   it passes alone, and again under low load (STUDIO_TEST_WORKERS=1: one test worker);
  *   intermittent it passes alone once, then fails alone under low load (flaky with no named cause).
+ *   timeout-flake (2.72.0) a game check's timeout-only red whose file passed when the check re-ran it alone at low load
+ *                (harness/game-gates.mjs timeoutOnlyRerun, recordTimeoutFlakes below); the check counted green for it.
  * Each label is a line in .studio/flakes.jsonl ({ at, test, check, label, why, train, tree, runs, rng }). A test
  * labelled flaky (any label but "real") STUDIO_FLAKE_QUARANTINE_AFTER (3) times in STUDIO_FLAKE_WINDOW_DAYS (7) goes on
  * the quarantine list studio/quarantine.json ([{ test, label, since, why, by, evidence, task, status }]) as PROPOSED:
@@ -38,7 +40,8 @@ import { testRngFacts, gameFolder } from './test-rng.mjs';
 
 export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
-export const FLAKY = Object.freeze(['load-flake', 'seed-flake', 'intermittent']);
+// 2.72.0 (a): "timeout-flake": a timeout-only red whose files passed when re-run alone at low load (harness/timeout-rerun.mjs).
+export const FLAKY = Object.freeze(['load-flake', 'seed-flake', 'intermittent', 'timeout-flake']);
 const DAY = 86400000;
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
@@ -231,17 +234,46 @@ export async function releaseQuarantine(root, test, { by, permission = '', why =
   return { ok: true, message: `Released ${e.test} from quarantine; the game's runner runs it again from the next check.` };
 }
 
+/**
+ * 2.72.0 (a): a game check's timeout-only red re-ran its files alone at low load (harness/game-gates.mjs): one
+ * "timeout-flake" row per file that passed there ({ at, test, check, label, why, tree, runs }), then the same quarantine
+ * rule as every flaky label (proposed after STUDIO_FLAKE_QUARANTINE_AFTER in the window). A file red alone isn't
+ * labelled here (the check stays red; the triager labels it). Never throws; returns the rows written.
+ */
+export function recordTimeoutFlakes(root, { check, files = [], why = '', tree = '', now = Date.now(), env = process.env, emit = emitEvent, log = () => {} } = {}) {
+  const rows = [];
+  for (const file of files) {
+    const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: 'timeout-flake', why: why || 'timed out in the check; passed when re-run alone at low load (one test worker)', train: String(env.STUDIO_LOCK_OWNER || '').startsWith('train-') ? String(env.STUDIO_LOCK_OWNER).replace(/^train-/, '').replace(/-re$/, '') : '', tree, runs: [{ ok: false, lowLoad: false, timeout: true }, { ok: true, lowLoad: true }] };
+    try { appendFlake(root, row); rows.push(row); } catch {}
+    try { const q = maybeQuarantine(root, row, { now, env, emit }); if (q) log(`[flakes] ${row.test} is ${q.status === 'active' ? 'quarantined' : 'PROPOSED for quarantine'} (${q.why})`); } catch {}
+  }
+  if (rows.length) { try { emit({ type: 'test.timeout_flake', agent: String(env.STUDIO_LOCK_OWNER || 'gates').slice(0, 60), status: 'warn', msg: `${check}: ${rows.length} test file(s) timed out, then passed alone at low load (timeout-flake; green for those files only): ${rows.map((r) => r.test).slice(0, 5).join(', ')}`.slice(0, 600), meta: { check, files: rows.map((r) => r.test), tree: tree || null } }); } catch {} }
+  return rows;
+}
+
+/** 2.72.0 (a): the digest's line for timeout-flakes in 24 h (from .studio/flakes.jsonl), or ''. */
+export function timeoutFlakeDigestLine(root, { now = Date.now() } = {}) {
+  if (!root) return '';
+  const rows = readFlakes(root).filter((r) => r.label === 'timeout-flake' && (Date.parse(r.at) || 0) >= now - DAY);
+  if (!rows.length) return '';
+  const by = {};
+  for (const r of rows) by[r.test] = (by[r.test] || 0) + 1;
+  const top = Object.entries(by).sort((a, b) => b[1] - a[1]);
+  return `${rows.length} timeout-only red${rows.length === 1 ? '' : 's'} in 24 h passed when re-run alone at low load (timeout-flake; counted green for that file only, the lane not blamed): ${top.slice(0, 3).map(([t, n]) => `${t}${n > 1 ? ` x${n}` : ''}`).join(', ')}${top.length > 3 ? ' …' : ''} (${FLAKES_REL}).`;
+}
+
 /** The digest's line: the harness's quarantine additions in 24 h, and how many tests are quarantined now. */
 export function quarantineDigestLine(events, { now = Date.now(), root = null } = {}) {
   const added = (events || []).filter((e) => e.type === 'test.quarantined' && e.agent === 'harness' && (Date.parse(e.ts) || 0) >= now - DAY);
   const all = root ? readQuarantine(root) : [];
   const proposed = all.filter((e) => !isActive(e));
   const active = all.filter(isActive);
-  if (!added.length && !all.length) return '';
+  const tf = timeoutFlakeDigestLine(root, { now }); // 2.72.0 (a)
+  if (!added.length && !all.length) return tf;
   const head = added.length ? `The harness quarantined ${added.length} flaky test${added.length === 1 ? '' : 's'} in 24 h (autoQuarantine): ${added.slice(0, 3).map((e) => `${e.meta?.test || '?'} (${e.meta?.label || '?'}, ${(e.meta?.evidence || []).length} labels)`).join(', ')}${added.length > 3 ? ' …' : ''}.` : '';
   const prop = proposed.length ? `Proposed for quarantine, still running until you confirm: ${proposed.slice(0, 3).map((e) => `${e.test} (${e.label}, ${(e.evidence || []).length} labels)`).join(', ')}${proposed.length > 3 ? ' …' : ''} (npm run flakes -- confirm <test> --by <you>).` : '';
   const tail = active.length ? `${active.length} test${active.length === 1 ? '' : 's'} quarantined (${QUARANTINE_REL}; npm run flakes; release: npm run flakes -- release <test> --by <you>).` : '';
-  return [head, prop, tail].filter(Boolean).join(' ');
+  return [head, prop, tail, tf].filter(Boolean).join(' ');
 }
 
 export function statusText(root, now = Date.now(), env = process.env) {

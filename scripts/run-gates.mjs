@@ -298,8 +298,12 @@ for (const gate of gates) {
   const ms = Date.now() - start;
   const ok = res.status === 0;
   const required = gate.required !== false;
-  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name });
+  // 2.72.0 (a): which part failed (sub-ids: game:test:<file>, golden:<file>), the files a timeout-only red re-ran green
+  // alone, and a red golden's first divergence, read from the gate's own output (harness/gate-subids.mjs).
+  const facts = await gateRowFacts(gate.id, ok, fenced.text);
+  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts });
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
+  if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
   if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: fenced.text, compact })}`); // 2.66.0 (d): one next step per failure
 
   if (cacheable && !isMergeTier && !focusRun && !sparseRun?.partial) {
@@ -366,7 +370,7 @@ try {
 // 2.34.0: every verify is an event (how long, scoped or not, what failed), for the harness health report.
 try {
   const { emitEvent } = await import('../harness/event.mjs');
-  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
+  emitEvent({ type: 'gates.run', agent: process.env.STUDIO_LOCK_OWNER || null, msg: `verify: ${rows.filter((r) => r.ok).length}/${rows.length} passed in ${Math.round((Date.now() - runStarted) / 1000)} s${changedFiles?.length ? ` (scoped to ${changedFiles.length} file(s))` : ''}`, meta: { ms: Date.now() - runStarted, scoped: Boolean(changedFiles?.length), partial: Boolean(only) || isFastTier, ran: rows.length, failed: rows.filter((r) => !r.ok && r.required).map((r) => r.id), ...gatesRunFacts(rows), gameMs: rows.find((r) => r.id === 'game')?.ms ?? null, ...(changedByVerify?.length ? { changedByVerify } : {}) } });
   // 2.65.0: a full verify also ends with the uniform job.done (harness/jobs.mjs), which `npm run events -- wait` matches.
   if (!only && !isFastTier) {
     const failedIds = rows.filter((r) => !r.ok && r.required).map((r) => r.id);
@@ -388,6 +392,29 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`[gates] ${rows.filter((r) => r.ok).length}/${rows.length} passed, all required gates green`);
+
+// ---- 2.72.0 (a): sub-ids, timeout-flakes and first divergences in the rows and the gates.run event ----
+
+/** { sub, timeoutFlakes, divergence } for one gate's row (only the keys that have something). Never throws. */
+async function gateRowFacts(id, ok, text) {
+  try {
+    const out = {};
+    if (!ok) out.sub = (await import('../harness/gate-subids.mjs')).subIdsFor(id, text, { roots: [root] });
+    const tf = (await import('../harness/timeout-rerun.mjs')).timeoutFlakesFromLog(text);
+    if (Object.keys(tf).length) out.timeoutFlakes = tf;
+    if (!ok) { const d = (await import('../harness/divergence.mjs')).divergenceFromLog(text); if (d.length) out.divergence = d.slice(0, 5); }
+    return out;
+  } catch { return {}; }
+}
+
+/** The gates.run event's meta additions: subIds (the required failures' parts), timeoutFlakes, divergence. */
+function gatesRunFacts(list) {
+  const red = list.filter((r) => !r.ok && r.required);
+  const subIds = [...new Set(red.flatMap((r) => (r.sub?.length ? r.sub : [r.id])))].slice(0, 40);
+  const tf = Object.assign({}, ...list.map((r) => r.timeoutFlakes || {}));
+  const div = red.flatMap((r) => r.divergence || []).slice(0, 5);
+  return { ...(subIds.length ? { subIds } : {}), ...(Object.keys(tf).length ? { timeoutFlakes: tf } : {}), ...(div.length ? { divergence: div } : {}) };
+}
 
 // ---- 2.58.0 (F2): tracked files a verify changed ----
 

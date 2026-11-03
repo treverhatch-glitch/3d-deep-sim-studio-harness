@@ -249,6 +249,12 @@ exclude: [...configDefaults.exclude, ...quarantined],
 
 A fix task is filed for each; when it lands, a game dev releases the test: `npm run flakes -- release <test> --by <name>`.
 
+A red whose only failures are per-test timeouts re-runs just those files alone with one test worker (2.72.0; needs a
+`"focus"` command with `{files}`, or a command that clearly runs vitest, jest or `node --test`): green alone counts
+green for that file (`timeout-flake`), red alone stays red (docs/WORK-ORGANIZATION.md, "Timeout-only reds"). A golden
+check can name where it first went wrong with a `"divergence"` entry (docs/HASH.md, "Where a red golden first went
+wrong").
+
 ## Landing tiers and batching for the merge train (2.63.0)
 
 The merge train gives each lane a blast-radius tier from its diff (`harness/tiers.mjs`; docs/WORK-ORGANIZATION.md):
