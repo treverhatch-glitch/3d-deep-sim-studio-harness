@@ -4325,6 +4325,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.0 (e): the L3 bar on one-sided 90% Wilson bounds (demotion on point estimates), audit sampling of hands-free
+// landings and autonomous decisions (seeded draw, review list, a failed audit is a Redo), and cheap-first routing with
+// the holdout off (qa/selftest-273e.mjs).
+{
+  const dir = copyRepo();
+  const { selftest273E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-273e.mjs')).href);
+  await selftest273E({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();

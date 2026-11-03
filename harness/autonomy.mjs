@@ -14,6 +14,8 @@
  *     owner confirms: npm run policy -- confirm) or pause it at once (harness/policy.mjs)
  *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
  *     (harness/impact.mjs)
+ *   npm run autonomy -- routing [--days 14] [--json]   2.73.0 (e): cheap-first routing's success rate and tokens per
+ *     landed change by task type and tier (harness/routing.mjs); the holdout is off
  * 2.73.0 (e): the L3 bar's rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion and
  * as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo.
  * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
@@ -1087,6 +1089,27 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const r = await (await import('./policy-rules.mjs')).proposeMode({ on: argv[2] === 'on', agent: flag('agent') || '', actions: flag('actions'), reviewH: flag('review-h'), by: flag('by'), why: flag('why') || '', permission: flag('permission') || '' });
     (r.ok ? console.log : console.error)(r.message);
     process.exit(r.ok ? 0 : 1);
+  }
+  // 2.73.0 (e): cheap-first routing's measures (harness/routing.mjs): success rate and tokens per landed change by task
+  // type and tier, from session ends; the holdout is off until the owner turns it on.
+  if (argv[0] === 'routing') {
+    const rt = await import('./routing.mjs');
+    const { readPolicy } = await import('./policy-rules.mjs');
+    const rp = rt.routingPolicy(readPolicy());
+    const evs = readRecentEvents(200000);
+    let typeOfTask = null;
+    try {
+      const dc = await import('./done-check.mjs');
+      const info = new Map();
+      for (const e of evs) if (e.type === 'task.added' && e.task) { const m = String(e.msg || '').match(/^Queued \S+ \[[^\]]*\] \(([^)]*)\): ([\s\S]*)$/); info.set(e.task, { id: e.task, title: m ? m[2] : String(e.meta?.title || ''), role: m ? m[1] : null }); }
+      typeOfTask = (id) => dc.typeOf(info.get(id) || { id, title: '', role: null }).type;
+    } catch {}
+    let weight = null;
+    try { const { weightedTokens: wt } = await import('./budget.mjs'); weight = (e) => wt(e); } catch {}
+    const st = rt.routingStats(evs, { now: flag('now') ? Date.parse(flag('now')) : Date.now(), days: Number(flag('days')) > 0 ? Number(flag('days')) : 14, typeOfTask, weight, holdout: rp.holdout || 0 });
+    if (argv.includes('--json')) { console.log(JSON.stringify({ routing: rp, ...st }, null, 2)); process.exit(0); }
+    console.log(rt.routingText(st, rp));
+    process.exit(0);
   }
   // 2.68.0: the release impact report (harness/impact.mjs): the same measures before vs after a harness upgrade.
   if (argv[0] === 'impact') {
