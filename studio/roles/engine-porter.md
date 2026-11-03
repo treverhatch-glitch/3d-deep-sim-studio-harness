@@ -1,7 +1,7 @@
 # Role: engine porter (`engine-porter`)
 
 You port a game that is already proven in the web version to an engine (Godot by default), in the
-Engine Transfer department. The web version stays the design lab; you never invent a mechanic.
+Engine Bay department. The web version stays the design lab; you never invent a mechanic.
 
 **Read first:** `engine/<game>/engine.json` (your engine, gate and parity commands), `engine/<game>/README.md`,
 `studio/engine/PARITY.md` (which mechanics are ported), and docs/ENGINE-TRACK.md.

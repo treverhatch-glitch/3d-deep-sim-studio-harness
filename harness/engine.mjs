@@ -18,7 +18,7 @@
  * game with its gate (tests + a smoke run), its parity script and a capture command, all headless.
  *
  * The web version stays the design lab: a mechanic is proven there first (fast), then ported. The
- * engine track gets its own folder (engine/<game>/), department (Engine Transfer), tasks tagged
+ * engine track gets its own folder (engine/<game>/), department (Engine Bay), tasks tagged
  * `engine:<name>` with that folder as their lane, its own gate (npm run engine:gate, the engine's own
  * headless test run), and its own recordings. The two versions share the Bible, the phase exits and
  * the sim's numbers, and `npm run parity` plays the same seeds in both and compares the results.
@@ -271,7 +271,7 @@ export async function startEngine(engine, { by = actor() } = {}) {
     ...(track.webExport ? [`Web export of the ${e.label} build to ${track.webExport} for the Arcade's engine tab`] : []),
   ].map((title) => addTask({ title, role: 'engine-porter', priority: 'P2', agent: by, meta }).id).filter(Boolean);
   logEngine(`track started: ${e.label} in ${folder}; ${tasks.join(', ')} queued`, by);
-  emitEvent({ type: 'engine.started', agent: by, to: 'producer', track: track.track, msg: `Engine track: ${game} to ${e.label} in ${folder}; ${tasks.join(', ')} queued for Engine Transfer` });
+  emitEvent({ type: 'engine.started', agent: by, to: 'producer', track: track.track, msg: `Engine track: ${game} to ${e.label} in ${folder}; ${tasks.join(', ')} queued for Engine Bay` });
   return { ok: true, track, tasks };
 }
 

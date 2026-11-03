@@ -18,7 +18,7 @@ Jed's run: keep it in web until playtests show it plays the way the dev imagined
 3. A yes runs `npm run engine -- start godot`:
    - `engine/<game>/` is created (for Godot, from `engine/_godot/`, a worked port of the template game);
    - `engine/<game>/engine.json` records the engine, the gate, the parity and capture commands and the game's ID;
-   - the Engine Transfer department opens;
+   - the Engine Bay department opens;
    - the first `engine-porter` tasks are queued, tagged `engine:<name>`, with `engine/<game>/` as their lane;
    - `studio/engine/PARITY.md` lists the mechanics and where each one is ported.
 

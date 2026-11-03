@@ -33,6 +33,7 @@ import { readTricks } from './tricks.mjs';
 import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
 import { readTrack } from './engine.mjs';
+import { roomFor as assignmentRoom, cachedProxy, ASSIGNMENT_ROOMS } from './war-room.mjs';
 
 /** The engine track for the Arcade: which engine, its web export if built, its last frames. */
 function engineInfo() {
@@ -265,6 +266,9 @@ export function buildHudState() {
   });
   const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task);
   const originOf = Object.fromEntries(added.filter((e) => e.meta?.origin).map((e) => [e.task, e.meta.origin]));
+  // 2.74.0: a task on another version of the game (--track engine:<name>) seats its agent in Engine Bay.
+  const trackOf = Object.fromEntries(added.filter((e) => e.meta?.track).map((e) => [e.task, String(e.meta.track)]));
+  const proxyAgent = cachedProxy()?.agent || '';
   for (const k of ['inProgress', 'backlog']) queue[k] = queue[k].map((t) => (originOf[t.id] ? { ...t, origin: originOf[t.id] } : t));
   const dayAgo = now - 24 * 3600 * 1000;
 
@@ -327,7 +331,8 @@ export function buildHudState() {
       ...a,
       role,
       // Seated by the division it was hired into, then by role.
-      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || roomForRole(role, divs) || 'engineering',
+      // 2.74.0: then the Studio floor's assignment rooms (Rail Yard, Watchtower, Engine Bay: harness/war-room.mjs roomFor).
+      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || assignmentRoom({ name: a.name, role: sess?.role || role || '', track: trackOf[a.task] || '', proxyAgent }) || roomForRole(role, divs) || 'engineering',
       // The launcher's heartbeat is the truth for agents it started.
       status: sess?.running ? (sess.stalled ? 'stalled' : 'working') : stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       launched: Boolean(sess?.running),
@@ -556,6 +561,7 @@ export function buildHudState() {
     // What is being worked on: every task with activity in the last 30 minutes.
     now: queue.inProgress.map((t) => ({ id: t.id, title: t.title, agents: [...new Set(events.filter((e) => e.task === t.id && Date.parse(e.ts) > now - 30 * 60000).map((e) => e.agent))] })).filter((t, i) => t.agents.length || i === 0),
     divisions: divs,
+    assignmentRooms: ASSIGNMENT_ROOMS,
     lessons: lessons(),
     rtk: rtkGain(),
     tokenUse: tokensCached(),
