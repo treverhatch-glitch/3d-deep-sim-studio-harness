@@ -29,6 +29,9 @@
  *      timeout): nobody is blamed. A refusal is tried again (STUDIO_UNITY_TRAIN_RETRIES, 2, every
  *      STUDIO_UNITY_TRAIN_RETRY_MIN, 10 min); still refused, or an error: the train stops, its branches stay queued,
  *      and `npm run task -- train --unity` later runs it again. What landed before it stays landed and closed.
+ *      2.73.2 (e, B-73): "not run" (the gate's status not-run: an infrastructure abort such as out of memory, the
+ *      editor ended from outside, no licence, or free RAM under STUDIO_UNITY_MIN_FREE_GB) is handled as a refusal:
+ *      tried again after STUDIO_UNITY_TRAIN_RETRY_MIN, then the branches stay queued; nobody is handed back as red.
  *
  * One Unity train at a time (.studio/locks/unity-train.lock; a dead holder's lock is taken over); every land run takes
  * machine:heavy (harness/unity-gate.mjs), as a landing (STUDIO_GATE_PRIORITY=landing). `npm run task -- train status`
@@ -305,8 +308,8 @@ async function unityTrainBody({ root, log, deps, id, by, s, update, max = 0, dry
         log(`[unity-train] ${id}: ${what}: land ${group.map((l) => `${l.task} (${l.branch})`).join(', ')} on ${target} at ${short(tip)}${ref ? ` through ${ref}` : ''}`);
         r = await runUnityGate({ ...arg, task: group.map((l) => l.task).join(','), label: `unity train ${id} (${group.map((l) => l.task).join(', ')})`, env: { ...env, STUDIO_GATE_PRIORITY: 'landing' }, log });
         res.runs += 1;
-        if (r.status !== 'refused' || a >= retries) break;
-        log(`[unity-train] ${id}: the land command refused (${r.why}); nobody is blamed; trying again in ${Math.round(retryMs / 1000)} s (${a + 1} of ${retries} retries)`);
+        if ((r.status !== 'refused' && r.status !== 'not-run') || a >= retries) break;
+        log(`[unity-train] ${id}: the land command ${r.status === 'not-run' ? 'did not run' : 'refused'} (${r.why}); nobody is blamed; trying again in ${Math.round(retryMs / 1000)} s (${a + 1} of ${retries} retries)`);
         update({ now: `waiting after a refusal (${r.why.slice(0, 120)})` });
         sleep(retryMs);
       }
@@ -333,9 +336,11 @@ async function unityTrainBody({ root, log, deps, id, by, s, update, max = 0, dry
   /** Refused or error: nobody is blamed, every branch left waits (stays queued). */
   const hold = (group, r) => {
     if (r.status === 'refused') res.refused = { at: new Date().toISOString(), why: r.why };
+    // 2.73.2 (e, B-73): an infrastructure abort: not run, not red; the branches wait for the next train.
+    if (r.status === 'not-run') res.notRun = { at: new Date().toISOString(), why: r.why, kind: r.infra?.kind || null };
     res.ok = false;
-    for (const l of group) defer(l, r.status === 'refused' ? `the land command refused (${r.why}); not a failure of the work: the next Unity train tries again` : `the land command failed to run (${r.why}); nobody is blamed: fix it, then run npm run task -- train --unity`);
-    ev(r.status === 'refused' ? 'refused' : 'error', id, `${r.status}: ${r.why}; ${group.map((l) => l.task).join(', ')} stay queued, nobody is handed back`, { agent: by, to: 'producer', status: r.status === 'refused' ? 'warn' : 'blocked', meta: { status: r.status, log: r.log } });
+    for (const l of group) defer(l, r.status === 'refused' ? `the land command refused (${r.why}); not a failure of the work: the next Unity train tries again` : r.status === 'not-run' ? `${r.why.startsWith('not run') ? r.why : `not run: ${r.why}`}; the next Unity train tries again` : `the land command failed to run (${r.why}); nobody is blamed: fix it, then run npm run task -- train --unity`);
+    ev(r.status === 'refused' ? 'refused' : r.status === 'not-run' ? 'not_run' : 'error', id, `${r.status}: ${r.why}; ${group.map((l) => l.task).join(', ')} stay queued, nobody is handed back`, { agent: by, to: 'producer', status: r.status === 'refused' || r.status === 'not-run' ? 'warn' : 'blocked', meta: { status: r.status, log: r.log, ...(r.infra ? { infra: r.infra.kind } : {}) } });
   };
   const blame = (r) => `${r.status === 'conflict' ? 'the land command found a merge conflict' : 'the land command is red'}: ${r.why}${r.tail ? `\n${r.tail.split('\n').map((x) => `  ${x}`).join('\n')}` : ''}\nIts log: ${r.log || '.studio/gates/out/unity.log'}.`;
 
@@ -381,7 +386,7 @@ async function unityTrainBody({ root, log, deps, id, by, s, update, max = 0, dry
   function finish() {
     res.message = res.message || summary(res);
     try { writeJson(lastFile(root), { ...res, by, at: new Date().toISOString() }); } catch {}
-    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, refused: Boolean(res.refused) } });
+    ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), runs: res.runs, refused: Boolean(res.refused), notRun: Boolean(res.notRun) } });
     return res;
   }
 }

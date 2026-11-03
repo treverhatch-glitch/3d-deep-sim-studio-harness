@@ -125,6 +125,24 @@ export function maxConcurrent(kind, { root = process.cwd(), env = process.env } 
 }
 export const WORKER_GB = (env = process.env) => Math.max(0.05, num(env.STUDIO_TEST_WORKER_GB, 0.45));
 
+/** 2.73.2 (e, B-73): every Unity editor kind (unity, unity-bake, unity-visual: the "unity" cap group). */
+export const isUnityKind = (kind) => capGroup(kind) === 'unity';
+/**
+ * 2.73.2 (e, B-73): the free-RAM floor a Unity editor run waits for before it starts: STUDIO_UNITY_MIN_FREE_GB (default
+ * 12; 0 or off: none), never more than 60% of the machine's RAM (a 16 GB machine waits for 9.6 GB, not 12). A Unity
+ * landing that started with about 9 GB free peaked at 4.6 GB beside a web verify's vitest and fell to 3.9 GB free:
+ * the run aborted. { gb, setGb, capGb, totalGb, why }; gb 0 means no floor. totalGb: the scan's, else os.totalmem().
+ */
+export function unityMinFreeGb({ env = process.env, profile = null, totalGb = null } = {}) {
+  const raw = env.STUDIO_UNITY_MIN_FREE_GB;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '' && (off(raw) || !(Number(raw) > 0))) return { gb: 0, setGb: 0, capGb: null, totalGb: null, why: `STUDIO_UNITY_MIN_FREE_GB=${raw}: no free-RAM floor for Unity` };
+  const setGb = num(raw, 12);
+  const total = fin(totalGb) ? totalGb : totalRamGb(profile) ?? r1(os.totalmem() / 1024 ** 3);
+  const capGb = fin(total) && total > 0 ? r1(total * 0.6) : null;
+  const gb = capGb !== null ? Math.min(setGb, capGb) : setGb;
+  return { gb, setGb, capGb, totalGb: total, why: `STUDIO_UNITY_MIN_FREE_GB ${setGb} GB${capGb !== null && capGb < setGb ? `, capped at 60% of this machine's ${total} GB: ${capGb} GB` : ''}` };
+}
+
 const toMs = (at) => (fin(at) ? at : Number.isFinite(Date.parse(at)) ? Date.parse(at) : NaN);
 
 /**

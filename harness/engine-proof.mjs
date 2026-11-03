@@ -24,6 +24,13 @@ import crypto from 'node:crypto';
 
 /** The failure kinds, each with an entry in harness/gate-fix.mjs ENGINE_FIXES. */
 export const PROOF_KINDS = ['stale-results', 'no-results', 'empty-run', 'compile-error', 'licence', 'aborted', 'exit-mismatch', 'test-failed'];
+/**
+ * 2.73.2 (e, B-73): the kinds of an infrastructure abort: the editor didn't get to test the work, so the run is "NOT RUN
+ * <kind>", never a FAIL of the game's tests (each has an ENGINE_FIXES entry too). licence and aborted are both: a licence
+ * problem is always not run; "Aborting batchmode" is not run only with no results file and no compile error (with
+ * results it stays FAIL aborted, 2.72). A compile error or a failing test is always a FAIL, whatever else the log says.
+ */
+export const INFRA_KINDS = ['out-of-memory', 'editor-killed', 'launch-failed', 'licence', 'aborted', 'ram-floor', 'busy'];
 
 /** A run's nonce: in the results file name, so no file from another run can be mistaken for this run's. */
 export const runNonce = () => `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
@@ -60,6 +67,35 @@ export function logSignatures(log, engine = 'unity') {
   if (a.length) out.push({ kind: 'aborted', text: `the editor aborted batch mode: ${a[0]}` });
   return out;
 }
+
+// 2.73.2 (e, B-73): the editor ran out of memory (Unity's native allocator, .NET, Windows STATUS_NO_MEMORY, Node).
+const OOM = /\bOut of memory\b|Could not allocate memory|Failed to allocate memory|System\.OutOfMemoryException|0xC0000017|JavaScript heap out of memory/i;
+const OOM_CODES = new Set([3221225495, -1073741801]);
+// Windows STATUS_CONTROL_C_EXIT (the console closed or Ctrl+C: the editor was ended from outside).
+const KILL_CODES = new Set([3221225786, -1073741510]);
+
+/**
+ * 2.73.2 (e, B-73): was this run an infrastructure abort rather than a result? { kind, text } or null. log: the editor's
+ * output; status: its exit code (null: killed); signal; spawnError (the child_process error, e.g. ENOENT); results: the
+ * parsed results this run wrote (null: none); timedOut (our own timeout: never infra here, a hang can be the work's).
+ * Never infra when the log shows a compile error or the results show a failing test: those are the work's FAILs.
+ */
+export function infraAbort({ log = '', status = null, signal = null, spawnError = null, results = null, timedOut = false, engine = 'unity' } = {}) {
+  if (spawnError && spawnError.code !== 'ETIMEDOUT') return { kind: 'launch-failed', text: `the editor could not be started (${spawnError.code || spawnError.message || 'spawn failed'}): check STUDIO_${engine === 'godot' ? 'GODOT' : 'UNITY'} points at the editor and that it opens on this machine` };
+  if (COMPILE[engine] && COMPILE[engine].test(String(log || ''))) return null;
+  if (results && Number(results.failed) > 0) return null;
+  const l = firstLines(log, LICENCE, 1);
+  if (engine === 'unity' && l.length) return { kind: 'licence', text: `the editor has no usable licence on this machine: ${l[0]}` };
+  const m = firstLines(log, OOM, 1);
+  if (OOM_CODES.has(Number(status)) || m.length) return { kind: 'out-of-memory', text: `the editor ran out of memory${m.length ? `: ${m[0]}` : ` (exit ${status}, 0xC0000017)`}` };
+  if (!results && !timedOut && ((status === null && signal && signal !== 'timeout') || KILL_CODES.has(Number(status)))) return { kind: 'editor-killed', text: `the editor was ended from outside (${signal || `exit ${status}`}) before it wrote any results` };
+  const a = firstLines(log, ABORTED, 1);
+  if (!results && a.length) return { kind: 'aborted', text: `the editor aborted batch mode before it wrote any results: ${a[0]}` };
+  return null;
+}
+
+/** 2.73.2 (e): the line printed for a run that did not run: "[engine-gate] NOT RUN <kind> (<engine>): <text>". */
+export const notRunLine = (p, engine = '') => `[engine-gate] NOT RUN ${p.kind}${engine ? ` (${engine})` : ''}: ${p.text}`;
 
 /**
  * Does the exit code agree with the results? results: { total, failed } (or null). status: the exit code (null:

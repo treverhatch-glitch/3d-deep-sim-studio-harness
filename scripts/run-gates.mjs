@@ -312,9 +312,13 @@ for (const gate of gates) {
   // 2.72.0 (a): which part failed (sub-ids: game:test:<file>, golden:<file>), the files a timeout-only red re-ran green
   // alone, and a red golden's first divergence, read from the gate's own output (harness/gate-subids.mjs).
   const facts = await gateRowFacts(gate.id, ok, fenced.text);
-  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts });
-  if (!ok && required && !firstRed) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
-  console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
+  // 2.73.2 (e, B-73): a gate that exits 3 with a "NOT RUN" line (the engine gate: an infrastructure abort, or free RAM
+  // under the Unity floor) did not test anything: its row says "not run: <why>". It is still no pass (not ok).
+  const notRunLine = !ok && res.status === 3 ? (fenced.text.match(/^\[(?:engine|unity|engine-gate|heavy)\] NOT RUN\b[^\n]*/m) || [])[0] : null;
+  const notRun = notRunLine ? notRunLine.replace(/^\[[\w-]+\] NOT RUN\s*/, '').replace(/^[^:]*:\s*not run:\s*/, '').slice(0, 300) : null;
+  rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts, ...(notRun ? { notRun } : {}) });
+  if (!ok && required && !firstRed && !notRun) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
+  console.log(notRun ? `[gates] NOT RUN ${gate.id}: not run: ${notRun}` : `[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
   if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
   if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: fenced.text, compact })}`); // 2.66.0 (d): one next step per failure
 
@@ -331,7 +335,7 @@ for (const gate of gates) {
   for (const l of gateWords({ rows, skipped, partial: Boolean(only) }, all).lines) console.log(`  ${l}`);
 }
 if (!compact) console.log('\n[gates] summary');
-if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.cached ? ' (cached)' : ''}${r.required ? '' : '  (optional)'}`);
+if (!compact) for (const r of rows) console.log(`  ${r.ok ? 'PASS' : r.notRun ? 'NOT RUN' : r.required ? 'FAIL' : 'WARN'}  ${r.id.padEnd(16)} ${String(r.ms).padStart(6)} ms${r.cached ? ' (cached)' : ''}${r.required ? '' : '  (optional)'}`);
 // 2.58.0 (F2): a verify must not dirty the repo (on Windows each verify rewrote a game test snapshot's line endings
 // on main). Tracked files outside studio/ (the board, which other agents write meanwhile) whose state or content
 // differs from before the gates ran are named here and in the record; the exit code doesn't change.
