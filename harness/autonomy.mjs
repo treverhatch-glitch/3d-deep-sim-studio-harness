@@ -15,7 +15,7 @@
  *   npm run autonomy -- impact [--release <version>] [--days 3] [--json]   2.68.0: a harness upgrade's before vs after
  *     (harness/impact.mjs)
  * 2.73.0 (e): the L3 bar's rates are judged at a one-sided Wilson bound ("confidence", default 0.9) for a promotion and
- * as point estimates for a demotion.
+ * as point estimates for a demotion; a failed audit (harness/audit.mjs) counts as a Redo.
  * 2.65.0: the card also shows the cost per landed task (tokens; dollars only with a studio/prices.json table), the
  * person's round-trips per landed task and orchestrator interventions (conductor.note events).
  *
@@ -776,7 +776,14 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const av = win.filter((e) => e.type === 'away.verdict' && actorOf(e, isPersonName).person).map((e) => e.status || e.meta?.verdict);
   const verdicts = { great: av.filter((v) => v === 'great').length, redo: av.filter((v) => v === 'redo').length, comment: av.filter((v) => v === 'comment').length };
   const vTotal = verdicts.great + verdicts.redo + verdicts.comment;
-  verdicts.redoRate = vTotal ? round(verdicts.redo / vTotal, 4) : null;
+  // 2.73.0 (e): audits (harness/audit.mjs): a failed audit of a hands-free landing or an autonomous decision counts as
+  // a Redo, a passed one as a review. The last verdict per audit item counts.
+  const auditLast = new Map();
+  for (const e of win) if (e.type === 'audit.verdict' && e.meta?.of && ['pass', 'fail'].includes(e.meta?.verdict)) auditLast.set(String(e.meta.of), e.meta.verdict);
+  verdicts.audited = auditLast.size;
+  verdicts.auditFailed = [...auditLast.values()].filter((x) => x === 'fail').length;
+  const rTotal = vTotal + verdicts.audited;
+  verdicts.redoRate = rTotal ? round((verdicts.redo + verdicts.auditFailed) / rTotal, 4) : null;
 
   // Tokens per landed task.
   const tokens = win.filter((e) => e.type === 'agent.session.end').reduce((s, e) => s + weight(e), 0);
@@ -1117,5 +1124,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   console.log(`L3 bar (${r.config.file}${r.config.exists ? '' : ', defaults: no file'}${r.config.protected ? '; protected: owner-signed changes only' : '; set by a person, a Producer or Director session or an outside agent, never a worker'}):`);
   console.log(r.badge.confidence ? `  Rates are judged at their one-sided ${Math.round(r.badge.confidence * 100)}% Wilson bound for a promotion (${r.config.file} "confidence", else STUDIO_L3_CONFIDENCE; 0 = point estimates); a demotion reads the point estimates.` : '  Rates are judged as point estimates ("confidence": 0).');
   for (const k of r.badge.checks) console.log(`  ${k.ok ? 'ok  ' : 'MISS'} ${k.id}: ${k.value} (bar: ${k.bar})${k.na ? ' n/a' : ''}`);
+  if (c.verdicts.audited) console.log(`  Audits counted in the redo rate: ${c.verdicts.audited} (${c.verdicts.auditFailed} failed).`);
   if (r.badge.suggestion.kind) console.log(r.badge.suggestion.text);
 }

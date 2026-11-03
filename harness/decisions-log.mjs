@@ -174,6 +174,7 @@ export async function reviewDecision(id, { verdict, by, permission = '', note = 
   const w = await reviewer({ by, permission, env, rec });
   if (!w.ok) return { ok: false, message: w.why };
   writeReview(root, rec, { verdict, d: w.d, note });
+  await auditOfReview(rec, { verdict, d: w.d, note, root });
   return { ok: true, message: `${rec.id} (${rec.action}${rec.subject ? ` ${rec.subject}` : ''} by ${rec.by}) ${verdict} by ${w.d.by}${note ? `: ${note}` : ''}.${rec.review ? ` (It was ${rec.review.verdict} by ${rec.review.by} before.)` : ''}` };
 }
 
@@ -241,6 +242,9 @@ async function runUndo(rec, { d, why, env, root }) {
   return { ok: false, text: rec.undo?.text ? `undo it by hand: ${rec.undo.text}` : 'this decision has no undo' };
 }
 
+/** 2.73.0 (e): a review of an autonomous decision the audit draw picked is its audit too (harness/audit.mjs). */
+async function auditOfReview(rec, opts) { try { return await (await import('./audit.mjs')).auditFromReview(rec, opts); } catch { return null; } }
+
 /** revert: run the undo, then record the review. Returns { ok, message }. */
 export async function revertDecision(id, { by, permission = '', why = '', env = process.env, root = mainRoot() } = {}) {
   const rec = find(root, id);
@@ -253,6 +257,7 @@ export async function revertDecision(id, { by, permission = '', why = '', env = 
   try { r = await quietly(() => runUndo(rec, { d: w.d, why, env, root })); } catch (e) { r = { ok: false, text: e.message }; }
   if (!r.ok) return { ok: false, message: `Not reverted: ${r.text}. Nothing recorded.` };
   writeReview(root, rec, { verdict: 'reverted', d: w.d, note: why, result: r.text });
+  await auditOfReview(rec, { verdict: 'reverted', d: w.d, note: why, root });
   return { ok: true, message: `Reverted ${rec.id} (${rec.action}${rec.subject ? ` ${rec.subject}` : ''} by ${rec.by}): ${r.text}.` };
 }
 

@@ -159,6 +159,8 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // 2.71.0 (x): autonomous mode: decisions per day, approved vs reverted, the review list, time saved (harness/decisions.mjs).
   let autoLine = '';
   try { autoLine = await (await import('./decisions-log.mjs')).autonomyDigestLine({ events: ev, now }); } catch { autoLine = ''; }
+  let auditLine = ''; // 2.73.0 (e): audit items picked, waiting, passed and failed (harness/audit.mjs)
+  try { auditLine = await (await import('./audit.mjs')).auditDigestLine({ events: ev, now }); } catch { auditLine = ''; }
   // 2.66.0 (c): the top blocked commands (harness/denials.mjs) as allowlist candidates; a person decides, nothing is added.
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
@@ -173,7 +175,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // (harness/workaround.mjs; the harness maintainer's queue, never a game task).
   let workMod = null; let workPts = []; let workLine = '';
   try { workMod = await import('./workaround.mjs'); workPts = await workMod.upgradesSeen({ events: ev, now, root }); workLine = workMod.workaroundDigestLine({ events: ev, now, points: workPts }); } catch { workLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(researchLine ? [researchLine] : []), ...(workLine ? [workLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ...(auditLine ? [auditLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);
