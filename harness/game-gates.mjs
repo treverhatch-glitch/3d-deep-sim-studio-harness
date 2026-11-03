@@ -381,6 +381,8 @@ async function divergenceForCheck(game, g, log) {
     if (!applies || !dv.divergenceOn()) return null;
     const res = await dv.gameDivergence({ root: REPO_ROOT, game, conf, gate: g.id });
     for (const l of dv.divergenceLines('[game-gates]', { ...res, gate: g.id })) log(l);
+    // 2.73.0 (g, A13): the signed report a re-record of the declared goldens carries (harness/golden-report.mjs).
+    if (Array.isArray(conf.goldens) && conf.goldens.length) (await import('./golden-report.mjs')).writeGoldenReport(REPO_ROOT, conf.goldens.map(String), res, { by: 'harness/game-gates.mjs', gate: g.id });
     return res;
   } catch (e) { log(`[game-gates] first divergence: not found (${String(e.message || e).slice(0, 160)})`); return null; }
 }
