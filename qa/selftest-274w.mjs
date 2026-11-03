@@ -189,7 +189,9 @@ export async function selftest274W({ dir, run, report, tmpRoot, root }) {
       const log3 = read(S, '.studio/logs/hub-exit.log');
       const hubJson = JSON.parse(read(S, '.studio/hub.json') || '{}');
       await guard('274w B-70: every hub exit is one line in .studio/logs/hub-exit.log: stopped by SIGTERM, and "port in use" (exit 2) for a second hub; .studio/hub.json names the running one (fails on 2.73.0: no log, the second hub crashed unlogged)', () => [
-        /"kind":"exit","cause":"stopped by SIGTERM/.test(log2) && busy.exitCode === 2 && /port \d+ is in use/.test(log3) && hubJson.pid === second.h.pid,
+        // On Windows kill() is TerminateProcess: no handler runs, so a hub killed from outside can't log it (the keeper
+        // names that case from the missing line); only the port-in-use exit is checked there.
+        (process.platform === 'win32' || /"kind":"exit","cause":"stopped by SIGTERM/.test(log2)) && busy.exitCode === 2 && /port \d+ is in use/.test(log3) && hubJson.pid === second.h.pid,
         `log ${log3.slice(-700)}; second exit ${busy.exitCode}; hub.json ${JSON.stringify(hubJson)}`]);
       second.h.kill();
     }
