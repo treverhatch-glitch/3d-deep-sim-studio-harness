@@ -72,6 +72,8 @@ import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
+import { recordTrust } from './gate-trust.mjs';
+import { toolchainProtected } from './test-toolchain.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
@@ -499,6 +501,15 @@ export function excusedRed(rec, tasks = []) {
 }
 
 /**
+ * 2.71.1 (D01/T04, G15/T02): may this record be reused at all? Its run log (harness/gate-trust.mjs recordTrust) must be in
+ * the .studio/ it was read from or the studio's own; a hand-written or edited record, or one from a run beside untracked
+ * or ignored inputs, is not. { ok, why }.
+ */
+export function recordTrusted(rec, root) {
+  return recordTrust(rec, [rec?._studio, path.join(root, '.studio')]);
+}
+
+/**
  * Recorded full verifies in the shared .studio/ (each agent's own, the studio's, earlier trains'). 2.69.0 (p): also the
  * verifies kept by tree (.studio/gates/trees/<tree>.json, run-gates keeps the newest 64: an agent's next verify no longer
  * hides its lane's green one) and, for a lane copy whose .studio/ is its own (not the link), the records in it.
@@ -506,15 +517,16 @@ export function excusedRed(rec, tasks = []) {
 function recordedVerifies(root, { tree = null, lanes = [] } = {}) {
   const files = [];
   const seen = new Set();
-  const add = (f, from = null) => { if (seen.has(f)) return; seen.add(f); try { files.push({ ...JSON.parse(fs.readFileSync(f, 'utf8')), ...(from ? { _lane: from } : {}) }); } catch {} };
+  // 2.71.1: each record keeps the .studio/ it was read from (_studio), where its run log must be (recordTrusted).
+  const add = (f, from = null, studio = null) => { if (seen.has(f)) return; seen.add(f); try { files.push({ ...JSON.parse(fs.readFileSync(f, 'utf8')), ...(from ? { _lane: from } : {}), _studio: studio }); } catch {} };
   const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
   const scan = (studio, from) => {
-    if (tree && /^[0-9a-f]{40,64}$/.test(tree)) add(path.join(studio, 'gates', 'trees', `${tree}.json`), from);
-    add(path.join(studio, 'gates-last-full.json'), from);
-    try { for (const n of fs.readdirSync(path.join(studio, 'gates'))) if (n.endsWith('-full.json')) add(path.join(studio, 'gates', n), from); } catch {}
+    if (tree && /^[0-9a-f]{40,64}$/.test(tree)) add(path.join(studio, 'gates', 'trees', `${tree}.json`), from, studio);
+    add(path.join(studio, 'gates-last-full.json'), from, studio);
+    try { for (const n of fs.readdirSync(path.join(studio, 'gates'))) if (n.endsWith('-full.json')) add(path.join(studio, 'gates', n), from, studio); } catch {}
   };
   scan(path.join(root, '.studio'), null);
-  try { for (const n of fs.readdirSync(path.join(root, TRAIN_DIR, 'records'))) add(path.join(root, TRAIN_DIR, 'records', n)); } catch {}
+  try { for (const n of fs.readdirSync(path.join(root, TRAIN_DIR, 'records'))) add(path.join(root, TRAIN_DIR, 'records', n), null, path.join(root, '.studio')); } catch {}
   const mine = real(path.join(root, '.studio'));
   for (const l of lanes) {
     const own = l?.dir ? real(path.join(l.dir, '.studio')) : null;
@@ -536,7 +548,7 @@ export function greenFirst(root, tip, lanes, { id = '', log = () => {}, whole = 
     const tree = m.status === 0 ? out(m).split('\n')[0].trim() : '';
     if (!/^[0-9a-f]{40,64}$/.test(tree)) return l;
     const changed = out(git(root, 'diff', '--name-only', tip, tree)).split('\n').filter(Boolean);
-    const hit = recordedVerifies(root, { tree, lanes: [l] }).find((rec) => rec.tree === tree && recordCovers(rec, { root, tree, changed, all: Boolean(l.all), whole }).ok);
+    const hit = recordedVerifies(root, { tree, lanes: [l] }).find((rec) => rec.tree === tree && recordCovers(rec, { root, tree, changed, all: Boolean(l.all), whole }).ok && recordTrusted(rec, root).ok);
     return hit ? { ...l, greenTree: tree } : l;
   });
   const first = marked.filter((l) => l.greenTree);
@@ -570,8 +582,10 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   let notReused = '';
   for (const rec of recordedVerifies(root, { tree, lanes })) {
     if (rec.tree !== tree) continue;
-    const c = recordCovers(rec, { root, tree, changed, all, whole });
+    const c0 = recordCovers(rec, { root, tree, changed, all, whole });
+    const c = c0.ok ? recordTrusted(rec, root) : c0; // 2.71.1 (D01/T04): only a record run-gates wrote (its run log matches)
     if (!c.ok) notReused ||= c.why;
+    if (c.ok) c.why = c0.why;
     if (c.ok) {
       // 2.69.0 (p): a train of ONE lane whose integration tree is the lane's verified tree reuses the lane's verify.
       const laneOf = lanes.length === 1 ? lanes[0].task : rec._lane || null;
@@ -623,7 +637,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
  * recorded green verify) is not sent out again. deps.remoteClient: a test's fake client.
  */
 async function verifyRemoteFirst(sc, o, { head, by, deps = {}, res }) {
-  if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all }).ok)) return verifyTree(sc, o);
+  if (remoteMode() === 'off' || o.seen.has(o.tree) || recordedVerifies(sc.root).some((rec) => rec.tree === o.tree && recordCovers(rec, { root: sc.root, tree: o.tree, changed: o.changed, all: o.all }).ok && recordTrusted(rec, sc.root).ok)) return verifyTree(sc, o);
   const root = sc.root;
   const games = gameGateIds(root);
   let gates = [];
@@ -1110,6 +1124,20 @@ export function laneFiles(root, base, head) {
   return files;
 }
 
+/**
+ * 2.71.1 (H03/H04/S02): the game's test toolchain in a lane's diff (harness/test-toolchain.mjs): the setup files the
+ * test configs name where the lane branched (more protected globs) and a change to a game package.json's test scripts (a "<pkg>#test-scripts"
+ * file, protected). Never throws.
+ */
+function laneToolchain(root, { base, head, files }) {
+  try {
+    const show = (rev, f) => { const r = git(root, 'show', `${rev}:${f}`); return r.status === 0 ? r.stdout : null; };
+    // The configs and manifests as main had them where the lane branched (base), the lane's own change base..head.
+    const tc = toolchainProtected({ base, changed: files.map((f) => f.path), show, names: (rev) => out(git(root, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', rev, '--', 'game', 'web')).split('\n').filter(Boolean), now: (f) => show(head, f) });
+    return { globs: [...tc.globs, ...tc.keyed.map((k) => k.path)], files: tc.keyed.map((k) => ({ status: 'M', path: k.path })) };
+  } catch { return { globs: [], files: [] }; }
+}
+
 /** The protected list (globs, addOnly) as main's tip has it: a lane can't shrink the list that judges it. */
 function protectedAt(root, tip) {
   try { const j = JSON.parse(out(git(root, 'show', `${tip}:studio/protected.json`))); return { globs: Array.isArray(j.globs) ? j.globs.map(String) : [], addOnly: Array.isArray(j.addOnly) ? j.addOnly.map(String) : ['qa/regressions/**'] }; } catch { return { globs: [], addOnly: ['qa/regressions/**'] }; }
@@ -1130,7 +1158,8 @@ export async function laneTier(root, { head }, { tip = null, settings = null } =
     const r = git(root, 'show', `${head}:${f.path}`);
     return [f.path, r.status === 0 ? proposalTargets(r.stdout) : null];
   }));
-  const c = classifyLane({ files, trailers: laneTrailers(root, base, head), settings: s, protectedGlobs: prot.globs, addOnly: prot.addOnly, proposals });
+  const tc = laneToolchain(root, { base, head, files }); // 2.71.1 (H03/H04/S02)
+  const c = classifyLane({ files: [...files, ...tc.files], trailers: laneTrailers(root, base, head), settings: s, protectedGlobs: [...prot.globs, ...tc.globs], addOnly: prot.addOnly, proposals });
   // 2.65.0 (B-40): a held lane's reason names the protected config it would change, so a release is an informed answer.
   if (c.rules.includes('config-proposal-protected')) {
     const globs = protectedGlobsAt(root, t);

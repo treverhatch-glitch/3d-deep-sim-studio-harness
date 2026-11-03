@@ -215,7 +215,13 @@ const headAtStart = gitOut(['rev-parse', 'HEAD'])?.trim() || null;
 const treeAtStart = headAtStart ? gitOut(['rev-parse', 'HEAD^{tree}'])?.trim() || null : null;
 const gatePathsAtStart = String(process.env.STUDIO_GATE_PATHS || '').split(',').filter(Boolean);
 const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsOn();
-const dirtyAtStart = treeDirty();
+// 2.71.1 (G15/T02): untracked files, and ignored files outside build and dependency output, under the game and the paths
+// the checks read count as dirty too: a config or setup file no commit holds changes what the checks run, and a record
+// of a "clean" run beside one must never be reused (harness/gate-trust.mjs hiddenInputs).
+const trust = await import('../harness/gate-trust.mjs');
+const hiddenAtStart = trust.hiddenInputs(root, [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine', 'hub'], { skip: isEngineChurn });
+if (hiddenAtStart?.length) console.log(`[gates] note: ${hiddenAtStart.length} untracked or ignored file(s) the checks may read (${hiddenAtStart.slice(0, 5).join(', ')}${hiddenAtStart.length > 5 ? ', …' : ''}): this verify counts as dirty, so it can't stand in for task done's checks or a train's verify. Commit them, or delete them (or add build output to .gitignore under a dist/, build/ or coverage/ folder).`);
+const dirtyAtStart = hiddenAtStart?.length ? true : treeDirty();
 const { runGateCommand } = await import('../harness/gate-spawn.mjs');
 const rows = [];
 let cachedCount = 0;
@@ -289,11 +295,17 @@ try {
   const headNow = headAtStart;
   const dirtyEnd = treeDirty();
   const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
-  const rec = JSON.stringify({ at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}) }, null, 2);
+  // 2.71.1 (D01/T04): every record carries a run id, and a full run also writes its run log (.studio/gates/runs/<id>.json,
+  // the record's digest): reuse needs the two to match (harness/gate-trust.mjs recordTrust).
+  const runId = /^[\w.-]{6,80}$/.test(process.env.STUDIO_VERIFY_RUN || '') ? process.env.STUDIO_VERIFY_RUN : trust.newRunId();
+  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}) }, null, 2);
+  if (!only && !isFastTier) trust.writeRunLog(path.join(root, '.studio'), JSON.parse(rec), { root: CHECKOUT.real, owner: process.env.STUDIO_LOCK_OWNER || null });
   // Each agent's own runs are kept apart too (2.29): in its own copy it tests its own work, and its
   // done-check reads its own record. The studio-wide record is the main checkout's.
   const owner = process.env.STUDIO_LOCK_OWNER;
-  const inCopy = Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== root;
+  // 2.71.1 (G12): a checkout whose .studio/ is a link (a lane or train copy) is a copy whatever STUDIO_MAIN_ROOT says, so a
+  // lane naming itself can't write the studio-wide records.
+  const inCopy = (Boolean(process.env.STUDIO_MAIN_ROOT) && path.resolve(process.env.STUDIO_MAIN_ROOT) !== root) || CHECKOUT.file !== 'full.json';
   if (!inCopy) fs.writeFileSync(path.join(root, '.studio', 'gates-last.json'), rec);
   // A full run is kept apart, so one agent's --only run never wipes the full verify another agent's
   // done-check needs (test #2).
