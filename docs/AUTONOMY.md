@@ -125,8 +125,18 @@ The file holds the level the owner set (`"level": "L2"`) and the bar for L3. Def
 | `minLanded` | at least 10 landed tasks (so a quiet week can't qualify) |
 | `handsFreeLandRate` | at least 0.8 |
 | `reopenRate` | at most 0.05 |
-| `redoRate` | at most 0.1 (n/a with no away verdicts) |
+| `redoRate` | at most 0.1 (the owner's Redo verdicts and failed audits over verdicts plus audits; n/a with none) |
 | `tierCUnsigned` | 0 tier-C landings without a signature (n/a until landings carry a risk tier) |
+| `confidence` | 0.9 (2.73.0; top level of the file, not under `l3`) |
+
+**Confidence bounds (2.73.0).** Point estimates let a handful of lucky landings suggest L3, so a promotion reads each
+rate at its one-sided Wilson bound at `"confidence"` (default 0.9; else `STUDIO_L3_CONFIDENCE`, which applies only
+when the file sets none): the hands-free rate's LOWER bound must reach its bar, the reopen and redo rates' UPPER
+bounds must stay at or under theirs. The CLI and the card show both and what would clear it, e.g.
+`hands-free 0.86 (lower bound 0.70 at 90%, n=14): not yet; about 67 more landings at this rate would clear it`, or
+"at this rate it never clears" when the rate itself is on the wrong side. With no reopen the reopen bound needs about
+32 landings to fall under 5%. Demotion stays on point estimates (fast to step down, slow to step up). The owner sets
+`"confidence": 0` in studio/autonomy.json for the old point-estimate verdicts.
 
 - **Promotion is only a suggestion.** When every bar holds and the studio is below L3, the card and the CLI say
   "suggest L3 (your call)". Nothing moves until the owner sets `"level": "L3"` in the file.
