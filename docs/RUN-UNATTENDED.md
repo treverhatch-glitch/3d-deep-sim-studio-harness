@@ -61,6 +61,15 @@ Scheduler (Windows); `--uninstall` removes it.
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
+- **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
+  `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
+  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.73.1 (B-68): a session
+  waiting on its own verify (`npm run verify`, its `.studio/verify-running/<agent>.json` or a `full*.json` it owns,
+  with a live process and no result yet) or on its own background `task done` (`.studio/done-running/`) is busy, not
+  stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most
+  `STUDIO_STALL_VERIFY_MAX_MIN` (60) minutes. A verify counts for at most that long from its start (a done for
+  `STUDIO_DONE_RUNNING_MAX_MIN`, 90), so a hung verify can't keep a session alive. `node harness/stall.mjs check`
+  shows "waiting on its own verify" for such a session.
 - **A silent agent doesn't hold its task forever.** A session whose process is alive but whose heartbeat
   is older than `STUDIO_STALL_RELEASE_MIN` (30 min; 0 turns it off) gets its work saved, its task handed back
   and its claims and slot freed by the watcher; the process itself is left alone (a machine waking from sleep,
