@@ -191,10 +191,14 @@ async function emit(root, event) {
 }
 const versionAt = (root, rev) => { try { return JSON.parse(git(['show', `${rev}:package.json`], root).stdout).version || '?'; } catch { return '?'; } };
 const gitPath = (root, name) => path.resolve(root, out1(git(['rev-parse', '--git-path', name], root)));
+// 2.69.0: compared as real paths. git prints the absolute git dir with the real path but the common dir relative to
+// the folder it was given, so a root reached through a link (or a Windows 8.3 short name such as RUNNER~1) made the
+// main checkout look like a lane copy (CI windows: "this is a lane copy" on the main checkout).
+const realOf = (p) => { let r = p; try { r = fs.realpathSync.native(p); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
 export const isMainCheckout = (root) => {
   const d = out1(git(['rev-parse', '--absolute-git-dir'], root));
   const c = out1(git(['rev-parse', '--git-common-dir'], root));
-  return Boolean(d) && path.resolve(root, d) === path.resolve(root, c);
+  return Boolean(d) && realOf(path.resolve(root, d)) === realOf(path.resolve(root, c));
 };
 const unmergedFiles = (root) => git(['diff', '--name-only', '--diff-filter=U'], root).stdout.split('\n').filter(Boolean);
 

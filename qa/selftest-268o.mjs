@@ -169,6 +169,10 @@ console.log(JSON.stringify({ checks: r.checks.length, paused, mode: r.mode }));`
       JSON.stringify({ off, wd, ev }).slice(0, 1500) + logText.slice(0, 800)]);
     write(dir, 'studio/budget.json', `${JSON.stringify({ order: ['claude'], tools: { claude: { weeklyTokens: 100000, resetDay: 'monday' } } }, null, 2)}\n`);
     run(dir, `node harness/task.mjs unhold ${t1} --by tester`, env);
+    // The pass before the wind-down started T-003 (its launch lock lasts STUDIO_LAUNCH_LOCK_SEC, 120 s). A fast machine
+    // reaches this pass inside that window and is told "T-003 is being started by builder-z..." (CI release-gate,
+    // 2.68.0); this check is about the resume, so the earlier launch's lock is cleared first.
+    try { for (const f of fs.readdirSync(path.join(dir, '.studio', 'locks'))) if (/^launch/.test(f)) fs.rmSync(path.join(dir, '.studio', 'locks', f), { force: true }); } catch {}
     const back = pass({ STUDIO_USAGE_WINDDOWN_PCT: '90' });
     const rs = evs().filter((e) => e.type === 'studio.winddown_resumed').pop();
     await guard('268o winddown: when the usage resets the supervisor resumes and links the restart log', () => [
