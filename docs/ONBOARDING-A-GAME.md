@@ -170,6 +170,31 @@ a run) makes it fail; `"off"` turns it off. `setupFiles` defaults to files named
 to the game's folder. It reads text: a seeded call through a helper with another name isn't seen. The manifest is
 protected: adding this needs the owner's approval.
 
+## The state probe (2.72.0)
+
+A golden says the final hash changed, but not when the run first went another way. A probe prints the sim's state
+digest at a few ticks, headless, and the game's checks compare those digests with main's. Declare it in
+`studio.gates.json`:
+
+```json
+{ "stateProbe": { "command": "node game/<name>/tools/probe.mjs --ticks {ticks}", "ticks": [0, 100, 1000] } }
+```
+
+The command runs from the repo root. `{ticks}` becomes `0,100,1000`. It prints one line per tick, `tick <n> <digest>`
+(or a JSON line `{"tick": n, "digest": "…"}`). `node harness/state-probe.mjs record` writes the baseline, by default
+`<game>/qa/state-probe.json`; set `"baseline"` to put it elsewhere. Commit it. The game gate then runs
+`game:state-probe`:
+
+- The same digests as the baseline on main: PASS.
+- Different, and no commit since main has a `Golden-Reason` trailer: FAIL, naming the first differing tick.
+- Different with a `Golden-Reason`: PASS only if the re-recorded baseline is committed with the change.
+- A probe that fails, times out or skips a tick: FAIL.
+- No baseline on main yet: PASS with a note.
+
+Main is the main checkout's branch, or `STUDIO_STATE_PROBE_BASE=<ref>`. The digests are plain strings, so a second
+engine's probe (a C# sim beside the TS one) can later be held to the same baseline. The manifest is protected:
+adding a probe needs the owner's approval.
+
 ## Slow tests under load (2.60.0)
 
 The game check's own timeout grows with load (2.59.0), but a per-test timeout in the game's test config doesn't.

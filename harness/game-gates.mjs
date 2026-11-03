@@ -90,6 +90,11 @@ export function declaredGates(game) {
       const mode = testRngMode(j.testRandomness);
       if (mode !== 'off') list.push({ id: 'game:test-rng', command: 'node harness/test-rng.mjs', required: mode === 'required' });
     }
+    // 2.72.0 (c): "stateProbe" adds the state probe (harness/state-probe.mjs): the sim's digests at the declared ticks,
+    // compared with main's; a change with no Golden-Reason is red with the first differing tick.
+    if (j.stateProbe && typeof j.stateProbe === 'object' && !list.some((x) => x.id === 'game:state-probe')) {
+      list.push({ id: 'game:state-probe', command: 'node harness/state-probe.mjs', required: true });
+    }
     return list;
   }
   const out = [];
