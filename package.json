@@ -107,6 +107,8 @@
     "digest": "node harness/digest.mjs",
     "denials": "node harness/denials.mjs",
     "delegate": "node harness/delegation.mjs",
+    "decisions": "node harness/decisions.mjs",
+    "policy": "node harness/policy.mjs",
     "vfx": "node harness/vfx.mjs",
     "public-guard": "node harness/public-guard.mjs",
     "engine:build": "node harness/unity.mjs build",

@@ -279,7 +279,10 @@ export async function runJanitor({ yes = false, lanes = false, by = '', permissi
           if (!again?.stale) { failed.push({ kind: 'lane', path: l.path, why: again?.why || 'gone' }); continue; }
           removeLaneCopy(l.agent);
           if (fs.existsSync(l.dir)) failed.push({ kind: 'lane', path: l.path, why: 'could not remove it' });
-          else lanesDeleted.push({ ...l, decided: { by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null } });
+          else {
+            lanesDeleted.push({ ...l, decided: { by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null } });
+            try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'janitor-lanes', subject: l.path || l.agent, by: d.by, as: dm.asOf(d), why: l.why || 'a stale lane copy', evidence: `${l.agent}, ${Math.round((l.bytes || 0) / 1048576)} MB`, undo: null, root }); } catch {}
+          }
         }
       }
     }

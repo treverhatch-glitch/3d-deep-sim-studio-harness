@@ -18,6 +18,8 @@
  *   - 2.68.0: roles the crew watchdog paused (harness/crew-watch.mjs), and the latest harness upgrade's verdict once
  *     both sides have enough data (npm run autonomy -- impact), as a line;
  *   - 2.70.0 (v): assets waiting for a review of their previews, oldest first (harness/asset-review.mjs);
+ *   - 2.71.0 (x): autonomous decisions waiting for review past the policy's reviewWithinH, and a proposal of
+ *     autonomous mode waiting for the owner; then a line with the autonomous decisions (harness/decisions.mjs);
  * then (2.66.0) the top 5 blocked commands as allowlist candidates (harness/denials.mjs; never added to any settings or
  * permission file: a person decides), the autonomy scorecard's line and what self-triage fixed in the last 24 h. Nothing needing a person: one line
  * says so. One digest.written event. A script: no model, no tokens. Every source is read-only and optional (a source
@@ -90,6 +92,13 @@ export async function needsPerson({ now = Date.now(), root = REPO_ROOT, events =
     const line = (await import('./asset-review.mjs')).pendingReviewsLine(root);
     if (line) out.push({ kind: 'review', line });
   });
+  // 2.71.0 (x): autonomous decisions past the policy's reviewWithinH (harness/decisions.mjs); work never waited for them.
+  await tryAdd(async () => { out.push(...await (await import('./decisions-log.mjs')).overdueNeeds({ now })); });
+  await tryAdd(async () => {
+    const pol = await import('./policy-rules.mjs');
+    const p = readJson(path.join((await import('./worktree.mjs')).mainRoot(), pol.PROPOSAL_REL));
+    if (p?.autonomous?.agent) out.push({ kind: 'policy', line: `${p.by} proposes autonomous mode for ${p.autonomous.agent} (${(p.autonomous.actions || []).join(', ')}): npm run policy -- confirm --by <you> (or decline)` });
+  });
   out.push(...fuzzSuggestions(ev, now));
   const declined = ev.filter((e) => e.type === 'selftriage.declined' && (Date.parse(e.ts) || 0) >= now - DAY);
   for (const e of declined.slice(-3)) { const why = String(e.meta?.why || e.msg || ''); out.push({ kind: 'halt', line: `self-triage left for you (${e.meta?.fix || 'a fix'}, ${e.meta?.cause || 'a cause'}): ${why.length > 110 ? `${why.slice(0, 109)}…` : why}` }); }
@@ -144,6 +153,9 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
   let delegLine = '';
   try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
+  // 2.71.0 (x): autonomous mode: decisions per day, approved vs reverted, the review list, time saved (harness/decisions.mjs).
+  let autoLine = '';
+  try { autoLine = await (await import('./decisions-log.mjs')).autonomyDigestLine({ events: ev, now }); } catch { autoLine = ''; }
   // 2.66.0 (c): the top blocked commands (harness/denials.mjs) as allowlist candidates; a person decides, nothing is added.
   let cands = [];
   try { cands = (await import('./denials.mjs')).allowlistCandidates({ n: 5, now }); } catch { cands = []; }
@@ -152,7 +164,7 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   try { quarLine = (await import('./flakes.mjs')).quarantineDigestLine(ev, { now, root }); } catch { quarLine = ''; }
   let buildLine = ''; // 2.70.0 (t): the latest playable build and clip after a landing in the last 24 h
   try { const l = (await import('./landing-build.mjs')).landingLine(ev, { since: now - DAY }); buildLine = l ? `${l} (npm run play).` : ''; } catch { buildLine = ''; }
-  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
+  const compose = (items) => [head, '', items.length ? `Needs you (${need.length}):` : 'Nothing needs you today.', ...items.map((x) => `- ${x.line}`), '', ...(candLine ? [candLine] : []), line, tri, ...(fuzzLine ? [fuzzLine] : []), ...(flakeLine ? [flakeLine] : []), ...(quarLine ? [quarLine] : []), ...(diskLine ? [diskLine] : []), ...(buildLine ? [buildLine] : []), ...(lanesLine ? [lanesLine] : []), ...(impactLine ? [impactLine] : []), ...(delegLine ? [delegLine] : []), ...(autoLine ? [autoLine] : []), ''].filter((x, i, a) => !(x === '' && a[i - 1] === '')).join('\n');
   // Under MAX_WORDS: drop list items from the end, then shorten the scorecard line.
   let items = [...need];
   let text = compose(items);

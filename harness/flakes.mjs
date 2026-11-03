@@ -207,8 +207,14 @@ export async function confirmQuarantine(root, test, { by, permission = '', why =
   e.status = 'active';
   e.confirmed = { by: d.by, at: new Date().toISOString(), via: d.via, ...(d.via !== 'person' ? { recordedBy: d.recordedBy, permission: d.permission || null } : {}), ...(why ? { why: String(why).slice(0, 300) } : {}) };
   writeQuarantine(root, list);
-  emit({ type: 'test.quarantined', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} confirmed the quarantine of ${e.test} (${e.label}; ${e.why})${d.via !== 'person' ? ` (recorded by ${d.recordedBy} on ${d.by}'s permission)` : ''}: the game's runner skips it (STUDIO_TEST_QUARANTINE)`.slice(0, 600), meta: { test: e.test, label: e.label, status: 'active', confirmedBy: d.by, via: d.via, evidence: e.evidence || [], by: e.by || null } });
+  emit({ type: 'test.quarantined', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} confirmed the quarantine of ${e.test} (${e.label}; ${e.why})${d.via === 'autonomous' ? ' (autonomous mode: on the review list)' : d.via !== 'person' ? ` (recorded by ${d.recordedBy} on ${d.by}'s permission)` : ''}: the game's runner skips it (STUDIO_TEST_QUARANTINE)`.slice(0, 600), meta: { test: e.test, label: e.label, status: 'active', confirmedBy: d.by, via: d.via, evidence: e.evidence || [], by: e.by || null } });
+  await logFlakeDecision({ d, test: e.test, why: why || e.why, evidence: `${e.label}, ${(e.evidence || []).length} label(s)`, undo: { kind: 'quarantine-release', test: e.test, text: `npm run flakes -- release ${e.test} --by <name>` } });
   return { ok: true, message: `Confirmed: ${e.test} is quarantined; the game's runner skips it from the next check. Release: npm run flakes -- release ${e.test} --by <name>.` };
+}
+
+/** 2.71.0 (x): one decision-log record (harness/decisions.mjs). Never throws. */
+async function logFlakeDecision({ d, test, why, evidence, undo }) {
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'quarantine', subject: test, by: d.by, as: dm.asOf(d), why, evidence, undo }); } catch {}
 }
 
 /** Release an entry (a game dev, or an outside agent or a Producer/Director session on a person's permission; never a worker). */
@@ -220,6 +226,7 @@ export async function releaseQuarantine(root, test, { by, permission = '', why =
   const d = await deciderCheck({ by, permission, env, action: 'quarantine', what: 'release a quarantined test' });
   if (!d.ok) return { ok: false, message: d.why };
   writeQuarantine(root, list.filter((x) => x !== e));
+  await logFlakeDecision({ d, test: e.test, why: why || 'released from quarantine', evidence: 'release', undo: { kind: 'quarantine-confirm', test: e.test, text: `the flake triager proposes it again on its next flaky run; npm run flakes -- confirm ${e.test} --by <name>` } });
   emit({ type: 'test.quarantine_released', agent: String(d.recordedBy || d.by).slice(0, 60), to: 'producer', msg: `${d.by} released ${e.test} from quarantine${d.via !== 'person' ? ` (recorded by ${d.recordedBy} on ${d.by}'s permission)` : ''}${why ? `: ${why}` : ''}`.slice(0, 600), meta: { test: e.test, by: d.by, via: d.via, recordedBy: d.recordedBy, permission: d.permission || null, entry: e } });
   return { ok: true, message: `Released ${e.test} from quarantine; the game's runner runs it again from the next check.` };
 }

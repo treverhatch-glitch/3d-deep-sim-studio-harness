@@ -59,6 +59,8 @@ export const DEFAULT_PROTECTED = [
   'studio/triggers.json',
   // 2.67.0: the owner's standing delegation to an outside agent (harness/delegation.mjs): an agent can't grant itself one.
   'studio/delegation.json',
+  // 2.71.0: the studio policy (harness/policy.mjs): autonomous mode and the owner's rules; an agent can't turn it on.
+  'studio/policy.json',
 ];
 
 // The repo to inspect. CI runs the base branch's copy of this checker against the PR's checkout

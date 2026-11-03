@@ -417,7 +417,7 @@ export async function reviewDecider({ by, permission = '', verdict = 'pass', mak
   try {
     const dl = await import('./delegation.mjs');
     const d = dl.delegationFor({ action: 'asset-review', by: who, env });
-    if (d.ok) { dl.recordUse(d, { action: 'asset-review' }); return { ok: true, via: 'delegation', by: who, recordedBy: who, permission: d.permission }; }
+    if (d.ok) { dl.recordUse(d, { action: 'asset-review' }); return { ok: true, via: d.autonomous ? 'autonomous' : 'delegation', by: who, recordedBy: who, permission: d.permission, at: d.at, ...(d.autonomous ? { autonomous: true } : {}) }; }
   } catch { /* no delegation: the other rules apply */ }
   const role = String(env.STUDIO_ROLE || '').trim();
   const marker = AGENT_SHELL.find((k) => String(env[k] || '').trim());
@@ -487,11 +487,27 @@ export async function recordVerdict({ asset, verdict, why = '', by, permission =
     fs.writeFileSync(path.join(dir, `asset-${rec.asset}-${at.slice(0, 10)}.md`), `# Asset review: ${rec.asset}\n\nReviewed: ${rec.task}${rec.reviewTask ? ` (review task ${rec.reviewTask})` : ''}, ${rec.model}\nVerdict: ${verdict === 'pass' ? 'approved' : 'request changes'}\nBy: ${d.by} (${d.via}${d.recordedBy !== d.by ? `, recorded by ${d.recordedBy}` : ''})\n${words ? `Why: ${words}\n` : ''}${fixTask ? `Fix task: ${fixTask}\n` : ''}Request: ${REVIEWS_DIR_REL}/${rec.asset}.md\n`);
   } catch { /* the record above is what the gate reads */ }
   emitEvent({ type: 'asset.review', agent: d.recordedBy, task: rec.task, to: roleOf(taskAdded(evs, rec.task)) || 'producer', status: verdict === 'pass' ? 'ok' : 'blocked', msg: (verdict === 'pass' ? `${rec.asset} passed its review (${d.by}${d.via !== 'agent' && d.via !== 'person' ? `, ${d.via}` : ''}): task done ${rec.task} lands it` : `${rec.asset} failed its review (${d.by}): ${words}${fixTask ? `; ${fixTask} fixes it` : ''}`).slice(0, 500), meta: { asset: rec.asset, verdict, by: d.by, via: d.via, reviewTask: rec.reviewTask || null, fixTask } });
+  // 2.71.0 (x): one decision-log record (harness/decisions.mjs); a revert asks for the review again.
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'asset-review', subject: rec.asset, by: d.by, as: dm.asCaller(d, env), why: words || `${verdict} (${rec.task})`, evidence: `${verdict}, ${rec.task}${fixTask ? `, fix task ${fixTask}` : ''}`, undo: { kind: 'asset-review-reopen', asset: rec.asset, task: rec.task, text: `the asset waits for a new review (npm run asset -- review ${rec.asset} --pass|--fail "…" --by <name>)` }, root }); } catch {}
   // The review task is answered: take it off the queue when nobody has started it (a session working it closes it).
   if (rec.reviewTask && board?.dropTask && board?.parseNextQueue) {
     try { if (board.parseNextQueue().backlog.some((t) => t.id === rec.reviewTask)) board.dropTask(rec.reviewTask, { by: d.recordedBy, why: `answered: ${rec.asset} ${verdict === 'pass' ? 'passed' : 'failed'} its review (${d.by})` }); } catch { /* it stays for its session */ }
   }
   return { ok: true, fixTask, message: verdict === 'pass' ? `${rec.asset}: review passed by ${d.by} (${d.via}). task done ${rec.task} lands it now.` : `${rec.asset}: review failed by ${d.by}: "${words}".${fixTask ? ` ${fixTask} fixes it.` : ''}` };
+}
+
+/**
+ * 2.71.0 (x): a reverted review decision (npm run decisions -- revert): the asset waits for a review again (verdict
+ * cleared, history kept). An asset whose task already landed says so: its files are on main; a person looks again.
+ */
+export function reopenReview(root, asset, { by = 'someone', why = '' } = {}) {
+  const rec = findAsset(root, asset);
+  if (!rec) return { ok: false, message: `No review record for "${asset}"` };
+  if (!rec.verdict) return { ok: true, message: `${rec.asset} already waits for a review` };
+  const at = new Date().toISOString();
+  writeJson(recordFile(root, rec.asset), { ...rec, verdict: null, reopened: { by, why: String(why).slice(0, 300), at, was: { verdict: rec.verdict, by: rec.by } }, history: [...(rec.history || []), { verdict: 'reopened', by, why: String(why).slice(0, 300), at }].slice(-20) });
+  emitEvent({ type: 'asset.review_requested', agent: by, task: rec.task, to: rec.role || 'producer', msg: `${rec.asset}'s review (${rec.verdict} by ${rec.by}) was reverted by ${by}: it waits for a new review${why ? ` (${why})` : ''}`.slice(0, 400), meta: { asset: rec.asset, reopened: true } });
+  return { ok: true, message: `${rec.asset} waits for a new review (its ${rec.verdict} by ${rec.by} is reverted; if ${rec.task} already landed, the asset is on main: review it again and fix forward)` };
 }
 
 async function main(argv) {

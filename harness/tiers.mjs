@@ -41,6 +41,7 @@ export const SHIPPED_PROTECTED = [...new Set([
   ...DEFAULT_PROTECTED,
   'studio/game.json', 'game/*/studio.gates.json', 'web/*/studio.gates.json', 'studio/secrets-allow.json',
   'studio/delegation.json', // 2.67.0 (harness/delegation.mjs), also in DEFAULT_PROTECTED
+  'studio/policy.json', // 2.71.0 (harness/policy.mjs), also in DEFAULT_PROTECTED
 ])];
 const rank = (t) => TIERS.indexOf(t);
 export const higher = (a, b) => (rank(b) > rank(a) ? b : a);

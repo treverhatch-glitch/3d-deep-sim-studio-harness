@@ -91,6 +91,7 @@ export async function resumeCli({ by = null, why = null, permission = null, env 
   fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true });
   const permRec = onPerm && onPerm.via !== 'person' ? { permission: perm.slice(0, 300), recordedBy: onPerm.recordedBy } : {};
   fs.writeFileSync(RESUME, `${JSON.stringify({ by: who.slice(0, 60), why: note, via: 'cli', at: new Date().toISOString(), ...permRec })}\n`);
+  try { const dm = await import('./decisions-log.mjs'); dm.logDecision({ action: 'studio-resume', subject: 'supervisor', by: who.slice(0, 60), as: dm.asOf({ via: permRec.recordedBy ? 'outside agent' : 'person', permission: permRec.permission }), why: note || 'try again', evidence: `halted: ${String(s.halted.why || '').slice(0, 120)}`, undo: null }); } catch {}
   emitEvent({ type: 'supervisor.resume_asked', agent: who.slice(0, 60), to: 'supervisor', msg: `${who} asked the supervisor to try again${permRec.recordedBy ? ` (recorded by ${permRec.recordedBy} on ${who}'s permission: "${permRec.permission.slice(0, 120)}")` : ''}${note ? `: ${note}` : ''} (it stopped: ${s.halted.why || 'see npm run studio:status'})`.slice(0, 600), meta: { ...permRec, by: who.slice(0, 60), why: note || null, via: 'cli', cleared: s.halted.why || null } });
   return { code: 0, text: `Cleared the halt (${s.halted.why || 'no reason recorded'}). The supervisor starts agents again on its next pass (within ${Math.round(LOOP_MS / 1000)} s); its supervisor.resumed event names ${who}.` };
 }

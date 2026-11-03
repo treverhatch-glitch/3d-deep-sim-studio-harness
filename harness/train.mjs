@@ -79,6 +79,8 @@ import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel,
 import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { delegationFor, recordUse } from './delegation.mjs';
+import { autonomousReleaseRefusal } from './policy-rules.mjs';
+import { logDecision, asOf } from './decisions-log.mjs';
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
@@ -1166,6 +1168,7 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   let r;
   try { r = withLandLock(root, () => applyLandedConfig(root, main, [{ task, released }], { by: released?.recordedBy || released?.by || 'train-config' })[0]); } catch (e) { return { ok: false, message: `could not apply it: ${e.message}` }; }
   if (!r) return { ok: false, message: `${task}'s proposal could not be read.` };
+  if (!r.held.length && released) logDecision({ action: 'config-apply', subject: task, by: released.by, as: asOf({ via: released.recordedBy ? 'outside agent' : 'person', permission }), why: `applied ${task}'s held config proposal`, evidence: proposalRel(task), undo: null, root });
   return { ok: !r.held.length, message: configLine(task, { ...r, decision: '' }) };
 }
 
@@ -1234,14 +1237,36 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     const e = q.find((x) => x.task === task);
     if (!e) return { ok: false, message: `${task} is not in the train queue (task done ${task} --train queues it; a tier-C lane is held there).` };
     if (!e.held) return { ok: false, message: `${task} is queued but not held: it needs no release.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}) };
+    // 2.71.0 (x): autonomous mode never releases a lane held for protected files, gates, deletes … (harness/policy.mjs).
+    const never = dg.autonomous ? autonomousReleaseRefusal(e.held.why) : '';
+    if (never) return { ok: false, message: `Refused: ${never}. Nothing was released.` };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
   const e = r.entry;
   if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
-  emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${e.released.by}${e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}) } });
+  emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${dg.autonomous ? `${dg.agent} in autonomous mode (allowed by ${e.released.by}; on the review list)` : e.released.by}${dg.autonomous ? '' : e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
+  // 2.71.0 (x): one record in the decision log (harness/decisions.mjs).
+  logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
   return { ok: true, entry: e, message: `${task} is released (tier ${e.held.tier}: ${e.held.why}) by ${e.released.by}${e.released.recordedBy ? `, recorded by ${e.released.recordedBy}` : ''}, for ${String(e.head).slice(0, 8)}. It lands with the next train (npm run task -- train); new commits on the lane need a new release.` };
+}
+
+/**
+ * 2.71.0 (x): undo a release (a reverted decision, harness/decisions.mjs): the lane waits for a person again. Only for
+ * the head that was released and only while it hasn't landed. { ok, landed, message }.
+ */
+export function unreleaseLane(root, task, { head = null, why = '' } = {}) {
+  const r = withQueue(root, (q) => {
+    const e = q.find((x) => x.task === task);
+    if (!e) return { ok: false, landed: true, message: `${task} isn't in the train queue any more (it landed or left)` };
+    if (!e.released) return { ok: true, message: `${task} is in the queue and not released; nothing to undo` };
+    if (head && e.released.head !== head) return { ok: false, message: `${task} was released again for another head (${String(e.released.head).slice(0, 8)}); undo that one by hand` };
+    delete e.released;
+    return { ok: true, message: `${task} is held again (tier ${e.held?.tier || '?'}): it waits for a person's release`, entry: { ...e } };
+  });
+  if (r.ok && r.entry) emitEvent({ type: 'task.train.held', agent: 'decisions', task, to: 'producer', status: 'blocked', msg: `${task} is held again${why ? ` (${why})` : ''}: npm run task -- train release ${task} --by <name>`.slice(0, 400), meta: { tier: r.entry.held?.tier || null, why: r.entry.held?.why || null, revert: true } });
+  return r;
 }
 
 /** STUDIO_TRAIN_MIN (1), STUDIO_TRAIN_MAX (0: no cap), STUDIO_TRAIN_WAIT_MIN (10) and the poll (STUDIO_TRAIN_POLL_S, 15). */
