@@ -1,0 +1,41 @@
+{
+  "bar": 0.5,
+  "note": "The studio's gameplay logic library (npm run logic; harness/logic-library.mjs). One entry per module; INDEX.md is written from this file. Ships empty except the made-up example below.",
+  "modules": [
+    {
+      "name": "example-step-toward",
+      "does": "moves a number toward a target by at most a fixed step per call, never past it (made-up example)",
+      "interface": "stepToward(value: number, target: number, maxStep: number): number",
+      "stack": "ts",
+      "assumptions": "plain finite numbers; a negative step counts as 0",
+      "tags": [
+        "approach",
+        "move",
+        "clamp"
+      ],
+      "game": "example (made up)",
+      "harness": "2.72.0",
+      "task": null,
+      "landedAt": "2026-11-03T00:00:00.000Z",
+      "tests": [],
+      "golden": null,
+      "files": [
+        "modules/example-step-toward/step-toward.mjs"
+      ],
+      "spec": "modules/example-step-toward/spec.json",
+      "specCases": 5,
+      "licence": "own-work",
+      "source": null,
+      "author": null,
+      "status": "confirmed",
+      "example": true,
+      "by": "harness",
+      "confirmedBy": "harness template",
+      "uses": [],
+      "hashes": {
+        "modules/example-step-toward/step-toward.mjs": "241310d83bb99d60803f60509f3eb5aaaa9169befc500d81c94d9365e1056805",
+        "modules/example-step-toward/spec.json": "d900a6d93d0c917cb7141d3418356916b5f3cdf6a5306f09b092f35b827595b5"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "function": "stepToward",
+  "note": "Language-neutral cases: a port (C#, GDScript) runs the same args and expects the same result.",
+  "cases": [
+    { "name": "moves up by at most the step", "args": [0, 10, 3], "expect": 3 },
+    { "name": "moves down by at most the step", "args": [10, 0, 4], "expect": 6 },
+    { "name": "never overshoots the target", "args": [8, 10, 5], "expect": 10 },
+    { "name": "stays at the target", "args": [5, 5, 2], "expect": 5 },
+    { "name": "a negative step doesn't move", "args": [1, 9, -2], "expect": 1 }
+  ]
+}

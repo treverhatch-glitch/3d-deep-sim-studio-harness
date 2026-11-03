@@ -23,6 +23,7 @@ const GROUPS = [
     ['task -- done <ID> --agent <you>', 'finish it (after verify)'],
     ['task -- pause <ID> --agent <you> --note "…"', 'hand it back with a note'],
     ['map -- find <name>', 'where a function or constant is, in one call'],
+    ['logic -- need "<what>"', 'gameplay code the studio already landed, before you write it'],
     ['agent -- list', 'agents running now'],
     ['handoff', 'the Producer\'s briefing'],
   ]],
