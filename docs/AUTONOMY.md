@@ -1,4 +1,4 @@
-# Autonomy: the scorecard, the drift checks and hands-off by default (2.64.0, 2.65.0, 2.66.0, 2.67.0)
+# Autonomy: the scorecard, the drift checks, hands-off by default and the self-repair loop (2.64.0 to 2.71.0)
 
 Two scripts that measure how much the studio needs a person, and notice a session going round in circles. Both
 read files and the event log only: no model, no tokens. Neither changes how the studio runs.
@@ -218,6 +218,43 @@ actions without the owner's words for each one, for a time the owner sets (harne
   revoke` (anyone may: it only takes power away), then `npm run delegate -- claude-settings --remove --write`.
 - `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
   and never acts (B-47: `task train --help` used to run a train).
+
+## The self-repair loop: workarounds and harness tasks (2.71.0)
+
+Every time an agent or a person has to work around the harness, it is recorded, and repeats open one task for whoever
+maintains the harness (`harness/workaround.mjs`). The loop the overseer used to run in a notes file, kept by the harness.
+
+- **Log one by hand:** `npm run workaround -- log "<what I had to do>" --why "<what the harness did wrong>" [--cmd
+  "<command>"] [--by <agent>]`. It goes to `.studio/workarounds.jsonl` and a `harness.workaround` event, with a
+  signature: the harness command involved (`npm run studio:stop` reads as `supervisor stop`) plus the "what" without
+  ids, hashes and numbers, so the same trouble on another task groups with it. Text is cleaned with the secret
+  scanner's patterns first.
+- **Detected ones** (`detected: true`, with their evidence; only cheap, certain signals):
+  - a hand edit of a harness-owned record: the harness stamps what it writes to the board (`studio/NEXT.md`,
+    `studio/DONE.md`) and the train queue (`.studio/train/queue.json`) in `.studio/write-stamps/`; a later file with
+    other content and a later time was changed outside the harness (found at the next harness write or scan). A file
+    equal to git's HEAD copy (a pull, a merge) or changed after an upgrade or restart was logged is not counted;
+  - `--force` on a `task` or `lock` command (a rehearsal's scripted one is not);
+  - the same `task` or `lock` command (same subcommand and ids) run `STUDIO_WORKAROUND_RETRIES` (3) times within
+    `STUDIO_WORKAROUND_RETRY_MIN` (10) minutes by the same agent, every earlier run having failed (read-only commands
+    and `task done --check` don't count);
+  - the supervisor stopped by hand and started again within `STUDIO_WORKAROUND_RESTART_MIN` (5) minutes, unless an
+    upgrade landed in between;
+  - an agent session whose launcher vanished with no stop asked through the harness while the machine stayed up.
+  Left out as noisy: a tool process ending by a signal (an out-of-memory kill looks the same) and records the harness
+  writes from many places without stamps. `STUDIO_WORKAROUND_DETECT=off` turns detection off.
+- **Harness tasks:** a signature seen twice, or once with `--why`, opens ONE task (deduped by signature) in
+  `studio/HARNESS-TASKS.md`, with the occurrences, evidence and commands. A separate queue for the harness maintainer:
+  never on `studio/NEXT.md`, never for game builders. `npm run workaround -- list | tasks [--all] | close <H-id> --by
+  <name> --note "…"` (a builder session can't close one; a closed task seen again reopens). The supervisor runs the
+  detection pass every `STUDIO_WORKAROUND_SCAN_MIN` (10) minutes (`npm run workaround -- scan` runs it now). When a
+  harness upgrade lands (as the impact report finds it, or the version changing) and a task's signature doesn't occur
+  for `STUDIO_WORKAROUND_FIXED_DAYS` (7) days after it, the task is marked "maybe fixed in <version>".
+- **Measured:** the daily digest's "Workarounds:" line (in 24 h, per day over 7 days, the top 5 signatures, the trend
+  after the latest upgrade, open harness tasks) and `npm run autonomy -- impact` (per day before and after the upgrade,
+  the top signatures after it and the trend after each recent upgrade: fewer workarounds means the upgrade worked).
+- **Export:** `npm run workaround -- export [--since 7d]` writes `.studio/exports/harness-workarounds-<date>.md`, one file
+  the owner can read and send to the harness maintainer (anything matching the secret scanner's patterns removed).
 
 ## Drift checks (Check cards to the Producer)
 

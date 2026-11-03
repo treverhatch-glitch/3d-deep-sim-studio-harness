@@ -4275,6 +4275,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.71.0 (z): the self-repair loop: workarounds logged by hand or detected (--force, refused commands re-run, hand-edited
+// board and train queue, supervisor restarts, killed launchers), one harness task per signature in studio/HARNESS-TASKS.md,
+// "maybe fixed" after an upgrade, the digest and impact measures and the export (qa/selftest-271z.mjs).
+{
+  const dir = copyRepo();
+  const { selftest271Z } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-271z.mjs')).href);
+  await selftest271Z({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
