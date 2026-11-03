@@ -6,6 +6,9 @@
  *   node qa/check-golden.mjs            check (fails on mismatch, stub hash, or a game with no golden)
  *   node qa/check-golden.mjs --update   rewrite hashes after an intended sim change (commit them together)
  *
+ * 2.72.0 (a): a sha256 red also prints where the run first went wrong (harness/divergence.mjs): "first divergence:
+ *   tick N, <subsystem>.<field> a -> b", against the commit that recorded the golden. STUDIO_GOLDEN_DIVERGENCE=off: not.
+ *
  * Golden shapes:
  *   replay:   { "cartridge", "seed", "tick", "actions": [{ "tick", "action" }], "hash" }
  *   scenario: { "cartridge", "scenario": "start-to-win", "seed"?, "expect": { "outcome", "tick" }, "hash" }
@@ -17,8 +20,10 @@ import { fileURLToPath } from 'node:url';
 import { defaultCartridgeName, listCartridges, loadCartridge, replay, runScenario } from '../harness/cartridge.mjs';
 import { hash64, isHash64, isSha256 } from '../harness/hash.mjs';
 import { checkRecordingId, gameIdFor } from '../harness/game-id.mjs';
+import { divergenceOn, divergenceLines, goldenDivergence } from '../harness/divergence.mjs';
 
 const GOLDEN_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'golden');
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const update = process.argv.includes('--update');
 
 const files = fs.existsSync(GOLDEN_DIR) ? fs.readdirSync(GOLDEN_DIR).filter((f) => f.endsWith('.json')).sort() : [];
@@ -80,6 +85,11 @@ for (const file of files) {
   }
   if (result.sha256 !== spec.sha256) {
     fail(`${file}: sha256 expected ${spec.sha256} got ${result.sha256}`);
+    // 2.72.0 (a): only on a red, where it first went wrong (harness/divergence.mjs): the tick, subsystem and field.
+    if (divergenceOn()) {
+      const d = await goldenDivergence({ root: REPO, file, rel: path.relative(REPO, full).split(path.sep).join('/'), spec, cart });
+      for (const l of divergenceLines('[golden]', d)) console.error(l);
+    }
     continue;
   }
   if (!isHash64(spec.hash) || result.hash !== spec.hash) {
