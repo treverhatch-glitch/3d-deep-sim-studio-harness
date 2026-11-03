@@ -185,6 +185,29 @@ export function sampledRate(k, n, minSample = DEFAULT_MIN_SAMPLE) {
   return { k: round(k, 2), n: round(n, 2), rate: n > 0 ? round(k / n, 4) : null, low: w ? round(w[0], 4) : null, high: w ? round(w[1], 4) : null, enough, text };
 }
 const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * 2.71.1 (B): tokens per landed change from the sessions that name their task (agent.session.end's task, or meta.task):
+ * { sessions, named, tasks: landed tasks with at least one named session, tokensPerLandedNamed (their mean), top: the
+ * five costliest [{ task, tokens, sessions }] }. Sessions that name no task are left to the window average.
+ */
+export function tokensByLandedTask(ends, landedTasks, weightOf) {
+  const landed = new Set((landedTasks || []).map(String));
+  const per = new Map();
+  let named = 0;
+  for (const e of ends || []) {
+    const t = String(e.task || e.meta?.task || '');
+    if (!t) continue;
+    named += 1;
+    if (!landed.has(t)) continue;
+    const r = per.get(t) || { task: t, tokens: 0, sessions: 0 };
+    r.tokens += Number(weightOf(e)) || 0;
+    r.sessions += 1;
+    per.set(t, r);
+  }
+  const rows = [...per.values()].map((r) => ({ ...r, tokens: Math.round(r.tokens) })).sort((a, b) => b.tokens - a.tokens);
+  return { sessions: (ends || []).length, named, tasks: rows.length, tokensPerLandedNamed: rows.length ? Math.round(rows.reduce((n, r) => n + r.tokens, 0) / rows.length) : null, top: rows.slice(0, 5) };
+}
+
 /** Does this text name the task id as a whole word (T-1 is not T-12)? */
 export const namesTask = (text, id) => Boolean(id) && new RegExp(`(?<![\\w-])${reEsc(id)}(?![\\w])`).test(String(text || ''));
 /** A revert commit subject naming the task: `Revert "…<task>…"` (what git revert writes). */
@@ -715,6 +738,8 @@ export function buildAutonomy(events, { now = Date.now(), days = DEFAULT_AUTONOM
   const prevLanded = new Set();
   for (const e of sorted) if (inPrev(ts(e))) for (const t of landingsOf(e)) prevLanded.add(t);
   const cost = { tokensPerLanded: n ? Math.round(tokens / n) : null, previousTokensPerLanded: prevLanded.size ? Math.round(prevTokens / prevLanded.size) : null, dollarsPerLanded: null, priced: false, note: `tokens only: no price table in config (${PRICES_REL})` };
+  // 2.71.1 (B): sessions that name their task (agent.session.end carries it since 2.71.1) are counted per landed task.
+  cost.byTask = tokensByLandedTask(win.filter((e) => e.type === 'agent.session.end'), landed.map((l) => l.task), weight);
   if (prices && typeof prices === 'object') {
     // 2.67.0: "prices from <file>, checked <date>"; with a table but no session it can price (or that reported its
     // cost) in the window, the card stays in tokens and says why instead of showing $0.
@@ -999,6 +1024,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (oh) console.log(`  Open halt: since ${oh.atLocal} (${oh.ageH} h), by ${oh.who}: ${oh.cause}. ${oh.stale ? 'Stale: ' : ''}${oh.clear}.`);
   console.log(`Gate catches: ${c.gateCatches.trainReds} train reds, ${c.gateCatches.notDone} done-check refusals (${c.gateCatches.perLanded ?? '-'} per landed task).`);
   console.log(`Away verdicts: ${c.verdicts.great} great, ${c.verdicts.redo} redo, ${c.verdicts.comment} comment (Redo ${pct(c.verdicts.redoRate)}). Tokens: ${c.tokens.toLocaleString()} (${c.tokensPerLanded === null ? '-' : c.tokensPerLanded.toLocaleString()} per landed task).`);
+  if (c.cost?.byTask?.tasks) console.log(`Tokens per landed task, from the sessions that name it: ${c.cost.byTask.tokensPerLandedNamed.toLocaleString()} (${c.cost.byTask.tasks} task(s); ${c.cost.byTask.named} of ${c.cost.byTask.sessions} session(s) name their task).`);
   if (c.cost) console.log(`Cost per landed task: ${c.cost.tokensPerLanded === null ? '-' : `${c.cost.tokensPerLanded.toLocaleString()} tokens`}${c.cost.previousTokensPerLanded ? ` (the ${r.card.window.days} days before: ${c.cost.previousTokensPerLanded.toLocaleString()})` : ''}${c.cost.priced ? `, $${c.cost.dollarsPerLanded ?? '-'} (${c.cost.note})` : ` (${c.cost.note})`}.`);
   const o = c.orchestrator;
   console.log(`Person round-trips per landed task: ${c.roundTripsPerLanded ?? '-'}. Orchestrator interventions: ${o.conductorNotes} conductor note(s)${o.conductorNotes ? ` (${Object.entries(o.by).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}${o.interventions ? `; ${o.interventions} step(s) in all by an outside agent or in a conductor note, ${o.planned} planned, ${o.unplanned} unplanned (${Object.entries(o.byType).map(([k, v]) => `${k} ${v}`).join(', ')}; ${Object.entries(o.who).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}.`);
