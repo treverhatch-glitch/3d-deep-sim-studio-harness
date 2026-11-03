@@ -4275,6 +4275,16 @@ console.log(JSON.stringify({ a, b, c }));`);
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.71.0 (x): one decision log (.studio/decisions.jsonl, npm run decisions), the studio policy file (npm run policy) and
+// autonomous mode with its review list: approve, revert (runs the undo), edit; never for protected files or deletes
+// (qa/selftest-271x.mjs).
+{
+  const dir = copyRepo();
+  const { selftest271X } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-271x.mjs')).href);
+  await selftest271X({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 {
   const dir = copyRepo();
