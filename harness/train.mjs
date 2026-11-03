@@ -74,6 +74,7 @@ import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastFor
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
+import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
 import { readBaseline, judgeRed } from './baseline.mjs';
 import { classifyLane, tierLine } from './tiers.mjs';
@@ -1848,6 +1849,25 @@ function chainTailDefer(ctx, { set, v, text }) {
   return lanes.length ? { tails, lanes, tests: vt } : null;
 }
 
+/**
+ * 2.73.2 (d, B-75): with main stuck red on a game check (harness/train-fix-first.mjs), the first lane that changes that
+ * check's configuration goes first and alone (its runAlone), with a task.train.fix_first event naming why.
+ */
+function fixFirst(root, lanes, { id, by, dryRun, log }) {
+  let r;
+  try {
+    const tip = out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`));
+    r = fixFirstOrder(root, lanes, { tip, gameIds: gameGateIds(root), headOf: (l) => laneNow(l).head || null });
+  } catch (err) { log(`[train] ${id}: WARN fix-first: ${err.message}`); return lanes; }
+  if (r.note) log(`[train] ${id}: fix-first: ${r.note}`);
+  if (!r.fix) return lanes;
+  log(`[train] ${id}: ${r.fix.task} first: ${r.fix.why}`);
+  if (!dryRun) {
+    ev('fix_first', id, `${r.fix.task} trains alone and first: ${r.fix.why}`, { task: r.fix.task, agent: by, status: 'warn', meta: { gates: r.fix.gates, files: r.fix.files, head: r.fix.head } });
+  }
+  return r.lanes;
+}
+
 async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false }) {
   const res = { ok: true, id, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
   sweepScratch(root, log);
@@ -1880,6 +1900,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   // 2.67.0 (f): a chain deferred for its tail waits until the tail is queued (harness/train-tail.mjs).
   waits.push(...chainTailWaits(root, lanes.filter((l) => !waits.some((w) => w.lane === l)), deps));
   lanes = lanes.filter((l) => !waits.some((w) => w.lane === l));
+  lanes = fixFirst(root, lanes, { id, by, dryRun, log }); // 2.73.2 (d, B-75), before the cap so the fix is never cut
   if (maxLanes > 0) lanes = lanes.slice(0, maxLanes);
   if (!lanes.length && waits.length) { waitActions(root, waits, { id, by, dryRun, res, log, deps }); res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
   if (!lanes.length) { res.message = res.held.length ? `No lane can land now: ${res.held.map((h) => `${h.task} needs the owner (tier ${h.tier})`).join('; ')}.` : 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
@@ -1950,7 +1971,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const ahead = Number(out(git(root, 'rev-list', '--count', `refs/heads/${main}..${now.head}`))) || 0;
     if (!ahead) { drop(lane, `it has no commits that ${main} doesn't have; task done ${lane.task} closes it`, { handBack: false }); continue; }
     // Tier B and C (released) lanes verify the whole game (--all).
-    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: c.runAlone, released: released ? entry.released : null });
+    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: lane.fixFirst ? { yes: true, why: lane.fixFirst.why } : c.runAlone, released: released ? entry.released : null });
   }
   // 2.63.0 (run alone): a large or sim-wide lane (manifest "runAlone") trains by itself. The caller's own lane goes
   // first; in a queued train the oldest decides: a run-alone lane first goes alone, else the others go without them.
@@ -1969,6 +1990,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   { const o = orderByDeps(group, depInfo.map, { done: depInfo.done }); for (const x of o.out) defer(x.lane, x.why); group = o.ordered; }
   if (group.length > 1 || group.some((l) => l.runAlone?.yes)) log(`[train] ${id}: this train: ${group.map((l) => `${l.task} (tier ${l.tier}${l.runAlone?.yes ? ', alone' : ''})`).join(', ')}`);
   ready.splice(0, ready.length, ...group);
+  if (!dryRun) for (const l of ready.filter((x) => x.fixFirst)) noteFixTried(root, l.task, l.head); // once per head (B-75)
   if (!ready.length) { res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
 
   const main = mainBranch(root);
@@ -2051,6 +2073,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         const redEta = bisectMode() === 'prefix' && set.length > 1 ? etaFor(1 + stepsLeft(0, set.length)) : null;
         if (ft.list.length) log(`[train] ${id}: verify ${res.verifies} red; failing tests: ${ft.list.join('; ')}${ft.more ? ` (+${ft.more} more)` : ''}`);
         const redSub = trainVerifyParts(redText, false, [sc.dir, root]).subIds; // 2.72.0 (a): which parts failed
+        noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
         // waits for its tail, nobody handed back, no bisection; the other lanes go on without it.
@@ -2089,6 +2112,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${plan.why}; log ${plan.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
+            noteTrainRed(root, { id, gates: plan.gates || v.gates, redMain: true });
             ev('red_main', id, res.message, { agent: by, to: 'producer', status: 'blocked' });
             for (const l of set) defer(l, `${main} itself is red`);
             return res;
@@ -2151,6 +2175,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${v0.gates.join(', ') || v0.why}; log ${v0.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
+            noteTrainRed(root, { id, gates: v0.gates, redMain: true });
             ev('red_main', id, res.message, { agent: by, to: 'producer', status: 'blocked' });
             for (const { l } of alone) defer(l, `${main} itself is red`);
             return res;
@@ -2178,6 +2203,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     for (const l of ready) deps.clearRunning?.(l.task);
     if (sc) removeScratch(sc);
   }
+  if (res.landed.length && !dryRun) noteTrainLanded(root); // 2.73.2 (d, B-75): main is green again
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   res.message = res.message || summary(res);
   writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });

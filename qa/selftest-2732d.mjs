@@ -1,10 +1,13 @@
 /**
- * qa/selftest-2732d.mjs — 2.73.2 (helper d): per-test timeouts that fit the test workers (B-71).
+ * qa/selftest-2732d.mjs — 2.73.2 (helper d): per-test timeouts that fit the test workers (B-71), and the fix for a check
+ * main is stuck red on trains alone and first (B-75).
  *   B-71  game-gates sizes test workers to the machine but the game's vitest kept its short testTimeout, so tests failed
  *         on time alone. Now a check whose command (or the npm script it calls) runs vitest/jest/node --test gets
  *         --testTimeout / --hookTimeout / --test-timeout = the game's own x ceil(4 x workers / cores) (1..4), never lower
  *         than the game set, shown in the check's row; a runtime flag (no file changes: the weakened-tests gate is quiet).
- * Each check fails on 2.73.1 (no such flag, no such module).
+ *   B-75  a train that found main red on a game check (or the same check red in two trains in a row) remembers it; the
+ *         next train puts a queued lane that changes that check's configuration (its vitest config here) first and alone.
+ * Each check fails on 2.73.1 (no such flag, no such module, the fix lane trained with the others and stayed red).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -122,6 +125,122 @@ console.log(JSON.stringify({
         && r.node === 'node --test --test-timeout=8000 t/*.test.mjs' && r.nodeNone?.applied === false && /nothing to scale/.test(r.nodeNone.why)
         && r.scale === 'cd game/a && npx vitest run --testTimeout=180000 --hookTimeout=45000' && r.gate === 'cd game/a && npx vitest run --testTimeout=300000 --hookTimeout=75000' && r.none === null,
       JSON.stringify(r).slice(0, 2500)]);
+    fs.rmSync(P, { recursive: true, force: true });
+  }
+
+  // ---------- B-75: main red on a game check; the lane that changes its config trains alone and first ----------
+  {
+    const S = path.join(tmpRoot, `2732d-train-${process.pid}`);
+    fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
+    if (fs.existsSync(path.join(dir, 'node_modules'))) { try { fs.symlinkSync(fs.realpathSync(path.join(dir, 'node_modules')), path.join(S, 'node_modules'), 'junction'); } catch {} }
+    for (const x of ['.studio/agents', '.studio/locks', '.studio/gates', '.studio/train', '.studio/decisions.jsonl', '.studio/gates-last.json', 'studio/handoffs']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
+    const events = path.join(S, '.studio', 'events-2732d.jsonl');
+    const env = { ...base, STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', GITHUB_BASE_REF: '', STUDIO_GAME: 'demo', STUDIO_DONE_NOOP: 'allow', STUDIO_HOOKS_CHECK: 'on', STUDIO_LANE_LIVE_MIN: '0', STUDIO_TRAIN: '', STUDIO_TRAIN_BISECT: '', STUDIO_TRAIN_MIN: '', STUDIO_TRAIN_MAX: '', STUDIO_TRAIN_WAIT_MIN: '', STUDIO_TRAIN_RIDE_ALONG: '', STUDIO_OWNER_KEY: path.join(tmpRoot, `no-owner-key-2732d-${process.pid}.pem`), AGENT_EVENTS_FILE: events };
+    const person = { ...env, STUDIO_LOCK_OWNER: '' };
+    const evs = () => { try { return fs.readFileSync(events, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const board = () => `${fs.existsSync(path.join(S, 'studio/NEXT.md')) ? fs.readFileSync(path.join(S, 'studio/NEXT.md'), 'utf8') : ''}`;
+    const doneBoard = () => `${fs.existsSync(path.join(S, 'studio/DONE.md')) ? fs.readFileSync(path.join(S, 'studio/DONE.md'), 'utf8') : ''}`;
+    const isDone = (id) => new RegExp(`\\b${id}\\b`).test(doneBoard()) && !new RegExp(`\\b${id}\\b`).test(board().split(/^## Done/m)[0]);
+    const queue = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'queue.json'), 'utf8')).map((e) => e.task); } catch { return []; } };
+    write(S, 'studio/gates.json', `${JSON.stringify({ gates: [
+      { id: 'protected', command: 'node qa/protected-check.mjs', required: true, lite: true },
+      { id: 'secrets', command: 'node scripts/secret-scan.mjs', required: true, lite: true },
+      { id: 'hooks', command: 'node harness/hook-stamp.mjs check', required: true, lite: true, cache: false },
+      { id: 'game', command: 'node harness/game-gates.mjs', required: true, lite: true, cache: false },
+    ] }, null, 2)}\n`);
+    write(S, 'game/demo/studio.gates.json', `${JSON.stringify({ gates: [{ id: 'check', command: 'node game/demo/check.mjs' }] }, null, 2)}\n`);
+    // The game's check: its slow test needs 60 s under this machine's load (120 s with a note that says HEAVY: a lane that
+    // really breaks it); the timeout is its test config's.
+    write(S, 'game/demo/check.mjs', [
+      "import fs from 'node:fs';",
+      "const ms = Number((fs.readFileSync('game/demo/vitest.config.mjs', 'utf8').match(/testTimeout:\\s*([\\d_]+)/) || [])[1]?.replace(/_/g, '')) || 5000;",
+      "const heavy = fs.existsSync('game/demo/notes/b.md') && fs.readFileSync('game/demo/notes/b.md', 'utf8').includes('HEAVY');",
+      "if (ms < (heavy ? 120000 : 60000)) { console.log(' FAIL  game/demo/src/pacing.test.ts > pacing > a season'); console.log(`Error: Test timed out in ${ms}ms.`); process.exit(1); }",
+      "console.log('demo ok');", ''].join('\n'));
+    write(S, 'game/demo/vitest.config.mjs', 'export default { test: { testTimeout: 15_000 } };\n');
+    g(S, 'init', '-q', '-b', 'main'); g(S, 'config', 'core.autocrlf', 'false');
+    g(S, 'add', '-A'); g(S, 'commit', '-qm', 'studio', '--no-verify');
+    g(S, 'config', 'core.hooksPath', 'scripts/hooks');
+    const addTask = (title) => (out(run(S, `node harness/task.mjs add "${title}" --role builder --priority P1`, env)).match(/"id": "(T-\d+)"/) || [])[1];
+    const laneProbe = path.join(tmpRoot, `lane-2732d-${process.pid}.mjs`);
+    fs.writeFileSync(laneProbe, `import { createLaneCopy } from ${JSON.stringify(pathToFileURL(path.join(S, 'harness', 'worktree.mjs')).href)};\nconst r = createLaneCopy(process.argv[2], { task: process.argv[3] });\nconsole.log(JSON.stringify(r));\n`);
+    const lane = (agent, title, files) => {
+      const id = addTask(title);
+      run(S, `node "${laneProbe}" ${agent} ${id}`, env);
+      const ld = path.join(S, '.lanes', agent);
+      const as = { ...env, STUDIO_MAIN_ROOT: S, STUDIO_LOCK_OWNER: agent };
+      const st = run(ld, `node harness/task.mjs start ${id} --agent ${agent}`, as);
+      for (const [rel, text] of Object.entries(files)) write(ld, rel, text);
+      g(ld, 'add', '-A');
+      const c = spawnSync('git', ['commit', '-q', '-m', `${id}: ${title}`], { windowsHide: true, cwd: ld, encoding: 'utf8', env: { ...process.env, ...as } });
+      return { id, agent, dir: ld, as, ok: fs.existsSync(ld) && st.status === 0 && c.status === 0, log: `${out(st)}\n${out(c)}` };
+    };
+    const queueIt = (l) => run(l.dir, `node harness/task.mjs done ${l.id} --agent ${l.agent} --train`, l.as);
+    const train = () => run(S, 'node harness/task.mjs train --by tester', env);
+    const n1 = lane('doc-a', 'Docs: note a', { 'game/demo/notes/a.md': '# A\n' });
+    const n2 = lane('doc-b', 'Docs: note b', { 'game/demo/notes/b.md': '# B\nHEAVY\n' });
+    const fx = lane('fix-t', 'Tests: per-test timeout that fits the workers', { 'game/demo/vitest.config.mjs': 'export default { test: { testTimeout: 60_000 } };\n' });
+    const n3 = lane('doc-c', 'Docs: note c', { 'game/demo/notes/c.md': '# C\n' });
+    const qs = [n1, n2, fx, n3].map(queueIt);
+    const t1 = train(); // main is red: nothing lands; the fix (a protected test config) is held for the owner
+    const streakFile = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'red-streak.json'), 'utf8')); } catch { return null; } };
+    const after1 = { done: [n1, n2, fx, n3].some((l) => isDone(l.id)), streak: streakFile() };
+    const rel = run(S, `node harness/task.mjs train release ${fx.id} --by Dana`, person);
+    const since = evs().length;
+    const t2 = train(); // the fix first and alone (it lands), then a train of the other three on the green main
+    const ev2 = evs().slice(since);
+    const ff = ev2.find((e) => e.type === 'task.train.fix_first');
+    const mainCfg = g(S, 'show', 'main:game/demo/vitest.config.mjs').stdout || '';
+    const fixLanded = isDone(fx.id) && /60_000/.test(mainCfg);
+    // The trains of this run, in order, as the log names them ("this train: ..."), and the landings in order.
+    const trains2 = out(t2).split('\n').filter((l) => /: this train: /.test(l)).map((l) => l.split(': this train: ')[1]);
+    const landings = ev2.filter((e) => e.type === 'task.train.landed').map((e) => (e.meta?.lanes || []).join(','));
+    const streakAfter = streakFile();
+    await guard('2.73.2 (d, B-75): with main red on its game check (a 15 s per-test timeout), once the queued lane that changes that check\'s test config (vitest.config.mjs, third of four in the queue) is released, a train that finds main red records it (.studio/train/red-streak.json); the next train puts it first and alone (task.train.fix_first naming the check and the file, "this train: <fix> (tier C, alone)", "trains alone and first"), it lands first on main; on the now-green main the follow-on trains of the other 3 find the lane that really breaks the check (a HEAVY note) and hand it back, the other two land, and the red streak is cleared (fails on 2.73.1: the fix rode with the other lanes, the combined train stayed red, "main itself is red" deferred every lane, nothing landed)', () => [
+      [n1, n2, fx, n3].every((l) => l.ok) && qs.every((q) => q.status === 0) && /itself fails its checks/.test(out(t1)) && !after1.done && after1.streak?.trains?.[0]?.redMain === true && after1.streak.trains[0].gates.includes('game') && rel.status === 0
+        && fixLanded && ff?.task === fx.id && ff.meta?.gates?.includes('game') && ff.meta?.files?.includes('game/demo/vitest.config.mjs')
+        && /trains alone and first/.test(out(t2)) && trains2[0] === `${fx.id} (tier C, alone)` && trains2[1] === `${n1.id} (tier A), ${n2.id} (tier A), ${n3.id} (tier A)`
+        && landings[0] === fx.id && landings.slice(1).join(',').split(',').sort().join(',') === [n1.id, n3.id].sort().join(',') && JSON.stringify(streakAfter?.trains) === '[]'
+        && isDone(n1.id) && isDone(n3.id) && !isDone(n2.id) && ev2.some((e) => e.type === 'task.train.dropped' && e.task === n2.id) && queue().length === 0,
+      JSON.stringify({ after1, t2s: t2.status, lanes: [n1, n2, fx, n3].map((l) => l.ok || l.log.slice(-300)), q: qs.map((q) => q.status === 0 || out(q).slice(-300)), t1: out(t1).slice(-800), rel: out(rel).slice(-300), t2: out(t2).slice(-1500), trains2, landings, ff: ff?.meta, mainCfg, queue: queue(), streakAfter }).slice(0, 3500)]);
+    try { fs.rmSync(laneProbe, { force: true }); } catch {}
+    try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 4, retryDelay: 300 }); } catch {}
+  }
+
+  // ---------- B-75: the pure rules: two reds in a row, a landing clears, once per head, off ----------
+  {
+    const P = path.join(tmpRoot, `2732d-ff-${process.pid}`);
+    fs.mkdirSync(P, { recursive: true });
+    const r = probe('ff', `import { noteTrainRed, noteTrainLanded, stuckChecks, noteFixTried, fixFirstOrder } from ${u('harness/train-fix-first.mjs')};
+const P = ${JSON.stringify(P)};
+const git = (cwd, args) => args[0] === 'show' ? { status: 1, stdout: '' } : { status: 0, stdout: args.at(-1).endsWith('fix') ? 'web/g/vite.config.ts\\nweb/g/src/a.ts\\n' : 'web/g/src/b.ts\\n' };
+const lanes = [{ task: 'T-1', head: 'h-doc' }, { task: 'T-2', head: 'h-fix' }, { task: 'T-3', head: 'h-doc2' }];
+const o = (env = {}) => fixFirstOrder(P, lanes, { tip: 'tip', gameIds: ['game'], git, env });
+const r = {};
+r.none = stuckChecks(P);
+noteTrainRed(P, { id: 'a', gates: ['game', 'docs'] });
+r.one = stuckChecks(P);
+noteTrainRed(P, { id: 'b', gates: ['game'] });
+r.two = stuckChecks(P);
+r.order = o().lanes.map((l) => l.task + (l.fixFirst ? '*' : ''));
+r.off = o({ STUDIO_TRAIN_FIX_FIRST: 'off' }).fix;
+r.own = fixFirstOrder(P, [{ ...lanes[0], own: true }, lanes[1]], { tip: 'tip', gameIds: ['game'], git }).fix;
+noteFixTried(P, 'T-2', 'h-fix');
+const again = o();
+r.again = again.fix; r.note = again.note;
+noteTrainLanded(P);
+r.cleared = stuckChecks(P);
+noteTrainRed(P, { id: 'c', gates: ['docs'] }); noteTrainRed(P, { id: 'd', gates: ['docs'] });
+r.notGame = stuckChecks(P);
+noteTrainRed(P, { id: 'e', gates: ['game'], redMain: true });
+r.redMain = stuckChecks(P);
+console.log(JSON.stringify(r));
+`);
+    await guard('2.73.2 (d, B-75): a game check red in two trains in a row (or red on main itself in one) is "stuck"; a lane whose diff changes a game test config (web/g/vite.config.ts) is moved first and marked to run alone; STUDIO_TRAIN_FIX_FIRST=off, an agent\'s own train for another lane, and a fix lane already tried at the same head move nothing (the note says why); a landing clears the streak; a non-game check never counts (fails on 2.73.1: no harness/train-fix-first.mjs)', () => [
+      r.none === null && r.one === null && JSON.stringify(r.two?.gates) === '["game"]' && /last two trains in a row \(a, b\)/.test(r.two?.why || '')
+        && JSON.stringify(r.order) === '["T-2*","T-1","T-3"]' && r.off === null && r.own === null && r.again === null && /already trained alone at this commit/.test(r.note || '')
+        && r.cleared === null && r.notGame === null && JSON.stringify(r.redMain?.gates) === '["game"]' && /on main itself in train e/.test(r.redMain?.why || ''),
+      JSON.stringify(r).slice(0, 2000)]);
     fs.rmSync(P, { recursive: true, force: true });
   }
 }

@@ -4499,6 +4499,7 @@ if (inShard('selftest-2731c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+<<<<<<< HEAD
 // 2.73.2 (e, B-73): a Unity run waits for a free-RAM floor (STUDIO_UNITY_MIN_FREE_GB) under machine:heavy, `npm run heavy
 // -- wait|run|release` for a studio's own scripts, and an infrastructure abort (out of memory, killed, no licence, aborted
 // before results) is NOT RUN in the gate, the land record and the train, never a FAIL (qa/selftest-2732e.mjs).
@@ -4531,6 +4532,11 @@ if (inShard('selftest-274w')) {
 
 // 2.73.2 (d, B-71): per-test timeouts scaled for the test workers (--testTimeout / --hookTimeout / --test-timeout,
 // never below the game's own) (qa/selftest-2732d.mjs).
+=======
+// 2.73.2 (d, B-71, B-75): per-test timeouts scaled for the test workers (--testTimeout / --hookTimeout / --test-timeout,
+// never below the game's own), and a lane that changes the config of the check main is stuck red on trains alone and
+// first (qa/selftest-2732d.mjs).
+>>>>>>> 114994b (2.73.2 (d) B-75: the fix for the check main is stuck red on trains alone and first)
 if (inShard('selftest-2732d')) {
   const dir = copyRepo();
   const { selftest2732D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732d.mjs')).href);

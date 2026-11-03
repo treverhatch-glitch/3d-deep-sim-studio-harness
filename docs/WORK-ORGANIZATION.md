@@ -87,7 +87,12 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Red (2.60.0, prefix bisection): only the failing checks run again (`run-gates --only`, scoped as the train's verify
   was), first on main, then on cumulative prefixes main+A, main+A+B, ... by binary search (about log2 N targeted
   runs; logs `.studio/train/<id>-recheck-<n>.log`). Red on main: main itself is red, nothing lands and nobody is
-  handed back. A verify or re-check that ran no check (2.67.2, B-50: refused because a full verify of the same
+  handed back. 2.73.2 (B-75): the train remembers it (`.studio/train/red-streak.json`, also a game check red in two
+  trains in a row; a train that lands anything clears it), and the next train puts the first queued lane that changes
+  that check's configuration (the game's vitest/vite/jest configs and workspaces, `.npmrc`, its `studio.gates.json`, the
+  test scripts of its package.json) first and alone (runAlone, `task.train.fix_first` with the reason), once per lane
+  commit; the other lanes follow in the next train. A tier-C fix still waits for the owner's release.
+  `STUDIO_TRAIN_FIX_FIRST=off` turns it off. A verify or re-check that ran no check (2.67.2, B-50: refused because a full verify of the same
   checkout runs, or `machine:heavy` stayed held past its wait) is busy, never red: the train waits and runs it again
   (`STUDIO_TRAIN_BUSY_WAIT_MIN`, 20 minutes in all, logged each time), then defers its lanes for the next train
   (`task.train.no_check`); it never hands anyone back or concludes that main is red from it (`harness/train-busy.mjs`).
