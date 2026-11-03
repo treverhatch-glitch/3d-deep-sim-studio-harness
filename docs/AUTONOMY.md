@@ -219,6 +219,52 @@ actions without the owner's words for each one, for a time the owner sets (harne
 - `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
   and never acts (B-47: `task train --help` used to run a train).
 
+## The decision log, the studio policy and autonomous mode (2.71.0)
+
+**One decision log.** Every decision the harness leaves to the owner or a game dev writes one record to
+`.studio/decisions.jsonl` (the main checkout's) and one `decision` event, where it is decided: train release, task
+type and visual proof, the dev's yes, hold and unhold, an asset review, a quarantine confirm or release, deleting stale
+lanes, train auto, upgrade auto, crew resume, ending a wind-down, studio resume, a held config proposal, the autonomy
+level, a delegation grant or revoke, and autonomous mode itself. A record is `{ id, at, action, subject, by, as, why,
+evidence, undo }`; `as` is `person`, `agent` (a decision an agent may take under its own name, such as a hold),
+`delegation <grant time>`, `autonomous` or `permission "<the person's words>"`; `undo` says how to revert it (or null).
+The older records (task-types.json, the train queue's release, the hold file) stay as they were: the log points at
+them, and a revert run from it never logs a second decision.
+
+    npm run decisions [-- --since 24h|7d|<ISO>] [--by <name>] [--action <a>] [--json]
+
+**The studio policy** (`studio/policy.json`, protected; `npm run policy` prints it): the owner's plain rules,
+`{ "autonomous": { "allowed", "agent", "actions", "reviewWithinH" }, "never": [...], "notes": [...] }`. No file means
+today's behaviour. It counts like the delegation: committed in the main checkout, signed when the studio has an owner
+key, otherwise only when the commit that set it isn't an agent's. `notes` are shown to every agent; a `never` word
+(`delete-lanes`, `upgrade-auto`, or an action's name) rules that action out for any agent, a delegated one included.
+
+**Autonomous mode** (opt-in per studio): while the policy allows it, the named overseer agent takes the listed
+game-dev decisions (default `train-release, type, yes, hold, visual, asset-review, quarantine`) with `--by <agent>`
+and no permission words. Each is recorded `as: "autonomous"` and goes on a **review list** that never blocks work.
+
+    npm run policy -- autonomous on --agent <name> [--actions …] [--review-h 72] --by <owner>   the owner's terminal
+    npm run autonomy -- mode autonomous on --agent <name> --by <game dev>   a proposal; the owner runs: npm run policy -- confirm --by <owner>
+    npm run autonomy -- mode autonomous off --by <name>                    pauses it at once (anyone but a worker)
+    npm run decisions -- review                                            the pending autonomous decisions, oldest first
+    npm run decisions -- approve <id> --by <you> | revert <id> --by <you> [--why "…"] | edit <id> --note "…" --by <you>
+    npm run decisions -- stats [--days 14]
+
+- **Never autonomous, whatever the file says:** protected files, gates (harness code, check silencers, deleted tests)
+  and the policy file, money, deletes (`janitor-lanes`, any rm), visibility, keys. A train release in autonomous mode is
+  refused for a lane held by any shipped tier-C rule; a lane held only after too many hand-backs, or by a game's own
+  rule, may be released.
+- **Never self-granted:** `policy autonomous on` and `policy confirm` refuse agents' shells, lanes and launched
+  sessions; a policy.json an agent committed doesn't count; a worker can't propose.
+- **Review:** a person (or an agent on a person's direct permission), never the agent that decided. `revert` runs the
+  record's undo: unhold or hold again, the type or visual proof back, the dev's yes taken back, a quarantine released, an
+  asset review reopened, a released lane held again; a lane that already landed gets a revert task instead.
+- **Shown:** the War Room snapshot (`decisions`: count, oldest, overdue) and the digest line (decisions per day,
+  approved vs reverted and the revert rate, time saved). Past `reviewWithinH` (72) they go under "Needs you".
+- **Time saved** per action is the median owner wait for that action over the last 14 days from events (held to
+  released, an agent's proposal to the dev's yes, a review request to its answer, a proposed quarantine to its
+  confirm) less the autonomous decision's own wait; under `STUDIO_DECISION_MIN_N` (10) waits it says "not enough data".
+
 ## Drift checks (Check cards to the Producer)
 
 Each observation of a running session (the launcher's heartbeat, and the watch pass for a session whose
