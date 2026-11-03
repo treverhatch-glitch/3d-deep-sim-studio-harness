@@ -6,7 +6,7 @@
  * from any agent and from anything a prompt injection made it run. Now an agent gets:
  *   - the system basics (PATH, HOME, locale, temp, proxy and certificate settings, display),
  *   - the studio's own settings (STUDIO_, AGENT_, PLAYTEST_, PLAYWRIGHT_, NODE_, npm_ names), minus
- *     STUDIO_OWNER_KEY,
+ *     STUDIO_OWNER_KEY and (2.71.0) STUDIO_REPORT_WEBHOOK,
  *   - the credentials of the tool it runs on and nothing else (claude: ANTHROPIC_ and CLAUDE_
  *     names, codex: OPENAI_ and CODEX_, grok: XAI_ and GROK_, agy: GEMINI_ and GOOGLE_, cursor: CURSOR_, aider: OLLAMA_;
  *     nim (2.58.3, aider on NVIDIA NIM): only OPENAI_API_KEY, set from NVIDIA_API_KEY (the first key of a list, else
@@ -27,7 +27,8 @@ import { fileURLToPath } from 'node:url';
 const HARNESS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASICS = /^(PATH|Path|PATHEXT|HOME|USER|USERNAME|LOGNAME|SHELL|TERM|COLORTERM|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMP|TEMP|TMPDIR|PWD|SystemRoot|SystemDrive|ComSpec|WINDIR|windir|OS|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|APPDATA|LOCALAPPDATA|USERPROFILE|HOMEDRIVE|HOMEPATH|ProgramFiles|ProgramFiles\(x86\)|ProgramData|CommonProgramFiles|PUBLIC|XDG_[A-Z_]+|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|SSL_CERT_FILE|SSL_CERT_DIR|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|CI|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)|EDITOR|VISUAL)$/;
 const STUDIO = /^(STUDIO_|AGENT_|PLAYTEST_|PLAYWRIGHT_|NODE_|npm_|GODOT|BLENDER)/;
-const NEVER = /^(STUDIO_OWNER_KEY|HUB_TOKEN)$/;
+// 2.71.0 (y): the owner's report webhook (harness/report-post.mjs) is a secret only the supervisor and the owner use.
+const NEVER = /^(STUDIO_OWNER_KEY|HUB_TOKEN|STUDIO_REPORT_WEBHOOK)$/;
 const TOOL_KEYS = {
   claude: /^(ANTHROPIC_|CLAUDE_)/,
   codex: /^(OPENAI_|CODEX_)/,

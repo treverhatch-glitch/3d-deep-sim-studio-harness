@@ -105,6 +105,8 @@
     "autonomy": "node harness/autonomy.mjs",
     "usage": "node harness/usage.mjs",
     "digest": "node harness/digest.mjs",
+    "report": "node harness/report-post.mjs",
+    "next-board": "node harness/next-board.mjs",
     "denials": "node harness/denials.mjs",
     "delegate": "node harness/delegation.mjs",
     "vfx": "node harness/vfx.mjs",

@@ -199,6 +199,14 @@ export async function supervise(opts, state, now = Date.now()) {
   const why = [];
   // opts.watcher: the watcher's auto-launch uses this same picker when no supervisor runs (one launcher).
   if (!opts.watcher && fs.existsSync(STOP_FILE)) return { stop: true, started: [], why: ['studio:stop was asked'] };
+  // 2.71.0 (y): the owner's reports to a webhook (harness/report-post.mjs): the digest once a day at STUDIO_REPORT_HOUR,
+  // the what's-next board when the queue changed a lot; before the halt and window checks, so a halted studio still reports.
+  if (!opts.watcher) {
+    try {
+      const rp = await (await import('./report-post.mjs')).reportPass({ now, inline: Boolean(opts.deps?.reportInline), deps: opts.deps?.reportDeps || {} });
+      if (rp?.line) console.log(`[supervisor] ${rp.line}`);
+    } catch { /* a report, never a crash */ }
+  }
   if (opts.until && now >= opts.until) {
     if (!state.halted) { try { await checkBadEnds(opts, state, now); } catch { /* the stop stands */ } }
     return { stop: true, started: [], why: [`the time is up (${new Date(opts.until).toTimeString().slice(0, 5)})`] };
