@@ -31,8 +31,8 @@ export async function selftest2731B({ dir, report, tmpRoot, root }) {
     delete e.NODE_PATH;
     return { ...e, ...extra };
   };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: cleanEnv() });
-  const node = (cwd, args, extra = {}, opts = {}) => spawnSync(process.execPath, args, { cwd, encoding: 'utf8', env: cleanEnv(extra), timeout: 120000, ...opts });
+  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv() });
+  const node = (cwd, args, extra = {}, opts = {}) => spawnSync(process.execPath, args, { windowsHide: true, cwd, encoding: 'utf8', env: cleanEnv(extra), timeout: 120000, ...opts });
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   let n = 0;

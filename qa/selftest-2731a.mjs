@@ -22,7 +22,7 @@ export async function selftest2731A({ dir, run, report, tmpRoot, root }) {
   const out = (r) => `${r.stdout || ''}${r.stderr || ''}`;
   const ident = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
   const gEnv = () => { const e = { ...process.env, ...ident }; for (const k of Object.keys(e)) if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|CONFIG.*|NO_REPLACE_OBJECTS)$/.test(k)) delete e[k]; return e; };
-  const g = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: gEnv() });
+  const g = (cwd, args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', env: gEnv() });
   const guard = async (name, fn) => { try { const [ok, detail] = await fn(); report(name, Boolean(ok), detail); } catch (e) { report(name, false, e.stack || String(e)); } };
   const base = {
     STUDIO_REFILL_WAKE: 'off', STUDIO_TASK_BUDGET: 'off', STUDIO_GATE_SLOTS: '0', STUDIO_WATCHDOG: 'off', STUDIO_VISUAL_GATE: 'off', STUDIO_MAIN_ROOT: '', STUDIO_PROTECT_BASE: '', STUDIO_PROTECT_ROOT: '',
@@ -52,7 +52,7 @@ export async function selftest2731A({ dir, run, report, tmpRoot, root }) {
   const probe = (S, env, name, code) => {
     const f = path.join(tmpRoot, `probe-2731a-${name}-${process.pid}-${++n}.mjs`);
     fs.writeFileSync(f, code);
-    const r = spawnSync(process.execPath, [f], { cwd: S, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 120000 });
+    const r = spawnSync(process.execPath, [f], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 120000 });
     const t = String(r.stdout || '').trim().split('\n').filter((x) => x.startsWith('{')).pop();
     try { return { ...JSON.parse(t), _err: r.stderr?.slice(-1500) }; } catch { return { _err: `${out(r).slice(-2500)}` }; }
   };
@@ -61,7 +61,7 @@ export async function selftest2731A({ dir, run, report, tmpRoot, root }) {
   // ---- B-68: a session waiting on its own verify ----
   await guard('2.73.1 (B-68): a builder waiting on its own running verify (.studio/verify-running/<agent>.json, live host, no result; or an in-process full*.json it owns) is not ended by the stall watchdog after STUDIO_STALL_MIN (15) quiet minutes; once the verify has its result the stall clock runs again from then; a verify whose process is gone, or older than STUDIO_STALL_VERIFY_MAX_MIN (60), counts for nothing (fails on 2.73.0: only task done held the clock, so the builder was ended mid-verify)', async () => {
     const { S, env } = studio('verify');
-    const dead = spawnSync(process.execPath, ['-e', '0']).pid;
+    const dead = spawnSync(process.execPath, ['-e', '0'], { windowsHide: true }).pid;
     const r = probe(S, env, 'verify', `import fs from 'node:fs'; import path from 'node:path';
 import { observe } from ${u(S, 'harness/stall.mjs')};
 const root = path.resolve('.'); const M = 60000; const now = Date.now(); const iso = (t) => new Date(t).toISOString();
@@ -178,7 +178,7 @@ console.log(JSON.stringify(r));
   await guard('2.73.1 (B-66 b): agent.session.end records how the process ended (meta.exitCause): a session killed by a signal from outside reads kind signal with SIGKILL (Windows: an exit code reads kind exit with that code), and the launcher\'s own kills map to stall/idle/budget, a stop to stopped (fails on 2.73.0: only "exit 1", the signal was dropped)', async () => {
     const { S, env, ev } = studio('cause');
     const win = process.platform === 'win32';
-    const s = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'bu-2731a', '--tool', 'claude', '--model', 'm-1'], { cwd: S, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_BUILDER_CMD: win ? 'exit 3' : 'kill -KILL $$' }, timeout: 120000 });
+    const s = spawnSync(process.execPath, ['harness/agent.mjs', 'start', '--role', 'builder', '--agent', 'bu-2731a', '--tool', 'claude', '--model', 'm-1'], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env, STUDIO_BUILDER_CMD: win ? 'exit 3' : 'kill -KILL $$' }, timeout: 120000 });
     const end = events(ev).filter((e) => e.type === 'agent.session.end' && e.agent === 'bu-2731a').pop();
     const c = end?.meta?.exitCause || null;
     const unit = probe(S, env, 'cause', `import { exitCause } from ${u(S, 'harness/agent.mjs')};
@@ -195,7 +195,7 @@ console.log(JSON.stringify({ stall: exitCause({ code: 1, exit: { killedBy: { kin
       const st = path.join(S, '.studio', 'supervisor.json');
       const oldUntil = new Date(Date.now() - 2 * M).toISOString();
       fs.writeFileSync(st, JSON.stringify({ pid: sleeper.pid, status: 'running', startedAt: new Date(Date.now() - 60 * M).toISOString(), opts: { until: oldUntil } }));
-      const ext = (args, extra = {}) => spawnSync(process.execPath, ['harness/supervisor.mjs', 'extend', ...args], { cwd: S, encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
+      const ext = (args, extra = {}) => spawnSync(process.execPath, ['harness/supervisor.mjs', 'extend', ...args], { windowsHide: true, cwd: S, encoding: 'utf8', env: { ...process.env, ...env, ...extra } });
       const worker = ext(['--until', '+3h', '--by', 'Dana'], { STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-s9' });
       const agentNoPerm = ext(['--until', '+3h', '--by', 'Dana'], { CLAUDECODE: '1' });
       const past = ext(['--until', '2001-01-01T00:00:00Z', '--by', 'Dana']);
