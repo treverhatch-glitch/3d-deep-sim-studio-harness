@@ -64,6 +64,8 @@ export const DEFAULT_PROTECTED = [
   'studio/delegation.json',
   // 2.71.0: the studio policy (harness/policy.mjs): autonomous mode and the owner's rules; an agent can't turn it on.
   'studio/policy.json',
+  // 2.73.0 (f): the outside overseer's stage (harness/overseer.mjs): an agent can't raise its own stage.
+  'studio/overseer.json',
   // 2.71.1 (A01b/A01d/A03): the gate runners and what they load, so a lane can't neuter the check that judges it
   // (harness/gate-trust.mjs and harness/test-toolchain.mjs decide what the gates trust, so they are here too).
   'scripts/run-gates.mjs', 'harness/gate-spawn.mjs', 'harness/game-gates.mjs', 'harness/silent-green.mjs', 'harness/cartridge.mjs',

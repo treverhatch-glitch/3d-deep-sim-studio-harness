@@ -110,6 +110,7 @@
     "next-board": "node harness/next-board.mjs",
     "denials": "node harness/denials.mjs",
     "workaround": "node harness/workaround.mjs",
+    "overseer": "node harness/overseer.mjs",
     "delegate": "node harness/delegation.mjs",
     "decisions": "node harness/decisions.mjs",
     "policy": "node harness/policy.mjs",
