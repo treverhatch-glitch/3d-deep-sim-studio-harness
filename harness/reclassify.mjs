@@ -53,7 +53,7 @@ import { delegationFor, recordUse, embeddedDelegationOk } from './delegation.mjs
 import { logDecision, asOf } from './decisions-log.mjs';
 
 export const TYPE_RECORD_REL = 'studio/task-types.json';
-export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
+export const RETYPABLE = ['change', 'chore', 'bug', 'docs', 'system', 'balance', 'fun', 'playtest', 'study', 'research', 'review', 'direction', 'idea', 'art', 'trick', 'whole'];
 const NOTE = 'Owner reclassifications of task types (npm run task -- type <ID> <type> --by <owner> --why "…"; harness/reclassify.mjs). Written by that command from the owner\'s terminal; an entry set by an agent\'s commit (Studio-Agent trailer) is ignored, and once the studio has an owner key only signed reclassifications (studio/approvals/type-<ID>.json) count.';
 
 // The agent-name shapes the launcher, fun verdicts and the agy allow-list use, and a "-bot" suffix.

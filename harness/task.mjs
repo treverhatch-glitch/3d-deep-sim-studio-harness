@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
+import { ensureResearchTemplate, researchRel } from './research.mjs';
 import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
@@ -489,7 +490,17 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   } catch {
     // the brief is a help, never a blocker
   }
-  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}) };
+  const research = researchAtStart(target);
+  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}), ...(research ? { research } : {}) };
+}
+
+/** 2.71.0 (y): a research task's write-up template, written where the task is worked (harness/research.mjs). */
+function researchAtStart(target) {
+  try {
+    if (taskType(target) !== 'research') return null;
+    const rel = ensureResearchTemplate(target);
+    return rel || researchRel(target.id);
+  } catch { return null; }
 }
 
 /**
@@ -1689,6 +1700,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // notes, at most 3k characters) replaces re-reading the whole hand-off history.
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
+    if (started.research) console.error(`Research task: write it up in ${started.research} (the template is there): every source with its link; task done refuses a write-up without them.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
     for (const l of startOv?.lines || []) console.error(l); // 2.69.0 (s): overlap advice, once the task is started
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
@@ -2168,13 +2180,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // --start/--claim are switches: a title word the parser took as their value is part of the title.
     const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
       process.exit(1);
     }
     // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
     const type = typeof flags.type === 'string' ? flags.type.toLowerCase() : '';
-    if (type && !['bug', 'chore', 'study', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
-      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, balance, fun, playtest, review, docs, idea or system.`);
+    if (type && !['bug', 'chore', 'study', 'research', 'balance', 'fun', 'playtest', 'review', 'docs', 'idea', 'system'].includes(type)) {
+      console.error(`Unknown --type "${flags.type}". Use bug, chore, study, research, balance, fun, playtest, review, docs, idea or system.`);
       process.exit(1);
     }
     const prefix = type && !title.toLowerCase().startsWith(type) ? `${type[0].toUpperCase()}${type.slice(1)}: ` : '';
