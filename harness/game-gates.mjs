@@ -38,6 +38,10 @@
  * logged with the reason. A gate without paths always runs, and no --changed means every gate runs.
  * No game set (or the game is a cartridge): nothing extra runs, the cartridge gates cover it.
  *
+ * 2.73.2 (d, B-71): a check that runs vitest, jest or node --test (directly or as its npm script's last step) gets a per-test
+ * timeout scaled for its test workers (--testTimeout / --hookTimeout / --test-timeout; harness/test-timeouts.mjs), never
+ * below the game's own; printed and kept in the row as "testTimeout". STUDIO_TEST_TIMEOUT_SCALE=off: nothing passed.
+ *
  * 2.72.0 (b): a gate may declare "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new
  * hits, harness/ratchet.mjs) and "canary": "<command or fixture path>" (input that must make it fail; npm run gates --
  * --canaries, harness/canaries.mjs).
@@ -53,7 +57,8 @@ import { selectGates, scopeOf, withGateSlot, matchAny, ALWAYS_SHARED } from './m
 import { normMode } from './det-math.mjs';
 import { testRngMode } from './test-rng.mjs';
 import { scaledTimeout, recordGateTime, recordGatePass, heldClaim, heavyHolders, laneChecksRunning } from './heavy.mjs';
-import { machineProfile, testWorkers, oomSignature } from './heavy-budget.mjs';
+import { machineProfile, testWorkers, oomSignature, logicalCores } from './heavy-budget.mjs';
+import { scaleTestTimeouts, timeoutLine as testTimeoutLine } from './test-timeouts.mjs';
 import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
 import { quarantineEnvValue } from './flakes.mjs';
@@ -445,10 +450,14 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
     const workersNow = () => {
+      let profile = null;
+      try { profile = machineProfile(slotRoot); } catch {}
       try {
-        return testWorkers({ profile: machineProfile(slotRoot), env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT });
-      } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2` }; }
+        return { ...testWorkers({ profile, env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT }), cores: logicalCores(profile) };
+      } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2`, cores: logicalCores(profile) }; }
     };
+    // 2.73.2 (d, B-71): the per-test timeout passed to the check's runner for this many workers (harness/test-timeouts.mjs).
+    let testTO = null;
     const runOnce = (cmd, forceMs = null, extraEnv = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated || plan.slowTier?.run ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
@@ -478,8 +487,12 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       const quarantined = quarantineEnvValue(REPO_ROOT);
       if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${extraEnv?.STUDIO_TEST_WORKERS || tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${extraEnv?.STUDIO_TEST_WORKERS ? 'low load for the timeout-only re-run' : tw.why})`);
+      // 2.73.2 (d, B-71): a vitest/jest/node --test check gets a per-test timeout that fits its workers (a runtime flag).
+      const scaled = scaleTestTimeouts({ command: cmd, root: REPO_ROOT, workers: Number(runEnv.STUDIO_TEST_WORKERS) || tw.workers, cores: tw.cores, gateFactor: timing.factor, minScale: slow?.minScale || 1, env: process.env });
+      testTO = scaled.info;
+      if (testTO) console.error(testTimeoutLine(cmdLabel, testTO));
       const t0 = Date.now();
-      const res = spawnSync(cmd, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
+      const res = spawnSync(scaled.command, { windowsHide: true, cwd: REPO_ROOT, shell: true, encoding: 'utf8', env: runEnv, maxBuffer: 32 * 1024 * 1024, timeout: timing.ms });
       // A pass at load factor 1 is the check's quiet run (its floor). 2.65.1: a pass of self-triage's re-run at the cap is
       // also its lastPass at any factor, which stands in for the floor only while no quiet run is recorded.
       if (res.status === 0 && !curRelated && !plan.slowTier?.run) {
@@ -500,6 +513,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     for (const g of gates) {
       cmdLabel = g.id;
       curGate = g;
+      testTO = null;
       if (focusMap && !(g.id in focusMap)) { skipped.push({ id: g.id, why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' }); continue; }
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
       const related = Boolean(g.related && relatedOn && codeOnly && existing.length);
@@ -602,7 +616,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.72.0 (a): after a timeout-only re-run, the failing files are the ones red alone (the green ones are timeout-flakes).
       // (Every failure was one of the timed-out files, so the files red alone are exactly the failing ones.)
       if (r.status !== 0 && redAlone) failFiles = [...redAlone];
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(testTO ? { testTimeout: testTO } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
       if (ratchet) { const row = rows[rows.length - 1]; delete row.failures; delete row.failingFiles; if (ratchet.why) row.why = ratchet.why; row.ratchet = { fresh: ratchet.judged?.fresh.length ?? null, standing: ratchet.judged?.standing ?? null }; }
     }
   }

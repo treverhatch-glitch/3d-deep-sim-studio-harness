@@ -404,7 +404,9 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
 - Game checks get `STUDIO_TEST_WORKERS` and `VITEST_MAX_WORKERS`: free RAM for the job / `STUDIO_TEST_WORKER_GB`
   (0.45), between 2 and cores - 2. Inside a verify that is the verify's claim; a lane's check shares the free budget
   with the other lane checks running. `STUDIO_TEST_WORKERS` sets it; 2 with no scan. The game's test config reads it
-  (docs/ONBOARDING-A-GAME.md).
+  (docs/ONBOARDING-A-GAME.md). 2.73.2: a vitest/jest/`node --test` check also gets its per-test timeout scaled for that
+  many workers (ceil(4 x workers / cores), 1..4; `STUDIO_TEST_TIMEOUT_SCALE`; ONBOARDING-A-GAME.md, "Per-test timeouts
+  that fit the workers").
 - The supervisor starts at most (RAM - reserve - heavy claims) / `STUDIO_SESSION_RAM_GB` (0.6) agent sessions, and
   says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
   `none`).

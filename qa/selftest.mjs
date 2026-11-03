@@ -4529,6 +4529,15 @@ if (inShard('selftest-274w')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.73.2 (d, B-71): per-test timeouts scaled for the test workers (--testTimeout / --hookTimeout / --test-timeout,
+// never below the game's own) (qa/selftest-2732d.mjs).
+if (inShard('selftest-2732d')) {
+  const dir = copyRepo();
+  const { selftest2732D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2732d.mjs')).href);
+  await selftest2732D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
