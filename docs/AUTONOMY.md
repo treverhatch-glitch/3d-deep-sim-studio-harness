@@ -170,7 +170,8 @@ stops from a fixed list, and sends one daily digest instead of approval pings.
   protected files changed without approval, an unsigned Bible and open questions, spend over the weekly target, a halt
   self-triage can't fix, fuzz findings suggested in the last 24 h (2.66.0, `npm run fuzz`'s shadow week); then (2.66.0)
   the top 5 allowlist candidates from the blocked-command log, the scorecard line, what self-triage fixed and how many
-  fuzz bug tasks were filed. Nothing waiting: one line says so.
+  fuzz bug tasks were filed; (2.71.0) research finished in the last 24 h, with its write-up. Nothing waiting: one line
+  says so. `npm run report -- post --what digest` sends it to the owner's webhook (docs/DISCORD-CREW.md).
 - **Fuzz bugs** (`npm run fuzz`, qa/fuzz.mjs, 2.66.0; cartridges/README.md, "Fuzz"): suggestions for the first week
   (`autoFileAfter` in `studio/fuzz.json`), then one bug task per new finding id, filed by the script, never twice.
   Each run plays `STUDIO_FUZZ_SEEDS` seeds (20) of `STUDIO_FUZZ_TICKS` ticks (500) per cartridge (or `seeds`/`ticks` in
