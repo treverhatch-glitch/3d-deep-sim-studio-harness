@@ -165,6 +165,14 @@ if (fs.existsSync(path.join(root, 'studio', 'task-types.json')) || fs.existsSync
     for (const l of typeRecordLines()) console.log(`[gates] ${l.ok ? 'owner type:' : 'WARN owner type:'} ${l.line}`);
   } catch { /* the list is a help, never a failure */ }
 }
+// 2.70.0 (w): in a sparse lane (harness/lane-sparse.mjs) the checks never see a partial tree: every left-out file a
+// check about to run reads is put back first (the game's own checks do the same in harness/game-gates.mjs), and a
+// run that still leaves files out doesn't write the shared gate cache.
+let sparseRun = null;
+try {
+  const ls = await import('../harness/lane-sparse.mjs');
+  sparseRun = ls.widenForChecks({ dir: root, needs: gates.filter((g) => g.id !== 'game').map((g) => ({ id: g.id, globs: ls.harnessCheckNeeds(g) })), log: (m) => console.log(m) });
+} catch (err) { console.log(`[gates] WARN sparse lane check: ${err.message}`); }
 if (skipped.length) console.log(`[gates] ${scope === 'lite' ? 'Lite scope: ' : ''}skipped ${skipped.join(', ')}${skipped.some((x) => x.endsWith('(deep)')) ? '; --deep runs the harness self-checks' : ''}${scope === 'lite' ? '; --full runs every gate' : ''}`);
 // 2.59.0 (#11b): one full verify per checkout. A stopped background verify loop's shell child survived and ran a
 // second full verify of the same checkout beside the first (the per-owner record above only keeps one owner's
@@ -251,7 +259,7 @@ for (const gate of gates) {
   console.log(`[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
   if (!ok) console.log(`[gates] ${(await import('../harness/gate-fix.mjs')).gateFixLine(gate, { output: `${res.stdout || ''}${res.stderr || ''}`, compact })}`); // 2.66.0 (d): one next step per failure
 
-  if (cacheable && !isMergeTier && !focusRun) {
+  if (cacheable && !isMergeTier && !focusRun && !sparseRun?.partial) {
     if (ok) set(gate, ms);
     else del(gate);
   }

@@ -1067,3 +1067,29 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
   and P-055 (the "claim was released" line came after the overlap lines).
 - **Fix:** the advice prints after a successful start; claimActive ignores task.overlap for that task.
   qa/selftest-258b.mjs.
+
+### P-188 — the GPU sat idle while GPU-type jobs queued behind CPU verifies · fixed in 2.70.0
+- **Evidence:** GPU 1-7% busy; the asset round trip (asset-gate.mjs) and browser playtests waited on the one heavy slot;
+  headless Chromium rendered WebGL on the CPU (no GPU flag).
+- **Fix:** the GPU area, opt-in browser GPU flags with a renderer record, Blender out of machine:heavy.
+  qa/selftest-270t.mjs.
+
+### P-189 — no playable build after a landing · fixed in 2.70.0
+- **Evidence:** builds were saved only by `play:browser`; the crew asked for a build and a clip per landing.
+- **Fix:** the landing build + clip worker. qa/selftest-270t.mjs.
+
+### P-190 — Unity runs repeated work · fixed in 2.70.0
+- **Evidence:** Edit Mode tests ran in .NET and again in the editor; no Accelerator; every test headless; two editor
+  starts per gate; a serial Library copy (research of 2026-11-02).
+- **Fix:** the reuse rules, the Accelerator setting and probe, the Graphics split, opt-in one-editor mode, a parallel
+  copy. qa/selftest-270u.mjs.
+
+### P-191 — asset previews landed with no one looking · fixed in 2.70.0
+- **Evidence:** the overseer checked every preview by eye (duty 15).
+- **Fix:** deterministic preview checks, then a required review by someone other than the maker. qa/selftest-270v.mjs.
+
+### P-192 — lane copies filled the disk unseen · fixed in 2.70.0
+- **Evidence:** 90-100 GB of lanes; about 75% of a game's tracked bytes were docs and media; stale-lane proposals
+  showed only when someone ran the janitor.
+- **Fix:** sparse lanes with widening, `lanes disk`, the supervisor's proposal pass. qa/selftest-270w.mjs.
+

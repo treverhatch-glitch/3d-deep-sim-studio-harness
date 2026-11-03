@@ -70,6 +70,24 @@ The probes read `window.__view()`: `player { x, y, z }`, `camera { forward: [x, 
 - **Finding a browser.** Order: `PLAYWRIGHT_CHROMIUM`, Playwright's own browser (`npx playwright install
   chromium`), then the installed Chrome or Edge (Windows and macOS included).
 
+## The GPU in the browser (2.70.0, opt-in, UNVERIFIED)
+
+Headless Chromium renders WebGL on the CPU (SwiftShader) unless told otherwise: browser playtests kept the CPU busy
+while the GPU idled. `STUDIO_BROWSER_GPU=on|off|auto` (default `off`; `auto` = on when the machine scan shows a GPU)
+adds the platform's flags in `qa/chromium.mjs`: Windows `--enable-gpu --use-angle=d3d11`, macOS `--use-angle=metal`,
+Linux `--enable-gpu --use-gl=angle`. **UNVERIFIED** on the crew's PC: nobody has seen yet that these give a hardware
+renderer there, so it stays opt-in. With it on, a browser playtest takes the GPU area (docs/WORK-ORGANIZATION.md).
+
+- The run's report records the renderer the page actually got (`renderer`: WebGL `UNMASKED_RENDERER` through the
+  debug extension when available). Flags on but SwiftShader or llvmpipe in use: the report and the log say "GPU flags
+  on but CPU renderer in use" once.
+- A renderer change shifts pixels. The visual proof's captures record their renderer (`<side>.renderer.json` beside the folder: a
+  capture through `qa/chromium.mjs` writes it via `STUDIO_RENDERER_FILE`, else the GPU setting alone). Two "before"
+  captures on different renderers re-baseline the noise with a note (judged against the minimum, as with no second
+  capture) instead of failing "too noisy"; before and after on different renderers is never a pass: the check names
+  both and asks for a new before. `capture after` runs with the GPU setting its before was taken with. The tolerance
+  is never loosened.
+
 ## Renderer work and bugs
 
 Tasks carry the part of the game they touch: `npm run task -- add "…" --part sim|renderer|both`.

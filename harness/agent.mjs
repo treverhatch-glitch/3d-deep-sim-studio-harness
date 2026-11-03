@@ -760,7 +760,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   let copy = null;
   const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
   if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
-    const c = createLaneCopy(agent, { task });
+    const c = createLaneCopy(agent, { task, lane });
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = { ...c, laneless };
   }

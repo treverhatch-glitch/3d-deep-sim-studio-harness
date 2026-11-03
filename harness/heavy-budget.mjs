@@ -22,6 +22,12 @@
  *        runs beside a CPU verify.
  * A claim bigger than its whole area can never fit: it runs alone (no other holder in that area) rather than waiting
  * for ever. Test hook: STUDIO_TEST_MACHINE (a profile as JSON, a path to one, or "none" for a failed scan).
+ *
+ * 2.70.0 (t): the GPU area for jobs. Kinds that are mostly GPU work (GPU_AREA_KINDS: a browser playtest with GPU flags
+ * on, Blender previews and the asset round trip, Unity bakes and graphics runs, the landing clip) claim VRAM plus a
+ * small RAM/CPU share instead of a slot when the scan shows a GPU, so they run beside a CPU verify. No GPU in the scan,
+ * no scan, or STUDIO_GPU_AREA=off: the 2.69 claims. Per-kind caps count by group (CAP_GROUPS: one Unity, one browser
+ * playtest, one harness Blender job unless raised).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,9 +48,69 @@ export const JOB_KINDS = {
   'blender-preview': { ramGb: 2, cpuThreads: 1, vramGb: 1, gpuOnly: true, what: 'Blender preview render' },
   'asset-roundtrip': { ramGb: 1, cpuThreads: 1, vramGb: 0, gpuOnly: false, what: 'asset export/re-import round trip' },
   heavy: { ramGb: 4, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'heavy command' },
+  // 2.70.0 (t): with no GPU in the scan these are CPU jobs like the rest (a slot); with one, gpuAreaClaim moves them.
+  'unity-bake': { ramGb: 8, cpuThreads: 4, vramGb: 4, gpuOnly: false, what: 'Unity lightmap bake' },
+  'unity-visual': { ramGb: 8, cpuThreads: 4, vramGb: 2, gpuOnly: false, what: 'Unity graphics test run' },
+  'build-clip': { ramGb: 3, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'playable build and clip after a landing' },
 };
 /** Per-kind concurrency caps (more slots never mean two Unity editors at once unless the owner sets it); others: none. */
-export const MAX_CONCURRENT = { unity: 1, 'browser-playtest': 1 };
+export const MAX_CONCURRENT = { unity: 1, 'browser-playtest': 1, blender: 1 };
+/**
+ * 2.70.0 (t): kinds that share one per-kind cap: every Unity editor run counts as "unity", the harness's own Blender
+ * jobs as "blender" (one at a time; an interactive Blender someone opened is never counted, closed or touched), and the
+ * landing clip (a browser playtest) as "browser-playtest".
+ */
+export const CAP_GROUPS = { 'unity-bake': 'unity', 'unity-visual': 'unity', 'blender-preview': 'blender', 'asset-roundtrip': 'blender', 'build-clip': 'browser-playtest' };
+export const capGroup = (kind) => CAP_GROUPS[kind] || kind;
+/** The kind shares a cap with others (it is in a group, or names one). */
+export const isGrouped = (kind) => Boolean(CAP_GROUPS[kind]) || Object.values(CAP_GROUPS).includes(kind);
+/**
+ * 2.70.0 (t): the GPU area for jobs that are mostly GPU work. When the machine scan shows a GPU (and STUDIO_GPU_AREA
+ * isn't off), these kinds claim VRAM plus a small RAM and CPU share instead of a machine:heavy slot, so they run
+ * beside a CPU verify when VRAM and RAM allow. `browser` kinds only when the browser runs with GPU flags
+ * (STUDIO_BROWSER_GPU on, or auto with a GPU); with the flags off Chromium renders on the CPU (SwiftShader) and the
+ * job keeps its slot. studio/machine-budget.json "gpuJobs": { "<kind>": { ramGb, cpuThreads, vramGb } } overrides.
+ */
+export const GPU_AREA_KINDS = {
+  'browser-playtest': { ramGb: 5, cpuThreads: 1, vramGb: 1, browser: true },
+  'gpu-playtest': { ramGb: 2, cpuThreads: 1, vramGb: 1, browser: true },
+  'blender-preview': { ramGb: 2, cpuThreads: 1, vramGb: 1 },
+  'asset-roundtrip': { ramGb: 1, cpuThreads: 1, vramGb: 0.5 },
+  'unity-bake': { ramGb: 8, cpuThreads: 2, vramGb: 4 },
+  'unity-visual': { ramGb: 8, cpuThreads: 2, vramGb: 2 },
+  'build-clip': { ramGb: 3, cpuThreads: 1, vramGb: 0.5, browser: true },
+};
+/**
+ * 2.70.0 (t): STUDIO_BROWSER_GPU=on|off|auto (default off): { on, mode, why }. auto = on when the machine scan shows a
+ * GPU. The flags themselves (qa/chromium.mjs browserGpuFlags) are UNVERIFIED on the crew's PC: opt-in.
+ */
+export function browserGpuMode(env = process.env, profile = null) {
+  const raw = String(env.STUDIO_BROWSER_GPU || '').trim().toLowerCase();
+  const mode = /^(on|1|true|yes)$/.test(raw) ? 'on' : raw === 'auto' ? 'auto' : 'off';
+  if (mode === 'on') return { on: true, mode, why: 'STUDIO_BROWSER_GPU=on' };
+  if (mode === 'off') return { on: false, mode, why: raw ? `STUDIO_BROWSER_GPU=${raw}` : 'STUDIO_BROWSER_GPU is off by default' };
+  const g = mainGpu(profile);
+  return g ? { on: true, mode, why: `STUDIO_BROWSER_GPU=auto and the machine scan shows ${g.name || 'a GPU'}` } : { on: false, mode, why: `STUDIO_BROWSER_GPU=auto and the machine scan shows no GPU${profile ? '' : ' (no scan)'}` };
+}
+/**
+ * 2.70.0 (t): the GPU-area claim for `kind`, or { claim: null, why } when the job keeps the 2.69 claim (no GPU in the
+ * scan or no scan, STUDIO_GPU_AREA=off, a browser job with GPU flags off, or a kind that isn't mostly GPU).
+ */
+export function gpuAreaClaim(kind, { root = process.cwd(), env = process.env, profile = null } = {}) {
+  if (!GPU_AREA_KINDS[kind]) return { claim: null, why: '' };
+  const g = mainGpu(profile);
+  if (!profile || !g) return { claim: null, why: profile ? 'no GPU in the machine scan' : 'no machine scan' };
+  if (off(env.STUDIO_GPU_AREA)) return { claim: null, why: 'STUDIO_GPU_AREA=off' };
+  const own = budgetConfig(root).gpuJobs;
+  const base = { ...GPU_AREA_KINDS[kind], ...(own && typeof own === 'object' && own[kind] && typeof own[kind] === 'object' ? own[kind] : {}) };
+  let why = `mostly GPU work and the scan shows ${g.name || 'a GPU'}`;
+  if (base.browser) {
+    const b = browserGpuMode(env, profile);
+    if (!b.on) return { claim: null, why: `the browser renders on the CPU (${b.why})` };
+    why = `the browser runs with GPU flags (${b.why})`;
+  }
+  return { claim: { ramGb: Number(base.ramGb) || 0, cpuThreads: Number(base.cpuThreads) || 0, gpu: Number(base.vramGb) > 0 ? { vramGb: Number(base.vramGb) } : null, gpuOnly: true, area: 'gpu' }, why };
+}
 /**
  * How many jobs of `kind` may run at once: STUDIO_HEAVY_MAX_<KIND> (kind upper-cased, - as _), else
  * studio/machine-budget.json "maxConcurrent": { "<kind>": n }, else MAX_CONCURRENT. null: no cap (0, off or none).
@@ -164,12 +230,13 @@ export function budgetState(p, holders = [], { env = process.env } = {}) {
     gpuClaimedGb: r1(vAll),
     gpuName: g?.name || null,
     cpuCap: Math.floor(logicalCores(p) * Math.max(1, num(env.STUDIO_CPU_OVERCOMMIT, 1.5))),
-    cpuUsed: sum(claims.filter((x) => !x.c.gpuOnly), (x) => x.c.cpuThreads),
+    // 2.70.0 (t): a GPU-area claim (area 'gpu') counts its small CPU share; older GPU-only claims count none (2.68).
+    cpuUsed: sum(claims.filter((x) => !x.c.gpuOnly || x.c.area === 'gpu'), (x) => x.c.cpuThreads),
     cores: logicalCores(p),
     holders: holders.length,
     ramHolders: claims.filter((x) => Number(x.c.ramGb) > 0).length,
     gpuHolders: claims.filter((x) => Number(x.c.gpu?.vramGb) > 0).length,
-    cpuHolders: claims.filter((x) => !x.c.gpuOnly).length,
+    cpuHolders: claims.filter((x) => !x.c.gpuOnly || x.c.area === 'gpu').length,
   };
 }
 
@@ -197,6 +264,12 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
     if (!(Number(base.ramGb) > 0)) out.ramGb = r1(1 + WORKER_GB(e) * w);
     if (!(Number(base.cpuThreads) > 0)) out.cpuThreads = w;
   }
+  // 2.70.0 (t): a mostly-GPU kind takes the GPU area when the scan shows a GPU; out.areaWhy says which area and why.
+  if (GPU_AREA_KINDS[k]) {
+    const ga = gpuAreaClaim(k, { root, env: e, profile });
+    if (ga.claim) Object.assign(out, ga.claim, { areaWhy: `the GPU area: ${ga.why}` });
+    else out.areaWhy = `a machine:heavy slot: ${ga.why}`;
+  }
   if (Number(ramGb) > 0) out.ramGb = Number(ramGb);
   if (vramGb !== undefined && vramGb !== null && vramGb !== '') out.gpu = Number(vramGb) > 0 ? { vramGb: Number(vramGb) } : null;
   if (gpuOnly !== undefined) out.gpuOnly = Boolean(gpuOnly);
@@ -207,14 +280,22 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
  * Does `claim` fit now? { ok, area: 'slots'|'ram'|'gpu'|'cpu'|null, line, alone? }. `holders` are the live records,
  * `slots` the holder cap. Without a profile only the slot count decides (2.67).
  */
-export function admit(claim, state, { slots = 1, holders = [], kindMax = null } = {}) {
+export function admit(claim, state, { slots = 1, holders = [], kindMax = null, groupMax = null } = {}) {
+  const capLine = (same, name, max) => `waiting: ${same} ${name} job${same === 1 ? '' : 's'} already running (max ${max}; STUDIO_HEAVY_MAX_${String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_')} or studio/machine-budget.json "maxConcurrent")`;
   // 2.68.0 (n): a per-kind cap (maxConcurrent), before the areas.
   if (kindMax && claim.kind) {
     const same = holders.filter((h) => claimOf(h).kind === claim.kind).length;
-    if (same >= kindMax) return { ok: false, area: 'kind', line: `waiting: ${same} ${claim.kind} job${same === 1 ? '' : 's'} already running (max ${kindMax}; STUDIO_HEAVY_MAX_${String(claim.kind).toUpperCase().replace(/[^A-Z0-9]+/g, '_')} or studio/machine-budget.json "maxConcurrent")` };
+    if (same >= kindMax) return { ok: false, area: 'kind', line: capLine(same, claim.kind, kindMax) };
   }
   const slotHolders = state.known ? holders.filter((h) => !claimOf(h).gpuOnly).length : holders.length;
   if (!(state.known && claim.gpuOnly) && slotHolders >= slots) return { ok: false, area: 'slots', line: `all ${slots} machine:heavy slot${slots === 1 ? '' : 's'} are taken (STUDIO_HEAVY_SLOTS)` };
+  // 2.70.0 (t): the cap group's cap (CAP_GROUPS: every Unity kind is one "unity", the harness's Blender jobs one
+  // "blender"), counting every kind in the group.
+  if (groupMax && claim.kind && isGrouped(claim.kind)) {
+    const grp = capGroup(claim.kind);
+    const same = holders.filter((h) => capGroup(claimOf(h).kind) === grp).length;
+    if (same >= groupMax) return { ok: false, area: 'kind', line: capLine(same, grp, groupMax) };
+  }
   if (!state.known) return { ok: true, area: null, line: '' };
   let alone = '';
   const ram = Number(claim.ramGb) || 0;
@@ -228,7 +309,7 @@ export function admit(claim, state, { slots = 1, holders = [], kindMax = null } 
     else return { ok: false, area: 'gpu', line: `waiting for the GPU: needs ${r1(v)} GB VRAM, ${state.freeVramGb} free on ${state.gpuName || 'the GPU'} (${state.gpuReserve} GB kept back: STUDIO_GPU_RESERVE_GB; GPU claims ${state.gpuClaimedGb} GB)` };
   }
   const c = Number(claim.cpuThreads) || 0;
-  if (!claim.gpuOnly && c > 0 && state.cpuHolders && state.cpuUsed + c > state.cpuCap) return { ok: false, area: 'cpu', line: `waiting for CPU: needs ${c} threads, ${Math.max(0, state.cpuCap - state.cpuUsed)} of ${state.cpuCap} free (STUDIO_CPU_OVERCOMMIT x ${state.cores} cores)` };
+  if ((!claim.gpuOnly || claim.area === 'gpu') && c > 0 && state.cpuHolders && state.cpuUsed + c > state.cpuCap) return { ok: false, area: 'cpu', line: `waiting for CPU: needs ${c} threads, ${Math.max(0, state.cpuCap - state.cpuUsed)} of ${state.cpuCap} free (STUDIO_CPU_OVERCOMMIT x ${state.cores} cores)` };
   return { ok: true, area: null, line: alone, alone: Boolean(alone) };
 }
 

@@ -93,10 +93,18 @@ export const ASSET_FIXES = {
   triangles: 'the mesh is over its triangle budget for that LOD: decimate it in a headless Blender script (blender -b --factory-startup -P <script>), name LOD meshes <name>_LOD1, _LOD2, and export again; the budget is studio/game.json assets.triangleBudget (the owner\'s)',
   texture: 'the texture is bigger than the budget: downscale it (npm run adapt, or a headless Blender bake) to studio/game.json assets.textureMaxPx on the longest side and export again',
   scale: 'the model\'s bounding box is not the size its brief states (or no size is recorded): fix the scale in the Blender script (real metres, applied transforms: bpy.ops.object.transform_apply(scale=True)) and export again, or record the brief\'s size as "size": { "w", "d", "h" } in {file}\'s manifest row or <name>.asset.json; the tolerance is studio/game.json assets.sizeTolerance (the owner\'s)',
-  preview: 'render a preview next to the model ({file} -> <name>.preview.png) with a headless Blender script (blender -b --factory-startup -P <script>), never the GUI',
+  preview: 'render a preview next to the model ({file} -> <name>.preview.png, or one per view: <name>.preview-front.png, -34, -top at 512 px) with a headless Blender script (blender -b --factory-startup -P <script>), never the GUI',
   roundtrip: 'the export/re-import command failed on {file}: run the command in studio/game.json assets.roundTrip yourself, fix what its last lines name (scale, missing textures, a broken export) and export again',
   brand: 'a brand name is in {file}\'s name, a glTF node/material/texture name or its manifest row: rename it to a generic name (and remove the brand mark from the model\'s textures); the brand list is studio/game.json assets.brandNames',
   name: 'rename {file} to letters, digits, . _ - and spaces only (a command line could misread it)',
+  // 2.70.0 (v): the preview checks (harness/asset-review.mjs). Fix the render or the model, never the thresholds
+  // (studio/asset-review.json silences checks: tier C).
+  'preview-blank': 'the preview {file} is (almost) one colour: the model isn\'t in front of the camera. Frame the camera on the model\'s bounding box in the headless render script (blender -b --factory-startup -P <script>) and render the front, 3/4 and top views again at the fixed size',
+  'preview-black': 'the preview {file} is all black: add a light (or a world colour) and check the camera isn\'t inside the model, then render again headless',
+  'preview-white': 'the preview {file} is all white: lower the exposure / light strength, or the background is filling the frame because the model is missing; render again headless',
+  'preview-magenta': 'the preview {file} shows the missing-texture magenta: a texture path is broken or not packed. Pack or relink the textures (bpy.ops.file.pack_all()), export the model again and render the previews again',
+  'preview-clipped': 'the model touches the edge of {file}: move the camera back or use the bounding box to frame it with a margin, then render the views again',
+  'preview-small': 'the model is tiny in {file}: check its scale first (real metres, applied transforms; a centimetre export is 100x off), then frame the camera on its bounding box and render again',
 };
 
 /** The Fix text for one asset-gate check on one file. */

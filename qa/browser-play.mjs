@@ -32,7 +32,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { launchChromium } from './chromium.mjs';
+import { launchChromium, rendererReport } from './chromium.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { REPO_ROOT, emitEvent } from '../harness/event.mjs';
 import { cartridgeFromArgv, loadCartridge, isTemplateCartridge } from '../harness/cartridge.mjs';
@@ -181,6 +181,9 @@ export async function playInBrowser({ cartridge, url: urlArg, shots = true, vide
       fail('BROWSER-NOT-LOADED', `the page didn't load: ${res?.err ? res.err.message.split('\n')[0] : `HTTP ${res.status()}`}`);
       return { ...report, passed: false };
     }
+    // 2.70.0 (t): which WebGL renderer the page got (STUDIO_BROWSER_GPU; SwiftShader is the CPU), in the report.
+    report.renderer = await rendererReport(browser, page);
+    if (report.renderer.note) report.notes = [...(report.notes || []), report.renderer.note];
     await page.waitForFunction(() => window.__sim && typeof window.__sim.getState === 'function', null, { timeout: 8000 }).catch(() => {});
     const hasSim = await page.evaluate(() => Boolean(window.__sim?.getState));
     const hasView = await page.evaluate(() => typeof window.__view === 'function');

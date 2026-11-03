@@ -348,7 +348,8 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
   RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less
   `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
   `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
-  the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify.
+  the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
+  below).
 - **Per kind**: at most one Unity editor run and one browser playtest at a time, whatever the slots (others: no cap
   within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
   (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap
@@ -368,6 +369,44 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
 - The supervisor starts at most (RAM - reserve - heavy claims) / `STUDIO_SESSION_RAM_GB` (0.6) agent sessions, and
   says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
   `none`).
+
+### The GPU area for jobs (2.70.0)
+
+The PC's GPU sat at 1-7% while CPU verifies queued, because browser playtests, Blender and Unity graphics runs all
+waited for the one heavy slot. When the machine scan shows a GPU, jobs that are mostly GPU work claim **VRAM plus a
+small RAM and CPU share** instead of a slot, so they start beside a CPU verify when VRAM and RAM allow:
+
+| Kind | GPU-area claim (RAM / CPU threads / VRAM) | When |
+|---|---|---|
+| `browser-playtest`, `gpu-playtest` | 5 / 1 / 1 GB, 2 / 1 / 1 GB | only with browser GPU flags on (`STUDIO_BROWSER_GPU`, docs/BROWSER-PLAY.md); off, the browser renders on the CPU and keeps its slot |
+| `blender-preview`, `asset-roundtrip` | 2 / 1 / 1 GB, 1 / 1 / 0.5 GB | the harness's own Blender jobs |
+| `unity-bake`, `unity-visual` | 8 / 2 / 4 GB, 8 / 2 / 2 GB | a Unity lightmap bake, a Unity graphics test run (callers pass the kind) |
+| `build-clip` | 3 / 1 / 0.5 GB | the playable build + clip after a landing (below), with browser GPU flags on |
+
+- No GPU in the scan, no scan, or `STUDIO_GPU_AREA=off`: the 2.69 claims exactly (a slot). `studio/machine-budget.json`
+  `"gpuJobs": { "<kind>": { "ramGb", "cpuThreads", "vramGb" } }` changes a GPU-area claim; `"jobs"` still sets the slot claim.
+- Per-kind caps stay and count by group: every Unity kind is one `unity` (one editor), the harness's Blender jobs are one
+  `blender` (one at a time, `STUDIO_HEAVY_MAX_BLENDER`), the landing clip counts as a `browser-playtest`. A Blender
+  someone opened by hand is never counted, closed or taken over.
+- Each such job logs one line: `[heavy] asset round trip took the GPU area: mostly GPU work and the scan shows <GPU>`,
+  or `took a machine:heavy slot: no GPU in the machine scan`. `node harness/heavy.mjs status` marks GPU-area holders.
+- **Blender** (`harness/blender-job.mjs`): the asset round trip claims by its program (Blender: `asset-roundtrip`;
+  a Unity batchmode command: `unity`) and a Blender command gets `-t <n>` render threads unless it sets its own:
+  `STUDIO_BLENDER_THREADS`, else logical cores / 3 from the scan (1 to 8); never 0 (Blender's 0 is every core).
+  UNVERIFIED with a real Blender: tests use a stub.
+
+### A playable build and a clip after each landing (2.70.0)
+
+After a merge train lands (task done's train and the train daemon's), the train queues ONE low-priority `build-clip`
+job (`harness/landing-build.mjs`) and goes on: a detached worker at below-normal priority saves the landed main as a
+playable build (`npm run play`, docs/ARCADE.md) and records a short clip (`qa/clip.mjs`), then records `build.snapshot`
+and `clip.recorded` events with the landed tasks. `npm run status -- --brief` and the daily digest show the latest
+("Playable build <id> (T-1, T-2); clip <file>"). At most one is queued: a newer landing replaces a queued one (its
+tasks added). Skipped when the game has no browser build (`browser.page` / `browser.dist` in its qa.mjs) or is the
+template, and with `STUDIO_LANDING_BUILD=off`. `STUDIO_LANDING_CLIP_SECONDS` (15), `STUDIO_LANDING_CLIP_CMD` (the
+clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEOUT_MIN` (10);
+`STUDIO_LANDING_BUILD_WORKER=off` queues without starting the worker. `node harness/landing-build.mjs status` shows
+what is queued or running.
 
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 

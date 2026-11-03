@@ -177,6 +177,8 @@ export async function selftest2671J({ dir, run, report, tmpRoot }) {
     const task = (cmd, env = {}) => run(dir, `node harness/task.mjs ${cmd}`, { ...base, ...env });
     const idOf = (r) => (out(r).match(/"id":\s*"(T-\d+)"/) || [])[1];
     const added = (id) => evs().filter((e) => e.type === 'task.added' && e.task === id).pop()?.meta || {};
+    // 2.70.0 (v): an asset whose checks pass lands only after a look by someone other than its maker.
+    const reviewed = (id, asset) => { const w8 = task(`done ${id} --agent artist-2671j`); const rv = run(dir, `node harness/assets.mjs review ${asset} --pass --by art-director-2671j`, { ...base, STUDIO_LOCK_OWNER: 'art-director-2671j' }); return { waited: w8.status !== 0 && /wait.? for a look/.test(out(w8)), passed: rv.status === 0 }; };
     // a: refused (no row), then lands and hands off to a builder task
     const a = idOf(task('add "Plan asset: dock crane prop" --role asset-3d --track asset --prototype'));
     task(`start ${a} --agent artist-2671j`);
@@ -188,6 +190,7 @@ export async function selftest2671J({ dir, run, report, tmpRoot }) {
     try { facts = JSON.parse(fs.readFileSync(path.join(dir, '.studio', 'handback-facts', `${a}.json`), 'utf8')); } catch {}
     row(glbA, 'own work');
     g('add', '-A'); g('commit', '-qm', 'crane row');
+    const rvA = reviewed(a, 'dock-crane');
     const done = task(`done ${a} --agent artist-2671j`);
     const hand = evs().filter((e) => e.type === 'asset.handoff' && e.meta?.from === a);
     const wid = hand[0]?.meta?.id;
@@ -197,8 +200,8 @@ export async function selftest2671J({ dir, run, report, tmpRoot }) {
     const handAfter = evs().filter((e) => e.type === 'asset.handoff' && e.meta?.from === a).length;
     const wires = evs().filter((e) => e.type === 'task.added' && (e.msg?.replace(/^Queued T-\d+ \[\w+\] \([\w-]+\): /, '') || '').startsWith('Wire in crane.glb')).length;
     guard('2.67.1 (j10a): task done on --track asset runs the asset gate: refused with the FAIL line and its Fix (missing row), kept for the hand-back facts; with the row it lands (2.67.0: it closed with no asset checks)', () => [
-      refused.status !== 0 && /\[asset-gate\] FAIL licence assets\/dock\/crane\.glb/.test(out(refused)) && /\[asset-gate\] Fix: /.test(out(refused)) && (facts?.gates || []).some((x) => x.id === 'asset' && !x.ok) && /FAIL licence assets\/dock\/crane\.glb/.test(facts?.text || '') && done.status === 0,
-      JSON.stringify({ refused: out(refused).slice(-900), facts, done: out(done).slice(-600) }).slice(0, 3000)]);
+      refused.status !== 0 && /\[asset-gate\] FAIL licence assets\/dock\/crane\.glb/.test(out(refused)) && /\[asset-gate\] Fix: /.test(out(refused)) && (facts?.gates || []).some((x) => x.id === 'asset' && !x.ok) && /FAIL licence assets\/dock\/crane\.glb/.test(facts?.text || '') && rvA.waited && rvA.passed && done.status === 0,
+      JSON.stringify({ refused: out(refused).slice(-900), facts, rvA, done: out(done).slice(-600) }).slice(0, 3000)]);
     guard('2.67.1 (j10b): a landed asset task files ONE "Wire in" builder task naming its files, --after the asset task; a second landing files none (2.67.0: no hand-off)', () => [
       hand.length === 1 && wid && wmeta.after?.includes(a) && (wmeta.assetFiles || []).includes(glbA) && !wmeta.track && /"already":true/.test(out(again)) && handAfter === 1 && wires === 1,
       JSON.stringify({ hand, wmeta, again: out(again).slice(-300), handAfter, wires }).slice(0, 2500)]);
@@ -211,11 +214,13 @@ export async function selftest2671J({ dir, run, report, tmpRoot }) {
     w('assets/dock/tug.preview.png', png(256, 256));
     row(glbB, 'CC0');
     g('add', '-A'); g('commit', '-qm', 'tug');
+    const w8b = task(`done ${b} --agent artist-2671j-b`);
+    const rvB = run(dir, 'node harness/assets.mjs review dock-tug --pass --by art-director-2671j', { ...base, STUDIO_LOCK_OWNER: 'art-director-2671j' });
     const doneB = task(`done ${b} --agent artist-2671j-b`);
     const hb = evs().filter((e) => e.type === 'asset.handoff' && e.meta?.from === b);
     const bmeta = hb[0]?.meta?.id ? added(hb[0].meta.id) : {};
     guard('2.67.1 (j10c): with the Unity engine configured the hand-off task is on the Unity track (--track engine:unity, an engine-porter), --after the asset task (2.67.0: no hand-off)', () => [
-      doneB.status === 0 && hb.length === 1 && bmeta.track === 'engine:unity' && bmeta.after?.includes(b) && /engine-porter/.test(evs().find((e) => e.type === 'task.added' && e.task === hb[0].meta.id)?.msg || ''),
+      w8b.status !== 0 && rvB.status === 0 && doneB.status === 0 && hb.length === 1 && bmeta.track === 'engine:unity' && bmeta.after?.includes(b) && /engine-porter/.test(evs().find((e) => e.type === 'task.added' && e.task === hb[0].meta.id)?.msg || ''),
       JSON.stringify({ doneB: out(doneB).slice(-700), hb, bmeta }).slice(0, 2500)]);
   }
 }

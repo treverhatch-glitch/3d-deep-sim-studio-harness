@@ -124,7 +124,7 @@ change adds or changes files under the game's declared asset paths. Its limits c
 | texture | a PNG/JPEG (loose or inside a .glb) is bigger than `textureMaxPx` |
 | scale | the model's bounding box (LOD 0 meshes' POSITION min/max through their nodes' transforms, metres; Y-up: w = x, h = y, d = z) is outside the stated size ± `sizeTolerance`; the size is `"size": { "w", "d", "h" }` in its manifest row or in `<name>.asset.json` next to it (none: a note, or a failure with `sizeRequired`). A game's own engine-side model check can run as the round-trip command |
 | preview | a model has no `<name>.preview.png` (or `_preview`, `.jpg`, `.webp`) next to it |
-| roundtrip | the configured command exits non-zero (it runs under the machine:heavy lock; `{file}` runs it per model). No command, or the program isn't installed: skipped with a note |
+| roundtrip | the configured command exits non-zero (it runs under the machine:heavy lock, 2.70.0: in the GPU area when the scan shows a GPU, one harness Blender job at a time, `-t <n>` threads from `STUDIO_BLENDER_THREADS` or the scan; docs/WORK-ORGANIZATION.md; `{file}` runs it per model). No command, or the program isn't installed: skipped with a note |
 | brand | a configured brand name is in a file name, a glTF node/mesh/material/texture/image name, or the manifest row |
 
 Every failure prints a `Fix:` line (`harness/gate-fix.mjs` ASSET_FIXES) and goes into the task's next hand-back facts.
@@ -135,4 +135,45 @@ but the round trip.
 naming the files, `--after` the asset task: on the Unity track (`--track engine:unity`, an engine-porter) when the
 studio has the Unity engine configured, else a builder task. It is filed once per asset task (an `asset.handoff`
 event).
+
+### Preview checks and the review (2.70.0)
+
+Each model gets three preview renders next to it, written by the render step at a fixed size (512 px square,
+`studio/asset-review.json` `previewSize`): `<name>.preview-front.png`, `<name>.preview-34.png`,
+`<name>.preview-top.png` (the older single `<name>.preview.png` counts as the front view). The asset gate measures
+each PNG in plain Node (`harness/asset-review.mjs`, no image library, no model call) and fails, with a plain-words
+line and a `Fix:` line, when a view is:
+
+| Check | Fails when |
+|---|---|
+| preview-blank | one colour covers over `blankShare` (98%) of the frame and nothing stands out of the background |
+| preview-black / preview-white | over `darkShare` / `lightShare` (98%) of the pixels are near black / near white |
+| preview-magenta | the missing-texture magenta is over `magentaMaxShare` (10%) of the model's pixels (untextured pink) |
+| preview-clipped | `edgeMinPixels` (2) or more model pixels sit on the frame's border (off-frame, camera too close) |
+| preview-small | the model's box is under `minFrameShare` (10%) of the frame and its longer side under half of it (often a wrong scale) |
+
+The model is every pixel that differs from the background (the border's most common colour, or transparency) by more
+than `bgTolerance`. More mass in the top half than the bottom (over `upWarnRatio`, 1.5x) in the front and 3/4 views is
+a WARNING note only: possibly upside down. A preview the decoder can't read (JPEG, 16-bit) is a note. A hard failure
+hands the asset straight back with the findings; no review is asked for.
+
+**The review.** When the checks pass, the asset still needs a look by a session that can view images. `task done`
+writes `.studio/asset-reviews/<asset>.md` (the previews, the brief's facts, the checks' numbers, four questions: scale
+against the reference, style match, orientation, obvious defects), files ONE "Review asset <asset>" task for the
+`role` in `studio/asset-review.json` (default `art-director`, the role that owns the look), and refuses until it is
+answered. `<asset>` is the model's path under the asset folder without the extension (`assets/props/crate.glb` is
+`props-crate`).
+
+```
+npm run asset -- review <asset> --pass --by <name>
+npm run asset -- review <asset> --fail "what is wrong" --by <name>
+npm run asset -- reviews                         waiting, oldest first (also in status --brief and the digest)
+```
+
+The worker who made the asset (the asset task's claimants, the row's `madeBy`) can't pass its own review. Another agent
+under its own name, a person, an agent recording a person's verdict with `--permission "<their words>"` (never a
+worker), or the outside agent under the owner's delegation for `asset-review` can. A pass counts for the files' current
+checksums: a re-export asks again. A fail files a fix task (asset track) with the reviewer's words. Both write a review
+note in `studio/reviews/`. `studio/asset-review.json` holds the thresholds, `review` and `role`; it silences checks, so a
+lane that changes it is tier C (a game dev releases it).
 

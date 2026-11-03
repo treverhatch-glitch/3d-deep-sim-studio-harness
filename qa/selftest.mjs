@@ -129,7 +129,8 @@ const edit = (dir, rel, fn) => fs.writeFileSync(path.join(dir, rel), fn(fs.readF
 // machine doesn't change their result (qa/selftest-259d.mjs tests the floor with its own setting).
 // 2.60.1 (B-17, B-35): the same for heavy work's memory floor, the CPU probe (Windows) and an open Unity editor
 // counted as heavy work (qa/selftest-2601m.mjs tests them with its own settings).
-const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off' };
+// 2.70.0 (t): no playable build + clip worker after a test train's landing (qa/selftest-270t.mjs turns it on).
+const CLEAN_ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(STUDIO_|HUB_|AGENT_|PLAYTEST_|OLLAMA_|NVIDIA_|ANTHROPIC_|OPENAI_|XAI_|GEMINI_|VERTEX_|GROQ_|OPENROUTER_|CODEX_|CURSOR_)|_API_KEY|_TOKEN$/.test(k))), STUDIO_RAM_FLOOR_GB: '0', STUDIO_HEAVY_RAM_FLOOR_GB: '0', STUDIO_CPU_PROBE: 'off', STUDIO_HEAVY_PROGRAMS: 'off', STUDIO_LANDING_BUILD: 'off' };
 const run = (dir, cmd, env = {}) => spawnSync(cmd, { cwd: dir, shell: true, encoding: 'utf8', env: { ...CLEAN_ENV, STUDIO_CARTRIDGE: '', AGENT_EVENTS_FILE: '', ...env } });
 const plantInvariant = (tick) => (s) =>
   s.replace('  if (state.won && state.lost)', `  if (state.tick === ${tick}) findings.push({ id: 'PLANTED', severity: 'P0', summary: 'planted at tick ${tick}' });\n  if (state.won && state.lost)`);
@@ -4232,6 +4233,45 @@ console.log(JSON.stringify({ a, b, c }));`);
   const dir = copyRepo();
   const { selftest269S } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-269s.mjs')).href);
   await selftest269S({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.70.0 (t): GPU area jobs (heavy-budget.mjs), browser GPU flags and the renderer record (qa/chromium.mjs,
+// visual-proof.mjs), Blender out of machine:heavy (harness/blender-job.mjs) and a playable build + clip after a landing
+// (harness/landing-build.mjs) (qa/selftest-270t.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270T } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270t.mjs')).href);
+  await selftest270T({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.70.0 (u): Unity speed: the Accelerator (STUDIO_UNITY_ACCELERATOR), no duplicate Edit Mode run (dotnet-covered or the
+// same tree), one editor start (STUDIO_UNITY_ONE_EDITOR), the Graphics split, landing build options, the parallel
+// Library copy (qa/selftest-270u.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270u.mjs')).href);
+  await selftest270U({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.70.0 (v): a vision check on asset previews before an asset lands: deterministic preview checks (blank, black,
+// white, magenta, clipped, small; an up-axis warning), then ONE review request and task, answered by someone other
+// than the maker (npm run asset -- review), before the asset lands (qa/selftest-270v.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270V } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270v.mjs')).href);
+  await selftest270V({ dir, run, report, tmpRoot });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.70.0 (w): sparse lanes (laneExclude, widen, the checks never see a partial tree), the lane disk report and the
+// janitor's stale-lane proposals surfaced by the supervisor in the digest, status --brief and the War Room (qa/selftest-270w.mjs).
+{
+  const dir = copyRepo();
+  const { selftest270W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-270w.mjs')).href);
+  await selftest270W({ dir, run, report, tmpRoot });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
