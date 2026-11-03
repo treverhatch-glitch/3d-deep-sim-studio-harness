@@ -566,6 +566,9 @@ async function main(argv) {
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
+    // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
+    await import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})).catch(() => {});
     // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
     // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
     if (!r.stop) await trainDaemonTick(state, r);

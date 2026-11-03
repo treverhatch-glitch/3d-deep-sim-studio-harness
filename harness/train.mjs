@@ -89,6 +89,7 @@ import { runGatesWaiting } from './train-busy.mjs';
 import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
+import { checkStamped, stampWrite } from './workaround.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -108,10 +109,13 @@ function writeQueue(root, q) {
   const f = queueFile(root);
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const tmp = `${f}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(q, null, 2)}\n`);
+  const text = `${JSON.stringify(q, null, 2)}\n`;
+  try { stampWrite(f, text, { root }); } catch { /* 2.71.0 (z): the write goes ahead unstamped */ }
+  fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, f);
 }
-const withQueue = (root, fn) => withLandLock(root, () => { const q = readQueue(root); const r = fn(q); writeQueue(root, q); return r; }, { name: 'train-queue', waitMs: 30000 });
+// 2.71.0 (z): the queue changed by hand since the harness last wrote it is a detected workaround (harness/workaround.mjs).
+const withQueue = (root, fn) => withLandLock(root, () => { try { checkStamped(queueFile(root), { root }); } catch { /* evidence only */ } const q = readQueue(root); const r = fn(q); writeQueue(root, q); return r; }, { name: 'train-queue', waitMs: 30000 });
 
 /** Put a checked lane in the queue (replacing the task's older entry). entry: { task, agent, dir, branch, head, all }. */
 export function enqueue(root, entry) {

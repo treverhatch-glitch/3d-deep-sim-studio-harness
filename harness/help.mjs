@@ -37,6 +37,7 @@ const GROUPS = [
     ['budget', 'quota marks and the last 5 hours'],
     ['run-report', 'a report of the run'],
     ['notes -- add --kind bad "…"', 'record a harness problem'],
+    ['workaround -- log "…" --why "…"', 'record a harness workaround (repeats open a harness task)'],
     ['pitfall -- "never …" --by <name>', 'a rule every later agent gets'],
     ['mode', 'pace and scope (scope lite|full)'],
   ]],

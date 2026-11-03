@@ -36,6 +36,7 @@
  * or STUDIO_AGENT_TOOL / STUDIO_AGENT_MODEL (.env). Output goes to .studio/agents/<agent>.log.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings } from './agy-allow.mjs';
@@ -328,7 +329,7 @@ export function markGone() {
     if (s.status !== 'running' || s.running) continue;
     const at = new Date().toISOString();
     fs.writeFileSync(sessionFile(s.agent), JSON.stringify({ ...s, running: undefined, stalled: undefined, beatAgeMin: undefined, status: 'ended', endedAt: at, reason: 'its process is gone (killed, crashed or the machine restarted)' }, null, 2));
-    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone' } });
+    emitEvent({ type: 'agent.session.end', agent: s.agent, model: s.model, status: 'error', msg: `${s.agent} ended: its process is gone (last heartbeat ${s.lastBeat || 'never'})`, meta: { role: s.role, tool: s.tool, reason: 'process gone', startedAt: s.startedAt || undefined, bootAt: new Date(Date.now() - os.uptime() * 1000).toISOString() } }); // 2.71.0 (z): times for harness/workaround.mjs
     // 2.65.0: the uniform job.done (harness/jobs.mjs) beside agent.session.end.
     jobDone({ kind: 'session', id: s.agent, agent: s.agent, task: s.task || null, result: 'gone', ms: Date.parse(s.startedAt) ? Date.now() - Date.parse(s.startedAt) : null, tail: `its process is gone (last heartbeat ${s.lastBeat || 'never'})`, log: s.log || null, extra: { role: s.role || null } });
     // Its own copy: save what's uncommitted, keep unmerged commits on their branch, remove the copy.

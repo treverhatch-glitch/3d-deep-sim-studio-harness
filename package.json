@@ -106,6 +106,7 @@
     "usage": "node harness/usage.mjs",
     "digest": "node harness/digest.mjs",
     "denials": "node harness/denials.mjs",
+    "workaround": "node harness/workaround.mjs",
     "delegate": "node harness/delegation.mjs",
     "vfx": "node harness/vfx.mjs",
     "public-guard": "node harness/public-guard.mjs",

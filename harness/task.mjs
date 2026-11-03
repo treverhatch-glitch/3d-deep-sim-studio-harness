@@ -39,6 +39,7 @@ import { withFileLock, writeAtomic } from './fsafe.mjs';
 import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
+import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -262,6 +263,10 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
   const wasNext = read(NEXT_FILE);
   let wasDone = read(DONE_FILE);
+  // 2.71.0 (z): a board file changed by something other than the harness since its last write (a hand edit) is a
+  // detected workaround (harness/workaround.mjs); every write is stamped first. Under the board lock; never a refusal.
+  try { checkStamped(NEXT_FILE, { text: wasNext }); checkStamped(DONE_FILE, { text: wasDone }); } catch { /* evidence only */ }
+  const put = (file, text) => { try { stampWrite(file, text); } catch { /* the write goes ahead unstamped */ } writeAtomic(file, text); };
   const onDisk = { next: parseQueueText(wasNext), done: parseQueueText(wasDone, 'done') };
   const nextOpen = new Set([...onDisk.next.inProgress, ...onDisk.next.backlog].map((t) => t.id));
   const inDoneFile = new Set(onDisk.done.done.map((t) => t.id));
@@ -277,13 +282,13 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   if (moving) writeAtomic(MOVES_FILE, `${JSON.stringify({ moves, at: new Date().toISOString(), pid: process.pid })}\n`, { fsync: false });
   if (toDone.length) {
     const first = renderDone([...tasks.done, ...onDisk.done.done.filter((t) => toOpen.includes(t.id))], kept.done);
-    if (first !== wasDone) writeAtomic(DONE_FILE, first);
+    if (first !== wasDone) put(DONE_FILE, first);
     wasDone = first;
   }
   // 2.57.0 (PU-16): replaced whole (temp file + rename): an agent reading mid-write saw half a board ("Task not found").
-  writeAtomic(NEXT_FILE, renderNext(tasks, kept.next));
+  put(NEXT_FILE, renderNext(tasks, kept.next));
   const doneText = renderDone(tasks.done, kept.done);
-  if (wasDone !== doneText) writeAtomic(DONE_FILE, doneText);
+  if (wasDone !== doneText) put(DONE_FILE, doneText);
   if (moving || fs.existsSync(MOVES_FILE)) try { fs.rmSync(MOVES_FILE, { force: true }); } catch { /* stale notes only matter for a task in both files */ }
   // 2.58.0 (P-057): say once which lines were set aside (they stay in the file, under UNREADABLE).
   const fresh = [...kept.next.filter((u) => u.fresh).map((u) => ['studio/NEXT.md', u.line]), ...kept.done.filter((u) => u.fresh).map((u) => ['studio/DONE.md', u.line])];
@@ -1517,6 +1522,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   const flags = parseFlags(process.argv.slice(2));
+  // 2.71.0 (z): --force and a refused command re-run again and again are detected workarounds (harness/workaround.mjs).
+  try { watchCommand('task', process.argv.slice(2), { agent: (typeof flags.agent === 'string' && flags.agent) || (typeof flags.by === 'string' && flags.by) || whoAmI({}, REPO_ROOT, { ...process.env, STUDIO_LOCK_OWNER: '' }) || process.env.STUDIO_LOCK_OWNER || null }); } catch { /* evidence only */ }
   const [cmd = 'next', arg1] = flags._;
   const q = parseNextQueue();
 
