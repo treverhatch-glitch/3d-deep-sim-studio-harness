@@ -297,4 +297,23 @@ console.log(JSON.stringify({ states: Object.fromEntries(Object.entries(r).map(([
     try { fs.rmSync(S, { recursive: true, force: true }); fs.rmSync(origin, { recursive: true, force: true }); fs.rmSync(work, { recursive: true, force: true }); } catch {}
   }
   try { fs.rmSync(laneProbeFile, { force: true }); } catch {}
+
+  // 2.69.0 (CI windows): the main checkout reached through another spelling of its path (a link here; an 8.3 short
+  // name such as RUNNER~1 on Windows) is still the main checkout; a git worktree is still a lane copy.
+  await guard('2.69.0 (s) upgrade: isMainCheckout compares real paths: the main checkout reached through a link is the main checkout, a git worktree of it is not (fails before: git gave the real git dir and a common dir relative to the link, so the main checkout read as a lane copy and the upgrade refused)', async () => {
+    const base = fs.mkdtempSync(path.join(tmpRoot, 'imc-'));
+    const real = path.join(base, 'real');
+    fs.mkdirSync(real);
+    const gg = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd, encoding: 'utf8' });
+    gg(real, 'init', '-q'); fs.writeFileSync(path.join(real, 'a.txt'), 'a\n'); gg(real, 'add', '-A'); gg(real, 'commit', '-qm', 'a', '--no-verify');
+    const link = path.join(base, 'link');
+    let linked = true;
+    try { fs.symlinkSync(real, link, 'junction'); } catch { linked = false; }
+    const wt = path.join(base, 'wt');
+    gg(real, 'worktree', 'add', '-q', wt);
+    const { isMainCheckout } = await import(pathToFileURL(path.join(dir, 'harness', 'upgrade-guard.mjs')).href);
+    const r = { real: isMainCheckout(real), link: linked ? isMainCheckout(link) : true, lane: isMainCheckout(wt), linked };
+    try { fs.rmSync(base, { recursive: true, force: true }); } catch {}
+    return [r.real === true && r.link === true && r.lane === false, JSON.stringify(r)];
+  });
 }
