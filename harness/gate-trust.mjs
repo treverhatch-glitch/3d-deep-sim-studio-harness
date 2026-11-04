@@ -193,18 +193,144 @@ export function recordTrust(rec, studioDirs = []) {
 }
 
 /** Folder names under the read paths whose ignored contents are build or dependency output, never read as input. */
-const OUTPUT_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.vite', '.cache', '.turbo', '.parcel-cache', '.nyc_output', 'test-results', 'playwright-report', 'blob-report', '.godot', 'captures', 'export', 'exports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.next', '.nuxt', '.svelte-kit', 'reports', 'Library', 'Temp', 'obj', 'Logs']);
+// 2.76.0 (B-85): .vite-cache and .tsbuild (a per-checkout Vite cache and tsbuildinfo folder a game's build writes) too.
+const OUTPUT_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.vite', '.vite-cache', '.tsbuild', '.cache', '.turbo', '.parcel-cache', '.nyc_output', 'test-results', 'playwright-report', 'blob-report', '.godot', 'captures', 'export', 'exports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.next', '.nuxt', '.svelte-kit', 'reports', 'Library', 'Temp', 'obj', 'Logs']);
 const HARMLESS_FILE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$|\.(log|tsbuildinfo|pyc|blend1)$|(^|\/)\.[^/]+\.tmp$/i;
 /** Root-level files a test runner or npm reads (an untracked or ignored one there counts too). */
 const ROOT_INPUT = /^((vitest|vite|jest|playwright|babel|karma|cypress|webpack|rollup)\.config\.[^/]+|vitest\.workspace\.[^/]+|\.npmrc|\.yarnrc(\.yml)?|\.babelrc(\.[^/]+)?|tsconfig[^/]*\.json|package\.json|\.mocharc(\.[^/]+)?|pytest\.ini|conftest\.py|sitecustomize\.py|setup\.(c|m)?[jt]s)$/i;
+/**
+ * 2.76.0 (B-85): a file whose NAME says it configures a tool (a runner config, an npm/yarn/babel rc, tsconfig, a package
+ * manifest, a test setup file), wherever it is. Such a file never counts as generated output, even when a check wrote it
+ * or a "generated" glob names it: an ignored or untracked one changes what the checks do (2.71.1's purpose).
+ */
+export const configLike = (rel) => {
+  const base = String(rel).replace(/\/$/, '').split('/').pop() || '';
+  return ROOT_INPUT.test(base) || /\.config\.[cm]?[jt]sx?$/i.test(base) || /^(\.env(\..*)?|\.npmrc|\.yarnrc.*|\.pnpmfile\.c?js|jsconfig[^/]*\.json)$/i.test(base) || /(^|[./-])setup(tests?|files?)?\.[cm]?[jt]sx?$/i.test(base);
+};
+
+/** Glob -> RegExp ('/'-separated, ** any depth, * one segment, ? one char; a bare folder covers what is under it). */
+export function generatedGlobRe(glob) {
+  let g = String(glob || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (!/[*?]/.test(g)) g = `${g}/**`;
+  let re = '';
+  for (let i = 0; i < g.length; i += 1) {
+    const c = g[i];
+    if (c === '*' && g[i + 1] === '*') { re += g[i + 2] === '/' ? '(?:.*/)?' : '.*'; i += g[i + 2] === '/' ? 2 : 1; }
+    else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * 2.76.0 (B-85): the "generated" globs a studio declares: studio/gates.json "generated" (paths from the studio root) and
+ * the game's <game>/studio.gates.json "generated" (paths from the game's folder). Files the game's own build or test
+ * scripts write and git ignores (art a pretest step unpacks from committed packs, caches). [regexes]; never throws.
+ */
+export function generatedGlobs(root, gameRoot = null) {
+  const res = [];
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const add = (list, base) => { for (const g of Array.isArray(list) ? list : []) { const t = String(g || '').trim(); if (!t || t.startsWith('/') || t.split(/[\\/]/).includes('..')) continue; try { res.push(generatedGlobRe(base ? `${base}/${t}` : t)); } catch {} } };
+  add(read(path.join(root, 'studio', 'gates.json'))?.generated, '');
+  if (gameRoot) add(read(path.join(root, gameRoot, 'studio.gates.json'))?.generated, String(gameRoot).replace(/\\/g, '/').replace(/\/+$/, ''));
+  return res;
+}
+
+const MAX_WALK = 20000;
+/** The files under an ignored folder entry (repo-relative, '/'), output folders and links left out; null past MAX_WALK. */
+function walkIgnored(root, rel, max = MAX_WALK) {
+  const outp = [];
+  const stack = [rel.replace(/\/$/, '')];
+  while (stack.length) {
+    const d = stack.pop();
+    let ents = [];
+    try { ents = fs.readdirSync(path.join(root, d), { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) {
+      const r = `${d}/${e.name}`;
+      if (e.isSymbolicLink()) continue;
+      if (e.isDirectory()) { if (!OUTPUT_DIRS.has(e.name)) stack.push(r); continue; }
+      if (!e.isFile()) continue;
+      outp.push(r);
+      if (outp.length > max) return null;
+    }
+  }
+  return outp;
+}
+const fingerprint = (root, rel) => { try { const st = fs.statSync(path.join(root, rel)); return [st.size, Math.round(st.mtimeMs)]; } catch { return null; } };
+
+/**
+ * 2.76.0 (B-85): every ignored file under `paths` (folder entries walked), outside studio state, dependency and build
+ * output: { rel: [size, mtimeMs] }, or null without git or past MAX_WALK files. run-gates takes it before and after the
+ * checks, so the files the checks themselves wrote (or rewrote) are known as their output.
+ */
+export function ignoredSnapshot(root, paths = []) {
+  const dirs = [...new Set(paths.map((p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '')).filter((p) => p && !p.startsWith('..') && fs.existsSync(path.join(root, p))))];
+  if (!dirs.length) return {};
+  const o = git(root, ['ls-files', '-z', '--others', '--exclude-standard', '--ignored', '--directory', '--', ...dirs.map((d) => `:(literal)${d}`)]);
+  if (o === null) return null;
+  const snap = {};
+  let n = 0;
+  for (const f of o.split('\0').filter(Boolean)) {
+    if (/^(studio|\.studio|\.lanes|node_modules)(\/|$)/.test(f) || f.replace(/\/$/, '').split('/').some((seg) => OUTPUT_DIRS.has(seg))) continue;
+    const files = f.endsWith('/') ? walkIgnored(root, f) : [f];
+    if (files === null) return null;
+    for (const r of files) { const fp = fingerprint(root, r); if (fp) { snap[r] = fp; n += 1; } }
+    if (n > MAX_WALK) return null;
+  }
+  return snap;
+}
+
+const GEN_DIR = path.join('gates', 'generated'); // under .studio/
+const genFile = (studioDir, root) => path.join(studioDir, GEN_DIR, `${crypto.createHash('sha1').update(realPath(root)).digest('hex').slice(0, 16)}.json`);
+/** The files an earlier verify in this checkout wrote as its checks' output: { rel: [size, mtimeMs] } (empty when none). */
+export function readGenerated(studioDir, root) {
+  try { const j = JSON.parse(fs.readFileSync(genFile(studioDir, root), 'utf8')); return j && realPath(j.root || '') === realPath(root) && j.files && typeof j.files === 'object' ? j.files : {}; } catch { return {}; }
+}
+/**
+ * 2.76.0 (B-85): after a verify, remember the ignored files its checks wrote or rewrote (in `after`, absent from
+ * `before` or changed since), plus the remembered ones still unchanged, for this checkout. Config-like names are
+ * never remembered. Returns the number kept; never throws.
+ */
+export function writeGenerated(studioDir, root, before, after) {
+  if (!before || !after) return 0;
+  const prev = readGenerated(studioDir, root);
+  const keep = {};
+  const same = (a, b) => Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+  for (const [rel, fp] of Object.entries(after)) {
+    if (configLike(rel)) continue;
+    const was = before[rel];
+    if (!was || !same(was, fp)) keep[rel] = fp; // written by the checks during this verify
+    else if (same(prev[rel], fp)) keep[rel] = fp; // written by an earlier verify, untouched since
+  }
+  try {
+    const f = genFile(studioDir, root);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, `${JSON.stringify({ root: path.resolve(root), at: new Date().toISOString(), files: keep })}\n`);
+  } catch {}
+  return Object.keys(keep).length;
+}
 
 /**
  * Untracked files, and ignored files outside build and dependency output, under `paths` (the game's folder, cartridges/,
  * qa/, harness/, scripts/…) and at the root when a runner reads them: the files a verify ran beside that no commit holds.
  * `skip` drops more (engine cache churn). Returns repo-relative paths ('/'-separated; a folder ends with '/'), or null
  * without git.
+ * 2.76.0 (B-85): an ignored FOLDER entry (git lists a wholly ignored folder as one "dir/" line) is judged by the files in
+ * it, so a folder holding only harmless files (*.tsbuildinfo) or generated output is not hidden; and an ignored file the
+ * checks' own commands wrote (`generated(rel)`: remembered by an earlier verify in this checkout, unchanged since) or a
+ * "generated" glob names counts as output. Never for untracked files, a root-level runner file or a config-like name.
  */
-export function hiddenInputs(root, paths = [], { skip = () => false, max = 50 } = {}) {
+export function hiddenInputs(root, paths = [], opts = {}) {
+  const r = hiddenReport(root, paths, opts);
+  return r === null ? null : r.hidden;
+}
+
+/**
+ * hiddenInputs with the reasons: { hidden, untracked, ignored, config, generated: n, excusedFolders: [dir/] } or null.
+ * `untracked`, `ignored` and `config` split `hidden` (config: a config-like name, untracked or ignored; never excused).
+ */
+export function hiddenReport(root, paths = [], { skip = () => false, max = 50, generated = null, globs = [] } = {}) {
   const dirs = [...new Set(paths.map((p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '')).filter((p) => p && !p.startsWith('..') && fs.existsSync(path.join(root, p))))];
   const list = (args) => { const o = git(root, ['ls-files', '-z', '--others', '--exclude-standard', ...args]); return o === null ? null : o.split('\0').filter(Boolean); };
   const spec = [...dirs.map((d) => `:(literal)${d}`)];
@@ -215,9 +341,30 @@ export function hiddenInputs(root, paths = [], { skip = () => false, max = 50 } 
   if (untracked === null || ignored === null || rootU === null || rootI === null) return null;
   const outputish = (f) => f.replace(/\/$/, '').split('/').some((seg) => OUTPUT_DIRS.has(seg));
   const studio = (f) => /^(studio|\.studio|\.lanes|node_modules)(\/|$)/.test(f);
+  const isGen = (f) => !configLike(f) && ((typeof generated === 'function' && generated(f)) || globs.some((re) => re.test(f)));
   const hidden = new Set();
-  for (const f of untracked) if (!studio(f) && !skip(f)) hidden.add(f);
-  for (const f of ignored) if (!studio(f) && !outputish(f) && !HARMLESS_FILE.test(f.replace(/\/$/, '')) && !skip(f)) hidden.add(f);
-  for (const f of [...rootU, ...rootI]) if (!f.includes('/') && ROOT_INPUT.test(f)) hidden.add(f);
-  return [...hidden].sort().slice(0, max);
+  const kinds = { untracked: new Set(), ignored: new Set(), config: new Set() };
+  let gen = 0;
+  const excusedFolders = [];
+  const put = (f, kind) => { hidden.add(f); (configLike(f) ? kinds.config : kinds[kind]).add(f); };
+  for (const f of untracked) if (!studio(f) && !skip(f)) put(f, 'untracked');
+  for (const f of ignored) {
+    if (studio(f) || outputish(f) || skip(f)) continue;
+    if (!f.endsWith('/')) {
+      if (HARMLESS_FILE.test(f)) continue;
+      if (isGen(f)) { gen += 1; continue; }
+      put(f, 'ignored');
+      continue;
+    }
+    // A wholly ignored folder: judged by what is in it (B-85: ".tsbuild/" holds only *.tsbuildinfo).
+    const files = walkIgnored(root, f);
+    if (files === null) { put(f, 'ignored'); continue; }
+    const bad = files.filter((x) => !HARMLESS_FILE.test(x) && !skip(x) && !isGen(x));
+    gen += files.filter((x) => !HARMLESS_FILE.test(x) && !skip(x) && isGen(x)).length;
+    if (!bad.length) { excusedFolders.push(f); continue; }
+    for (const x of bad) put(x, 'ignored');
+  }
+  for (const f of [...rootU, ...rootI]) if (!f.includes('/') && ROOT_INPUT.test(f)) put(f, rootU.includes(f) ? 'untracked' : 'ignored');
+  const cap = (s) => [...s].sort().slice(0, max);
+  return { hidden: cap(hidden), count: hidden.size, untracked: cap(kinds.untracked), ignored: cap(kinds.ignored), config: cap(kinds.config), generated: gen, excusedFolders: excusedFolders.slice(0, max) };
 }

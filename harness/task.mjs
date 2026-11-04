@@ -1090,6 +1090,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     },
     // 2.69.0 (r): ONE fix task per test the flake triager quarantined (harness/flakes.mjs; the board dedupes by title).
     fileFlakeTask: ({ title, test, label }) => addTask({ title, role: 'builder', priority: 'P1', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', flake: { test, label } } }),
+    // 2.76.0 (helper h): in beta mode the hand-back cap files ONE Producer task for the lane (the board dedupes by title).
+    fileRescue: ({ task, n, why }) => addTask({ title: `Rescue ${task}: handed back ${n} times`, role: 'producer', priority: 'P0', agent: 'train', meta: { promoted: true, origin: 'harness', handBackCap: { task, n, why: String(why || '').slice(0, 300) } } }),
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },

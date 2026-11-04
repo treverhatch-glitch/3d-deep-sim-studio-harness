@@ -225,6 +225,15 @@
   ignored ones outside build and dependency output (`node_modules`, `dist`, `build`, `coverage`, `.vite`, …), under the
   game, `cartridges/`, `qa/`, `harness/`, `scripts/`, `engine/`, `hub/` or a runner config at the root, records
   `dirty: true` and the files (`hidden`), and is never reused.
+  2.76.0 (B-85): files the game's own build and test scripts write are output, not hidden inputs: `.vite-cache` and
+  `.tsbuild` count as build output; a wholly ignored folder is judged by the files in it (one holding only `*.tsbuildinfo`
+  is fine); the ignored files a full verify's checks wrote are remembered for that checkout
+  (`.studio/gates/generated/<checkout>.json`, size and time) and count as output at the next verify while unchanged; and
+  a game lists more under `"generated": ["public/art/refs/**"]` in its `studio.gates.json` (paths from the game folder;
+  `studio/gates.json` takes paths from the root; both are protected files). Never excused: untracked files, root runner
+  files, and config-like names anywhere (`*.config.*`, `.npmrc`, `tsconfig*.json`, `package.json`, setup files). The record
+  says what made it dirty (`dirtyFrom`); a train verify whose gates all pass and whose only "dirt" is ignored non-config
+  files in the train's fresh copy is green with a trust note (`task.train.trust_note`), never a hand-back.
 - Signed verify records (2.73.0, `harness/verify-key.mjs`): each studio has a local verify key, made on first use and kept
   outside every checkout and lane: `~/.studio-verify/<studio-id>.key` (mode 600; `<studio-id>` is a hash of the
   repository's git folder, which the main checkout, its lanes and the train's copies share). `STUDIO_VERIFY_KEY_DIR`
