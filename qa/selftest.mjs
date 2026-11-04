@@ -4594,6 +4594,15 @@ if (inShard('selftest-276i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (w): the War Room as a field terminal: a verify's real progress (harness/gate-progress.mjs, written by run-gates)
+// on the running train, the cut hub pages (/legacy, the React sources, /human), dark always with a light screen by hand.
+if (inShard('selftest-277w')) {
+  const dir = copyRepo();
+  const { selftest277W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277w.mjs')).href);
+  await selftest277W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
