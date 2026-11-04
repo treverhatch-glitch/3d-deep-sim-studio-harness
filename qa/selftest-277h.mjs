@@ -231,7 +231,7 @@ console.log(JSON.stringify(readQueue(process.cwd()).find((e) => e.task === 'T-95
       const L = st.lane('p93d', 'T-946', { 'web/mini/breaks-soak.txt': 'this lane breaks the soak\n' });
       st.setQueue([L]);
       const t = st.train('p93d');
-      return [!t.landed?.includes('T-946') && known().length === 0 && (t.calls?.handBack || []).some(([task]) => task === 'T-946'), JSON.stringify({ t, k: known() }).slice(0, 3000)];
+      return [!t.landed?.includes('T-946') && known().length === 0 && t.logs?.some((l) => /cleared from the known-red list/.test(l)) && (t.calls?.handBack || []).some(([task]) => task === 'T-946'), JSON.stringify({ t, k: known() }).slice(0, 3000)];
     });
   }
 
