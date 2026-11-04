@@ -85,10 +85,26 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
     let d = null;
     try { d = (await import('../harness/hook-stamp.mjs')).laneHarnessDrift(root); } catch {}
     if (d?.files.length) {
-      const { laneDriftText, laneHarnessOwn } = await import('../harness/hook-stamp.mjs');
+      const { laneDriftText, laneHarnessOwn, workerSession } = await import('../harness/hook-stamp.mjs');
+      const builder = await workerSession();
       if (laneHarnessOwn()) console.log(`[gates] note: STUDIO_LANE_HARNESS=own: running this lane copy's own harness, ${d.files.length} file(s) behind ${d.branch}`);
       else {
-        console.error(`[gates] FAIL not run: ${laneDriftText(d)}`);
+        // 2.78.0 (B-105): for a launched worker the harness refreshes the lane itself (main merged in with studio/ left out, the
+        // hooks re-stamped as its own step), then runs this verify again on the fresh code; a worker is never told to run a step
+        // it may not. A person or a Producer gets the refusal and its fix, as before.
+        let rf = null;
+        if (builder && !process.env.STUDIO_LANE_REFRESHED) {
+          try {
+            const { refreshStaleLane } = await import('../harness/train-refresh.mjs');
+            rf = await refreshStaleLane(d.lane.main, { task: process.env.STUDIO_JOB_TASK || null, agent: path.basename(root), dir: root, branch: null }, { by: 'harness', log: (m) => console.error(m) });
+          } catch (e) { rf = { refreshed: false, why: e.message }; }
+        }
+        if (rf?.refreshed) {
+          console.error(`[gates] this lane copy ran an older harness than ${d.branch}; refreshed it (${rf.why}). Running the verify again on the new code.`);
+          const again = spawnSync(process.execPath, [process.argv[1], ...argv], { cwd: root, stdio: 'inherit', windowsHide: true, env: { ...process.env, STUDIO_LANE_REFRESHED: '1' } });
+          process.exit(again.status ?? 1);
+        }
+        console.error(`[gates] FAIL not run: ${laneDriftText(d, { builder })}${rf?.why ? ` (the harness tried to refresh it: ${rf.why})` : ''}`);
         process.exit(1);
       }
     }

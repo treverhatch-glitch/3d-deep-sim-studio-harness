@@ -176,6 +176,30 @@ export function laneSparseState(dir = REPO_ROOT) {
   return { sparse: true, on: extra.length > 0, patterns, extra };
 }
 
+/**
+ * 2.78.0 (B-105): a lane copy's studio/ and .studio/ are links (a symlink, or a junction on Windows) to the main
+ * checkout's. createLaneCopy leaves them out with a sparse checkout, so git never writes through them. When that
+ * state is lost (the entries lose skip-worktree), a merge of main sees main's live board files through the link as
+ * local changes ("commit your changes or stash") and, were it to go on, would write main's files. Before any merge
+ * or rebase in the lane: mark every tracked path under a linked folder skip-worktree again (the state the copy was
+ * made in), and say whether the copy's sparse patterns still leave the folders out, so files main adds there are not
+ * written either. Touches only this lane's index; the link and main's files are never opened. A folder that is a real
+ * folder (not a link) is left alone. Returns { links: [names], marked, sparseOk, why? }.
+ */
+export function protectSharedLinks(dir = REPO_ROOT) {
+  const links = ['studio', '.studio'].filter((d) => { try { return fs.lstatSync(path.join(dir, d)).isSymbolicLink(); } catch { return false; } });
+  if (!links.length) return { links: [], marked: 0, sparseOk: true };
+  const ls = git(dir, 'ls-files', '-t', '-z', '--', ...links.map((l) => `${l}/`));
+  const open = String(ls.stdout || '').split('\0').filter((l) => l && !l.startsWith('S ')).map((l) => l.slice(2));
+  if (open.length) {
+    const r = spawnSync('git', ['update-index', '--skip-worktree', '-z', '--stdin'], { cwd: dir, input: `${open.join('\0')}\0`, encoding: 'utf8', windowsHide: true });
+    if (r.status !== 0) return { links, marked: 0, sparseOk: false, why: `could not mark ${links.join(', ')} left out of the lane: ${String(r.stderr || '').trim().split('\n').pop()}` };
+  }
+  const st = laneSparseState(dir);
+  const sparseOk = st.sparse && links.every((l) => st.patterns.includes(`!/${l}/`));
+  return { links, marked: open.length, sparseOk };
+}
+
 /** Tracked files this copy leaves out (skip-worktree), studio/ and .studio/ apart. */
 export function leftOutFiles(dir = REPO_ROOT) {
   const r = git(dir, 'ls-files', '-t', '-z');

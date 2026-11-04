@@ -646,12 +646,27 @@ export function laneHarnessDrift(root = ROOT, env = process.env) {
   return { lane, branch: lane.branch, base, tip, files: d.stdout.split('\n').map((s) => s.trim()).filter(Boolean) };
 }
 
+/** 2.78.0 (B-105): is this a launched worker session (a builder, …), which may not refresh a lane or restamp? */
+export async function workerSession(env = process.env) {
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const owner = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (!role && !owner) return false;
+  try {
+    const { DECIDER_ROLES, WORKER_NAME } = await import('./permission.mjs');
+    return Boolean((role && !DECIDER_ROLES.test(role)) || (owner && WORKER_NAME.test(owner)));
+  } catch { return Boolean(role); }
+}
+
 export const laneHarnessOwn = (env = process.env) => /^own$/i.test(String(env.STUDIO_LANE_HARNESS || ''));
 
 /** The refusal (or note) for a lane copy running an older harness than the studio's branch. */
-export function laneDriftText(d) {
+export function laneDriftText(d, { builder = false } = {}) {
   const shown = d.files.slice(0, 6).join(', ') + (d.files.length > 6 ? ` and ${d.files.length - 6} more` : '');
-  return `this lane copy runs its own harness, and ${d.branch} has changed ${d.files.length} harness file(s) since the lane branched from it (${shown}), so its checks would judge with the old code. Rebase on it: git rebase ${d.branch} (then npm run hooks -- restamp if the hooks gate lists commits). STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
+  const head = `this lane copy runs its own harness, and ${d.branch} has changed ${d.files.length} harness file(s) since the lane branched from it (${shown}), so its checks would judge with the old code.`;
+  // 2.78.0 (B-105): a launched worker may not rebase or restamp: the harness refreshes its lane (npm run verify does it, leaving
+  // the shared studio/ alone); failing that it hands the task back and the lane is refreshed for the next session.
+  if (builder) return `${head} The harness refreshes a lane copy itself when its verify runs (${d.branch} merged in, studio/ left alone, the hooks re-stamped as its own step); if that did not happen, hand the task back (npm run task -- pause <ID> --agent <you> --note "…"): the lane is refreshed for the next session. STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
+  return `${head} Rebase on it: git rebase ${d.branch} (then npm run hooks -- restamp if the hooks gate lists commits), or npm run lanes -- refresh <task> --by <name>, which merges it in and leaves studio/ alone. STUDIO_LANE_HARNESS=own runs this copy's harness anyway.`;
 }
 
 // ---- 2.59.0: re-stamp a lane's commits through the real hooks ----
@@ -781,7 +796,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(`[commit-msg] note: could not stamp this commit (${e.message}); the hooks gate will list it.`);
     }
     // 2.59.0 (#6): a note, never a refusal: the commit is the agent's work and must not be lost to a stale copy.
-    try { const d = laneHarnessOwn() ? null : laneHarnessDrift(process.cwd()); if (d?.files.length) console.error(`[commit-msg] note: ${laneDriftText(d)}`); } catch {}
+    try { const d = laneHarnessOwn() ? null : laneHarnessDrift(process.cwd()); if (d?.files.length) console.error(`[commit-msg] note: ${laneDriftText(d, { builder: await workerSession() })}`); } catch {}
     process.exit(0);
   }
   if (cmd === 'check') {
@@ -791,7 +806,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       try { d = laneHarnessDrift(); } catch {}
       if (d?.files.length && laneHarnessOwn()) console.error(`[hooks] note: STUDIO_LANE_HARNESS=own: judging with this lane copy's own harness, ${d.files.length} file(s) behind ${d.branch}`);
       else if (d?.files.length) {
-        const why = laneDriftText(d);
+        const why = laneDriftText(d, { builder: await workerSession() });
         if (process.argv.includes('--json')) console.log(JSON.stringify({ ok: false, staleHarness: d.files, open: [], why }));
         else console.error(`[hooks] FAIL ${why}`);
         process.exit(1);
