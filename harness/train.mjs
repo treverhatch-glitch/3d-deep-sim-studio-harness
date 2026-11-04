@@ -73,6 +73,9 @@ import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
+import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
+import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
+import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
@@ -448,6 +451,19 @@ export function buildIntegration(sc, tip, lanes, { id, unionFiles = [] }) {
 const recordGreen = (rec) => Boolean(rec) && !rec.partial && rec.tier !== 'fast' && rec.dirty === false && !rec.incomingOnly && Array.isArray(rec.rows) && rec.rows.length > 0 && rec.rows.every((r) => r.ok || r.required === false);
 
 /**
+ * 2.76.0 (B-85): a full record whose required rows all passed and whose "dirty" comes only from ignored, non-config files
+ * the checks may read (run-gates' dirtyFrom: tracked tree clean, nothing untracked, no config-like name): the trust
+ * note's words, else ''. Only the train's own just-run verify in its fresh scratch copy is judged so (never a reuse).
+ */
+export function ignoredOnlyDirty(rec) {
+  const d = rec?.dirtyFrom;
+  if (!rec || rec.dirty !== true || !d || d.tracked !== false || d.untracked !== 0 || d.config !== 0 || !(d.ignored > 0)) return '';
+  if (rec.partial || rec.tier === 'fast' || rec.incomingOnly || !Array.isArray(rec.rows) || !rec.rows.length || !rec.rows.every((r) => r.ok || r.required === false)) return '';
+  const shown = (rec.hidden || []).slice(0, 3).join(', ');
+  return `the record counts as dirty only because of ${d.ignored} ignored file(s) the checks wrote in the train's own copy (${shown}${d.ignored > 3 ? ', …' : ''}), no tracked change, no untracked file, no config file`;
+}
+
+/**
  * May this verify record stand for the train's verify of `tree`? The same rules as task done's (merge-lane.mjs
  * judgeVerifyReuse: same tree, clean, at least as wide, engine gate, not related-only, at most 24 h old), and every
  * required row green (task done reruns the safety checks itself; a train has only this verify).
@@ -622,7 +638,16 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   for (const f of [`${owner}-full.json`, `${owner}.json`]) { try { fs.rmSync(path.join(gatesDir, f), { force: true }); } catch {} }
   if (rec) { rec.train = id; try { fs.writeFileSync(path.join(recDir, `${id}-${n}.json`), JSON.stringify(rec, null, 2)); } catch {} }
   // Green only when the gates passed AND the record says they tested exactly this tree, clean, in full.
-  const ok = r.status === 0 && recordGreen(rec) && rec.tree === tree && (!all || !rec.scoped);
+  // 2.76.0 (B-85): or every gate passed on exactly this tree and the only thing that made the record "dirty" is ignored,
+  // non-config files in the train's own scratch copy (made fresh from git: only this train's checks wrote them, e.g. art
+  // a pretest step unpacks): a trust note, never a hand-back. A tracked change, an untracked file or a config-like name
+  // still makes it not clean (2.71.1).
+  const trustNote = r.status === 0 && !recordGreen(rec) && rec?.tree === tree && (!all || !rec.scoped) ? ignoredOnlyDirty(rec) : '';
+  const ok = r.status === 0 && (recordGreen(rec) || Boolean(trustNote)) && rec.tree === tree && (!all || !rec.scoped);
+  if (trustNote) {
+    log(`[train] ${id}: verify ${n}: trust note: ${trustNote}; every gate passed on tree ${tree.slice(0, 8)}, so it counts as green (not a hand-back)`);
+    emitEvent({ type: 'task.train.trust_note', agent: owner, status: 'warn', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} green with a trust note: ${trustNote}`.slice(0, 600), meta: { train: id, tree, n, dirtyFrom: rec.dirtyFrom, hidden: (rec.hidden || []).slice(0, 10) } });
+  }
   const { gates, detail } = failLines(text);
   const why = ok ? '' : noCheck ? `ran no check (${busy || `exit ${r.status} before any gate ran`})` : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   const vparts = trainVerifyParts(text, ok, [sc.dir, root]); // 2.72.0 (a)
@@ -1269,8 +1294,10 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
 }
 
 /** How many times a task was handed back for a failure (task.paused with a reason key, as harness/breaker.mjs counts). */
+// 2.76.0: infrastructure hand-backs (a missing lane copy, a CRLF/hash mismatch, a re-queue, a dead train, a timeout-only
+// red already re-run, a mixed lane: harness/train-lanes.mjs infraHandBack) never count.
 export function handBackCount(task) {
-  return readRecentEvents(20000).filter((e) => e.type === 'task.paused' && e.task === task && (e.meta?.reasonKey || /Not landed by merge train/.test(String(e.msg || '')))).length;
+  return readRecentEvents(20000).filter((e) => e.type === 'task.paused' && e.task === task && (e.meta?.reasonKey || /Not landed by merge train/.test(String(e.msg || ''))) && !infraHandBack(e)).length;
 }
 export const maxHandBacks = (env = process.env) => (Number(env.STUDIO_TRAIN_MAX_HANDBACKS) >= 0 && String(env.STUDIO_TRAIN_MAX_HANDBACKS || '').trim() !== '' ? Number(env.STUDIO_TRAIN_MAX_HANDBACKS) : 3);
 
@@ -1280,12 +1307,12 @@ export const heldNow = (e) => Boolean(e?.held) && !(e.released && e.released.hea
 const releasedFor = (e, head) => Boolean(e?.released) && e.released.head === head;
 
 /** Put a lane in the queue as "needs the owner" (or mark its entry so), with its tier and why. */
-export function holdLane(root, lane, { tier, why, rerecord = null }) {
+export function holdLane(root, lane, { tier, why, rerecord = null, beta = false }) {
   return withQueue(root, (q) => {
     let e = q.find((x) => x.task === lane.task);
     if (!e) { e = { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: lane.note || '', at: new Date().toISOString() }; q.push(e); }
     const fresh = !e.held || e.held.head !== lane.head || e.held.why !== why;
-    Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at, ...(rerecord ? { rerecord } : {}) } });
+    Object.assign(e, { head: lane.head, branch: lane.branch || e.branch, dir: lane.dir || e.dir, held: { tier, why, head: lane.head, at: fresh ? new Date().toISOString() : e.held.at, ...(rerecord ? { rerecord } : {}), ...(beta ? { beta: true } : {}) } });
     if (e.released && e.released.head !== lane.head) delete e.released;
     return { entry: { ...e }, fresh };
   });
@@ -1324,7 +1351,12 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
   // 2.67.0: the owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
   const dg = delegationFor({ action: 'train-release', by, env, root });
   if (dg.ok && ownerKey && !dg.signed && !dg.beta) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
-  const refusal = dg.ok ? '' : releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
+  // 2.76.0: a lane the hand-back cap held in beta mode is released by the beta actors (the orchestrator, a Producer or
+  // Director session: harness/beta-mode.mjs betaActor), no owner needed. Recorded as a beta use.
+  const betaHeld = !dg.ok && Boolean(readQueue(root).find((x) => x.task === task)?.held?.beta);
+  const ba = betaHeld ? betaActor({ env, from: root }) : { ok: false };
+  if (ba.ok) by = String(by || ba.who || '').trim() || ba.who;
+  const refusal = dg.ok || ba.ok ? '' : releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
   if (refusal) return { ok: false, message: `${refusal}${dg.why ? ` (${dg.why})` : ''} Nothing was released.` };
   if (dg.ok) { by = dg.owner; permission = dg.permission; }
   const perm = permissionText(permission);
@@ -1340,12 +1372,14 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true } : {}), ...(ba.ok ? { beta: ba.via } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
   const e = r.entry;
+  keepRelease(root, task, e.released); // 2.76.0: survives the lane leaving and re-entering the queue at this head
   if (dg.ok) recordUse(dg, { action: 'train-release', task, detail: `tier ${e.held.tier} at ${String(e.head).slice(0, 8)}` });
+  if (ba.ok) recordBetaUse(ba, { action: 'train-release', subject: task, why: e.held.why });
   emitEvent({ type: 'task.train.released', agent: e.released.recordedBy || e.released.by, task, to: e.agent, status: 'ok', msg: `${task} (tier ${e.held.tier}: ${String(e.held.why).slice(0, 200)}) released for the merge train by ${dg.autonomous ? `${dg.agent} in autonomous mode (allowed by ${e.released.by}; on the review list)` : e.released.by}${dg.autonomous ? '' : e.released.recordedBy ? ` (recorded by ${e.released.recordedBy} on ${e.released.by}'s permission: "${e.released.permission.slice(0, 120)}")` : ''}, at ${String(e.head).slice(0, 8)}`.slice(0, 600), meta: { by: e.released.by, head: e.head, tier: e.held.tier, ...(e.released.permission ? { permission: e.released.permission, recordedBy: e.released.recordedBy } : {}), ...(dg.autonomous ? { autonomous: true } : {}) } });
   // 2.71.0 (x): one record in the decision log (harness/decisions.mjs).
   logDecision({ action: 'train-release', subject: task, by: dg.ok ? dg.agent : e.released.by, as: asOf(dg.ok ? dg : { via: rec?.via, permission: e.released.permission }), why: `tier ${e.held.tier}: ${e.held.why}`, evidence: `${e.held.rerecord ? `${rerecordEvidence(e.held)}; ` : ''}${e.held.tier} at ${String(e.head).slice(0, 8)}`, undo: { kind: 'rehold-lane', task, head: e.head, text: `npm run decisions -- revert <id> (holds ${task} again if it hasn't landed; else files a revert task)` }, root });
@@ -1362,6 +1396,7 @@ export function unreleaseLane(root, task, { head = null, why = '' } = {}) {
     if (!e) return { ok: false, landed: true, message: `${task} isn't in the train queue any more (it landed or left)` };
     if (!e.released) return { ok: true, message: `${task} is in the queue and not released; nothing to undo` };
     if (head && e.released.head !== head) return { ok: false, message: `${task} was released again for another head (${String(e.released.head).slice(0, 8)}); undo that one by hand` };
+    forgetRelease(root, task, e.released.head);
     delete e.released;
     return { ok: true, message: `${task} is held again (tier ${e.held?.tier || '?'}): it waits for a person's release`, entry: { ...e } };
   });
@@ -1453,6 +1488,42 @@ async function trainDiskWarning(root, log) {
   try { const w = await (await import('./machine.mjs')).diskWarning({ root }); if (w) log(`[train] warning: ${w}.`); } catch {}
 }
 
+/**
+ * 2.76.0 (B-88): run one train body with its life recorded (harness/train-life.mjs): its lanes, a normal end, or a death
+ * with its cause on any exit path this process sees (a throw in a step is recorded, then thrown on). A dry run records
+ * nothing.
+ */
+async function livedTrain(root, { id, by, dryRun }, fn) {
+  if (dryRun) return fn(null);
+  const life = beginTrainLife(root, { id, by });
+  try {
+    const r = await fn(life);
+    life.end(r?.message || '');
+    return r;
+  } catch (e) {
+    life.died(`crashed: ${String(e?.message || e).slice(0, 200)}`);
+    throw e;
+  }
+}
+
+/**
+ * 2.76.0 (B-88): record every train that died without recording its end (harness/train-life.mjs reapDeadTrains) and keep
+ * its lanes moving: a queued lane keeps its place, a task done's own lane is queued, a lane two trains died with at the
+ * same head is held for the Producer (not a hand-back: never counted toward STUDIO_TRAIN_MAX_HANDBACKS). Never throws.
+ */
+export function reapTrains(root, { log = () => {}, now = Date.now(), env = process.env } = {}) {
+  try {
+    return reapDeadTrains(root, {
+      now, env, log,
+      entryOf: (task) => readQueue(root).find((e) => e.task === task) || null,
+      mark: (task, patch) => requeue(root, { task }, patch),
+      enqueue: (lane) => enqueue(root, { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: 'queued again after its train died', diedIn: lane.diedIn }),
+      onMain: (head) => git(root, 'merge-base', '--is-ancestor', head, `refs/heads/${mainBranch(root)}`).status === 0,
+      toProducer: (lane, note) => { const h = holdLane(root, lane, { tier: 'B', why: note }); if (h.fresh) emitEvent({ type: 'task.train.held', agent: 'train', task: lane.task, to: 'producer', status: 'blocked', msg: `${lane.task}: ${note}. npm run task -- train release ${lane.task} --by <name> lets it train again`.slice(0, 600), meta: { tier: 'B', why: note, died: true } }); },
+    });
+  } catch { return []; }
+}
+
 export async function runTrain(opts = {}) {
   const root = opts.root || mainRoot();
   const log = opts.log || ((m) => console.error(m));
@@ -1469,7 +1540,9 @@ export async function runTrain(opts = {}) {
   }
   // 2.63.0 (batching): a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes (--now: it doesn't).
   if (!opts.lanes && !opts.dryRun && !opts.now) waitForBatch(root, { log, id });
-  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by }), { waitMs: opts.waitMs ?? 0, log });
+  // 2.76.0 (B-88): a train that died without recording its end (its process gone) is recorded now, before this one.
+  if (!opts.dryRun) reapTrains(root, { log });
+  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => livedTrain(root, { id: tid, by, dryRun: opts.dryRun }, (life) => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by, life })), { waitMs: opts.waitMs ?? 0, log });
   let locked = await one(id);
   if (locked?.busy) return { ok: false, id, busy: locked.busy, message: `Another train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}); run this again when it ends.`, landed: [], dropped: [], deferred: [] };
   // 2.63.0 (run alone): lanes that waited because a lane ran alone get the next train(s) now, one after another.
@@ -1870,7 +1943,7 @@ function fixFirst(root, lanes, { id, by, dryRun, log }) {
   return r.lanes;
 }
 
-async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false }) {
+async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false, life = null }) {
   const res = { ok: true, id, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
   sweepScratch(root, log);
   const queued = !given;
@@ -1908,11 +1981,11 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   if (!lanes.length) { res.message = res.held.length ? `No lane can land now: ${res.held.map((h) => `${h.task} needs the owner (tier ${h.tier})`).join('; ')}.` : 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
   ev('start', id, `${lanes.length} lane(s): ${lanes.map((l) => l.task).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun, ...(lanes.some((l) => l.rider) ? { riders: lanes.filter((l) => l.rider).map((l) => l.task) } : {}) } });
   (await import('./hotspots.mjs')).trainStart(root, lanes, log, id); // 2.60.0 (helper b): lines two lanes change, in the start log
-  const drop = (lane, why, { handBack = true } = {}) => {
+  const drop = (lane, why, { handBack = true, infra = false } = {}) => {
     res.dropped.push({ task: lane.task, why });
     if (dryRun) return;
     if (queued || lane.fromQueue) dequeue(root, lane.task);
-    ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked' });
+    ev('dropped', id, `${lane.task} handed back: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'blocked', ...(infra ? { meta: { infra: true } } : {}) });
     if (handBack && !lane.own) {
       try { if (lane.branch) rememberTaskBranch(lane.task, lane.branch); } catch {}
       // 2.72.0 (b): a train red is a round of the lane's task (harness/round-cap.mjs); red twice in a row on one failure adds
@@ -1924,11 +1997,13 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };
   const hold = (lane, tier, why, extra = {}) => {
-    res.held.push({ task: lane.task, tier, why, fresh: true });
-    log(`[train] ${id}: ${lane.task} needs the owner (tier ${tier}: ${why}); it waits in the train queue until a person releases it: npm run task -- train release ${lane.task} --by <name>`);
+    res.held.push({ task: lane.task, tier, why, fresh: true, ...(extra.beta ? { beta: true } : {}) });
+    // 2.76.0: a beta hold (the hand-back cap in beta mode) waits for the orchestrator or the Producer, not a person.
+    const who = extra.beta ? 'the orchestrator or the Producer' : 'a person';
+    log(`[train] ${id}: ${lane.task} ${extra.beta ? 'goes to the orchestrator and the Producer' : 'needs the owner'} (tier ${tier}: ${why}); it waits in the train queue until ${who} releases it: npm run task -- train release ${lane.task} --by <name>`);
     if (dryRun) return;
     const h = holdLane(root, lane, { tier, why, ...extra });
-    if (h.fresh) ev('held', id, `${lane.task} needs the owner (tier ${tier}): ${why}. It waits in the queue; a person releases it with npm run task -- train release ${lane.task} --by <name> [--permission "…"]`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why } });
+    if (h.fresh) ev('held', id, `${lane.task} ${extra.beta ? 'is held for the orchestrator and the Producer (beta mode)' : 'needs the owner'} (tier ${tier}): ${why}. It waits in the queue; ${who} releases it with npm run task -- train release ${lane.task} --by <name>${extra.beta ? '' : ' [--permission "…"]'}`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why, ...(extra.beta ? { beta: true } : {}) } });
   };
 
   waitActions(root, waits, { id, by, dryRun, res, log, deps });
@@ -1942,8 +2017,26 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     // A rider goes only with the caller's own lane: if that one can't go, the riders wait for the next train.
     if (lane.rider && !ready.some((l) => l.own)) continue;
     let now = laneNow(lane);
-    if (now.error) { drop(lane, now.error, { handBack: false }); continue; }
+    // 2.76.0 (W-0081): a copy that is gone is made again from its branch, not handed back.
+    if (now.error && lane.dir && !fs.existsSync(lane.dir)) {
+      if (dryRun) log(`[train] ${id}: ${lane.task}: ${now.error}; a train would make it again from ${lane.branch || 'its branch'}`);
+      else {
+        const rc = recreateLaneCopy(root, lane, { log: (m) => log(m.replace('[train] ', `[train] ${id}: `)) });
+        if (rc.ok) { ev('lane_recreated', id, `${lane.task}: its lane copy was gone; made again from ${rc.branch} at ${rc.head.slice(0, 8)}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn', meta: { dir: rc.dir, branch: rc.branch, head: rc.head, infra: true } }); now = laneNow(lane); }
+        else now = { error: `${now.error}, and it couldn't be made again from its branch: ${rc.why}` };
+      }
+    }
+    if (now.error) { drop(lane, now.error, { handBack: false, infra: true }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
+    // 2.76.0 (B-91/B-92): a lane carrying another open task's commits (Studio-Task trailers) is refused before anything
+    // is spent on it, naming them (harness/train-lanes.mjs mixedLane). Not counted toward the hand-back cap.
+    if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_MIXED || '')) {
+      const dc = depContext(root, deps);
+      const openNow = dc.states?.open;
+      const allowed = mayCarry(root, lane.task, dc.map);
+      const m = mixedLane(root, { task: lane.task, tip: out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`)), head: now.head, open: (t) => (openNow ? openNow.has(t) : true) && !allowed.has(t) });
+      if (m.mixed) { if (!dryRun) noteMixed(id, lane, m, by); drop(lane, m.why, { infra: true }); continue; }
+    }
     // 2.76.0 (B-81): a lane whose harness is behind main (an upgrade's refresh that didn't finish) is refreshed here
     // (harness/train-refresh.mjs), not handed back by its hooks check; only a real conflict hands it back.
     if (!dryRun) {
@@ -1954,11 +2047,16 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
     const c = await laneTier(root, { head: now.head, task: lane.task, agent: lane.agent, dir: lane.dir }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);
-    const released = releasedFor(entry, now.head);
+    // 2.76.0: a release kept for this task and head (.studio/train/releases.json) counts too: an infrastructure hand-back
+    // (lane copy missing, a re-queue, a dead train) that took the entry out of the queue never voids it.
+    const kept = releasedFor(entry, now.head) ? null : keptRelease(root, lane.task, now.head);
+    if (kept && entry) entry.released = kept;
+    const released = releasedFor(entry, now.head) || Boolean(kept);
+    const relBy = (entry?.released || kept)?.by;
     res.tiers[lane.task] = c.tier;
-    log(`[train] ${id}: ${lane.task} ${tierLine(c)}${released ? ` (released by ${entry.released.by})` : ''}${c.runAlone.yes ? `; runs alone: ${c.runAlone.why}` : ''}`);
+    log(`[train] ${id}: ${lane.task} ${tierLine(c)}${released ? ` (released by ${relBy})` : ''}${c.runAlone.yes ? `; runs alone: ${c.runAlone.why}` : ''}`);
     for (const n of c.notes) log(`[train] ${id}: ${settings0.manifest || 'manifest'}: ${n} (ignored)`);
-    if (!dryRun) ev('tier', id, `${lane.task} ${tierLine(c)}${released ? ` (released by ${entry.released.by})` : ''}`, { task: lane.task, agent: by, meta: { tier: c.tier, why: c.why, rules: c.rules, runAlone: c.runAlone.yes ? c.runAlone.why : null, released: released ? entry.released.by : null } });
+    if (!dryRun) ev('tier', id, `${lane.task} ${tierLine(c)}${released ? ` (released by ${relBy})` : ''}`, { task: lane.task, agent: by, meta: { tier: c.tier, why: c.why, rules: c.rules, runAlone: c.runAlone.yes ? c.runAlone.why : null, released: released ? relBy : null } });
     // 2.65.0 (B-40): a config proposal that can't be applied, or conflicts with main's value now, is handed back first.
     const cp = laneProposal(root, { task: lane.task, head: now.head, tip: tip0 });
     if (cp && !cp.ok) { drop(lane, cp.why); continue; }
@@ -1967,8 +2065,23 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (c.needs.pinMoves.length) { drop(lane, `it is tier B and changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer on its commits: declare the pins it moves ("Pin-Moves: <pin>"), then task done again`); continue; }
     if (c.tier === 'B' && !released) {
       const n = (deps.handBacks || handBackCount)(lane.task);
-      if (n > maxHandBacks()) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'B', `handed back ${n} times (more than ${maxHandBacks()}, STUDIO_TRAIN_MAX_HANDBACKS): after that many tries the problem is in the plan, so a person looks before it lands`); continue; }
+      if (n > maxHandBacks()) {
+        // 2.76.0 (the owner's Priority 1): in beta mode the cap sends the lane to the orchestrator and the Producer (they
+        // release it, no owner key) with ONE Producer rescue task, instead of waiting for a person.
+        let beta = false;
+        try { beta = readBeta({ root }).on; } catch {}
+        if (beta) {
+          const why = `handed back ${n} times (more than ${maxHandBacks()}, STUDIO_TRAIN_MAX_HANDBACKS): in beta mode the orchestrator or the Producer looks (no owner needed): fix the plan, then npm run task -- train release ${lane.task} --by <you>`;
+          const fresh = !(entry?.held?.beta && entry.held.head === now.head);
+          hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'B', why, { beta: true });
+          if (fresh && !dryRun) { try { const t = deps.fileRescue?.({ task: lane.task, n, why }); if (t?.id) log(`[train] ${id}: ${lane.task}: Producer task ${t.id}${t.duplicate ? ' (already open)' : ''}: ${t.title || `Rescue ${lane.task}`}`); } catch (e) { log(`[train] ${id}: ${lane.task}: couldn't file the Producer's rescue task: ${e.message}`); } }
+          continue;
+        }
+        hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'B', `handed back ${n} times (more than ${maxHandBacks()}, STUDIO_TRAIN_MAX_HANDBACKS): after that many tries the problem is in the plan, so a person looks before it lands`);
+        continue;
+      }
     }
+    if (!dryRun) writeTrainStatus(root, id, { step: 'precheck', text: `checking ${lane.task} in its own copy`, lanes: lanes.length, eta: null }); // 2.76.0 (B-88)
     const pre = lane.prechecked && now.head === lane.head ? { ok: true, head: now.head, all: lane.all } : (deps.precheck || ((l) => precheckChild(root, l)))({ ...lane, head: now.head });
     // Uncommitted work: its agent is still at it, so it waits (queued). Not this agent's claim any more, or a copy whose
     // harness predates the train: out of the queue, nobody's claim touched. Any other refusal (hooks, protected files,
@@ -1980,7 +2093,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const ahead = Number(out(git(root, 'rev-list', '--count', `refs/heads/${main}..${now.head}`))) || 0;
     if (!ahead) { drop(lane, `it has no commits that ${main} doesn't have; task done ${lane.task} closes it`, { handBack: false }); continue; }
     // Tier B and C (released) lanes verify the whole game (--all).
-    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: lane.fixFirst ? { yes: true, why: lane.fixFirst.why } : c.runAlone, released: released ? entry.released : null });
+    ready.push({ ...lane, head: now.head, branch: now.branch || lane.branch, all: Boolean(pre.all || lane.all || c.needs.all), tier: c.tier, runAlone: lane.fixFirst ? { yes: true, why: lane.fixFirst.why } : c.runAlone, released: released ? entry?.released || kept : null });
   }
   // 2.63.0 (run alone): a large or sim-wide lane (manifest "runAlone") trains by itself. The caller's own lane goes
   // first; in a queued train the oldest decides: a run-alone lane first goes alone, else the others go without them.
@@ -2003,6 +2116,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   if (!ready.length) { res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
 
   const main = mainBranch(root);
+  life?.lanes(ready); // 2.76.0 (B-88): a death from here on keeps these lanes moving
+  writeTrainStatus(root, id, { step: 'build', text: `building main + ${ready.map((l) => l.task).join(', ')}`, lanes: ready.length, eta: null });
   for (const l of ready) deps.markRunning?.(l.task, l.agent);
   // 2.65.3 (B-43): the running train's step, for npm run lanes and status --brief; a long train is told about the cap.
   res.trainLanes = ready.length;

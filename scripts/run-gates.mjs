@@ -254,9 +254,20 @@ const relatedAtStart = (await import('../harness/game-gates.mjs')).relatedTestsO
 // the checks read count as dirty too: a config or setup file no commit holds changes what the checks run, and a record
 // of a "clean" run beside one must never be reused (harness/gate-trust.mjs hiddenInputs).
 const trust = await import('../harness/gate-trust.mjs');
-const hiddenAtStart = trust.hiddenInputs(root, [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine', 'hub'], { skip: isEngineChurn });
-if (hiddenAtStart?.length) console.log(`[gates] note: ${hiddenAtStart.length} untracked or ignored file(s) the checks may read (${hiddenAtStart.slice(0, 5).join(', ')}${hiddenAtStart.length > 5 ? ', …' : ''}): this verify counts as dirty, so it can't stand in for task done's checks or a train's verify. Commit them, or delete them (or add build output to .gitignore under a dist/, build/ or coverage/ folder).`);
-const dirtyAtStart = hiddenAtStart?.length ? true : treeDirty();
+// 2.76.0 (B-85): ignored files the checks' own commands wrote in an earlier verify of this checkout (unchanged since), and
+// those a "generated" glob names (studio/gates.json, the game's studio.gates.json), are output, not hidden inputs; so is an
+// ignored folder holding only harmless files. Untracked files, root runner files and config-like names still count.
+const readPaths = [...(sg?.root ? [sg.root] : []), 'cartridges', 'qa', 'harness', 'scripts', 'engine', 'hub'];
+const studioDirOf = path.join(root, '.studio');
+const genBefore = trust.readGenerated(studioDirOf, root);
+const ignoredBefore = trust.ignoredSnapshot(root, readPaths);
+const sameFp = (a, b) => Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+const hiddenRep = trust.hiddenReport(root, readPaths, { skip: isEngineChurn, generated: (rel) => Boolean(ignoredBefore) && sameFp(genBefore[rel], ignoredBefore[rel]), globs: trust.generatedGlobs(root, sg?.root || null) });
+const hiddenAtStart = hiddenRep ? hiddenRep.hidden : null;
+if (hiddenRep?.generated) console.log(`[gates] note: ${hiddenRep.generated} ignored file(s) the checks' own commands generate (written by an earlier verify here, or named by a "generated" glob) count as output, not inputs`);
+if (hiddenAtStart?.length) console.log(`[gates] note: ${hiddenRep.count} untracked or ignored file(s) the checks may read (${hiddenAtStart.slice(0, 5).join(', ')}${hiddenRep.count > 5 ? ', …' : ''}): this verify counts as dirty, so it can't stand in for task done's checks or a train's verify. Commit them, or delete them (or add build output to .gitignore under a dist/, build/ or coverage/ folder; files the game's own scripts generate: list them under "generated" in its studio.gates.json).`);
+const trackedDirtyAtStart = treeDirty();
+const dirtyAtStart = hiddenAtStart?.length ? true : trackedDirtyAtStart;
 const { runGateCommand } = await import('../harness/gate-spawn.mjs');
 const rows = [];
 let cachedCount = 0;
@@ -362,10 +373,14 @@ try {
   const headNow = headAtStart;
   const dirtyEnd = treeDirty();
   const dirtyNow = dirtyAtStart === null || dirtyEnd === null ? null : dirtyAtStart || dirtyEnd;
+  // 2.76.0 (B-85): what made it dirty, so the train can tell "only ignored, non-config files" (a trust note) from a real
+  // hidden input or an edited tree; and the ignored files this verify's checks wrote, remembered as their output.
+  const dirtyFrom = dirtyNow ? { tracked: trackedDirtyAtStart === null || dirtyEnd === null ? null : Boolean(trackedDirtyAtStart || dirtyEnd), untracked: hiddenRep?.untracked?.length || 0, config: hiddenRep?.config?.length || 0, ignored: hiddenRep?.ignored?.length || 0 } : null;
+  try { if (!only && !isFastTier) trust.writeGenerated(studioDirOf, root, ignoredBefore, trust.ignoredSnapshot(root, readPaths)); } catch {}
   // 2.71.1 (D01/T04): every record carries a run id, and a full run also writes its run log (.studio/gates/runs/<id>.json,
   // the record's digest): reuse needs the two to match (harness/gate-trust.mjs recordTrust).
   const runId = /^[\w.-]{6,80}$/.test(process.env.STUDIO_VERIFY_RUN || '') ? process.env.STUDIO_VERIFY_RUN : trust.newRunId();
-  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
+  const rec = JSON.stringify({ runId, at: new Date().toISOString(), head: headNow, tree: treeAtStart, dirty: dirtyNow, gatePaths: gatePathsAtStart, ...(relatedAtStart ? { related: true } : {}), ...(process.env.STUDIO_GATE_INCOMING_FILE ? { incomingOnly: true } : {}), partial: Boolean(only) || isFastTier, ...(focusRun ? { focus: true } : {}), scope, deep, tier, cachedCount, skipped, cartridge: active.name, rows, ...(changedFiles?.length ? { scoped: true, changed: changedFiles, base: changedBase } : {}), ...(changedByVerify ? { changedByVerify } : {}), ...(process.env.STUDIO_VERIFY_RUN ? { verifyRun: process.env.STUDIO_VERIFY_RUN } : {}), ...(hiddenAtStart?.length ? { hidden: hiddenAtStart } : {}), ...(dirtyFrom ? { dirtyFrom } : {}), ...(process.env.STUDIO_VERIFY_PRELOADED ? { nodeOptionsPreload: process.env.STUDIO_VERIFY_PRELOADED.split(' ') } : {}) }, null, 2);
   // 2.73.0 (g): the run log is signed with the studio's verify key (outside every checkout); unsigned, it is never reused.
   const runLog = !only && !isFastTier ? trust.writeRunLog(path.join(root, '.studio'), JSON.parse(rec), { root: CHECKOUT.real, owner: process.env.STUDIO_LOCK_OWNER || null }) : null;
   if (runLog && !runLog.signed) console.log(`[gates] note: this verify's record is not signed (${runLog.why}), so task done and the train won't reuse it`);

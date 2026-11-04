@@ -4594,6 +4594,15 @@ if (inShard('selftest-276i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (h): the merge train: generated files aren't hidden inputs (B-85), a dead train is recorded and found (B-88), a
+// missing lane copy is recreated (W-0081), the hand-back cap in beta mode and infrastructure hand-backs, mixed lanes (B-91/92).
+if (inShard('selftest-276h')) {
+  const dir = copyRepo();
+  const { selftest276H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276h.mjs')).href);
+  await selftest276H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (w): the War Room as a field terminal: a verify's real progress (harness/gate-progress.mjs, written by run-gates)
 // on the running train, the cut hub pages (/legacy, the React sources, /human), dark always with a light screen by hand.
 if (inShard('selftest-277w')) {

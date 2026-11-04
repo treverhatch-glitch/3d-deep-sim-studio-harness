@@ -4,6 +4,49 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.76.0] — 2026-11-04
+2.76.0 is the beta release the owner asked for: the crew's orchestrator gets the owner's permissions in beta mode, a
+Line Producer keeps the work moving, the Communicator reports to Discord, Gemini builders run headless, and the crew's
+bug list B-80 to B-95 is fixed.
+### Beta mode
+- **`npm run beta -- on|off|status`** (studio/beta.json, protected): the owner (from their own terminal, or the owner
+  proxy with --permission) names the agents who act as the owner while it is on. They release, approve protected
+  files, answer asks (B-86) and run the owner's commands without the key; each use is logged as a beta use. Never:
+  money, spending, payments, deletes; workers never act as the owner; the game's tests and the train's full verify stay.
+- `npm run delegate -- claude-settings --owner --dir <folder> --write` writes the owner's allow rules for the
+  orchestrator's own folder (B-95). Approval hashes read text files with LF endings, so CRLF checkouts match (B-93).
+### The Line Producer (new role, on the supervisor's loop)
+- Each pass: a builder target from the rig, why every waiting task can't start (with its fix), the mechanical fixes
+  done and logged, chain-breakers first on the strongest model, models by task size, a research/expansion share per
+  phase. `npm run line -- status|plan|why`; `.studio/line/status.json`; `STUDIO_LINE_PRODUCER` on|report|off.
+  Role card: studio/roles/line-producer.md, docs/LINE-PRODUCER.md.
+### The Communicator (owner's Priority 6)
+- Harness code, zero model tokens: a status post every 30 min and alerts that tag only who must act (orchestrator,
+  keys, owner for decisions and disasters), deduplicated and batched. `STUDIO_COMM_WEBHOOK`, studio/communicator.json
+  mentions, `npm run comm -- status|preview|test`. docs/DISCORD-CREW.md.
+### The merge train
+- Files the game's own scripts generate are output, not hidden inputs; a green verify dirty only from ignored
+  non-config files lands with a trust note (B-85).
+- A train records how it ended; a dead train is found, recorded with its last step, its lock freed and its lanes kept
+  (B-88). A missing lane copy is made again from its branch (W-0081). Lanes behind main's harness are refreshed before
+  their checks (B-81).
+- Mixed lanes (another open task's commits) are refused before their verify (B-91/B-92). In beta mode the hand-back cap
+  goes to the orchestrator with one Rescue task; infrastructure hand-backs never count.
+### Builders and the rig
+- **Gemini on agy (B-80, W-0072/73):** the write_file rule, GEMINI.md shell rules in agy lanes, a Gemini default model,
+  accept-edits mode, a 5400 s print timeout, agy's stop line in the hand-back note.
+- A stall is judged on this session's part of the log (B-83/W-0070); a session the launcher ends records its own usage
+  and cost (B-82); a builder never works in the main checkout (B-84); a task's live owner is judged on its own work
+  (B-90/W-0084).
+- Test workers are shared by cores with the train's verify first (B-89, `STUDIO_RIG_SHARE`, `STUDIO_TRAIN_RESERVE`);
+  status names the tasks waiting on a dev's yes (B-87); first divergence works for a cartridge whose loader is outside
+  its folder (B-94).
+### Untested
+- On Windows: agy's `--model` flag name (set `STUDIO_AGY_MODEL_FLAG=off` if agy launches fail), the agy accept-edits
+  and print-timeout options, the train's heartbeat worker and SIGBREAK record, a real Discord webhook post.
+
+---
+
 ## [2.75.0] — 2026-11-03
 2.75.0 carries three releases at once for the crew's restart: 2.73.2 (the rest of the crew's emergency list, B-71 to
 B-76), 2.74.0 (the War Room refresh: working buttons, live pages, the hub kept up, B-62/B-63/B-70) and the War Room's
