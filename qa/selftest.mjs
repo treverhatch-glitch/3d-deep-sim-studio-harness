@@ -4665,6 +4665,15 @@ if (inShard('selftest-2771c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.2: an ended agent's empty lane got a full verify and blocked every launch (B-107); a beating speculative train called
+// dead (B-106); `grandfather --ref` for an update an older guard merged (B-104).
+if (inShard('selftest-2772')) {
+  const dir = copyRepo();
+  const { selftest2772 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2772.mjs')).href);
+  await selftest2772({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.78.0 (PU-56): load-sensitive tests: a red is "real" only if it also fails at quiet low load.
 if (inShard('selftest-278a')) {
   const dir = copyRepo();

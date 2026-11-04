@@ -1330,3 +1330,17 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-252 — permission denials were recorded again at every session end · fixed in 2.77.1
 - **Evidence:** the lab replay of the crew's logs (2026-11-04): 182 of 248 denial records were copies (director-1's one session, 13 times), which made the repeat-rate numbers wrong.
 - **Fix:** denials are read from the session's own part of the appended agent log (PU-44). Also PU-45: harness messages give one command per call (no `git add … && git commit`). qa/selftest-2771.mjs.
+
+### P-253 — an agent that ended with no commits stalled every launch for 20 minutes · fixed in 2.77.2
+- **Evidence:** builder-agyf8 (T-165) exited with nothing committed; its launcher ran a full verify of the empty lane while handing back, and the supervisor refused every ready task ("builder-agyf8 is working on the whole game"): 0 builders for ~20 min (B-107).
+- **Why:** in a lane copy the "did it commit" search of the log found main's own commits naming the task; and an ending session still counted as holding the whole game.
+- **Fix:** a lane copy's work is its branch's commits only; an exited or wrapping-up session clashes with nothing. qa/selftest-2772.mjs.
+
+### P-254 — a speculative train still verifying was reported "died silently" · fixed in 2.77.2
+- **Evidence:** train 20261104-200655-37648 ran its verify (red after 951 s) while the Communicator alerted "died silently" (B-106).
+- **Fix:** a train with a fresh heartbeat (or train-next.lock) is alive. qa/selftest-2772.mjs.
+
+### P-255 — 2.77.1's own commits failed the hooks gate after its merge · fixed in 2.77.2
+- **Evidence:** after `upgrade --merge origin/claude/2771`, `hook-stamp.mjs check` listed b09c320d, 30b411ec, 596003a6 (B-104).
+- **Why:** that merge ran 2.77.0's upgrade guard, which has no grandfather step (it starts with 2.77.1's guard).
+- **Fix:** `grandfather --ref <remote ref>` lists them by hand; merging 2.77.2 with 2.77.1's guard lists them by itself. qa/selftest-2772.mjs.
