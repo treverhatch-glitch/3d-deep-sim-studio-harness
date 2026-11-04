@@ -64,8 +64,10 @@ export async function selftest276H({ dir, run, report, tmpRoot, root }) {
   };
   const u = (S, p) => JSON.stringify(pathToFileURL(path.join(S, p)).href);
 
+  // ONLY_276H=b85,b88,… runs some parts (a maintainer's shortcut; the full selftest runs them all).
+  const want = (k) => !process.env.ONLY_276H || process.env.ONLY_276H.split(',').includes(k);
   // ---- B-85: generated files are output, not hidden inputs ----
-  {
+  if (want('b85')) {
     // A made-up web game whose only check writes what a pretest step would: unpacked art (only when missing, as an
     // unpack step does), a tsbuildinfo folder and a Vite cache, all git-ignored.
     const gen = `import fs from 'node:fs';
@@ -137,6 +139,87 @@ console.log(JSON.stringify({ ok: r.ok, why: r.why, logs }));
       const t = trainVerify('untracked');
       fs.rmSync(path.join(S, 'web/mini/vitest.config.ts'), { force: true });
       return [t.ok === false && /not a clean full verify/.test(t.why || '') && !t.logs?.some((l) => /trust note/.test(l)), JSON.stringify(t).slice(0, 2500)];
+    });
+  }
+
+  // ---- B-88: a train records its end, and a dead one is found ----
+  if (want('b88')) {
+    const { S, ev, env } = studio('b88');
+    const head = gitIn(S, 'rev-parse', 'HEAD').stdout.trim();
+    const deadPid = () => spawnSync(process.execPath, ['-e', ''], { windowsHide: true }).pid;
+    const tdir = (id) => path.join(S, '.studio', 'train', id);
+    const st = (id) => { try { return JSON.parse(fs.readFileSync(path.join(tdir(id), 'status.json'), 'utf8')); } catch { return null; } };
+    const queue = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'queue.json'), 'utf8')); } catch { return []; } };
+    const died = () => events(ev).filter((e) => e.type === 'task.train.died');
+    await guard('2.76.0 (B-88): a step that throws mid-train (the lane check) is recorded: task.train.died with the step it died in, status "died", life.json ended, and the error still reaches the caller (fails on 2.75.0: no end recorded, status stuck)', () => {
+      const r = probe(S, env, 'crash', `import { runTrain } from ${u(S, 'harness/train.mjs')};
+let threw = '';
+try { await runTrain({ root: process.cwd(), by: 'tester', lanes: [{ task: 'T-901', agent: 'builder-x', dir: process.cwd(), branch: 'main', head: ${JSON.stringify(head)} }], quietJob: true, deps: { precheck: () => { throw new Error('the lane check crashed'); }, handBack: () => {} }, log: () => {} }); } catch (e) { threw = e.message; }
+console.log(JSON.stringify({ threw }));
+`);
+      const d = died().find((e) => /the lane check crashed/.test(e.msg));
+      const id = d?.meta?.train;
+      const life = id ? JSON.parse(fs.readFileSync(path.join(tdir(id), 'life.json'), 'utf8')) : null;
+      return [r.threw === 'the lane check crashed' && d && d.meta.step === 'precheck' && /died: precheck/.test(d.msg) && st(id)?.step === 'died' && life?.ended?.how === 'died', JSON.stringify({ r, d, st: id && st(id), life }).slice(0, 2500)];
+    });
+    await guard('2.76.0 (B-88): a train process stopped by Ctrl+C (SIGINT) records its death on the way out (POSIX; on Windows a signal can\'t be sent to a child this way, so the reaper covers it) (fails on 2.75.0: nothing to record it)', async () => {
+      if (process.platform === 'win32') return [true, 'skipped on Windows'];
+      const ready = path.join(tmpRoot, `b88-ready-${process.pid}`);
+      const f = path.join(tmpRoot, `b88-sig-${process.pid}.mjs`);
+      fs.writeFileSync(f, `import fs from 'node:fs';
+import { beginTrainLife } from ${u(S, 'harness/train-life.mjs')};
+const id = '20261104-010203-' + process.pid;
+const h = beginTrainLife(process.cwd(), { id, by: 'sig-test' });
+fs.writeFileSync(${JSON.stringify(ready)}, id);
+setInterval(() => {}, 1000);
+`);
+      const { spawn } = await import('node:child_process');
+      const child = spawn(process.execPath, [f], { cwd: S, env: { ...process.env, ...env }, windowsHide: true, stdio: 'ignore' });
+      const t0 = Date.now();
+      while (!fs.existsSync(ready) && Date.now() - t0 < 60000) await new Promise((res) => setTimeout(res, 100));
+      const id = fs.existsSync(ready) ? fs.readFileSync(ready, 'utf8') : '';
+      const code = await new Promise((res) => { child.on('exit', (c) => res(c)); child.kill('SIGINT'); });
+      fs.rmSync(f, { force: true }); fs.rmSync(ready, { force: true });
+      const d = died().find((e) => e.meta?.train === id);
+      return [id && code === 130 && d && /SIGINT/.test(d.msg) && st(id)?.step === 'died', JSON.stringify({ id, code, d, st: id && st(id) })];
+    });
+    await guard('2.76.0 (B-88): a train whose process is gone (killed: nothing in it ran) is found by the next train\'s reaper: task.train.died "died: verify", its status "died", the train lock that still names it freed, its task done\'s own lane queued again (not a hand-back) and a queued lane kept in place; a train from before 2.76 (status.json only, stuck) is found by the pid in its id; a second death with the same head holds the lane for the Producer (fails on 2.75.0: no reaper; status stuck at verify)', () => {
+      const p1 = deadPid(); const p2 = deadPid(); const p3 = deadPid();
+      const id1 = `20261104-044849-${p1}`; const id2 = `20261104-050000-${p2}`; const id3 = `20261104-060000-${p3}`;
+      const w = (rel, j) => writeIn(S, rel, `${JSON.stringify(j, null, 2)}\n`);
+      w(`.studio/train/${id1}/status.json`, { train: id1, step: 'verify', text: 'verify 1: lanes 1-2, T-911, T-912' });
+      w(`.studio/train/${id1}/life.json`, { id: id1, pid: p1, by: 'builder-s157', at: new Date().toISOString(), lanes: [{ task: 'T-911', agent: 'builder-a', dir: S, branch: 'lane/a', head: 'a'.repeat(40), own: true }, { task: 'T-912', agent: 'builder-b', dir: S, branch: 'lane/b', head: 'b'.repeat(40), fromQueue: true }], ended: null });
+      w('.studio/locks/train.lock', { pid: p1, at: Date.now(), id: id1, by: 'builder-s157' });
+      w('.studio/train/queue.json', [{ task: 'T-912', agent: 'builder-b', dir: S, branch: 'lane/b', head: 'b'.repeat(40), at: new Date().toISOString() }]);
+      w(`.studio/train/${id2}/status.json`, { train: id2, step: 'verify', text: 'verify 1' });
+      const r1 = probe(S, env, 'reap', `import { reapTrains } from ${u(S, 'harness/train.mjs')};
+console.log(JSON.stringify(reapTrains(process.cwd(), {})));
+`);
+      const q1 = queue();
+      const lockGone = !fs.existsSync(path.join(S, '.studio', 'locks', 'train.lock'));
+      // A second train dies with T-912 at the same head.
+      w(`.studio/train/${id3}/status.json`, { train: id3, step: 'verify', text: 'verify 1' });
+      w(`.studio/train/${id3}/life.json`, { id: id3, pid: p3, by: 'train-daemon', at: new Date().toISOString(), lanes: [{ task: 'T-912', agent: 'builder-b', dir: S, branch: 'lane/b', head: 'b'.repeat(40), fromQueue: true }], ended: null });
+      const r2 = probe(S, env, 'reap2', `import { reapTrains } from ${u(S, 'harness/train.mjs')};
+console.log(JSON.stringify(reapTrains(process.cwd(), {})));
+`);
+      const q2 = queue();
+      const d1 = died().find((e) => e.meta?.train === id1);
+      const ok = d1 && /died: verify/.test(d1.msg) && st(id1)?.step === 'died' && lockGone && st(id2)?.step === 'died' && died().some((e) => e.meta?.train === id2)
+        && q1.find((e) => e.task === 'T-911')?.diedIn?.train === id1 && q1.find((e) => e.task === 'T-912')?.diedIn?.train === id1
+        && !events(ev).some((e) => e.type === 'task.paused')
+        && q2.find((e) => e.task === 'T-912')?.held && /two trains died/.test(q2.find((e) => e.task === 'T-912').held.why);
+      return [ok, JSON.stringify({ r1, r2, q1, q2, lockGone, d1 }).slice(0, 3000)];
+    });
+    await guard('2.76.0 (B-88): the train daemon\'s pass records a dead train too (task.train.died), so its stuck status no longer reads as running (fails on 2.75.0)', async () => {
+      const p = deadPid(); const id = `20261104-070000-${p}`;
+      writeIn(S, `.studio/train/${id}/status.json`, JSON.stringify({ train: id, step: 'verify', text: 'verify 2' }));
+      writeIn(S, '.studio/locks/train.lock', JSON.stringify({ pid: p, at: Date.now(), id, by: 'train-daemon' }));
+      const r = probe(S, env, 'daemon', `import { trainDaemonPass } from ${u(S, 'harness/train-daemon.mjs')};
+const r = await trainDaemonPass({ root: process.cwd(), env: { ...process.env, STUDIO_TRAIN_AUTO: 'on' }, spawnTrain: () => ({ pid: 1 }), dryRun: false, queue: [], room: { ok: true } });
+console.log(JSON.stringify(r));
+`);
+      return [died().some((e) => e.meta?.train === id) && st(id)?.step === 'died', JSON.stringify({ r, st: st(id) })];
     });
   }
 }

@@ -73,6 +73,7 @@ import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
+import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
@@ -1473,6 +1474,42 @@ async function trainDiskWarning(root, log) {
   try { const w = await (await import('./machine.mjs')).diskWarning({ root }); if (w) log(`[train] warning: ${w}.`); } catch {}
 }
 
+/**
+ * 2.76.0 (B-88): run one train body with its life recorded (harness/train-life.mjs): its lanes, a normal end, or a death
+ * with its cause on any exit path this process sees (a throw in a step is recorded, then thrown on). A dry run records
+ * nothing.
+ */
+async function livedTrain(root, { id, by, dryRun }, fn) {
+  if (dryRun) return fn(null);
+  const life = beginTrainLife(root, { id, by });
+  try {
+    const r = await fn(life);
+    life.end(r?.message || '');
+    return r;
+  } catch (e) {
+    life.died(`crashed: ${String(e?.message || e).slice(0, 200)}`);
+    throw e;
+  }
+}
+
+/**
+ * 2.76.0 (B-88): record every train that died without recording its end (harness/train-life.mjs reapDeadTrains) and keep
+ * its lanes moving: a queued lane keeps its place, a task done's own lane is queued, a lane two trains died with at the
+ * same head is held for the Producer (not a hand-back: never counted toward STUDIO_TRAIN_MAX_HANDBACKS). Never throws.
+ */
+export function reapTrains(root, { log = () => {}, now = Date.now(), env = process.env } = {}) {
+  try {
+    return reapDeadTrains(root, {
+      now, env, log,
+      entryOf: (task) => readQueue(root).find((e) => e.task === task) || null,
+      mark: (task, patch) => requeue(root, { task }, patch),
+      enqueue: (lane) => enqueue(root, { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head: lane.head, all: Boolean(lane.all), note: 'queued again after its train died', diedIn: lane.diedIn }),
+      onMain: (head) => git(root, 'merge-base', '--is-ancestor', head, `refs/heads/${mainBranch(root)}`).status === 0,
+      toProducer: (lane, note) => { const h = holdLane(root, lane, { tier: 'B', why: note }); if (h.fresh) emitEvent({ type: 'task.train.held', agent: 'train', task: lane.task, to: 'producer', status: 'blocked', msg: `${lane.task}: ${note}. npm run task -- train release ${lane.task} --by <name> lets it train again`.slice(0, 600), meta: { tier: 'B', why: note, died: true } }); },
+    });
+  } catch { return []; }
+}
+
 export async function runTrain(opts = {}) {
   const root = opts.root || mainRoot();
   const log = opts.log || ((m) => console.error(m));
@@ -1489,7 +1526,9 @@ export async function runTrain(opts = {}) {
   }
   // 2.63.0 (batching): a queued train waits up to STUDIO_TRAIN_WAIT_MIN for STUDIO_TRAIN_MIN lanes (--now: it doesn't).
   if (!opts.lanes && !opts.dryRun && !opts.now) waitForBatch(root, { log, id });
-  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by }), { waitMs: opts.waitMs ?? 0, log });
+  // 2.76.0 (B-88): a train that died without recording its end (its process gone) is recorded now, before this one.
+  if (!opts.dryRun) reapTrains(root, { log });
+  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => livedTrain(root, { id: tid, by, dryRun: opts.dryRun }, (life) => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by, life })), { waitMs: opts.waitMs ?? 0, log });
   let locked = await one(id);
   if (locked?.busy) return { ok: false, id, busy: locked.busy, message: `Another train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}); run this again when it ends.`, landed: [], dropped: [], deferred: [] };
   // 2.63.0 (run alone): lanes that waited because a lane ran alone get the next train(s) now, one after another.
@@ -1890,7 +1929,7 @@ function fixFirst(root, lanes, { id, by, dryRun, log }) {
   return r.lanes;
 }
 
-async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false }) {
+async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = false, oneLane = false, rideAlong = false, life = null }) {
   const res = { ok: true, id, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
   sweepScratch(root, log);
   const queued = !given;
@@ -1982,6 +2021,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       const n = (deps.handBacks || handBackCount)(lane.task);
       if (n > maxHandBacks()) { hold({ ...lane, head: now.head, branch: now.branch || lane.branch }, 'B', `handed back ${n} times (more than ${maxHandBacks()}, STUDIO_TRAIN_MAX_HANDBACKS): after that many tries the problem is in the plan, so a person looks before it lands`); continue; }
     }
+    if (!dryRun) writeTrainStatus(root, id, { step: 'precheck', text: `checking ${lane.task} in its own copy`, lanes: lanes.length, eta: null }); // 2.76.0 (B-88)
     const pre = lane.prechecked && now.head === lane.head ? { ok: true, head: now.head, all: lane.all } : (deps.precheck || ((l) => precheckChild(root, l)))({ ...lane, head: now.head });
     // Uncommitted work: its agent is still at it, so it waits (queued). Not this agent's claim any more, or a copy whose
     // harness predates the train: out of the queue, nobody's claim touched. Any other refusal (hooks, protected files,
@@ -2016,6 +2056,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   if (!ready.length) { res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
 
   const main = mainBranch(root);
+  life?.lanes(ready); // 2.76.0 (B-88): a death from here on keeps these lanes moving
+  writeTrainStatus(root, id, { step: 'build', text: `building main + ${ready.map((l) => l.task).join(', ')}`, lanes: ready.length, eta: null });
   for (const l of ready) deps.markRunning?.(l.task, l.agent);
   // 2.65.3 (B-43): the running train's step, for npm run lanes and status --brief; a long train is told about the cap.
   res.trainLanes = ready.length;

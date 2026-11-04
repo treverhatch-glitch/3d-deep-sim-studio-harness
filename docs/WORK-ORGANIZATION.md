@@ -209,7 +209,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   doesn't wait unless `--wait`). A stopped studio runs no train; drain on makes a train
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
-  `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`.
+  `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
+  `.lane_recreated`, `.mixed`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -260,6 +261,18 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   added), and ONE `job.done` (kind train, `meta.auto`, `requeued`) sums it. `npm run task -- train auto off|on --by
   <name> [--why "…"]` switches it (a person, the owner's delegation, or a Producer/Director session or an outside agent
   on a person's `--permission`; never a worker); `npm run task -- train auto` shows it.
+- A train that dies (2.76.0, B-88, `harness/train-life.mjs`): each train writes `.studio/train/<id>/life.json` (its pid,
+  its lanes) and a heartbeat file (every 30 s, from a worker thread, so a train inside a 30-minute verify still beats).
+  An exception in a step, an uncaught exception or unhandled rejection, Ctrl+C, a closed console (SIGINT/SIGHUP/SIGBREAK)
+  or `process.exit` mid-train records `task.train.died` ("died: <last step>"), a `job.done` (result `died`) and the
+  status `died` before the process ends. A SIGTERM or a kill (on Windows, a session's process tree ended by the
+  launcher: nothing in the process runs) is found by the reaper, which runs before every train and in every train
+  daemon pass: a train with no recorded end whose process is gone (or alive with a heartbeat older than
+  `STUDIO_TRAIN_DEAD_MIN`, 30, minutes on two looks a minute apart: Windows reuses process ids) is recorded the same
+  way, its train lock freed, and its lanes kept moving: a queued lane keeps its place, a `task done`'s own lane is
+  queued again, a lane two trains died with at the same head is held for the Producer. None of it is a hand-back.
+  A train from before 2.76.0 (a `status.json` only) is judged by the pid in its id when its status changed in the last
+  24 h.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
