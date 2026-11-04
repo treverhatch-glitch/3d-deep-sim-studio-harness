@@ -18,6 +18,9 @@
  *                    [--parallel N] [--keep] [--model-grader] [--yes]
  *   npm run bench -- compare <runA> <runB>       paired per-case comparison, a sign test, and a verdict
  *   npm run bench -- show <run>                  one run's scores
+ *   npm run bench -- split [--held-out-share 0.3] --by <person>   2.78.0 (PU-59): studio/bench/split.json, held-in / held-out
+ *   npm run bench -- run --split heldIn|heldOut  run one split only
+ *   npm run bench -- compare <A> <B> [--change C-3]   per split: the deltas, then accept / compute-bought / reject
  *
  * Where things are:
  *   studio/bench/cases/<id>.json      a case: { id, from: { task, title }, commit, brief, grader, tokenCap, timeoutMin }
@@ -477,7 +480,18 @@ export async function runBench(opts = {}, { log = console.log, env = process.env
   }
   const pick = pickCases(root, opts.cases, env);
   if (pick.error) return { code: 1, text: `Not run: ${pick.error}.` };
-  const { cases } = pick;
+  let { cases } = pick;
+  // 2.78.0 (PU-59): --split heldIn|heldOut runs one split of the cases (studio/bench/split.json).
+  const splitName = opts.split ? String(opts.split) : null;
+  if (splitName) {
+    if (!SPLITS.includes(splitName)) return { code: 1, text: `Not run: --split is ${SPLITS.join(' or ')}.` };
+    const sp = readSplit(root, env);
+    if (!sp) return { code: 1, text: 'Not run: no studio/bench/split.json (npm run bench -- split --by <you> makes it).' };
+    const stray = cases.filter((c) => !sp.heldIn.includes(c.id) && !sp.heldOut.includes(c.id)).map((c) => c.id);
+    if (stray.length) return { code: 1, text: `Not run: case(s) not in the split yet: ${stray.join(', ')} (npm run bench -- split assigns them).` };
+    cases = cases.filter((c) => sp[splitName].includes(c.id));
+    if (!cases.length) return { code: 1, text: `Not run: the ${splitName} split has no cases.` };
+  }
   const harnessRef = opts.harness || 'HEAD';
   const harnessSha = git(root, ['rev-parse', '--verify', `${harnessRef}^{commit}`]).stdout.trim();
   if (!/^[0-9a-f]{40}$/.test(harnessSha)) return { code: 1, text: `Not run: --harness ${harnessRef} is not a commit in this studio.` };
@@ -495,7 +509,7 @@ export async function runBench(opts = {}, { log = console.log, env = process.env
   fs.mkdirSync(path.join(out, 'logs'), { recursive: true });
   const copiesRoot = path.join(env.STUDIO_BENCH_COPIES ? path.resolve(env.STUDIO_BENCH_COPIES) : path.join(os.tmpdir(), 'studio-bench'), runId);
   const res = {
-    id: runId, label: opts.label || null, by: who.by, ...(who.permission ? { permission: who.permission, recordedBy: who.recordedBy } : {}),
+    id: runId, label: opts.label || null, split: splitName, by: who.by, ...(who.permission ? { permission: who.permission, recordedBy: who.recordedBy } : {}),
     at: new Date().toISOString(), harness: { ref: harnessRef, sha: harnessSha }, without, withoutEnv: without ? COMPONENTS[without].env : null, offInEnv,
     k, parallel, agent: env.STUDIO_BENCH_AGENT_CMD ? 'STUDIO_BENCH_AGENT_CMD (a stand-in)' : 'harness/agent.mjs start (the studio\'s configured tool and model)',
     cases: cases.map((c) => c.id), caseHashes: Object.fromEntries(cases.map((c) => [c.id, caseHash(root, c, env)])), tokenCeiling: ceiling, tries: [], done: false,
@@ -610,6 +624,117 @@ export function compareText(A, B, cmp) {
   return L.join('\n');
 }
 
+// ---- 2.78.0 (PU-59): a held-out split, and the acceptance rule for harness changes ----
+// About half of an evolved harness's gains were overfitting to the cases it was tuned on, and some were just more
+// compute. So a harness change is judged on two splits of the cases (held-in: the cases proposers may learn from;
+// held-out: cases nobody tunes on) and on what it costs. Retro, learn and experiment read no bench results today; if
+// one ever does, it reads held-in cases only (readSplit(...).heldIn).
+export const SPLITS = ['heldIn', 'heldOut'];
+export const splitFile = (root = mainRoot(), env = process.env) => path.join(benchDir(root, env), 'split.json');
+export function readSplit(root = mainRoot(), env = process.env) {
+  const j = readJson(splitFile(root, env));
+  if (!j || !Array.isArray(j.heldIn) || !Array.isArray(j.heldOut)) return null;
+  return { heldIn: j.heldIn.map(String), heldOut: j.heldOut.map(String), seed: Number.isFinite(Number(j.seed)) ? Number(j.seed) : 1 };
+}
+export const noiseFloor = (env = process.env) => { const v = Number(env.STUDIO_BENCH_NOISE); return Number.isFinite(v) && String(env.STUDIO_BENCH_NOISE).trim() !== '' && v >= 0 ? v : 0.05; };
+export const costMax = (env = process.env) => { const v = Number(env.STUDIO_BENCH_COST_MAX); return Number.isFinite(v) && String(env.STUDIO_BENCH_COST_MAX).trim() !== '' && v >= 0 ? v : 0.15; };
+const rank = (seed, id) => crypto.createHash('sha1').update(`${seed}:${id}`).digest('hex');
+
+/** The split for these case ids: existing ids keep their side; new ones are ranked by the seed, and the held-out share is topped up from the front. */
+export function assignSplit(ids, prev = null, { share = 0.3, seed = null } = {}) {
+  const sd = Number.isFinite(Number(seed)) && seed !== null ? Number(seed) : prev?.seed ?? 1;
+  const want = new Set(ids);
+  const heldIn = (prev?.heldIn || []).filter((id) => want.has(id));
+  const heldOut = (prev?.heldOut || []).filter((id) => want.has(id) && !heldIn.includes(id));
+  const fresh = [...want].filter((id) => !heldIn.includes(id) && !heldOut.includes(id)).sort((a, b) => rank(sd, a).localeCompare(rank(sd, b)) || a.localeCompare(b));
+  const total = want.size;
+  const target = Math.min(total, total >= 2 ? Math.max(1, Math.round(total * share)) : 0);
+  const need = Math.max(0, target - heldOut.length);
+  heldOut.push(...fresh.slice(0, need));
+  heldIn.push(...fresh.slice(need));
+  return { heldIn: heldIn.sort(), heldOut: heldOut.sort(), seed: sd };
+}
+
+export function makeSplit(o = {}, { env = process.env } = {}) {
+  const root = mainRoot();
+  const who = mayRun({ by: o.by, permission: o.permission, env, root: REPO_ROOT, what: 'write the bench split' });
+  if (!who.ok) return { code: 1, text: `Not written: ${who.why}.` };
+  const share = o.heldOutShare === undefined || o.heldOutShare === true ? 0.3 : Number(o.heldOutShare);
+  if (!(share > 0 && share < 1)) return { code: 1, text: 'Not written: --held-out-share is between 0 and 1 (default 0.3).' };
+  const cases = readCases(root, env);
+  if (!cases.length) return { code: 1, text: 'Not written: no bench cases yet (npm run bench -- add).' };
+  const prev = readSplit(root, env);
+  const next = assignSplit(cases.map((c) => c.id), prev, { share, seed: o.seed });
+  const added = next.heldIn.concat(next.heldOut).filter((id) => !prev || (!prev.heldIn.includes(id) && !prev.heldOut.includes(id)));
+  const file = splitFile(root, env);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+  const rel = posix(path.relative(root, file));
+  const inRepo = !rel.startsWith('..');
+  return { code: 0, split: next, text: `Wrote ${rel}: ${next.heldIn.length} held-in, ${next.heldOut.length} held-out (seed ${next.seed}); ${added.length} new case(s) assigned${added.length ? `: ${added.join(', ')}` : ''}.${inRepo ? ` ${BENCH_REL}/ is a protected folder: commit it with the owner's signed approval (npm run approve -- protected --note "bench split"), like any bench case.` : ''}` };
+}
+
+/** One run's numbers over the cases of one split: pass@1, pass^k and tokens per passing try. */
+export function splitStats(run, ids) {
+  const set = new Set(ids);
+  const tries = (run.tries || []).filter((t) => set.has(t.case));
+  const sc = score(tries);
+  const passes = tries.filter((t) => t.pass).length;
+  const tokens = tries.reduce((n, t) => n + (Number(t.tokens) || 0), 0);
+  return { cases: sc.cases, tries: tries.length, pass1: sc.pass1, passK: sc.passK, tokens, passes, tokensPerPass: passes ? Math.round(tokens / passes) : null };
+}
+
+/**
+ * The acceptance rule: A is the harness before, B the one being judged. Per split: the change in pass@1, pass^k and
+ * tokens per pass. accept = neither split drops by more than the noise floor, at least one improves by more than it, and
+ * tokens per pass rise at most costMax; unproven = only heldIn improved; compute-bought = improves but costs more; reject =
+ * anything else.
+ */
+export function compareSplits(A, B, split, { noise = 0.05, costMax: cmax = 0.15 } = {}) {
+  const per = {};
+  const pairedIds = (ids) => ids.filter((id) => A.score?.perCase?.[id] && B.score?.perCase?.[id] && !(A.caseHashes?.[id] && B.caseHashes?.[id] && A.caseHashes[id] !== B.caseHashes[id]));
+  for (const name of SPLITS) {
+    const ids = pairedIds(split[name] || []);
+    const a = splitStats(A, ids);
+    const b = splitStats(B, ids);
+    const d1 = round(b.pass1 - a.pass1, 4);
+    const dk = round(b.passK - a.passK, 4);
+    const dt = a.tokensPerPass && b.tokensPerPass ? round((b.tokensPerPass - a.tokensPerPass) / a.tokensPerPass, 4) : null;
+    per[name] = { ids, cases: ids.length, a, b, dPass1: d1, dPassK: dk, dTokensPerPass: dt, dropped: d1 < -noise || dk < -noise, improved: d1 > noise || dk > noise };
+  }
+  const all = [...per.heldIn.ids, ...per.heldOut.ids];
+  const a = splitStats(A, all);
+  const b = splitStats(B, all);
+  const cost = a.tokensPerPass && b.tokensPerPass ? round((b.tokensPerPass - a.tokensPerPass) / a.tokensPerPass, 4) : b.passes && !a.passes ? 0 : null;
+  const missing = SPLITS.filter((n) => !per[n].cases);
+  const dropped = SPLITS.filter((n) => per[n].dropped);
+  const improved = SPLITS.filter((n) => per[n].improved);
+  let verdict; let why;
+  if (missing.length) { verdict = 'reject'; why = `no paired cases in ${missing.join(' and ')}: a change is accepted only when both splits were measured`; }
+  else if (dropped.length) { verdict = 'reject'; why = `${dropped.join(' and ')} dropped by more than the noise floor (${noise})`; }
+  else if (!improved.length) { verdict = 'reject'; why = `no split improved by more than the noise floor (${noise}): within noise`; }
+  // 2.78.0: an improvement on the held-in cases alone (held-out flat) is what overfitting looks like (Harness-Delta
+  // Attribution: about half of evolved-harness gains): not accepted until the held-out split improves too.
+  else if (improved.length === 1 && improved[0] === 'heldIn') { verdict = 'unproven'; why = `only heldIn improved (heldOut within the noise floor ${noise}): it may fit the cases it was tuned on; accept it once heldOut improves too`; }
+  else if (cost !== null && cost > cmax) { verdict = 'compute-bought'; why = `${improved.join(' and ')} improved, but tokens per pass rose ${pct(cost)} (limit ${pct(cmax)})`; }
+  else if (cost === null) { verdict = 'reject'; why = 'tokens per pass could not be compared (a run had no passing try)'; }
+  else { verdict = 'accept'; why = `${improved.join(' and ')} improved, neither split dropped, tokens per pass ${cost >= 0 ? '+' : ''}${pct(cost)}`; }
+  const within = SPLITS.filter((n) => per[n].cases && !per[n].dropped && !per[n].improved);
+  return { verdict, why, noise, costMax: cmax, cost, within, splits: per, overall: { a, b } };
+}
+
+export function splitCompareText(A, B, r) {
+  const sg = (x) => `${x >= 0 ? '+' : ''}${pct(x)}`;
+  const L = [`Split compare ${A.id} (A) -> ${B.id} (B), noise floor ${r.noise}, cost limit ${pct(r.costMax)}:`];
+  for (const n of SPLITS) {
+    const s = r.splits[n];
+    L.push(`  ${n} (${s.cases} case(s)): pass@1 ${pct(s.a.pass1)} -> ${pct(s.b.pass1)} (${sg(s.dPass1)})   pass^k ${pct(s.a.passK)} -> ${pct(s.b.passK)} (${sg(s.dPassK)})   tokens per pass ${s.a.tokensPerPass === null ? 'n/a' : fmt(s.a.tokensPerPass)} -> ${s.b.tokensPerPass === null ? 'n/a' : fmt(s.b.tokensPerPass)}${s.dTokensPerPass === null ? '' : ` (${sg(s.dTokensPerPass)})`}${!s.cases ? '  not measured' : s.dropped ? '  DROPPED' : s.improved ? '  improved' : '  within noise'}`);
+  }
+  L.push(`  overall tokens per pass: ${r.cost === null ? 'n/a' : sg(r.cost)}`);
+  L.push(`verdict: ${r.verdict} (${r.why})`);
+  return L.join('\n');
+}
+
 // ---- adding a case from a past task ----
 function taskTitle(root, id) {
   for (const rel of ['studio/NEXT.md', 'studio/DONE.md']) {
@@ -711,12 +836,29 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   } else if (cmd === 'compare') {
     const [a, b] = [loadRun(o._[1] || '', root), loadRun(o._[2] || '', root)];
     if (!a || !b) r = { code: 1, text: `Usage: npm run bench -- compare <runA> <runB> (a run id in .studio/bench/ or a results.json); not found: ${[!a && o._[1], !b && o._[2]].filter((x) => x !== false).join(', ') || 'two runs needed'}` };
-    else { const cmp = compareRuns(a, b, { alpha: Number(o.alpha) || 0.05 }); r.text = o.json ? JSON.stringify(cmp, null, 2) : compareText(a, b, cmp); }
+    else {
+      const cmp = compareRuns(a, b, { alpha: Number(o.alpha) || 0.05 });
+      // 2.78.0 (PU-59): with a split (studio/bench/split.json) the compare also prints the held-in / held-out acceptance
+      // rule; --change C-n attaches its verdict to that change record (harness/changes.mjs).
+      const sp = readSplit(root);
+      const res = sp ? compareSplits(a, b, sp, { noise: noiseFloor(), costMax: costMax() }) : null;
+      r.text = o.json ? JSON.stringify(res ? { ...cmp, split: res } : cmp, null, 2) : `${compareText(a, b, cmp)}${res ? `\n${splitCompareText(a, b, res)}` : ''}`;
+      if (o.change && o.change !== true) {
+        if (!res) r = { code: 1, text: `${r.text}\nNo studio/bench/split.json, so there is no verdict to attach to ${o.change} (npm run bench -- split --by <you>).` };
+        else {
+          const { attachBench } = await import('./changes.mjs');
+          const at = attachBench(String(o.change), { verdict: res.verdict, why: res.why, runs: [a.id, b.id], noise: res.noise, costMax: res.costMax, cost: res.cost, splits: Object.fromEntries(SPLITS.map((n) => [n, { dPass1: res.splits[n].dPass1, dPassK: res.splits[n].dPassK, dTokensPerPass: res.splits[n].dTokensPerPass }])) });
+          r = { code: at.ok ? 0 : 1, text: o.json ? r.text : `${r.text}\n${at.message}` };
+        }
+      }
+    }
+  } else if (cmd === 'split') {
+    r = makeSplit(o);
   } else if (cmd === 'show') {
     const res = loadRun(o._[1] || '', root);
     r = res ? { code: 0, text: o.json ? JSON.stringify(res, null, 2) : summary(res) } : { code: 1, text: `No finished run ${o._[1] || ''} in .studio/bench/.` };
   } else {
-    r = { code: cmd ? 1 : 0, text: 'npm run bench -- add | list | components | run | compare <A> <B> | show <run>   (docs/BENCH.md)' };
+    r = { code: cmd ? 1 : 0, text: 'npm run bench -- add | list | components | split | run | compare <A> <B> | show <run>   (docs/BENCH.md)' };
   }
   if (r.text) (r.code === 1 ? console.error : console.log)(r.text);
   process.exit(r.code);

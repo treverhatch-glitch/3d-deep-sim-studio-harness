@@ -577,6 +577,30 @@ clip command, `{seconds}` and `{name}` placeholders), `STUDIO_LANDING_CLIP_TIMEO
 `STUDIO_LANDING_BUILD_WORKER=off` queues without starting the worker. `node harness/landing-build.mjs status` shows
 what is queued or running.
 
+## Plan-time scope and waves, in shadow mode (2.78.0, PU-60)
+
+The logs showed thousands of `hotspot.overlap` events in a few days. `task add` and `task start` already warn about an
+overlap (`harness/task-overlap.mjs`, `harness/hotspots.mjs`), but nothing schedules by it. `harness/plan-waves.mjs`
+measures what scheduling by it would do. (Not `harness/waves.mjs`: that is the fun-check waves module.) It changes
+nothing: no task is started, held or blocked by it.
+
+- A task may carry a **scope**: the globs of the files it expects to touch. `task add --scope "src/sim/**,docs/A.md"`
+  stores it as `scope` in the task's `task.added` meta (the flag already existed for engine passes; entries with spaces
+  are free text and are ignored). A task without a scope borrows the files its `hotspot.overlap` and `task.overlap`
+  history names.
+- `node harness/plan-waves.mjs [--json]` builds an overlap graph of the **ready** builder tasks and colours it greedily,
+  in queue order, into waves: tasks in one wave do not overlap. It prints the waves, which running lanes (their scope,
+  history and what the lane already changed) overlap which ready tasks, the tasks with neither scope nor history (they
+  overlap nothing), and the **serialized share**: ready tasks forced into wave 2 or later over all ready tasks.
+- The stop rule: if the serialized share is over `STUDIO_WAVES_MAX_SHARE` (0.6), the output and the event say waves
+  would over-serialize the crew, and scheduling by them should not be switched on.
+- Shadow logging: the watcher (`harness/watch.mjs`, each pass) logs a `waves.shadow` event at most every
+  `STUDIO_WAVES_MIN` minutes (30). `STUDIO_WAVES=off` stops it.
+- `node harness/plan-waves.mjs replay --events <events.jsonl> --days 14` reads past `task.start`, `task.done` and
+  `hotspot.overlap` events and reports how many recorded overlaps waves would have avoided (the two tasks' scopes, or
+  overlap history known before that event, overlapped), and roughly how much extra wall time: the task that started
+  second would have waited out the time the two ran together (a task with no done event counts as the median).
+
 ## Summary Format (`studio/done/YYYY-MM-DD-short-title.md`)
 
 ```markdown

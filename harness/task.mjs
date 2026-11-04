@@ -2345,7 +2345,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const bad = flags.refs.split(',').map((x) => x.trim()).filter((x) => /^[a-z][a-z0-9+.-]*:\/\//i.test(x));
       if (bad.length) { console.error(`--refs takes local paths to reference photos the studio provides (a file, or the assets reference folder), not links: ${bad.join(', ')}. The harness never downloads photos; save it under assets/reference/ first.`); process.exit(1); }
     }
-    if ((flags['visual-check'] || typeof flags.refs === 'string' || typeof flags.scope === 'string') && !/^engine:[a-z][a-z0-9-]{1,30}$/.test(String(flags.track || ''))) console.error('note: --scope, --visual-check and --refs belong to an engine pass (--track engine:<name>); recorded in the task\'s meta only.');
+    // 2.78.0 (PU-60): --scope on any task is the files it expects to touch (harness/plan-waves.mjs reads it); only
+    // --visual-check and --refs are an engine pass's.
+    if ((flags['visual-check'] || typeof flags.refs === 'string') && !/^engine:[a-z][a-z0-9-]{1,30}$/.test(String(flags.track || ''))) console.error('note: --visual-check and --refs belong to an engine pass (--track engine:<name>); recorded in the task\'s meta only.');
     // PU-58: --canary "<why>" marks a task impossible on purpose. Only a decider adds one, and the flag never goes into
     // the task's meta (the task.added event), the brief or NEXT.md: it is kept in .studio/canaries.json (harness/canary.mjs).
     const canaryWhy = typeof flags.canary === 'string' ? flags.canary.trim() : '';

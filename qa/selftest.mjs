@@ -4705,6 +4705,14 @@ if (inShard('selftest-278e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.0 (PU-59, PU-60): the bench's held-out split and acceptance rule; plan-time waves in shadow mode.
+if (inShard('selftest-278f')) {
+  const dir = copyRepo();
+  const { selftest278F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-278f.mjs')).href);
+  await selftest278F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
