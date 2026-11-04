@@ -17,7 +17,8 @@
  * (STUDIO_BRIEF_DEFAULT_MIN). Workers: launched sessions running now (role and task). Landed: task.done, train
  * landings and lane merges in the window; bugs fixed: those whose board title starts "Bug" or that were added as
  * --type bug. Unity: the last Unity land gate (.studio/gates/unity-last.json). Blockers: a halted supervisor, a
- * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person. PC: free memory and who
+ * stopped studio (.studio/STOP.json), lanes held in the train queue for the owner (tier C), open asks for a person, 2.76.0 (B-87) tasks
+ * waiting on the dev's `task yes` ("waiting on yes (N): T-1, T-2"). PC: free memory and who
  * holds machine:heavy. 2.68.0 (m): a "Machine: RAM …, CPU …, GPU …, disk … free" line (harness/machine.mjs); 2.68.0 (o): blockers also name roles
  * the crew watchdog paused and a usage wind-down. 2.65.3: a running merge train's step and ETA (harness/train-status.mjs), and STUDIO_TRAIN_MAX
  * when it has more than 6 lanes. 2.70.0 (t): the latest playable build and clip after a landing ("Playable build <id>
@@ -88,6 +89,8 @@ export async function briefFacts({ root = REPO_ROOT, since = null, now = Date.no
   let asks = [];
   try { asks = fs.readdirSync(path.join(root, 'studio', 'asks')).filter((f) => /^A-\d+\.json$/.test(f)).sort().map((f) => readJson(path.join(root, 'studio', 'asks', f))).filter((a) => a && a.status === 'open').map((a) => a.id); } catch {}
   if (asks.length) blockers.push({ kind: 'asks', ids: asks, text: 'asks' });
+  // 2.76.0 (j, B-87): agent-proposed tasks waiting on the dev's yes (harness/yes-wait.mjs).
+  try { const w = await (await import('./yes-wait.mjs')).readYesWaiting({ root }); if (w.count) blockers.push({ kind: 'yes', ids: w.ids, text: `waiting on yes (${w.count}${w.beta.on ? ', beta mode may say it' : ''})` }); } catch {}
   // 2.68.0: roles the crew watchdog paused (.studio/crew-paused.json) and a usage wind-down (.studio/winddown.json).
   const crew = Object.keys(readJson(path.join(root, '.studio', 'crew-paused.json'), {})?.roles || {});
   if (crew.length) blockers.push({ kind: 'crew', ids: crew, text: 'crew paused (sessions, nothing landed)' });

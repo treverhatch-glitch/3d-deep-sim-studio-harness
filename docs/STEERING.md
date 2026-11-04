@@ -6,7 +6,9 @@ let the dev overrule a gate. Counts are tokens, turns and tasks; no money figure
 ## Intent card and task origin (J2)
 - Every task is tagged **dev-asked** or **agent-proposed** when it is queued. `npm run task -- add "…" --origin dev --asked "<the dev's words>"` marks a dev request; an agent's add defaults to agent-proposed.
 - After turning feedback into tasks, the Producer shows one card: `npm run intent -- echo --asked "add sprint/jump" --wont "stamina, camera" --tasks T-160 --by producer-1`. The War Room shows "You asked for: X. I will NOT change: Y." under **Your call**; one click ("That's right") confirms it. `npm run intent -- list` shows them.
-- An **agent-proposed mechanic** (a phrase like "add a grapple", "new stamina system"; never a lone word) waits for the dev's yes: the "Yes, build it" button, or `npm run task -- yes <ID> --by <dev>`. Other agent work starts at once.
+- An **agent-proposed mechanic** (a phrase like "add a grapple", "new stamina system"; never a lone word) waits for the dev's yes: the "Yes, build it" button, or `npm run task -- yes <ID> --by <dev>`. Other agent work starts at once. 2.76.0: the tasks waiting on a yes are named in
+`npm run studio:status` (after the last pass: "waiting on yes: N (T-…)"), in `npm run status -- --brief` (Blockers) and
+in the War Room's Needs a person; in beta mode the line says who beta mode lets give the yes.
 - Only a person says yes. From inside an agent it is a relay and needs the dev's own words and where they said them (`--quote "…" --source "…"`).
 
 ## "Do it now" (J3)

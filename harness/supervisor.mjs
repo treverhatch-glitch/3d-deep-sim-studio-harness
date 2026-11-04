@@ -796,8 +796,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(r.code);
   }
   if (argv[0] === 'status') {
+    // 2.76.0 (j, B-87): agent-proposed tasks waiting on the dev's yes, named after the last pass (harness/yes-wait.mjs).
+    const yesWaitText = async () => { try { const w = await (await import('./yes-wait.mjs')).readYesWaiting(); return w.count ? `; ${w.line}: npm run task -- yes <id> --by <dev>${w.beta.on ? ` (${w.beta.words})` : ''}` : ''; } catch { return ''; } };
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}` : 'The supervisor has not run here yet: npm run studio:start');
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}` : 'The supervisor has not run here yet: npm run studio:start');
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {
