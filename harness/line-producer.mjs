@@ -502,10 +502,27 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       fixed: f.fixed.map((a) => ({ kind: a.kind, task: a.task, what: a.what })),
       actions: readActions(10),
     };
+    // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
+    status.text = summaryLine(status);
     if (!dryRun) { try { fs.mkdirSync(LINE_DIR(), { recursive: true }); const tmp = `${LINE_STATUS_FILE()}.${process.pid}.tmp`; fs.writeFileSync(tmp, `${JSON.stringify(status, null, 2)}\n`); fs.renameSync(tmp, LINE_STATUS_FILE()); } catch {} }
     void note;
     return status;
   } catch (e) { return { mode, error: e.message, at: new Date(now).toISOString() }; }
+}
+
+/** "Line: 2/5 builders (rig: …); 4 blocked (2 chain, 1 yes, 1 park); chain-breaker T-010 (3 wait); fixed 1" */
+export function summaryLine(s) {
+  const kinds = {};
+  for (const b of s.blocked || []) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
+  const cb = (s.chainBreakers || [])[0];
+  return [
+    `Line: ${s.builders?.running ?? 0}/${s.builders?.target ?? 0} builders${s.builders?.rigCap !== null && s.builders?.rigCap !== undefined && s.builders.rigCap < (s.builders.paceCap ?? Infinity) ? ` (the rig carries ${s.builders.rigCap})` : ''}`,
+    s.blocked?.length ? `${s.blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : 'nothing blocked',
+    cb ? `chain-breaker ${cb.task} (${cb.n} wait${cb.state === 'blocked' ? ', blocked' : ''})` : null,
+    s.expansion?.slots ? `expansion ${s.expansion.running}/${s.expansion.slots}` : null,
+    s.fixed?.length ? `fixed ${s.fixed.length}` : null,
+    s.reasons?.length ? 'a Producer note is open' : null,
+  ].filter(Boolean).join('; ');
 }
 
 /** The last pass's status (.studio/line/status.json), or null. */

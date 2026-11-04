@@ -134,7 +134,10 @@ const holds = JSON.parse(fs.readFileSync('studio/task-holds.json', 'utf8')).task
 console.log(JSON.stringify({ claimed: c.ok, locked: lock.status('task:T-040').locked, holds, s, file: fs.existsSync('.studio/line/status.json'), actions: fs.readFileSync('.studio/line/actions.jsonl', 'utf8') }));`);
     if (!j) return [false, out(r)];
     const evs = events(ev).filter((e) => e.type === 'line.fixed');
-    const shape = ['builders', 'blocked', 'chainBreakers', 'expansion', 'rig', 'actions'].every((k) => k in j.s) && ['running', 'target', 'why'].every((k) => k in j.s.builders) && 'share' in j.s.expansion && 'byPhase' in j.s.expansion;
+    // The Communicator (helper l) reads { at (ISO), builders: { running, target }, blocked, text } from this file.
+    const file = JSON.parse(fs.readFileSync(path.join(S, '.studio', 'line', 'status.json'), 'utf8'));
+    const comm = Number.isFinite(Date.parse(file.at)) && Number.isFinite(file.builders?.running) && Number.isFinite(file.builders?.target) && Array.isArray(file.blocked) && /^Line: \d+\/\d+ builders/.test(file.text || '') && !/\n/.test(file.text);
+    const shape = comm && ['builders', 'blocked', 'chainBreakers', 'expansion', 'rig', 'actions'].every((k) => k in j.s) && ['running', 'target', 'why'].every((k) => k in j.s.builders) && 'share' in j.s.expansion && 'byPhase' in j.s.expansion;
     return [j.claimed && !j.locked && !j.holds['T-041'] && j.file && shape && /T-040/.test(j.actions) && /cooldown/.test(j.actions) && evs.length >= 2 && j.s.order.includes('T-040'), JSON.stringify({ ...j, s: undefined, order: j.s.order, evs: evs.map((e) => e.msg) })];
   });
 
