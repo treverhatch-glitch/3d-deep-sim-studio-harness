@@ -418,7 +418,7 @@ export function liveOwner(taskId, agent, events = null, { waiting = false } = {}
     // A waiting task counts only when the harness handed it back from that owner (orphaned); one whose owner's own
     // hand-back was cut off (no task.paused logged) is anyone's.
     if (waiting && !claimOwner(taskId, evs)?.orphaned) return null;
-    const a = claimActive(taskId, { root: mainRoot(), orphaned: true, events: evs });
+    const a = claimActive(taskId, { root: mainRoot(), orphaned: true, events: evs, asker: agent }); // 2.76.0 (B-90): never its own copy
     return a.busy && a.owner && a.owner !== agent ? a : null;
   } catch { return null; }
 }

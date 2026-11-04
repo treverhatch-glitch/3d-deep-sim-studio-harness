@@ -1423,7 +1423,8 @@ export function precheckChild(root, lane) {
   let src = '';
   try { src = fs.readFileSync(script, 'utf8'); } catch {}
   if (!src.includes("flags['train-check']")) return { ok: false, error: 'old-harness', message: `${lane.task}'s lane copy runs a harness from before the merge train (2.59.0): merge the studio's branch into the copy (git merge ${mainBranch(root)}), commit, and queue it again, or land it with STUDIO_TRAIN=off npm run task -- done ${lane.task}` };
-  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent };
+  // 2.76.0 (B-90): run in the lane owner's name, but its events are the train's (meta.onBehalf), never the owner's activity.
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent, STUDIO_ON_BEHALF: 'train' };
   const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check'], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{"train')).pop();
   try { const j = JSON.parse(line); return { ...j, ok: Boolean(j.ok) }; } catch {}

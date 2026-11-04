@@ -103,7 +103,9 @@ export function emitEvent(partial = {}) {
     tokensSaved: Number(partial.tokensSaved || 0),
     latencyMs: durationMs,
     msg: partial.msg || '',
-    meta: partial.meta || {},
+    // 2.76.0 (B-90): a process the harness runs in an agent's name (the train's checks of a lane, STUDIO_ON_BEHALF=train)
+    // marks its events, so they never count as that agent's own activity (harness/busy.mjs claimActive).
+    meta: process.env.STUDIO_ON_BEHALF && !(partial.meta && 'onBehalf' in partial.meta) ? { ...(partial.meta || {}), onBehalf: String(process.env.STUDIO_ON_BEHALF).slice(0, 40) } : partial.meta || {},
     ...(studioGameId() ? { gameId: studioGameId() } : {}),
     ...(partial.track || process.env.STUDIO_TRACK ? { track: partial.track || process.env.STUDIO_TRACK } : {}),
   };
