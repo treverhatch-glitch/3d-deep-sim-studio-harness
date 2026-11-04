@@ -1,0 +1,32 @@
+{
+  "id": "start-to-win",
+  "seed": 1337,
+  "steps": [
+    {"tick":1,"action":"spawn","args":{"kind":"vehicle","id":"bought-1","x":0,"z":1}},
+    {"tick":2,"action":"spawn","args":{"kind":"vehicle","id":"bought-2","x":0,"z":2}},
+    {"tick":4,"action":"spawn","args":{"kind":"vehicle","id":"bought-4","x":0,"z":4}},
+    {"tick":15,"action":"spawn","args":{"kind":"vehicle","id":"bought-15","x":0,"z":1}},
+    {"tick":26,"action":"spawn","args":{"kind":"vehicle","id":"bought-26","x":0,"z":5}},
+    {"tick":36,"action":"spawn","args":{"kind":"vehicle","id":"bought-36","x":0,"z":1}},
+    {"tick":47,"action":"spawn","args":{"kind":"vehicle","id":"bought-47","x":0,"z":5}},
+    {"tick":57,"action":"spawn","args":{"kind":"vehicle","id":"bought-57","x":0,"z":1}},
+    {"tick":67,"action":"spawn","args":{"kind":"vehicle","id":"bought-67","x":0,"z":4}},
+    {"tick":76,"action":"spawn","args":{"kind":"vehicle","id":"bought-76","x":0,"z":6}},
+    {"tick":85,"action":"spawn","args":{"kind":"vehicle","id":"bought-85","x":0,"z":1}},
+    {"tick":94,"action":"spawn","args":{"kind":"vehicle","id":"bought-94","x":0,"z":3}},
+    {"tick":103,"action":"spawn","args":{"kind":"vehicle","id":"bought-103","x":0,"z":5}},
+    {"tick":112,"action":"spawn","args":{"kind":"vehicle","id":"bought-112","x":0,"z":0}},
+    {"tick":121,"action":"spawn","args":{"kind":"vehicle","id":"bought-121","x":0,"z":2}},
+    {"tick":129,"action":"spawn","args":{"kind":"vehicle","id":"bought-129","x":0,"z":3}},
+    {"tick":138,"action":"spawn","args":{"kind":"vehicle","id":"bought-138","x":0,"z":5}},
+    {"tick":147,"action":"spawn","args":{"kind":"vehicle","id":"bought-147","x":0,"z":0}},
+    {"tick":155,"action":"spawn","args":{"kind":"vehicle","id":"bought-155","x":0,"z":1}},
+    {"tick":164,"action":"spawn","args":{"kind":"vehicle","id":"bought-164","x":0,"z":3}},
+    {"tick":172,"action":"spawn","args":{"kind":"vehicle","id":"bought-172","x":0,"z":4}},
+    {"tick":181,"action":"spawn","args":{"kind":"vehicle","id":"bought-181","x":0,"z":6}}
+  ],
+  "goal": {"path":"won","op":"eq","value":true},
+  "saveAt": 100,
+  "maxTicks": 320,
+  "note": "A player buys vehicles as soon as each pays for itself and wins the economy before the power runs out. Doing nothing loses; the goal \"won\" is only reached by playing."
+}

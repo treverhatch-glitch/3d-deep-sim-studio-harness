@@ -149,6 +149,18 @@ export function step(prevState, action = null) {
   return state;
 }
 
+/**
+ * Save and load (used by qa/journey.mjs, the fresh-process reopen check): the state as the cartridge saves it, as text,
+ * and back. The state is plain JSON, so this is JSON; a save that drops a field changes the state digest after a reopen.
+ */
+export function saveState(state) {
+  return JSON.stringify(state);
+}
+
+export function loadState(raw) {
+  return JSON.parse(raw);
+}
+
 export function invariants(state) {
   const findings = [];
   const { credits, energy } = state.resources;
