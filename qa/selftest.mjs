@@ -4603,6 +4603,16 @@ if (inShard('selftest-276h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (u): engine passes inside the harness (P5.1-P5.6, P9.7): an engine pass in its own repo queues for its engine
+// train, the Line Producer starts that train in a quiet window, the land run is a recorded heavy job, the lane tunes its
+// listed settings, the visual check (shots, reference photos, the builder looked, a review by someone else), any engine.
+if (inShard('selftest-277u')) {
+  const dir = copyRepo();
+  const { selftest277U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277u.mjs')).href);
+  await selftest277U({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

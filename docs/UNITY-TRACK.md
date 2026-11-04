@@ -1,4 +1,4 @@
-# The Unity track (2.46.0)
+# The Unity track (2.46.0; inside the harness end to end since 2.77.0)
 
 How the studio builds a game in Unity without its agents drifting: the rules in a pure C# assembly that
 anything can test, the editor for what only the editor can check, and real input for every control.
@@ -458,6 +458,31 @@ npm run task -- train status                              # the queue and the ru
 
 Each pass is a task with its own branch, its own result and its own history on the board. A red batch is bisected
 to the branch that broke it, and only that task is handed back. Refusals (busy) are retried, and nobody is blamed.
+
+## Unity passes inside the harness (2.77.0)
+
+Unity passes are board tasks now, and the Unity train is their normal landing path. Before 2.77 the crew ran its Unity
+work outside the harness, because the track wasn't fed: the done check looked for the pass's commits in the studio
+repo, the track could fall out of the event log, nobody started the Unity train, and a launched porter had no checkout
+of the Unity repo. The full pattern, the same for any engine, is in [ENGINE-TRACKS.md](ENGINE-TRACKS.md).
+
+- **Add a pass:** `npm run task -- add "Pass 11: …" --role engine-porter --track engine:unity --branch unity/pass-11
+  --scope "…" [--visual-check --refs <photos>]`. A launched porter gets `.lanes/engine/<T-ID>`, a worktree of the
+  Unity repo on its branch.
+- **Queue it:** `task done <ID> --train` checks the pass in the Unity repo (commits on its branch that the target
+  lacks, all committed, the visual check) and queues it.
+- **Land it:** the Line Producer starts `task train --engine unity` in a quiet window: no web train running, no other
+  Unity job, free RAM at or over the floor, the CPU not busy, and web lanes first.
+  - The land run is a `machine:heavy` `unity` job (8 GB, 4 threads).
+  - Its length is recorded, and the median becomes the expected minutes: 30 until runs are recorded, about 26 for
+    Edit Mode on the crew's PC.
+  - An infrastructure abort is still NOT RUN.
+- **Your own land script:** put it in `engines.unity.land` / `landMany` (with `{flags}` for the lane's tuned batch
+  flags) and keep its RAM floor in `STUDIO_UNITY_MIN_FREE_GB` or the lane's tuned `ram-floor`. The harness runs it
+  as the one land run. It doesn't need its own `heavy wait` any more, though one inside it is harmless: a nested
+  `heavy` call joins the train's hold.
+- **Self-tuning:** `npm run engine -- tune unity <quality-level|volume|lod-bias|batch-flags|ram-floor> <value> --by
+  <you> --why "…"`, logged in the decisions log.
 
 ## Settings
 
