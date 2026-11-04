@@ -146,14 +146,15 @@ const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').
  * Why this release of a held re-record is refused, or ''. held.rerecord from rerecordTier. who: { by (the person),
  * agent (a delegation's or autonomous agent), recordedBy (an agent recording a person's permission), delegated }.
  */
-export function rerecordRefusal(held, { by = '', agent = '', recordedBy = '', delegated = false } = {}) {
+export function rerecordRefusal(held, { by = '', agent = '', recordedBy = '', delegated = false, beta = false } = {}) {
   const rr = held?.rerecord;
   if (!rr || !Array.isArray(rr.reports) || !rr.reports.length) return '';
   const authors = Array.isArray(rr.authors) ? rr.authors : [];
   const signer = [agent, recordedBy, by].find((n) => authors.some((a) => same(a, n)));
   if (signer) return `${signer} is this lane's author (${authors.join(', ')}): a re-recorded golden needs a second signer, a person, a delegation or autonomous review by another agent`;
   const missing = rr.reports.filter((r) => !r.ok);
-  if (missing.length && delegated) return `${missing.map(reportLine).join('; ')}. Without the harness's first-divergence report a delegation or autonomous review can't release a re-recorded golden: a person does (npm run task -- train release <ID> --by <name>)`;
+  // 2.76.0: in beta mode the owner's stand-in may release it without the report (logged; the author rule above stays).
+  if (missing.length && delegated && !beta) return `${missing.map(reportLine).join('; ')}. Without the harness's first-divergence report a delegation or autonomous review can't release a re-recorded golden: a person does (npm run task -- train release <ID> --by <name>)`;
   return '';
 }
 

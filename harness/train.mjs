@@ -1322,7 +1322,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `refs/heads/${mainBranch(root)}:studio/keys/owner-ed25519.pub.pem`)));
   // 2.67.0: the owner's standing delegation (harness/delegation.mjs) lets the named outside agent release with --by <agent>.
   const dg = delegationFor({ action: 'train-release', by, env, root });
-  if (dg.ok && ownerKey && !dg.signed) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
+  if (dg.ok && ownerKey && !dg.signed && !dg.beta) return { ok: false, message: `This studio has an owner key: the delegation isn't signed with it. Nothing was released.` };
   const refusal = dg.ok ? '' : releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
   if (refusal) return { ok: false, message: `${refusal}${dg.why ? ` (${dg.why})` : ''} Nothing was released.` };
   if (dg.ok) { by = dg.owner; permission = dg.permission; }
@@ -1337,9 +1337,9 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     if (never) return { ok: false, message: `Refused: ${never}. Nothing was released.` };
     // 2.73.0 (g, A13): a re-recorded golden needs a releaser who isn't the lane's author, and, without the harness's
     // first-divergence report, a person (harness/golden-report.mjs).
-    const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok });
+    const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;

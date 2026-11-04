@@ -4548,6 +4548,15 @@ if (inShard('selftest-275h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (g): beta mode (the owner's gates off while the harness is built): the switch, who it covers, approvals
+// without the key, owner asks (B-86), LF hashing of approved text (B-93), owner allow rules for the proxy's folder (B-95).
+if (inShard('selftest-276g')) {
+  const dir = copyRepo();
+  const { selftest276G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276g.mjs')).href);
+  await selftest276G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

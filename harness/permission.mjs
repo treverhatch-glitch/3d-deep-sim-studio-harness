@@ -14,6 +14,7 @@
  */
 
 import { proxyShell } from './owner-proxy.mjs';
+import { betaActor } from './beta-mode.mjs';
 
 // Launched sessions that may act on a person's permission.
 export const DECIDER_ROLES = /^(producer|director)$/i;
@@ -30,7 +31,9 @@ export const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_C
 export const permissionText = (p, env = process.env) => {
   const t = String(p || '').trim();
   if (t) return t;
-  try { const s = proxyShell({ env }); return s.ok ? s.words : ''; } catch { return ''; }
+  try { const s = proxyShell({ env }); if (s.ok) return s.words; } catch { /* not the proxy */ }
+  // 2.76.0: in beta mode the owner's stand-ins (harness/beta-mode.mjs) need no per-step words either.
+  try { const b = betaActor({ env }); return b.ok ? b.words : ''; } catch { return ''; }
 };
 
 /**

@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
+import { proxyShell } from './owner-proxy.mjs';
+import { betaActor } from './beta-mode.mjs';
 
 export const ASKS_DIR = path.join(REPO_ROOT, 'studio', 'asks');
 const LOG = path.join(REPO_ROOT, 'studio', 'decisions', 'decided-without-you.md');
@@ -72,9 +74,18 @@ export function ask({ question, options = [], def = null, timeout = null, why = 
   return { ok: true, ask: a, note: protectedTopic && timeout ? 'This is about signing, pillars, money or deleting, so it waits for a person: no deadline.' : null };
 }
 
+/** The owner's stand-in in this shell: the owner proxy, or a beta-mode actor. { owner, agent, via } or null. */
+function ownerStandIn(env = process.env) {
+  try { const p = proxyShell({ env }); if (p.ok) return { owner: String(p.doc.by), agent: String(p.doc.agent), via: 'owner proxy' }; } catch {}
+  try { const b = betaActor({ env }); if (b.ok) return { owner: String(b.doc.by), agent: String(b.who), via: 'beta mode' }; } catch {}
+  return null;
+}
+
 function resolve(id, status, answer, by, extra = {}) {
   const a = read(path.join(ASKS_DIR, `${id}.json`));
   if (!a) return { ok: false, message: `No question ${id}` };
+  // 2.76.0 (B-86): the owner proxy's shell and, in beta mode, the owner's stand-ins answer for the owner (recorded).
+  if (by && isAgent(by) && status !== 'decided') { const s = ownerStandIn(); if (s && s.agent.toLowerCase() === String(by).toLowerCase()) { extra = { ...extra, recordedBy: by, via: s.via }; by = s.owner; } }
   if (!by || (isAgent(by) && status !== 'decided')) return { ok: false, message: 'A person answers: --by <your name>. Agents ask; they don\'t answer for the game dev.' };
   if (status !== 'decided' && by === a.by) return { ok: false, message: `${by} asked ${id}; the game dev answers it.` };
   if (!String(answer || '').trim()) return { ok: false, message: 'Give the answer.' };

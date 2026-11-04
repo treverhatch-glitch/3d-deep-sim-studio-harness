@@ -42,6 +42,7 @@ import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { autonomousFor, policyNeverWhy, embeddedAutonomyOk } from './policy-rules.mjs';
 import { logDecision } from './decisions-log.mjs';
 import { grantBody, isProxyGrant, PROXY_MAX_DAYS, PROXY_DEFAULT_DAYS, PROXY_NEVER } from './owner-proxy.mjs';
+import { betaActor, BETA_NEVER, recordBetaUse } from './beta-mode.mjs';
 
 export const DELEGATION_REL = 'studio/delegation.json';
 /**
@@ -83,6 +84,8 @@ export const ACTION_COMMANDS = {
  * STUDIO_LOCK_OWNER or STUDIO_AGENT, a worker's name.
  */
 export function ownerShellRefusal({ env = process.env, lane = inLaneCopy() } = {}) {
+  // 2.76.0: in beta mode the owner's stand-ins (harness/beta-mode.mjs) pass where the owner's own terminal does.
+  try { if (!lane && betaActor({ env }).ok) return ''; } catch { /* the usual rules */ }
   const role = String(env.STUDIO_ROLE || '').trim();
   if (role) return `this runs inside a launched ${role} session (STUDIO_ROLE is set)`;
   if (lane) return 'this runs in a lane copy, not the studio\'s main checkout';
@@ -155,7 +158,10 @@ export const delegationWords = (doc) => `under delegation ${doc.at} by ${doc.by}
  * apply and nothing about a delegation needs saying).
  */
 export function delegationFor({ action, by, env = process.env, root = mainRoot(), now = Date.now(), lane = inLaneCopy(), autonomy = true } = {}) {
-  const d = delegationOnly({ action, by, env, root, now, lane });
+  let d = delegationOnly({ action, by, env, root, now, lane });
+  // 2.76.0 (beta mode, harness/beta-mode.mjs): while it is on, the named outside agents and the Producer/Director
+  // sessions act as the owner for every action but money and deletes, with --by <their name> or --by <the owner>.
+  if (!d.ok) { const b = betaFor({ action, by, env, root }); if (b) d = b; }
   // 2.71.0 (x): the studio policy's "never" rules an action out for every agent, a delegated one included.
   const never = d.ok ? policyNeverWhy(action, { root }) : '';
   if (never) return { ok: false, why: `no delegation applies: ${never}` };
@@ -166,6 +172,21 @@ export function delegationFor({ action, by, env = process.env, root = mainRoot()
   if (a.ok) return a;
   return { ok: false, why: d.why || a.why };
 }
+function betaFor({ action, by, env, root }) {
+  const who = String(by || '').trim();
+  if (!who) return null;
+  let a = null;
+  try { a = betaActor({ env, from: root }); } catch { return null; }
+  if (!a?.ok) return null;
+  if (BETA_NEVER.includes(String(action || '').toLowerCase())) return { ok: false, why: `no delegation applies: beta mode never covers ${action}` };
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  const owner = String(a.doc.by || '');
+  if (!(same(who, a.who) || same(who, me) || same(who, owner))) return null;
+  recordBetaUse(a, { action });
+  return { ok: true, beta: true, owner, agent: me || a.who, at: a.doc.at, until: null, signed: false, proxy: false, permission: a.words.slice(0, 500), why: '', doc: a.doc };
+}
+const same = (x, y) => String(x || '').trim().toLowerCase() === String(y || '').trim().toLowerCase() && String(x || '').trim() !== '';
+
 function delegationOnly({ action, by, env, root, now, lane }) {
   let who = String(by || '').trim();
   if (!who) return { ok: false, why: '' };
@@ -291,13 +312,23 @@ export function revokeDelegation({ by = '', commit = true, env = process.env, ro
 }
 
 /** The narrow Claude Code allow rules for these actions: npm and node forms, prefix rules only. */
-export function claudeRules(actions) {
+export function claudeRules(actions, { owner = false } = {}) {
   const out = [];
   for (const a of actions) for (const c of ACTION_COMMANDS[a] || []) out.push(`Bash(npm run task -- ${c}:*)`, `Bash(node harness/task.mjs ${c}:*)`);
+  if (owner) out.push(...OWNER_RULES);
   return [...new Set(out)];
 }
+/**
+ * 2.76.0 (B-95): the owner's commands for the owner proxy's or a beta-mode stand-in's own Claude Code session (whose
+ * folder may not be the studio's: `claude-settings --owner --dir <its folder>`). Prefix rules for exactly these commands,
+ * npm and npm.cmd forms; never a broad rule.
+ */
+const OWNER_CMDS = ['task -- train release', 'task -- type', 'task -- visual', 'task -- yes', 'task -- hold', 'task -- unhold', 'task -- unpark',
+  'approve -- protected', 'approve -- tests', 'approve -- hooks', 'approve -- force', 'approve -- show', 'ask -- answer', 'beta -- status', 'delegate -- list',
+  'studio:resume', 'studio:extend', 'studio:reload-env', 'studio:boot', 'studio:status', 'lanes -- refresh', 'janitor -- --lanes'];
+export const OWNER_RULES = OWNER_CMDS.flatMap((c) => [`Bash(npm run ${c}:*)`, `Bash(npm.cmd run ${c}:*)`]);
 /** A rule this command would ever write: exactly a delegated command's prefix (no other wildcard, no shell tricks). */
-export const narrowRule = (r) => /^Bash\((npm run task --|node harness\/task\.mjs) (train release|type|visual|yes|hold|unhold):\*\)$/.test(r);
+export const narrowRule = (r) => OWNER_RULES.includes(r) || /^Bash\((npm run task --|node harness\/task\.mjs) (train release|type|visual|yes|hold|unhold):\*\)$/.test(r);
 
 /**
  * Merge (or with remove, take out) the rules in <root>/.claude/settings.json permissions.allow. Every other key, and
@@ -360,6 +391,25 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const d = readDelegation();
     const list = opt('--actions') ? String(opt('--actions')).split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean) : (isProxyGrant(d.doc) ? DELEGABLE : (d.doc?.actions || []));
     const unknown = list.filter((a) => !DELEGABLE.includes(a));
+    // 2.76.0 (B-95): --owner adds the owner's commands (the proxy's or beta mode's session); --dir writes that session's
+    // own folder's .claude/settings.json when it isn't the studio's.
+    const ownerRules = argv.includes('--owner') || isProxyGrant(d.doc);
+    if (ownerRules && !unknown.length) {
+      const rules = claudeRules(list, { owner: true });
+      const dir = opt('--dir');
+      if (!argv.includes('--write')) {
+        console.log(`Claude Code allow rules for the owner's commands (the owner proxy's / beta mode's own session${dir ? `, in ${dir}` : ''}); write them once with --write${dir ? '' : ' (add --dir <the session\'s folder> when it runs outside the studio folder)'}:`);
+        for (const r of rules) console.log(`  ${r}`);
+        console.log('The harness still checks every use. Remove them with --remove --write.');
+        process.exit(0);
+      }
+      const shell = ownerShellRefusal();
+      if (shell && !argv.includes('--remove')) { console.error(`Not written: ${shell}. The owner runs this once, in their own terminal (or, in beta mode, the owner's stand-in does).`); process.exit(1); }
+      const r = writeClaudeRules(rules, { root: dir ? path.resolve(dir) : mainRoot(), remove: argv.includes('--remove') });
+      if (!r.ok) { console.error(r.message); process.exit(1); }
+      console.log(argv.includes('--remove') ? `Removed ${r.removed.length} rule(s) from ${dir ? path.join(path.resolve(dir), r.file) : r.file}.` : `Added ${r.added.length} rule(s) to ${dir ? path.join(path.resolve(dir), r.file) : r.file} permissions.allow${r.added.length < rules.length ? ` (${rules.length - r.added.length} were already there)` : ''}. Deny rules untouched.`);
+      process.exit(0);
+    }
     if (!list.length || unknown.length) { console.error(`${unknown.length ? `${unknown.join(', ')} can't be delegated. ` : 'No delegation on file: grant one first, or pass --actions. '}Actions: ${DELEGABLE.join(', ')}.`); process.exit(1); }
     const rules = claudeRules(list);
     if (!argv.includes('--write')) {
