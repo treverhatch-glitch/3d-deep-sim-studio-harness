@@ -144,8 +144,8 @@ console.log(JSON.stringify({
   {
     const env = { STUDIO_BUILDER_CMD: 'node -e 0', STUDIO_HEARTBEAT_SEC: '1' };
     const bare = home();
-    const s1 = run(dir, 'node harness/agent.mjs start --role builder --agent agy-hint-1 --tool agy --model m-1', as(bare, env));
-    const s2 = run(dir, 'node harness/agent.mjs start --role builder --agent agy-hint-2 --tool agy --model m-1', as(enrolledHome, env));
+    const s1 = run(dir, 'node harness/agent.mjs start --role builder --agent agy-hint-1 --tool agy --model gemini-m-1', as(bare, env));
+    const s2 = run(dir, 'node harness/agent.mjs start --role builder --agent agy-hint-2 --tool agy --model gemini-m-1', as(enrolledHome, env));
     const lines1 = String(s1.stdout).split(/\r?\n/).filter((l) => l === HINT);
     const started = events().some((e) => e.type === 'agent.session.start' && e.agent === 'agy-hint-1');
     report('P-067: npm run agent -- start … --tool agy prints one line, "agy has no allow-rules: run npm run agent -- allow agy --by <owner> (dry-run first)", while nothing is enrolled, and starts the agent anyway; with the rules enrolled it prints nothing',

@@ -187,12 +187,12 @@ console.log(JSON.stringify({ running: sessions().some((x) => x.agent === 'h9-slo
   // ---------- H-2: agy's prompt on stdin ----------
   {
     const task = add(dir, 'Agy run');
-    const s = start(dir, `--role builder --agent h2-agy --task ${task} --tool agy --model m-1`, { STUDIO_WORKTREES: 'off' });
+    const s = start(dir, `--role builder --agent h2-agy --task ${task} --tool agy --model gemini-m-1`, { STUDIO_WORKTREES: 'off' });
     const r = recOf('agy', 'h2-agy');
     const kick = path.join(dir, '.studio', 'kickoff', 'h2-agy.md');
     const kickText = fs.existsSync(kick) ? fs.readFileSync(kick, 'utf8') : null;
     report('H-2 (crew agy-1.log: "Error: unexpected argument "are". Prompts are read only from -p/--print, -i/--prompt-interactive, or stdin"): agent start --tool agy with an agy that splits its arguments again at whitespace (as agy.exe did): the whole kickoff arrives (on stdin), no "unexpected argument", and no argument carries the prompt',
-      s.status === 0 && r && !r.error && r.via === 'stdin' && kickText && r.prompt === kickText && /^You are /.test(r.prompt) && same(r.argv, ['--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'm-1']),
+      s.status === 0 && r && !r.error && r.via === 'stdin' && kickText && r.prompt === kickText && /^You are /.test(r.prompt) && same(r.argv, ['--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'gemini-m-1']),
       `record: ${JSON.stringify(r && { ...r, prompt: r.prompt?.slice(0, 120) })}\n${out(s).slice(-600)}`);
   }
   {

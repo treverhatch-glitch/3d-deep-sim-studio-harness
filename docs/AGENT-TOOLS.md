@@ -65,6 +65,11 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
     `--model` the launcher now picks `STUDIO_TOOL_AGY_MODEL`, else `gemini-4-argon-high` (`agy models` lists the names; a
     model from the budget order's `agy:<model>` entry wins). **Untested on real agy:** the flag's name;
     `STUDIO_AGY_MODEL_FLAG` names another flag, `=off` passes no model.
+  - **Gemini only (2.77.0):** an agy start whose model isn't a Gemini model (`gemini-…`) is refused: agy also serves
+    Claude models, and a Claude model inside agy spends Claude's pool under agy's name. `--force-model` (or
+    `STUDIO_AGY_ANY_MODEL=on`, or an `agy:<model>` entry the owner put in the budget order) runs it anyway. A model the
+    rescue, routing, tier-up or reroute picked for an agy session that isn't Gemini gives way to the Gemini default
+    (event `model.kept_gemini`), and a failover keeps a model only within its family.
   - In a lane copy the launcher writes `GEMINI.md` (agy reads it from its folder) with the shell rules: one plain
     command per call, no pipes, chains, redirects or `cd` (a refused command ends the session; the crew found Gemini
     pipes and chains by habit). The file is kept out of the copy's change (its exclude file); a repository that has its
