@@ -4650,6 +4650,15 @@ if (inShard('selftest-2771c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.2: an ended agent's empty lane got a full verify and blocked every launch (B-107); a beating speculative train called
+// dead (B-106); `grandfather --ref` for an update an older guard merged (B-104).
+if (inShard('selftest-2772')) {
+  const dir = copyRepo();
+  const { selftest2772 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2772.mjs')).href);
+  await selftest2772({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {
