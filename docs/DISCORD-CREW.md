@@ -109,6 +109,50 @@ The conversation on the chat stays with the overseer; the posts and write-ups it
   refuses the task while the write-up has no Sources section or no link in it. No verify. The daily digest lists the
   research finished in the last 24 h with its file and recommendation.
 
+## The Communicator: status and alerts posted by code (2.76.0)
+
+Extra chat sessions that only reported confused names and answered things they couldn't. The Communicator
+(harness/communicator.mjs) is harness code: it posts, it never reads the chat and it spends no model tokens. The
+supervisor runs it once per pass.
+
+- **Status** every `STUDIO_COMM_STATUS_MIN` minutes (30): one fixed-format post from the same facts `status -- --brief`
+  and the Line Producer read (the event stream and the state files): agents and their tasks, landed since the run's start
+  and per hour, the train (step and ETA, or the last train's end and length, the queue), the rig's RAM/CPU/GPU/disk
+  (the supervisor's machine scan), API $ when sessions report it or `studio/prices.json` prices them, what is blocked and
+  why, what waits on a yes, beta mode on or off, and the Line Producer's line (`.studio/line/status.json`) when it has one.
+- **Alerts** at once, each tagging exactly who must act, from `studio/communicator.json` (Discord user ids are not
+  secrets; commit it):
+
+  ```json
+  { "mentions": { "orchestrator": "<id>", "keys": "<id>", "owner": "<id>" },
+    "names": { "orchestrator": "<name>", "keys": "<name>", "owner": "<name>" },
+    "agents": { "orchestrator": "<its STUDIO_LOCK_OWNER>" }, "username": "Studio Status" }
+  ```
+
+  The orchestrator: a train that died (its lock's process is gone, or it started and never ended) or is red on real
+  failures (main red; a red train that isn't flaky or infrastructure), fewer builders busy than the Line Producer's target
+  for 10 minutes (without a Line Producer: `STUDIO_COMM_MIN_BUILDERS`, off by default), the crew breaker or a supervisor
+  halt, a stop file, a stuck lane (queued over `STUDIO_COMM_STUCK_MIN`, 120, with no train running, or a stalled
+  session), a harness error. The key holder: an owner-key step (a lane held for the owner's release, protected files
+  changed without approval); never in beta mode, nor when the orchestrator's agent holds a delegation for releases. The
+  owner: only owner decisions (asks; in beta mode only asks about money, deleting, direction or scope; spend over budget;
+  a policy proposal) and disasters, which tag the orchestrator too: disk under `STUDIO_COMM_DISK_GB` (30),
+  `STUDIO_COMM_CRASHES` (3) crashes in an hour, everything blocked (no agent, no train, a blocker, the supervisor
+  running) over `STUDIO_COMM_BLOCKED_MIN` (60).
+- **Rules**: one alert at most once per `STUDIO_COMM_DEDUP_MIN` (30); one still open is tagged again every
+  `STUDIO_COMM_REPEAT_MIN` (120; disasters every 30); a pass's alerts go in one post, with the status when it is due;
+  closed alerts are named once ("Cleared: …"); `STUDIO_COMM_QUIET=23:00-07:00` (local time) holds owner-only alerts that
+  aren't disasters until it ends. A failed post is tried again after 5 minutes.
+- **One identity**: the webhook's username ("Studio Status"), plain text in parts of at most 2000 characters cut at line
+  ends, Discord `allowed_mentions` listing only the ids tagged in that part (no @everyone). The webhook is
+  `STUDIO_COMM_WEBHOOK`, else `STUDIO_REPORT_WEBHOOK` (the environment or `.env`; never printed, logged or put in an
+  event; launched agents never get either). It is on with `STUDIO_COMM_WEBHOOK`, or with the report webhook plus
+  `studio/communicator.json` or `STUDIO_COMM=on`; `STUDIO_COMM=off` turns it off. State: `.studio/comm/state.json`;
+  each post is a `comm.posted` event.
+- `npm run comm -- status [--json]` shows the set-up (the webhook masked) and what was tagged; `npm run comm -- preview
+  [--json]` prints what it would post now, with mentions as @names, and sends nothing; `npm run comm -- test` posts one
+  line that tags no one.
+
 ## One machine, one studio
 
 The studio keeps its locks, board and state in one checkout. Every bot drives **the same private studio

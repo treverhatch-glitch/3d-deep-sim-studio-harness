@@ -238,6 +238,41 @@ actions without the owner's words for each one, for a time the owner sets (harne
 - `--help` / `-h` on any `npm run task --` subcommand, and on `delegate`, `lanes`, `fuzz` and `denials`, prints usage
   and never acts (B-47: `task train --help` used to run a train).
 
+### Beta mode (2.76.0): the owner's gates off while the harness is built
+
+The owner's request (2026-11-04): "we are still in beta for the harness build and these [permission] things really slow
+us down ... allow [the orchestrator] to have the same permissions to get tasks done as i would have." One switch
+(harness/beta-mode.mjs), set once:
+
+    npm run beta -- on --by <owner> [--agents opus-1] [--why "…"]     the owner's terminal (signed where the key is), or
+                                                                     the owner proxy's shell with --permission "<the owner's yes>"
+    npm run beta -- off --by <name>                                  anyone may: it only takes power away
+    npm run beta -- status [--json]
+
+`studio/beta.json` (protected, read as committed in the main checkout). While it is on, the named outside agents (and
+the owner proxy's agent) and launched Producer/Director sessions act as the owner, with `--by <their name>` or
+`--by <the owner>`, no owner key and no per-step `--permission`:
+
+- every owner action (`delegationFor`: releases including tier C and golden re-records without a report, types, yes,
+  holds, unparks, resumes, janitor, upgrade switches, …) and every "a person's direct permission" command;
+- approvals (`npm run approve -- protected|tests|hooks|force`): an approval with no signature that carries beta.json; it
+  counts while beta mode is still on with that file, and only from a commit that isn't a worker's;
+- answering owner asks (`npm run ask -- answer <A-ID> <answer> --by <agent>`, recorded as the owner's answer with
+  `recordedBy`).
+
+Every use is logged (`delegation.used` events, the decision log, the daily digest, the War Room's Owner proxy panel), so
+the owner reviews afterwards instead of approving before. Never: money, deletes, worker sessions or workers' names
+(builders, reviewers, QA …), a lane copy acting as the owner (except approving that lane's own change). The game's tests,
+the train's full verify and the weakened-tests and hooks gates stay on. `npm run beta -- off` brings the owner gates back
+at once; approvals made in beta that haven't landed stop counting.
+
+The orchestrator's own Claude Code session may run in another folder than the studio: write the owner's command rules
+there once with `npm run delegate -- claude-settings --owner --dir <its folder> --write` (B-95; prefix rules for exactly
+those commands, npm and npm.cmd forms, never a broad rule).
+
+Protected text files are hashed with LF line endings (B-93): an approval signed on a Windows checkout (CRLF) matches the
+check in any checkout.
+
 ### The standing owner proxy (2.73.1, B-67)
 
 The owner's request (2026-11-03): "make Opus be able to do everything if I say yes via discord". One grant makes one

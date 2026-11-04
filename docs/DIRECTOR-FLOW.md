@@ -59,8 +59,12 @@ default 60 s, off when `STUDIO_WATCH_INTERVAL=0`) and in the supervisor's loop. 
    refused until the owner lets go (`--force` for a person reassigning it). A lane copy with commits that name the
    task (or on its branch, or named for the owner) ahead of the studio's branch keeps it however quiet the owner is
    (built, not landed), for up to `STUDIO_CLAIM_LANE_MAX_H` (24) hours since the lane last changed, unless the
-   owner's session ended. These hand-backs, and every other one the harness causes, never count for the circuit
-   breaker or as a failure;
+   owner's session ended. 2.76.0 (B-90, W-0084): only the owner's own work counts: its events on that task or on none,
+   never an event about another of its tasks, nor one the train wrote in its name (the train's checks run with
+   `STUDIO_ON_BEHALF=train`, which marks their events `meta.onBehalf`); and a lane copy that is another agent's (a
+   launcher-made `.lanes/<name>` of a session other than the owner, or the asking agent's own) is never the owner's
+   built work. An orchestrator's hand-made copy still counts. These hand-backs, and every other one the harness
+   causes, never count for the circuit breaker or as a failure;
 2. counts idle builder slots against ready work across the whole board, every role and lane, minus held and
    parked tasks (breaker parks included) and minus failing tasks: a task whose last hand-back was a failure is
    never re-fed by the flow; the circuit breaker or a person decides what happens to it;

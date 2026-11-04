@@ -4,4 +4,6 @@
  * top-level await, and once task-hold.mjs imported reclassify.mjs (B-38), `node harness/stall.mjs` reached
  * worktree.mjs before stall.mjs had defined the set: "Cannot access 'PLANNING_ROLES' before initialization".
  */
-export const PLANNING_ROLES = new Set(['producer', 'director', 'planner']);
+// 2.76.0 (k): the Line Producer (harness/line-producer.mjs) is code on the supervisor's loop; a session someone starts in
+// that role (a judgement call) works in the main checkout like the other planning roles.
+export const PLANNING_ROLES = new Set(['producer', 'director', 'planner', 'line-producer']);

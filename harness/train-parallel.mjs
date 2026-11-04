@@ -52,7 +52,7 @@ export async function bisectWidth({ root, env = process.env, machine, holders, n
   let stop = '';
   for (; k < cap; k += 1) {
     const state = budgetState(profile, sim, { env: e });
-    const claim = jobClaim('verify', { root, env: e, state, profile, label: 'train re-check' });
+    const claim = jobClaim('verify', { root, env: e, state, profile, label: 'train re-check', as: 'train' }); // 2.76.0 (j, B-89): the train's own
     const a = admit(claim, state, { slots, holders: sim, kindMax });
     if (!a.ok || a.alone) { stop = a.line || 'it would run alone'; break; }
     sim.push({ at: Date.now() + 1 + k, claim, pid: 0 });

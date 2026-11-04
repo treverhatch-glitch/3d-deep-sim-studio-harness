@@ -1253,3 +1253,23 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-233 — the Studio floor was cluttered with cut-off names and agents long gone · fixed in 2.75.0
 - **Evidence:** "unkno…", "builde…" plates; every agent of the last 24 h stayed on the floor.
 - **Fix:** short plates over the role, state badges, agents leave when done. qa/selftest-275h.mjs.
+
+### P-234 — every permission step waited on the owner during the beta · fixed in 2.76.0
+- **Evidence:** the owner: "i need it so patch or the discord crew can have all permissions"; releases and asks stalled.
+- **Fix:** beta mode (studio/beta.json): named agents act as the owner, logged, never money or deletes. qa/selftest-276g.mjs.
+
+### P-235 — nobody kept the line moving or reported it · fixed in 2.76.0
+- **Evidence:** the orchestration report of 2026-11-04: builders idle beside startable tasks; the owner asked for status by hand.
+- **Fix:** the Line Producer on the supervisor's loop; the Communicator's posts and alerts. qa/selftest-276k.mjs, qa/selftest-276l.mjs.
+
+### P-236 — green lanes dropped, dead trains unrecorded, mixed lanes trained · fixed in 2.76.0
+- **Evidence:** B-85 (generated art as hidden input), B-88 (train 20261104-044849-34540 left at "verify"), W-0081, B-91/B-92.
+- **Fix:** generated output excused, train life records, lane copies recreated, mixed lanes refused first. qa/selftest-276h.mjs.
+
+### P-237 — Gemini builders, stalls, usage and lane copies went wrong for the crew · fixed in 2.76.0
+- **Evidence:** B-80..B-84, B-90, W-0070/72/73: refused write_file, relaunches stall-killed in seconds, a repeated cost row, builders in main.
+- **Fix:** agy options and rules, per-session log reads, own usage, a lane copy at claim, owner judged on own work. qa/selftest-276i.mjs.
+
+### P-238 — every check took every core; yes-waits unnamed; divergence missed shared loaders · fixed in 2.76.0
+- **Evidence:** B-89 (26 of 28 cores per check), B-87, B-94.
+- **Fix:** core shares with the train first; "waiting on yes: N (ids)"; the import closure materialized. qa/selftest-276j.mjs.

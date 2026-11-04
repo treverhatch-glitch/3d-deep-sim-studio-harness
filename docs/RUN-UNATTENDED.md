@@ -119,11 +119,24 @@ Scheduler (Windows); `--uninstall` removes it.
   already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
+- **The Line Producer (2.76.0, docs/LINE-PRODUCER.md).** Each pass, before the supervisor picks what to start,
+  `harness/line-producer.mjs` frees locks of ended sessions, recreates a train lane's lost copy from its branch, clears
+  cooldowns whose time has passed, puts chain-breakers first on the strongest model, keeps a share of builders on
+  research/expansion across the early/mid/late phases, and holds builders back when the rig is full (never more than
+  the pace allows). `npm run line -- status`; `STUDIO_LINE_PRODUCER=report|off`.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
   `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
-  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.73.1 (B-68): a session
+  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.76.0 (B-83, the crew's
+  W-0070): each session is judged on its own tokens only. An agent's log is appended to across sessions under one name,
+  so a relaunch counted the last session's tokens and was ended within seconds ("read 837668 tokens … 3 s into the new
+  session", every builder). The session record's `logFrom` says where its part of the log starts (the launcher's
+  heartbeat and the watchdog read only that part), only the newest Claude session id in it counts, its stall record
+  starts fresh, and a count that starts over restarts the read-burn window there. 2.76.0 (B-82): a session the launcher
+  ends (stall, idle, budget) records its usage from its stream and a cost estimated at `studio/prices.json`
+  (`meta.costEstimated`); before, it recorded the previous session's result line (the same cost twice) or nothing.
+  2.73.1 (B-68): a session
   waiting on its own verify (`npm run verify`, its `.studio/verify-running/<agent>.json` or a `full*.json` it owns,
   with a live process and no result yet) or on its own background `task done` (`.studio/done-running/`) is busy, not
   stalled: the stall clock is held and the wall-clock cap may run over while it waits, by at most

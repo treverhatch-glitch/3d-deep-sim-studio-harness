@@ -418,7 +418,7 @@ export function liveOwner(taskId, agent, events = null, { waiting = false } = {}
     // A waiting task counts only when the harness handed it back from that owner (orphaned); one whose owner's own
     // hand-back was cut off (no task.paused logged) is anyone's.
     if (waiting && !claimOwner(taskId, evs)?.orphaned) return null;
-    const a = claimActive(taskId, { root: mainRoot(), orphaned: true, events: evs });
+    const a = claimActive(taskId, { root: mainRoot(), orphaned: true, events: evs, asker: agent }); // 2.76.0 (B-90): never its own copy
     return a.busy && a.owner && a.owner !== agent ? a : null;
   } catch { return null; }
 }
@@ -1090,6 +1090,8 @@ export function trainDeps(busyMod, { forDone = false } = {}) {
     },
     // 2.69.0 (r): ONE fix task per test the flake triager quarantined (harness/flakes.mjs; the board dedupes by title).
     fileFlakeTask: ({ title, test, label }) => addTask({ title, role: 'builder', priority: 'P1', agent: 'train', meta: { type: 'bug', promoted: true, origin: 'harness', flake: { test, label } } }),
+    // 2.76.0 (helper h): in beta mode the hand-back cap files ONE Producer task for the lane (the board dedupes by title).
+    fileRescue: ({ task, n, why }) => addTask({ title: `Rescue ${task}: handed back ${n} times`, role: 'producer', priority: 'P0', agent: 'train', meta: { promoted: true, origin: 'harness', handBackCap: { task, n, why: String(why || '').slice(0, 300) } } }),
     ...(forDone ? {} : {
       waitForDrain: () => busyMod.waitForDrain(),
       markRunning: (t, a) => { busyMod.markDoneRunning(t, a).catch(() => {}); },
@@ -1719,6 +1721,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(started.error === 'locked' && started.lock?.owner && !started.message ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
       process.exit(1);
     }
+    // 2.76.0 (B-84): a code-writing session claiming from the main checkout gets its lane copy now; none: hand it back.
+    const atClaim = (await import('./lane-at-claim.mjs')).laneAtClaim({ agent: whoAmI(flags), task: started.id });
+    if (atClaim?.error) {
+      pauseTask(started.id, whoAmI(flags), `${whoAmI(flags)} claimed ${started.id} from the main checkout and ${atClaim.error}; a builder session never works in the main checkout. Start it again once a lane copy can be made (npm run lanes shows the copies).`, { force: true });
+      console.error(`${started.id} handed back: ${atClaim.error}. A builder session never works in the main checkout.`);
+      process.exit(1);
+    }
+    if (atClaim) for (const l of (await import('./lane-at-claim.mjs')).laneAtClaimLines(atClaim)) console.error(l);
     // 2.30c (#4): short output. The brief's path and a 10-line summary; the carry-forward note (newest
     // notes, at most 3k characters) replaces re-reading the whole hand-off history.
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
@@ -1729,7 +1739,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
     await startDiskWarning(); // 2.68.0 (m)
     const { handoff, ...rest } = started;
-    console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}) }, null, 2));
+    console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}), ...(atClaim ? { laneCopy: atClaim.rel, laneDir: atClaim.dir } : {}) }, null, 2));
     process.exit(0);
   }
 

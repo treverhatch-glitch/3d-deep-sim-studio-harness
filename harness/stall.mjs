@@ -169,6 +169,12 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const prev = readStall(session.agent);
   const fresh = !prev || prev.startedAt !== session.startedAt;
   let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
+  // 2.76.0 (B-83, the crew's W-0070): fewer tokens than the last observation means the count started over (a new Claude
+  // session inside this launcher run: logTokens counts only the newest one). The window starts again from here, so the
+  // old session's base can neither kill the new one nor hide a real burn behind a base it never reaches. The
+  // no-progress clock is kept (the crew's local patch reset it to the session's start, which could end a long session
+  // on its next beat).
+  if (!fresh && Number(tokens.in) < Number(prev.tokensIn || 0)) s = { ...s, baseIn: Number(tokens.in) || 0, baseOut: Number(tokens.out) || 0, recounted: new Date(now).toISOString() };
   // 2.30q (#6): a session waiting on its own task done (gates, landing) is busy, not stalled. 2.73.1 (B-68): so is one
   // waiting on its own verify, and a done of any task it runs (busyWait above, bounded by STUDIO_STALL_VERIFY_MAX_MIN).
   let doing = null;
@@ -185,10 +191,48 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   return v;
 }
 
-/** Cumulative tokens from a stream-json log (each assistant message's usage), for a live session. */
+/**
+ * 2.76.0 (B-83): the lines of the newest Claude session in a log (stream-json lines carry "session_id"). A log that
+ * holds two sessions (a second Claude process in one launcher run, a wrapper that restarts it) is cut to the last one;
+ * lines without a session id (the launcher's own, another tool's) are kept. A log with no session id is returned whole.
+ */
+export function newestSessionPart(log) {
+  const text = String(log || '');
+  const ids = [...text.matchAll(/"session_id"\s*:\s*"([^"]+)"/g)];
+  if (!ids.length) return text;
+  const id = ids[ids.length - 1][1];
+  if (ids.every((m) => m[1] === id)) return text;
+  return text.split('\n').filter((l) => !/"session_id"\s*:/.test(l) || l.includes(`"${id}"`)).join('\n');
+}
+
+/**
+ * 2.76.0 (B-83): the part of an agent log this session wrote: from byte `from` (the log's size when the session
+ * started, recorded as the session's logFrom) to the end, at most `bytes` of its tail. The log is appended to across
+ * sessions under one name, so the whole file counted the earlier sessions' tokens too. Never throws ('' on error).
+ */
+export function readLogFrom(file, from = 0, bytes = 2 * 1024 * 1024) {
+  try {
+    const size = fs.statSync(file).size;
+    const start = Math.max(Number(from) > 0 && Number(from) <= size ? Number(from) : 0, size - bytes);
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      return buf.toString('utf8');
+    } finally { fs.closeSync(fd); }
+  } catch { return ''; }
+}
+
+/** 2.76.0 (B-83): a new session under this name starts with no stall record (the last session's is dropped). */
+export function resetStall(agent) {
+  try { clearStall(agent); } catch { /* a guard, never a crash */ }
+}
+
+/** Cumulative tokens from a stream-json log (each assistant message's usage), for a live session. 2.76.0 (B-83): only
+ * the newest Claude session's lines count (newestSessionPart). */
 export function logTokens(log) {
   let tin = 0; let tout = 0; const seen = new Set();
-  for (const l of String(log || '').split(/\r?\n/)) {
+  for (const l of newestSessionPart(log).split(/\r?\n/)) {
     const t = l.trim();
     if (!t.startsWith('{')) continue;
     let o; try { o = JSON.parse(t); } catch { continue; }

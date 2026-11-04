@@ -1,0 +1,189 @@
+/**
+ * harness/beta-mode.mjs — 2.76.0 (the owner's request, 2026-11-04): beta mode, the owner gates off while the harness is
+ * built.
+ *
+ * The owner's words: "i kinda want us to drop these permission things for now actually. we are still in beta for the
+ * harness build and these things really slow us down ... if we are patching things every 10 minutes and we need keys for
+ * everything this becomes a full time job for me" and "allow [the orchestrator] to have the same permissions to get tasks
+ * done as i would have". So one switch, set once:
+ *
+ *   npm run beta -- on --by <owner> [--agents opus-1,patch] [--why "…"] [--permission "<the owner's words or a link>"]
+ *   npm run beta -- off --by <name>            anyone may: it only takes power away
+ *   npm run beta -- status [--json]
+ *
+ * studio/beta.json { on, by, at, why, agents, roles, signature? | recordedBy+permission? } as committed in the main
+ * checkout. While it is on, the named outside agents (the crew's orchestrator) and the planning roles' launched sessions
+ * (Producer, Director) act as the owner without the owner key or the owner's words for each step: every owner action
+ * (harness/delegation.mjs delegationFor), approvals of protected files, gates, tests, hooks and forced dones
+ * (harness/approve.mjs, an approval that carries this file instead of a signature), answering owner asks, releasing a
+ * golden re-record. Every use is logged (who, why) and shown in the daily digest and the War Room, so the owner reviews
+ * afterwards instead of approving before. What stays on: the game's tests, the train's full verify, no deletes, no money,
+ * worker sessions never act as the owner.
+ *
+ * Who may turn it on: the owner in their own terminal (signed with the owner key when the private key is here), or the
+ * owner proxy's own shell recording the owner's yes (--permission), like any proxy approval. A commit that set it from
+ * a worker's session (Studio-Agent trailer naming a worker) doesn't count. No harness imports beyond owner-proxy.mjs,
+ * hash.mjs and event.mjs: approve.mjs, delegation.mjs and permission.mjs use it.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { canonicalBytes } from './hash.mjs';
+import { REPO_ROOT, emitEvent } from './event.mjs';
+import { mainCheckout, ownerPubAt, proxyShell, inLane } from './owner-proxy.mjs';
+
+export const BETA_REL = 'studio/beta.json';
+export const BETA_ROLES = ['producer', 'director'];
+export const BETA_NEVER = ['money', 'spend', 'payment', 'delete'];
+const FIELDS = ['on', 'by', 'at', 'why', 'agents', 'roles'];
+const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
+const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
+const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+const body = (d) => Object.fromEntries(FIELDS.map((k) => [k, d?.[k]]));
+const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
+const keyPath = (env) => env.STUDIO_OWNER_KEY || path.join(os.homedir(), '.studio-owner', 'owner-ed25519.pem');
+
+function verifyBeta(doc, pub) {
+  try { return Boolean(doc?.signature && pub) && crypto.verify(null, Buffer.from(canonicalBytes(body(doc))), crypto.createPublicKey(pub), Buffer.from(String(doc.signature), 'base64')); } catch { return false; }
+}
+
+/**
+ * Beta mode as committed in the main checkout: { on, doc, why, signed, setBy }. Never throws. `on` needs the file
+ * committed with on: true and one of: the owner key's valid signature; the owner proxy's recorded yes (recordedBy is the
+ * proxy agent, a permission line); or a commit that is a person's or an outside agent's (no worker's Studio-Agent).
+ */
+export function readBeta({ root = mainCheckout(), now = Date.now() } = {}) {
+  const shown = git(root, 'show', `HEAD:${BETA_REL}`);
+  if (shown.status !== 0) return { on: false, doc: null, why: 'beta mode is off (no studio/beta.json committed)' };
+  let doc;
+  try { doc = JSON.parse(shown.stdout); } catch { return { on: false, doc: null, why: `${BETA_REL} isn't valid JSON` }; }
+  if (doc?.on !== true) return { on: false, doc, why: `beta mode is off (${BETA_REL} by ${doc?.by || '?'} at ${short(doc?.at)})` };
+  if (!String(doc.by || '').trim() || !Number.isFinite(Date.parse(doc.at))) return { on: false, doc, why: `${BETA_REL} doesn't say who set it and when` };
+  const pub = ownerPubAt(root);
+  const signed = pub ? verifyBeta(doc, pub) : false;
+  const log = git(root, 'log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', 'HEAD', '--', BETA_REL);
+  const [sha = '', agent = ''] = String(log.stdout || '').trim().split('\t');
+  const committer = agent.trim();
+  if (committer && WORKER.test(committer)) return { on: false, doc, why: `${BETA_REL} was set in a worker's commit (${committer}); only the owner or the owner's proxy turns beta mode on` };
+  if (doc.recordedBy && String(doc.permission || '').trim().length < 10) return { on: false, doc, why: `${BETA_REL} was recorded by ${doc.recordedBy} without the owner's yes (--permission)` };
+  void now;
+  return { on: true, doc, signed, commit: sha.slice(0, 8), setBy: committer || 'a person', why: '' };
+}
+export const betaOn = (opts) => readBeta(opts).on;
+export const betaWords = (doc) => `beta mode: set by ${doc.by} at ${short(doc.at)} (${BETA_REL}${doc.why ? `: ${String(doc.why).slice(0, 120)}` : ''})`;
+
+/**
+ * Is this caller one beta mode lets act as the owner? { ok, who, via, doc, words, why }. A named outside agent
+ * (STUDIO_LOCK_OWNER in agents, or the owner proxy's agent), or a launched Producer/Director session (STUDIO_ROLE);
+ * never a worker's name or a worker session. A lane copy counts only with allowLane (approving that lane's own change).
+ */
+export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = false } = {}) {
+  let root = from;
+  try { root = mainCheckout(from); } catch {}
+  const b = readBeta({ root });
+  if (!b.on) return { ok: false, why: '' };
+  const role = String(env.STUDIO_ROLE || '').trim().toLowerCase();
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (me && WORKER.test(me)) return { ok: false, why: `${me} is a worker agent; beta mode never lets a worker act as the owner` };
+  if (role && !(b.doc.roles || BETA_ROLES).includes(role)) return { ok: false, why: `a launched ${role} session doesn't act as the owner in beta mode` };
+  let lane = false;
+  try { lane = !allowLane && inLane(from); } catch { lane = true; }
+  if (lane) return { ok: false, why: 'a lane copy doesn\'t act as the owner in beta mode' };
+  const agents = (b.doc.agents || []).map((a) => String(a).toLowerCase());
+  let proxyAgent = '';
+  try { const p = proxyShell({ env, from, allowLane: true }); if (p.ok) proxyAgent = String(p.doc.agent); } catch {}
+  const named = me && (agents.includes(me.toLowerCase()) || me.toLowerCase() === proxyAgent.toLowerCase());
+  if (role && (b.doc.roles || BETA_ROLES).includes(role)) return { ok: true, who: me || `a ${role} session`, via: `beta ${role}`, doc: b.doc, words: betaWords(b.doc), why: '' };
+  if (named) return { ok: true, who: me, via: 'beta agent', doc: b.doc, words: betaWords(b.doc), why: '' };
+  return { ok: false, why: '' };
+}
+
+/** An approval made in beta mode (no signature, beta.json embedded): counts while beta mode is still on with that file. */
+export function betaApprovalOk(doc, { root = null } = {}) {
+  const e = doc?.beta;
+  if (!e || doc?.signature) return false;
+  const cur = readBeta({ root: root || mainCheckout() });
+  if (!cur.on) return false;
+  return String(cur.doc.at) === String(e.at) && String(cur.doc.by) === String(e.by) && String(doc.approval?.recordedBy || '').trim() !== '' && !WORKER.test(String(doc.approval.recordedBy));
+}
+
+/** `beta on|off`. Returns { ok, message, doc? }. */
+export function setBeta({ on, by, agents = '', why = '', permission = '', env = process.env, root = mainCheckout(), commit = true, now = Date.now() } = {}) {
+  const who = String(by || '').trim();
+  const refuse = (m) => ({ ok: false, message: `Beta mode not changed: ${m}.` });
+  if (!who) return refuse('say who: --by <your name>');
+  const role = String(env.STUDIO_ROLE || '').trim();
+  const me = String(env.STUDIO_LOCK_OWNER || '').trim();
+  if (on) {
+    if (role) return refuse(`a launched ${role} session can't turn beta mode on; the owner does, or the owner's proxy with the owner's yes`);
+    if (me && WORKER.test(me)) return refuse(`${me} is a worker agent`);
+    const marker = AGENT_SHELL.find((k) => String(env[k] || '').trim());
+    const p = proxyShell({ env, from: root });
+    const yes = String(permission || '').trim();
+    const viaProxy = p.ok;
+    if ((marker || me) && !viaProxy) return refuse(`this shell is an agent's (${marker || `STUDIO_LOCK_OWNER=${me}`}) and not the owner proxy's; the owner turns beta mode on in their own terminal, or the proxy records the owner's yes`);
+    if (viaProxy && yes.length < 10) return refuse(`the owner proxy (${p.doc.agent}) turns beta mode on only with the owner's yes recorded: --permission "<their words or a link to the message>"`);
+    const list = [...new Set([...(String(agents || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean)), ...(viaProxy ? [String(p.doc.agent)] : [])])];
+    const bad = list.find((a) => !/^[\w.-]{1,60}$/.test(a) || WORKER.test(a));
+    if (bad) return refuse(`${bad} isn't an outside agent's name (workers never act as the owner)`);
+    const doc = { on: true, by: viaProxy ? String(p.doc.by) : who.slice(0, 60), at: new Date(now).toISOString(), why: String(why || '').trim().slice(0, 300) || 'beta: the harness is still being built; the owner reviews afterwards', agents: list, roles: BETA_ROLES };
+    if (viaProxy) Object.assign(doc, { recordedBy: String(p.doc.agent), permission: yes.slice(0, 500) });
+    const pub = ownerPubAt(root);
+    const kf = keyPath(env);
+    if (pub && !viaProxy && fs.existsSync(kf)) {
+      try { doc.signature = crypto.sign(null, Buffer.from(canonicalBytes(body(doc))), crypto.createPrivateKey(fs.readFileSync(kf, 'utf8'))).toString('base64'); } catch (e) { return refuse(`signing failed (${e.message})`); }
+      if (!verifyBeta(doc, pub)) return refuse(`the private key at ${kf} doesn't match the studio's owner key`);
+    }
+    fs.mkdirSync(path.join(root, 'studio'), { recursive: true });
+    fs.writeFileSync(path.join(root, BETA_REL), `${JSON.stringify(doc, null, 2)}\n`);
+    const c = commit ? commitBeta(root, `beta: on (by ${doc.by}${viaProxy ? `, recorded by ${doc.recordedBy}` : ''})`, doc.why) : { committed: false, note: ' Not committed (--no-commit).' };
+    emitEvent({ type: 'beta.on', agent: viaProxy ? doc.recordedBy : doc.by, msg: `beta mode on: ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions act as the owner (${doc.why})`.slice(0, 400), meta: { agents: list, roles: BETA_ROLES, by: doc.by, recordedBy: doc.recordedBy || null, signed: Boolean(doc.signature) } });
+    logBeta({ action: 'beta-on', by: doc.by, why: doc.why, evidence: `${list.join(', ') || 'Producer/Director sessions'}${viaProxy ? `; recorded by ${doc.recordedBy}: ${yes.slice(0, 160)}` : ''}`, root });
+    return { ok: true, doc, committed: c.committed, message: `Beta mode is on${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions now act as the owner: every owner action, approvals (protected files, gates, tests, hooks, forced dones), owner asks and golden releases, with --by <their name>, no owner key and no --permission. Every use is logged (npm run decisions; the digest; the War Room). Tests, the train's full verify, no deletes and no money stay on. npm run beta -- off ends it.`.replace(/\s+/g, ' ').trim() };
+  }
+  if (!fs.existsSync(path.join(root, BETA_REL))) return { ok: true, message: 'Beta mode is already off.' };
+  let old = {};
+  try { old = JSON.parse(fs.readFileSync(path.join(root, BETA_REL), 'utf8')); } catch {}
+  const doc = { on: false, by: who.slice(0, 60), at: new Date(now).toISOString(), why: String(why || '').trim().slice(0, 300) || 'beta mode off', agents: [], roles: [] };
+  fs.writeFileSync(path.join(root, BETA_REL), `${JSON.stringify(doc, null, 2)}\n`);
+  const c = commit ? commitBeta(root, `beta: off (by ${who})`, doc.why) : { committed: false, note: ' Not committed (--no-commit).' };
+  emitEvent({ type: 'beta.off', agent: who.slice(0, 60), msg: `beta mode off by ${who}${old.on ? ` (it was on since ${short(old.at)})` : ''}`, meta: { by: who } });
+  logBeta({ action: 'beta-off', by: who, why: doc.why, evidence: 'off', root });
+  return { ok: true, doc, committed: c.committed, message: `Beta mode is off${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} The owner gates are back: protected files, gates and approvals need the owner key (or the owner proxy with the owner's yes).`.replace(/\s+/g, ' ').trim() };
+}
+function commitBeta(root, msg, why) {
+  if (git(root, 'rev-parse', '--verify', 'HEAD').status !== 0) return { committed: false, note: ' Not a git checkout: nothing committed.' };
+  git(root, 'add', '--', BETA_REL);
+  const r = git(root, 'commit', '--only', '-m', msg, '-m', `Why: ${why}`, '--', BETA_REL);
+  return r.status === 0 ? { committed: true, note: '' } : { committed: false, note: ` Committing it failed (${String(r.stderr || r.stdout).trim().split('\n').pop() || `exit ${r.status}`}): commit ${BETA_REL} yourself.` };
+}
+function logBeta({ action, by, why, evidence, root }) {
+  import('./decisions-log.mjs').then((dm) => dm.logDecision({ action, subject: BETA_REL, by: String(by).slice(0, 60), as: 'person', why: String(why).slice(0, 300), evidence: String(evidence).slice(0, 300), undo: action === 'beta-on' ? { kind: 'text', text: 'npm run beta -- off --by <name>' } : null, root })).catch(() => {});
+}
+
+/** One beta-mode use, for the digest and the War Room (a delegation.used event with meta.beta). */
+export function recordBetaUse(actor, { action, subject = '', why = '' } = {}) {
+  try { emitEvent({ type: 'delegation.used', agent: String(actor.who || 'beta').slice(0, 60), msg: `${actor.who} ${action}${subject ? ` ${subject}` : ''} in beta mode${why ? `: ${String(why).slice(0, 160)}` : ''}`.slice(0, 400), meta: { beta: true, action, via: actor.via } }); } catch {}
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const argv = process.argv.slice(2);
+  const opt = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? argv[i + 1] : null; };
+  const cmd = argv[0] || 'status';
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log('Usage: npm run beta -- on --by <owner> [--agents a,b] [--why "…"] [--permission "<the owner\'s yes>"] [--no-commit]\n       npm run beta -- off --by <name> [--why "…"] [--no-commit]\n       npm run beta -- status [--json]');
+    process.exit(0);
+  }
+  if (cmd === 'on' || cmd === 'off') {
+    const r = setBeta({ on: cmd === 'on', by: opt('--by'), agents: opt('--agents') || '', why: opt('--why') || '', permission: opt('--permission') || '', commit: !argv.includes('--no-commit') });
+    (r.ok ? console.log : console.error)(r.message);
+    process.exit(r.ok ? 0 : 1);
+  }
+  const b = readBeta();
+  if (argv.includes('--json')) { console.log(JSON.stringify(b, null, 2)); process.exit(0); }
+  console.log(b.on ? `Beta mode is ON: ${betaWords(b.doc)}; acting as the owner: ${[...(b.doc.agents || []), 'Producer/Director sessions'].join(', ')}${b.signed ? ' (signed)' : b.doc.recordedBy ? ` (recorded by ${b.doc.recordedBy} on the owner's yes)` : ''}.` : `Beta mode is off. ${b.why}`);
+  process.exit(0);
+}

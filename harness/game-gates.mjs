@@ -453,11 +453,14 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       let profile = null;
       try { profile = machineProfile(slotRoot); } catch {}
       try {
-        return { ...testWorkers({ profile, env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT }), cores: logicalCores(profile) };
+        // 2.76.0 (j, B-89): a lane check (or the slow tier's soak) gets its share of the cores beside what runs.
+        return { ...testWorkers({ profile, env: process.env, holdClaim: heldClaim(slotRoot), holders: heavyHolders(slotRoot), laneChecks: laneChecksRunning(slotRoot), root: REPO_ROOT, trainRoot: slotRoot, self: plan.slowTier?.run ? 'soak' : 'check' }), cores: logicalCores(profile) };
       } catch (err) { return { workers: 2, why: `couldn't size them (${String(err.message || err).slice(0, 80)}): 2`, cores: logicalCores(profile) }; }
     };
     // 2.73.2 (d, B-71): the per-test timeout passed to the check's runner for this many workers (harness/test-timeouts.mjs).
     let testTO = null;
+    // 2.76.0 (j, B-89): the workers a check ran with, its share of the cores and why (kept in its row).
+    let twRow = null;
     const runOnce = (cmd, forceMs = null, extraEnv = null) => slot(cmdLabel, () => {
       timing = scaledTimeout(baseTimeout, slotRoot, { label: curRelated || plan.slowTier?.run ? null : timeKey() });
       // 2.65.0: self-triage's one re-run after a timeout under load runs at the cap (harness/self-triage.mjs timeoutRerun).
@@ -476,6 +479,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.68.0 (n): test workers sized to the machine (harness/heavy-budget.mjs testWorkers), always passed (CI=true
       // stays for snapshots): STUDIO_TEST_WORKERS and VITEST_MAX_WORKERS for the game's test config to read.
       const tw = workersNow();
+      twRow = { workers: tw.workers, why: String(tw.why || '').slice(0, 400), ...(tw.share ? { share: tw.share } : {}), ...(Number(tw.machineWorkers) > 0 ? { machineWorkers: tw.machineWorkers } : {}) };
       runEnv = { ...runEnv, STUDIO_TEST_WORKERS: String(tw.workers), VITEST_MAX_WORKERS: String(tw.workers) };
       // 2.72.0 (a): the timeout-only re-run's low load (one test worker), applied last.
       if (extraEnv) runEnv = { ...runEnv, ...extraEnv };
@@ -488,7 +492,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (quarantined) { runEnv = { ...runEnv, STUDIO_TEST_QUARANTINE: quarantined }; console.error(`[game-gates] ${cmdLabel}: ${JSON.parse(quarantined).length} quarantined test file(s) skipped by the game's runner (STUDIO_TEST_QUARANTINE; npm run flakes)`); } else { const { STUDIO_TEST_QUARANTINE: _q, ...rest } = runEnv; runEnv = rest; }
       console.error(`[game-gates] ${cmdLabel}: ${extraEnv?.STUDIO_TEST_WORKERS || tw.workers} test workers (STUDIO_TEST_WORKERS, VITEST_MAX_WORKERS: ${extraEnv?.STUDIO_TEST_WORKERS ? 'low load for the timeout-only re-run' : tw.why})`);
       // 2.73.2 (d, B-71): a vitest/jest/node --test check gets a per-test timeout that fits its workers (a runtime flag).
-      const scaled = scaleTestTimeouts({ command: cmd, root: REPO_ROOT, workers: Number(runEnv.STUDIO_TEST_WORKERS) || tw.workers, cores: tw.cores, gateFactor: timing.factor, minScale: slow?.minScale || 1, env: process.env });
+      const scaled = scaleTestTimeouts({ command: cmd, root: REPO_ROOT, workers: Number(runEnv.STUDIO_TEST_WORKERS) || tw.workers, machineWorkers: extraEnv?.STUDIO_TEST_WORKERS ? null : tw.machineWorkers, cores: tw.cores, gateFactor: timing.factor, minScale: slow?.minScale || 1, env: process.env });
       testTO = scaled.info;
       if (testTO) console.error(testTimeoutLine(cmdLabel, testTO));
       const t0 = Date.now();
@@ -514,6 +518,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       cmdLabel = g.id;
       curGate = g;
       testTO = null;
+      twRow = null;
       if (focusMap && !(g.id in focusMap)) { skipped.push({ id: g.id, why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' }); continue; }
       const existing = changedHere.filter((f) => fs.existsSync(path.join(REPO_ROOT, f))).map((f) => f.slice(prefix.length));
       const related = Boolean(g.related && relatedOn && codeOnly && existing.length);
@@ -616,7 +621,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.72.0 (a): after a timeout-only re-run, the failing files are the ones red alone (the green ones are timeout-flakes).
       // (Every failure was one of the timed-out files, so the files red alone are exactly the failing ones.)
       if (r.status !== 0 && redAlone) failFiles = [...redAlone];
-      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(testTO ? { testTimeout: testTO } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
+      rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(testTO ? { testTimeout: testTO } : {}), ...(twRow ? { testWorkers: twRow } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
       if (ratchet) { const row = rows[rows.length - 1]; delete row.failures; delete row.failingFiles; if (ratchet.why) row.why = ratchet.why; row.ratchet = { fresh: ratchet.judged?.fresh.length ?? null, standing: ratchet.judged?.standing ?? null }; }
     }
   }

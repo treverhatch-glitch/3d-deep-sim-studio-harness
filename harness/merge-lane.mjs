@@ -264,7 +264,8 @@ export function withGateSlot(root, label, fn, { log = () => {}, env = process.en
       for (let i = 1; i <= n && !mine && !ahead.length; i += 1) {
         const f = path.join(dir, `gate-slot-${i}.lock`);
         try {
-          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), label, ...(landing ? { landing: true } : {}) }), { flag: 'wx' });
+          // 2.76.0 (j, B-89): heavyHeld names the machine:heavy hold this check runs inside (a full verify's own check).
+          fs.writeFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), label, ...(landing ? { landing: true } : {}), ...(env.STUDIO_HEAVY_HELD ? { heavyHeld: String(env.STUDIO_HEAVY_HELD) } : {}) }), { flag: 'wx' });
           mine = f;
         } catch (err) {
           if (err.code !== 'EEXIST') throw err;

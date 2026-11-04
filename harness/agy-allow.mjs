@@ -50,6 +50,7 @@ import path from 'node:path';
 import { ALLOWED } from './allowlist.mjs';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { writeAtomic } from './fsafe.mjs';
+import { betaActor, recordBetaUse } from './beta-mode.mjs';
 
 /** Where agy's rules are written, per scope (null: agy has no such file). studio: the harness's own file, which the
  * launcher passes with --settings (the default); user: agy's own settings.json. */
@@ -84,8 +85,53 @@ export const AGY_APPROVED = ['node', 'npm', 'npx', 'git status', 'git diff', 'gi
 /** The approved entries, as harness list rows. */
 export const agyApprovedList = (list = ALLOWED) => list.filter(([name]) => AGY_APPROVED.includes(name));
 
-/** Every rule a list gives, in list order: by default the approved set (H-2b); agyRules(ALLOWED) for the whole list. */
-export const agyRules = (list = agyApprovedList()) => [...new Set(list.flatMap(([, p]) => agyRulesFor(p)))];
+/**
+ * 2.76.0 (B-80): agy gates file writes apart from commands. A builder with only command rules read, then quit with
+ * "jetski: no output produced — a tool required the "write_file" permission that headless mode cannot prompt for, so it
+ * was auto-denied". The crew's test on Windows (agy 1.4.12): a bare "write_file" entry allows creating and editing files
+ * in place. UNTESTED: a lane-scoped form (write_file(<path>)); the bare form is the one found to work.
+ */
+export const AGY_FILE_RULES = ['write_file'];
+
+/** Every rule a list gives, in list order: by default the approved set (H-2b); agyRules(ALLOWED) for the whole list.
+ * 2.76.0 (B-80): plus the file-write rule (AGY_FILE_RULES). */
+export const agyRules = (list = agyApprovedList()) => [...new Set([...list.flatMap(([, p]) => agyRulesFor(p)), ...AGY_FILE_RULES])];
+
+/**
+ * 2.76.0 (B-80 part 2): one refused command ends a headless agy session, and Gemini pipes and chains by habit
+ * (`git status 2>&1 | Select-Object -First 3`, `cd .. ; node --version` were refused by the regex rules, by design:
+ * no | ; &&). These lines, in a GEMINI.md in the session's folder, steered it (the crew's test); the launcher writes
+ * them into each agy lane copy (never committed: the lane's exclude file) and puts them in the agy kickoff.
+ */
+export const AGY_SHELL_RULES = [
+  '# Rules for this studio (written by the harness launcher)',
+  '',
+  '- Run one plain command per shell call: no pipes (|), no chains (; && ||), no redirects (> 2>&1), no subshells, no `cd`.',
+  '  A command the allow-list refuses ends your session at once, with your work unsaved.',
+  '- You are already in the right folder. Use relative paths; never cd elsewhere.',
+  '- To see less output, run the command plainly; the harness keeps its own output short.',
+  '- Allowed: node, npm, npx, git status, git diff, git add, git commit, git log. Edit files with your file tools.',
+  '- Commit as you go (git add <files>, then git commit -m "<task id>: <what>"), then npm run task -- done <ID> --agent <you>.',
+  '',
+].join('\n');
+
+/**
+ * Write AGY_SHELL_RULES as GEMINI.md into a lane copy, unless the repository has its own GEMINI.md there (left alone),
+ * and keep it out of the lane's change (the copy's exclude file, harness/worktree.mjs). Returns true when written.
+ */
+export function writeAgyLaneRules(dir, { excludeFile = null } = {}) {
+  try {
+    const f = path.join(dir, 'GEMINI.md');
+    if (fs.existsSync(f) && !fs.readFileSync(f, 'utf8').startsWith(AGY_SHELL_RULES.split('\n')[0])) return false;
+    fs.writeFileSync(f, AGY_SHELL_RULES);
+    if (excludeFile) {
+      let now = '';
+      try { now = fs.readFileSync(excludeFile, 'utf8'); } catch {}
+      if (!/^\/GEMINI\.md$/m.test(now)) fs.appendFileSync(excludeFile, `${now && !now.endsWith('\n') ? '\n' : ''}/GEMINI.md\n`);
+    }
+    return true;
+  } catch { return false; }
+}
 
 /** The settings file for a scope, or null when agy reads none there. */
 export function settingsFile(scope = DEFAULT_SCOPE, { home = os.homedir(), stateDir = STUDIO_STATE_DIR } = {}) {
@@ -124,8 +170,8 @@ export function agyAllowState({ home = os.homedir(), stateDir = STUDIO_STATE_DIR
   if (s.error) return { file, want: rules.length, have: 0, missing: rules, error: s.error };
   const allow = new Set((s.data.permissions?.allow || []).map(String));
   // The owner allowed every command already: nothing for the harness to add.
-  if (allow.has('command(*)')) return { file, want: rules.length, have: rules.length, missing: [] };
-  const missing = rules.filter((r) => !allow.has(r));
+  // 2.76.0 (B-80): file writes are gated apart from commands, so command(*) doesn't cover write_file.
+  const missing = rules.filter((r) => !allow.has(r) && !(allow.has('command(*)') && r.startsWith('command(')));
   return { file, want: rules.length, have: rules.length - missing.length, missing };
 }
 
@@ -193,7 +239,11 @@ export function enrolAgy({ by = null, scope = null, dryRun = false, all = false,
   }
   const who = String(by || '').trim();
   if (!who) return fail('Nothing written: --by <owner> is required. The owner approves what agy may run without asking.');
-  if (env.STUDIO_ROLE || AGENTISH.test(who)) return fail(`Nothing written: ${env.STUDIO_ROLE ? `this runs inside a launched ${env.STUDIO_ROLE} session` : `"${who}" is an agent's name`}. The owner runs this in their own terminal, after reading the --dry-run.`);
+  // 2.76.0: in beta mode (harness/beta-mode.mjs) the orchestrator the owner named, or a Producer/Director session, may
+  // write them as the owner would (logged as a beta use); a worker never.
+  const beta = env.STUDIO_ROLE || AGENTISH.test(who) ? betaActor({ env }) : { ok: false };
+  if ((env.STUDIO_ROLE || AGENTISH.test(who)) && !beta.ok) return fail(`Nothing written: ${env.STUDIO_ROLE ? `this runs inside a launched ${env.STUDIO_ROLE} session` : `"${who}" is an agent's name`}. The owner runs this in their own terminal, after reading the --dry-run${beta.why ? ` (${beta.why})` : ''}.`);
+  if (beta.ok) recordBetaUse(beta, { action: 'allow agy', subject: settingsFile(want, { home, stateDir }) ? path.basename(settingsFile(want, { home, stateDir })) : '', why: setName });
   if (!toAdd.length && !toRemove.length) {
     lines.push(`agy already has all ${rules.length} rules of ${setName} in ${file}: nothing added, nothing written.`);
     if (extraNote) lines.push(extraNote);
@@ -215,7 +265,7 @@ export function enrolAgy({ by = null, scope = null, dryRun = false, all = false,
   lines.push(`${toAdd.length ? `Added ${toAdd.length} allow-rule(s)` : 'Added no rules'}${toRemove.length ? `, removed ${toRemove.length} harness rule(s) beyond ${all ? 'the harness list' : 'the approved set'},` : ''} in ${file}${kept ? ` (${kept} were already there)` : ''}, approved by ${who}.${backup ? ` Backup: ${backup}.` : ''}`);
   lines.push(`agy agents may now run ${setName} headless${want === 'studio' ? ' (the launcher passes this file with --settings)' : ''}. Nothing else changed.`);
   if (extraNote) lines.push(extraNote);
-  lines.push('On Windows agy matched exact commands only in the crew\'s test (command(node --version) yes, command(node) no): these rules may allow nothing there. The regex rules are untested on real agy: check one launched agy agent runs node; if not, add the exact commands it needs by hand.');
+  lines.push('On Windows the word-prefix rules (command(node)) matched nothing in the crew\'s test; the regex: rules did (node --version, npm --version, npm run -s task -- train status through agy --settings, 2026-11-04). A pipe, a chain (; &&) or a cd stays refused by design, and one refusal ends a headless agy session: the launcher tells agy so (its kickoff and a GEMINI.md in its lane copy).');
   try {
     emitEvent({ type: 'agy.allow_enrolled', agent: who, to: 'producer', msg: `${who} approved agy's allow-rules: ${toAdd.length} added${toRemove.length ? `, ${toRemove.length} removed` : ''} in ${tilde(file, home)} (${all ? 'the whole harness list, --all' : 'the approved set'})${backup ? `; backup ${tilde(backup, home)}` : ''}`, meta: { by: who, scope: want, file: tilde(file, home), added: toAdd.length, removed: toRemove.length, set: all ? 'all' : 'approved', backup: backup ? tilde(backup, home) : null } });
   } catch {

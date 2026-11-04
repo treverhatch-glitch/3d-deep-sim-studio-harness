@@ -4548,6 +4548,61 @@ if (inShard('selftest-275h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (g): beta mode (the owner's gates off while the harness is built): the switch, who it covers, approvals
+// without the key, owner asks (B-86), LF hashing of approved text (B-93), owner allow rules for the proxy's folder (B-95).
+if (inShard('selftest-276g')) {
+  const dir = copyRepo();
+  const { selftest276G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276g.mjs')).href);
+  await selftest276G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag exactly who
+// must act (orchestrator, key holder, owner), dedup, quiet hours, beta mode, the Line Producer's status, the webhook kept secret.
+if (inShard('selftest-276l')) {
+  const dir = copyRepo();
+  const { selftest276L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276l.mjs')).href);
+  await selftest276L({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.76.0 (k): the Line Producer (harness/line-producer.mjs): why each waiting task waits, chain-breakers first on the top
+// model, size routing, mechanical fixes (dead holders' locks, a lost train lane copy, past-due cooldowns), the rig's
+// builder target, the expansion share and its one Director slice, the Producer note, the supervisor following the plan.
+if (inShard('selftest-276k')) {
+  const dir = copyRepo();
+  const { selftest276K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276k.mjs')).href);
+  await selftest276K({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.76.0 (j): test workers shared by cores with priority (B-89, harness/rig-budget.mjs), "waiting on yes" in the status
+// lines and the War Room (B-87), and the first divergence for a cartridge whose loader is outside its folder (B-94).
+if (inShard('selftest-276j')) {
+  const dir = copyRepo();
+  const { selftest276J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276j.mjs')).href);
+  await selftest276J({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.76.0 (helper i): the launcher and the agents: B-83 stall per session, B-82 cost of a launcher end, W-0072/73 and
+// B-80 agy (accept-edits, timeout, model, write_file, GEMINI.md, its stop line), B-84 lane copies, B-90 live owner, B-81.
+if (inShard('selftest-276i')) {
+  const dir = copyRepo();
+  const { selftest276I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276i.mjs')).href);
+  await selftest276I({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.76.0 (h): the merge train: generated files aren't hidden inputs (B-85), a dead train is recorded and found (B-88), a
+// missing lane copy is recreated (W-0081), the hand-back cap in beta mode and infrastructure hand-backs, mixed lanes (B-91/92).
+if (inShard('selftest-276h')) {
+  const dir = copyRepo();
+  const { selftest276H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276h.mjs')).href);
+  await selftest276H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

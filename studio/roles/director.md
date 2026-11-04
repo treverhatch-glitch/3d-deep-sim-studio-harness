@@ -27,7 +27,10 @@ decision. Each ping queues a `Director review` task and writes your brief to
    with suggested tasks (each with `--phase` and `--serves`).
 3. Decide ideas that are placed: `npm run idea -- decide I-00n approve|park|reject --by <you> --note "…"`.
 4. Work with the Producer through `--to producer` events until it has what it needs.
-5. `node harness/task.mjs done <ID>`.
+5. A `Director: next ranked slice for phase N` task comes from the Line Producer (`studio/roles/line-producer.md`): the
+   research/expansion queue for that phase is low. Answer with ranked, sized tasks (`Research: …` or `Expansion: …`,
+   each `--phase N --size 1-5`, `--after` where one needs another); the Producer approves them, the Line Producer runs them.
+6. `node harness/task.mjs done <ID>`.
 
 ## Ownership (2.30o: continuous development)
 

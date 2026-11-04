@@ -85,7 +85,7 @@ export async function verifyRoom(root, env = process.env) {
     const profile = hb.machineProfile(hroot, { env });
     const holders = h.heavyHolders(hroot, { env });
     const state = hb.budgetState(profile, holders, { env });
-    const claim = hb.jobClaim('verify', { root, env, profile, state });
+    const claim = hb.jobClaim('verify', { root, env, profile, state, as: 'train' }); // 2.76.0 (j, B-89): sized as the train's verify
     const a = hb.admit(claim, state, { slots: h.heavySlots(env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
     return { ok: a.ok, line: a.ok ? '' : a.line };
   } catch (e) { return { ok: false, line: `the machine budget couldn't be read (${e.message})` }; }
@@ -143,6 +143,8 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   if (env === process.env) { try { (await import('./env-reload.mjs')).reloadEnvIfChanged({ by: DAEMON_BY }); } catch {} }
   root ||= (await import('./worktree.mjs')).mainRoot();
   if (off(env.STUDIO_TRAIN_AUTO)) return { started: false, why: 'STUDIO_TRAIN_AUTO is off' };
+  // 2.76.0 (B-88): a train that died without recording its end (process gone) is recorded, its lock freed, its lanes kept.
+  if (!dryRun && !('lock' in given)) { try { (await import('./train.mjs')).reapTrains(root, { env }); } catch {} }
   const f = await daemonFacts(root, { env, now, halted, ...given });
   // The machine budget is read only when everything else says go (it reads the scan and the heavy holders).
   if (!('room' in given)) f.room = { ok: true };

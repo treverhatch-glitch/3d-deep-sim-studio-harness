@@ -46,6 +46,11 @@ function engineInfo() {
 import { readStatus as supervisorStatus } from './supervisor.mjs';
 import { budgetStatus } from './budget.mjs';
 import { holdReason, holdOwner, readHolds } from './task-hold.mjs';
+import { yesWaiting, yesLine, betaYesWords } from './yes-wait.mjs';
+import { readBeta } from './beta-mode.mjs';
+// 2.76.0 (j, B-87): in beta mode, who may give the yes instead of the dev (cached 30 s: it reads git).
+let betaYesCache = { at: 0, text: '' };
+const betaYesWait = () => { if (Date.now() - betaYesCache.at > 30000) { let t = ''; try { t = betaYesWords(readBeta()); } catch {} betaYesCache = { at: Date.now(), text: t ? `; ${t}` : '' }; } return betaYesCache.text; };
 import { latestVerdict } from './verdict.mjs';
 import { tokenTotals } from './tokens.mjs';
 import { ledgerMetrics, readProxyLogs } from './ledger.mjs';
@@ -392,6 +397,10 @@ export function buildHudState() {
   if (watchLast && !agentList.some((a) => a.name === 'watch')) {
     agentList.push({ name: 'watch', role: 'watch', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
   }
+  // 2.76.0 (k): the Line Producer's desk in the Producer's office (a script, like the watcher), once it has run.
+  if (fs.existsSync(path.join(STUDIO_STATE_DIR, 'line', 'status.json')) && !agentList.some((a) => a.name === 'line-producer')) {
+    agentList.push({ name: 'line-producer', role: 'line-producer', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
+  }
   const producerName = (pname && agentList.find((a) => a.name === pname)?.name) || agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
   const byName = new Map(agentList.map((a) => [a.name, a]));
 
@@ -427,6 +436,8 @@ export function buildHudState() {
   for (const g of forcedGroups(queue)) needs.push({ agent: 'producer', msg: `${g.tasks.length} task${g.tasks.length === 1 ? '' : 's'} closed past the same check: ${g.cause} (${g.tasks.slice(0, 6).join(', ')}${g.tasks.length > 6 ? ', …' : ''})`, task: g.checks[0], action: { type: 'accept-cause', cause: g.cause, label: 'Accept for this run' } });
   // 2.30c (#8): a task parked by the circuit breaker gets its own card, with Unblock.
   needs.push(...breakerCards(holds));
+  // 2.76.0 (j, B-87): agent-proposed tasks waiting on the dev's yes, one card for all (harness/yes-wait.mjs).
+  { const w = yesWaiting({ holds, queue }); if (w.count) needs.push({ agent: 'board', msg: `${yesLine(w)}: agent-proposed tasks start only after a yes (npm run task -- yes ${w.ids[0]} --by <you>)${betaYesWait()}`, task: w.ids[0] }); }
   for (const t of [...queue.inProgress, ...queue.backlog]) {
     if (/^Watch:/i.test(t.title)) needs.push({ agent: 'watch', msg: t.title, task: t.id });
   }

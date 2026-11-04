@@ -43,6 +43,8 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
+import { betaActor, betaApprovalOk } from './beta-mode.mjs';
+import { WORKER_NAME } from './permission.mjs';
 import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
 import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
@@ -52,7 +54,7 @@ export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const APPROVALS_REL = 'studio/approvals';
 const PROTECTED_REL = 'studio/protected.json';
 export const DEFAULT_PROTECTED = [
-  'studio/protected.json', 'studio/keys/**', 'studio/gates.json', 'studio/bible/controls.json',
+  'studio/protected.json', 'studio/keys/**', 'studio/beta.json', 'studio/gates.json', 'studio/bible/controls.json',
   'cartridges/*/qa.mjs', 'web/*/sim/qa.mjs', 'game/*/sim/qa.mjs', 'qa/regressions/**',
   'qa/controls-check.mjs', 'qa/protected-check.mjs', 'harness/approve.mjs',
   '**/tools/controls.gd', '**/tools/gate.gd', '.github/workflows/**',
@@ -179,9 +181,15 @@ export function resolveBase(envIn = process.env) {
   return null;
 }
 
+// 2.76.0 (B-93): a text file is hashed with LF line endings, as git stores it: a Windows checkout (core.autocrlf) has CRLF
+// in the working tree, and an approval signed there never matched the check run in a checkout with LF. Binary files
+// (a NUL byte) are hashed as they are.
 const blobSha = (rel) => {
   const f = path.join(ROOT, rel);
-  return fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : 'deleted';
+  if (!fs.existsSync(f)) return 'deleted';
+  const b = fs.readFileSync(f);
+  const norm = b.includes(0) ? b : Buffer.from(b.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return crypto.createHash('sha256').update(norm).digest('hex');
 };
 
 /** Globs where a NEW file needs no approval (a new regression only makes the judge stricter); edits and deletes still do. */
@@ -242,6 +250,11 @@ export function verifyApproval(doc, publicPem) {
   // that grant is still the one on file and the owner's yes is recorded (harness/owner-proxy.mjs).
   // A committed proxy approval also has to be the proxy's own commit (the commit-msg hook's Studio-Agent trailer: the
   // proxy's name, or none for a person): a builder's lane can't carry one in.
+  if (!doc?.signature && doc?.beta) {
+    if (!betaApprovalOk(doc)) return false;
+    const who = doc.file ? committedByAgent(doc.file) : null;
+    return who === null || who === '' || !WORKER_NAME.test(who); // a worker's lane can't carry one in
+  }
   if (!doc?.signature && doc?.proxy) {
     if (!proxyApprovalOk(doc, publicPem)) return false;
     const who = doc.file ? committedByAgent(doc.file) : null;
@@ -310,6 +323,16 @@ let proxyPermission = '';
  */
 function signOrProxy(approval) {
   if (fs.existsSync(ownerKeyPath())) return { approval, signature: sign(approval) };
+  // 2.76.0: in beta mode (harness/beta-mode.mjs) the owner's stand-ins approve without the key or per-step words; the
+  // approval carries studio/beta.json and counts while beta mode is still on with it. Logged like every owner act.
+  const b = betaActor({ allowLane: true });
+  if (b.ok) {
+    const yes = String(proxyPermission || '').trim();
+    const a = { ...approval, recordedBy: String(b.who), via: b.via, ...(yes ? { permission: yes.slice(0, 500) } : {}) };
+    emitEvent({ type: 'delegation.used', agent: String(b.who).slice(0, 60), msg: `${b.who} approved ${approval.kind} in beta mode${approval.note ? `: ${String(approval.note).slice(0, 160)}` : ''}`.slice(0, 400), meta: { beta: true, action: `approve-${approval.kind}`, by: approval.by } });
+    import('./decisions-log.mjs').then((dm) => dm.logDecision({ action: `approve-${approval.kind}`, subject: approval.change || approval.task || approval.kind, by: String(b.doc.by).slice(0, 60), as: 'beta', why: String(approval.note || approval.reason || '').slice(0, 300), evidence: `${b.via} ${b.who}${yes ? `: ${yes.slice(0, 160)}` : ''}`, undo: null })).catch(() => {});
+    return { approval: a, signature: null, beta: { by: b.doc.by, at: b.doc.at } };
+  }
   const p = proxyShell({ allowLane: true });
   if (!p.ok) return { approval, signature: sign(approval) }; // throws the usual "no owner key on this machine"
   const yes = String(proxyPermission || '').trim();

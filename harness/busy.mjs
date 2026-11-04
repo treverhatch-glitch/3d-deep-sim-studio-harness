@@ -121,7 +121,7 @@ function laneChangedAt(dir) {
  * file change in that time. Synchronous (the watcher's pass is). `root` is the main checkout (worktree.mainRoot()).
  * Returns { busy, why, owner }.
  */
-export function claimActive(task, { root = null, now = Date.now(), env = process.env, events = null, orphaned = false } = {}) {
+export function claimActive(task, { root = null, now = Date.now(), env = process.env, events = null, orphaned = false, asker = null } = {}) {
   const win = claimWindowMs(env);
   if (!(win > 0)) return { busy: false };
   const evs = events || readRecentEvents(20000);
@@ -130,7 +130,10 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
   // The claim's own task.start isn't proof of work since: a claim runs out an hour after it, so on its own it is never
   // inside the window when the claim ran out by itself (only when it was released by hand straight away).
   // 2.69.0: nor is the overlap advice its start records (task.overlap): written by the start command, not by work.
-  const mine = evs.filter((e) => e.agent === c.owner && !(e.type === 'task.start' && e.task === task && e.ts === c.at) && !(e.type === 'task.overlap' && e.task === task));
+  // 2.76.0 (B-90): only the owner's own work counts: an event on this task or on none, never one the harness wrote in
+  // its name (the train's checks of another of its lanes: task.unwired on T-105 kept T-144, T-146, T-152 and T-153 of an
+  // old orchestrator name "busy" for hours; meta.onBehalf, set by the train) and never one about another task.
+  const mine = evs.filter((e) => e.agent === c.owner && ownWork(e, task) && !(e.type === 'task.start' && e.task === task && e.ts === c.at) && !(e.type === 'task.overlap' && e.task === task));
   const last = mine[mine.length - 1];
   const min = (t) => Math.max(0, Math.round((now - t) / 60000));
   if (last && !GONE_TYPES.has(last.type)) {
@@ -142,12 +145,13 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
       const lanes = path.join(root, '.lanes');
       const dirs = new Set();
       if (fs.existsSync(lanes)) {
-        for (const d of fs.readdirSync(lanes, { withFileTypes: true })) if (d.isDirectory() && (d.name === c.owner || d.name.startsWith(`${c.owner}-`))) dirs.add(path.join(lanes, d.name));
+        for (const d of fs.readdirSync(lanes, { withFileTypes: true })) if (d.isDirectory() && (d.name === c.owner || d.name.startsWith(`${c.owner}-`)) && !othersLane(d.name, c.owner, root, asker)) dirs.add(path.join(lanes, d.name));
         const b = read(path.join(root, '.studio', 'lane-branches.json'), {})[task];
         if (b) {
           for (const d of fs.readdirSync(lanes, { withFileTypes: true })) {
             // 2.73.1 (B-51): no own .git, no lane (git there would name the main checkout's branch).
             if (!d.isDirectory() || dirs.has(path.join(lanes, d.name)) || !fs.existsSync(path.join(lanes, d.name, '.git'))) continue;
+            if (othersLane(d.name, c.owner, root, asker)) continue; // 2.76.0 (B-90, W-0084): another agent's copy
             const head = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: path.join(lanes, d.name), encoding: 'utf8', windowsHide: true }).stdout?.trim();
             if (head === b) dirs.add(path.join(lanes, d.name));
           }
@@ -163,10 +167,31 @@ export function claimActive(task, { root = null, now = Date.now(), env = process
   // (waiting for a landing, a green gate or a quiet machine), however long ago it last changed: a new agent would
   // build it again. Not when the owner is gone (its session ended: the next agent carries its branch, as designed).
   if (root && !ownerGone(c, mine, root)) {
-    const ahead = laneAhead(task, c.owner, root, now, env);
+    const ahead = laneAhead(task, c.owner, root, now, env, asker);
     if (ahead) return { busy: true, owner: c.owner, short: `${task}'s owner ${c.owner} has it built in ${ahead.lane}, not landed yet`, why: `${task}'s claim ran out, but ${c.owner}'s lane copy ${ahead.lane} has ${ahead.n} commit(s) the studio's branch doesn't (built, not landed; last change ${min(ahead.at)} min ago)` };
   }
   return { busy: false, owner: c.owner };
+}
+
+/**
+ * 2.76.0 (B-90): an event that is the owner's own work on `task`: on that task or on none, and not written by the
+ * harness in the owner's name (meta.onBehalf: the train's checks run as the lane's owner).
+ */
+export function ownWork(e, task) {
+  if (e?.meta && e.meta.onBehalf) return false;
+  return !e?.task || e.task === task;
+}
+
+/**
+ * 2.76.0 (B-90, W-0084): is .lanes/<name> another agent's copy (so its changes are that agent's, not `owner`'s)? It is
+ * when it is the asking agent's own, or the launcher made it for another agent (.studio/agents/<name>.json names a
+ * session in it). An orchestrator's hand-made copies (no session record, often named for itself) are not.
+ */
+export function othersLane(name, owner, root, asker = null) {
+  if (!name || name === owner) return false;
+  if (asker && (name === asker || name.startsWith(`${asker}-`))) return true;
+  const rec = read(path.join(root, '.studio', 'agents', `${name}.json`), null);
+  return Boolean(rec && rec.agent === name);
 }
 
 /** The owner has gone: its last event says so, or its launcher session record ended after it claimed. */
@@ -188,7 +213,7 @@ const laneMaxMs = (env) => {
  * that names the task (an orchestrator's lanes are often named for itself, not the agent: opus-14 for opus-bot).
  * Its last change must be within STUDIO_CLAIM_LANE_MAX_H (24) hours. { lane, n, at } or null.
  */
-function laneAhead(task, owner, root, now, env) {
+function laneAhead(task, owner, root, now, env, asker = null) {
   const max = laneMaxMs(env);
   if (!(max > 0)) return null;
   const lanes = path.join(root, '.lanes');
@@ -209,6 +234,9 @@ function laneAhead(task, owner, root, now, env) {
     if (log.status !== 0) continue;
     const commits = String(log.stdout || '').split('\x1e').filter((s) => s.trim());
     if (!commits.length) continue;
+    // 2.76.0 (B-90, W-0084): a copy that is another agent's (the new builder's, which merged the task's branch in) is
+    // that agent's work, never the old owner's.
+    if (othersLane(name, owner, root, asker)) continue;
     const mineLane = name === owner || name.startsWith(`${owner}-`) || (want && head === want);
     if (!mineLane && !commits.some((m) => names.test(m))) continue;
     const at = laneChangedAt(d);
