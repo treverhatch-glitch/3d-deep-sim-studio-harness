@@ -244,11 +244,11 @@ console.log(JSON.stringify({ room, batch, modes, dec, pick, judge, base, daemon 
       const desc = aHead && bHead && g(T.S, 'merge-base', '--is-ancestor', aHead, bHead).status === 0 && g(T.S, 'rev-parse', 'main').stdout.trim() === bHead;
       return [aDone && bLanded && ts(aDone) <= ts(bLanded) && desc && !fs.existsSync(path.join(T.S, '.studio', 'locks', 'train-next.lock')) && life?.ended?.how === 'done' && JSON.stringify((life?.lanes || []).map((l) => l.task).sort()) === JSON.stringify(L.slice(4).map((l) => l.id).sort()), `${detail}\nlife=${JSON.stringify(life)}`];
     });
-    await guard('2.77.0 (p, P9.6): while both verify, .studio/train/status.json keeps the running train\'s fields (train A, step verify, its tree) and adds `next` (train B, speculative, after A, step verify); `task train status` shows "Running: train A" and "Next: train B ... speculative on train A\'s tree"; studio:status shows both (fails on 2.76.1: no next, no such lines)', () => {
+    await guard('2.77.0 (p, P9.6): while both verify, .studio/train/status.json keeps the running train\'s fields (train A, step verify, its tree) and adds `next` (train B, speculative, after A, step verify or already ready: its stand-in verify may finish before the snapshot); `task train status` shows "Running: train A" and "Next: train B ... speculative on train A\'s tree"; studio:status shows both (fails on 2.76.1: no next, no such lines)', () => {
       let snap = null; try { snap = JSON.parse(fs.readFileSync(path.join(T.mark, 'status-snap.json'), 'utf8')); } catch {}
       let txt = ''; try { txt = fs.readFileSync(path.join(T.mark, 'train-status.txt'), 'utf8'); } catch {}
       let sup = ''; try { sup = fs.readFileSync(path.join(T.mark, 'studio-status.txt'), 'utf8'); } catch {}
-      return [snap?.train === aId && snap.step === 'verify' && snap.head && snap.next?.train === bId && snap.next.speculative === true && snap.next.after === aId && snap.next.step === 'verify'
+      return [snap?.train === aId && snap.step === 'verify' && snap.head && snap.next?.train === bId && snap.next.speculative === true && snap.next.after === aId && ['verify', 'ready'].includes(snap.next.step)
         && new RegExp(`Running: train ${aId}`).test(txt) && new RegExp(`Next: train ${bId}.*speculative on train ${aId}`).test(txt) && new RegExp(`Next: train ${bId}`).test(sup) && new RegExp(`Running: train ${aId}`).test(sup),
       `snap=${JSON.stringify(snap)?.slice(0, 1500)}\n--- train status\n${txt.slice(-1500)}\n--- studio:status\n${sup.slice(-800)}`];
     });

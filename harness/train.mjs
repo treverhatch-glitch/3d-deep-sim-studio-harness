@@ -95,7 +95,7 @@ import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote } from './train-status.mjs';
-import { batchCap, batchSize, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
+import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
 import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
@@ -1966,7 +1966,16 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   const queued = !given;
   const rules = batchRules();
   // 2.77.0 (p, P9.6): a train takes at most STUDIO_TRAIN_BATCH lanes (default 4), beside --max and STUDIO_TRAIN_MAX.
-  const maxLanes = batchCap({ max, rulesMax: rules.max });
+  let maxLanes = batchCap({ max, rulesMax: rules.max });
+  // 2.77.0 (maintainer): the DEFAULT batch of 4 only splits the queue when a speculative train can follow (pipeline on,
+  // or auto with room for a second verify); otherwise one train takes them all, the 2.76 way, so 6 green lanes still
+  // land on one verify. A STUDIO_TRAIN_BATCH that is set always applies.
+  if (!given && String(process.env.STUDIO_TRAIN_BATCH ?? '').trim() === '' && maxLanes === batchSize()) {
+    const mode = pipelineMode();
+    let room = mode === 'on';
+    if (mode === 'auto') { try { room = Boolean((await (deps.pipelineRoom || pipelineRoom)({ root }))?.ok); } catch { room = false; } }
+    if (!room) maxLanes = batchCap({ max, rulesMax: rules.max, env: { ...process.env, STUDIO_TRAIN_BATCH: 'off' } });
+  }
   let lanes = given ? given.map((l) => ({ ...l, own: oneLane })) : readQueue(root).map((l) => ({ ...l, fromQueue: true }));
   // 2.63.0: a lane held for the owner (tier C, or handed back too often) stays in the queue until a person releases it.
   clearContractHolds(root, lanes, log); // 2.72.0 (c): a reviewer's signature clears a contract-only hold
@@ -2620,7 +2629,13 @@ function summary(res) {
  * B's lanes); P9.1's record-only rule plugs in here. { land, how: 'same'|'record', files? } | { land: false, why }.
  */
 export function nextBaseVerdict(root, { assumed, now, lanes = [] }) {
-  return speculativeBaseVerdict(root, { assumed, now, lanes }, { recordMove: (r, from, to, l) => boardOnlyMove(r, from, to, boardPaths(), { lanes: l }) });
+  // 2.77.0 (maintainer): a record move that needs some checks re-run (P9.1's rechecks: the controls list, a changed
+  // approval, reviews, notes) is not one B may land on without verifying: B is discarded and its lanes train normally.
+  const recordMove = (r, from, to, l) => {
+    const m = boardOnlyMove(r, from, to, boardPaths(), { lanes: l });
+    return m?.ok && Array.isArray(m.recheck) && m.recheck.length ? { ok: false, why: `it changes ${m.files.join(', ')}, which needs ${m.recheck.join(', ')} re-run` } : m;
+  };
+  return speculativeBaseVerdict(root, { assumed, now, lanes }, { recordMove });
 }
 
 const nextPollMs = () => 1000;
