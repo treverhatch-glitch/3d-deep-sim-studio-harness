@@ -107,7 +107,7 @@ last 24 hours.
   a tab bar like a wrist terminal, the system's monospace font (Cascadia Mono or Consolas on Windows).
 - **The Studio floor is bigger**: drawn larger on wide screens (rooms, people, plates and text), with a badge that bobs
   over each person, a burst over the room when a task lands (and in the Rail Yard when a train lands), and the
-  verify's progress under the Rail Yard's track. Finished agents still walk out (2.75.0).
+  verify's progress in the Rail Yard. Finished agents still walk out (2.75.0).
 - **The Train Room is a loom**: main is the glowing central timeline; each lane a filament that branches off it and is
   woven back in when it lands, pulses while verifying, peels away red when handed back, waits violet for a release.
 - **A real loading bar** for the running train's verify: `scripts/run-gates.mjs` writes its live progress to
@@ -115,6 +115,22 @@ last 24 hours.
   `.studio/gates/gate-times.json` (the last 10 runs per gate; harness/gate-progress.mjs). The bar is the checks finished
   out of the run's checks; the ETA is the median recorded time of each check still to run plus what is left of the
   running one, and says "estimate" when any of them has fewer than 3 recorded runs (no ETA at all before a first run).
+
+- **The Rail Yard is a small loom** (round 2, replacing the brick railway): a gold-framed timeline loom two rooms wide,
+  main as the glowing orange line, lanes queued for the next train waiting on spools at the left (violet when they wait
+  for a release), the train's lanes branching off main and pulsing while they verify, landed ones woven back in green,
+  handed-back ones peeling away red. The train's keeper sits at the desk beside it; under it the same real bar as the
+  Train Room (percent, checks done of all, the running check, minutes left, "(estimate)" under 3 recorded runs).
+- **The Control room is short** (round 2): the top screen keeps what matters (status, needs a person, crew, the Train
+  Room, run clock, machine, owner proxy), then agents and Your call, activity and the queue (both scroll), the Act box.
+  Everything else (claims, playtest, bugs by model, autonomy, floors and the Director's flow, running unattended,
+  budget, sessions, token ledger, tokens used, model calls, divisions, shell output) is a fold in one row under the
+  columns: closed by default, an open one takes the whole row, and each fold's open/closed is kept in this browser.
+  About 2,950 px on a desktop with the folds closed (7,900 before), 6,900 on a phone (12,300).
+- **Nothing sits over the page** (round 2): the Studio floor's "Game in development" bar is the end of the page, not
+  pinned over the rooms, and the Live badge sits at the end of the current view's header.
+- **Beta mode on the owner-proxy card** (round 2): "Beta mode on: set by <who> since <when>; acting as the owner: <agents>
+  (<why>)" or "Beta mode off" with the reason, read from the committed `studio/beta.json` (harness/beta-mode.mjs).
 
 ### Pages
 
@@ -126,4 +142,5 @@ last 24 hours.
 | `/legacy` (the React War Room retired in 2.4.0) and its source files (`/WarRoom.tsx` …) | cut: the War Room v3 does all of it |
 | `/human` (balance and fun sign-off) | cut: "Sign off balance" / "Sign off fun" in the Control room's Act box do the same (`/api/human/*` stays) |
 
-`node qa/hud-check.mjs --only gallery --shots <folder>` shoots every view, desktop and phone, in `<folder>/277/`.
+`node qa/hud-check.mjs --only gallery --shots <folder>` shoots every view, desktop and phone, in `<folder>/277b/`, and checks the folds, the page height and that
+the bottom bar and the Live badge cover nothing.

@@ -424,9 +424,9 @@ async function warRoom274() {
   });
   // The Studio floor: the Rail Yard, Engine Bay and Watchtower rooms, each saying what its staff do, with the action.
   await goTo(page, 'tycoon');
-  await expect('2.74.0: the Studio floor has a Rail Yard with the train\'s cars, an open Engine Bay with the engine worker, and a Watchtower with the proxy', async () => {
+  await expect('2.74.0: the Studio floor has a Rail Yard with the train\'s lanes, an open Engine Bay with the engine worker, and a Watchtower with the proxy', async () => {
     const rooms = await page.locator('#t-office .room .sign').allInnerTexts();
-    const cars = await page.locator('#room-rails .yard .car').count();
+    const cars = await page.locator('#room-rails .rloom .thr').count();
     const engine = await page.locator('#room-engine').getAttribute('class').catch(() => '');
     const inEngine = await page.locator('#t-crowd .desk[data-room="engine"][data-agent="unity-worker-1"]').count();
     const tower = await text(page, '#room-watchtower .towerlog');
@@ -437,7 +437,30 @@ async function warRoom274() {
     const btn = await page.locator('#room-engine [data-now] [data-act2]').count();
     return { ok: /T-002/.test(t) && /editing|verifying|held/.test(t) && btn >= 1, seen: `${t} | buttons ${btn}` };
   });
+  // 2.77.0 (round 2): the Rail Yard is a small loom: the verifying lanes pulse on it, the handed-back one peels red, the
+  // held one waits on a spool at the left, main glows; the train's real progress under it; no brick railway left.
+  // T-204 waits on its spool: violet "waits for a release" while held, "queued for the next train" once released (above).
+  const released204 = /"released":\s*\{[^}]*"by":\s*"hatch"/.test(read('.studio/train/queue.json'));
+  await expect(`2.77.0: the Rail Yard draws the loom (2 verifying, 1 handed back, T-204 waiting at the left ${released204 ? 'released' : 'held'}, main glowing) and the real bar (50%, 3/6, now, minutes or estimate), no brick wall`, async () => {
+    return page.evaluate((spoolWant) => {
+      const room = document.querySelector('#room-rails');
+      const q = (sel) => room?.querySelectorAll(sel).length || 0;
+      const bar = room?.querySelector('.rloom .rbar')?.textContent.replace(/\s+/g, ' ') || '';
+      const now = room?.querySelector('.rbar [role="progressbar"]')?.getAttribute('aria-valuenow');
+      const spool = [...(room?.querySelectorAll('.rloom .spool title') || [])].map((t) => t.textContent).join(' | ');
+      const svg = room?.querySelector('.rloom svg.rl')?.getBoundingClientRect();
+      const r = room?.getBoundingClientRect();
+      const brick = /wl-brick/.test(room?.className || '') || q('.yard') + q('.car') + q('.loco') > 0;
+      // the keeper's desk sits beside the loom, never under it
+      const lr = room?.querySelector('.rloom')?.getBoundingClientRect();
+      const keeper = [...document.querySelectorAll('#t-crowd .desk[data-room="rails"]')].map((d) => d.getBoundingClientRect());
+      const overKeeper = Boolean(lr) && keeper.some((b) => lr.left < b.right - 1 && b.left < lr.right - 1 && lr.top < b.bottom - 1 && b.top < lr.bottom - 1);
+      const ok = q('.rloom .thr.verifying') === 2 && q('.rloom .thr.dropped') === 1 && new RegExp(spoolWant).test(spool) && q('.rloom .rl-main.pulse') === 1 && now === '50' && /50%/.test(bar) && /3\/6/.test(bar) && /now /.test(bar) && /min left|no ETA yet/.test(bar) && !brick && svg && r && svg.width >= r.width * 0.7 && svg.height >= 90 && keeper.length >= 1 && !overKeeper;
+      return { ok, seen: `verifying ${q('.rloom .thr.verifying')} dropped ${q('.rloom .thr.dropped')} | spools ${spool} | bar ${bar} (${now}) | brick ${brick} | loom ${svg && Math.round(svg.width)}x${svg && Math.round(svg.height)} in a room ${r && Math.round(r.width)} wide | keeper desks ${keeper.length}, under the loom ${overKeeper}` };
+    }, released204 ? 'T-204: queued for the next train' : 'T-204: waits for a release');
+  });
   await shot(page, '274-studio-floor-desktop.png', { fullPage: true });
+  if (shotsAt) await page.locator('#room-rails').screenshot({ path: path.join(shotsAt, '277b', 'rail-yard-desktop.png') }).catch(() => {});
   // 2.75.0: every person wears one state badge (its key in the dock); when an agent's session ends it leaves the floor.
   await expect('2.75.0: each agent on the Studio floor has a state badge, and the dock explains every badge', async () => {
     const st = await page.locator('#t-crowd .person[data-agent="unity-worker-1"] > .stb').getAttribute('data-st').catch(() => null);
@@ -508,12 +531,12 @@ async function warRoom274() {
 
 // 2.75.0 / 2.77.0: every view, desktop and phone: drawn, no script errors, nothing off the side, one shared tab bar (same
 // order everywhere, the current view marked), and dark: 2.77.0 is dark always, so the desktop pass runs with the system set
-// to light and must still be dark. Screenshots in --shots/277/<size>-<view>.png. Then the light screen, picked by hand.
+// to light and must still be dark. Screenshots in --shots/277b/<size>-<view>.png. Then the light screen, picked by hand.
 const VIEWS = ['ops', 'tycoon', 'plan', 'assets', 'arcade', 'away'];
 const luminance = (bg) => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg) || []; const c = [1, 2, 3].map((i) => { const x = Number(m[i] || 0) / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 async function gallery275() {
   if (!seeded274) { seed274(); seeded274 = true; }
-  const out = shotsAt ? path.join(shotsAt, '277') : null;
+  const out = shotsAt ? path.join(shotsAt, '277b') : null;
   if (out) fs.mkdirSync(out, { recursive: true });
   for (const [w, h, size, system] of [[1280, 900, 'desktop', 'light'], [390, 844, 'phone', 'dark']]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: system });
@@ -556,6 +579,75 @@ async function gallery275() {
   await ctx.close();
 }
 
+// 2.77.0 (round 2): the Control room keeps the top screen for what matters and folds the rest: every fold closed by
+// default and the page short (desktop under 3,000 px); a fold opens and closes on its summary and is remembered across a
+// reload. The fixed bars cover nothing: the Studio floor's bottom bar sits under the rooms (rects don't meet), the Live
+// badge sits in each view's header and meets no panel or room. The owner-proxy card says whether beta mode is on.
+async function folds277b() {
+  if (!seeded274) { seed274(); seeded274 = true; }
+  const out = shotsAt ? path.join(shotsAt, '277b') : null;
+  if (out) fs.mkdirSync(out, { recursive: true });
+  for (const [w, h, size, limit] of [[1280, 900, 'desktop', 3000], [390, 844, 'phone', 8000]]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/?skin=ops`);
+    const shut = await expect.quiet(async () => page.evaluate((max) => {
+      const f = [...document.querySelectorAll('#ops details.fold[data-fold]')];
+      const tall = document.documentElement.scrollHeight;
+      const drawn = /Pace/.test(document.querySelector('#ops [data-signals]')?.textContent || '');
+      const parts = [...document.querySelectorAll('#ops > *, #ops > main > *')].map((e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : e.className ? `.${String(e.className).split(' ')[0]}` : ''} ${Math.round(e.getBoundingClientRect().height)}`).join(', ');
+      return { ok: drawn && f.length >= 10 && f.every((d) => !d.open) && tall < max, seen: `${f.length} folds, open: ${f.filter((d) => d.open).map((d) => d.dataset.fold).join(',') || 'none'} | page ${tall} px | ${parts}` };
+    }, limit), { holdMs: 300 });
+    // the essentials are on the page (not folded): needs a person, crew, Train Room, run clock, machine, owner proxy
+    const top = await page.evaluate(() => ['o-hold', 'o-agents', 'o-trains', 'o-clock', 'o-machine', 'o-proxy'].map((id) => [id, Boolean(document.getElementById(id)) && !document.getElementById(id).closest('details.fold')]));
+    check(`2.77.0: ${size} Control room: every lower section folded by default, the page under ${limit} px, the essentials unfolded`, shut.ok && top.every(([, v]) => v), `${shut.message || shut.seen || ''} | ${JSON.stringify(top)}`);
+    if (out) await page.screenshot({ path: path.join(out, `${size}-ops-folded.png`), fullPage: true }).catch(() => {});
+    if (size === 'desktop') {
+      const sum = page.locator('[data-fold="budget"] > summary');
+      await sum.click();
+      const opened = await expect.quiet(async () => ({ ok: await page.evaluate(() => { let kept = null; try { kept = localStorage.getItem('hudFold:budget'); } catch {} return document.querySelector('[data-fold="budget"]').open && document.querySelector('[data-fold="budget"] > :not(summary)').getBoundingClientRect().height > 0 && kept === 'open'; }), seen: '' }));
+      await page.reload();
+      const kept = await expect.quiet(async () => ({ ok: await page.evaluate(() => document.querySelector('[data-fold="budget"]').open && !document.querySelector('[data-fold="ledger"]').open), seen: '' }));
+      await page.locator('[data-fold="budget"] > summary').click();
+      // the toggle event (and so the remembered state) comes a moment after the click: wait for it, then reload
+      await expect.quiet(async () => ({ ok: await page.evaluate(() => { try { return localStorage.getItem('hudFold:budget') === 'closed'; } catch { return false; } }), seen: '' }));
+      await page.reload();
+      const shutAgain = await expect.quiet(async () => ({ ok: await page.evaluate(() => /Pace/.test(document.querySelector('#ops [data-signals]')?.textContent || '') && !document.querySelector('[data-fold="budget"]').open), seen: '' }), { holdMs: 300 });
+      check('2.77.0: a fold opens on its summary, stays open across a reload (this browser), and closes again', opened.ok && kept.ok && shutAgain.ok, JSON.stringify({ opened: opened.ok, kept: kept.ok, closedAgain: shutAgain.ok }));
+      const beta = await expect.quiet(async () => { const t = await text(page, '#o-proxybody'); return { ok: /Beta mode (on|off)/.test(t), seen: t.slice(0, 200) }; });
+      check('2.77.0: the owner-proxy card says whether beta mode is on (studio/beta.json)', beta.ok, beta.message || beta.seen || '');
+    }
+    // the Live badge covers nothing, on every view
+    for (const v of VIEWS) {
+      await page.goto(`${BASE}/?skin=${v}`);
+      const r = await expect.quiet(async () => page.evaluate((view) => {
+        const live = document.getElementById('live');
+        const lr = live.getBoundingClientRect();
+        const hits = [...document.querySelectorAll(`#${view} .panel, #${view} section, #${view} .room, #${view} .card`)].filter((e) => !e.contains(live) && e.getBoundingClientRect().height > 0 && (() => { const b = e.getBoundingClientRect(); return lr.left < b.right - 1 && b.left < lr.right - 1 && lr.top < b.bottom - 1 && b.top < lr.bottom - 1; })()).map((e) => e.id || e.className).slice(0, 3);
+        return { ok: lr.width > 0 && Boolean(live.closest(`#${view}`)) && getComputedStyle(live).position !== 'fixed' && !hits.length, seen: `in ${live.parentElement?.id || live.parentElement?.className} ${getComputedStyle(live).position} | over ${hits.join(', ') || 'nothing'}` };
+      }, v));
+      check(`2.77.0: ${size} ${v}: the Live badge sits in the view's header and covers no panel`, r.ok, r.message || r.seen || '');
+    }
+    // the Studio floor's bottom bar sits under the rooms, scrolled to the end of the page too
+    await page.goto(`${BASE}/?skin=tycoon`);
+    const dock = await expect.quiet(async () => page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      const d = document.querySelector('#tycoon .dock')?.getBoundingClientRect();
+      const rooms = [...document.querySelectorAll('#t-office .room')];
+      const hit = d ? rooms.filter((e) => { const b = e.getBoundingClientRect(); return d.left < b.right - 1 && b.left < d.right - 1 && d.top < b.bottom - 1 && b.top < d.bottom - 1; }).map((e) => e.id) : ['no dock'];
+      // and in the Rail Yard the loom and its bar sit clear of the keeper at the desk (phone too)
+      const lr = document.querySelector('#room-rails .rloom')?.getBoundingClientRect();
+      const desks = [...document.querySelectorAll('#t-crowd .desk[data-room="rails"]')];
+      const keeper = [...desks, ...desks.map((k) => document.querySelector(`#t-crowd .person[data-agent="${k.dataset.agent}"]`)).filter(Boolean)].map((e) => e.getBoundingClientRect());
+      const over = !lr || keeper.some((b) => lr.left < b.right - 1 && b.left < lr.right - 1 && lr.top < b.bottom - 1 && b.top < lr.bottom - 1);
+      return { ok: rooms.length > 3 && d && d.height > 0 && !hit.length && getComputedStyle(document.querySelector('#tycoon .dock')).position !== 'fixed' && keeper.length > 0 && !over, seen: `${rooms.length} rooms | dock ${d && Math.round(d.top)}-${d && Math.round(d.bottom)} over ${hit.join(', ') || 'nothing'} | rail yard keeper ${keeper.length}, loom over the keeper ${over}` };
+    }));
+    check(`2.77.0: ${size} Studio floor: the "Game in development" bar covers no room, and the Rail Yard's loom covers no keeper`, dock.ok, dock.message || dock.seen || '');
+    if (out) await page.screenshot({ path: path.join(out, `${size}-tycoon-end.png`), fullPage: false }).catch(() => {});
+    await ctx.close();
+  }
+}
+
 try {
   for (const [w, h, size] of only ? [] : [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
     for (const skin of ['ops', 'tycoon', 'plan', 'assets', 'arcade']) {
@@ -578,6 +670,8 @@ try {
       check(`${size} ${skin}: loads without errors`, errs.length === 0 && drawn.ok, [drawn.ok ? '' : `the view never drew: ${drawn.message}`, ...errs.slice(0, 3)].filter(Boolean).join(' | '));
       check(`${size} ${skin}: nothing runs off the side`, wide.length === 0, wide.join(', '));
       if (skin === 'ops') {
+        // 2.77.0: the Floors and Director cards sit in the "Floors and the flow" fold (closed by default): open it.
+        await page.locator('[data-fold="flow"] > summary').click();
         await expect(`${size} ops: the Director card shows the flow (starved, builders 0/3) and the red CI job (2.30h)`, async () => {
           const t = await text(page, '#o-director');
           return { ok: /starved/.test(t) && /builders 0\/3/.test(t) && /ci\/windows/.test(t), seen: t };
@@ -878,6 +972,8 @@ try {
   check('no script errors while using it', errs.length === 0, errs.join(' | '));
 
   if (!only) {
+    // 2.77.0: the ledger sits in a folded section (closed by default): open it first.
+    await page.locator('[data-fold="ledger"] > summary').click();
     // 2.30e: the token ledger tiles, from the seeded sessions: 3k tokens for the one finished task, 1 of 2
     // sessions ended with no task done, turns 12 / 40, and the free model flagged as estimated.
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -908,6 +1004,7 @@ try {
   }
   if (!only) await warRoom274();
   if (!only || only === 'gallery') await gallery275();
+  if (!only || only === 'gallery') await folds277b();
 } finally {
   for (const p of sleepers) { try { p.kill(); } catch {} }
   await browser.close();

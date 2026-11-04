@@ -10,6 +10,10 @@
  *   pages      the hub no longer serves the retired React War Room (/legacy), its source files or /human; / still works
  *   look       dark always (no light theme from the system; a light screen only by the person's button, in every view's
  *              header), the loom and the bar in the Train Room, the bursts and the bigger Studio floor
+ *   rail yard  (round 2) the Studio floor's Rail Yard as a small loom with the same real bar, no brick railway
+ *   folds      (round 2) the Control room's lower sections folded, closed by default, remembered per browser
+ *   bars       (round 2) the floor's bottom bar and the Live badge sit in the page, over nothing
+ *   beta       (round 2) beta mode (studio/beta.json) on the owner-proxy card
  * Each check fails on 2.76.0 (none of this exists there, or those pages still answer).
  */
 import fs from 'node:fs';
@@ -125,8 +129,32 @@ export async function selftest277W({ dir, run, report, tmpRoot, root }) {
         /<html lang="en" data-theme="dark">/.test(page) && !/prefers-color-scheme/.test(page) && /html\[data-theme="light"\] \{\s*--ds-bg:/.test(page) && (page.match(/<button type="button" class="themebtn" data-themebtn/g) || []).length === 6 && /store\.set\('hudTheme', t\)/.test(page),
         `prefers-color-scheme ${/prefers-color-scheme/.test(page)}; theme buttons ${(page.match(/class="themebtn"/g) || []).length}`]);
       await guard('277w look: the Train Room draws the loom and the verify bar, a landed task bursts out of its room, and the Studio floor is drawn larger on wide screens (fails on 2.76.0)', () => [
-        /<svg class="loom"/.test(page) && /function verifyBar\(bar\)/.test(page) && /role="progressbar"/.test(page) && /function roomBurst\(roomId, text\)/.test(page) && /#tycoon \.office \{ zoom: 1\.3; \}/.test(page) && /\.yard \.ybar/.test(page),
+        /<svg class="loom"/.test(page) && /function verifyBar\(bar\)/.test(page) && /role="progressbar"/.test(page) && /function roomBurst\(roomId, text\)/.test(page) && /#tycoon \.office \{ zoom: 1\.3; \}/.test(page),
         'loom, verifyBar, roomBurst or the zoom missing']);
+      // round 2: the Rail Yard is a small loom with the real bar; the Control room folds; the bars cover nothing
+      const css = [...page.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+      await guard('277w rail yard: the Studio floor\'s Rail Yard is a loom chamber (function miniLoom: main, waiting spools, the lanes as threads by state) with the verify\'s real bar under it, two columns wide; the brick railway is gone (fails on 2.76.0: cars on a brick wall)', () => [
+        /function miniLoom\(web\)/.test(page) && /data-dyn="rloom"/.test(page) && /class="rbar"/.test(page) && /class="spool \$\{w\.held \? 'held' : 'queued'\}"/.test(page) && /class="thr \$\{esc\(l\.state\)\}"/.test(page) && /aria-valuenow="\$\{bar\.percent\}"/.test(page) && /\(estimate\)/.test(page)
+          && /\.room\.r-rails \{ grid-column: span 2; \}/.test(css) && !/wl-brick fl-concrete r-rails/.test(page) && !/data-dyn="yard"/.test(page),
+        `miniLoom ${/function miniLoom/.test(page)}; brick ${/wl-brick fl-concrete r-rails/.test(page)}; yard ${/data-dyn="yard"/.test(page)}`]);
+      const folds = page.match(/<details class="fold" data-fold="[a-z]+"/g) || [];
+      const row = (page.match(/<div class="foldrow"[\s\S]*?\n {2}<\/div>/) || [''])[0];
+      await guard('277w folds: the Control room\'s lower sections are folds, closed by default (no open attribute), in one row under the columns, each remembered per browser through the try/catch store (fails on 2.76.0: no folds)', () => [
+        folds.length >= 12 && (row.match(/<details class="fold"/g) || []).length === folds.length && !/<details class="fold"[^>]*\bopen\b/.test(page) && /store\.set\(k, d\.open \? 'open' : 'closed'\)/.test(page) && /hudFold:/.test(page) && /\.foldsec:has\(> details\[open\]\) \{ grid-column: 1 \/ -1; \}/.test(css)
+          && ['o-hold', 'o-trains', 'o-clock', 'o-machine', 'o-proxy', 'o-agents'].every((id) => !row.includes(`id="${id}"`)),
+        `folds ${folds.length}, in the row ${(row.match(/<details class="fold"/g) || []).length}`]);
+      await guard('277w bars: the Studio floor\'s "Game in development" bar is not fixed or sticky over the rooms, and the Live badge moves into the current view\'s header (fails on 2.76.0: both sat over the page)', () => [
+        /html body #tycoon \.dock \{ position: static; \}/.test(css) && /html body \.live \{ position: static;/.test(css) && /const placeLive = \(s\) =>/.test(page) && /const setSkin = \(s\) => \{ if \(!document\.getElementById\(s\)\) return; placeLive\(s\);/.test(page),
+        `dock static ${/#tycoon \.dock \{ position: static; \}/.test(css)}; placeLive ${/placeLive/.test(page)}`]);
+      // beta mode on the owner-proxy card: committed studio/beta.json on, read through harness/beta-mode.mjs
+      fs.writeFileSync(path.join(S, 'studio', 'beta.json'), JSON.stringify({ on: true, by: 'owner-z', at: new Date(now - 3600000).toISOString(), why: 'harness build', agents: ['orch-z'] }, null, 2));
+      g(S, ['add', 'studio/beta.json']); g(S, ['commit', '-qm', 'beta on', '--no-verify']);
+      const bp = spawnSync(process.execPath, ['--input-type=module', '-e', "const w = await import('./harness/war-room.mjs'); const s = await w.warRoomState({ launched: [], agents: [], queue: { inProgress: [], backlog: [], done: [] } }); console.log(JSON.stringify(s.ownerProxy?.beta ?? null));"], { cwd: S, env, encoding: 'utf8', windowsHide: true });
+      let beta = null;
+      try { beta = JSON.parse(String(bp.stdout).trim().split('\n').pop()); } catch {}
+      await guard('277w beta: the War Room\'s owner proxy carries beta mode (on, who, since, the agents) from studio/beta.json, and the card prints it (fails on 2.76.0: no beta on the card)', () => [
+        beta && beta.on === true && beta.by === 'owner-z' && Number.isFinite(Date.parse(beta.at)) && beta.agents.join() === 'orch-z' && /Beta mode \$\{bt\.on \? 'on' : 'off'\}/.test(page) && /set by \$\{esc\(bt\.by \|\| '\?'\)\} since/.test(page),
+        `${String(bp.stderr).slice(-400)}\n${JSON.stringify(beta)}`]);
     }
   } finally {
     for (const k of kids) { try { k.kill(); } catch {} }
