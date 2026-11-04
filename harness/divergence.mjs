@@ -11,8 +11,9 @@
  *
  * The reference is the commit that last changed the golden file (it recorded the hash; STUDIO_DIVERGENCE_REF names
  * another). Its cartridge folder is read with `git show` into a temp folder and loaded with loadCartridge({ dir }). The
- * reference is then run to its end: when its sha256 is not the golden's, the line says the reference does not
- * reproduce the golden (the divergence is against that commit, not the recording). It LOCATES a bug; the golden check
+ * reference (2.76.0, B-94: with every file it imports from outside its folder, as it was in that commit, and the
+ * checkout's node_modules linked: materializeClosure) is then run to its end: when its sha256 is not the golden's, the
+ * line says the reference does not reproduce the golden (the divergence is against that commit, not the recording). It LOCATES a bug; the golden check
  * still decides red or green. STUDIO_GOLDEN_DIVERGENCE=off turns it off.
  *
  * Generic contract for a studio game (not a cartridge): its studio.gates.json may declare
@@ -150,6 +151,80 @@ export function materialize(root, ref, rel, dest) {
   return files.length;
 }
 
+// ---- 2.76.0 (j, B-94): a reference cartridge that imports files outside its folder ----
+const JS_EXT = /\.(m?[jt]s|c[jt]s)$/i;
+/** Relative specifiers a module's text names: static and dynamic imports, re-exports, require(), new URL(…, import.meta.url). */
+export function relativeSpecifiers(text) {
+  const t = String(text || '').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const out = new Set();
+  const res = [
+    /\bfrom\s*['"](\.{1,2}\/[^'"\n]+)['"]/g,
+    /\bimport\s*['"](\.{1,2}\/[^'"\n]+)['"]/g,
+    /\bimport\s*\(\s*['"](\.{1,2}\/[^'"\n]+)['"]\s*[,)]/g,
+    /\brequire\s*\(\s*['"](\.{1,2}\/[^'"\n]+)['"]\s*\)/g,
+    /\bnew\s+URL\s*\(\s*['"](\.{1,2}\/[^'"\n]+)['"]\s*,\s*import\.meta\.url\s*\)/g,
+  ];
+  for (const re of res) for (const m of t.matchAll(re)) out.add(m[1].replace(/[?#].*$/, ''));
+  return [...out];
+}
+
+/** What `ref:rel` is: 'blob', 'tree' or '' (not in that commit). */
+const objType = (root, ref, rel) => { const r = git(root, ['cat-file', '-t', `${ref}:${rel}`]); return r.status === 0 ? r.stdout.trim() : ''; };
+
+/**
+ * Write a cartridge folder of a commit under `dest` (as materialize does) and, following its relative imports, every
+ * file it needs from outside that folder (a game's own loader beside its sim, the sim's sources, a package.json that
+ * sets the module type), each as it was in that commit, at the same repo path. Then link the checkout's node_modules
+ * (the repo root's, and any under a folder a needed file is in) so bare imports resolve. A `.js` import that is a `.ts`
+ * file in that commit (TypeScript's convention) takes the `.ts`. { files, outside: [rel], missing: [{ rel, from }] }.
+ */
+export function materializeClosure(root, ref, rel, dest, { maxFiles = 4000 } = {}) {
+  const have = new Set();
+  const list = (sub) => { const ls = git(root, ['ls-tree', '-r', '-z', '--name-only', ref, '--', sub]); return ls.status === 0 ? ls.stdout.split('\0').filter(Boolean) : []; };
+  const write = (f) => {
+    if (have.has(f)) return false;
+    const b = spawnSync('git', ['show', `${ref}:${f}`], { cwd: root, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+    if (b.status !== 0) return false;
+    const out = path.join(dest, ...f.split('/'));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, b.stdout);
+    have.add(f);
+    return true;
+  };
+  materialize(root, ref, rel, dest);
+  for (const f of list(rel)) have.add(f);
+  const queue = [...have].filter((f) => JS_EXT.test(f));
+  const outside = [];
+  const missing = [];
+  const base = String(rel).replace(/\/+$/, '');
+  while (queue.length && have.size < maxFiles) {
+    const f = queue.shift();
+    let text = '';
+    try { text = fs.readFileSync(path.join(dest, ...f.split('/')), 'utf8'); } catch { continue; }
+    for (const spec of relativeSpecifiers(text)) {
+      let target = path.posix.normalize(path.posix.join(path.posix.dirname(f), spec)).replace(/\/+$/, '');
+      if (target.startsWith('..') || path.posix.isAbsolute(target)) { missing.push({ rel: spec, from: f, why: 'outside the repository' }); continue; }
+      if (have.has(target)) continue;
+      let type = objType(root, ref, target);
+      if (!type && /\.(c|m)?js$/i.test(target)) {
+        const ts = target.replace(/\.(c|m)?js$/i, (m) => m.replace(/js$/i, 'ts'));
+        if (objType(root, ref, ts) === 'blob') { target = ts; type = 'blob'; }
+      }
+      if (!type) { missing.push({ rel: target, from: f, why: `not in ${String(ref).slice(0, 8)} (a built or untracked file?)` }); continue; }
+      const added = type === 'tree' ? list(target).filter((x) => write(x)) : write(target) ? [target] : [];
+      for (const a of added) { if (!a.startsWith(`${base}/`)) outside.push(a); if (JS_EXT.test(a)) queue.push(a); }
+    }
+  }
+  // package.json files on the way to each needed file outside the folder (they set "type": "module" and imports maps).
+  const dirs = new Set();
+  for (const a of outside) { let d = path.posix.dirname(a); while (d && d !== '.') { dirs.add(d); d = path.posix.dirname(d); } }
+  dirs.add('');
+  for (const d of dirs) { const pj = d ? `${d}/package.json` : 'package.json'; if (!have.has(pj) && objType(root, ref, pj) === 'blob') write(pj); }
+  // node_modules: the checkout's, linked at the same places (a junction on Windows: no admin rights needed).
+  for (const d of dirs) linkModules(path.join(root, ...d.split('/').filter(Boolean)), path.join(dest, ...d.split('/').filter(Boolean)));
+  return { files: have.size, outside: [...new Set(outside)], missing };
+}
+
 /** The two printed lines for a result: the human one and the JSON one. */
 export function divergenceLines(prefix, r) {
   if (!r) return [];
@@ -195,14 +270,15 @@ export async function goldenDivergence({ root, file, rel, spec, cart, env = proc
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-div-'));
   try {
     const crel = `cartridges/${cart.name}`;
-    const n = materialize(root, ref.ref, crel, tmp);
-    if (!n) return { file, ref: ref.ref, error: `the reference ${ref.ref.slice(0, 8)} has no ${crel}` };
+    if (objType(root, ref.ref, crel) !== 'tree') return { file, ref: ref.ref, error: `the reference ${ref.ref.slice(0, 8)} has no ${crel}` };
+    // 2.76.0 (j, B-94): with what it imports from outside its folder (a game's own cartridge loader and its sim).
+    const m = materializeClosure(root, ref.ref, crel, tmp);
     const { loadCartridge, groupActions } = await import('./cartridge.mjs');
     let refCart;
-    try { refCart = await loadCartridge(cart.name, { dir: path.join(tmp, ...crel.split('/')) }); } catch (e) { return { file, ref: ref.ref, error: `the reference's cartridge didn't load (${String(e.message).slice(0, 160)}; a cartridge that imports files outside its folder can't be compared this way)` }; }
+    try { refCart = await loadCartridge(cart.name, { dir: path.join(tmp, ...crel.split('/')) }); } catch (e) { return { file, ref: ref.ref, error: `the reference's cartridge didn't load (${String(e.message).slice(0, 160)}${m.missing.length ? `; it imports ${m.missing.slice(0, 3).map((x) => `${x.rel} (${x.why})`).join(', ')}` : ''})` }; }
     const r = lockstep(refCart, cart, spec, { groupActions });
     if (r.error) return { file, ref: ref.ref, error: r.error };
-    const res = { file, ref: ref.ref, refWhy: ref.why, ...r, reproduces: r.refEnd ? r.refEnd === spec.sha256 : null, ms: Date.now() - t0 };
+    const res = { file, ref: ref.ref, refWhy: ref.why, ...r, reproduces: r.refEnd ? r.refEnd === spec.sha256 : null, ms: Date.now() - t0, ...(m.outside.length ? { outside: m.outside.length } : {}) };
     if (res.found) await emit(res);
     return res;
   } catch (e) {

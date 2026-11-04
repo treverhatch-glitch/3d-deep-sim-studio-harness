@@ -401,7 +401,7 @@ function heldByParent(dir, env) {
 
 /** 2.68.0 (n): the claim of the machine:heavy hold this process runs inside (STUDIO_HEAVY_HELD), or null. */
 export function heldClaim(root, env = process.env) {
-  try { const h = heldByParent(heavyDir(root), env); return h?.claim ? { ...h.claim, label: h.claim.label || h.label } : null; } catch { return null; }
+  try { const h = heldByParent(heavyDir(root), env); return h?.claim ? { ...h.claim, label: h.claim.label || h.label, holderPid: h.pid } : null; } catch { return null; }
 }
 
 /**
@@ -475,7 +475,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       if (!ram.low && ramTold) { log(`[heavy] ${label}: free memory is back over the floor (${ram.freeGb ?? '?'} GB)`); ramTold = false; }
       holders = collectHolders(dir, { staleMs, log, env });
       const state = budgetState(profile, holders, { env });
-      claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly });
+      // 2.76.0 (j, B-89): a verify's share of the cores also counts the lane checks running (gate slots).
+      claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly, extraJobs: kind === 'verify' && profile ? laneCheckSlots(root, env).map(() => ({ kind: 'check', workers: null, threads: 0 })) : [] });
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }) });
       floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
@@ -628,9 +629,25 @@ function otherGateSlots(root, env) {
   return names.filter((n) => /^gate-slot-\d+\.lock$/.test(n)).map((n) => readJson(path.join(dir, n))).filter((h) => h?.pid && h.pid !== process.pid && pidAlive(h.pid, h.identity) && Date.now() - Number(h.at || 0) <= staleMs);
 }
 
-/** 2.68.0 (n): game checks running now in other processes (gate-slot holders): a lane's share of the budget divides by them + 1. */
+/**
+ * 2.76.0 (j, B-89): the lane checks running now in other processes: gate-slot holders that are not the game check of a
+ * live machine:heavy holder (a full verify's own check took a gate slot too: its record names the hold, heavyHeld, so it
+ * is counted once, as the verify). [{ pid, label, landing, at }].
+ */
+export function laneCheckSlots(root, env = process.env) {
+  let slots = [];
+  try { slots = otherGateSlots(root, env); } catch { return []; }
+  if (!slots.length) return [];
+  const live = heavyHolders(root, { env });
+  const covered = (g) => {
+    const m = String(g.heavyHeld || '').match(/^(machine-heavy-\d+\.lock):(\d+)$/);
+    return Boolean(m && live.some((h) => h.file === m[1] && Number(h.pid) === Number(m[2])));
+  };
+  return slots.filter((g) => !covered(g)).map((g) => ({ pid: g.pid, label: g.label || null, landing: Boolean(g.landing), at: g.at || null }));
+}
+/** 2.68.0 (n): game checks running now in other processes (gate-slot holders): a lane's share of the budget divides by them + 1. 2.76.0: not a verify's own. */
 export function laneChecksRunning(root, env = process.env) {
-  try { return otherGateSlots(root, env).length; } catch { return 0; }
+  try { return laneCheckSlots(root, env).length; } catch { return 0; }
 }
 
 // ---- 2.60.1 (B-17, B-35): what loads the machine outside the lock ----

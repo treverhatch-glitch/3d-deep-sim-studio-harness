@@ -9,6 +9,9 @@
  *
  *   factor = ceil(4 x workers / logical cores), between 1 and 4      (workerFactor)
  *
+ * 2.76.0 (j, B-89): "workers" there is every check's test workers on the machine (this check's share plus the others'
+ * running now: heavy-budget.mjs testWorkers machineWorkers), so sharing the cores never shortens a timeout.
+ *
  * A test's timeout is taken as fitting a box at a quarter load or less (one worker per four logical cores, about one per
  * physical core with room to spare); at full load a CPU-bound test takes up to about 4 x as long. (Measured on a
  * 28-thread box: a game's 15 s testTimeout went red at 25 workers and was raised to 60 s, x4, by hand.) The factor used is
@@ -183,14 +186,18 @@ const appendFlags = (cmd, r, flags) => {
  * The command to run a game check with, its per-test timeout scaled for the load: { command, info } where info is null
  * (not a test runner: nothing to say) or { runner, factor, why, applied, ms?, baseMs?, hookMs?, hookBaseMs?, flags? }.
  */
-export function scaleTestTimeouts({ command, root, workers, cores = null, gateFactor = 1, minScale = 1, env = process.env }) {
+export function scaleTestTimeouts({ command, root, workers, machineWorkers = null, cores = null, gateFactor = 1, minScale = 1, env = process.env }) {
   const r = resolveRunner(command, root);
   if (!r.runner) return { command, info: null, skipped: r.why };
   const c = Math.max(1, Number(cores) || (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 1);
   if (off(env.STUDIO_TEST_TIMEOUT_SCALE)) return { command, info: { runner: r.runner, factor: 1, applied: false, why: 'STUDIO_TEST_TIMEOUT_SCALE=off: the game\'s own timeouts' } };
   const given = Number(env.STUDIO_TEST_TIMEOUT_SCALE);
-  const wf = String(env.STUDIO_TEST_TIMEOUT_SCALE ?? '').trim() && Number.isFinite(given) ? Math.max(1, given) : workerFactor(workers, c);
-  const parts = [String(env.STUDIO_TEST_TIMEOUT_SCALE ?? '').trim() && Number.isFinite(given) ? `STUDIO_TEST_TIMEOUT_SCALE=${given}` : `${workers} test worker${Number(workers) === 1 ? '' : 's'} on ${c} logical core${c === 1 ? '' : 's'}: ceil(4 x ${workers} / ${c}), at most ${MAX_WORKER_FACTOR}`];
+  // 2.76.0 (j, B-89): with the cores shared between checks, the load a test sees is every check's workers on the machine
+  // (machineWorkers: this check's plus the others' running now, heavy-budget.mjs testWorkers), not its own share.
+  const mw = Number(machineWorkers) > Number(workers) ? Math.round(Number(machineWorkers)) : null;
+  const load = mw || workers;
+  const wf = String(env.STUDIO_TEST_TIMEOUT_SCALE ?? '').trim() && Number.isFinite(given) ? Math.max(1, given) : workerFactor(load, c);
+  const parts = [String(env.STUDIO_TEST_TIMEOUT_SCALE ?? '').trim() && Number.isFinite(given) ? `STUDIO_TEST_TIMEOUT_SCALE=${given}` : mw ? `${mw} test workers on the machine (${workers} its own, ${mw - workers} in other checks) on ${c} logical core${c === 1 ? '' : 's'}: ceil(4 x ${mw} / ${c}), at most ${MAX_WORKER_FACTOR}` : `${workers} test worker${Number(workers) === 1 ? '' : 's'} on ${c} logical core${c === 1 ? '' : 's'}: ceil(4 x ${workers} / ${c}), at most ${MAX_WORKER_FACTOR}`];
   if (Number(gateFactor) > wf) parts.push(`the gate's load factor ${gateFactor}`);
   if (Number(minScale) > Math.max(wf, Number(gateFactor) || 1)) parts.push(`the manifest's slowTests minScale ${minScale}`);
   const factor = Math.round(Math.max(1, wf, Number(gateFactor) || 1, Number(minScale) || 1) * 10) / 10;
