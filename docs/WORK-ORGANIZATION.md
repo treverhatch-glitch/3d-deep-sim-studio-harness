@@ -216,7 +216,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`, `.mixed`.
+  `.lane_recreated`, `.mixed`; 2.77.0: `.known_red`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -292,6 +292,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   queued again, a lane two trains died with at the same head is held for the Producer. None of it is a hand-back.
   A train from before 2.76.0 (a `status.json` only) is judged by the pid in its id when its status changed in the last
   24 h.
+- Known red on main (2.77.0, P9.3/P9.6, `harness/known-red.mjs`): when a train finds main itself red (its bisection's
+  "main itself fails its checks", or a verify of main alone), the failing test files are listed once in
+  `.studio/train/known-red.json` with the evidence (train, main's tree, the log; `task.train.known_red`). A later train
+  still runs its full verify on the exact tree; when its only red parts are listed tests (sub-ids naming a test file) in
+  files none of its lanes change, it re-runs just those files on main's tip alone: still red there, the train lands and
+  the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
+  the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
+  A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
+  `STUDIO_TRAIN_KNOWN_RED=off` turns it off.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,

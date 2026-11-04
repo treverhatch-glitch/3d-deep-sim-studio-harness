@@ -101,7 +101,7 @@ function webTrain(root, events, now) {
   const lanes = id ? laneStates(events, id) : [];
   const since = running?.since ? Date.parse(running.since) : null;
   const waiting = queue.filter((e) => !lanes.some((l) => l.task === e.task)).map((e) => ({ task: e.task, agent: e.agent || null, held: e.held && !(e.released && e.released.head === e.head) ? { tier: e.held.tier, why: String(e.held.why || '').split('\n')[0].slice(0, 200) } : null, released: e.released?.by || null }));
-  if (!running && !queue.length && !last && !lastId) return null;
+  if (!running && !queue.length && !last && !lastId && !(readJson(path.join(root, '.studio', 'train', 'known-red.json'), null)?.tests || []).length) return null;
   return {
     kind: 'web', name: 'Merge train', id,
     running: Boolean(running),
@@ -113,6 +113,8 @@ function webTrain(root, events, now) {
     lanes: lanes.length ? lanes : running?.lanes ? [] : [],
     laneCount: running?.lanes || lanes.length || null,
     waiting,
+    // 2.77.0 (P9.3): tests red on main itself (harness/known-red.mjs), counted on the train card.
+    knownRed: (() => { const k = readJson(path.join(root, '.studio', 'train', 'known-red.json'), null)?.tests; return Array.isArray(k) && k.length ? { n: k.length, tests: k.slice(0, 5).map((x) => String(x.test)) } : null; })(),
     needsRelease: waiting.filter((w) => w.held).map((w) => w.task),
     last,
   };

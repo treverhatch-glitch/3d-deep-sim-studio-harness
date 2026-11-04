@@ -184,4 +184,54 @@ console.log(JSON.stringify(readQueue(process.cwd()).find((e) => e.task === 'T-95
       return [r.released?.by === 'the-owner' && r.agent === 'builder-c', JSON.stringify(r)];
     });
   }
+
+  // ---- P9.3/P9.6: tests known red on main ----
+  if (want('p93')) {
+    // A made-up web game whose test run fails src/soak.test.ts while web/mini/soak-state.txt says "red" (main's own
+    // state) or a lane adds web/mini/breaks-soak.txt; it prints a vitest-style FAIL line for the file.
+    const st = trainStudio('p93', [{ id: 'game', command: 'node harness/game-gates.mjs', required: true, lite: true, cache: false }], (S) => {
+      writeIn(S, 'studio/game.json', `${JSON.stringify({ game: 'mini' })}\n`);
+      writeIn(S, 'web/mini/studio.gates.json', `${JSON.stringify({ gates: [{ id: 'test', command: 'node web/mini/test.mjs' }] }, null, 2)}\n`);
+      writeIn(S, 'web/mini/src/soak.test.ts', '// the soak test (made up)\n');
+      writeIn(S, 'web/mini/soak-state.txt', 'red\n');
+      writeIn(S, 'web/mini/test.mjs', [
+        "import fs from 'node:fs';",
+        "const red = fs.readFileSync('web/mini/soak-state.txt', 'utf8').includes('red') || fs.existsSync('web/mini/breaks-soak.txt');",
+        "console.log(' ✓ src/econ.test.ts (3 tests)');",
+        "if (red) { console.log(' FAIL  src/soak.test.ts > soak > 60 days'); console.log(' Test Files  1 failed | 1 passed (2)'); process.exit(1); }",
+        "console.log(' ✓ src/soak.test.ts (1 test)');", "console.log(' Test Files  2 passed (2)');", ''].join('\n'));
+    });
+    const { S, ev } = st;
+    const known = () => { try { return JSON.parse(fs.readFileSync(path.join(S, '.studio', 'train', 'known-red.json'), 'utf8')).tests || []; } catch { return []; } };
+    await guard('2.77.0 (P9.3): a train that finds main itself red lists the failing test once in .studio/train/known-red.json with its evidence (the train, main\'s tree, the log); nothing lands and nobody is handed back, as before (fails on 2.76.0: no list)', () => {
+      const L = st.lane('p93a', 'T-944', { 'docs/p93a-277h.md': '# a\n' });
+      st.setQueue([L]);
+      const t = st.train('p93a');
+      const k = known();
+      return [!t.landed?.length && !t.calls?.handBack?.length && k.length === 1 && /soak\.test\.ts$/.test(k[0].test) && k[0].train && k[0].tree, JSON.stringify({ t, k }).slice(0, 3000)];
+    });
+    await guard('2.77.0 (P9.3/P9.6): the next train is red only on that known-red test, which still fails on main alone: the full verify ran, the reds are reported (task.train.known_red "excused"), the lane lands and its task closes on the train\'s judgement; `task train status` shows the count (fails on 2.76.0: main red, nothing lands)', () => {
+      const n0 = events(ev).length;
+      const t = st.train('p93b');
+      const ex = events(ev).slice(n0).find((e) => e.type === 'task.train.known_red' && e.meta?.action === 'excused');
+      const status = run(S, 'node harness/task.mjs train status', st.env);
+      return [t.landed?.includes('T-944') && t.verifies >= 1 && ex && st.mainHas('docs/p93a-277h.md') && /Known red on main: 1 test/.test(out(status)), JSON.stringify({ t, ex: ex?.msg, status: out(status).slice(-600) }).slice(0, 3000)];
+    });
+    await guard('2.77.0 (P9.3, the guard): a lane that changes the known-red test file itself is never excused: its red is its own (passes only on 2.77.0: there is no list before)', () => {
+      const n0 = events(ev).length;
+      const L = st.lane('p93c', 'T-945', { 'web/mini/src/soak.test.ts': '// the soak test, changed by a lane\n' });
+      st.setQueue([L]);
+      const t = st.train('p93c');
+      const later = events(ev).slice(n0);
+      return [!t.landed?.includes('T-945') && !later.some((e) => e.type === 'task.train.known_red' && e.meta?.action === 'excused') && t.logs?.some((l) => /never excused/.test(l)), JSON.stringify({ t }).slice(0, 3000)];
+    });
+    await guard('2.77.0 (P9.3): once main is green on the test, a train red on it (the lane breaks it) re-runs it on main alone, finds it green, clears the entry, and hands the lane back as its own red (fails on 2.76.0: no list to clear)', () => {
+      writeIn(S, 'web/mini/soak-state.txt', 'green\n');
+      gitIn(S, 'commit', '-q', '--no-verify', '-am', 'main: the soak fixed');
+      const L = st.lane('p93d', 'T-946', { 'web/mini/breaks-soak.txt': 'this lane breaks the soak\n' });
+      st.setQueue([L]);
+      const t = st.train('p93d');
+      return [!t.landed?.includes('T-946') && known().length === 0 && (t.calls?.handBack || []).some(([task]) => task === 'T-946'), JSON.stringify({ t, k: known() }).slice(0, 3000)];
+    });
+  }
 }

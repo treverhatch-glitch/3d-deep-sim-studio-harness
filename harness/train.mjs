@@ -76,6 +76,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
+import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
@@ -2188,6 +2189,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         const redEta = bisectMode() === 'prefix' && set.length > 1 ? etaFor(1 + stepsLeft(0, set.length)) : null;
         if (ft.list.length) log(`[train] ${id}: verify ${res.verifies} red; failing tests: ${ft.list.join('; ')}${ft.more ? ` (+${ft.more} more)` : ''}`);
         const redSub = trainVerifyParts(redText, false, [sc.dir, root]).subIds; // 2.72.0 (a): which parts failed
+        // 2.77.0 (P9.3/P9.6): red only on tests known red on main (no lane changes them) that still fail on main alone:
+        // the full verify ran on the exact tree; those reds are reported, not blocking (harness/known-red.mjs).
+        {
+          const kr = knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text: redText });
+          if (kr) { verdict = { built: kr.built, v: { ...v, ok: true, knownRed: kr.subs, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, knownRed: kr.subs.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } }; break; }
+        }
         noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
@@ -2224,6 +2231,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           }
           if (plan.kind === 'noCheck') { deferNoCheck(res, set, defer, { id, log, by, what: plan.why }); set = []; break; }
           if (plan.kind === 'redMain') {
+            listRedMain(root, { id, logRel: plan.log, roots: [sc.dir, root], tree: out(git(root, 'rev-parse', `${tip}^{tree}`)), gates: plan.gates || v.gates }); // 2.77.0 (P9.3)
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${plan.why}; log ${plan.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
@@ -2287,6 +2295,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           if (!v0.cached && !v0.reused) res.verifies += 1;
           if (v0.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `the verify of main alone ${v0.why}` }); set = []; break; }
           if (!v0.ok) {
+            listRedMain(root, { id, logRel: v0.log, roots: [sc.dir, root], tree: b0.tree, gates: v0.gates }); // 2.77.0 (P9.3)
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${v0.gates.join(', ') || v0.why}; log ${v0.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
@@ -2308,6 +2317,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       if (!verdict) break;
       // (d) Green: main moves to exactly the verified tree, then each task closes.
       const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res, unionFiles });
+      // 2.77.0 (P9.3): a green landing that changed a known-red test's file is main going green on it.
+      if (landed !== 'moved' && res.landed.length && !verdict.v.knownRed && !verdict.v.excused?.length) {
+        try { const ch = changedVs(sc.dir, tip, verdict.built.head); const fixed = readKnownRed(root).filter((x) => ch.some((c) => c === fileSub(x.test) || c.endsWith(`/${fileSub(x.test)}`))).map((x) => x.test); if (fixed.length) clearKnownRed(root, fixed, `train ${id} landed a change to them on a green verify`); } catch {}
+      }
       if (landed === 'moved') {
         ev('moved', id, `${main} moved while the train was verified; building it again on the new ${main}`, { agent: by, status: 'warn' });
         continue;
@@ -2324,6 +2337,47 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });
   ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: brief(res) });
   return res;
+}
+
+// ---- 2.77.0 (P9.3/P9.6): tests known red on main -----------------------------------------------------------------
+
+const knownRedOn = () => !/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_KNOWN_RED || '');
+
+/** A verify of main alone was red: list its failing test files as known red on main (harness/known-red.mjs). */
+function listRedMain(root, { id, logRel, roots, tree, gates }) {
+  if (!knownRedOn()) return;
+  try {
+    const text = logRel ? fs.readFileSync(path.join(root, logRel), 'utf8') : '';
+    const subs = trainVerifyParts(text, false, roots).subIds;
+    if (subs.length) addKnownRed(root, subs, { train: id, tree, log: logRel || null, gates });
+  } catch {}
+}
+
+/**
+ * The verify is red: if its only red parts are known-red tests no lane changes, re-run just those test files on main's
+ * tip alone. Still red there: { built, subs } (the train lands; the reds are reported). Green there: the entries clear,
+ * null (the red is the lanes'). Anything else: null. The scratch copy is back at the train's tree when it returns.
+ */
+function knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text }) {
+  if (!knownRedOn() || !readKnownRed(root).length) return null;
+  const changed = changedVs(sc.dir, tip, built.head);
+  const cand = knownRedCandidate(root, { redGates: v.gates, subs: redSub, changed });
+  if (!cand.ok) { log(`[train] ${id}: known red on ${main}: not excused (${cand.why})`); return null; }
+  const f = trainFocus(text);
+  const b0 = buildIntegration(sc, tip, [], { id, unionFiles });
+  const c = recheck(sc, { id, tree: b0.tree, gates: v.gates, changed: [], all, cache: cache.checks, log, res, label: `${main} alone`, focus: f.focus || null, question: `do the known-red tests (${cand.subs.slice(0, 3).join(', ')}) still fail on ${main} alone?` });
+  const back = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo);
+  if (back.tree !== built.tree) { log(`[train] ${id}: known red: the train's tree couldn't be rebuilt exactly (${String(back.tree).slice(0, 8)} vs ${built.tree.slice(0, 8)}); not excused`); return null; }
+  if (c.noCheck) return null;
+  if (c.ok) {
+    clearKnownRed(root, cand.subs, `green on ${main} alone in train ${id}`);
+    log(`[train] ${id}: ${cand.subs.join(', ')} pass on ${main} alone now (cleared from the known-red list): the red is this train's`);
+    return null;
+  }
+  addKnownRed(root, cand.subs, { train: id, tree: b0.tree, log: c.log, gates: v.gates });
+  log(`[train] ${id}: red only on tests known red on ${main} (${cand.subs.join(', ')}), and they still fail on ${main} alone (${c.log}): the full verify of tree ${built.tree.slice(0, 8)} ran; those reds are reported, not blocking`);
+  ev('known_red', id, `red only on known-red tests that also fail on ${main} alone (${cand.subs.slice(0, 4).join(', ')}${cand.subs.length > 4 ? ', …' : ''}): ${set.map((l) => l.task).join(', ')} land; the reds are reported, not blocking`, { agent: by, status: 'warn', meta: { action: 'excused', tests: cand.subs, lanes: set.map((l) => l.task), mainLog: c.log, verifyLog: v.log || null } });
+  return { built: back, subs: cand.subs };
 }
 
 // ---- 2.60.1 (B-29): main moved only by board/record files -----------------------------------------------
