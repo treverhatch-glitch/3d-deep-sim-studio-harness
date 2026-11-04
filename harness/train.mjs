@@ -97,7 +97,8 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote, readTrainStatus } from './train-status.mjs';
 import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
-import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
+import { triageRed, triageOn, fileQuarantineTasks, loadSensitiveExcuse } from './flakes.mjs';
+import { waitQuiet } from './flake-quiet.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { runGatesWaiting } from './train-busy.mjs';
@@ -692,7 +693,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
   const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
-  if (!ok && !res.noCheck) flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r)
+  if (!ok && !res.noCheck) res.triage = flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r); 2.78.0: the labels decide a load-sensitive excuse
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
   return j;
@@ -869,8 +870,13 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     const base = String(id).replace(/-\d+$/, '');
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
-    const runAlone = ({ check, file, lowLoad }) => {
+    const runAlone = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10 }) => {
       checkCancel(root, id); // 2.77.1 (B-98): swallowed by the catch below; the next verify or re-check stops the train
+      // 2.78.0 (PU-56): the confirming re-run of a red alone waits for a quiet machine (no other heavy job), bounded.
+      if (quiet) {
+        const q = waitQuiet(root, { waitMin: quietWaitMin, log: (m) => log(`[train] ${id}: ${m}`) });
+        if (!q.quiet) { log(`[train] ${id}: no quiet machine within ${quietWaitMin} min (${q.busy.slice(0, 2).join('; ')}): ${file} stays real, unconfirmed under load`); return { ok: false, quietUnreached: true }; }
+      }
       n += 1;
       const owner = `train-${id}-flake`;
       const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
@@ -2273,6 +2279,17 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           const kr = knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text: redText });
           if (kr) { verdict = { built: kr.built, v: { ...v, ok: true, knownRed: kr.subs, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, knownRed: kr.subs.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } }; break; }
         }
+        // 2.78.0 (PU-56): red only on tests that failed alone under load and passed alone at quiet low load (load-sensitive):
+        // like a timeout-flake that passed alone at low load, the lane isn't handed back for them; the reds are reported.
+        {
+          const ls = loadSensitiveExcuse({ subs: redSub, gates: v.gates, labels: v.triage?.labels || [] });
+          if (ls.ok) {
+            log(`[train] ${id}: red only in load-sensitive tests that passed alone at quiet low load (${ls.tests.slice(0, 3).join('; ')}${ls.tests.length > 3 ? '; …' : ''}): treated like a timeout-flake that passed alone at low load; ${set.map((l) => l.task).join(', ')} not handed back for them`);
+            ev('load_sensitive', id, `red only in load-sensitive tests (passed alone at quiet low load): ${set.map((l) => l.task).join(', ')} not handed back; the reds are reported`, { agent: by, status: 'warn', meta: { action: 'excused', tests: ls.tests, lanes: set.map((l) => l.task), verifyLog: v.log || null } });
+            verdict = { built, v: { ...v, ok: true, loadSensitive: ls.tests, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, loadSensitive: ls.tests.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } };
+            break;
+          } else if (v.triage?.labels?.some((l) => l.label === 'load-sensitive')) log(`[train] ${id}: some failing tests are load-sensitive but the red is not only that (${ls.why}); handled as a real red`);
+        }
         noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
@@ -2396,7 +2413,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       // (d) Green: main moves to exactly the verified tree, then each task closes.
       const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res, unionFiles });
       // 2.77.0 (P9.3): a green landing that changed a known-red test's file is main going green on it.
-      if (landed !== 'moved' && res.landed.length && !verdict.v.knownRed && !verdict.v.excused?.length) {
+      if (landed !== 'moved' && res.landed.length && !verdict.v.knownRed && !verdict.v.loadSensitive && !verdict.v.excused?.length) {
         try { const ch = changedVs(sc.dir, tip, verdict.built.head); const fixed = readKnownRed(root).filter((x) => ch.some((c) => c === fileSub(x.test) || c.endsWith(`/${fileSub(x.test)}`))).map((x) => x.test); if (fixed.length) clearKnownRed(root, fixed, `train ${id} landed a change to them on a green verify`); } catch {}
       }
       if (landed === 'moved') {

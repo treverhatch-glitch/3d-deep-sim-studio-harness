@@ -29,6 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents, emitEvent } from './event.mjs';
 import { parseNextQueue } from './task.mjs';
+import { impossibleExit } from './busy.mjs';
 import { taskType, TYPES } from './done-check.mjs';
 
 const NOT_CODE = /^(\.studio\/|studio\/|qa\/(reports|regressions)\/|docs\/)/;
@@ -110,7 +111,7 @@ export function buildScorecard({ events = readRecentEvents(20000), queue = parse
     }
     if (e.type === 'task.not_done') row(modelOf(e)).refused += 1;
     if (e.type === 'task.forced') row(modelOf(e)).forced += 1;
-    if (e.type === 'task.paused' && e.agent !== 'watch') row(modelOf(e)).handedBack += 1;
+    if (e.type === 'task.paused' && e.agent !== 'watch' && !impossibleExit(e)) row(modelOf(e)).handedBack += 1;
     if (e.type === 'task.reopened' && closer.has(e.task)) {
       const c = closer.get(e.task);
       const r = row(c.model);

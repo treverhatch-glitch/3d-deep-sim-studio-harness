@@ -320,7 +320,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
   and again with one test worker → `load-flake`; passes then fails → `intermittent`. Labels go to
-  `.studio/flakes.jsonl`; they never change what the train does. A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
+  `.studio/flakes.jsonl`; they don't change what the train does, except `load-sensitive` (below). A test labelled flaky `STUDIO_FLAKE_QUARANTINE_AFTER`
   (3) times in `STUDIO_FLAKE_WINDOW_DAYS` (7) goes on `studio/quarantine.json` (`{ test, label, since, why, by,
   status, evidence, task }`) as PROPOSED, and ONE fix task is filed. The harness never silences a test on its own
   authority: a proposed entry still runs; the digest and `npm run flakes` list it until a person, an agent under the
@@ -332,6 +332,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   quarantined. The list silences a check, so a lane changing it is tier C; a game dev releases an entry (`npm run
   flakes -- release <test> --by <name>`, same rules). Events: `test.quarantine_proposed`, `test.quarantined`
   (confirmed or automatic), `test.quarantine_released`. `STUDIO_FLAKE_TRIAGE=off` turns the triage off.
+  2.78.0 (PU-56): "alone" isn't quiet while other verifies run, so a file that fails alone is no longer `real` at once:
+  it runs again at low load (one test worker) after the machine is quiet (no other `machine:heavy` holder, no other
+  game check in a gate slot, no Unity outside the lock; `harness/flake-quiet.mjs`). Fails there too → `real`. Passes
+  there → `load-sensitive` (it needs a quiet machine; listed in `.studio/load-sensitive.json` as `{ test, check, first,
+  last, count }`; never quarantined). The quiet wait is bounded by `STUDIO_FLAKE_QUIET_WAIT_MIN` (default 10 minutes);
+  a machine that never went quiet leaves it `real`, "unconfirmed under load" (no red is passed without evidence). A
+  train whose red has ONLY `load-sensitive` failing test files (each labelled in that triage) doesn't hand its lanes
+  back for them, like a timeout-flake that passed alone at low load: it lands, the reds are reported
+  (`task.train.load_sensitive`, the log says so).
 - Timeout-only reds (2.72.0, `harness/timeout-rerun.mjs`): in any game check (a verify, a train's verify or
   re-check, task done), a red whose ONLY failures are per-test timeouts (vitest "Test timed out in N ms", jest
   "Exceeded timeout of N ms", `node --test` `testTimeoutFailure` / "test timed out after", each in a named file, the
@@ -492,6 +501,11 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
   (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap
   waits: `waiting: 1 unity job already running (max 1)`.
+  2.78.0 (PU-56): `STUDIO_HEAVY_MAX_VERIFY` caps game verifies the same way (`harness/heavy-budget.mjs maxConcurrent`; the
+  train's verify is first in the queue; unset: no cap within the budget). On a PC that also runs Unity gates, 4-6
+  builder verifies at once slow a timing test past its budget (a 2 ms test took 2.2-2.5 ms under load, 0.7-1.1 ms
+  alone): set `STUDIO_HEAVY_MAX_VERIFY=3` there. The flake triager's confirming re-run waits for a quiet machine up
+  to `STUDIO_FLAKE_QUIET_WAIT_MIN` (10) minutes (see the flake triager).
 - A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
   8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
   alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.

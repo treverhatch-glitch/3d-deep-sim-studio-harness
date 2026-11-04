@@ -53,6 +53,9 @@ export function sessionOutcome({ agent, task, startedAt, events = [], commits = 
     else if (!commits) why = `it claimed ${task} but committed nothing and didn't call task done`;
     else why = `it made ${commits} commit(s) but didn't call task done`;
   }
+  // PU-58: a session that took the impossible exit (task impossible) did what it was asked to do: not no-work, not stuck.
+  const impossible = !done && mine.some((e) => e.type === 'task.impossible' && e.agent === agent);
+  if (impossible) return { task, claimed, commits, done, noWork: false, stuck: false, counts: false, impossible: true, why: '' };
   const noWork = !done && !commits;
   const stuck = !done && Boolean(notDone);
   return { task, claimed, commits, done, noWork, stuck, counts: Boolean(counts), why };

@@ -10,6 +10,9 @@
  *                (harness/test-rng.mjs findings, 2.67.0); no second run is needed;
  *   load-flake   it passes alone, and again under low load (STUDIO_TEST_WORKERS=1: one test worker);
  *   intermittent it passes alone once, then fails alone under low load (flaky with no named cause).
+ *   load-sensitive (2.78.0, PU-56) it fails alone, then passes alone at low load once the machine is quiet (no other heavy
+ *                job: harness/flake-quiet.mjs; waits up to STUDIO_FLAKE_QUIET_WAIT_MIN, 10). Fails there too: real. Quiet not
+ *                reached in time: real, "unconfirmed under load" (never a pass without evidence). Listed in .studio/load-sensitive.json.
  *   timeout-flake (2.72.0) a game check's timeout-only red whose file passed when the check re-ran it alone at low load
  *                (harness/game-gates.mjs timeoutOnlyRerun, recordTimeoutFlakes below); the check counted green for it.
  * Each label is a line in .studio/flakes.jsonl ({ at, test, check, label, why, train, tree, runs, rng }). A test
@@ -42,6 +45,9 @@ export const FLAKES_REL = '.studio/flakes.jsonl';
 export const QUARANTINE_REL = 'studio/quarantine.json';
 // 2.72.0 (a): "timeout-flake": a timeout-only red whose files passed when re-run alone at low load (harness/timeout-rerun.mjs).
 export const FLAKY = Object.freeze(['load-flake', 'seed-flake', 'intermittent', 'timeout-flake']);
+// 2.78.0 (PU-56): "load-sensitive": fails alone while other work runs, passes alone at low load on a quiet machine.
+// Not in FLAKY: it is a test that needs a quiet machine, not a flaky one, so it is listed (LOAD_SENSITIVE_REL), never quarantined.
+export const LOAD_SENSITIVE_REL = '.studio/load-sensitive.json';
 const DAY = 86400000;
 const off = (v) => /^(off|0|false|no)$/i.test(String(v ?? '').trim());
 const num = (v, d) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : d);
@@ -103,21 +109,66 @@ export function rngFindingsFor(test, facts) {
   return (facts?.items || []).filter((it) => samePath(String(it).replace(/:\d+\s.*$/, ''), test));
 }
 
+/** 2.78.0 (PU-56): minutes a quiet re-run may wait for the machine to be quiet (STUDIO_FLAKE_QUIET_WAIT_MIN, default 10). */
+export const quietWaitMin = (env = process.env) => num(env.STUDIO_FLAKE_QUIET_WAIT_MIN, 10);
+
 /**
- * Label one failing test file: runAlone({ check, file, lowLoad }) -> { ok } runs it alone on the same tree.
- * Returns { label, why, runs: [{ ok, lowLoad }], rng }.
+ * Label one failing test file: runAlone({ check, file, lowLoad, quiet?, quietWaitMin? }) -> { ok, quietUnreached? } runs it
+ * alone on the same tree. A caller that supports `quiet` waits (up to quietWaitMin) for a quiet machine first and
+ * returns { ok: false, quietUnreached: true } without running when it never came; one that doesn't ignores the flag.
+ * Returns { label, why, runs: [{ ok, lowLoad, quiet? }], rng }.
  */
-export function labelTest({ check, file, runAlone, rng = null }) {
+export function labelTest({ check, file, runAlone, rng = null, env = process.env }) {
   const runs = [];
   const first = runAlone({ check, file, lowLoad: false });
   runs.push({ ok: Boolean(first?.ok), lowLoad: false });
-  if (!first?.ok) return { label: 'real', why: 'fails when run alone on the same tree', runs, rng: [] };
+  if (!first?.ok) {
+    // 2.78.0 (PU-56): "alone" isn't quiet while other verifies run: a red alone is confirmed at quiet low load first.
+    const wait = quietWaitMin(env);
+    const q = runAlone({ check, file, lowLoad: true, quiet: true, quietWaitMin: wait });
+    if (q?.quietUnreached) {
+      runs.push({ ok: false, lowLoad: true, quiet: false });
+      return { label: 'real', why: `fails when run alone on the same tree; unconfirmed under load: a quiet machine was not reached within ${wait} min (STUDIO_FLAKE_QUIET_WAIT_MIN), so the failure is treated as real`, runs, rng: [] };
+    }
+    runs.push({ ok: Boolean(q?.ok), lowLoad: true, quiet: true });
+    if (q?.ok) return { label: 'load-sensitive', why: 'fails when run alone while other work runs, passes alone at low load (one test worker) on a quiet machine: it needs a quiet machine (load-sensitive)', runs, rng: [] };
+    return { label: 'real', why: 'fails when run alone on the same tree, and again at quiet low load', runs, rng: [] };
+  }
   const found = rngFindingsFor(file, rng);
   if (found.length) return { label: 'seed-flake', why: `passes alone; the test uses randomness without a fixed seed (${found.slice(0, 2).join('; ')})`, runs, rng: found };
   const second = runAlone({ check, file, lowLoad: true });
   runs.push({ ok: Boolean(second?.ok), lowLoad: true });
   if (second?.ok) return { label: 'load-flake', why: 'passes alone, and again under low load (one test worker): it failed only beside other work', runs, rng: [] };
   return { label: 'intermittent', why: 'passes alone once, then fails alone under low load: flaky with no named cause', runs, rng: [] };
+}
+
+/** 2.78.0 (PU-56): the list of load-sensitive tests, newest data per test: [{ test, check, first, last, count }]. */
+export function readLoadSensitive(root) {
+  const j = readJson(path.join(root, LOAD_SENSITIVE_REL), []);
+  return (Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : []).filter((e) => e && typeof e.test === 'string');
+}
+function noteLoadSensitive(root, row) {
+  const list = readLoadSensitive(root);
+  const e = list.find((x) => x.check === row.check && samePath(x.test, row.test));
+  if (e) { e.last = row.at; e.count = (e.count || 1) + 1; } else list.push({ test: row.test, check: row.check, first: row.at, last: row.at, count: 1 });
+  writeAtomic(path.join(root, LOAD_SENSITIVE_REL), `${JSON.stringify(list, null, 2)}\n`);
+}
+
+/**
+ * 2.78.0 (PU-56): may a red be excused for load? subs: the red's sub-ids (gate:check:file); gates: its failed gates; labels:
+ * the triage rows. Yes only when every failed gate has a file sub-id and every such file was labelled load-sensitive in
+ * this triage (its quiet low-load re-run passed). Same shape of test as harness/known-red.mjs knownRedCandidate.
+ * Returns { ok, tests, why }.
+ */
+export function loadSensitiveExcuse({ subs = [], gates = [], labels = [] } = {}) {
+  const fileOf = (s) => { const p = String(s || '').split(':'); return p.length >= 2 && /[\\/.]/.test(p[p.length - 1]) ? p.slice(p.length >= 3 ? 2 : 1).join(':').replace(/\\/g, '/') : null; };
+  if (!subs.length) return { ok: false, tests: [], why: 'no failing test named' };
+  const bad = subs.filter((s) => { const f = fileOf(s); return !f || !labels.some((l) => l.label === 'load-sensitive' && samePath(l.test, f)); });
+  if (bad.length) return { ok: false, tests: [], why: `${bad.slice(0, 3).join(', ')} not load-sensitive` };
+  const covered = new Set(subs.map((s) => String(s).split(':')[0]));
+  const bare = gates.filter((g) => !covered.has(String(g).split(':')[0]));
+  if (bare.length) return { ok: false, tests: [], why: `${bare.join(', ')} failed with no load-sensitive part` };
+  return { ok: true, tests: subs, why: '' };
 }
 
 /**
@@ -138,9 +189,10 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
   for (const { check, file } of pairs.slice(0, rules.maxFiles)) {
     seen.add(`${check}|${file}`);
     let l;
-    try { l = labelTest({ check, file, runAlone, rng: facts }); } catch (e) { log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
+    try { l = labelTest({ check, file, runAlone, rng: facts, env }); } catch (e) { log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
     const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng.length ? { rng: l.rng } : {}) };
     try { appendFlake(root, row); } catch {}
+    if (row.label === 'load-sensitive') { try { noteLoadSensitive(root, row); } catch {} }
     out.labels.push(row);
     log(`[flakes] ${row.test} (${check}): ${row.label}: ${row.why}`);
     const q = maybeQuarantine(root, row, { now, env, emit });

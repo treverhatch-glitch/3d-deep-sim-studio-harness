@@ -89,6 +89,7 @@ Logging `editing` is not enough. Use the lock helper.
   done-check passes: `node harness/done-check.mjs <ID>` shows what is missing; how each kind of task finishes is in `studio/skills/`)
 - `--force` finishes anyway, but it is logged and the Producer gets a P1 `Check forced done` task. Agents don't force: ask the owner, who types it (docs/FORCED-CLOSE.md)
 - Out of usage or being swapped? `node harness/task.mjs pause <ID> --agent <you> --note "where you stopped"` hands it back with a note for the next agent
+- A task that contradicts itself, or can't be done without bending a check? Use the honest exit, not a changed check: `npm run task -- impossible <ID> --why "<what contradicts what>" --agent <you>` releases it, holds it for the Producer and is not counted as a failure (no loop park, breaker or model escalation).
 - `npm run verify` before calling it done; `npm run release` before a merge
 - Update `CURRENT_TASK.md`
 
