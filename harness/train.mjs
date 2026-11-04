@@ -447,6 +447,19 @@ export function buildIntegration(sc, tip, lanes, { id, unionFiles = [] }) {
 const recordGreen = (rec) => Boolean(rec) && !rec.partial && rec.tier !== 'fast' && rec.dirty === false && !rec.incomingOnly && Array.isArray(rec.rows) && rec.rows.length > 0 && rec.rows.every((r) => r.ok || r.required === false);
 
 /**
+ * 2.76.0 (B-85): a full record whose required rows all passed and whose "dirty" comes only from ignored, non-config files
+ * the checks may read (run-gates' dirtyFrom: tracked tree clean, nothing untracked, no config-like name): the trust
+ * note's words, else ''. Only the train's own just-run verify in its fresh scratch copy is judged so (never a reuse).
+ */
+export function ignoredOnlyDirty(rec) {
+  const d = rec?.dirtyFrom;
+  if (!rec || rec.dirty !== true || !d || d.tracked !== false || d.untracked !== 0 || d.config !== 0 || !(d.ignored > 0)) return '';
+  if (rec.partial || rec.tier === 'fast' || rec.incomingOnly || !Array.isArray(rec.rows) || !rec.rows.length || !rec.rows.every((r) => r.ok || r.required === false)) return '';
+  const shown = (rec.hidden || []).slice(0, 3).join(', ');
+  return `the record counts as dirty only because of ${d.ignored} ignored file(s) the checks wrote in the train's own copy (${shown}${d.ignored > 3 ? ', …' : ''}), no tracked change, no untracked file, no config file`;
+}
+
+/**
  * May this verify record stand for the train's verify of `tree`? The same rules as task done's (merge-lane.mjs
  * judgeVerifyReuse: same tree, clean, at least as wide, engine gate, not related-only, at most 24 h old), and every
  * required row green (task done reruns the safety checks itself; a train has only this verify).
@@ -621,7 +634,16 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   for (const f of [`${owner}-full.json`, `${owner}.json`]) { try { fs.rmSync(path.join(gatesDir, f), { force: true }); } catch {} }
   if (rec) { rec.train = id; try { fs.writeFileSync(path.join(recDir, `${id}-${n}.json`), JSON.stringify(rec, null, 2)); } catch {} }
   // Green only when the gates passed AND the record says they tested exactly this tree, clean, in full.
-  const ok = r.status === 0 && recordGreen(rec) && rec.tree === tree && (!all || !rec.scoped);
+  // 2.76.0 (B-85): or every gate passed on exactly this tree and the only thing that made the record "dirty" is ignored,
+  // non-config files in the train's own scratch copy (made fresh from git: only this train's checks wrote them, e.g. art
+  // a pretest step unpacks): a trust note, never a hand-back. A tracked change, an untracked file or a config-like name
+  // still makes it not clean (2.71.1).
+  const trustNote = r.status === 0 && !recordGreen(rec) && rec?.tree === tree && (!all || !rec.scoped) ? ignoredOnlyDirty(rec) : '';
+  const ok = r.status === 0 && (recordGreen(rec) || Boolean(trustNote)) && rec.tree === tree && (!all || !rec.scoped);
+  if (trustNote) {
+    log(`[train] ${id}: verify ${n}: trust note: ${trustNote}; every gate passed on tree ${tree.slice(0, 8)}, so it counts as green (not a hand-back)`);
+    emitEvent({ type: 'task.train.trust_note', agent: owner, status: 'warn', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} green with a trust note: ${trustNote}`.slice(0, 600), meta: { train: id, tree, n, dirtyFrom: rec.dirtyFrom, hidden: (rec.hidden || []).slice(0, 10) } });
+  }
   const { gates, detail } = failLines(text);
   const why = ok ? '' : noCheck ? `ran no check (${busy || `exit ${r.status} before any gate ran`})` : r.status !== 0 ? `failed: ${gates.join(', ') || `exit ${r.status}`}` : !rec ? 'wrote no verify record' : rec.tree !== tree ? `tested tree ${String(rec.tree).slice(0, 8)}, not ${tree.slice(0, 8)}` : 'its record is not a clean full verify';
   const vparts = trainVerifyParts(text, ok, [sc.dir, root]); // 2.72.0 (a)
