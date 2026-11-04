@@ -45,6 +45,7 @@ import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
 import { shrinkAtDone } from './ratchet.mjs';
 import { capRefusal } from './round-cap.mjs';
+import { pinRefusal } from './task-pin.mjs';
 
 export const NEXT_FILE = path.join(REPO_ROOT, 'studio', 'NEXT.md');
 // 2.30c (#13): finished tasks live in studio/DONE.md, so NEXT.md (read by every agent) holds only open work.
@@ -425,6 +426,9 @@ export function liveOwner(taskId, agent, events = null, { waiting = false } = {}
 
 export function startTask(taskId, agent = null, { model = null, force = false } = {}) {
   if (!agent) return { error: 'owner-required', message: 'Pass --agent <unique-name> so the task lock has an owner.' };
+  // 2.77.0 (n, B-92): a session the launcher started on a task works only that task (harness/task-pin.mjs); --force too.
+  const pinWhy = pinRefusal(taskId, { action: 'start' });
+  if (pinWhy) return { error: 'pinned', message: pinWhy };
   const stop = readStop();
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
@@ -1802,6 +1806,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         process.exit(1);
       }
       if (fa?.ok) { flags.force = true; flags['accepted-by'] = `${fa.by} (signed approval ${fa.file})`; if (typeof flags.reason !== 'string' || flags.reason.trim().length < 10) flags.reason = fa.reason; }
+    }
+    // 2.77.0 (n, B-92): a pinned session (STUDIO_TASK_PIN, set by the launcher) closes or queues only its own task.
+    if (!flags.check && !flags['train-check']) {
+      const pinWhy = pinRefusal(targetId, { action: flags.train ? 'train' : 'done' });
+      if (pinWhy) {
+        emitEvent({ type: 'task.done_refused', agent: whoAmI(flags) || undefined, task: targetId, status: 'blocked', msg: `pinned: ${pinWhy}`.slice(0, 400), meta: { pin: process.env.STUDIO_TASK_PIN || null, train: Boolean(flags.train) } });
+        console.error(`${pinWhy} Nothing was closed or queued.`);
+        process.exit(1);
+      }
     }
     // 2.30n: a forced done says why (10+ characters); "no reason given" taught the Producer nothing.
     if (flags.force && String(typeof flags.reason === 'string' ? flags.reason : '').trim().length < 10) {

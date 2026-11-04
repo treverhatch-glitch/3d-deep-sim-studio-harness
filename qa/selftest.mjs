@@ -25,6 +25,9 @@ const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === '
 const secs = (n) => `${Math.ceil(n * SLOW)}s`;
 let failed = 0;
 let n = 0;
+// 2.77.0 (n, B-92): a launched session's task pin (STUDIO_TASK_PIN) is about that session's own task commands; the
+// self-test's copies start and close their own test tasks, so a verify run inside a pinned session never inherits it.
+delete process.env.STUDIO_TASK_PIN;
 
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
@@ -4609,6 +4612,15 @@ if (inShard('selftest-277h')) {
   const dir = copyRepo();
   const { selftest277H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277h.mjs')).href);
   await selftest277H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
+// usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
+if (inShard('selftest-277n')) {
+  const dir = copyRepo();
+  const { selftest277N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277n.mjs')).href);
+  await selftest277N({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

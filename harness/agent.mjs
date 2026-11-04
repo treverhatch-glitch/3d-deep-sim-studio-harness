@@ -2,7 +2,7 @@
 /**
  * harness/agent.mjs — start agents, watch them, and clean up when one dies.
  *
- *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|nim|custom --model <model>
+ *   npm run agent -- start --role builder --agent builder-1 --tool claude|codex|agy|cursor|grok|aider|nim|custom --model <model> [--force-model]
  *                       [--fallback codex:gpt-6-sol,claude:claude-sonnet-5-5] [--task T-012] [--lane <folder>] [--one-task] [--detach]
  *   npm run agent -- now "<what I'm doing>"   an agent's one-line status, shown with its heartbeat in the War Room
  *   npm run agent -- hire --role <role> [--division sound] [--task T-012 | --next] [--lane <folder>] [--note "…"]
@@ -40,6 +40,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
+import { pinKickoff } from './task-pin.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -221,6 +222,21 @@ function agySettingsArg(file) {
  * A value that isn't one plain word is ignored (the default is used).
  */
 export const AGY_DEFAULT_MODEL = 'gemini-4-argon-high';
+/**
+ * 2.77.0 (n, the owner's Priority 8): agy serves Gemini here. agy also lists Claude and other models, and with a
+ * non-Gemini model (or none) it ran Claude Sonnet inside agy: the session spent Claude's pool while the record said agy.
+ * isGeminiModel: a Gemini model id (gemini-…, models/gemini-…). modelFamilyTool: the tool a model's family runs on
+ * here (gemini -> agy, claude/opus/sonnet/haiku -> claude), or null.
+ */
+export const isGeminiModel = (m) => /^(models\/)?gemini[-_.]/i.test(String(m || '').trim());
+export function modelFamilyTool(m) {
+  const s = String(m || '').trim().toLowerCase();
+  if (isGeminiModel(s)) return 'agy';
+  if (/^(claude|opus|sonnet|haiku)\b|^claude-/.test(s)) return 'claude';
+  return null;
+}
+/** STUDIO_AGY_ANY_MODEL=on (or --force-model): agy may run a model that isn't Gemini (a person's explicit choice). */
+export const agyAnyModel = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_AGY_ANY_MODEL || '').trim());
 export function agyOptions(model = null, env = process.env) {
   const word = (v, d) => (/^[\w.:-]{1,60}$/.test(String(v ?? '').trim()) ? String(v).trim() : d);
   const timeout = word(env.STUDIO_AGY_PRINT_TIMEOUT, '5400s');
@@ -599,6 +615,49 @@ export function agyStopLine(log) {
   return hit ? hit.replace(/\s+/g, ' ').slice(0, 300) : null;
 }
 
+/**
+ * 2.77.0 (n, the owner's Priority 8 telemetry): what an agy session used, from its own output. agy -p printed only its
+ * final text in the crew's logs (no usage line, no model), so every agy session recorded 0 tokens and the session's
+ * model was whatever the launcher passed. Read here, newest session part only:
+ *   - Gemini usage objects: usageMetadata { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (one per
+ *     response id, the last one counts), or a stats.models.<model>.tokens { prompt, candidates, cached } summary (the
+ *     Gemini CLI's --output-format json shape); a plain `usage` line is tokensFrom's already;
+ *   - the model it names: modelVersion, model, or the stats.models key.
+ * { reported: true, tokensIn, tokensOut, cacheRead, model } or, with nothing reported, an estimate from text length
+ * (the kickoff in, the session's output out, ~4 characters a token): { reported: false, estimated: true, tokensIn,
+ * tokensOut, cacheRead: 0, model } — recorded as usage "not reported", never as 0.
+ */
+export function agyUsage(log, { kickoffChars = 0 } = {}) {
+  const part = newestSessionPart(String(log || ''));
+  let model = null;
+  const byResp = new Map();
+  let stats = null;
+  let n = 0;
+  for (const l of part.split(/\r?\n/)) {
+    const t = l.trim();
+    if (!t.startsWith('{')) continue;
+    let o; try { o = JSON.parse(t); } catch { continue; }
+    const m = o.modelVersion || o.model || o.response?.modelVersion || null;
+    if (typeof m === 'string' && /^[\w.:/-]{2,80}$/.test(m)) model = m.replace(/^models\//, '');
+    const um = o.usageMetadata || o.response?.usageMetadata;
+    if (um && typeof um === 'object') { byResp.set(o.responseId || o.response?.responseId || `n${n++}`, um); }
+    const sm = o.stats?.models;
+    if (sm && typeof sm === 'object' && Object.keys(sm).length) stats = sm;
+  }
+  if (stats) {
+    let i = 0, out = 0, cached = 0;
+    for (const [k, v] of Object.entries(stats)) { const tk = v?.tokens || {}; i += Number(tk.prompt ?? tk.input) || 0; out += Number(tk.candidates ?? tk.output) || 0; cached += Number(tk.cached) || 0; if (!model) model = k; }
+    if (i || out) return { reported: true, tokensIn: Math.max(0, i - cached), tokensOut: out, cacheRead: cached, model };
+  }
+  if (byResp.size) {
+    let i = 0, out = 0, cached = 0;
+    for (const um of byResp.values()) { const c = Number(um.cachedContentTokenCount) || 0; i += Math.max(0, (Number(um.promptTokenCount) || 0) - c); out += (Number(um.candidatesTokenCount) || 0) + (Number(um.thoughtsTokenCount) || 0); cached += c; }
+    if (i || out || cached) return { reported: true, tokensIn: i, tokensOut: out, cacheRead: cached, model };
+  }
+  const text = part.split(/\r?\n/).filter((l) => !/^\[launcher\]/.test(l)).join('\n');
+  return { reported: false, estimated: true, tokensIn: Math.ceil((Number(kickoffChars) || 0) / 4), tokensOut: Math.ceil(text.length / 4), cacheRead: 0, model };
+}
+
 export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
@@ -708,6 +767,21 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     const st = streamUsage(usageLog ?? log);
     if (st) tok = st;
   }
+  // 2.77.0 (n): agy reported no usage line Claude's readers know: its own (Gemini) usage, else "not reported" with an
+  // estimate from text length (meta.usage, meta.tokensEstimated), never a silent 0; and the model agy names, if any.
+  let agyUse = null;
+  if (tool === 'agy' && !(tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    let kickoffChars = 0;
+    try { kickoffChars = fs.statSync(path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`)).size; } catch {}
+    agyUse = agyUsage(usageLog ?? log, { kickoffChars });
+    tok = { ...tok, tokensIn: agyUse.tokensIn, tokensOut: agyUse.tokensOut, cacheRead: agyUse.cacheRead || 0, ...(agyUse.estimated ? { usage: 'not reported', tokensEstimated: true } : { usage: 'reported' }) };
+  } else if (tool === 'agy') {
+    const named = agyUsage(usageLog ?? log).model;
+    agyUse = { reported: true, model: named };
+    tok = { ...tok, usage: 'reported' };
+  }
+  const modelReported = agyUse?.model && agyUse.model !== model ? agyUse.model : null;
+  if (modelReported) model = modelReported;
   if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
     const est = estimateCost(tok, { model, tool, role });
     if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
@@ -719,7 +793,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -751,7 +825,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { windowsHide: true, cwd, encoding: 'utf8' }).stdout || '';
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
+  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_TASK_PIN: id, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
   const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
@@ -989,6 +1063,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
     + refreshRule({ oneTask, task })
+    // 2.77.0 (n, B-92): a session started on a task works only that task (harness/task-pin.mjs; task start/done refuse others).
+    + (task ? pinKickoff(task) : '')
     // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
     + (tool === 'agy' && !custom ? `\n${AGY_SHELL_RULES.split('\n').slice(2).join('\n')}` : '')
     // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
@@ -1049,7 +1125,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // B-18 (2.60.1): a custom command for --tool nim (STUDIO_TOOL_NIM_CMD, the old venv workaround, or a role's command)
   // keeps nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (as a 'custom' tool it had no key).
   const nimCustom = Boolean(custom) && tool === 'nim' && !rehearsal;
-  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}), STUDIO_TASK_PIN: task || '' } });
   for (const n of launchNotes) fs.writeSync(out, `[launcher] ${n}\n`);
   if (nimCustom) fs.writeSync(out, `[launcher] the custom command for --tool nim gets nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (value not shown)\n`);
   // B-37 (2.60.1): Python holds its output in a buffer when stdout is a file, so an aider that died left nothing in the
@@ -1119,7 +1195,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
@@ -1266,6 +1342,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const [next, ...rest] = fallback;
     const [ftool, fmodel] = next.split(':');
     const resume = result.handed[0]?.task || task;
+    // 2.77.0 (n): a failover keeps the model only within its family: agy gets a Gemini model, claude never a Gemini one.
+    if (!fmodel && ftool === 'agy' && !isGeminiModel(model)) model = isGeminiModel(process.env.STUDIO_TOOL_AGY_MODEL) ? String(process.env.STUDIO_TOOL_AGY_MODEL).trim() : AGY_DEFAULT_MODEL;
+    else if (!fmodel && ftool !== 'agy' && isGeminiModel(model)) model = String(process.env[`STUDIO_TOOL_${roleKey(ftool)}_MODEL`] || process.env[`STUDIO_${roleKey(role)}_MODEL`] || process.env.STUDIO_AGENT_MODEL || 'unknown').trim();
     emitEvent({ type: 'agent.failover', agent, to: 'producer', msg: `${agent} failed over to ${ftool}${fmodel ? ` (${fmodel})` : ''}${resume ? ` on ${resume}` : ''}` });
     return runAgent({ role, agent, tool: ftool, model: fmodel || model, fallback: rest, task: resume, lane, oneTask, division, note, by });
   }
@@ -1786,6 +1865,18 @@ export function startAgent(opts, { detach = false } = {}) {
       emitEvent({ type: rr.applied ? 'model.rerouted' : 'model.reroute_suggested', agent: 'director', to: 'producer', task: opts.task, msg: `${opts.task}: ${rr.fromModel} (${rr.fromFamily}) replied with reasoning only; ${rr.applied ? `rerouted to ${rr.model}${rr.tool ? ` on ${rr.tool}` : ''}` : 'route it to another model family (set STUDIO_REROUTE_MODELS, e.g. codex:gpt-5)'}`, meta: rr });
     }
   }
+  // 2.77.0 (n, Priority 8): an agy session runs a Gemini model. An explicit non-Gemini --model is refused unless forced
+  // (--force-model, STUDIO_AGY_ANY_MODEL=on, or an agy:<model> entry the owner put in the budget order); a model the
+  // rescue, routing, tier-up or reroute picked for an agy session that isn't Gemini gives way to the Gemini default.
+  if (tool === 'agy' && !isGeminiModel(model)) {
+    const forced = Boolean(opts.forceModel) || agyAnyModel() || Boolean(opts.orderModel);
+    if (!forced && opts.model) return { ok: false, refused: 'agy-model', message: `Not started: agy runs Gemini models in this studio, and "${model}" isn't one (agy with a non-Gemini model, or none, ran Claude Sonnet inside agy). Use --model gemini-… (agy models lists them; the default is ${String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL}), --tool claude for a Claude model, or --force-model to run it on agy anyway.` };
+    if (!forced) {
+      const g = isGeminiModel(process.env.STUDIO_TOOL_AGY_MODEL) ? String(process.env.STUDIO_TOOL_AGY_MODEL).trim() : AGY_DEFAULT_MODEL;
+      emitEvent({ type: 'model.kept_gemini', agent: opts.by || 'launcher', task: opts.task || undefined, msg: `${agent} (agy): ${model} isn't a Gemini model, so it starts on ${g}`, meta: { tool, from: model, model: g } });
+      model = g;
+    }
+  }
   // H-1 (2.58.5): a nim session never inherits the role's (or a rescue's, escalation's, reroute's) non-NIM model.
   if (tool === 'nim') model = nimModel(model);
   if (tool === 'codex' && model === 'unknown' && !process.env[`STUDIO_${roleKey(role)}_CMD`]) return { ok: false, message: 'Codex needs a model (--model, or STUDIO_AGENT_MODEL / STUDIO_<ROLE>_MODEL): its default is refused on ChatGPT logins.' };
@@ -1809,8 +1900,9 @@ export function startAgent(opts, { detach = false } = {}) {
   if (opts.next && !opts.task) opts = { ...opts, task: nextFor({ role }, parseNextQueue()).task?.id || null };
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
-    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : [])];
-    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
+    const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
+    // 2.77.0 (n, B-92): the launcher is not the pinned session that may have started it (its agent gets its own pin).
+    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
     sup.unref();
     // PU-17: the launcher's spawn time (in-process, no OS query), for a stop that comes while it is still starting.
     const supId = spawnedIdentity(sup.pid, process.execPath);
@@ -1909,7 +2001,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const d = listDivisions().find((x) => x.id === division);
       if (d && !d.active) setDivision(division, true, flag('by') || 'producer');
     }
-    const base = { role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved') };
+    const base = { role: flag('role'), agent: flag('agent'), tool: flag('tool'), model: flag('model'), fallback: (flag('fallback') || '').split(',').filter(Boolean), task: flag('task'), next: argv.includes('--next'), lane: flag('lane'), oneTask: argv.includes('--one-task') || Boolean(flag('loop')), extra: Number(flag('extra')) || 0, division, note: flag('note') || '', by: flag('by') || (cmd === 'hire' ? process.env.STUDIO_LOCK_OWNER || null : null), loop: flag('loop'), approved: argv.includes('--approved'), forceModel: argv.includes('--force-model') };
     // A hire runs in the background unless --foreground: tied to the hiring shell, it died with it and its
     // record stayed "running" with its claims held (test #3, engine-porter-1).
     const r = startAgent(base, { detach: argv.includes('--detach') || (cmd === 'hire' && !argv.includes('--foreground')) });

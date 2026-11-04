@@ -26,6 +26,13 @@ Agents must keep durable work in files, never trapped in chat history.
    - Update `studio/CURRENT_TASK.md` and mark the item done in `studio/NEXT.md` (`node harness/task.mjs done <ID>`).
 6. At the end of a day or major session, fill `studio/daily/YYYY-MM-DD.md` (copied from `studio/daily/TEMPLATE.md`), including the task checklist and any before/after gameplay videos.
 
+**A session started on a task keeps it (2.77.0, B-92).** The launcher gives every session it starts with `--task`
+(any tool: claude, agy, codex, a custom command) `STUDIO_TASK_PIN=<task>`, records `pinned` on the session and says so
+in its kickoff. From that session `task start <another task>` is refused, and so is `task done <another task>` (plain
+or `--train`; `--check` and the train's `--train-check` are not); its own task is never refused
+(`harness/task-pin.mjs`). A builder started on T-152 had taken a P0 rescue instead and trained it under the wrong ID.
+A person's shell has no pin, so nothing changes there.
+
 ## Many Agents, One Board (crash-safe state, 2.57.0)
 
 Several agents change the board at once, and any of them can be killed mid-command. So the harness never
