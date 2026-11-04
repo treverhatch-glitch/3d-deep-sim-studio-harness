@@ -1273,3 +1273,7 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-238 — every check took every core; yes-waits unnamed; divergence missed shared loaders · fixed in 2.76.0
 - **Evidence:** B-89 (26 of 28 cores per check), B-87, B-94.
 - **Fix:** core shares with the train first; "waiting on yes: N (ids)"; the import closure materialized. qa/selftest-276j.mjs.
+
+### P-239 — a trust-note landing left its task open · fixed in 2.76.1
+- **Evidence:** helper review: the close got the verify's dirty record and refused "not a clean, green full verify".
+- **Fix:** the train closes with its own judged record (closeRec). qa/selftest-276h.mjs.
