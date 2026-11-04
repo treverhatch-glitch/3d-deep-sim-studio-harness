@@ -1129,6 +1129,11 @@
   html body #ops .card { background: var(--ds-surface-2); color: var(--ds-text); border: 1px solid var(--ds-line); border-top: 3px solid var(--ds-info); }
   html body #ops #o-queue { max-height: 260px; overflow: auto; overscroll-behavior: contain; }
 
+  /* ---- 2.77.0: the fixed bars cover nothing: the floor's bottom bar ends the page, the Live badge sits in the header ---- */
+  html body #tycoon .dock { position: static; }
+  html body .live { position: static; order: 8; margin-left: auto; box-shadow: none; }
+  html body[data-skin="tycoon"] .live { bottom: auto; }
+
 </style>
 </head>
 <body data-skin="ops">
@@ -1447,7 +1452,8 @@
 
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
-  const setSkin = (s) => { if (!document.getElementById(s)) return; document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
+  const placeLive = (s) => { const h = document.querySelector(`#${s} > header, #${s} > .top`); const b = document.getElementById('live'); if (h && b && b.parentElement !== h) h.appendChild(b); };
+  const setSkin = (s) => { if (!document.getElementById(s)) return; placeLive(s); document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
   const SKINS = ['tycoon', 'ops', 'plan', 'assets', 'arcade', 'away'].filter((k) => document.getElementById(k));
   setSkin(SKINS.includes(fromUrl) ? fromUrl : SKINS.includes(store.get('hudSkin')) ? store.get('hudSkin') : 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
