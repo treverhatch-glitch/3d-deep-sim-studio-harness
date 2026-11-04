@@ -67,6 +67,7 @@
  *   node harness/hook-stamp.mjs check [--json]
  *   node harness/hook-stamp.mjs stamp <message-file>      (the commit-msg hook)
  *   node harness/hook-stamp.mjs grandfather [--json]      (list the commits this checkout already has as exempt)
+ *   node harness/hook-stamp.mjs grandfather --ref <remote ref>  (2.77.2: an update's commits, merged by an older guard)
  *   node harness/hook-stamp.mjs restamp [--json]          (npm run hooks -- restamp; in a lane copy)
  */
 import fs from 'node:fs';
@@ -819,6 +820,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   if (cmd === 'grandfather') {
+    // 2.77.2 (B-104): `grandfather --ref <remote-tracking ref>`: an update merged by an older upgrade guard (one without
+    // the 2.77.1 step) lists its commits here by hand: the unstamped commits between the hooks gate's base and that ref.
+    // Only a remote-tracking ref (refs/remotes/…, what was fetched): a local branch can't exempt local work.
+    const refAt = process.argv.indexOf('--ref');
+    if (refAt > 0) {
+      const ref = String(process.argv[refAt + 1] || '');
+      const full = git(['rev-parse', '--symbolic-full-name', ref]).stdout.trim();
+      const sha = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).stdout.trim();
+      if (!/^refs\/remotes\//.test(full) || !sha) { console.error(`[hooks] FAIL --ref ${ref || '(none)'} isn't a remote-tracking ref (e.g. origin/main, after git fetch): only fetched update commits can be listed`); process.exit(1); }
+      const b = await changeBase();
+      const r = await grandfatherRange(`${b?.base || 'HEAD'}..${sha}`);
+      if (!r.ok) { console.error(`[hooks] FAIL ${r.why}`); process.exit(1); }
+      console.log(`[hooks] PASS ${r.added} unstamped commit(s) of ${ref} (${sha.slice(0, 10)}) since ${b?.ref || 'HEAD'} added to the exempt list (${r.total} in all): ${r.file}`);
+      process.exit(0);
+    }
     const r = await writeGrandfather();
     if (process.argv.includes('--json')) { console.log(JSON.stringify(r)); process.exit(r.ok ? 0 : 1); }
     if (!r.ok) { console.error(`[hooks] FAIL ${r.why}`); process.exit(1); }

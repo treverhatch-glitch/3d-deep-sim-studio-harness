@@ -539,6 +539,10 @@ function writeSplit(u) {
 export const cacheTtlAsked = (role) => (LONG_CACHE_ROLES.has(role) && process.env.STUDIO_LONG_CACHE !== 'off' ? '1h' : '5m');
 
 /** 2.30i: a session that ended without task done gets the launcher's foreground verify: a clean exit, or a crash after it committed. */
+/** 2.77.2 (B-107): did the session commit work for its task? In a lane copy: its branch is ahead of main. In the shared
+ * checkout: a commit naming the task since it started (logHit, called only then). */
+export const workCommitted = ({ ahead = 0, inCopy = false, logHit = () => false } = {}) => Number(ahead) > 0 || (!inCopy && Boolean(logHit()));
+
 export function crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit }) {
   if (trouble || reasoningOnly || capped) return false;
   return Boolean(hasCommit) && Number.isInteger(code);
@@ -729,11 +733,14 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   const ahead = s0.copy?.branch ? unmerged(s0.copy.branch) : 0;
   const finished = [];
   for (const id of tasks) {
-    const hasCommit = ahead > 0 || (() => {
+    // 2.77.2 (B-107): in its own lane copy, a session's work is exactly the commits its branch has that main doesn't
+    // (ahead). The log search below is for a session in the shared checkout only: in a copy it also found main's own
+    // commits naming the task (made before the copy was cut), so an empty lane got a 20-minute launcher verify.
+    const hasCommit = workCommitted({ ahead, inCopy: Boolean(s0.copy?.branch), logHit: () => {
       const cwd = copyDir && fs.existsSync(copyDir) ? copyDir : REPO_ROOT;
       const git = spawnSync('git', ['log', `--since=${s0.startedAt || new Date(Date.now()-86400000).toISOString()}`, '--grep', id, '--oneline'], { windowsHide: true, cwd, encoding: 'utf8' });
       return git.status === 0 && git.stdout.trim().length > 0;
-    })();
+    } });
     let af = null;
     // A stopped session's task isn't closed for it: the person asked it to stop (its work is saved below).
     if (!stop && crashFinishable({ code, trouble, reasoningOnly, capped, hasCommit })) {

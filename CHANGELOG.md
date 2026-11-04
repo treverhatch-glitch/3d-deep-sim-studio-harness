@@ -4,6 +4,20 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.77.2] — 2026-11-05
+A hotfix from the crew's first hours on 2.77.1 (B-104 to B-107). The rest of that list (B-105 lane refresh after an
+upgrade, B-99 agy's idle exit) goes into 2.78. Status: docs/RELEASE-2.77.2.md.
+- **An agent that ended with nothing committed no longer stalls the studio (B-107, P-253).** In a lane copy only the
+  branch's own commits count as the session's work: an empty lane gets no 20-minute launcher verify (main's own commits
+  naming the task had counted). A session whose agent has exited no longer "works on the whole game", so it doesn't stop
+  every other builder from starting.
+- **No false "train died silently" for a speculative train (B-106, P-254):** a train whose heartbeat is fresh is alive,
+  with or without a lock.
+- **`node harness/hook-stamp.mjs grandfather --ref <remote ref>` (B-104, P-255):** lists a fetched update's unstamped
+  commits as exempt when an older upgrade guard merged it (2.77.1 was merged by 2.77.0's guard, which had no such step).
+  Merging 2.77.2 with 2.77.1's guard does it by itself, 2.77.1's commits included. A local branch is refused.
+- Tests: qa/selftest-2772.mjs.
+
 ## [2.77.1] — 2026-11-05
 The crew's live-run blockers on 2.77.0 (their list of 2026-11-04, B-92 to B-103). Item-by-item status, with what is left
 and the upgrade note for Patch: docs/RELEASE-2.77.1.md.

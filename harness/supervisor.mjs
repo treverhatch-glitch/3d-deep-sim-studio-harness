@@ -277,6 +277,12 @@ export function groupSameDeaths(ends, env = process.env) {
 }
 
 /** One pass: what to start now, and why nothing else. Pure decision + the starts; the loop calls it. */
+/** 2.77.2 (B-107): the running session of the same role whose lane clashes with group g's, or undefined. A session whose
+ * agent has exited (its launcher is handing the work back) works on nothing and clashes with nothing. */
+export function laneClashWith(sameRole, g, clashes) {
+  return (sameRole || []).find((s) => !s.ending && !s.agentExited && clashes(s.lane || null, g.lane || null));
+}
+
 export async function supervise(opts, state, now = Date.now()) {
   const { parseNextQueue, readStop } = await import('./task.mjs');
   if (!opts.watcher) {
@@ -487,7 +493,9 @@ export async function supervise(opts, state, now = Date.now()) {
     const sameRole = live.filter((s) => s.role === g.role);
     const codeRole = g.role === 'builder' || Boolean(g.lane) || sameRole.some((s) => s.lane);
     if (codeRole) {
-      const clash = sameRole.find((s) => lanesClash(s.lane || null, g.lane || null));
+      // 2.77.2 (B-107): a session whose agent has already exited (its launcher is handing its work back) is working on
+      // nothing: it no longer holds the whole game, so it doesn't stop every other builder from starting.
+      const clash = laneClashWith(sameRole, g, lanesClash);
       if (clash) {
         if (sameRole.length) why.push(`${g.role}${g.lane ? ` in ${g.lane}` : ''}: ${clash.agent} is working ${clash.lane ? `in ${clash.lane}` : 'on the whole game (no lane)'}`);
         continue;
