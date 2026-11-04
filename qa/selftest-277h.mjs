@@ -234,4 +234,32 @@ console.log(JSON.stringify(readQueue(process.cwd()).find((e) => e.task === 'T-95
       return [!t.landed?.includes('T-946') && known().length === 0 && (t.calls?.handBack || []).some(([task]) => task === 'T-946'), JSON.stringify({ t, k: known() }).slice(0, 3000)];
     });
   }
+
+  // ---- B-96: a new lane copy gets the branch holding the task's approved contents ----
+  if (want('b96')) {
+    const st = trainStudio('b96', [{ id: 'game', command: 'node -e "process.exit(0)"', required: true, lite: true, cache: false }]);
+    const { S, env } = st;
+    const crypto = await import('node:crypto');
+    const sha = (t) => crypto.createHash('sha256').update(Buffer.from(t)).digest('hex');
+    // old: the first builder's lane; p81a: the next builder's lane, chained from it (the remembered branch); signed: the
+    // old lane plus the protected file as the owner's delegate re-signed it, on another branch.
+    const O = st.lane('b96-old', 'T-955', { 'game/demo/checks.json': '{ "rule": 1 }\n' });
+    const P = st.lane('b96-p81a', 'T-955', { 'game/demo/work.ts': 'export const work = 1\n' }, { from: 'lane/b96-old' });
+    const G = st.lane('b96-signed', 'T-955', { 'game/demo/checks.json': '{ "rule": 2 }\n' }, { from: 'lane/b96-old' });
+    for (const d of [O.dir, P.dir, G.dir]) gitIn(S, 'worktree', 'remove', '--force', d);
+    writeIn(S, 'studio/approvals/protected-b96.json', `${JSON.stringify({ approval: { kind: 'protected', change: 'x', files: [{ path: 'game/demo/checks.json', sha256: sha('{ "rule": 2 }\n') }], by: 'the-owner', at: new Date().toISOString() }, signature: 'made-up' }, null, 2)}\n`);
+    writeIn(S, '.studio/lane-branches.json', `${JSON.stringify({ 'T-955': 'lane/b96-p81a' }, null, 2)}\n`);
+    await guard('2.77.0 (B-96): a new lane copy for a task merges its previous lane AND the lane branch whose protected file matches the owner\'s approval (lane.approval_carried), so it starts from the approved contents; a task with no matching branch gets only its previous lane, as before (fails on 2.76.0: the copy held the contents the approval wasn\'t signed for)', () => {
+      const r = probe(S, { ...env, STUDIO_MAIN_ROOT: S }, 'lanecopy', `import { createLaneCopy } from ${u(S, 'harness/worktree.mjs')};
+import fs from 'node:fs'; import path from 'node:path';
+const c = createLaneCopy('builder-p84a', { task: 'T-955' });
+const t = c.dir ? fs.readFileSync(path.join(c.dir, 'game/demo/checks.json'), 'utf8') : null;
+const w = c.dir ? fs.existsSync(path.join(c.dir, 'game/demo/work.ts')) : false;
+const c2 = createLaneCopy('builder-other', { task: 'T-956' });
+console.log(JSON.stringify({ carried: c.carried || null, lf: t === '{ "rule": 2 }\\n', work: w, error: c.error || null, other: c2.carried || null, otherError: c2.error || null }));
+`);
+      const ev2 = events(st.ev).find((e) => e.type === 'lane.approval_carried' && e.task === 'T-955');
+      return [r.lf === true && r.work === true && /b96-signed/.test(r.carried || '') && /b96-p81a/.test(r.carried || '') && ev2 && !r.other, JSON.stringify({ r, ev2: ev2?.msg }).slice(0, 2500)];
+    });
+  }
 }

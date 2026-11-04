@@ -29,6 +29,7 @@ import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRech
 import { PLANNING_ROLES } from './planning-roles.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
+import { approvedBranchFor } from './lane-approvals.mjs';
 
 export const LANES_DIR = '.lanes';
 const BRANCHES = () => path.join(STUDIO_STATE_DIR, 'lane-branches.json');
@@ -265,6 +266,20 @@ export function carryTaskBranch(task, dir = REPO_ROOT) {
       carried = prev;
       b[`${task}:carried`] = [...new Set([...(b[`${task}:carried`] || []), prev])];
     } else git(dir, 'merge', '--abort');
+  }
+  // 2.77.0 (B-96): and the lane branch holding the contents the task's owner approval was signed for, when it isn't the
+  // previous lane (harness/lane-approvals.mjs). A conflict leaves the copy as it was, with an event saying so.
+  const ap = approvedBranchFor(root, task, { dir, main: mainBranch(root) });
+  if (ap) {
+    const m = git(dir, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-edit', ap.branch);
+    if (m.status === 0) {
+      carried = carried ? `${carried}, ${ap.branch}` : ap.branch;
+      b[`${task}:carried`] = [...new Set([...(b[`${task}:carried`] || []), ap.branch])];
+      emitEvent({ type: 'lane.approval_carried', task, msg: `${task}: merged ${ap.branch} into the new copy: it holds the contents ${ap.approval} was signed for`, meta: { branch: ap.branch, head: ap.head, approval: ap.approval } });
+    } else {
+      git(dir, 'merge', '--abort');
+      emitEvent({ type: 'lane.approval_carried', task, status: 'warn', msg: `${task}: ${ap.branch} holds the contents ${ap.approval} was signed for, but it doesn't merge into the new copy cleanly; merge it by hand`, meta: { branch: ap.branch, head: ap.head, approval: ap.approval, conflict: true } });
+    }
   }
   if (mine) {
     b[task] = mine;
