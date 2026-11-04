@@ -234,8 +234,8 @@ console.log(JSON.stringify(probeTool('agy', { timeoutMs: 30000 })));`, { ...with
     let st = {};
     try { st = JSON.parse(fs.readFileSync(studioFile, 'utf8')); } catch {}
     const rules = st.permissions?.allow || [];
-    report('H-2b (crew: "allow agy wrote 30 rules (node, npm, npx, ffmpeg, blender, git status/diff/add/commit/log/show, ls, mkdir, cp, mv) but the owner\'s approval was node, npm, npx and git status/diff/add/commit/log only"): allow agy --by <owner> writes exactly the approved set, a word rule and a regex rule each (16 rules), and none of ffmpeg, blender, git show, ls, mkdir, cp, mv',
-      w.status === 0 && rules.length === 16 && same(words(rules), [...approvedWords].sort()) && approvedWords.every((p) => rules.some((r) => r.startsWith(`command(regex:^${p}(`))) && !extraWords.some((p) => rules.some((r) => r === `command(${p})` || r.startsWith(`command(regex:^${p}(`))),
+    report('H-2b (crew: "allow agy wrote 30 rules (node, npm, npx, ffmpeg, blender, git status/diff/add/commit/log/show, ls, mkdir, cp, mv) but the owner\'s approval was node, npm, npx and git status/diff/add/commit/log only"): allow agy --by <owner> writes exactly the approved set, a word rule and a regex rule each, plus the write_file rule since 2.76.0 (B-80) (17 rules), and none of ffmpeg, blender, git show, ls, mkdir, cp, mv',
+      w.status === 0 && rules.length === 17 && rules.includes('write_file') && same(words(rules), [...approvedWords].sort()) && approvedWords.every((p) => rules.some((r) => r.startsWith(`command(regex:^${p}(`))) && !extraWords.some((p) => rules.some((r) => r === `command(${p})` || r.startsWith(`command(regex:^${p}(`))),
       `${out(w).slice(-600)}\nrules (${rules.length}): ${JSON.stringify(rules).slice(0, 600)}`);
 
     // The crew's file: the 30 rules 2.58.3 wrote, plus one of the owner's own. --all, plain, --prune.
@@ -253,10 +253,10 @@ console.log(JSON.stringify(probeTool('agy', { timeoutMs: 30000 })));`, { ...with
     try { st3 = JSON.parse(fs.readFileSync(studioFile, 'utf8')); } catch {}
     const left = st3.permissions?.allow || [];
     const baks = fs.readdirSync(path.dirname(studioFile)).filter((f) => f.startsWith('agy-settings.json.bak-'));
-    report('H-2b: more than the approved set needs --all (it writes the whole harness list, 30 rules); a plain run on such a file adds nothing and names the 7 extra entries with the --prune hint; --prune (after a dry run that writes nothing) takes out only the harness rules beyond the approved set, keeps the owner\'s own rule, and backs the file up first',
-      all.status === 0 && thirty.length === 30 && plain.status === 0 && /nothing added/i.test(out(plain)) && /--prune/.test(out(plain)) && same(((out(plain).match(/are in the file \(([^)]*)\)/) || [])[1] || '').split(', ').sort(), [...extraWords].sort())
+    report('H-2b: more than the approved set needs --all (it writes the whole harness list, 30 rules, plus write_file since 2.76.0); a plain run on such a file adds nothing and names the 7 extra entries with the --prune hint; --prune (after a dry run that writes nothing) takes out only the harness rules beyond the approved set, keeps the owner\'s own rule, and backs the file up first',
+      all.status === 0 && thirty.length === 31 && thirty.includes('write_file') && plain.status === 0 && /nothing added/i.test(out(plain)) && /--prune/.test(out(plain)) && same(((out(plain).match(/are in the file \(([^)]*)\)/) || [])[1] || '').split(', ').sort(), [...extraWords].sort())
         && dry.status === 0 && /Would remove 14/.test(out(dry)) && afterDry.includes('command(ffmpeg)')
-        && pr.status === 0 && left.length === 17 && left.includes('command(npm run verify)') && same(words(left.filter((r) => r !== 'command(npm run verify)')), [...approvedWords].sort()) && baks.length >= 1,
+        && pr.status === 0 && left.length === 18 && left.includes('write_file') && left.includes('command(npm run verify)') && same(words(left.filter((r) => r !== 'command(npm run verify)' && r !== 'write_file')), [...approvedWords].sort()) && baks.length >= 1,
       `all (${all.status}): ${thirty.length} rules ${out(all).slice(-300)}\nplain: ${out(plain).slice(-500)}\ndry: ${out(dry).slice(-400)}\nprune (${pr.status}): ${out(pr).slice(-400)}\nleft (${left.length}): ${JSON.stringify(left).slice(0, 500)}\nbackups: ${baks.join(', ')}`);
     fs.rmSync(studioFile, { force: true });
     for (const b of baks) fs.rmSync(path.join(path.dirname(studioFile), b), { force: true });
