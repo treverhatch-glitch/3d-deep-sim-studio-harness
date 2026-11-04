@@ -4633,6 +4633,14 @@ if (inShard('selftest-277o')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (helper m): Windows-safe remote worker owner names (remote-<worker>), tests for the owner command rules and the scoped agents.
+if (inShard('selftest-277m')) {
+  const dir = copyRepo();
+  const { selftest277M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277m.mjs')).href);
+  await selftest277M({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
