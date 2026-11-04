@@ -255,10 +255,111 @@ export function budgetState(p, holders = [], { env = process.env } = {}) {
     ramHolders: claims.filter((x) => Number(x.c.ramGb) > 0).length,
     gpuHolders: claims.filter((x) => Number(x.c.gpu?.vramGb) > 0).length,
     cpuHolders: claims.filter((x) => !x.c.gpuOnly || x.c.area === 'gpu').length,
+    // 2.76.0 (j, B-89): what runs, by rig kind, for the core share (coreShare).
+    jobs: rigJobs(holders),
   };
 }
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+// ---- 2.76.0 (j, B-89): test workers shared by cores too, by priority ----
+/**
+ * Test workers were sized by free RAM only, so each check that started took up to cores - 2 (26 of 28 threads) and two or
+ * three verifies at once ran the CPU at 100% (full verifies went from about 12 to 25-48 min). Now a job that sizes its own
+ * test workers (a full verify, a lane's game check, a soak) also gets only its share of the logical cores, counting the
+ * other jobs running (machine:heavy holders, the gate slots of lane checks) and the train's verify when one is coming:
+ *
+ *   share = floor((cores - threads of fixed-size jobs) x weight / (weight + the weights of the other sizing jobs))
+ *   workers = min(share, the RAM figure as before, the CPU headroom: STUDIO_CPU_OVERCOMMIT x cores - the others' threads)
+ *
+ * Weights (studio/machine-budget.json "priority" overrides): the train's verify 4, a builder's verify or lane check 2, a
+ * soak 1. Jobs with a fixed claim (Unity, Blender and asset jobs, playtests, a generic heavy command) take the threads
+ * they claim off the top, so they are never squeezed. The train's verify is "coming" (counted as if running) while a
+ * train holds its lock or lanes wait in its queue (STUDIO_TRAIN_RESERVE=off: not counted). STUDIO_TEST_WORKERS still
+ * wins; STUDIO_RIG_SHARE=off sizes by RAM only (2.75). Always between 2 and cores - 2.
+ */
+export const RIG_WEIGHTS = { train: 4, verify: 2, check: 2, soak: 1 };
+/** Rig kinds: train, verify, check, soak size themselves; unity, art, playtest, other have fixed claims. */
+export const SIZING_KINDS = Object.keys(RIG_WEIGHTS);
+export const rigShareOn = (env = process.env) => !off(env.STUDIO_RIG_SHARE);
+export function rigWeights(root = process.cwd()) {
+  const own = budgetConfig(root).priority;
+  const out = { ...RIG_WEIGHTS };
+  if (own && typeof own === 'object') for (const k of SIZING_KINDS) if (Number(own[k]) > 0) out[k] = Number(own[k]);
+  return out;
+}
+/**
+ * The rig kind of a machine:heavy holder record or a claim: train (a verify run as a landing: the merge train's),
+ * verify, soak (a label naming a soak), unity, art (Blender, asset round trip), playtest (browser, GPU, landing clip),
+ * other (a generic heavy command).
+ */
+export function rigKind(rec) {
+  const c = rec && rec.claim && typeof rec.claim === 'object' ? rec.claim : rec || {};
+  if (c.rig && typeof c.rig === 'string') return c.rig;
+  const label = String(rec?.label || c.label || '');
+  if (/\bsoak/i.test(label)) return 'soak';
+  if (c.kind === 'verify') return rec?.landing ? 'train' : 'verify';
+  if (isUnityKind(c.kind)) return 'unity';
+  if (capGroup(c.kind) === 'blender') return 'art';
+  if (capGroup(c.kind) === 'browser-playtest' || c.kind === 'gpu-playtest') return 'playtest';
+  return 'other';
+}
+/** The jobs a budget state counts, from holder records: [{ kind, workers, threads, gpuOnly, label, pid, at }]. */
+export const rigJobs = (holders = []) => holders.map((h) => { const c = claimOf(h); return { kind: rigKind(h), workers: Number(c.workers) > 0 ? Number(c.workers) : null, threads: Number(c.cpuThreads) || 0, gpuOnly: Boolean(c.gpuOnly), ramGb: Number(c.ramGb) || 0, label: c.label || h.label || null, pid: h.pid || null, at: h.at || null, owner: h.owner || null }; });
+
+const aliveP = (pid) => { if (!pid) return false; try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/**
+ * The train's verify that is coming (to keep its share free): [{ kind: 'train', why }] or []. A train lock held by a live
+ * process whose verify isn't running yet, or lanes in the train queue not held for a person while the supervisor runs
+ * (its passes start trains) and STUDIO_TRAIN, STUDIO_TRAIN_AUTO and train auto aren't off. `jobs`: what runs now (a running train verify: []).
+ * STUDIO_TRAIN_RESERVE=off: []. Reads <root>/.studio only.
+ */
+export function trainComing(root, { env = process.env, jobs = [], now = Date.now() } = {}) {
+  if (off(env.STUDIO_TRAIN_RESERVE) || !root) return [];
+  if (jobs.some((j) => j.kind === 'train')) return [];
+  const lock = readJson(path.join(root, '.studio', 'locks', 'train.lock'));
+  const staleMs = num(env.STUDIO_TRAIN_STALE_MIN, 360) * 60000;
+  if (lock && aliveP(lock.pid) && !(now - Number(lock.at || 0) > staleMs)) return [{ kind: 'train', why: `train ${lock.id || ''} is running; its verify gets its share`.replace(/ {2}/, ' ') }];
+  if (off(env.STUDIO_TRAIN) || off(env.STUDIO_TRAIN_AUTO)) return [];
+  if (readJson(path.join(root, '.studio', 'train', 'auto.json'))?.off) return [];
+  // Queued lanes start a train only through the train daemon, which runs in the supervisor's passes.
+  const sup = readJson(path.join(root, '.studio', 'supervisor.json'));
+  if (!(sup?.status === 'running' && aliveP(sup.pid))) return [];
+  const q = readJson(path.join(root, '.studio', 'train', 'queue.json'));
+  const ready = (Array.isArray(q) ? q : []).filter((e) => e && e.task && !(e.held && !(e.released && e.released.head === e.head)));
+  return ready.length ? [{ kind: 'train', why: `${ready.length} lane${ready.length === 1 ? '' : 's'} queued for the train (${ready.slice(0, 3).map((e) => e.task).join(', ')}${ready.length > 3 ? ', …' : ''})` }] : [];
+}
+
+/**
+ * A sizing job's share of the cores: { workers, share, headroom, used, cores, weight, weights, others, coming, why }.
+ * self: its rig kind; others: rigJobs of what runs (plus { kind: 'check' } per lane check; workers unknown: estimated
+ * at their own share); coming: trainComing(). Pure.
+ */
+export function coreShare({ cores, self = 'verify', others = [], coming = [], env = process.env, weights = RIG_WEIGHTS } = {}) {
+  const c = Math.max(1, Math.floor(Number(cores) || 1));
+  const wOf = (k) => (SIZING_KINDS.includes(k) ? Number(weights[k]) || RIG_WEIGHTS[k] || 1 : 0);
+  const w = wOf(self) || RIG_WEIGHTS.verify;
+  const fixed = others.filter((o) => !SIZING_KINDS.includes(o.kind) || o.gpuOnly);
+  const sizing = others.filter((o) => SIZING_KINDS.includes(o.kind) && !o.gpuOnly);
+  const fixedThreads = fixed.reduce((a, o) => a + (Number(o.threads) || 0), 0);
+  const all = w + sizing.reduce((a, o) => a + wOf(o.kind), 0) + coming.reduce((a, o) => a + wOf(o.kind), 0);
+  const pool = Math.max(2, c - fixedThreads);
+  const share = Math.floor((pool * w) / all);
+  const est = (o) => (Number(o.workers) > 0 ? Number(o.workers) : Number(o.threads) > 0 ? Number(o.threads) : Math.max(2, Math.floor((pool * wOf(o.kind)) / all)));
+  const used = fixedThreads + sizing.reduce((a, o) => a + est(o), 0);
+  const cap = Math.floor(c * Math.max(1, num(env.STUDIO_CPU_OVERCOMMIT, 1.5)));
+  const headroom = cap - used;
+  const hi = Math.max(2, c - 2);
+  let workers = clamp(share, 2, hi);
+  const capped = headroom < workers;
+  if (capped) workers = Math.max(2, Math.floor(headroom));
+  const count = (k) => sizing.filter((o) => o.kind === k).length;
+  const names = { train: "the train's verify", verify: 'builder verify', check: 'lane check', soak: 'soak' };
+  const besides = [...SIZING_KINDS.filter((k) => count(k)).map((k) => `${count(k)} ${names[k]}${count(k) > 1 && k !== 'train' ? 's' : ''} (weight ${wOf(k)})`), ...(fixed.length ? [`${fixedThreads} thread${fixedThreads === 1 ? '' : 's'} of fixed jobs (${[...new Set(fixed.map((o) => o.kind))].join(', ')})`] : []), ...coming.map((o) => `the train's verify coming (weight ${wOf('train')}: ${o.why})`)];
+  const why = `${workers} of ${c} cores as ${self === 'train' ? "the train's verify" : `a ${names[self] || self}`} (weight ${w} of ${Math.round(all * 10) / 10}${besides.length ? `; beside ${besides.join(', ')}` : '; nothing else running'}${capped ? `; CPU headroom ${Math.max(0, headroom)} of ${cap} threads (STUDIO_CPU_OVERCOMMIT)` : ''})`;
+  return { workers, share, headroom, used, cores: c, weight: w, weightAll: all, others: used, coming: coming.length, capped, why };
+}
+
 /** Test workers for `budgetGb` of RAM: clamp(floor(budget / 0.45), 2, cores - 2). */
 export function workersFor(budgetGb, cores, env = process.env) {
   return clamp(Math.floor(Math.max(0, budgetGb) / WORKER_GB(env)), 2, Math.max(2, cores - 2));
@@ -270,14 +371,30 @@ const envWorkers = (env) => (Number(env.STUDIO_TEST_WORKERS) > 0 ? Math.floor(Nu
  * itself to what is free now (state.freeRamGb): its workers, then 1 GB + 0.45 GB each. Overrides: studio/machine-budget.json
  * "jobs", then opts.ramGb / vramGb / gpuOnly (heavy.mjs run --ram-gb, --vram-gb, --gpu-only).
  */
-export function jobClaim(kind, { root = process.cwd(), env = process.env, label = null, state = null, profile = null, ramGb, vramGb, gpuOnly } = {}) {
+export function jobClaim(kind, { root = process.cwd(), env = process.env, label = null, state = null, profile = null, ramGb, vramGb, gpuOnly, as = null, coming = undefined, extraJobs = [] } = {}) {
   const { env: e, jobs } = cfgEnv(root, env);
   const k = JOB_KINDS[kind] ? kind : 'heavy';
   const base = { ...JOB_KINDS[k], ...(jobs[k] && typeof jobs[k] === 'object' ? jobs[k] : {}) };
   const out = { kind: k, label: label || base.what, ramGb: base.ramGb, cpuThreads: base.cpuThreads, gpu: Number(base.vramGb) > 0 ? { vramGb: Number(base.vramGb) } : null, gpuOnly: Boolean(base.gpuOnly) };
   if (k === 'verify') {
     const cores = logicalCores(profile);
-    const w = envWorkers(e) ?? (state?.known && fin(state.freeRamGb) ? workersFor(state.freeRamGb - 1, cores, e) : 2);
+    const ew = envWorkers(e);
+    const ramW = state?.known && fin(state.freeRamGb) ? workersFor(state.freeRamGb - 1, cores, e) : 2;
+    let w = ew ?? ramW;
+    // 2.76.0 (j, B-89): a verify run as a landing is the merge train's; it and a builder's verify get their share of
+    // the cores beside what runs (state.jobs) and the train's verify that is coming (coreShare).
+    const self = as || (String(e.STUDIO_GATE_PRIORITY || '').toLowerCase() === 'landing' ? 'train' : /\bsoak/i.test(String(label || '')) ? 'soak' : 'verify');
+    out.rig = self;
+    if (ew) out.workersWhy = 'STUDIO_TEST_WORKERS';
+    else if (!state?.known) out.workersWhy = 'no machine scan: 2, as CI=true gave before';
+    else if (!rigShareOn(e)) out.workersWhy = `RAM only (STUDIO_RIG_SHARE=off): ${state.freeRamGb} GB free`;
+    else {
+      const others = [...(state.jobs || []), ...(Array.isArray(extraJobs) ? extraJobs : [])];
+      const cs = coreShare({ cores, self, others, coming: coming !== undefined ? coming : self === 'train' ? [] : trainComing(root, { env: e, jobs: others }), env: e, weights: rigWeights(root) });
+      w = Math.min(ramW, cs.workers);
+      out.share = { workers: cs.workers, ramWorkers: ramW, cores: cs.cores, weight: cs.weight, weightAll: cs.weightAll, coming: cs.coming };
+      out.workersWhy = `${cs.why}${ramW < cs.workers ? `; RAM allows ${ramW} (${state.freeRamGb} GB free / ${WORKER_GB(e)} GB per worker)` : ''}`;
+    }
     out.workers = w;
     if (!(Number(base.ramGb) > 0)) out.ramGb = r1(1 + WORKER_GB(e) * w);
     if (!(Number(base.cpuThreads) > 0)) out.cpuThreads = w;
@@ -341,16 +458,29 @@ export function describeBudget(state, slots) {
  * Test workers for a game check: { workers, why }. STUDIO_TEST_WORKERS wins; inside a heavy hold, its claim's workers;
  * no scan: 2 (what CI=true gave before); else the free budget shared with the other running lane checks.
  */
-export function testWorkers({ profile = null, env = process.env, holdClaim = null, holders = [], laneChecks = 0, root = process.cwd() } = {}) {
+export function testWorkers({ profile = null, env = process.env, holdClaim = null, holders = [], laneChecks = 0, root = process.cwd(), self = null, trainRoot = null, coming = undefined } = {}) {
   const { env: e } = cfgEnv(root, env);
   const ew = envWorkers(e);
-  if (ew) return { workers: ew, why: 'STUDIO_TEST_WORKERS' };
-  if (holdClaim && Number(holdClaim.workers) > 0) return { workers: Number(holdClaim.workers), why: `the ${holdClaim.label || 'heavy job'}'s claim (${holdClaim.ramGb} GB)` };
+  // 2.76.0 (j, B-89): machineWorkers = this check's workers plus the others' running now (known or estimated): the
+  // per-test timeout factor reads it (harness/test-timeouts.mjs), so a smaller share never means a shorter timeout.
+  const cores = logicalCores(profile);
+  const mine = holdClaim?.holderPid ? holders.filter((h) => Number(h.pid) !== Number(holdClaim.holderPid)) : holders;
+  const othersOf = () => [...rigJobs(mine), ...Array.from({ length: Math.max(0, Number(laneChecks) || 0) }, () => ({ kind: 'check', workers: null, threads: 0 }))];
+  const machineOf = (w) => { if (!profile) return w; try { const o = othersOf(); return w + coreShare({ cores, self: self || 'check', others: o, env: e }).used; } catch { return w; } };
+  if (ew) return { workers: ew, why: 'STUDIO_TEST_WORKERS', machineWorkers: machineOf(ew) };
+  if (holdClaim && Number(holdClaim.workers) > 0) return { workers: Number(holdClaim.workers), why: `the ${holdClaim.label || 'heavy job'}'s claim (${holdClaim.ramGb} GB${holdClaim.workersWhy ? `; ${holdClaim.workersWhy}` : ''})`, ...(holdClaim.share ? { share: holdClaim.share } : {}), machineWorkers: machineOf(Number(holdClaim.workers)) };
   if (!profile) return { workers: 2, why: 'no machine scan: 2, as CI=true gave before' };
   const st = budgetState(profile, holders, { env: e });
   if (!fin(st.freeRamGb)) return { workers: 2, why: 'the scan has no free-RAM figure: 2' };
   const share = st.freeRamGb / (laneChecks + 1);
-  return { workers: workersFor(share, logicalCores(profile), e), why: `${r1(share)} GB of ${st.freeRamGb} GB free${laneChecks ? ` shared with ${laneChecks} other running lane check${laneChecks === 1 ? '' : 's'}` : ''} / ${WORKER_GB(e)} GB per worker, 2..cores-2` };
+  const ramW = workersFor(share, cores, e);
+  const ramWhy = `${r1(share)} GB of ${st.freeRamGb} GB free${laneChecks ? ` shared with ${laneChecks} other running lane check${laneChecks === 1 ? '' : 's'}` : ''} / ${WORKER_GB(e)} GB per worker, 2..cores-2`;
+  if (!rigShareOn(e)) return { workers: ramW, why: `${ramWhy} (STUDIO_RIG_SHARE=off: RAM only)`, machineWorkers: machineOf(ramW) };
+  const kind = self || 'check';
+  const others = othersOf();
+  const cs = coreShare({ cores, self: kind, others, coming: coming !== undefined ? coming : kind === 'train' ? [] : trainComing(trainRoot || root, { env: e, jobs: others }), env: e, weights: rigWeights(root) });
+  const w = Math.min(ramW, cs.workers);
+  return { workers: w, why: `${cs.why}${ramW < cs.workers ? `; RAM allows ${ramW}: ${ramWhy}` : ''}`, share: { workers: cs.workers, ramWorkers: ramW, cores: cs.cores, weight: cs.weight, weightAll: cs.weightAll, coming: cs.coming }, machineWorkers: w + cs.used };
 }
 
 /**

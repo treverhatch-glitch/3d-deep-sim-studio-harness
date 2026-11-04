@@ -412,6 +412,17 @@ and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 G
   (docs/ONBOARDING-A-GAME.md). 2.73.2: a vitest/jest/`node --test` check also gets its per-test timeout scaled for that
   many workers (ceil(4 x workers / cores), 1..4; `STUDIO_TEST_TIMEOUT_SCALE`; ONBOARDING-A-GAME.md, "Per-test timeouts
   that fit the workers").
+- 2.76.0 (B-89): the cores are shared too. A job that sizes its test workers (a full verify, a lane check, a soak) gets
+  its share of the logical cores beside what runs: weight 4 for the merge train's verify, 2 for a builder's verify or
+  lane check, 1 for a soak (studio/machine-budget.json `"priority"` overrides); Unity, Blender, asset and playtest jobs
+  take the threads they claim off the top. While a train holds its lock, or lanes wait in its queue and the supervisor
+  runs, its verify counts as coming, so a builder's verify leaves it room (`STUDIO_TRAIN_RESERVE=off`: not). Workers =
+  the smallest of that share, the RAM figure and the CPU headroom (`STUDIO_CPU_OVERCOMMIT` x cores - the others'
+  threads), 2..cores - 2.
+  The gate's line and the check's row (`testWorkers`: workers, share, why, machineWorkers) say which and why; the
+  per-test timeout reads every check's workers on the machine (machineWorkers), so a smaller share never shortens it.
+  `STUDIO_TEST_WORKERS` still wins; `STUDIO_RIG_SHARE=off` sizes by RAM only (2.75). `node harness/rig-budget.mjs
+  [--json]` (rigBudget()) lists what runs (kind, workers, RAM, start, ETA) and what each kind would get now.
 - The supervisor starts at most (RAM - reserve - heavy claims) / `STUDIO_SESSION_RAM_GB` (0.6) agent sessions, and
   says so when that holds one back. Tests stub the scan with `STUDIO_TEST_MACHINE` (a profile as JSON, a path, or
   `none`).
