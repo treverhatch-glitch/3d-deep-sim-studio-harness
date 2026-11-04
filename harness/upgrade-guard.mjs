@@ -51,7 +51,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SELF = fileURLToPath(import.meta.url);
@@ -511,9 +511,17 @@ export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } 
   const script = path.join(root, 'harness', 'lanes.mjs');
   if (!fs.existsSync(script)) return empty('this studio has no harness/lanes.mjs');
   const args = [script, 'refresh', '--all', '--by', String(by || ''), '--json', ...(mode === 'no-tests' ? ['--no-tests'] : [])];
-  const r = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  // 2.76.0 (B-81): the refresh runs in its own background process (detached: it outlives this command and whatever
+  // limit its caller's shell has) and the upgrade waits for it at most STUDIO_UPGRADE_REFRESH_WAIT_S (120) seconds.
+  // On the crew's PC the refresh (every lane's targeted tests) ran past its caller's limit, gave "exit 143", and the
+  // next train bounced every stale lane on the hooks check. A refresh still running is said so; the train refreshes a
+  // lane whose harness is still behind main before it checks it (harness/train-refresh.mjs).
+  const r = runRefreshBackground(root, args, env);
   let j = null;
-  try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch { j = null; }
+  try { j = JSON.parse(String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{')).pop()); } catch { j = null; }
+  if (!j && r.running) {
+    return { ran: 'background', why: 'still running', pid: r.pid, log: r.log, refreshed: [], conflicted: [], red: [], skipped: [], results: [], lines: [`[upgrade] lanes: refresh still running in the background (pid ${r.pid}, log ${r.log}; waited ${r.waitedS} s, STUDIO_UPGRADE_REFRESH_WAIT_S). It goes on by itself; a lane it hasn't reached yet is refreshed by the next train before its checks. npm run lanes shows each lane.`] };
+  }
   if (!j) {
     const tail = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').slice(-3).join(' / ');
     return empty(`lanes refresh gave no result (exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}); run npm run lanes -- refresh --all --by <you>`);
@@ -530,6 +538,40 @@ export function refreshLanesAfterUpgrade({ root = ROOT, by, env = process.env } 
     ...results.map((x) => `  ${word[x.status] || x.status} ${x.lane}: ${String(x.why || '').slice(0, 300)}`),
   ];
   return out;
+}
+
+/**
+ * 2.76.0 (B-81): run `lanes refresh` detached, its output in .studio/upgrades/lanes-refresh-<time>.log, and wait for it
+ * at most STUDIO_UPGRADE_REFRESH_WAIT_S (120; 0 = don't wait) seconds. { stdout, status, running, pid, log, waitedS }.
+ */
+export function runRefreshBackground(root, args, env = process.env) {
+  const dir = path.join(root, '.studio', 'upgrades');
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const logFile = path.join(dir, `lanes-refresh-${stamp}.log`);
+  const exitFile = `${logFile}.exit`;
+  const rel = path.relative(root, logFile).split(path.sep).join('/');
+  // A tiny wrapper records the exit code next to the log, so the wait knows the refresh is over (not only its pid).
+  const wrapper = `const { spawnSync } = require('node:child_process'); const fs = require('node:fs');
+const r = spawnSync(process.execPath, ${JSON.stringify(args)}, { cwd: ${JSON.stringify(root)}, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true });
+fs.writeFileSync(${JSON.stringify(exitFile)}, String(r.status === null ? 'signal ' + (r.signal || '') : r.status));`;
+  const fd = fs.openSync(logFile, 'a');
+  let child;
+  try {
+    child = spawn(process.execPath, ['-e', wrapper], { cwd: root, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+    child.unref();
+  } finally { fs.closeSync(fd); }
+  const waitS = Number(env.STUDIO_UPGRADE_REFRESH_WAIT_S ?? 120);
+  const limit = Number.isFinite(waitS) && waitS >= 0 ? waitS * 1000 : 120000;
+  const t0 = Date.now();
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(exitFile) && Date.now() - t0 < limit) Atomics.wait(nap, 0, 0, 200);
+  const done = fs.existsSync(exitFile);
+  let stdout = '';
+  try { stdout = fs.readFileSync(logFile, 'utf8'); } catch {}
+  let status = null;
+  try { const t = fs.readFileSync(exitFile, 'utf8').trim(); status = /^\d+$/.test(t) ? Number(t) : t; } catch {}
+  return { stdout, status, running: !done, pid: child?.pid ?? null, log: rel, waitedS: Math.round((Date.now() - t0) / 1000) };
 }
 
 /** Is every line of a conflict side a task row (a list item or a table row) or blank? */

@@ -107,6 +107,14 @@ which node can't run, so use the line above there.) The guard finds the studio b
    (targeted tests fail) or skipped (a running session, uncommitted work, a merge in progress: never touched). The
    upgrade passes either way. `STUDIO_UPGRADE_REFRESH=off` skips the refresh (run it yourself later);
    `STUDIO_UPGRADE_REFRESH=no-tests` merges without running the lanes' targeted tests.
+   **2.76.0 (B-81):** the refresh runs in its own background process (log `.studio/upgrades/lanes-refresh-<time>.log`)
+   and the upgrade waits for it at most `STUDIO_UPGRADE_REFRESH_WAIT_S` (120) seconds: on the crew's PC the refresh ran
+   past its caller's limit ("lanes refresh gave no result (exit 143)") and the next train bounced every lane. Still
+   running, the upgrade says so and the refresh goes on by itself. Each lane's targeted tests stop at
+   `STUDIO_LANES_REFRESH_TEST_S` (600; 0 = no limit): main stays merged in and the lane is left to the train's full
+   verify. And the train refreshes a lane whose harness is behind main itself, before its checks (main merged in,
+   commits re-stamped, no tests; `harness/train-refresh.mjs`); only a real conflict hands it back.
+   `STUDIO_TRAIN_REFRESH=off` turns that off.
    **Before snapshot (2.73.0):** just before it merges, `--merge` writes `.studio/upgrades/<from>-to-<to>.json`: the
    studio's numbers over the `STUDIO_UPGRADE_SNAPSHOT_DAYS` (3) days before the update (landed per hour, false reds per
    train, tokens per landed change and by task, red verify %, workarounds per day, verify minutes, hand-backs, no-work

@@ -40,7 +40,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
-import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings } from './agy-allow.mjs';
+import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -74,7 +74,8 @@ import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
-import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf } from './stall.mjs';
+import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart } from './stall.mjs';
+import { readPrices, readPriceMultipliers, priceFor, dollarsOf } from './autonomy.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
@@ -209,6 +210,27 @@ function agySettingsArg(file) {
 }
 
 /**
+ * 2.76.0 (B-80; the crew's local patches W-0072, W-0073): agy's options before --settings.
+ *   --print-timeout STUDIO_AGY_PRINT_TIMEOUT (5400s): 900 s ended a builder mid test run ("print timeout after 15m0s
+ *       while the agent was waiting on 1 background task"); a builder session runs up to 90 min (STUDIO_SESSION_MAX_MIN).
+ *   --mode STUDIO_AGY_MODE (accept-edits; off drops it): agy's analogue of Claude's acceptEdits. A headless agy session
+ *       ends at its first refused tool, and file writes were refused even with a write_file allow rule. Commands stay
+ *       on the --settings allow-list.
+ *   --model <model> when one is given (STUDIO_AGY_MODEL_FLAG names the flag; off drops it): with no model passed agy ran
+ *       its own default (a Claude model), not Gemini. UNTESTED on real agy: the flag's name (agy models lists the names).
+ * A value that isn't one plain word is ignored (the default is used).
+ */
+export const AGY_DEFAULT_MODEL = 'gemini-4-argon-high';
+export function agyOptions(model = null, env = process.env) {
+  const word = (v, d) => (/^[\w.:-]{1,60}$/.test(String(v ?? '').trim()) ? String(v).trim() : d);
+  const timeout = word(env.STUDIO_AGY_PRINT_TIMEOUT, '5400s');
+  const mode = /^(off|0|false|no|none)$/i.test(String(env.STUDIO_AGY_MODE || '')) ? null : word(env.STUDIO_AGY_MODE, 'accept-edits');
+  const flag = /^(off|0|false|no|none)$/i.test(String(env.STUDIO_AGY_MODEL_FLAG || '')) ? null : (/^--?[\w-]{1,30}$/.test(String(env.STUDIO_AGY_MODEL_FLAG || '').trim()) ? String(env.STUDIO_AGY_MODEL_FLAG).trim() : '--model');
+  const m = model && model !== 'unknown' ? word(model, null) : null;
+  return ['--print-timeout', /^\d+$/.test(timeout) ? `${timeout}s` : timeout, ...(mode ? ['--mode', mode] : []), ...(flag && m ? [flag, m] : [])];
+}
+
+/**
  * How each tool is started: an argv, the prompt on stdin (stdin) or as one argument (promptAt, its index in argv).
  * P-066 (crew P-036): harness/launch.mjs starts the argv with no shell on every OS, so each element arrives as one
  * argument. The prompt goes on stdin where the tool reads it there (claude -p with no prompt argument, codex's -, and
@@ -251,7 +273,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // M3 (2.58.3, crew P-037 addendum): agy takes a session settings file (--settings <file>); the studio's own
       // (.studio/agy-settings.json, written by `npm run agent -- allow agy`) is passed when it exists.
       const settings = agySettingsArg(agyStudioSettings());
-      const tail = ['--print-timeout', '900s', ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
+      const tail = [...agyOptions(m), ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
       // H-2 (2.58.5): on Windows agy.exe got `-p <prompt>` as one argument (started directly, no shell, quoted by the
       // rules every Windows program reads) and still said `unexpected argument "are"`: the prompt ("You are …") was split
       // at its spaces after it reached agy.exe. agy reads a prompt from stdin too ("Prompts are read only from -p/--print,
@@ -526,7 +548,61 @@ export function exitCause({ code, exit = {}, stop = null } = {}) {
   return { ...base, kind: 'exit' };
 }
 
-export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, exit = {} }) {
+/**
+ * 2.76.0 (B-82): a session's usage from its stream (each assistant message's usage, once per message id, newest Claude
+ * session only), for a session that ended with no result line of its own: the launcher ended it (stall, idle, budget),
+ * or it crashed. Same shape as tokensFrom; null when the stream carries no usage.
+ */
+export function streamUsage(log) {
+  const seen = new Set();
+  let n = 0; const r = { in: 0, cacheRead: 0, out: 0, cacheWrite: 0, cacheWrite5m: null, cacheWrite1h: null };
+  for (const l of newestSessionPart(log).split(/\r?\n/)) {
+    const t = l.trim();
+    if (!t.startsWith('{') || !t.includes('usage')) continue;
+    let o; try { o = JSON.parse(t); } catch { continue; }
+    if (o.type === 'result') continue;
+    const u = o.message?.usage;
+    if (!u || typeof u !== 'object') continue;
+    const id = o.message?.id;
+    if (id) { if (seen.has(id)) continue; seen.add(id); }
+    n += 1;
+    const w = writeSplit(u);
+    r.in += (Number(u.input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0);
+    r.cacheRead += Number(u.cache_read_input_tokens) || 0;
+    r.out += Number(u.output_tokens) || 0;
+    r.cacheWrite += w.cacheWrite;
+    if (w.cacheWrite5m !== null) r.cacheWrite5m = (r.cacheWrite5m || 0) + w.cacheWrite5m;
+    if (w.cacheWrite1h !== null) r.cacheWrite1h = (r.cacheWrite1h || 0) + w.cacheWrite1h;
+  }
+  return n ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: null, turns: n, cacheWrite: r.cacheWrite, cacheWrite5m: r.cacheWrite5m, cacheWrite1h: r.cacheWrite1h, fromStream: true } : null;
+}
+
+/** 2.76.0 (B-82): dollars for a session's usage at studio/prices.json (harness/autonomy.mjs), or null with no price row. */
+export function estimateCost(tok, { model, tool, role } = {}) {
+  try {
+    const prices = readPrices();
+    if (!prices || !priceFor(prices, model, tool)) return null;
+    const meta = { tool, cacheRead: tok.cacheRead, cacheWrite: tok.cacheWrite, cacheWrite5m: tok.cacheWrite5m, cacheWrite1h: tok.cacheWrite1h, cacheTtl: tok.cacheWrite ? cacheTtlAsked(role) : undefined };
+    const d = dollarsOf([{ model, tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, meta }], prices, readPriceMultipliers());
+    return d.priced ? Math.round(d.usd * 10000) / 10000 : null;
+  } catch { return null; }
+}
+
+/**
+ * 2.76.0 (B-80, the crew's adapter checklist item 3): why a headless agy session stopped, from its own log: the
+ * "jetski: …" line or a "… permission that headless mode cannot prompt for" refusal (one denial ends the session).
+ * null when there is none.
+ */
+export function agyStopLine(log) {
+  const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const hit = [...lines].reverse().find((l) => /^jetski:|headless mode cannot prompt|auto-denied|print timeout after/i.test(l));
+  return hit ? hit.replace(/\s+/g, ' ').slice(0, 300) : null;
+}
+
+export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
+  // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
+  const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
+  const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
   const found = providerTrouble(log, code);
   // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
   // never this session's (test #2: claude was marked out of quota for agy's limit).
@@ -602,8 +678,8 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
       : limit
       ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
-      : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
     handed.push({ task: id, patch });
@@ -624,7 +700,18 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
       if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
     }
   } catch { outcome = null; }
-  const tok = tokensFrom(log);
+  let tok = tokensFrom(log);
+  // 2.76.0 (B-82): no result line of its own (the launcher ended it, it crashed): its usage from the stream, and its
+  // cost estimated at studio/prices.json (meta.costEstimated), so API spend isn't undercounted.
+  let costEstimated = false;
+  if (!(tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    const st = streamUsage(usageLog ?? log);
+    if (st) tok = st;
+  }
+  if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    const est = estimateCost(tok, { model, tool, role });
+    if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
+  }
   // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
@@ -632,7 +719,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -709,7 +796,9 @@ export function parkIfLooping(id, now = Date.now()) {
 }
 
 /** The last part of a log (stream-json logs grow large; the refresh check needs only the latest usage). */
-function tailOf(file, bytes = 2 * 1024 * 1024) {
+function tailOf(file, bytes = 2 * 1024 * 1024, from = 0) {
+  // 2.76.0 (B-83): from = where this session's output starts in the (appended) log: earlier sessions never count.
+  if (from > 0) return readLogFrom(file, from, bytes);
   try {
     const size = fs.statSync(file).size;
     const fd = fs.openSync(file, 'r');
@@ -863,6 +952,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = { ...c, laneless };
   }
+  // 2.76.0 (B-80 part 2): an agy session reads GEMINI.md in its folder: the shell rules, kept out of the lane's change.
+  if (copy && tool === 'agy' && !custom) writeAgyLaneRules(copy.dir, { excludeFile: path.join(REPO_ROOT, '.studio', 'lanes', `${agent}.exclude`) });
   // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
   // copy couldn't be made; otherwise say once that they aren't locked.
   if (unheld.size && !copy) {
@@ -898,6 +989,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
     + refreshRule({ oneTask, task })
+    // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
+    + (tool === 'agy' && !custom ? `\n${AGY_SHELL_RULES.split('\n').slice(2).join('\n')}` : '')
     // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
     + (refreshes > 0 && task ? `\nThis is a fresh session after a refresh: read studio/handoffs/${task}.md first; don't redo what it says is done.\n` : '')
     // PU-36 (P-049): the --note is written by whoever started the session (a person, the Producer, a chat bot), so it
@@ -943,6 +1036,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
   const out = fs.openSync(logFile, 'a');
+  // 2.76.0 (B-83, B-82): the log is appended to across sessions under one name (a relaunch, a refresh, a failover):
+  // this session's part starts here. The stall check, the refresh check and the session's usage read only that part.
+  let logFrom = 0;
+  try { logFrom = fs.fstatSync(out).size; } catch {}
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
@@ -1022,8 +1119,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
+  resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
@@ -1035,14 +1133,16 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const wip = wipSummary(agent);
     let progress = null;
     try {
-      progress = heartbeatCheck(agent, { log: tailOf(logFile), model, task });
+      progress = heartbeatCheck(agent, { log: tailOf(logFile, undefined, logFrom), model, task });
     } catch {
       // the refresh check is a help, never a blocker
     }
     // 2.30o: the stall check (harness/stall.mjs): no progress, a read-only burn, or past the wall-clock cap ends it.
     let stall = null;
     try {
-      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile)), cwd });
+      // 2.76.0 (B-84): a copy made when the session claimed its task (harness/lane-at-claim.mjs) is where its work is.
+      const cwdNow = !copy && s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : cwd;
+      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile, undefined, logFrom)), cwd: fs.existsSync(cwdNow) ? cwdNow : cwd });
     } catch {
       // the stall check is a guard, never a crash
     }
@@ -1110,7 +1210,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   if (!killedBy) { const st = stallEndOf(agent, startedAt); if (st && st.by !== 'launcher') killedBy = { kind: 'stall', why: st.why, stallKind: st.kind, at: st.at, by: st.by }; }
   markAgentExited(agent, startedAt, { at: exitedAt || new Date().toISOString(), code, signal: exitSignal, kind: killedBy?.kind || (spawnError ? 'spawn-error' : exitSignal ? 'signal' : 'exit') });
   fs.closeSync(out);
-  const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
+  // 2.76.0 (B-82): this session's own part of the log (an earlier session's result line in the tail was reported as
+  // this one's usage and cost: two session ends with the same costUsd), and all of it for the usage of a session the
+  // launcher ended (no result line of its own).
+  const log = readLogFrom(logFile, logFrom, 256 * 1024).slice(-20000);
+  const usageLog = readLogFrom(logFile, logFrom, 64 * 1024 * 1024);
   // B-37 (2.60.1): a failed aider session (nim, aider) leaves evidence: the last lines of its output in a file beside
   // the log, and its lane copy kept for a look (STUDIO_KEEP_FAILED_LANE=off removes it as before). Before H-1's line,
   // which stays the log's last.
@@ -1131,8 +1235,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
     }
   }
-  const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
+  const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // 2.76.0 (B-84): made at task start
+  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+  if (atClaim?.branch && fs.existsSync(path.join(REPO_ROOT, atClaim.dir || ''))) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
   // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).
@@ -1604,8 +1710,12 @@ export function startAgent(opts, { detach = false } = {}) {
       const [tt, ...mm] = t.split(':');
       tool = tt;
       if (!opts.model) model = mm.join(':') || process.env[`STUDIO_TOOL_${roleKey(tt)}_MODEL`] || model;
+      if (mm.join(':')) opts = { ...opts, orderModel: true };
     }
   }
+  // 2.76.0 (B-80): agy with no --model ran agy's own default (a Claude model), not Gemini. A role's model setting is for
+  // its Claude sessions, so agy takes STUDIO_TOOL_AGY_MODEL, else the Gemini default (AGY_DEFAULT_MODEL).
+  if (tool === 'agy' && !opts.model && !opts.orderModel) model = String(process.env.STUDIO_TOOL_AGY_MODEL || '').trim() || AGY_DEFAULT_MODEL;
   // 2.30q (#7): the budget stop is checked after the takeover picked a tool; with every tool out, nothing starts.
   { const st = launchStop({ role, tool, model, agent, task: opts.task || null }); if (st) return { ok: false, skipped: true, message: `Not started: budget stop (${st.why}).` }; }
   // 2.30o: profile check before launch: a planning role never shares a builder's profile; per-profile limits.

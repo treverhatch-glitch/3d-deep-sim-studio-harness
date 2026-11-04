@@ -15,7 +15,7 @@ agent's task, lock and event commands, and its commits, carry its name and model
 | Codex CLI | `codex exec - < prompt.md` | `--sandbox workspace-write` (read-only by default) | `CODEX_API_KEY`, for that one command | `--json` gives JSON Lines. Must run inside a git repo. `--full-auto` is gone |
 | Cursor CLI | `agent -p "<prompt>"` | `--force` (or `--yolo`) | `CURSOR_API_KEY` | `--output-format text\|json\|stream-json` |
 | Grok Build CLI | `grok -p "<prompt>"` | `--always-approve` | `XAI_API_KEY` or `grok login` | Early beta (SuperGrok, X Premium+). `-m` picks the model; `--output-format plain\|json\|streaming-json` |
-| Antigravity CLI | `agy --print-timeout 900s < prompt.md` (the launcher's form since 2.58.5; `agy -p "<prompt>"` in Google's docs) | workspace files: always; shell commands: only those its `settings.json` allows (see [agy's allow-rules](#agys-allow-rules-the-owner-enrols-them-once)) | Antigravity key (`AV_API_KEY` in the migration guides) | Replaced Gemini CLI for personal Google accounts on June 18, 2026. Paid Gemini API keys and Code Assist Standard/Enterprise can still use `gemini`. agy exits early unless it has `--print-timeout`, so the launcher adds it |
+| Antigravity CLI | `agy --print-timeout 5400s --mode accept-edits --model <model> < prompt.md` (the launcher's form since 2.76.0; `agy -p "<prompt>"` in Google's docs) | workspace files: always; shell commands: only those its `settings.json` allows (see [agy's allow-rules](#agys-allow-rules-the-owner-enrols-them-once)) | Antigravity key (`AV_API_KEY` in the migration guides) | Replaced Gemini CLI for personal Google accounts on June 18, 2026. Paid Gemini API keys and Code Assist Standard/Enterprise can still use `gemini`. agy exits early unless it has `--print-timeout`, so the launcher adds it |
 | Aider + Ollama | `aider --model ollama_chat/<model> --message-file prompt.md` | `--yes` | none (local) | One instruction, then exits: give it one small task. Ollama's default 2k context silently drops text: start it with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` |
 | Aider + NVIDIA NIM (`--tool nim`) | `aider --model openai/<model> --openai-api-base https://integrate.api.nvidia.com/v1 --message-file prompt.md` | `--yes-always` (and `--no-auto-commits`) | `NVIDIA_API_KEY` (the agent gets it as `OPENAI_API_KEY` and `AIDER_OPENAI_API_KEY`) | See [NIM as a worker](#nim-as-a-worker-tool-nim) |
 
@@ -50,10 +50,27 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
 - **agy's prompt goes in on stdin** (2.58.5, crew H-2). On Windows agy.exe was started directly (no shell, the prompt
   quoted by the rules every Windows program reads) and still answered `Error: unexpected argument "are". Prompts are
   read only from -p/--print, -i/--prompt-interactive, or stdin`: the prompt ("You are …") was split at its spaces after
-  it reached agy. The launcher now starts `agy --print-timeout 900s [--settings <file>]` and writes the kickoff to its
+  it reached agy. The launcher now starts `agy --print-timeout 5400s --mode accept-edits --model <model> [--settings <file>]`
+  (2.76.0, below) and writes the kickoff to its
   stdin, then closes it, so no argument has a space to split (a settings path with a space is given relative to the
   agent's folder). **Untested on real agy:** if your agy ignores stdin, `STUDIO_AGY_PROMPT=arg` brings back
   `agy -p "<prompt>" …`.
+- **agy's options (2.76.0, the crew's B-80 and local patches W-0072/W-0073).**
+  - `--print-timeout` is `STUDIO_AGY_PRINT_TIMEOUT` (default `5400s`; a bare number means seconds). 900 s ended a
+    builder in the middle of a test run ("print timeout after 15m0s while the agent was waiting on 1 background task").
+  - `--mode accept-edits` (agy's analogue of Claude's `acceptEdits`): a headless agy session ends at its first refused
+    tool, and file writes were refused even with a `write_file` allow rule. `STUDIO_AGY_MODE=off` drops it; another
+    value is passed as the mode. Shell commands stay on the `--settings` allow-list.
+  - `--model <model>`: `--tool agy` with no `--model` ran agy's own default (a Claude model), not Gemini. With no
+    `--model` the launcher now picks `STUDIO_TOOL_AGY_MODEL`, else `gemini-4-argon-high` (`agy models` lists the names; a
+    model from the budget order's `agy:<model>` entry wins). **Untested on real agy:** the flag's name;
+    `STUDIO_AGY_MODEL_FLAG` names another flag, `=off` passes no model.
+  - In a lane copy the launcher writes `GEMINI.md` (agy reads it from its folder) with the shell rules: one plain
+    command per call, no pipes, chains, redirects or `cd` (a refused command ends the session; the crew found Gemini
+    pipes and chains by habit). The file is kept out of the copy's change (its exclude file); a repository that has its
+    own `GEMINI.md` keeps it. The agy kickoff carries the same rules.
+  - When agy stops on a refused tool, its line (`jetski: … permission … auto-denied`, or a print timeout) is put in the
+    hand-back note and the session's end event (`meta.agyStop`), so the reason isn't only in `.studio/agents/<name>.log`.
 - The agent's log (`npm run agent -- logs <agent>`) starts with a `[launcher]` line when a Windows tool was started
   as an npm shim or through cmd.exe, or wasn't found on PATH.
 - A custom command (`STUDIO_<ROLE>_CMD`, `STUDIO_AGENT_CMD`, `STUDIO_TOOL_<TOOL>_CMD`) is your own command line and
@@ -99,16 +116,20 @@ npm run agent -- allow agy --by <your name> --prune         # also take out harn
   agy. More needs `--all` (the whole harness list) and the owner's OK. `--prune` takes harness rules beyond the set being
   written back out of the file (backed up first; your own rules are never touched); a run without it says when there
   are any.
+- **File writes (2.76.0, B-80):** agy gates file writes apart from commands. With command rules only, a builder read,
+  then quit with `a tool required the "write_file" permission that headless mode cannot prompt for`. The set now
+  includes a bare `"write_file"` rule (the form the crew tested on Windows: it allows creating and editing files);
+  `command(*)` doesn't cover it. In beta mode (`npm run beta`) the orchestrator the owner named, or a Producer/Director
+  session, may run `allow agy` too (logged as a beta use); a worker never.
 - It adds that set under `permissions.allow`, two rules per entry: `command(npm)` (agy matches a command's
   leading words) and `command(regex:^npm(?: …)?$)` (on Windows, PowerShell or cmd lines that can't be split into
   words need `regex:`, per Google's docs; the pattern refuses `;`, `&&`, `|` and `$(…)`, so a chained second command
   still asks).
-- **What the crew saw on Windows: only exact commands matched.** `command(node --version)` allowed
-  `node --version`; `command(node *)`, `command(node*)`, `command(node**)`, `command(node:*)` and `command(node)` were
-  all denied. So on Windows the word-prefix rules allow nothing (`command(npm)` does not allow `npm run verify`), and
-  the `regex:` rules are **untested on real agy**: they may allow nothing either. After enrolling, check that one
-  launched agy agent can run `node`; if not, the owner adds the exact command lines it needs by hand (for example
-  `command(npm run verify)`, `command(git status)`), one rule per exact line.
+- **What the crew saw on Windows:** the word-prefix rules matched exact commands only (`command(node --version)`
+  allowed `node --version`; `command(node)` and its wildcard forms were denied), and the `regex:` rules worked
+  (2026-11-04: `node --version`, `npm --version` and `npm run -s task -- train status` through `agy --settings`). A pipe,
+  a chain or a `cd` is refused by design (`git status 2>&1 | Select-Object -First 3`, `cd .. ; node --version`), which
+  is why the launcher's GEMINI.md and kickoff say "one plain command per call".
 - It only adds: other settings and your own allow, ask and deny rules stay (deny still beats allow). The file is
   copied to `<file>.bak-<time>` first and written atomically. A second run adds nothing. A file that isn't plain JSON
   is left alone and the rules are printed to paste by hand.
@@ -211,7 +232,11 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
   locks and events live in this checkout's `studio/` and `.studio/`. The launcher's lane copies (`.lanes/<agent>`)
   link those back. A code lane gets a copy, and since 2.58.3 so does a code-writing role (anyone but the Producer,
   Director, planner and liaison) on a task with no lane: its staged files then can't block other tasks' `task done`
-  in the main checkout. `STUDIO_LANELESS=shared` keeps such sessions in the main checkout; `STUDIO_WORKTREES=off`
+  in the main checkout. 2.76.0 (B-84): so does such a session started with no task at all, and a code-writing session
+  that still claims a task from the main checkout (one an older launcher started) gets its copy at `task start`
+  (`harness/lane-at-claim.mjs`: `.lanes/<agent>`, the task's earlier work merged in, recorded on its session; the output
+  says to cd there). If no copy can be made, the claim is handed back: a builder session never works in the main
+  checkout. `STUDIO_LANELESS=shared` keeps such sessions in the main checkout; `STUDIO_WORKTREES=off`
   turns copies off.
 - **Name every agent.** One `--agent` per running agent, never shared. The scorecard, locks and HUD
   all go by that name.

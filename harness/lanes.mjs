@@ -421,7 +421,15 @@ export async function refreshLane(root, lane, { by, busyOk = false, tests = true
   const own = out(git(lane.dir, 'diff', '--name-only', '--no-renames', `${tip}...HEAD`)).split('\n').filter(Boolean);
   if (tests && own.length) {
     const script = path.join(lane.dir, 'harness', 'game-gates.mjs');
-    const r = spawnSync(process.execPath, [script, '--json', '--paths', own.join(','), '--changed', own.join(',')], { cwd: lane.dir, encoding: 'utf8', env: { ...laneEnv, STUDIO_GATE_RELATED: 'on', STUDIO_JOB_TASK: lane.task || '', ...(lane.agent ? { STUDIO_LOCK_OWNER: lane.agent } : {}) }, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+    // 2.76.0 (B-81): bounded per lane (STUDIO_LANES_REFRESH_TEST_S, 600; 0 = no limit). An upgrade's refresh of every
+    // lane ran past its caller (exit 143) and left every lane stale; a lane whose tests don't finish keeps the merge and
+    // is left to the next train's full verify.
+    const limS = Number(env.STUDIO_LANES_REFRESH_TEST_S ?? 600);
+    const r = spawnSync(process.execPath, [script, '--json', '--paths', own.join(','), '--changed', own.join(',')], { cwd: lane.dir, encoding: 'utf8', env: { ...laneEnv, STUDIO_GATE_RELATED: 'on', STUDIO_JOB_TASK: lane.task || '', ...(lane.agent ? { STUDIO_LOCK_OWNER: lane.agent } : {}) }, maxBuffer: 64 * 1024 * 1024, windowsHide: true, ...(Number.isFinite(limS) && limS > 0 ? { timeout: limS * 1000, killSignal: 'SIGKILL' } : {}) });
+    if (r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) {
+      testRes = { ok: true, ran: [], failed: [], skipped: [], timedOut: true, note: `targeted tests not finished in ${limS} s (STUDIO_LANES_REFRESH_TEST_S): left to the next train's full verify` };
+      return done('ok', `${merged ? `merged ${main} (${behind} commit(s))` : `already has ${main}`}${restamped ? `; re-stamped ${restamped} commit(s)` : ''}; ${testRes.note}`, { head, merged, restamped, behind, tests: testRes });
+    }
     let j = null;
     try { j = JSON.parse(String(r.stdout || '').trim().split('\n').pop()); } catch {}
     testRes = { ok: r.status === 0 && Boolean(j?.ok ?? true), ran: (j?.rows || []).map((x) => x.id), failed: (j?.failed || []).map((x) => `${x.id}: ${String(x.why || '').slice(0, 200)}`), skipped: (j?.skipped || []).map((x) => x.id), ...(j ? {} : { tail: tailOf(`${r.stdout || ''}${r.stderr || ''}`) }) };

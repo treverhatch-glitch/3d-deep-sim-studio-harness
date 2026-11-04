@@ -101,6 +101,7 @@ import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGates
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
+import { refreshStaleLane } from './train-refresh.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -1423,7 +1424,8 @@ export function precheckChild(root, lane) {
   let src = '';
   try { src = fs.readFileSync(script, 'utf8'); } catch {}
   if (!src.includes("flags['train-check']")) return { ok: false, error: 'old-harness', message: `${lane.task}'s lane copy runs a harness from before the merge train (2.59.0): merge the studio's branch into the copy (git merge ${mainBranch(root)}), commit, and queue it again, or land it with STUDIO_TRAIN=off npm run task -- done ${lane.task}` };
-  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent };
+  // 2.76.0 (B-90): run in the lane owner's name, but its events are the train's (meta.onBehalf), never the owner's activity.
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: lane.agent, STUDIO_ON_BEHALF: 'train' };
   const r = spawnSync(process.execPath, [script, 'done', lane.task, '--agent', lane.agent, '--train-check'], { windowsHide: true, cwd: lane.dir, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const line = String(r.stdout || '').trim().split('\n').filter((l) => l.startsWith('{"train')).pop();
   try { const j = JSON.parse(line); return { ...j, ok: Boolean(j.ok) }; } catch {}
@@ -1939,9 +1941,16 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   for (const lane of lanes) {
     // A rider goes only with the caller's own lane: if that one can't go, the riders wait for the next train.
     if (lane.rider && !ready.some((l) => l.own)) continue;
-    const now = laneNow(lane);
+    let now = laneNow(lane);
     if (now.error) { drop(lane, now.error, { handBack: false }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
+    // 2.76.0 (B-81): a lane whose harness is behind main (an upgrade's refresh that didn't finish) is refreshed here
+    // (harness/train-refresh.mjs), not handed back by its hooks check; only a real conflict hands it back.
+    if (!dryRun) {
+      const rf = await (deps.refreshStale || refreshStaleLane)(root, { ...lane, head: now.head }, { log });
+      if (rf.handBack) { drop(lane, rf.why); continue; }
+      if (rf.refreshed) { now = laneNow(lane); if (now.error) { drop(lane, now.error, { handBack: false }); continue; } }
+    }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
     const c = await laneTier(root, { head: now.head, task: lane.task, agent: lane.agent, dir: lane.dir }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);

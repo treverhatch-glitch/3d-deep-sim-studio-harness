@@ -71,10 +71,13 @@ export const MAIN_CHECKOUT_ROLES = new Set([...PLANNING_ROLES, 'liaison', 'human
 /**
  * A session on a task with no lane gets its own copy too when its role writes code (builder, rnd, art, qa-playtester,
  * reviewer, …): builders on laneless tasks left staged test files in the main checkout and blocked six other tasks'
- * `task done` for 3 hours. STUDIO_LANELESS=shared keeps the old shared checkout; STUDIO_WORKTREES=off turns copies off.
+ * `task done` for 3 hours. 2.76.0 (B-84): so does such a session started with no task at all. STUDIO_LANELESS=shared keeps the old shared checkout; STUDIO_WORKTREES=off turns copies off.
  */
 export function lanelessWantsCopy({ role, lane = null, task = null, env = process.env } = {}) {
-  if (lane || !task || !role) return false;
+  // 2.76.0 (B-84): a session started with no task gets its copy too: three builders started without --task claimed a
+  // task, staged game files in the main checkout's index and were refused by the pre-commit hook.
+  void task;
+  if (lane || !role) return false;
   if (/^shared$/i.test(env.STUDIO_LANELESS || '') || /^(off|0|false|no)$/i.test(env.STUDIO_WORKTREES || '')) return false;
   return !MAIN_CHECKOUT_ROLES.has(String(role).toLowerCase());
 }
