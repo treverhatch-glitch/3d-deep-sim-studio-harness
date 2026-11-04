@@ -33,6 +33,13 @@
  *   g. 2.77.0 (o): remote workers (harness/remote-workers.mjs): when the local builders are at their target, the
  *      remote-eligible ready tasks are offered to remote (cloud) workers (status "remote", `line -- plan`); with
  *      STUDIO_REMOTE=on the pass also ends leases that ran out and starts a background fetch of remote/* when due.
+ *   h. 2.77.0 (u, P5.2/P5.3): each engine train (harness/unity-train.mjs, any engine target of harness/engine-tracks.mjs)
+ *      with branches queued is started in a quiet window (enginePass/engineWindow): no web train running (train >
+ *      builder verifies > engine > soaks), no other job of the same heavy kind, free RAM at or over the engine's floor,
+ *      CPU under STUDIO_ENGINE_QUIET_CPU_PCT (75), and no web lane queued unless the engine queue waited
+ *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
+ *      machine:heavy with the RAM floor, and an infrastructure abort stays NOT RUN (2.73.2). STUDIO_ENGINE_TRAIN_AUTO=off
+ *      (or engines.<x>.trainAuto false) leaves starting it to a person.
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
@@ -45,7 +52,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 
@@ -264,8 +271,8 @@ export async function rigNow({ env = process.env, now = Date.now(), deps = {} } 
         if (r && typeof r === 'object') {
           const byRam = [r.builders, r.builderRoom, r.sessions].map(Number).find(Number.isFinite);
           const cpuBusy = [r.cpuBusy, r.cpu?.busy].map(Number).find(Number.isFinite);
-          const heavy = (Array.isArray(r.jobs) ? r.jobs : Array.isArray(r.heavy) ? r.heavy : []).map((h) => ({ kind: h.kind || null, label: h.label || null, owner: h.owner || null, ramGb: h.ramGb ?? null, cpuThreads: h.cpuThreads ?? h.workers ?? null })).sort((a, b) => JOB_RANK(a) - JOB_RANK(b));
-          return { source: 'rig-budget', known: r.known !== false && (Number.isFinite(byRam) || Number.isFinite(cpuBusy)), byRam: Number.isFinite(byRam) ? byRam : null, cpuBusy: Number.isFinite(cpuBusy) ? cpuBusy : null, cpuBusyPct: busyPct, cpuHold: Number.isFinite(cpuBusy) && cpuBusy * 100 >= busyPct, freeRamGb: r.freeRamGb ?? null, usableRamGb: r.usableRamGb ?? null, claimedGb: r.claimedGb ?? null, cores: r.cores ?? null, heavy, train, why: r.why || (Number.isFinite(byRam) ? `the rig budget has room for ${byRam} builder session(s)` : '') };
+          const heavy = (Array.isArray(r.jobs) ? r.jobs : Array.isArray(r.heavy) ? r.heavy : Array.isArray(r.running) ? r.running : []).map((h) => ({ kind: h.kind || null, label: h.label || null, owner: h.owner || null, ramGb: h.ramGb ?? null, cpuThreads: h.cpuThreads ?? h.workers ?? null })).sort((a, b) => JOB_RANK(a) - JOB_RANK(b));
+          return { source: 'rig-budget', known: r.known !== false && (Number.isFinite(byRam) || Number.isFinite(cpuBusy)), byRam: Number.isFinite(byRam) ? byRam : null, cpuBusy: Number.isFinite(cpuBusy) ? cpuBusy : null, cpuBusyPct: busyPct, cpuHold: Number.isFinite(cpuBusy) && cpuBusy * 100 >= busyPct, freeRamGb: r.freeRamGb ?? r.freeGb ?? null, usableRamGb: r.usableRamGb ?? null, claimedGb: r.claimedGb ?? null, cores: r.cores ?? null, heavy, train, why: r.why || (Number.isFinite(byRam) ? `the rig budget has room for ${byRam} builder session(s)` : '') };
         }
       }
     } catch { /* not there yet: the heavy budget below */ }
@@ -608,6 +615,9 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     // background fetch of remote/* starts when one is due, and a changed offer is one remote.offer event.
     let remotePass = null;
     if (acting && p.remote?.on) { try { remotePass = await (await import('./remote-workers.mjs')).remotePass({ env, now, plan: p.remote, ...(deps.spawnFetch ? { spawnFetch: deps.spawnFetch } : {}), ...(deps.root ? { root: deps.root } : {}) }); } catch {} }
+    // 2.77.0 (u, P5.2/P5.3): engine trains in quiet windows.
+    let engines = [];
+    try { engines = await enginePass({ now, env, dryRun: !acting, rig: f.rig, deps }); } catch (e) { engines = [{ error: e.message }]; }
     const status = {
       at: new Date(now).toISOString(),
       mode,
@@ -626,6 +636,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       actions: readActions(10),
       models: f.pools ? { on: true, why: f.pools.why, pools: Object.fromEntries(Object.entries(f.pools.state).map(([k, v]) => [k, { model: v.model, tool: v.tool, usedPct: v.usedPct, near: v.near, out: v.out }])) } : { on: false },
       protectedSteps: (f.protectedSteps || []).map(({ task, actor, via, hold, why, fix }) => ({ task, actor, via: via || null, hold, why, fix })),
+      engines,
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -648,7 +659,98 @@ export function summaryLine(s) {
     s.remote?.on && (s.remote.out || s.remote.queued || s.remote.offer?.length) ? `remote ${s.remote.out}/${s.remote.max}${s.remote.offer?.length ? ` (offer ${s.remote.offer.map((o) => o.task).join(', ')})` : ''}` : null,
     s.fixed?.length ? `fixed ${s.fixed.length}` : null,
     s.reasons?.length ? 'a Producer note is open' : null,
+    ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
   ].filter(Boolean).join('; ');
+}
+
+// ---- engine trains in quiet windows (2.77.0, u: P5.2/P5.3) -----------------------------------------------------------
+
+/**
+ * Should engine <x>'s train start now? Pure. f: { engine, label, heavyKind, queued, oldestAt, running, startedRecently,
+ * auto, webTrain, webQueued, heavy: [{ kind, label }], freeGb, floorGb, floorFrom, cpuBusy, expectedMin, now }.
+ * { start, wait, why }. Priority (the owner's): the web train > builder verifies > Unity/art > soaks.
+ */
+export function engineWindow(f, env = process.env) {
+  const L = f.label || f.engine;
+  const quietPct = num(env.STUDIO_ENGINE_QUIET_CPU_PCT, 75);
+  const maxWait = num(env.STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN, 120);
+  const waited = f.oldestAt ? Math.round(((f.now ?? Date.now()) - Date.parse(f.oldestAt)) / 60000) : 0;
+  const no = (why) => ({ start: false, wait: true, why });
+  if (!f.auto) return { start: false, wait: false, why: `starting the ${L} train is left to a person (STUDIO_ENGINE_TRAIN_AUTO=off or engines.${f.engine}.trainAuto false): npm run task -- train --engine ${f.engine}` };
+  if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
+  if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
+  if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
+  if (f.webTrain) return no('the web train is running (its verify goes first: train > builder verifies > engine > soaks)');
+  const sameKind = (f.heavy || []).filter((h) => (f.heavyKind === 'unity' ? /unity/i.test(`${h.kind || ''}`) : false) || /\btrain\b/i.test(`${h.kind || ''}`));
+  if (sameKind.length) return no(`machine:heavy holds ${sameKind.map((h) => h.label || h.kind).slice(0, 2).join(', ')}`);
+  if (Number.isFinite(f.freeGb) && f.floorGb > 0 && f.freeGb < f.floorGb) return no(`free RAM ${f.freeGb} GB is under the ${L} floor ${f.floorGb} GB (${f.floorFrom})`);
+  if (Number.isFinite(f.cpuBusy) && f.cpuBusy * 100 >= quietPct) return no(`CPU ${Math.round(f.cpuBusy * 100)}% busy (STUDIO_ENGINE_QUIET_CPU_PCT ${quietPct})`);
+  if (f.webQueued > 0 && waited < maxWait) return no(`${f.webQueued} web lane(s) wait for the web train, which goes first (the ${L} queue waited ${waited} of ${maxWait} min: STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN)`);
+  return { start: true, wait: false, why: `quiet window: no web train${f.webQueued ? ` (the ${L} queue waited ${waited} min, past ${maxWait})` : ''}, ${Number.isFinite(f.freeGb) ? `${f.freeGb} GB free (floor ${f.floorGb} GB)` : 'free RAM unknown (the train waits for its floor)'}${Number.isFinite(f.cpuBusy) ? `, CPU ${Math.round(f.cpuBusy * 100)}%` : ''}; one land run ~${f.expectedMin ?? '?'} min` };
+}
+
+const ENGINE_STARTS = () => path.join(LINE_DIR(), 'engine-trains.json');
+
+/**
+ * One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts the
+ * ones whose window is open (unless dryRun or STUDIO_LINE_PRODUCER=report). deps: { rig, rigBudget, machine, root,
+ * startTrain(engine) -> { pid } }.
+ */
+export async function enginePass({ now = Date.now(), env = process.env, dryRun = false, rig = null, deps = {} } = {}) {
+  const et = await import('./engine-tracks.mjs');
+  const ut = await import('./unity-train.mjs');
+  const { mainRoot } = await import('./worktree.mjs');
+  const root = deps.root || mainRoot();
+  const targets = et.engineTargets({ root }).filter((t) => t.land);
+  if (!targets.length) return [];
+  // The machine: rigBudget's running jobs and free RAM, the scan's CPU.
+  let rb = null;
+  try { rb = deps.rigBudget ? await deps.rigBudget() : await (await import('./rig-budget.mjs')).rigBudget({ env, now }); } catch { rb = null; }
+  let cpuBusy = null;
+  try { const prof = deps.machine !== undefined ? deps.machine : (await import('./heavy-budget.mjs')).machineProfile(root, { env, now }); cpuBusy = Number.isFinite(prof?.cpu?.busy) ? prof.cpu.busy : null; } catch {}
+  const heavy = (rb?.running || rig?.heavy || []).map((h) => ({ kind: h.kind, label: h.label }));
+  let webTrain = Boolean(rig?.train?.running);
+  try { if (!webTrain && !deps.rig) webTrain = Boolean((await import('./train-daemon.mjs')).trainLockHeld(root, env, now)); } catch {}
+  if (deps.webTrain !== undefined) webTrain = deps.webTrain;
+  const webQ = (readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || []).filter((e) => e?.task && !(e.held && !(e.released && e.released.head === e.head)));
+  const starts = readJson(ENGINE_STARTS(), {}) || {};
+  const autoOn = !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_TRAIN_AUTO ?? ''));
+  const acting = !dryRun && lineMode(env) === 'on';
+  const out = [];
+  for (const t of targets) {
+    const q = ut.readUnityQueue(root, t.name);
+    const running = ut.runningUnityTrain(root, t.name);
+    const floor = et.engineFloor(t.name, { env, root });
+    const exp = et.expectedMinutes(t.name, { root });
+    const last = starts[t.name];
+    const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
+    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto, webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    const w = engineWindow(f, env);
+    const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why };
+    if (w.start && acting) {
+      try {
+        const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);
+        row.started = true;
+        row.pid = r?.pid || null;
+        starts[t.name] = { at: new Date(now).toISOString(), pid: row.pid };
+        fs.mkdirSync(LINE_DIR(), { recursive: true });
+        fs.writeFileSync(ENGINE_STARTS(), `${JSON.stringify(starts, null, 2)}\n`);
+        logAction({ kind: 'engine-train', what: `started the ${t.label} train (${q.length} branch(es): ${q.map((e) => e.task).join(', ')}): ${w.why}`, meta: { engine: t.name, tasks: q.map((e) => e.task), expectedMin: exp.minutes } });
+      } catch (e) { row.started = false; row.why = `${w.why}; could not start it: ${e.message}`; }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** `node harness/task.mjs train --engine <x> --by line-producer`, detached, its output in .studio/line/<x>-train.log. */
+export function startEngineTrain(root, engine, env = process.env) {
+  fs.mkdirSync(LINE_DIR(), { recursive: true });
+  const fd = fs.openSync(path.join(LINE_DIR(), `${engine}-train.log`), 'a');
+  const child = spawn(process.execPath, [path.join(root, 'harness', 'task.mjs'), 'train', '--engine', engine, '--by', LINE_AGENT], { cwd: root, env: { ...env, STUDIO_LOCK_OWNER: LINE_AGENT }, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+  child.unref();
+  try { fs.closeSync(fd); } catch {}
+  return { pid: child.pid };
 }
 
 /** The last pass's status (.studio/line/status.json), or null. */

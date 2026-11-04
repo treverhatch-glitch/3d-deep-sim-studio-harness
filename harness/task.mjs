@@ -23,6 +23,7 @@ import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
+import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack } from './engine-tracks.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -581,6 +582,9 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
     if (idx !== -1) [target] = q.backlog.splice(idx, 1);
   }
   if (!target) return null;
+  // 2.77.0 (u): an engine pass whose work lives in the engine's own repo: the studio-repo checks (no code changed, the
+  // game's checks) don't judge it; its done check looks at its branch there and its engine's land run is its verify.
+  const extEngine = (() => { try { const r = engineTaskOf(target.id); return r && engineRepo(r.engine) ? r : null; } catch { return null; } })();
 
   // 2.60.1 (B-40): studio/ in a lane copy is main's: main's studio config changed while this task was worked and not
   // committed there doesn't land with the lane. Said loudly, never a refusal.
@@ -594,7 +598,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30m: a build task must change code. T-017 in the Marina run was closed with no change at all
   // (the agent judged the existing code good enough). Zero code changes since the task started are
   // refused unless the task is marked no-op with a reason (task done <ID> --no-op "<why>").
-  if (!force && target.role === 'builder' && ['change', 'chore', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
+  if (!force && !extEngine && target.role === 'builder' && ['change', 'chore', 'system', 'bug', 'fun', 'balance'].includes(taskType(target)) && process.env.STUDIO_DONE_NOOP !== 'allow') {
     if (noop && String(noop).trim().length >= 10) {
       emitEvent({ type: 'task.noop', agent: agent || target.role, task: target.id, msg: `${target.id} closed as no-op: ${String(noop).trim().slice(0, 300)}` });
       note = `${note ? `${note}; ` : ''}no-op: ${String(noop).trim().slice(0, 200)}`;
@@ -677,7 +681,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30k: done means committed. Uncommitted changes in the task's claimed files (or the game's
   // folders when it claimed none) are refused, so they aren't later committed under another task
   // (T-013 in the Marina run was accepted with its diff left uncommitted).
-  if (!force && !inLaneCopy() && process.env.STUDIO_DONE_UNCOMMITTED !== 'allow') {
+  if (!force && !extEngine && !inLaneCopy() && process.env.STUDIO_DONE_UNCOMMITTED !== 'allow') {
     const owner = lock.locked ? lock.lock.owner : agent;
     let scope = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
     const claimedPaths = scope.length > 0;
@@ -775,7 +779,8 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
 
   // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
   // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
-  if (!force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
+  if (extEngine && !force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') console.log(`[task done] ${target.id} is a ${extEngine.engine} pass in its own repo: the studio game's checks don't judge it; its ${extEngine.engine} land run does`);
+  if (!force && !extEngine && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
     const owner = lock.locked ? lock.lock.owner : agent;
     const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
     const lanePaths = laneList(readHolds()[target.id]?.lane);
@@ -850,8 +855,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   if (unityTrainCheck) return force ? { error: 'train-force', message: 'A forced done never goes through the Unity train.' } : { unityReady: true, id: target.id, type: check.type };
   // 2.59.0 (#16): a task on the Unity track (task add --track engine:unity) lands through the studio's Unity gate
   // (harness/unity-gate.mjs: its configured land command, under the machine:heavy lock); it closes only on a pass.
-  if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === target.id).pop()?.meta?.track === 'engine:unity') {
-    const ug = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-gate.mjs'), '--json', '--task', target.id], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
+  // 2.77.0 (u, P5.6): any engine target with a land command (studio/game.json engines.<x>.land); the track from the
+  // task's engine record first (harness/engine-tracks.mjs), so an old task keeps it.
+  const landEngine = (() => { const e = engineOfTrack(extEngine?.track || (() => { try { return engineTaskOf(target.id)?.track; } catch { return null; } })()); return e && (e === 'unity' || engineTarget(e)?.land) ? e : null; })();
+  if (!force && process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && landEngine) {
+    const ug = spawnSync(process.execPath, [path.join(REPO_ROOT, 'harness', 'unity-gate.mjs'), '--json', '--task', target.id, '--engine', landEngine], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, STUDIO_GATE_PRIORITY: 'landing' }, maxBuffer: 32 * 1024 * 1024 });
     let u = null;
     try { u = JSON.parse((ug.stdout || '').trim().split('\n').pop()); } catch {}
     if (!u) return { error: 'unity-gate', message: `${target.id} is not done: the Unity gate didn't report (${`${ug.stderr || ''}${ug.stdout || ''}`.trim().slice(-300) || `exit ${ug.status}`}). node harness/unity-gate.mjs --task ${target.id} runs it.` };
@@ -1446,6 +1454,9 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
     msg: `Queued ${newTask.id} [${newTask.priority}] (${newTask.role}): ${newTask.title}`,
     meta,
   });
+  // 2.77.0 (u, P5.1): an engine pass (--track engine:<name>) keeps its engine, branch, scope and visual check in its own
+  // record (.studio/engine/tasks.json): it never falls out of the last 20000 events the way the task.added meta does.
+  recordEngineTaskAtAdd(newTask.id, meta);
   // 2.30d (#5): a builder task bigger than size 3 gets a linked planner task to split it, and waits for it.
   let split = null;
   if (role === 'builder' && Number(meta.size) > SIZE_CAP && !meta.splitOf) {
@@ -1474,6 +1485,27 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
 }
 
 const fromRescueMeta = (meta) => meta?.origin === 'rescue' || meta?.rescueSplit;
+
+/** 2.77.0 (u): the engine targets the studio names (for train status). */
+function engineTargetsQuiet() { try { return Object.keys(JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'studio', 'game.json'), 'utf8'))?.engines || {}).filter((n) => /^[a-z][a-z0-9-]{1,30}$/.test(n)); } catch { return []; } }
+
+/** 2.77.0 (u, P5.1): the engine record of a task added on an engine track (harness/engine-tracks.mjs). Never throws. */
+function recordEngineTaskAtAdd(id, meta = {}) {
+  const m = String(meta.track || '').match(/^engine:([a-z][a-z0-9-]{1,30})$/);
+  if (!m) return;
+  try {
+    const refs = Array.isArray(meta.refs) ? meta.refs : [];
+    const rec = { engine: m[1], track: meta.track, branch: typeof meta.branch === 'string' ? meta.branch : null, scope: typeof meta.scope === 'string' ? meta.scope : null, visual: meta.visualCheck || refs.length ? { required: true, refs } : null, by: meta.origin || null };
+    const f = path.join(mainRoot(), '.studio', 'engine', 'tasks.json');
+    let all = {};
+    try { all = JSON.parse(fs.readFileSync(f, 'utf8')) || {}; } catch { all = {}; }
+    all[id] = { ...rec, at: new Date().toISOString() };
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`);
+    fs.renameSync(tmp, f);
+  } catch { /* the task.added event still carries the track */ }
+}
 
 /** Take a waiting task off the queue (2.30, J11). Work in progress is handed back first. The why is kept. */
 export function dropTask(id, { by = actor(), why } = {}) {
@@ -1848,11 +1880,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (flags.train) {
       if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
       // 2.63.0: a Unity-track task queues its Unity branch for the Unity merge train (harness/unity-train.mjs).
-      if (process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && (await import('./unity-gate.mjs')).taskTrack(targetId) === 'engine:unity') {
+      // 2.77.0 (u, P5.2/P5.6): any engine target with a land command trains on its own engine train.
+      const trainEngine = (() => { const e = engineOfTrack((() => { try { return (engineTaskOf(targetId) || {}).track; } catch { return null; } })()); return e && (e === 'unity' || engineTarget(e)?.land) ? e : null; })();
+      if (process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && trainEngine) {
+        // --branch is recorded first, so the done check looks at that branch in the engine repo.
+        if (typeof flags.branch === 'string' && flags.branch) { try { (await import('./engine-tracks.mjs')).setEngineTask(targetId, { engine: trainEngine, branch: flags.branch }); } catch {} }
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
         if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
         if (pre.error) { console.error(pre.message); process.exit(1); }
-        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { task: pre.id, agent: whoAmI(flags), branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
+        const r = (await import('./unity-train.mjs')).queueUnityTask(mainRoot(), { engine: trainEngine, task: pre.id, agent: whoAmI(flags), branch: typeof flags.branch === 'string' ? flags.branch : null, note: typeof flags.note === 'string' ? flags.note : '' });
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
@@ -1964,20 +2000,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (cmd === 'train') {
     const tr = await import('./train.mjs');
     // 2.63.0: the Unity merge train (harness/unity-train.mjs): `train --unity` (or --track engine:unity).
-    if (flags.unity || flags.track === 'engine:unity') {
+    // 2.77.0 (u, P5.6): `train --engine <name>` (or --track engine:<name>) for any engine target; --unity is --engine unity.
+    const trainEng = typeof flags.engine === 'string' ? flags.engine : flags.unity ? 'unity' : engineOfTrack(flags.track);
+    if (trainEng) {
       const ut = await import('./unity-train.mjs');
-      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot())); process.exit(0); }
+      if (arg1 === 'status' || flags.unity === 'status' || flags.status) { console.log(ut.unityStatusText(mainRoot(), { engine: trainEng })); process.exit(0); }
       const busyMod = await import('./busy.mjs');
-      const r = await ut.runUnityTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
+      const r = await ut.runUnityTrain({ engine: trainEng, root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), by: typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human', waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
       (r.ok ? console.log : console.error)(r.message);
-      console.log(JSON.stringify({ unityTrain: r.id, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
+      console.log(JSON.stringify({ unityTrain: r.id, engine: trainEng, landed: r.landed, dropped: r.dropped, deferred: r.deferred, runs: r.runs ?? 0, ...(r.refused ? { refused: r.refused } : {}), ...(r.busy ? { busy: r.busy } : {}) }, null, 2));
       process.exit(r.ok ? 0 : r.refused ? 3 : 1);
     }
     if (arg1 === 'status' || flags.status) {
       const qd = tr.readQueue(mainRoot());
       console.log(qd.length ? `${qd.length} lane(s) wait for the next train:\n${qd.map((e) => `  ${e.task}  ${e.agent}  ${e.branch} at ${String(e.head).slice(0, 8)} (queued ${String(e.at).slice(0, 16)})${tr.heldNow(e) ? `  NEEDS THE OWNER (tier ${e.held.tier}: ${String(e.held.why).slice(0, 160)}; train release ${e.task} --by <name>)` : e.released && e.released.head === e.head ? `  released by ${e.released.by}` : ''}${e.after?.task ? `  after ${e.after.task} (predicted conflict)` : ''}${tr.taskHoldOf(mainRoot(), e.task) ? `  OUT OF TRAINS: ${tr.heldOutWhy(tr.taskHoldOf(mainRoot(), e.task)).replace('<ID>', e.task)}` : ''}`).join('\n')}` : 'No lane waits for a train (task done <ID> --train queues one).');
       { const kl = (await import('./known-red.mjs')).knownRedLine(mainRoot()); if (kl) console.log(kl); } // 2.77.0 (P9.3)
-      { const ut = (await import('./unity-train.mjs')).unityStatusText(mainRoot(), { quiet: true }); if (ut) console.log(ut); } // 2.63.0: the Unity train
+      { const um = await import('./unity-train.mjs'); const names = new Set(['unity', ...engineTargetsQuiet()]); for (const e of names) { const ut = um.unityStatusText(mainRoot(), { quiet: true, engine: e }); if (ut) console.log(ut); } } // 2.63.0: the Unity train; 2.77.0: every engine's
       process.exit(0);
     }
     // 2.63.0: a person (or an agent with a person's direct permission; never a worker) releases a lane held for the owner.
@@ -2014,7 +2052,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity | --engine <name>] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });
@@ -2242,7 +2280,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // --start/--claim are switches: a title word the parser took as their value is part of the title.
     const title = [...flags._.slice(1), ...['start', 'claim'].filter((k) => typeof flags[k] === 'string').map((k) => flags[k])].join(' ');
     if (!title) {
-      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <unity branch>]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
+      console.error('Usage: node harness/task.mjs add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|study|research|balance|fun|playtest|review|docs|idea] [--size 1-5] [--caused-by T-012] [--phase 1|2|3 --serves pillar:<name>|layer:<id>] [--idea I-001] [--part sim|renderer|both] [--lane <folder>] [--paths a.js,b.js] [--after T-011] [--track web|engine:<name> [--branch <engine branch>] [--scope "…"] [--visual-check] [--refs a.jpg,b.jpg]] [--prototype | --infra] [--origin dev|agent] [--asked "<the dev\'s words>"] [--mechanic] [--tricks 1-6] [--start --agent <you>]');
       process.exit(1);
     }
     // --type bug|chore|study|balance|fun|playtest|review|docs puts the matching prefix on the title.
@@ -2268,6 +2306,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error('--start needs --agent <unique-name> (or STUDIO_LOCK_OWNER): the task is claimed for that agent as it is queued.');
       process.exit(1);
     }
+    // 2.77.0 (u, P5.5): reference photos are files the studio provides; the harness never downloads one.
+    if (typeof flags.refs === 'string') {
+      const bad = flags.refs.split(',').map((x) => x.trim()).filter((x) => /^[a-z][a-z0-9+.-]*:\/\//i.test(x));
+      if (bad.length) { console.error(`--refs takes local paths to reference photos the studio provides (a file, or the assets reference folder), not links: ${bad.join(', ')}. The harness never downloads photos; save it under assets/reference/ first.`); process.exit(1); }
+    }
+    if ((flags['visual-check'] || typeof flags.refs === 'string' || typeof flags.scope === 'string') && !/^engine:[a-z][a-z0-9-]{1,30}$/.test(String(flags.track || ''))) console.error('note: --scope, --visual-check and --refs belong to an engine pass (--track engine:<name>); recorded in the task\'s meta only.');
     const created = addTask({
       title: `${prefix}${title}`,
       role: flags.role || 'builder',
@@ -2289,6 +2333,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
         // 2.60.1 (B-41): the Unity branch a --track engine:unity task lands from (harness/unity-gate.mjs {branch}).
         ...(typeof flags.branch === 'string' ? { branch: flags.branch } : {}),
+        // 2.77.0 (u, P5.1/P5.5): an engine pass's scope, its visual check and the studio's reference photos (local paths).
+        ...(typeof flags.scope === 'string' ? { scope: flags.scope.slice(0, 600) } : {}),
+        ...(flags['visual-check'] ? { visualCheck: true } : {}),
+        ...(typeof flags.refs === 'string' && flags.refs.trim() ? { refs: flags.refs.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
         ...(typeof flags.after === 'string' ? { after: flags.after.split(/[,\s]+/).filter((x) => /^[A-Z]+-\d+$/.test(x)) } : {}),
         ...(flags.prototype ? { prototype: true } : {}),
         ...(flags.infra ? { infra: true } : {}),

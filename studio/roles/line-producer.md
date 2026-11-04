@@ -61,3 +61,9 @@ is only reported, naming who may act for the owner (beta mode's agents, the owne
 Settings: `STUDIO_LINE_PRODUCER` (on | report | off), `STUDIO_LINE_EXPANSION_SHARE`, `STUDIO_LINE_EXPANSION_MIN`,
 `STUDIO_LINE_CHAIN_MIN`, `STUDIO_LINE_BUILDER_GB`, `STUDIO_LINE_CPU_BUSY_PCT`, `STUDIO_LINE_RIG`,
 `STUDIO_LINE_PLAN_MAX_SEC` (docs/LINE-PRODUCER.md).
+
+**Engine trains (2.77.0).** Each pass you also start an engine's train (`task train --engine <name>`, detached) when its
+queue has branches and the machine is in a quiet window: no web train, no other job of its kind, free RAM over its
+floor, CPU under `STUDIO_ENGINE_QUIET_CPU_PCT`, web lanes first unless the engine queue waited
+`STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN`. The `engines` rows of `npm run line -- status --json` say why one waits
+(docs/ENGINE-TRACKS.md).

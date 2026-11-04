@@ -585,7 +585,8 @@ async function linePlanNow(now) {
     if (!plan) return null;
     return {
       orderGroups: (groups) => lp.orderGroups(groups, plan),
-      holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
+      // 2.77.0 (u, P5.1): an engine pass's session (engine-porter) counts against the rig's cap with the builders.
+      holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : g.role === 'engine-porter' && plan.rigCap !== null && live.filter((s) => (s.role === 'builder' || s.role === 'engine-porter') && s.running !== false).length >= plan.rigCap ? `engine-porter: the Line Producer holds new engine passes (the rig can carry ${plan.rigCap} sessions now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
       routeFor: (g, { tool, preferred, custom, outUntil }) => {
         const id = g.tasks[0]?.id;
         const r = plan.routes[id];
