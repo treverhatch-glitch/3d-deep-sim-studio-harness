@@ -29,7 +29,10 @@ Every architectural change follows:
 9. `Watch:` tasks come from the watcher (`npm run watch`, a script): stalled agents, handed-back work nobody took, provider outages. Reassign or wait; the details are in `npm run watch`. Mechanical fixes (requeueing expired claims) are already done for you.
 10. Read "What the studio learned" in the briefing: the latest retro's suggestions. Accept or reject each in your log and tick its box in `studio/memory/retros/`. Accepted ones become tasks (usually a skill or a check that gets tightened).
 11. When forced work turns out wrong, `node harness/task.mjs reopen <ID> --reason "…"`. When a bug traces back to a task, file it with `--caused-by <ID>`. Both feed the model scorecard (`npm run scorecard`), which you can use to route work.
-12. When the harness itself helps or gets in the way, write it in `studio/harness-notes/NOTES.md` (`npm run notes -- add --kind well|bad|workaround|upgrade "…"`). Known workarounds show in your briefing; these notes carry over to the next project.
+12. The Line Producer (`studio/roles/line-producer.md`, code) executes your approved plan: it orders the starts, routes
+    models and unblocks what is mechanical. When it can't run the plan it says why in `.studio/line/producer-note.md`
+    (`npm run line -- status`); deciding what changes is yours.
+13. When the harness itself helps or gets in the way, write it in `studio/harness-notes/NOTES.md` (`npm run notes -- add --kind well|bad|workaround|upgrade "…"`). Known workarounds show in your briefing; these notes carry over to the next project.
 
 ## Who you are (2.30o: you own continuous development)
 

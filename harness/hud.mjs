@@ -392,6 +392,10 @@ export function buildHudState() {
   if (watchLast && !agentList.some((a) => a.name === 'watch')) {
     agentList.push({ name: 'watch', role: 'watch', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
   }
+  // 2.76.0 (k): the Line Producer's desk in the Producer's office (a script, like the watcher), once it has run.
+  if (fs.existsSync(path.join(STUDIO_STATE_DIR, 'line', 'status.json')) && !agentList.some((a) => a.name === 'line-producer')) {
+    agentList.push({ name: 'line-producer', role: 'line-producer', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
+  }
   const producerName = (pname && agentList.find((a) => a.name === pname)?.name) || agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
   const byName = new Map(agentList.map((a) => [a.name, a]));
 

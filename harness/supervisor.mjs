@@ -451,7 +451,11 @@ export async function supervise(opts, state, now = Date.now()) {
   const started = [];
   let ram = null;
   // Most urgent first; the dev hacker only gets a slot nobody else needs (it never holds anything up).
-  const ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  let ordered = [...groups.values()].sort((a, b) => (a.role === 'dev-hacker') - (b.role === 'dev-hacker') || String(a.tasks[0].priority).localeCompare(String(b.tasks[0].priority)));
+  // 2.76.0 (k): the Line Producer's plan (harness/line-producer.mjs, STUDIO_LINE_PRODUCER): its order, model routes and
+  // the rig's builder cap. Within the pace's caps only: it reorders and can hold builders back, never adds one.
+  const line = await linePlanNow(now);
+  if (line) ordered = line.orderGroups(ordered);
   for (const g of ordered) {
     if (room <= 0) break;
     if (crewPaused[g.role]) {
@@ -473,6 +477,8 @@ export async function supervise(opts, state, now = Date.now()) {
         continue;
       }
     }
+    const lineHold = line ? line.holdFor(g, live) : '';
+    if (lineHold) { why.push(lineHold); continue; }
     const perRole = (mode.perRole || {})[g.role] ?? 1;
     // One agent per lane (the clash check above); without a lane, the pace's per-role cap.
     if (!g.lane && sameRole.length >= perRole + (extra ? 1 : 0)) continue;
@@ -538,7 +544,9 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
       continue;
     }
-    const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra }, { detach: true });
+    const lr = line ? line.routeFor(g, { tool, preferred, custom, live }) : {};
+    const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
+    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model} (${lr.tier} tier, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, failed: lr.failed || 0 } });
     if (r.ok) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
@@ -563,6 +571,29 @@ export async function trainDaemonTick(state, r = {}, opts = {}) {
     state.train = { at: new Date().toISOString(), started: Boolean(d.started), why: d.why, ...(d.pid ? { pid: d.pid } : {}) };
     return d;
   } catch (err) { state.train = { at: new Date().toISOString(), started: false, why: `error: ${err.message}` }; return { started: false, why: err.message }; }
+}
+
+/**
+ * 2.76.0 (k): the Line Producer's plan for this pass, or null (off, report, stale, unreadable). orderGroups(groups) sorts
+ * by its order; routeFor(group, …) gives { model, tier, why } for the group's first task (only on the preferred tool,
+ * never for a custom command) holdFor(group, live) says why a builder waits when the rig's builder cap is reached. Never throws.
+ */
+async function linePlanNow(now) {
+  try {
+    const lp = await import('./line-producer.mjs');
+    const plan = lp.supervisorPlan({ now });
+    if (!plan) return null;
+    return {
+      orderGroups: (groups) => lp.orderGroups(groups, plan),
+      holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
+      routeFor: (g, { tool, preferred, custom }) => {
+        const id = g.tasks[0]?.id;
+        const r = plan.routes[id];
+        if (!r?.model || custom || (tool && tool !== preferred)) return {};
+        return { model: r.model, tier: r.tier, why: r.why };
+      },
+    };
+  } catch { return null; }
 }
 
 /** 2.68.0 (n): the session cap by RAM, { cap, why }; the configured cap when anything fails. */
@@ -651,6 +682,9 @@ async function main(argv) {
     reloadEnvIfChanged({ by: 'supervisor', ack: true });
     // 1. The hub: up, or restart it (with backoff) and remember how long it was down and why (2.74.0, harness/hub-keeper.mjs).
     if (opts.hub) hub = await keepHubUp(state, port, hub);
+    // 2.76.0 (k): the Line Producer's pass (harness/line-producer.mjs): mechanical unblocks, the order, the routes, the
+    // rig's builder cap, .studio/line/status.json; supervise() below follows the plan. Code only, never a crash.
+    await import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});
     // 2-4. Work.
     const r = await supervise(opts, state).catch((err) => ({ started: [], why: [`error: ${err.message}`] }));
     state.sessions += r.started.length;
