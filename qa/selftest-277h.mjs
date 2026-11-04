@@ -239,6 +239,8 @@ console.log(JSON.stringify(readQueue(process.cwd()).find((e) => e.task === 'T-95
   if (want('b96')) {
     const st = trainStudio('b96', [{ id: 'game', command: 'node -e "process.exit(0)"', required: true, lite: true, cache: false }]);
     const { S, env } = st;
+    // Windows runners check out with CRLF by default; the lane copy's git must write the bytes the approval was signed for.
+    gitIn(S, 'config', 'core.autocrlf', 'false');
     const crypto = await import('node:crypto');
     const sha = (t) => crypto.createHash('sha256').update(Buffer.from(t)).digest('hex');
     // old: the first builder's lane; p81a: the next builder's lane, chained from it (the remembered branch); signed: the
