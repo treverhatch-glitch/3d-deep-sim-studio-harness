@@ -210,7 +210,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`, `.mixed`.
+  `.lane_recreated`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -231,7 +231,16 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   - **B, checks plus history**: the game's sim paths, goldens, declared pin moves or pin files, shared utilities, the
     registry/barrel, a changed test, any file no rule names. The train verifies with `--all`; a golden changed with no
     `Golden-Reason:` trailer, or a pin file (`pins.files`) with no `Pin-Moves:`, is handed back; a task handed back
-    more than `STUDIO_TRAIN_MAX_HANDBACKS` (3) times is held for a person like tier C.
+    more than `STUDIO_TRAIN_MAX_HANDBACKS` (3) times is held for a person like tier C. 2.76.0: in beta mode
+    (`npm run beta`, `harness/beta-mode.mjs`) it is held for the orchestrator and the Producer instead (`held.beta`; they
+    release it with `train release <ID> --by <their name>`, no owner key, recorded as a beta use) and ONE Producer task
+    "Rescue <ID>: handed back N times" is filed. Infrastructure hand-backs never count toward the cap: a missing lane
+    copy, a CRLF/hash mismatch, a re-queue, a dead train, a timeout-only red re-run alone, a mixed lane
+    (`harness/train-lanes.mjs` INFRA_HANDBACK, or `meta.infra`). A release is also kept by task and head
+    (`.studio/train/releases.json`), so a lane that leaves the queue and is queued again at the same commit stays released.
+  - 2.76.0 (W-0081): a queued lane whose copy folder (`.lanes/<name>`) is gone is made again from its branch
+    (`task.train.lane_recreated`; links, `.env`, exclude file as a lane copy; the sparse checkout is the plain one) when the
+    branch still holds the queued commit and no other worktree has it checked out; otherwise it leaves the queue as before.
   - A task held for landing (`npm run task -- hold <ID>`) stays out of every train (queued, riding along or its own
     `task done --train`): deferred with the hold's reason, `OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in
     `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the

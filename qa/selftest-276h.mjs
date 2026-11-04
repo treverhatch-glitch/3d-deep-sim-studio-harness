@@ -175,10 +175,13 @@ setInterval(() => {}, 1000);
 `);
       const { spawn } = await import('node:child_process');
       const child = spawn(process.execPath, [f], { cwd: S, env: { ...process.env, ...env }, windowsHide: true, stdio: 'ignore' });
+      let exited = null;
+      const gone = new Promise((res) => child.on('exit', (c) => { exited = c; res(c); }));
       const t0 = Date.now();
-      while (!fs.existsSync(ready) && Date.now() - t0 < 60000) await new Promise((res) => setTimeout(res, 100));
+      while (!fs.existsSync(ready) && exited === null && Date.now() - t0 < 60000) await new Promise((res) => setTimeout(res, 100));
       const id = fs.existsSync(ready) ? fs.readFileSync(ready, 'utf8') : '';
-      const code = await new Promise((res) => { child.on('exit', (c) => res(c)); child.kill('SIGINT'); });
+      if (exited === null) child.kill('SIGINT');
+      const code = await gone;
       fs.rmSync(f, { force: true }); fs.rmSync(ready, { force: true });
       const d = died().find((e) => e.meta?.train === id);
       return [id && code === 130 && d && /SIGINT/.test(d.msg) && st(id)?.step === 'died', JSON.stringify({ id, code, d, st: id && st(id) })];
@@ -220,6 +223,79 @@ const r = await trainDaemonPass({ root: process.cwd(), env: { ...process.env, ST
 console.log(JSON.stringify(r));
 `);
       return [died().some((e) => e.meta?.train === id) && st(id)?.step === 'died', JSON.stringify({ r, st: st(id) })];
+    });
+  }
+
+  // ---- W-0081, the hand-back cap in beta mode, infrastructure hand-backs, kept releases, mixed lanes (B-91/92) ----
+  if (want('lanes')) {
+    const tasks = ['T-921', 'T-922', 'T-923', 'T-924', 'T-925', 'T-926', 'T-927'];
+    const { S, ev, env } = studio('lanes', (S) => {
+      writeIn(S, 'studio/gates.json', `${JSON.stringify({ gates: [{ id: 'game', command: 'node -e "process.exit(0)"', required: true, lite: true, cache: false }] }, null, 2)}\n`);
+      writeIn(S, 'studio/NEXT.md', `# Studio Task Queue\n\n## IN_PROGRESS\n${tasks.map((t) => `- [>] **${t}** [P1] (\`builder\`) — made-up task ${t}`).join('\n')}\n\n## BACKLOG\n\n## DONE\n`);
+      fs.rmSync(path.join(S, 'studio', 'beta.json'), { force: true });
+    });
+    const person = { ...env, CLAUDECODE: '', AI_AGENT: '', CODEX_SANDBOX: '', GEMINI_CLI: '', STUDIO_LOCK_OWNER: '' };
+    const queueF = path.join(S, '.studio', 'train', 'queue.json');
+    const queue = () => { try { return JSON.parse(fs.readFileSync(queueF, 'utf8')); } catch { return []; } };
+    const mainHas = (rel) => gitIn(S, 'cat-file', '-e', `main:${rel}`).status === 0;
+    const lane = (name, task, files, { tags = [task], extra = [] } = {}) => {
+      const d = path.join(S, '.lanes', name);
+      gitIn(S, 'worktree', 'add', '-q', '-b', `lane/${name}`, d, 'main');
+      for (const c of [...extra, { files, tags }]) {
+        for (const [rel, text] of Object.entries(c.files)) writeIn(d, rel, text);
+        gitIn(d, 'add', '-A');
+        gitIn(d, 'commit', '-q', '--no-verify', '-m', `${task}: work`, ...c.tags.map((t) => ['-m', `Studio-Task: ${t}`]).flat());
+      }
+      return { task, agent: `builder-${name}`, dir: d, branch: `lane/${name}`, head: gitIn(d, 'rev-parse', 'HEAD').stdout.trim(), at: new Date().toISOString() };
+    };
+    const train = (name, hb = 0, extraEnv = {}) => probe(S, { ...env, ...extraEnv }, `train-${name}`, `import { runTrain } from ${u(S, 'harness/train.mjs')};
+const calls = { handBack: [], rescue: [] }; const logs = [];
+const r = await runTrain({ root: process.cwd(), by: 'tester', now: true, quietJob: true, deps: { precheck: (l) => ({ ok: true, head: l.head }), close: () => ({ ok: true }), handBack: (l, note) => calls.handBack.push([l.task, String(note).slice(0, 600)]), handBacks: () => ${hb}, fileRescue: (x) => { calls.rescue.push(x); return { id: 'T-990', title: 'Rescue ' + x.task + ': handed back ' + x.n + ' times' }; } }, log: (m) => logs.push(m) });
+console.log(JSON.stringify({ landed: r.landed, dropped: r.dropped, held: r.held, calls, logs: logs.slice(-25) }));
+`);
+    const setQueue = (list) => writeIn(S, '.studio/train/queue.json', `${JSON.stringify(list, null, 2)}\n`);
+    await guard('2.76.0 (W-0081): a queued lane whose copy folder is gone is made again from its branch (task.train.lane_recreated) and lands, not handed back as "its lane copy … is gone" (fails on 2.75.0: dropped)', () => {
+      const L = lane('w81', 'T-921', { 'docs/w81-276h.md': '# notes\n' });
+      fs.rmSync(L.dir, { recursive: true, force: true });
+      setQueue([L]);
+      const t = train('w81');
+      const made = events(ev).some((e) => e.type === 'task.train.lane_recreated' && e.task === 'T-921');
+      return [made && t.landed?.includes('T-921') && mainHas('docs/w81-276h.md') && fs.existsSync(path.join(L.dir, 'docs/w81-276h.md')), JSON.stringify(t).slice(0, 2500)];
+    });
+    await guard('2.76.0 (beta, Priority 1): infrastructure hand-backs (a missing lane copy, a CRLF hash mismatch, a re-queue, a dead train, a timeout-only red re-run alone, a mixed lane) don\'t count toward the hand-back cap; a real one does (fails on 2.75.0: 7 counted)', () => {
+      const evF = path.join(S, '.studio', 'events-276h.jsonl');
+      const msgs = ['Not landed by merge train x: its lane copy /x/.lanes/a is gone', 'Not landed by merge train x: the protected approval was hashed on CRLF bytes and the committed blobs are LF', 'Not landed by merge train x: re-queued after its copy was made again', 'Not landed by merge train x: train 20261104-044849-34540 died during verify', 'Not landed by merge train x: timeout-flake: 2 test file(s) timed out and passed alone', 'Not landed by merge train x: a mixed lane: it carries commits of another task that hasn\'t landed', 'Not landed by merge train x: the checks fail on main + this lane (game)'];
+      fs.appendFileSync(evF, msgs.map((m, i) => `${JSON.stringify({ id: `evt_hb_${i}`, ts: new Date().toISOString(), type: 'task.paused', task: 'T-923', agent: 'train', status: 'paused', msg: `Handed back T-923: ${m}`, meta: { reasonKey: `k${i}` } })}\n`).join(''));
+      const r = probe(S, env, 'hbcount', `import { handBackCount } from ${u(S, 'harness/train.mjs')};
+console.log(JSON.stringify({ n: handBackCount('T-923') }));
+`);
+      return [r.n === 1, JSON.stringify(r)];
+    });
+    // Beta mode on (studio/beta.json committed by a person), with the orchestrator opus-1.
+    writeIn(S, 'studio/beta.json', `${JSON.stringify({ on: true, by: 'the-owner', at: new Date().toISOString(), why: 'beta: the harness is still being built', agents: ['opus-1'], roles: ['producer', 'director'] }, null, 2)}\n`);
+    gitIn(S, 'add', 'studio/beta.json'); gitIn(S, 'commit', '-q', '--no-verify', '-m', 'beta: on');
+    await guard('2.76.0 (beta, Priority 1): in beta mode a tier-B lane over the hand-back cap is held for the orchestrator and the Producer (held.beta, "no owner needed") with ONE Producer rescue task "Rescue <ID>: handed back N times", and the orchestrator releases it with --by opus-1, no owner key or --permission (fails on 2.75.0: "a person looks", no task, opus-1 refused)', () => {
+      const L = lane('cap', 'T-922', { 'misc/cap-276h.txt': 'a change no tier rule names\n' });
+      setQueue([L]);
+      const t = train('cap', 5);
+      const e = queue().find((x) => x.task === 'T-922');
+      const rel = probe(S, { ...env, STUDIO_LOCK_OWNER: 'opus-1', CLAUDECODE: '1' }, 'release-beta', `import { releaseLane } from ${u(S, 'harness/train.mjs')};
+console.log(JSON.stringify(releaseLane(process.cwd(), 'T-922', { by: 'opus-1' })));
+`);
+      const ok = e?.held?.beta === true && /orchestrator or the Producer/.test(e.held.why) && !/a person looks/.test(e.held.why) && t.calls?.rescue?.length === 1 && t.calls.rescue[0].task === 'T-922' && rel.ok === true;
+      return [ok, JSON.stringify({ t, e, rel }).slice(0, 3000)];
+    });
+    gitIn(S, 'rm', '-q', 'studio/beta.json'); gitIn(S, 'commit', '-q', '--no-verify', '-m', 'beta: off');
+    await guard('2.76.0 (Priority 1): a release made for a commit survives an infrastructure hand-back: the lane leaves the queue (its copy was missing) and is queued again at the same head, and the next train lands it without holding it again for the hand-back count (fails on 2.75.0: held again, "handed back 6 times")', () => {
+      const L = lane('rel', 'T-924', { 'misc/rel-276h.txt': 'a tier-B change\n' });
+      setQueue([L]);
+      train('rel-1', 5);
+      const rel = probe(S, person, 'release', `import { releaseLane } from ${u(S, 'harness/train.mjs')};
+console.log(JSON.stringify(releaseLane(process.cwd(), 'T-924', { by: 'the-owner' })));
+`);
+      setQueue([{ ...L, at: new Date().toISOString() }]); // taken out and queued again at the same head: no release on the entry
+      const t = train('rel-2', 6);
+      return [rel.ok === true && t.landed?.includes('T-924') && mainHas('misc/rel-276h.txt'), JSON.stringify({ rel, t }).slice(0, 3000)];
     });
   }
 }
