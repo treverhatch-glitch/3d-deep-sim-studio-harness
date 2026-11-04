@@ -116,6 +116,26 @@ console.log(JSON.stringify({ room, batch, modes, dec, pick, judge, base, daemon 
         && b.same?.land === true && b.board?.land === true && b.board.how === 'record' && JSON.stringify(b.board.files) === '["studio/NEXT.md"]' && b.code?.land === false && p.daemon?.start === false && /lands first/.test(p.daemon?.why || ''),
       JSON.stringify({ judge: p.judge, base: p.base, daemon: p.daemon }).slice(0, 2500)];
     });
+
+    // nextBaseVerdict and a record move that needs checks re-run (harness/train-board.json "rechecks")
+    const repo2 = path.join(tmpRoot, `277p-git2-${process.pid}`);
+    fs.mkdirSync(repo2, { recursive: true });
+    g(repo2, 'init', '-q', '-b', 'main');
+    write(repo2, 'src/a.txt', 'a\n'); write(repo2, 'studio/bible/controls.json', '{"controls":[]}\n'); write(repo2, 'studio/NEXT.md', '# board\n');
+    g(repo2, 'add', '-A'); g(repo2, 'commit', '-qm', 'A');
+    const A2 = g(repo2, 'rev-parse', 'HEAD').stdout.trim();
+    write(repo2, 'studio/NEXT.md', '# board 2\n'); g(repo2, 'add', '-A'); g(repo2, 'commit', '-qm', 'board');
+    const plain2 = g(repo2, 'rev-parse', 'HEAD').stdout.trim();
+    g(repo2, 'checkout', '-q', '-b', 'ctl', A2);
+    write(repo2, 'studio/bible/controls.json', '{"controls":["jump"]}\n'); g(repo2, 'add', '-A'); g(repo2, 'commit', '-qm', 'controls');
+    const ctl2 = g(repo2, 'rev-parse', 'HEAD').stdout.trim();
+    const p2 = probe(dir, { ...process.env }, 'recheck', `import { nextBaseVerdict } from ${href(dir, 'harness/train.mjs')};
+const R = ${JSON.stringify(repo2)};
+console.log(JSON.stringify({ same: nextBaseVerdict(R, { assumed: ${JSON.stringify(A2)}, now: ${JSON.stringify(A2)} }), plain: nextBaseVerdict(R, { assumed: ${JSON.stringify(A2)}, now: ${JSON.stringify(plain2)} }), ctl: nextBaseVerdict(R, { assumed: ${JSON.stringify(A2)}, now: ${JSON.stringify(ctl2)} }) }));
+`);
+    await guard('2.77.0 (p, P9.6): nextBaseVerdict: a main move by a record file that needs checks re-run (studio/bible/controls.json, train-board.json "recheckPaths") does not land (land false, the reason names the re-check); a move by a plain board file (studio/NEXT.md) still lands as "record"; the same commit lands as "same" (fails before the maintainer commit: the controls move lands as a record move)', () => [
+      p2.same?.land === true && p2.same.how === 'same' && p2.plain?.land === true && p2.plain.how === 'record' && p2.ctl?.land === false && /re-run|controls/.test(p2.ctl.why || '') && /controls/.test(p2.ctl.why || ''),
+      JSON.stringify(p2).slice(0, 2500)]);
   }
 
   // ---- the studio and its made-up game (as qa/selftest-269q.mjs) ----
@@ -318,5 +338,29 @@ console.log(JSON.stringify({ room, batch, modes, dec, pick, judge, base, daemon 
     const died = T.evs().find((e) => e.type === 'task.train.died' && e.meta?.train === bid);
     await guard('2.77.0 (p, P9.6, B-88): a speculative train whose process is gone is found by the reaper like any train: task.train.died "died: verify", and its train-next.lock (which names it) is freed so the next B can start (fails on 2.76.1: the reaper frees only train.lock)', () => [
       died && /died: verify/.test(died.msg) && !fs.existsSync(lockF), `${JSON.stringify(r).slice(0, 800)} died=${JSON.stringify(died)} lock=${fs.existsSync(lockF)}`]);
+  }
+  // ---- 6. the default batch of 4 splits the queue only when a speculative train can follow ----
+  if (want('batch')) {
+    const lanes6 = (T, tag) => [1, 2, 3, 4, 5, 6].map((k) => T.lane(`pq-${tag}${k}`, `Docs: note ${tag}${k}`, { [`game/demo/notes/${tag}${k}.md`]: `# ${tag}${k}\n` }));
+    const starts = (T) => startOf(T.evs(), (e) => !e.meta?.speculative).map((e) => e.meta?.lanes || []);
+    const verifiesOf = (T) => T.evs().filter((e) => e.type === 'task.train.verify').length;
+    // (a) STUDIO_TRAIN_BATCH unset, pipeline off: no speculative train can follow, so the default cap of 4 does not apply
+    const Ta = studio('batch-off');
+    const La = lanes6(Ta, 'a');
+    const envA = { ...Ta.env, STUDIO_TRAIN_PIPELINE: 'off', STUDIO_TRAIN_BATCH: '' };
+    const ra = run(Ta.S, 'node harness/task.mjs train --by tester --now', envA);
+    const sa = starts(Ta);
+    await guard('2.77.0 (p, P9.6): STUDIO_TRAIN_BATCH unset and STUDIO_TRAIN_PIPELINE=off (no speculative train can follow): six ready green lanes land in ONE train with one verify, the default cap of 4 does not apply (fails before the maintainer commit: 4 then 2)', () => [
+      La.every((l) => l.ok) && ra.status === 0 && sa.length === 1 && sa[0].length === 6 && verifiesOf(Ta) === 1 && [1, 2, 3, 4, 5, 6].every((k) => Ta.onMain(`game/demo/notes/a${k}.md`)) && !Ta.queue().length,
+      `ok=${La.map((l) => l.ok)} starts=${JSON.stringify(sa)} verifies=${verifiesOf(Ta)} queue=${Ta.queue()}\n${out(ra).slice(-1500)}\n${La.find((l) => !l.ok)?.log || ''}`]);
+    // (b) the same with STUDIO_TRAIN_BATCH=4 set: the cap applies, 4 then 2
+    const Tb = studio('batch-four');
+    const Lb = lanes6(Tb, 'b');
+    const envB = { ...Tb.env, STUDIO_TRAIN_PIPELINE: 'off', STUDIO_TRAIN_BATCH: '4' };
+    const rb1 = run(Tb.S, 'node harness/task.mjs train --by tester --now', envB);
+    const sb = starts(Tb);
+    await guard('2.77.0 (p, P9.6): STUDIO_TRAIN_PIPELINE=off with STUDIO_TRAIN_BATCH=4 set explicitly: the cap applies, one `task train` lands six lanes as a train of 4 and then a train of 2, two verifies (a set batch always applies; this guards the explicit cap and holds before and after the maintainer commit)', () => [
+      Lb.every((l) => l.ok) && rb1.status === 0 && sb.length === 2 && sb[0].length === 4 && sb[1].length === 2 && verifiesOf(Tb) === 2 && [1, 2, 3, 4, 5, 6].every((k) => Tb.onMain(`game/demo/notes/b${k}.md`)) && !Tb.queue().length,
+      `ok=${Lb.map((l) => l.ok)} starts=${JSON.stringify(sb)}\n${out(rb1).slice(-1200)}\n${Lb.find((l) => !l.ok)?.log || ''}`]);
   }
 }
