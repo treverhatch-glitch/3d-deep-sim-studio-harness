@@ -237,6 +237,14 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
 - Inside a launched session (an agent hiring an agent) a mapping counts only as written in the studio's `.env`; one set
   in the session's own shell is refused.
 
+## Scoped agents (`.claude/agents/`)
+
+Claude Code reads three agent definitions from `.claude/agents/`, so a session can hand work to the cheapest model that
+fits: **scout** (Haiku, read-only: Read, Grep, Glob, Bash; finds code and answers where/what/how with `path:line`
+references, never edits), **fixer** (Sonnet: a change someone already designed, with its tests and their PASS/FAIL
+lines) and **architect** (Opus: new subsystems, cross-cutting changes, permission rules and other work that needs
+judgement; hands mechanical follow-ups to the fixer). Each file's frontmatter names the agent and its model.
+
 ## Best practices for a run
 
 - **Let the launcher make the copies.** Don't use a tool's own worktree mode (`claude -w`): the studio's queue,

@@ -269,6 +269,7 @@ at once; approvals made in beta that haven't landed stop counting.
 The orchestrator's own Claude Code session may run in another folder than the studio: write the owner's command rules
 there once with `npm run delegate -- claude-settings --owner --dir <its folder> --write` (B-95; prefix rules for exactly
 those commands, npm and npm.cmd forms, never a broad rule).
+The list includes (2.77.0) `agent -- stop`, `agent -- pause`, `task -- park`, `task -- block`, `task -- unblock`, `task -- pause`, `beta -- on` and `beta -- off`.
 
 Protected text files are hashed with LF line endings (B-93): an approval signed on a Windows checkout (CRLF) matches the
 check in any checkout.
