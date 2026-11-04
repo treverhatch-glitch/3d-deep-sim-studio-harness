@@ -691,15 +691,6 @@
   .room .now .more { color: #fff; text-shadow: 1px 1px 0 #000; }
   /* Rail Yard: the merge train's lanes as cars on a track through QUEUE, VERIFY and LANDED */
   .room.r-rails .floor { background: repeating-linear-gradient(90deg, #6d5d4b 0 14px, #5d4f40 14px 16px); }
-  .yard { position: absolute; left: 10px; right: 10px; top: 112px; height: 74px; }
-  .yard .rail { position: absolute; left: 0; right: 0; top: 46px; height: 10px; background: repeating-linear-gradient(90deg, #8d6e63 0 6px, transparent 6px 14px), linear-gradient(#b0bec5 0 2px, transparent 2px 8px, #b0bec5 8px 10px); }
-  .yard .stn { position: absolute; top: 0; font: 11px/1 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; color: #fff; background: #37474f; padding: 2px 4px; border: 2px solid #263238; }
-  .yard .stn.q { left: 0; } .yard .stn.v { left: 42%; } .yard .stn.l { right: 0; background: #2e7d32; border-color: #1b5e20; }
-  .yard .car { position: absolute; top: 28px; width: 34px; height: 18px; background: #ffb300; border: 2px solid #3e2723; font: 11px/11px VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; text-align: center; color: #3e2723; transition: left 1.2s ease; overflow: hidden; }
-  .yard .car.verifying { background: #ffb300; animation: chug .5s steps(2) infinite; } .yard .car.landed { background: #66bb6a; } .yard .car.dropped { background: #e53935; color: #fff; animation: flicker 1s steps(2) infinite; } .yard .car.held, .yard .car.waiting { background: #b39ddb; }
-  @keyframes chug { 50% { transform: translateY(-2px); } }
-  .yard .loco { position: absolute; top: 24px; width: 40px; height: 22px; background: #c62828; border: 2px solid #3e2723; border-radius: 0 8px 0 0; transition: left 1.2s ease; }
-  .yard .note { position: absolute; left: 0; right: 0; top: 60px; font: 11px/1 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; color: #fff; text-shadow: 1px 1px 0 #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Watchtower: the owner proxy's beacon, lit while it acted in the last hour */
   .room.r-watchtower .floor { background: repeating-linear-gradient(0deg, #78909c 0 10px, #6c818c 10px 12px); }
   .tower { position: absolute; width: 34px; height: 70px; background: repeating-linear-gradient(0deg, #8d6e63 0 8px, #795548 8px 10px); border: 2px solid #3e2723; }
@@ -952,17 +943,6 @@
   html body .room .now .row:has(.needs-release), html body .room .now .row:has(.held) { border-left-color: #6a4cc4; } html body .room .now .row:has(.parked) { border-left-color: #b42f2f; }
   html body .room .now button { font: 700 11px/1 var(--ds-font); border: 0; border-radius: 2px; background: #1f7f52; padding: 3px 6px; }
   /* Rail Yard: the locomotive runs the track while a train is on it; cars wait at their station */
-  html body .yard .stn { font: 600 11px/1 var(--ds-font); border-radius: 2px; border: 0; padding: 3px 6px; background: #263341; }
-  html body .yard .stn.l { background: #1f7f52; }
-  html body .yard .car { border-radius: 3px; font: 600 11px/14px var(--ds-font); border-width: 1px; }
-  html body .yard .car.verifying { background: #4c9be0; color: #fff; } html body .yard .car.landed { background: #34a874; color: #08130d; }
-  html body .yard .car.held, html body .yard .car.waiting { background: #9378e0; color: #fff; } html body .yard .car.dropped { background: #e05656; }
-  html body .yard .loco { animation: yardrun 9s linear infinite; border-radius: 3px 10px 3px 3px; }
-  html body .yard .loco::before { content: ''; position: absolute; right: 4px; top: -9px; width: 8px; height: 9px; background: #3e2723; }
-  html body .yard .loco::after { content: ''; position: absolute; right: 2px; top: -20px; width: 12px; height: 12px; border-radius: 50%; background: rgba(220, 225, 230, .7); animation: puff 1.2s ease-out infinite; }
-  @keyframes yardrun { 0% { left: -44px; } 100% { left: calc(100% + 4px); } }
-  @keyframes puff { 0% { transform: translate(0, 0) scale(.5); opacity: .9; } 100% { transform: translate(-10px, -12px) scale(1.4); opacity: 0; } }
-  html body .yard .note { display: none; }
   /* Engine Bay: hazard floor and a turning gear while its engine train or workers run */
   html body .room.r-engine.busy .prop svg.art { animation: gear 5s linear infinite; transform-origin: 50% 50%; }
   @keyframes gear { to { transform: rotate(360deg); } }
@@ -1047,7 +1027,7 @@
   html body .live { font-family: var(--ds-font); border-radius: var(--ds-r1); }
   html body .toast { font-family: var(--ds-font); border-radius: var(--ds-r2); }
   html body .acard, html body .acard .view { border-radius: var(--ds-r2); }
-  html body .stb, html body .room .now .chip, html body .room .now button, html body .yard .stn, html body .yard .car, html body .towerlog { font-family: var(--ds-font); }
+  html body .stb, html body .room .now .chip, html body .room .now button, html body .towerlog { font-family: var(--ds-font); }
 
   /* ---- the Studio floor, bigger: full width, larger rooms, people and plates (the whole floor is drawn larger) ---- */
   html body #tycoon .office { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; padding: var(--ds-5); }
@@ -1098,9 +1078,7 @@
 
   @media (max-width: 600px) { html body .need { grid-template-columns: minmax(0, 1fr); } html body .need > button, html body .need > .actbtn { justify-self: start; } }
 
-  html body .yard .ybar { position: absolute; left: 0; right: 0; top: 62px; height: 10px; border: 1px solid #ffb340; background: rgba(0, 0, 0, .5); }
-  html body .yard .ybar i { display: block; height: 100%; background: repeating-linear-gradient(90deg, #ffb340 0 6px, transparent 6px 8px); box-shadow: 0 0 6px rgba(255, 179, 64, .6); }
-  html body .yard .ybar b { position: absolute; right: 2px; top: -15px; font: 700 11px/1 var(--ds-font); color: #ffe2a8; text-shadow: 1px 1px 0 #000; }
+
   /* ---- 2.77.0: beta mode on the owner-proxy card ---- */
   html body .betaline { margin: 0 0 8px; padding: 4px 8px; border-left: var(--ds-strip) solid var(--ds-off); background: var(--ds-surface-2); border-radius: var(--ds-r1); }
   html body .betaline.on { border-left-color: var(--ds-hold); background: var(--ds-hold-bg); }
@@ -1134,6 +1112,38 @@
   html body .live { position: static; order: 8; margin-left: auto; box-shadow: none; }
   html body[data-skin="tycoon"] .live { bottom: auto; }
 
+  /* ---- 2.77.0: the Rail Yard, a loom chamber (two columns wide, so the loom reads at the room's size) ---- */
+  @media (min-width: 600px) { html body .room.r-rails { grid-column: span 2; } }
+  html body .room.r-rails .wall { background: radial-gradient(ellipse at 60% 80%, #2b1c05, #120b03 70%); border-bottom-color: #2a1d06; }
+  html body .room.r-rails .floor { background: linear-gradient(#18210f 1px, transparent 1px) 0 0 / 20px 20px, linear-gradient(90deg, #18210f 1px, #0a0f08 1px) 0 0 / 20px 20px; }
+  html body .rloom { position: absolute; z-index: 2; left: 8px; right: 8px; top: 30px; }
+  /* two columns wide: the keeper's desk on the left, the loom and its readout beside it (never over the keeper) */
+  @media (min-width: 600px) { html body .rloom { left: 132px; } }
+  html body .rloom svg.rl { display: block; width: 100%; height: auto; overflow: visible; }
+  html body .rl .rl-frame { fill: url(#rlBody); stroke: url(#rlGold); stroke-width: 5; }
+  html body .rl .rl-legs { fill: #8a6512; }
+  html body .rl .rl-main { stroke: #ff7a1a; stroke-width: 4.5; stroke-linecap: round; filter: url(#rlGlow); }
+  html body .rl .rl-main.pulse { animation: mainpulse 2.4s ease-in-out infinite; }
+  html body .rl .thr { fill: none; stroke-width: 2.6; stroke-linecap: round; }
+  html body .rl .thr.verifying { stroke: #ffd36b; stroke-dasharray: 8 6; animation: weave 1.3s linear infinite; filter: url(#rlGlow); }
+  html body .rl .thr.landed { stroke: #7dff9e; filter: url(#rlGlow); }
+  html body .rl .thr.dropped { stroke: #ff4d3d; stroke-dasharray: 3 4; animation: flicker 1.2s steps(2) infinite; }
+  html body .rl .thr.held, html body .rl .thr.deferred, html body .rl .thr.waiting { stroke: #c9a4ff; stroke-dasharray: 2 5; }
+  html body .rl .kn { fill: #7dff9e; filter: url(#rlGlow); } html body .rl .kn.v { fill: #ffd36b; animation: flicker 1s steps(2) infinite; }
+  html body .rl .spool rect { fill: #8a6512; } html body .rl .spool path { stroke: #ffd77a; stroke-width: 2.5; stroke-dasharray: 3 3; }
+  html body .rl .spool.held path { stroke: #c9a4ff; } html body .rl .spool.held rect { fill: #6a3fb0; }
+  html body .rl text { font: 700 13px var(--ds-font); fill: #ffe9c2; text-anchor: middle; }
+  html body .rl text.tl { text-anchor: start; font-size: 12px; }
+  html body .rl text.lbl { text-anchor: start; font-size: 11px; font-weight: 400; fill: #d9b98a; }
+  /* a phone draws the loom at about 60%: bigger numbers so they still read (after the sizes above, so it wins) */
+  @media (max-width: 599px) { html body .rl text { font-size: 20px; } html body .rl text.tl { font-size: 19px; } html body .rl text.lbl { font-size: 17px; } }
+  html body .rbar { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 8px; background: rgba(4, 10, 5, .92); border: 1px solid #2f6b3d; border-radius: 3px; font: 700 12px/1.2 var(--ds-font); color: #8dffab; text-shadow: 0 0 5px rgba(93, 255, 138, .45); }
+  html body .rbar .t { color: #5dff8a; letter-spacing: .06em; }
+  html body .rbar .track { flex: 0 1 140px; min-width: 50px; height: 10px; border: 1px solid #ffb340; background: rgba(255, 179, 64, .08); }
+  html body .rbar .track i { display: block; height: 100%; background: repeating-linear-gradient(90deg, #ffb340 0 6px, transparent 6px 8px); box-shadow: 0 0 6px rgba(255, 179, 64, .6); }
+  html body .rbar b { color: #ffb340; }
+  @media (max-width: 599px) { html body .rbar { font-size: 11px; gap: 6px; } html body .rbar .st, html body .rbar .t { display: none; } html body .rbar .track { flex-basis: 64px; } }
+  html body .rbar .w { flex: 1 1 auto; font-weight: 400; color: #b8f5c6; min-width: 0; overflow-wrap: anywhere; }
 </style>
 </head>
 <body data-skin="ops">
@@ -2476,8 +2486,10 @@
     engine: { cls: 'wl-rivet fl-hazard', v: '--wall:#607d8b;--wall2:#455a64;--trim:#fdd835;--fa:#9e9e9e;--fb:#757575',
       html: () => prop('right:10px;top:46px', '<div class="belt" data-dyn="enginetrain" title="The engine track\'s own train (harness/unity-train.mjs)"><span class="m">LANES</span><span class="track"><i></i></span><span class="m">LAND</span></div>') + prop('right:16px;bottom:110px', P.gear) },
     // 2.74.0: the merge train's yard: lanes as cars through QUEUE, VERIFY and LANDED.
-    rails: { cls: 'wl-brick fl-concrete r-rails', v: '--wall:#4e342e;--wall2:#3e2723;--trim:#ffb300;--fa:#6d5d4b;--fb:#5d4f40',
-      html: () => '<div class="yard" data-dyn="yard"><span class="stn q">QUEUE</span><span class="stn v">VERIFY</span><span class="stn l">LANDED</span><span class="rail"></span><span class="note"></span></div>' },
+    // 2.77.0: the Rail Yard is a loom chamber: the merge train's lanes as threads on a small golden timeline loom, the
+    // verify's real progress in a terminal readout under it, the train's keeper at the desk below.
+    rails: { cls: 'wl-plain r-rails', v: '--wall:#140d04;--wall2:#1d1407;--trim:#ffb340;--fa:#0b0f0a;--fb:#101a10',
+      html: () => '<div class="rloom" data-dyn="rloom"><div class="rl-svg"></div><div class="rbar"></div></div>' },
     // 2.74.0: the outside overseer / owner proxy: a beacon lit while it acted in the last hour, its log, Revoke.
     watchtower: { cls: 'wl-plain fl-concrete r-watchtower', v: '--wall:#263238;--wall2:#1c262b;--trim:#ffee58;--fa:#78909c;--fb:#6c818c',
       html: () => prop('right:20px;top:24px', '<div class="tower"><span class="beacon" data-dyn="beacon"></span></div>') + '<div class="towerlog" data-dyn="towerlog" style="right:58px;top:30px"></div>' },
@@ -2763,6 +2775,37 @@
   }
 
   // Room widgets that show real studio state.
+  /**
+   * 2.77.0: the Rail Yard's loom, drawn for the room: main as the glowing orange line; queued lanes as threads waiting
+   * on spools at the left (violet when they wait for a release); lanes in the train branch off main, pulse while they
+   * verify, weave back in green when they land, peel away red when handed back. Original art.
+   */
+  function miniLoom(web) {
+    const W = 560, H = 170, cy = 92;
+    const lanes = web?.lanes || [];
+    const waiting = (web?.waiting || []).slice(0, 6);
+    const num = (t) => String(t).replace(/^[A-Z]+-/, '');
+    const spools = waiting.map((w, i) => { const x = 46 + i * 20; return `<g class="spool ${w.held ? 'held' : 'queued'}"><title>${esc(w.task)}: ${w.held ? 'waits for a release' : 'queued for the next train'}</title><rect x="${x - 6}" y="22" width="12" height="7" rx="2"></rect><path d="M${x},29 L${x},52"></path><text x="${x}" y="62">${esc(num(w.task))}</text></g>`; }).join('');
+    const thr = lanes.slice(0, 6).map((l, i) => {
+      const side = i % 2 ? 1 : -1;
+      const y = cy + side * (20 + Math.floor(i / 2) * 22);
+      const x0 = 190 + i * 10;
+      const lift = `M${x0},${cy} C${x0 + 30},${cy} ${x0 + 24},${y} ${x0 + 56},${y}`;
+      const d = l.state === 'landed' ? `${lift} L420,${y} C450,${y} 446,${cy} 478,${cy}` : l.state === 'dropped' ? `${lift} L360,${y} C390,${y} 398,${y + side * 22} 426,${y + side * 34}` : l.state === 'verifying' ? `${lift} L450,${y}` : `${lift} L380,${y}`;
+      return `<path class="thr ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(l.state)}</title></path><text class="tl" x="${x0 + 60}" y="${y - 4}">${esc(num(l.task))}</text>${l.state === 'verifying' ? `<circle class="kn v" cx="450" cy="${y}" r="3"></circle>` : l.state === 'landed' ? `<circle class="kn" cx="478" cy="${cy}" r="4"></circle>` : ''}`;
+    }).join('');
+    return `<svg class="rl" viewBox="0 0 ${W} ${H}" role="img" aria-label="The merge train's loom: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', ') || 'no lanes on it')}${waiting.length ? `; waiting: ${esc(waiting.map((w) => w.task).join(', '))}` : ''}">
+      <defs><linearGradient id="rlGold" x1="0" x2="1"><stop offset="0" stop-color="#7a5410"></stop><stop offset=".5" stop-color="#ffd77a"></stop><stop offset="1" stop-color="#7a5410"></stop></linearGradient>
+      <radialGradient id="rlBody" cx=".5" cy=".55" r=".7"><stop offset="0" stop-color="#3a2706"></stop><stop offset="1" stop-color="#0e0902"></stop></radialGradient>
+      <filter id="rlGlow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="2" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs>
+      <rect class="rl-frame" x="160" y="18" width="${W - 176}" height="${H - 30}" rx="56"></rect>
+      <rect class="rl-legs" x="${W / 2 + 60}" y="${H - 13}" width="10" height="12"></rect><rect class="rl-legs" x="${W / 2 - 70}" y="${H - 13}" width="10" height="12"></rect>
+      <path class="rl-main${web?.running ? ' pulse' : ''}" d="M172,${cy} L${W - 26},${cy}"></path>
+      <text class="lbl" x="40" y="14">waiting</text><text class="lbl" x="${W - 120}" y="14">main</text>
+      ${spools || '<text class="tl" x="46" y="44">none</text>'}${thr}
+    </svg>`;
+  }
+
   // 2.75.0: one badge over each person: what they are doing, in the same colors as everywhere else (the key in the dock).
   const STATE = { working: ['✎', 'working'], verifying: ['◷', 'verifying'], 'on-train': ['⇢', 'on the train'], 'needs-release': ['◆', 'waits for a release'], held: ['◆', 'held for landing'], 'handed-back': ['↩', 'handed back'], parked: ['!', 'parked'], stalled: ['!', 'stalled'], ending: ['⇥', 'ending: leaving the room'], idle: ['z', 'idle'] };
   function stateOf(a, s) {
@@ -2800,33 +2843,20 @@
 
   function renderWidgets(s) {
     // 2.74.0: the Rail Yard (the merge train), the Engine Bay belt (the engine train) and the Watchtower (the proxy).
-    const yard = office.querySelector('[data-dyn="yard"]');
+    const rl = office.querySelector('[data-dyn="rloom"]');
     const web = (s.warRoom?.trains || []).find((t) => t.kind === 'web');
-    if (yard) {
-      const cars = [...(web?.lanes || []).map((l) => ({ task: l.task, st: l.state })), ...(web?.waiting || []).map((w) => ({ task: w.task, st: w.held ? 'held' : 'waiting' }))].slice(0, 7);
-      const at = { waiting: 0, held: 0, deferred: 0, verifying: 42, dropped: 30, landed: 78 };
-      const sig = JSON.stringify(cars) + (web?.text || '');
-      if (yard.dataset.sig !== sig) {
-        yard.dataset.sig = sig;
-        yard.querySelectorAll('.car,.loco').forEach((e) => e.remove());
-        const byPos = {};
-        cars.forEach((c) => {
-          const base = at[c.st] ?? 0;
-          const k = (byPos[base] = (byPos[base] || 0) + 1) - 1;
-          yard.insertAdjacentHTML('beforeend', `<span class="car ${esc(c.st)}" style="left:calc(${base}% + ${k * 36}px)" title="${esc(c.task)}: ${esc(c.st)}">${esc(String(c.task).replace(/^[A-Z]+-/, ''))}</span>`);
-        });
-        if (web?.running) yard.insertAdjacentHTML('beforeend', '<span class="loco" style="left:calc(42% - 44px)" aria-hidden="true"></span>');
-        yard.querySelector('.note').textContent = web ? (web.running ? `${web.step}${web.elapsedMin != null ? ` ${web.elapsedMin} min` : ''}: ${web.text || ''}` : web.last ? `last: ${web.last.landed?.length ? `landed ${web.last.landed.join(', ')}` : 'landed nothing'}` : `${(web.waiting || []).length} queued`) : 'no train yet';
-      }
-      yard.title = web ? `Merge train${web.id ? ` ${web.id}` : ''}: ${web.running ? web.text || web.step : 'not running'}` : 'No merge train yet (npm run task -- done <ID> --train)';
-      // 2.77.0: the verify's real progress under the track (the Control room's Train Room has the words).
-      let yb = yard.querySelector('.ybar');
-      if (web?.bar && !web.bar.ended) {
-        if (!yb) { yb = document.createElement('span'); yb.className = 'ybar'; yb.innerHTML = '<i></i><b></b>'; yard.appendChild(yb); }
-        yb.querySelector('i').style.width = `${web.bar.percent}%`;
-        yb.querySelector('b').textContent = `${web.bar.percent}%${web.bar.etaMs != null ? ` · ${Math.max(1, Math.round(web.bar.etaMs / 60000))} min` : ''}`;
-        yb.title = `Verify: ${web.bar.done} of ${web.bar.total} checks${web.bar.step ? `, now ${web.bar.step}` : ''}${web.bar.estimate ? ' (estimate)' : ''}`;
-      } else if (yb) yb.remove();
+    if (rl) {
+      const svgHtml = miniLoom(web);
+      const box = rl.querySelector('.rl-svg');
+      if (box.dataset.sig !== svgHtml) { box.dataset.sig = svgHtml; box.innerHTML = svgHtml; }
+      const bar = web?.bar && !web.bar.ended ? web.bar : null;
+      const eta = bar ? (bar.etaMs == null ? 'no ETA yet' : `~${Math.max(1, Math.round(bar.etaMs / 60000))} min left`) : '';
+      const barHtml = bar
+        ? `<span class="t">Verify</span><span class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${bar.percent}" aria-label="Verify ${bar.percent}% done"><i style="width:${bar.percent}%"></i></span><b>${bar.percent}%</b><span class="w">${bar.done}/${bar.total}${bar.step ? `<span class="st"> · now ${esc(bar.step)}</span>` : ''} · ${esc(eta)}${bar.estimate && bar.etaMs != null ? ' (estimate)' : ''}</span>`
+        : `<span class="t">Idle</span><span class="w">${web?.running ? `train ${esc(web.id || '')}: ${esc(web.step || 'starting')}` : web?.last ? `last train: ${web.last.landed?.length ? `landed ${esc(web.last.landed.join(', '))}` : 'landed nothing'}` : 'no train yet: npm run task -- done <ID> --train'}</span>`;
+      const rb = rl.querySelector('.rbar');
+      if (rb.dataset.sig !== barHtml) { rb.dataset.sig = barHtml; rb.innerHTML = barHtml; }
+      rl.title = web ? `Merge train${web.id ? ` ${web.id}` : ''}: ${web.running ? web.text || web.step : 'not running'}` : 'No merge train yet (npm run task -- done <ID> --train)';
     }
     const belt = office.querySelector('[data-dyn="enginetrain"]');
     if (belt) {
