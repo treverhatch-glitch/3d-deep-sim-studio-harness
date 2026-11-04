@@ -42,7 +42,7 @@ export async function selftest276K({ dir, run, report, tmpRoot, root }) {
   const studio = (name, { tasks = [], holds = {}, events = [], mode = 'extreme' } = {}) => {
     const S = path.join(tmpRoot, `276k-${name}-${process.pid}-${++n}`);
     fs.cpSync(dir, S, { recursive: true, filter: (src) => !/[\\/](\.git|\.lanes|node_modules)$/.test(src) });
-    for (const x of ['.studio/agents', '.studio/locks', '.studio/train', '.studio/line', '.studio/supervisor.json', 'studio/divisions.json', 'studio/policy.json', 'studio/delegation.json', 'studio/beta.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
+    for (const x of ['.studio/agents', '.studio/locks', '.studio/train', '.studio/line', '.studio/supervisor.json', 'studio/divisions.json', 'studio/policy.json', 'studio/delegation.json', 'studio/beta.json', 'studio/models.json']) fs.rmSync(path.join(S, x), { recursive: true, force: true });
     const ev = path.join(S, '.studio', 'events-276k.jsonl');
     fs.mkdirSync(path.dirname(ev), { recursive: true });
     fs.writeFileSync(ev, events.map((e, i) => JSON.stringify({ id: `evt_${i}`, status: 'ok', ts: iso(now - 3600000 + i * 1000), ...e })).join('\n') + (events.length ? '\n' : ''));

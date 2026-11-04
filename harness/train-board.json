@@ -1,5 +1,5 @@
 {
-  "note": "2.60.1 (B-29): board and record files a commit on the studio's branch may change while a merge train is verified without the train verifying again (harness/train.mjs boardOnlyMove). The train's copy never tests studio/ from its tree (studio/ is sparse-excluded there and linked to the main checkout's), so these paths can't change what its verify saw. Only these: anything else (studio/protected.json, studio/game.json, studio/gates.json, keys, approvals, any code, any golden) still means a new verify. A deleted or renamed path never counts. Repo-relative globs (** any depth, * one segment).",
+  "note": "2.60.1 (B-29): board and record files a commit on the studio's branch may change while a merge train is verified without the train verifying again (harness/train.mjs boardOnlyMove). The train's copy never tests studio/ from its tree (studio/ is sparse-excluded there and linked to the main checkout's), so these paths can't change what its verify saw. Only these: anything else (studio/protected.json, studio/game.json, studio/gates.json, keys, any code, any golden) still means a new verify; 2.77.0: an added approval (addOnlyPaths) doesn't, and a file only some checks read (recheckPaths) re-runs just those checks. A deleted or renamed path never counts. Repo-relative globs (** any depth, * one segment).",
   "boardPaths": [
     "studio/NEXT.md",
     "studio/DONE.md",
@@ -7,11 +7,45 @@
     "studio/handoffs/**",
     "studio/memory/**",
     "studio/logs/**",
-    "studio/notes/**"
+    "studio/notes/**",
+    "studio/decisions/**",
+    "studio/decisions.jsonl",
+    "studio/asks/**",
+    "studio/daily/**",
+    "studio/harness-notes/**",
+    "studio/bible/BIBLE.md",
+    "studio/bible/STORYBOARD.md",
+    "studio/bible/NOT-DOING.md",
+    "studio/bible/ideas/**",
+    "studio/bible/systems/**",
+    "studio/bible/reviews/**"
   ],
   "taskRecordsNote": "2.67.0 (B-29): task records a board move may also change, as path -> the key that holds the entries (a map by task id, or a list of entries with a \"task\" field), only when every entry it changes is for a task that is not a lane of the running train (a `task yes` or a hold for another task). A change to an entry of a lane in the train, to another key, or to an entry without a task still means a new verify.",
   "taskRecords": {
     "studio/task-holds.json": "tasks",
     "studio/pending-review.json": "items"
+  },
+  "addOnlyNote": "2.76.0+ (2.77.0, P9.1): files a board move may ADD (never change or delete) without a new verify: a new approval only lets more changes pass the protected check, never fewer, and no check reads it otherwise.",
+  "addOnlyPaths": [
+    "studio/approvals/**"
+  ],
+  "recheckNote": "2.77.0 (P9.1): files a required check reads, path glob -> the check ids that read them. When main moves by these (and board files) only while a train is verified, the train re-runs just those checks on the new tree (run-gates --only) instead of the whole verify; green lands, red verifies again in full. A check id the studio doesn't have is skipped (nothing reads the file).",
+  "recheckPaths": {
+    "studio/bible/controls.json": [
+      "controls"
+    ],
+    "studio/approvals/**": [
+      "protected",
+      "approvals"
+    ],
+    "studio/reviews/**": [
+      "reviewer"
+    ],
+    "studio/producer/**": [
+      "docs"
+    ],
+    "studio/meetings/**": [
+      "docs"
+    ]
   }
 }

@@ -392,12 +392,16 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
     const statusDue = now - lastStatus >= s.statusMin * 60000;
     const doStatus = statusDue && retryOk;
     const doAlerts = due.length > 0 && retryOk;
+    // 2.77.0 (u, P5.5): notices other harness parts queued (the visual check's shots for the owner): one path line each,
+    // posted once, tagging nobody (harness/visual-check.mjs postShots writes .studio/comm/notices.jsonl).
+    const notices = retryOk ? pendingNotices(root, st) : [];
     const L = [];
     if (doAlerts) { L.push(`Studio alert ${hhmm(now)}`); for (const a of due) L.push(alertLine(a, cfg)); }
+    if (notices.length) { if (L.length) L.push(''); L.push(`Studio notice ${hhmm(now)}`); for (const n of notices) L.push(quiet(short(n.text, 600))); }
     if ((doAlerts || doStatus) && cleared.length) L.push(`Cleared: ${cut(cleared, 6)}`);
     if (doStatus) { if (L.length) L.push(''); L.push(statusText(f, { alerts: open })); }
     const text = L.join('\n');
-    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : null;
+    const kind = doAlerts && doStatus ? 'alerts+status' : doAlerts ? 'alerts' : doStatus ? 'status' : notices.length ? 'notices' : null;
     const result = { posted: false, kind, alerts: due.map((a) => ({ key: a.key, kind: a.kind, who: routeAlert(a) })), held, cleared, open: open.length };
     if (dryRun) return { ...result, dryRun: true, text, enabled: en };
     if (kind) {
@@ -408,6 +412,7 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
         if (doStatus) st.lastStatusAt = new Date(now).toISOString();
         for (const a of due) st.sent[a.key] = { at: new Date(now).toISOString(), kind: a.kind, who: routeAlert(a), count: (st.sent[a.key]?.count || 0) + 1, cleared: false };
         for (const k of cleared) st.sent[k].cleared = true;
+        st.notices = [...(st.notices || []), ...notices.map((n) => n.key)].slice(-200);
       } else st.failedAt = new Date(now).toISOString();
       st.lastPost = { at: new Date(now).toISOString(), kind, ok: r.ok, parts: r.parts, sent: r.sent, why: r.why || null };
       try { emitEvent({ type: 'comm.posted', agent: 'communicator', to: 'human', status: r.ok ? 'ok' : 'error', msg: r.ok ? `Posted ${kind}${due.length ? ` (${due.length} alert${due.length === 1 ? '' : 's'}: ${cut(due.map((a) => a.key), 4)})` : ''}` : `Couldn't post ${kind}: ${r.why}`, meta: { kind, ok: r.ok, parts: r.parts, sent: r.sent, alerts: due.map((a) => a.key), tagged: [...new Set(due.flatMap(routeAlert))], held, source: hook.source } }); } catch {}
@@ -422,6 +427,24 @@ export async function communicatorPass({ now = Date.now(), dryRun = false, env =
   } catch (e) {
     return { posted: false, why: scrub(`the communicator failed: ${e?.message || e}`, hook?.url).slice(0, 300) };
   }
+}
+
+/**
+ * 2.77.0 (u): notices queued in .studio/comm/notices.jsonl ({ key, kind, text, at }) not posted yet (state.notices
+ * holds the keys posted), the last 20 of the past day. queueNotice adds one.
+ */
+export function pendingNotices(root = REPO_ROOT, st = {}, now = Date.now()) {
+  let lines = [];
+  try { lines = fs.readFileSync(path.join(root, '.studio', 'comm', 'notices.jsonl'), 'utf8').split('\n').filter(Boolean); } catch { return []; }
+  const sent = new Set(st.notices || []);
+  const out = [];
+  for (const l of lines.slice(-200)) { try { const n = JSON.parse(l); if (n?.key && n.text && !sent.has(n.key) && now - (Date.parse(n.at) || 0) < 86400000 && !out.some((x) => x.key === n.key)) out.push(n); } catch {} }
+  return out.slice(-20);
+}
+export function queueNotice({ key, text, kind = 'notice', root = REPO_ROOT } = {}) {
+  const f = path.join(root, '.studio', 'comm', 'notices.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.appendFileSync(f, `${JSON.stringify({ key: key || `${kind}:${Date.now()}`, kind, text: String(text || '').slice(0, 1000), at: new Date().toISOString() })}\n`);
 }
 
 /** `comm -- status`: the set-up and the state, nothing secret. */

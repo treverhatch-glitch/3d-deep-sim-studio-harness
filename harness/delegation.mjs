@@ -325,7 +325,9 @@ export function claudeRules(actions, { owner = false } = {}) {
  */
 const OWNER_CMDS = ['task -- train release', 'task -- type', 'task -- visual', 'task -- yes', 'task -- hold', 'task -- unhold', 'task -- unpark',
   'approve -- protected', 'approve -- tests', 'approve -- hooks', 'approve -- force', 'approve -- show', 'ask -- answer', 'beta -- status', 'delegate -- list',
-  'studio:resume', 'studio:extend', 'studio:reload-env', 'studio:boot', 'studio:status', 'lanes -- refresh', 'janitor -- --lanes'];
+  'studio:resume', 'studio:extend', 'studio:reload-env', 'studio:boot', 'studio:status', 'lanes -- refresh', 'janitor -- --lanes',
+  // 2.77.0 (P9.5): the orchestrator's other actions Claude Code kept asking about.
+  'agent -- stop', 'agent -- pause', 'task -- park', 'task -- block', 'task -- unblock', 'task -- pause', 'beta -- on', 'beta -- off'];
 export const OWNER_RULES = OWNER_CMDS.flatMap((c) => [`Bash(npm run ${c}:*)`, `Bash(npm.cmd run ${c}:*)`]);
 /** A rule this command would ever write: exactly a delegated command's prefix (no other wildcard, no shell tricks). */
 export const narrowRule = (r) => OWNER_RULES.includes(r) || /^Bash\((npm run task --|node harness\/task\.mjs) (train release|type|visual|yes|hold|unhold):\*\)$/.test(r);

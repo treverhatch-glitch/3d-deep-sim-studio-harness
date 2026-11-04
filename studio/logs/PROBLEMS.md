@@ -1277,3 +1277,27 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-239 — a trust-note landing left its task open · fixed in 2.76.1
 - **Evidence:** helper review: the close got the verify's dirty record and refused "not a clean, green full verify".
 - **Fix:** the train closes with its own judged record (closeRec). qa/selftest-276h.mjs.
+
+### P-240 — agy ran Claude, logged 0 tokens, and builders drifted off their task · fixed in 2.77.0
+- **Evidence:** agy-1.json (model claude-sonnet-5-5, tokensIn 0); agy10 trained T-183 instead of its T-152 (B-92).
+- **Fix:** Gemini-only agy, agy usage read or estimated, the task pin, model pools that prefer Gemini. qa/selftest-277n.mjs.
+
+### P-241 — trains threw away verifies and lanes missed their approvals · fixed in 2.77.0
+- **Evidence:** a signing commit on main discarded a 23-min green verify (T-148); T-134 started while queued; soak tests red on main failed every train; T-181 handed back 3 times (B-96).
+- **Fix:** record-only moves keep the verify, queued tasks not startable, known-red-on-main, approved branches carried. qa/selftest-277h.mjs.
+
+### P-242 — no way to use cloud workers or make a lane by hand · fixed in 2.77.0
+- **Evidence:** the owner's ask; a bare worktree gave 'Task "T-181" not found'.
+- **Fix:** remote workers through the train; `lane -- create`. qa/selftest-277o.mjs, qa/selftest-277m.mjs.
+
+### P-243 — engine passes were refused at done and never trained · fixed in 2.77.0
+- **Evidence:** 2.76.1 refuses an engine pass "no changes found" (its commits are in the engine repo); nothing started the Unity train.
+- **Fix:** engine tasks judged in their repo, the engine train in quiet windows, visual checks. qa/selftest-277u.mjs.
+
+### P-244 — the War Room was light, long and covered its own content; the Train Room ETA was a guess · fixed in 2.77.0
+- **Evidence:** the owner: "darkmode not light mode"; a 7,896 px Control room; the floor bar over the Train Room.
+- **Fix:** the dark terminal, folds, page flow, a recorded verify progress. qa/selftest-277w.mjs, qa/hud-check.mjs.
+
+### P-245 — lanes waited in line behind one 25-minute verify · fixed in 2.77.0
+- **Evidence:** the crew's notes (P9.6); one train at a time.
+- **Fix:** one speculative train on train A's tree, landing only on A's exact tree (or plus record files that need no re-check). qa/selftest-277p.mjs.

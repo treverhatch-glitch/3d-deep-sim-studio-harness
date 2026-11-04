@@ -52,6 +52,10 @@ export const JOB_KINDS = {
   'unity-bake': { ramGb: 8, cpuThreads: 4, vramGb: 4, gpuOnly: false, what: 'Unity lightmap bake' },
   'unity-visual': { ramGb: 8, cpuThreads: 4, vramGb: 2, gpuOnly: false, what: 'Unity graphics test run' },
   'build-clip': { ramGb: 3, cpuThreads: 2, vramGb: 0, gpuOnly: false, what: 'playable build and clip after a landing' },
+  // 2.77.0 (f, P4.2): an art bake (lightmap, texture, mesh or atlas bake run by an art pass), whatever tool runs it. A
+  // fixed claim like Unity's (rig kind "art"); `minutes` is what the Line Producer expects it to take. All three are data:
+  // studio/machine-budget.json "jobs": { "art-bake": { ramGb, cpuThreads, minutes } }.
+  'art-bake': { ramGb: 6, cpuThreads: 4, vramGb: 0, gpuOnly: false, minutes: 20, what: 'art bake' },
 };
 /** Per-kind concurrency caps (more slots never mean two Unity editors at once unless the owner sets it); others: none. */
 export const MAX_CONCURRENT = { unity: 1, 'browser-playtest': 1, blender: 1 };
@@ -278,7 +282,31 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
  * train holds its lock or lanes wait in its queue (STUDIO_TRAIN_RESERVE=off: not counted). STUDIO_TEST_WORKERS still
  * wins; STUDIO_RIG_SHARE=off sizes by RAM only (2.75). Always between 2 and cores - 2.
  */
-export const RIG_WEIGHTS = { train: 4, verify: 2, check: 2, soak: 1 };
+/**
+ * 2.77.0 (f, P4.2): the rig's priority order, in ONE table: train > builder verifies (a verify, a lane's check) >
+ * Unity/art > soaks. `weight` is the share of the cores a job that sizes its own test workers gets (RIG_WEIGHTS below,
+ * derived from this table); Unity, art, playtest and other jobs have fixed claims and no weight (they are never
+ * squeezed, they take their threads off the top), so their rank only says where they stand when something compares
+ * kinds (rigRank). Playtest and other share Unity/art's rank: the order names no other place for them.
+ */
+export const RIG_PRIORITY = [
+  { rank: 1, kinds: ['train'], weight: 4, what: "the merge train's verify" },
+  { rank: 2, kinds: ['verify', 'check'], weight: 2, what: "a builder's verify or lane check" },
+  { rank: 3, kinds: ['unity', 'art', 'playtest', 'other'], weight: null, what: 'Unity, art (Blender, asset round trip, art bake), playtest and other fixed-claim jobs' },
+  { rank: 4, kinds: ['soak'], weight: 1, what: 'a soak' },
+];
+/** The rank (1 = first) of a rig kind in RIG_PRIORITY; unknown kinds rank last. */
+export const rigRank = (kind) => (RIG_PRIORITY.find((r) => r.kinds.includes(kind)) || { rank: RIG_PRIORITY.length + 1 }).rank;
+export const RIG_WEIGHTS = Object.fromEntries(RIG_PRIORITY.flatMap((r) => (r.weight ? r.kinds.map((k) => [k, r.weight]) : [])));
+/** The job catalog with the expected CPU threads, RAM and minutes per kind (studio/machine-budget.json "jobs" applied), by rank. */
+export function jobCatalog(root = process.cwd(), env = process.env) {
+  const { jobs } = cfgEnv(root, env);
+  return Object.keys(JOB_KINDS).map((kind) => {
+    const b = { ...JOB_KINDS[kind], ...(jobs[kind] && typeof jobs[kind] === 'object' ? jobs[kind] : {}) };
+    const rig = rigKind({ claim: { kind } });
+    return { kind, rig: kind === 'verify' ? 'verify' : rig, rank: rigRank(kind === 'verify' ? 'verify' : rig), ramGb: b.ramGb ?? null, cpuThreads: b.cpuThreads ?? null, minutes: Number(b.minutes) > 0 ? Number(b.minutes) : null, what: b.what };
+  }).sort((a, b) => a.rank - b.rank || a.kind.localeCompare(b.kind));
+}
 /** Rig kinds: train, verify, check, soak size themselves; unity, art, playtest, other have fixed claims. */
 export const SIZING_KINDS = Object.keys(RIG_WEIGHTS);
 export const rigShareOn = (env = process.env) => !off(env.STUDIO_RIG_SHARE);
@@ -300,7 +328,7 @@ export function rigKind(rec) {
   if (/\bsoak/i.test(label)) return 'soak';
   if (c.kind === 'verify') return rec?.landing ? 'train' : 'verify';
   if (isUnityKind(c.kind)) return 'unity';
-  if (capGroup(c.kind) === 'blender') return 'art';
+  if (capGroup(c.kind) === 'blender' || c.kind === 'art-bake') return 'art';
   if (capGroup(c.kind) === 'browser-playtest' || c.kind === 'gpu-playtest') return 'playtest';
   return 'other';
 }
@@ -375,7 +403,7 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
   const { env: e, jobs } = cfgEnv(root, env);
   const k = JOB_KINDS[kind] ? kind : 'heavy';
   const base = { ...JOB_KINDS[k], ...(jobs[k] && typeof jobs[k] === 'object' ? jobs[k] : {}) };
-  const out = { kind: k, label: label || base.what, ramGb: base.ramGb, cpuThreads: base.cpuThreads, gpu: Number(base.vramGb) > 0 ? { vramGb: Number(base.vramGb) } : null, gpuOnly: Boolean(base.gpuOnly) };
+  const out = { kind: k, label: label || base.what, minutes: Number(base.minutes) > 0 ? Number(base.minutes) : null, ramGb: base.ramGb, cpuThreads: base.cpuThreads, gpu: Number(base.vramGb) > 0 ? { vramGb: Number(base.vramGb) } : null, gpuOnly: Boolean(base.gpuOnly) };
   if (k === 'verify') {
     const cores = logicalCores(profile);
     const ew = envWorkers(e);

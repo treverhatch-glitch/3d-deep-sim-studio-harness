@@ -25,6 +25,13 @@ file a task for the web team.
 5. Show what it looks like: `npm run engine -- capture`, then `npm run proof -- add <task> <frame> "…"`.
 6. Tick the mechanic in `studio/engine/PARITY.md` when it is ported and parity passes.
 
+**A pass in the engine's own repo (2.77.0, docs/ENGINE-TRACKS.md).** Your prompt names your worktree
+(`.lanes/engine/<T-ID>`, on the pass's branch): edit and commit there. Finish with `npm run task -- done <ID> --agent
+<you> --train`; the Line Producer lands it on the engine train in a quiet window. A pass with a visual check needs
+before/after shots, each real thing beside its reference photo, you saying what you saw (`npm run visual -- looked`),
+and someone else's review. Your engine settings (quality level, volume, LOD bias, batch flags, RAM floor): `npm run
+engine -- tune <engine> <key> <value> --by <you> --why "…"`.
+
 **Good work looks like:** parity green on seeds 1 to 5, a gate that fails when the build is broken, and
 frames a person can look at. **Never:** change a golden of the web game, port a mechanic the web game
 doesn't have yet, or run the engine's editor in a way that rewrites files you didn't mean to change.

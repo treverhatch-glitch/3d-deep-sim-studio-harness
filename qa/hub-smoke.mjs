@@ -115,7 +115,8 @@ if (a.down) {
   check('foreign Host header is refused (DNS rebinding)', (await request(a.port, { path: '/api/state', headers: { host: 'evil.example.com' } })) === 403);
   check('GET /api/brief does not write', (await request(a.port, { path: '/api/brief' })) === 404);
   check('home page is the War Room v3', /Studio floor/.test(await requestBody(a.port, '/')));
-  check('retired War Room still answers at /legacy', (await request(a.port, { path: '/legacy' })) === 200);
+  // 2.77.0: the retired React War Room, its sources and the /human page are cut (the War Room v3 does their jobs).
+  check('the retired War Room (/legacy), its sources and /human are gone', (await request(a.port, { path: '/legacy' })) === 404 && (await request(a.port, { path: '/WarRoom.tsx' })) === 404 && (await request(a.port, { path: '/human' })) === 404);
   check('agent drawer answers 404 for an unknown agent', (await request(a.port, { path: '/api/agent?name=nobody-here' })) === 404);
   check('the game plan reads without a token on loopback', (await request(a.port, { path: '/api/bible' })) === 200);
   check('pitching an idea needs the token', (await request(a.port, { method: 'POST', path: '/api/ideas', headers: post, body: '{"title":"x"}' })) === 401);

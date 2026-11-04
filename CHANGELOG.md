@@ -4,6 +4,56 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.77.0] — 2026-11-04
+2.77.0 is "Patch #2": everything on the crew's 2026-11-04 list that 2.76 didn't finish. The item-by-item status is in
+docs/PATCH-2-CROSSCHECK.md.
+### Gemini as a first-class builder
+- agy runs Gemini only (a non-Gemini model is refused unless forced). A session started with `--task` works only that
+  task (B-92). agy sessions record their real model and usage, or "not reported" with an estimate, never 0.
+- **Model pools** (`studio/models.json`, `npm run models -- status|init`): Flash for small tasks, Argon for normal ones,
+  Claude for hard work, chain-breakers and after a Gemini failure; a pool near its limit or landing too little falls
+  through to the next, learned from `.studio/routing/outcomes.json`. The pool limits are guesses: set yours.
+  `STUDIO_MODEL_ROUTING=off` turns routing off.
+- In beta mode or under the proxy, a protected step goes to an approver and the task waits, instead of stranding.
+### Trains and lanes
+- A train keeps its verify when main moves only by records (approvals, decisions, asks, the Bible's prose); a file
+  some checks read re-runs only those checks (P9.1). A task queued for the train can't be started by another session
+  (P9.2). Tests red on main itself are listed once; a train whose only reds are those, still failing on main alone,
+  lands with them reported (P9.3/P9.5, `STUDIO_TRAIN_KNOWN_RED`). A new lane copy carries the branch holding the
+  task's approved contents (B-96); the launcher doesn't merge a mixed lane into a new copy (P2.4).
+- `npm run lane -- create <T-ID> --from <branch>...` makes a proper lane copy from chosen branches (P9.4).
+- **Pipelined trains (P9.6):** while a train verifies, one speculative train verifies its tree plus the next lanes
+  and lands right after it without verifying again; if the first goes red or main moves (by code, or by a file that
+  needs checks re-run), it is discarded and its lanes keep their place, never handed back. A train takes at most
+  `STUDIO_TRAIN_BATCH` lanes (4) when a speculative train can follow; otherwise one train takes them all, as before.
+  `STUDIO_TRAIN_PIPELINE` auto (only with room for a second verify), on or off. Status and the War Room show both.
+### Remote (cloud) workers
+- `npm run remote -- mark|brief|fetch|release|status`: a cloud session does a self-contained task on a 12 h lease,
+  pushes `remote/<T-ID>-…`, and the PC lands it only through the normal train. docs/REMOTE-WORKERS.md.
+### Unity, and any engine, inside the harness
+- One engine table (harness/engine-tracks.mjs). Engine passes are board tasks (`--track engine:<x> --scope
+  --visual-check --refs`), judged in their own repo and launched into a worktree of it; the engine's train lands them,
+  started by the Line Producer in quiet windows (`STUDIO_ENGINE_TRAIN_AUTO=off` to start it by hand). Land runs are
+  recorded heavy jobs; infrastructure aborts stay NOT RUN. `npm run engine -- tune` for the listed engine settings,
+  logged. **Visual checks** (`npm run visual -- …`): fixed-camera shots, reference photos side by side, the builder's
+  look and a review by someone else ("toyish" blocks done), sent to the owner. docs/ENGINE-TRACKS.md.
+### The War Room
+- Dark retro terminal on every view (a light screen is the person's choice, remembered). A bigger Studio floor with
+  bursts when tasks and trains land; the Rail Yard is a small loom with the train's verify bar. The Train Room is a
+  timeline loom with a real progress bar (checks done, the current check, an ETA from recorded runs, "estimate" under 3
+  runs). The Control room folds its lower panels. The Arcade plays saved builds in the page. Cut: `/legacy`, `/human`.
+### Smaller items
+- The daily digest lists beta-mode uses (P1.1). The rig budget has an art-bake job and one priority table (train >
+  builder verifies > engine/art > soaks). Owner allow rules for agent stop/pause, task park/block/unblock/pause and
+  beta on/off. Remote claims are `remote-<worker>` (Windows-safe). Three scoped Claude Code agents ship in
+  `.claude/agents/`: scout (Haiku, read-only), fixer (Sonnet), architect (Opus).
+### Untested
+- On Windows: lane copies made by fetch and the engine worktrees under `.lanes/engine`, git cherry-pick in a lane copy,
+  the War Room's terminal fonts. Nothing has run against a real Unity or Godot editor or a real agy usage line.
+- After the upgrade, routing starts sending small and normal tasks to agy once `.studio/agy-settings.json` exists.
+
+---
+
 ## [2.76.1] — 2026-11-04
 - **A lane landed under a trust note closes its task (B-85 follow-up):** the train closed the task with the verify's
   own record ("dirty"), which the close refuses, so the lane landed and its task stayed open. It now closes with the

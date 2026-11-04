@@ -1232,7 +1232,7 @@ export function createHubServer() {
       return sendJson(res, 200, await hudCached());
     }
 
-    // The War Room v3 is the home page. The old React War Room is retired to /legacy for one release.
+    // The War Room v3 is the home page (2.77.0: the retired React War Room and its /legacy route are gone).
     if ((url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/v3' || url.pathname === '/v3/') && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       // The page knows which version it is, so after a hub restart it reloads itself only when the page changed.
@@ -1409,30 +1409,8 @@ export function createHubServer() {
       return;
     }
 
-    // Serve modular TypeScript/React source files for inspection or bundler-free dev
-    const modularFiles = [
-      'WarRoom.tsx',
-      'AgentGraph.tsx',
-      'AgentEyesViewport.tsx',
-      'TerminalDock.tsx',
-      'UsageTelemetry.tsx',
-      'NextQueue.tsx',
-    ];
-    const cleanName = url.pathname.replace(/^\//, '');
-    if (modularFiles.includes(cleanName)) {
-      const filePath = path.join(__dirname, cleanName);
-      if (fs.existsSync(filePath)) {
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-        return res.end(fs.readFileSync(filePath, 'utf8'));
-      }
-    }
-
-    if (url.pathname === '/human' || url.pathname === '/human.html') {
-      const file = path.join(__dirname, 'human.html');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(fs.readFileSync(file, 'utf8'));
-    }
-
+    // 2.77.0: the React War Room's sources, the /human page and /legacy are cut (docs/WAR-ROOM-V3.md, "Pages"): the War
+    // Room v3 has every one of their jobs (sign-offs in the Control room's Act box). They answer 404 like any unknown path.
     if (url.pathname === '/api/human/notes' && req.method === 'GET') {
       const read = (rel) => {
         const file = path.join(REPO_ROOT, rel);
@@ -1455,15 +1433,6 @@ export function createHubServer() {
       const text = `# ${kind} decision\n\n${String(body.note || '').slice(0, 2000)}\n\n- by: human\n- at: ${new Date().toISOString()}\n`;
       fs.writeFileSync(file, text);
       return sendJson(res, 200, { ok: true, file: `studio/${kind}/${name}` });
-    }
-
-    if (url.pathname === '/legacy' || url.pathname === '/legacy/') {
-      const builtHtml = path.join(__dirname, 'dist', 'index.html');
-      const fallbackHtml = path.join(__dirname, 'index.html');
-      const targetHtml = fs.existsSync(builtHtml) ? builtHtml : fallbackHtml;
-      const notice = '<div style="position:fixed;z-index:2147483647;left:0;right:0;top:0;padding:8px 14px;background:#ffd54f;color:#2b1d14;font:14px system-ui">This War Room is retired and will be removed in the next release. The new one is at <a href="/">/</a>.</div>';
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      return res.end(fs.readFileSync(targetHtml, 'utf8').replace(/<body([^>]*)>/i, (m) => `${m}${notice}`));
     }
 
     // A bundled game (vite's default base '/') asks for /assets/index-…js at the root, not under
@@ -1627,7 +1596,6 @@ export function startHubCli() {
     // 2.74.0: the token is no longer printed: a person pairs their browser once (npm run hub -- pair --by <name>).
     console.log(` War Room                      : http://localhost:${PORT}/  (buttons: npm run hub -- pair --by <your name>, once per browser)`);
     console.log(` Studio view                   : http://localhost:${PORT}/?skin=tycoon`);
-    console.log(` Retired War Room (one release): http://localhost:${PORT}/legacy`);
     console.log(` WebSocket Terminal & Stream   : ws://localhost:${PORT}/ws`);
     console.log(` Events Ledger                 : ${path.relative(REPO_ROOT, eventsFile)}`);
     console.log(` Subscription Usage File       : ${path.relative(REPO_ROOT, USAGE_FILE)}`);

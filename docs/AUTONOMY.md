@@ -266,9 +266,16 @@ the owner reviews afterwards instead of approving before. Never: money, deletes,
 the train's full verify and the weakened-tests and hooks gates stay on. `npm run beta -- off` brings the owner gates back
 at once; approvals made in beta that haven't landed stop counting.
 
+2.77.0: the daily digest (`npm run digest`) ends with a `## Beta mode` section for its 24 hours: whether beta is on
+(who set it and when), who turned it on or off and when (the `beta.on` / `beta.off` events and the decisions log), and
+each use as one line (who, action, subject, why: the `delegation.used` events with `meta.beta`, written by
+`recordBetaUse`), at most 30 lines with a count of the rest. It is left out when beta is off and nothing was used, and it
+is not counted in the digest's 200 words.
+
 The orchestrator's own Claude Code session may run in another folder than the studio: write the owner's command rules
 there once with `npm run delegate -- claude-settings --owner --dir <its folder> --write` (B-95; prefix rules for exactly
 those commands, npm and npm.cmd forms, never a broad rule).
+The list includes (2.77.0) `agent -- stop`, `agent -- pause`, `task -- park`, `task -- block`, `task -- unblock`, `task -- pause`, `beta -- on` and `beta -- off`.
 
 Protected text files are hashed with LF line endings (B-93): an approval signed on a Windows checkout (CRLF) matches the
 check in any checkout.

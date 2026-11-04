@@ -2,9 +2,9 @@
 
 > The War Room v3 as it is now (pairing, live refresh, the deck, the Studio floor's rooms): docs/WAR-ROOM-V3.md.
 >
-> **Retired in 2.4.0.** The HUB's home page is now War Room v3 (`hub/v3/index.html`): an Ops view and a
-> Studio view, built from files only, with buttons behind the HUB token. This React War Room still
-> answers at `/legacy` for one release and will then be removed. What follows describes the old page.
+> **Retired in 2.4.0; cut in 2.77.0.** The HUB's home page is War Room v3 (`hub/v3/index.html`). The hub no
+> longer serves this React War Room (`/legacy`) or its source files; the files are kept until the `war-room-build`
+> CI job goes. What follows describes the old page.
 
 The **Mission Control War Room** (`hub/`) is a zero-LLM-token tactical command center designed in a **Palantir / SpaceX Dragon / Cyberpunk Mission Control** aesthetic (`#06080E` obsidian matte, `backdrop-filter: blur(12px)`, `1px solid #00F0FF` tactical borders, CRT scanline toggle, and `JetBrains Mono` telemetry).
 

@@ -29,7 +29,17 @@
  *      STUDIO_LINE_EXPANSION_MIN (2) such tasks are open it files ONE "Director: next ranked slice for phase <n>" task
  *      (never two open);
  *   f. one Producer note (.studio/line/producer-note.md, a line.plan_blocked event when its reasons change) when the plan
- *      can't run.
+ *      can't run;
+ *   g. 2.77.0 (o): remote workers (harness/remote-workers.mjs): when the local builders are at their target, the
+ *      remote-eligible ready tasks are offered to remote (cloud) workers (status "remote", `line -- plan`); with
+ *      STUDIO_REMOTE=on the pass also ends leases that ran out and starts a background fetch of remote/* when due.
+ *   h. 2.77.0 (u, P5.2/P5.3): each engine train (harness/unity-train.mjs, any engine target of harness/engine-tracks.mjs)
+ *      with branches queued is started in a quiet window (enginePass/engineWindow): no web train running (train >
+ *      builder verifies > engine > soaks), no other job of the same heavy kind, free RAM at or over the engine's floor,
+ *      CPU under STUDIO_ENGINE_QUIET_CPU_PCT (75), and no web lane queued unless the engine queue waited
+ *      STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN (120). It runs `task train --engine <x>` detached; the train itself still takes
+ *      machine:heavy with the RAM floor, and an infrastructure abort stays NOT RUN (2.73.2). STUDIO_ENGINE_TRAIN_AUTO=off
+ *      (or engines.<x>.trainAuto false) leaves starting it to a person.
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
@@ -42,7 +52,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 
@@ -54,7 +64,7 @@ export const LINE_NOTE_FILE = () => path.join(LINE_DIR(), 'producer-note.md');
 export const SLICE_TITLE = /^Director: next ranked slice\b/i;
 export const PHASE_LABEL = { 1: 'early', 2: 'mid', 3: 'late' };
 export const TIERS = ['cheap', 'mid', 'top'];
-const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'lane'];
+const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'protected', 'lane'];
 const OWNER_KINDS = new Set(['yes', 'park', 'held']);
 const PRI = (p) => { const m = String(p || '').match(/P(\d)/i); return m ? Number(m[1]) : 9; };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
@@ -142,6 +152,19 @@ export function routeTask(t, { meta = {}, type = '', chainBreaker = false, faile
 }
 
 /**
+ * 2.77.0 (n): the route by model pool (harness/model-pools.mjs pickPool): Gemini first (Flash small, Argon normal),
+ * Claude for hard work, chain-breakers and after a Gemini failure, quota-aware. { tier (the size class), model, tool,
+ * pool, why }; model null: the launcher's default. A rescue keeps the rescue model.
+ */
+export function poolRoute(t, { chainBreaker = false, pools }) {
+  if (/^Rescue:/i.test(String(t.title || ''))) return { tier: null, model: null, why: 'a rescue: the rescue model starts it' };
+  const r = pickPoolFn(pools)({ size: t.size || 'normal', chainBreaker, failed: t.poolFailed ?? t.failed ?? 0, lastFailedPool: t.lastFailedPool || null, protectedHeavy: Boolean(t.protectedHeavy), startedOn: t.started && t.state !== 'running' ? t.startedOn || null : null }, pools);
+  return { tier: r.size, model: r.model, ...(r.tool ? { tool: r.tool } : {}), ...(r.pool ? { pool: r.pool } : {}), why: r.why };
+}
+let pickPoolImpl = null;
+const pickPoolFn = (pools) => pools.pickPool || pickPoolImpl;
+
+/**
  * The plan from plain data (pure, testable). facts: { now, tasks: [{ id, title, role, priority, meta, type, state:
  * 'ready'|'running'|'blocked', block: { kind, why, fix, mechanical? }, failed, started }], holds, done (Set), sessions:
  * [{ role, task, running }], pace: { maxAgents, perRole, label }, rig: { known, byRam, cpuBusy, cpuHold, why },
@@ -195,7 +218,7 @@ export function linePlan(f) {
   }
   ready.slice().sort((a, b) => PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).forEach(take);
   const routes = {};
-  for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
+  for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = f.pools ? poolRoute(t, { chainBreaker: cbSet.has(t.id), pools: f.pools }) : routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
   // Plans that can't run: for the Producer.
   const reasons = [];
   for (const c of cbs) {
@@ -212,8 +235,12 @@ export function linePlan(f) {
   for (const d of f.dangling || []) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
   if (blocked.some((b) => b.kind === 'trunk')) reasons.push('the trunk is red: only fix tasks start until it is green');
   const why = [`pace ${f.pace?.label || '?'} allows ${paceCap} builder${paceCap === 1 ? '' : 's'}`, rigCap === null ? rigWhy : `rig: ${rigWhy}`, `${builders.length} running`, `${readyB.length} ready`, blocked.length ? `${blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : null].filter(Boolean).join('; ');
+  // 2.77.0 (o): remote (cloud) workers: remote-eligible ready tasks offered when the local builders are at their target.
+  let remote = null;
+  if (f.remote && f.remote.remotePlan) remote = f.remote.remotePlan(f.remote, { order, target, running: builders.length, roleOf: (id) => byTask.get(id)?.role });
   return {
     builders: { running: builders.length, target, paceCap, rigCap, ready: readyB.length, why },
+    ...(remote ? { remote } : {}),
     order,
     routes,
     blocked,
@@ -244,8 +271,8 @@ export async function rigNow({ env = process.env, now = Date.now(), deps = {} } 
         if (r && typeof r === 'object') {
           const byRam = [r.builders, r.builderRoom, r.sessions].map(Number).find(Number.isFinite);
           const cpuBusy = [r.cpuBusy, r.cpu?.busy].map(Number).find(Number.isFinite);
-          const heavy = (Array.isArray(r.jobs) ? r.jobs : Array.isArray(r.heavy) ? r.heavy : []).map((h) => ({ kind: h.kind || null, label: h.label || null, owner: h.owner || null, ramGb: h.ramGb ?? null, cpuThreads: h.cpuThreads ?? h.workers ?? null })).sort((a, b) => JOB_RANK(a) - JOB_RANK(b));
-          return { source: 'rig-budget', known: r.known !== false && (Number.isFinite(byRam) || Number.isFinite(cpuBusy)), byRam: Number.isFinite(byRam) ? byRam : null, cpuBusy: Number.isFinite(cpuBusy) ? cpuBusy : null, cpuBusyPct: busyPct, cpuHold: Number.isFinite(cpuBusy) && cpuBusy * 100 >= busyPct, freeRamGb: r.freeRamGb ?? null, usableRamGb: r.usableRamGb ?? null, claimedGb: r.claimedGb ?? null, cores: r.cores ?? null, heavy, train, why: r.why || (Number.isFinite(byRam) ? `the rig budget has room for ${byRam} builder session(s)` : '') };
+          const heavy = (Array.isArray(r.jobs) ? r.jobs : Array.isArray(r.heavy) ? r.heavy : Array.isArray(r.running) ? r.running : []).map((h) => ({ kind: h.kind || null, label: h.label || null, owner: h.owner || null, ramGb: h.ramGb ?? null, cpuThreads: h.cpuThreads ?? h.workers ?? null })).sort((a, b) => JOB_RANK(a) - JOB_RANK(b));
+          return { source: 'rig-budget', known: r.known !== false && (Number.isFinite(byRam) || Number.isFinite(cpuBusy)), byRam: Number.isFinite(byRam) ? byRam : null, cpuBusy: Number.isFinite(cpuBusy) ? cpuBusy : null, cpuBusyPct: busyPct, cpuHold: Number.isFinite(cpuBusy) && cpuBusy * 100 >= busyPct, freeRamGb: r.freeRamGb ?? r.freeGb ?? null, usableRamGb: r.usableRamGb ?? null, claimedGb: r.claimedGb ?? null, cores: r.cores ?? null, heavy, train, why: r.why || (Number.isFinite(byRam) ? `the rig budget has room for ${byRam} builder session(s)` : '') };
         }
       }
     } catch { /* not there yet: the heavy budget below */ }
@@ -432,6 +459,40 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       tasks.push({ ...row, state: block ? 'blocked' : 'ready', ...(block ? { block } : {}) });
     }
   }
+  // 2.77.0 (n): model pools (harness/model-pools.mjs), when on: each task's size class, its last failed pool, the model
+  // it started on, whether it is protected-heavy; the outcomes file is rebuilt (written only when this pass acts).
+  let pools = null;
+  let protectedSteps = [];
+  try {
+    const mp = await import('./model-pools.mjs');
+    pickPoolImpl = mp.pickPool;
+    const sizes = new Map(tasks.map((t) => [t.id, mp.sizeClass(t.meta || {}, t.type)]));
+    const mc = await mp.modelContext({ env, now, events, sizeOf: (id) => sizes.get(String(id)) || mp.sizeClass(added.get(String(id)) || {}, ''), write: fix, deps: deps.models || {} });
+    const byTaskOut = new Map();
+    for (const o of mc.outcomes) { if (!byTaskOut.has(o.task)) byTaskOut.set(o.task, []); byTaskOut.get(o.task).push(o); }
+    for (const t of tasks) {
+      const outs = byTaskOut.get(t.id) || [];
+      t.size = sizes.get(t.id);
+      // A red round here is a session handed back for its own reasons since the task last landed: not a protected
+      // step (that is correct behaviour, routed to an approver below), not a usage limit or a person's stop.
+      const sinceLand = outs.slice(outs.map((o) => o.result).lastIndexOf('landed') + 1);
+      t.poolFailed = sinceLand.filter((o) => o.result === 'handed' && !o.protected).length;
+      t.lastFailedPool = sinceLand.filter((o) => o.result === 'handed' && !o.protected).pop()?.pool || null;
+      t.protectedHeavy = Boolean(t.meta?.protected) || outs.some((o) => o.protected);
+      const mine = events.filter((e) => e.task === t.id);
+      const lastDone = mine.filter((e) => e.type === 'task.done').pop();
+      const st = (lastDone ? mine.slice(mine.indexOf(lastDone) + 1) : mine).filter((e) => e.type === 'agent.session.start' && e.model && e.model !== 'unknown').pop();
+      if (st) t.startedOn = { model: st.model, tool: st.meta?.tool || null };
+    }
+    if (mc.on) pools = { cfg: mc.cfg, state: mc.state, rates: mc.rates, recentProt: mc.recentProt, pickPool: mp.pickPool, why: mc.why, quota: mc.quota.why };
+    // 2.77.0 (n, Priority 8): a protected step a builder handed back goes to someone who may approve it (beta mode or
+    // the owner proxy) instead of stranding the task; it is held from new builders until approved (or the hold ends).
+    protectedSteps = await protectedRoutes({ tasks, events, now, env, act: fix });
+    for (const ps of protectedSteps) {
+      const t = tasks.find((x) => x.id === ps.task);
+      if (t && ps.hold && t.state === 'ready') { t.state = 'blocked'; t.block = { kind: 'protected', why: ps.why, fix: ps.fix }; }
+    }
+  } catch { pools = null; }
   const sliceOpen = [...q.inProgress, ...q.backlog].find((t) => SLICE_TITLE.test(t.title || '')) || null;
   const pace = deps.pace || (await import('./mode.mjs')).effectiveMode();
   const rig = deps.rig || (await rigNow({ env, now }));
@@ -443,7 +504,71 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     models = rp.models?.length || Object.keys(rp.tiers || {}).length ? rt.tierModels(rp, env) : {};
   } catch { models = {}; }
   if (!Object.keys(models).length) for (const t of TIERS) { const m = String(env[`STUDIO_TIER_${t.toUpperCase()}_MODEL`] || '').trim(); if (m) models[t] = m; }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed };
+  // 2.77.0 (o): remote workers (harness/remote-workers.mjs): the live leases and which ready tasks may go out.
+  let remote = deps.remote || null;
+  if (!remote) {
+    try { const rw = await import('./remote-workers.mjs'); remote = { ...(await rw.remoteFacts({ tasks, holds, events, env, root })), remotePlan: rw.remotePlan }; } catch { remote = null; }
+  } else if (!remote.remotePlan) { try { remote = { ...remote, remotePlan: (await import('./remote-workers.mjs')).remotePlan }; } catch {} }
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps };
+}
+
+/**
+ * 2.77.0 (n): who may approve a protected step now: beta mode's named agents (harness/beta-mode.mjs; betaActor asked as
+ * each), else the owner proxy's agent (harness/delegation.mjs delegationFor, which then needs the owner's recorded yes
+ * as --permission). { who, via, note } or null (only the owner).
+ */
+export async function protectedApprover({ env = process.env } = {}) {
+  try {
+    const { readBeta, betaActor } = await import('./beta-mode.mjs');
+    const b = readBeta();
+    if (b.on) {
+      for (const a of b.doc.agents || []) { const x = betaActor({ env: { STUDIO_LOCK_OWNER: String(a) } }); if (x.ok) return { who: String(a), via: 'beta mode', note: 'approves without the owner key while beta mode is on' }; }
+      return { who: 'producer', via: 'beta mode (a Producer session)', note: 'a Producer session approves while beta mode is on' };
+    }
+  } catch {}
+  try {
+    const d = await import('./delegation.mjs');
+    const doc = d.readDelegation().doc;
+    if (doc?.agent && doc.proxy && d.delegationFor({ action: 'approve-protected', by: doc.agent, env: { STUDIO_LOCK_OWNER: String(doc.agent) }, autonomy: false }).ok) return { who: String(doc.agent), via: 'the owner proxy', note: 'signs with the owner\'s recorded yes (--permission "<the owner\'s words>")' };
+  } catch {}
+  void env;
+  return null;
+}
+
+/**
+ * The protected steps waiting (each task whose newest hand-back since its last start names a protected file and has
+ * no approval since): routed once per hand-back (a line.protected_routed event to the approver) and held from new
+ * builders for STUDIO_LINE_PROTECTED_HOLD_MIN (120) after it was routed, or until an approval names it (approval.protected
+ * or .proposal, or a beta/proxy approve-protected use, after the hand-back). No approver: reported only.
+ */
+export async function protectedRoutes({ tasks, events, now = Date.now(), env = process.env, act = true } = {}) {
+  const { PROTECTED_RX } = await import('./model-pools.mjs');
+  const holdMs = Math.max(0, num(env.STUDIO_LINE_PROTECTED_HOLD_MIN, 120)) * 60000;
+  const out = [];
+  let approver;
+  for (const t of tasks) {
+    if (t.state === 'running') continue;
+    const mine = events.filter((e) => e.task === t.id || (e.type && /^approval\.|^delegation\.used$/.test(e.type) && String(e.msg || '').includes(t.id)));
+    const lastStart = mine.filter((e) => e.type === 'task.start' || e.type === 'agent.session.start').pop();
+    const pause = mine.filter((e) => e.type === 'task.paused' && (!lastStart || Date.parse(e.ts) >= Date.parse(lastStart.ts))).pop();
+    if (!pause || !PROTECTED_RX.test(String(pause.msg || ''))) continue;
+    const at = Date.parse(pause.ts);
+    const approved = mine.some((e) => Date.parse(e.ts) > at && (/^approval\.(protected|proposal)$/.test(e.type) || (e.type === 'delegation.used' && /approve-(protected|proposal)/.test(String(e.meta?.action || '')))));
+    if (approved) continue;
+    if (approver === undefined) approver = await protectedApprover({ env });
+    const note = String(pause.msg || '').replace(/^Handed back \S+: /, '').slice(0, 220);
+    if (!approver) { out.push({ task: t.id, at: pause.ts, by: pause.agent || null, actor: null, hold: false, why: `handed back a protected step: ${note}`, fix: 'only the owner approves it (no beta mode or owner proxy): npm run approve -- protected --note "…" in its lane' }); continue; }
+    const routedEv = events.filter((e) => e.type === 'line.protected_routed' && e.task === t.id && e.meta?.handBack === pause.ts).pop();
+    const routed = Boolean(routedEv);
+    const routedAt = routedEv ? Date.parse(routedEv.ts) : now;
+    const fixText = `routed to ${approver.who} (${approver.via}): in ${t.id}'s lane copy run npm run approve -- protected --note "${t.id}: <which file and why>"${/proxy/.test(approver.via) ? ' --permission "<the owner\'s words>"' : ''}, then it restarts`;
+    if (!routed && act) {
+      try { emitEvent({ type: 'line.protected_routed', agent: LINE_AGENT, to: approver.who, task: t.id, msg: `Line Producer: ${t.id}'s protected step (handed back by ${pause.agent || 'its builder'}: "${note.slice(0, 160)}") goes to ${approver.who} (${approver.via}), who may approve it: ${fixText}`.slice(0, 600), meta: { handBack: pause.ts, by: pause.agent || null, actor: approver.who, via: approver.via } }); } catch {}
+      logAction({ kind: 'protected', task: t.id, what: `routed ${t.id}'s protected step to ${approver.who} (${approver.via})`, meta: { handBack: pause.ts } }, { emit: false });
+    }
+    out.push({ task: t.id, at: pause.ts, by: pause.agent || null, actor: approver.who, via: approver.via, hold: (routed || act) && now - routedAt < holdMs, routed: routed || act, why: `its protected step waits for ${approver.who} (${approver.via}): ${note}`, fix: fixText });
+  }
+  return out;
 }
 
 /** The Producer note: one file, rewritten when its reasons change, and one line.plan_blocked event per change. */
@@ -486,6 +611,13 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     }
     let note = null;
     if (acting) { try { note = writeNote(p.reasons, { now }); } catch {} }
+    // 2.77.0 (o): STUDIO_REMOTE=on: leases that ran out end (the claim released, the task back on the board), a
+    // background fetch of remote/* starts when one is due, and a changed offer is one remote.offer event.
+    let remotePass = null;
+    if (acting && p.remote?.on) { try { remotePass = await (await import('./remote-workers.mjs')).remotePass({ env, now, plan: p.remote, ...(deps.spawnFetch ? { spawnFetch: deps.spawnFetch } : {}), ...(deps.root ? { root: deps.root } : {}) }); } catch {} }
+    // 2.77.0 (u, P5.2/P5.3): engine trains in quiet windows.
+    let engines = [];
+    try { engines = await enginePass({ now, env, dryRun: !acting, rig: f.rig, deps }); } catch (e) { engines = [{ error: e.message }]; }
     const status = {
       at: new Date(now).toISOString(),
       mode,
@@ -495,12 +627,16 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       chainBreakers: p.chainBreakers,
       expansion: { ...p.expansion, ...(slice ? { sliceFiled: slice } : {}) },
       rig: f.rig,
+      ...(p.remote ? { remote: { ...p.remote, ...(remotePass ? { swept: remotePass.swept, fetch: remotePass.fetch } : {}) } } : {}),
       order: p.order,
       routes: Object.fromEntries(Object.entries(p.routes).filter(([id]) => p.order.includes(id) || p.chainBreakers.some((c) => c.task === id))),
       reasons: p.reasons,
       note: p.reasons.length ? '.studio/line/producer-note.md' : null,
       fixed: f.fixed.map((a) => ({ kind: a.kind, task: a.task, what: a.what })),
       actions: readActions(10),
+      models: f.pools ? { on: true, why: f.pools.why, pools: Object.fromEntries(Object.entries(f.pools.state).map(([k, v]) => [k, { model: v.model, tool: v.tool, usedPct: v.usedPct, near: v.near, out: v.out }])) } : { on: false },
+      protectedSteps: (f.protectedSteps || []).map(({ task, actor, via, hold, why, fix }) => ({ task, actor, via: via || null, hold, why, fix })),
+      engines,
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -520,9 +656,101 @@ export function summaryLine(s) {
     s.blocked?.length ? `${s.blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : 'nothing blocked',
     cb ? `chain-breaker ${cb.task} (${cb.n} wait${cb.state === 'blocked' ? ', blocked' : ''})` : null,
     s.expansion?.slots ? `expansion ${s.expansion.running}/${s.expansion.slots}` : null,
+    s.remote?.on && (s.remote.out || s.remote.queued || s.remote.offer?.length) ? `remote ${s.remote.out}/${s.remote.max}${s.remote.offer?.length ? ` (offer ${s.remote.offer.map((o) => o.task).join(', ')})` : ''}` : null,
     s.fixed?.length ? `fixed ${s.fixed.length}` : null,
     s.reasons?.length ? 'a Producer note is open' : null,
+    ...(s.engines || []).filter((e) => e.queued || e.running).map((e) => `${e.engine} train: ${e.running ? 'running' : e.started ? 'started' : `${e.queued} queued, waits (${e.why})`}`),
   ].filter(Boolean).join('; ');
+}
+
+// ---- engine trains in quiet windows (2.77.0, u: P5.2/P5.3) -----------------------------------------------------------
+
+/**
+ * Should engine <x>'s train start now? Pure. f: { engine, label, heavyKind, queued, oldestAt, running, startedRecently,
+ * auto, webTrain, webQueued, heavy: [{ kind, label }], freeGb, floorGb, floorFrom, cpuBusy, expectedMin, now }.
+ * { start, wait, why }. Priority (the owner's): the web train > builder verifies > Unity/art > soaks.
+ */
+export function engineWindow(f, env = process.env) {
+  const L = f.label || f.engine;
+  const quietPct = num(env.STUDIO_ENGINE_QUIET_CPU_PCT, 75);
+  const maxWait = num(env.STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN, 120);
+  const waited = f.oldestAt ? Math.round(((f.now ?? Date.now()) - Date.parse(f.oldestAt)) / 60000) : 0;
+  const no = (why) => ({ start: false, wait: true, why });
+  if (!f.auto) return { start: false, wait: false, why: `starting the ${L} train is left to a person (STUDIO_ENGINE_TRAIN_AUTO=off or engines.${f.engine}.trainAuto false): npm run task -- train --engine ${f.engine}` };
+  if (!f.queued) return { start: false, wait: false, why: `no ${L} branch queued` };
+  if (f.running) return { start: false, wait: false, why: `the ${L} train is running` };
+  if (f.startedRecently) return { start: false, wait: false, why: `started it ${f.startedRecently} min ago` };
+  if (f.webTrain) return no('the web train is running (its verify goes first: train > builder verifies > engine > soaks)');
+  const sameKind = (f.heavy || []).filter((h) => (f.heavyKind === 'unity' ? /unity/i.test(`${h.kind || ''}`) : false) || /\btrain\b/i.test(`${h.kind || ''}`));
+  if (sameKind.length) return no(`machine:heavy holds ${sameKind.map((h) => h.label || h.kind).slice(0, 2).join(', ')}`);
+  if (Number.isFinite(f.freeGb) && f.floorGb > 0 && f.freeGb < f.floorGb) return no(`free RAM ${f.freeGb} GB is under the ${L} floor ${f.floorGb} GB (${f.floorFrom})`);
+  if (Number.isFinite(f.cpuBusy) && f.cpuBusy * 100 >= quietPct) return no(`CPU ${Math.round(f.cpuBusy * 100)}% busy (STUDIO_ENGINE_QUIET_CPU_PCT ${quietPct})`);
+  if (f.webQueued > 0 && waited < maxWait) return no(`${f.webQueued} web lane(s) wait for the web train, which goes first (the ${L} queue waited ${waited} of ${maxWait} min: STUDIO_ENGINE_TRAIN_MAX_WAIT_MIN)`);
+  return { start: true, wait: false, why: `quiet window: no web train${f.webQueued ? ` (the ${L} queue waited ${waited} min, past ${maxWait})` : ''}, ${Number.isFinite(f.freeGb) ? `${f.freeGb} GB free (floor ${f.floorGb} GB)` : 'free RAM unknown (the train waits for its floor)'}${Number.isFinite(f.cpuBusy) ? `, CPU ${Math.round(f.cpuBusy * 100)}%` : ''}; one land run ~${f.expectedMin ?? '?'} min` };
+}
+
+const ENGINE_STARTS = () => path.join(LINE_DIR(), 'engine-trains.json');
+
+/**
+ * One look at every engine train: [{ engine, queued, running, expectedMin, floorGb, start, why, started? }]. Starts the
+ * ones whose window is open (unless dryRun or STUDIO_LINE_PRODUCER=report). deps: { rig, rigBudget, machine, root,
+ * startTrain(engine) -> { pid } }.
+ */
+export async function enginePass({ now = Date.now(), env = process.env, dryRun = false, rig = null, deps = {} } = {}) {
+  const et = await import('./engine-tracks.mjs');
+  const ut = await import('./unity-train.mjs');
+  const { mainRoot } = await import('./worktree.mjs');
+  const root = deps.root || mainRoot();
+  const targets = et.engineTargets({ root }).filter((t) => t.land);
+  if (!targets.length) return [];
+  // The machine: rigBudget's running jobs and free RAM, the scan's CPU.
+  let rb = null;
+  try { rb = deps.rigBudget ? await deps.rigBudget() : await (await import('./rig-budget.mjs')).rigBudget({ env, now }); } catch { rb = null; }
+  let cpuBusy = null;
+  try { const prof = deps.machine !== undefined ? deps.machine : (await import('./heavy-budget.mjs')).machineProfile(root, { env, now }); cpuBusy = Number.isFinite(prof?.cpu?.busy) ? prof.cpu.busy : null; } catch {}
+  const heavy = (rb?.running || rig?.heavy || []).map((h) => ({ kind: h.kind, label: h.label }));
+  let webTrain = Boolean(rig?.train?.running);
+  try { if (!webTrain && !deps.rig) webTrain = Boolean((await import('./train-daemon.mjs')).trainLockHeld(root, env, now)); } catch {}
+  if (deps.webTrain !== undefined) webTrain = deps.webTrain;
+  const webQ = (readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || []).filter((e) => e?.task && !(e.held && !(e.released && e.released.head === e.head)));
+  const starts = readJson(ENGINE_STARTS(), {}) || {};
+  const autoOn = !/^(off|0|false|no)$/i.test(String(env.STUDIO_ENGINE_TRAIN_AUTO ?? ''));
+  const acting = !dryRun && lineMode(env) === 'on';
+  const out = [];
+  for (const t of targets) {
+    const q = ut.readUnityQueue(root, t.name);
+    const running = ut.runningUnityTrain(root, t.name);
+    const floor = et.engineFloor(t.name, { env, root });
+    const exp = et.expectedMinutes(t.name, { root });
+    const last = starts[t.name];
+    const since = last ? Math.round((now - Date.parse(last.at)) / 60000) : null;
+    const f = { engine: t.name, label: t.label, heavyKind: t.heavyKind, queued: q.length, oldestAt: q[0]?.at || null, running: Boolean(running), startedRecently: since !== null && since < num(env.STUDIO_ENGINE_TRAIN_COOLDOWN_MIN, 3) ? Math.max(0, since) : 0, auto: autoOn && t.trainAuto, webTrain, webQueued: webQ.length, heavy, freeGb: Number.isFinite(rb?.freeGb) ? rb.freeGb : Number.isFinite(rig?.freeRamGb) ? rig.freeRamGb : null, floorGb: floor.gb, floorFrom: floor.from, cpuBusy, expectedMin: exp.minutes, now };
+    const w = engineWindow(f, env);
+    const row = { engine: t.name, queued: q.length, running: Boolean(running), expectedMin: exp.minutes, expectedFrom: exp.from, floorGb: floor.gb, start: w.start, why: w.why };
+    if (w.start && acting) {
+      try {
+        const r = deps.startTrain ? await deps.startTrain(t.name) : startEngineTrain(root, t.name, env);
+        row.started = true;
+        row.pid = r?.pid || null;
+        starts[t.name] = { at: new Date(now).toISOString(), pid: row.pid };
+        fs.mkdirSync(LINE_DIR(), { recursive: true });
+        fs.writeFileSync(ENGINE_STARTS(), `${JSON.stringify(starts, null, 2)}\n`);
+        logAction({ kind: 'engine-train', what: `started the ${t.label} train (${q.length} branch(es): ${q.map((e) => e.task).join(', ')}): ${w.why}`, meta: { engine: t.name, tasks: q.map((e) => e.task), expectedMin: exp.minutes } });
+      } catch (e) { row.started = false; row.why = `${w.why}; could not start it: ${e.message}`; }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** `node harness/task.mjs train --engine <x> --by line-producer`, detached, its output in .studio/line/<x>-train.log. */
+export function startEngineTrain(root, engine, env = process.env) {
+  fs.mkdirSync(LINE_DIR(), { recursive: true });
+  const fd = fs.openSync(path.join(LINE_DIR(), `${engine}-train.log`), 'a');
+  const child = spawn(process.execPath, [path.join(root, 'harness', 'task.mjs'), 'train', '--engine', engine, '--by', LINE_AGENT], { cwd: root, env: { ...env, STUDIO_LOCK_OWNER: LINE_AGENT }, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+  child.unref();
+  try { fs.closeSync(fd); } catch {}
+  return { pid: child.pid };
 }
 
 /** The last pass's status (.studio/line/status.json), or null. */
@@ -542,7 +770,7 @@ export function supervisorPlan({ now = Date.now(), env = process.env } = {}) {
   const s = readLineStatus();
   if (!s || s.mode !== 'on' || s.error || s.dryRun || !Array.isArray(s.order)) return null;
   if (now - Date.parse(s.at) > num(env.STUDIO_LINE_PLAN_MAX_SEC, 300) * 1000) return null;
-  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)) };
+  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, hold: new Map((s.protectedSteps || []).filter((p) => p.hold).map((p) => [p.task, p.why])), rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)) };
 }
 /** Sort the supervisor's groups (and each group's tasks) by the plan's order; tasks not in it keep their place after. */
 export function orderGroups(groups, plan) {
@@ -565,11 +793,19 @@ export function statusText(s) {
   L.push(`Order: ${s.order?.length ? s.order.slice(0, 8).map((id) => `${id}${s.routes?.[id]?.model ? ` (${s.routes[id].model})` : ''}`).join(', ') : 'nothing ready'}${s.order?.length > 8 ? ` (+${s.order.length - 8})` : ''}.`);
   const e = s.expansion || {};
   L.push(`Expansion: ${e.slots} slot(s) at share ${e.share}, ${e.running} running, ${e.open} open (${['1', '2', '3'].map((p) => `${e.byPhase?.[p]?.label} ${e.byPhase?.[p]?.open}`).join(', ')}${e.byPhase?.unphased?.open ? `, unphased ${e.byPhase.unphased.open}` : ''})${e.sliceOpen ? `; Director slice open: ${e.sliceOpen}` : ''}${e.sliceFiled ? `; asked the Director: ${e.sliceFiled}` : ''}.`);
+  if (s.remote) L.push(remoteText(s.remote));
   if (s.blocked?.length) { L.push('Blocked:'); for (const b of s.blocked.slice(0, 12)) L.push(`  ${b.task} [${b.kind}] ${b.why}${b.fix ? ` -> ${b.fix}` : ''}`); if (s.blocked.length > 12) L.push(`  … and ${s.blocked.length - 12} more (npm run line -- status --json)`); }
+  if (s.models?.on) L.push(`Model pools (npm run models -- status): ${Object.entries(s.models.pools || {}).map(([k, v]) => `${k} ${v.out ? 'out' : v.near ? `near (${v.usedPct}%)` : `${v.usedPct}%`}`).join(', ')}.`);
+  if (s.protectedSteps?.length) L.push(`Protected steps: ${s.protectedSteps.map((p) => `${p.task} -> ${p.actor || 'the owner'}${p.hold ? ' (held)' : ''}`).join('; ')}.`);
   if (s.reasons?.length) L.push(`For the Producer (this plan can't run because): ${s.reasons.join('; ')}.`);
   if (s.fixed?.length) L.push(`Fixed this pass: ${s.fixed.map((a) => a.what).join('; ')}.`);
   if (s.actions?.length) L.push(`Last actions: ${s.actions.slice(-5).map((a) => `${String(a.at).slice(11, 16)} ${a.what}`).join('; ')}.`);
   return L.join('\n');
+}
+
+/** 2.77.0 (o): the "remote" line (harness/remote-workers.mjs remoteLine's words; inline so the CLI never fails on it). */
+export function remoteText(r) {
+  return `Remote: ${r.out} out${r.queued ? `, ${r.queued} queued for the train` : ''} (0 local CPU until queued; at most ${r.max}); ${r.offer?.length ? `offer: ${r.offer.map((o) => o.task).join(', ')} -> npm run remote -- brief <T-ID> --worker <name> --by <you>` : r.why}${r.leases?.length ? `; leases: ${r.leases.map((l) => `${l.task} ${l.owner} ${l.status} until ${String(l.until).slice(11, 16)} UTC`).join(', ')}` : ''}.`;
 }
 
 export function whyText(s, id) {

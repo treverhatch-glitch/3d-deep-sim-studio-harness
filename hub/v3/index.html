@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -603,9 +603,6 @@
 
   /* ---------- 2.74.0: the refreshed War Room ---------- */
   body[data-skin="ops"] { --card: #212a36; --chip: #2f3a48; --ok-bg: rgba(61, 220, 132, .12); --bad-bg: rgba(255, 90, 95, .12); --wait: #c084fc; }
-  @media (prefers-color-scheme: light) {
-    body[data-skin="ops"] { --bg: #f3f5f8; --panel: #ffffff; --line: #d3dae3; --ink: #17202a; --quiet: #556273; --go: #13803d; --standby: #9a5b00; --hold: #c62828; --link: #0b5fae; --focus: #0b5fae; --card: #f7f9fb; --chip: #e7ecf2; --ok-bg: rgba(19, 128, 61, .09); --bad-bg: rgba(198, 40, 40, .08); --wait: #7e22ce; }
-  }
   body { font-family: Barlow, "Segoe UI", system-ui, -apple-system, sans-serif; }
   #ops h1, #ops h2 { font-family: "Barlow Condensed", "Segoe UI Semibold", "Arial Narrow", system-ui, sans-serif; }
   .deck { padding: 12px 20px 0; display: grid; gap: 14px; }
@@ -694,15 +691,6 @@
   .room .now .more { color: #fff; text-shadow: 1px 1px 0 #000; }
   /* Rail Yard: the merge train's lanes as cars on a track through QUEUE, VERIFY and LANDED */
   .room.r-rails .floor { background: repeating-linear-gradient(90deg, #6d5d4b 0 14px, #5d4f40 14px 16px); }
-  .yard { position: absolute; left: 10px; right: 10px; top: 112px; height: 74px; }
-  .yard .rail { position: absolute; left: 0; right: 0; top: 46px; height: 10px; background: repeating-linear-gradient(90deg, #8d6e63 0 6px, transparent 6px 14px), linear-gradient(#b0bec5 0 2px, transparent 2px 8px, #b0bec5 8px 10px); }
-  .yard .stn { position: absolute; top: 0; font: 11px/1 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; color: #fff; background: #37474f; padding: 2px 4px; border: 2px solid #263238; }
-  .yard .stn.q { left: 0; } .yard .stn.v { left: 42%; } .yard .stn.l { right: 0; background: #2e7d32; border-color: #1b5e20; }
-  .yard .car { position: absolute; top: 28px; width: 34px; height: 18px; background: #ffb300; border: 2px solid #3e2723; font: 11px/11px VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; text-align: center; color: #3e2723; transition: left 1.2s ease; overflow: hidden; }
-  .yard .car.verifying { background: #ffb300; animation: chug .5s steps(2) infinite; } .yard .car.landed { background: #66bb6a; } .yard .car.dropped { background: #e53935; color: #fff; animation: flicker 1s steps(2) infinite; } .yard .car.held, .yard .car.waiting { background: #b39ddb; }
-  @keyframes chug { 50% { transform: translateY(-2px); } }
-  .yard .loco { position: absolute; top: 24px; width: 40px; height: 22px; background: #c62828; border: 2px solid #3e2723; border-radius: 0 8px 0 0; transition: left 1.2s ease; }
-  .yard .note { position: absolute; left: 0; right: 0; top: 60px; font: 11px/1 VT323, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; color: #fff; text-shadow: 1px 1px 0 #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Watchtower: the owner proxy's beacon, lit while it acted in the last hour */
   .room.r-watchtower .floor { background: repeating-linear-gradient(0deg, #78909c 0 10px, #6c818c 10px 12px); }
   .tower { position: absolute; width: 34px; height: 70px; background: repeating-linear-gradient(0deg, #8d6e63 0 8px, #795548 8px 10px); border: 2px solid #3e2723; }
@@ -717,25 +705,27 @@
      edge and means the same thing everywhere (go, wait, stop, hold, info, off). Tokens for color, type, spacing and
      radius; light and dark follow the system; reduced motion is respected (the rule at the top of this sheet).
      ================================================================================================================== */
+  /* 2.77.0: a retro-futurist field terminal, dark always (a light set only when the person picks it: the theme button).
+     Two phosphors: green for reading, amber for what wants a person; status colors keep their one meaning. */
   :root {
-    --ds-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-    --ds-display: "Bahnschrift SemiCondensed", Bahnschrift, "DIN Alternate", "DIN Condensed", "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+    --ds-font: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Menlo", ui-monospace, monospace;
+    --ds-display: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Menlo", ui-monospace, monospace;
     --ds-1: 4px; --ds-2: 8px; --ds-3: 12px; --ds-4: 16px; --ds-5: 24px; --ds-6: 32px;
-    --ds-r1: 3px; --ds-r2: 6px; --ds-r3: 10px;
+    --ds-r1: 2px; --ds-r2: 4px; --ds-r3: 6px;
     --ds-t-xs: 12px; --ds-t-s: 13px; --ds-t-m: 15px; --ds-t-l: 17px; --ds-t-xl: 20px; --ds-t-2xl: 26px;
-    --ds-strip: 5px;
-    --ds-bg: #151c24; --ds-surface: #1c2530; --ds-surface-2: #232e3b; --ds-line: #314050; --ds-text: #e4eaf0; --ds-muted: #8e9dad;
-    --ds-go: #34a874; --ds-wait: #e2a03a; --ds-stop: #e05656; --ds-hold: #9378e0; --ds-info: #4c9be0; --ds-off: #7d8a97;
-    --ds-go-bg: rgba(52, 168, 116, .14); --ds-wait-bg: rgba(226, 160, 58, .14); --ds-stop-bg: rgba(224, 86, 86, .14); --ds-hold-bg: rgba(147, 120, 224, .15); --ds-info-bg: rgba(76, 155, 224, .13);
-    --ds-tape: #f2c94c; --ds-on-strong: #0f151b; --ds-floor: #10161d; --ds-floor-line: #1b2530;
+    --ds-strip: 4px;
+    --ds-bg: #050906; --ds-surface: #0a120c; --ds-surface-2: #0f1d13; --ds-line: #1d4a2a; --ds-text: #b8f5c6; --ds-muted: #6fae7f;
+    --ds-go: #5dff8a; --ds-wait: #ffb340; --ds-stop: #ff5f4f; --ds-hold: #d28cff; --ds-info: #66e3ff; --ds-off: #4d7058;
+    --ds-go-bg: rgba(93, 255, 138, .1); --ds-wait-bg: rgba(255, 179, 64, .12); --ds-stop-bg: rgba(255, 95, 79, .12); --ds-hold-bg: rgba(210, 140, 255, .12); --ds-info-bg: rgba(102, 227, 255, .1);
+    --ds-tape: #ffb340; --ds-on-strong: #041006; --ds-floor: #040805; --ds-floor-line: #0d1f12;
+    --ds-glow: 0 0 6px rgba(93, 255, 138, .35); --ds-glow-amber: 0 0 8px rgba(255, 179, 64, .45);
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --ds-bg: #e4e9ed; --ds-surface: #f7f9fa; --ds-surface-2: #edf1f4; --ds-line: #c6d0d9; --ds-text: #142029; --ds-muted: #4e5d6b;
-      --ds-go: #1f7f52; --ds-wait: #a4650f; --ds-stop: #b42f2f; --ds-hold: #6a4cc4; --ds-info: #1f69ae; --ds-off: #6b7784;
-      --ds-go-bg: rgba(31, 127, 82, .1); --ds-wait-bg: rgba(164, 101, 15, .1); --ds-stop-bg: rgba(180, 47, 47, .09); --ds-hold-bg: rgba(106, 76, 196, .1); --ds-info-bg: rgba(31, 105, 174, .09);
-      --ds-tape: #b8860b; --ds-on-strong: #ffffff; --ds-floor: #cfd6dc; --ds-floor-line: #c2cad1;
-    }
+  /* The light set, only on request (data-theme="light" on <html>, remembered in this browser). */
+  html[data-theme="light"] {
+    --ds-bg: #e9eee2; --ds-surface: #f6f8f1; --ds-surface-2: #e3eadb; --ds-line: #9bb59e; --ds-text: #10301a; --ds-muted: #3f6a4b;
+    --ds-go: #13803d; --ds-wait: #9a5b00; --ds-stop: #b42f2f; --ds-hold: #6a3fb0; --ds-info: #0d6a86; --ds-off: #6b7d70;
+    --ds-go-bg: rgba(19, 128, 61, .1); --ds-wait-bg: rgba(154, 91, 0, .1); --ds-stop-bg: rgba(180, 47, 47, .09); --ds-hold-bg: rgba(106, 63, 176, .1); --ds-info-bg: rgba(13, 106, 134, .09);
+    --ds-tape: #9a5b00; --ds-on-strong: #ffffff; --ds-floor: #d7dfcf; --ds-floor-line: #c7d2bf; --ds-glow: none; --ds-glow-amber: none;
   }
   /* Every view maps its own names onto the tokens, so the older rules below them pick the system up. */
   html body[data-skin] {
@@ -923,7 +913,7 @@
     padding: var(--ds-5) var(--ds-5) var(--ds-6); gap: 20px;
   }
   html body .room { border: 3px solid #0b1015; border-radius: var(--ds-r2); box-shadow: 0 2px 0 rgba(0, 0, 0, .35); }
-  @media (prefers-color-scheme: light) { html body .room { border-color: #4a5560; box-shadow: 0 2px 0 rgba(40, 50, 60, .25); } }
+  html[data-theme="light"] body .room { border-color: #4a5560; box-shadow: 0 2px 0 rgba(40, 50, 60, .25); }
   html body .room.busy { animation: setlit 3s ease-in-out infinite; }
   @keyframes setlit { 50% { box-shadow: 0 2px 0 rgba(0, 0, 0, .35), 0 0 0 3px var(--ds-tape), 0 0 22px rgba(242, 201, 76, .45); } }
   html body .room .sign, html body .room.r-production .sign { top: 8px; left: 8px; padding: 3px 8px; border: 0; border-radius: var(--ds-r1); background: #fdfaf2; color: #172029; font: 600 13px/1.2 var(--ds-display); box-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
@@ -953,17 +943,6 @@
   html body .room .now .row:has(.needs-release), html body .room .now .row:has(.held) { border-left-color: #6a4cc4; } html body .room .now .row:has(.parked) { border-left-color: #b42f2f; }
   html body .room .now button { font: 700 11px/1 var(--ds-font); border: 0; border-radius: 2px; background: #1f7f52; padding: 3px 6px; }
   /* Rail Yard: the locomotive runs the track while a train is on it; cars wait at their station */
-  html body .yard .stn { font: 600 11px/1 var(--ds-font); border-radius: 2px; border: 0; padding: 3px 6px; background: #263341; }
-  html body .yard .stn.l { background: #1f7f52; }
-  html body .yard .car { border-radius: 3px; font: 600 11px/14px var(--ds-font); border-width: 1px; }
-  html body .yard .car.verifying { background: #4c9be0; color: #fff; } html body .yard .car.landed { background: #34a874; color: #08130d; }
-  html body .yard .car.held, html body .yard .car.waiting { background: #9378e0; color: #fff; } html body .yard .car.dropped { background: #e05656; }
-  html body .yard .loco { animation: yardrun 9s linear infinite; border-radius: 3px 10px 3px 3px; }
-  html body .yard .loco::before { content: ''; position: absolute; right: 4px; top: -9px; width: 8px; height: 9px; background: #3e2723; }
-  html body .yard .loco::after { content: ''; position: absolute; right: 2px; top: -20px; width: 12px; height: 12px; border-radius: 50%; background: rgba(220, 225, 230, .7); animation: puff 1.2s ease-out infinite; }
-  @keyframes yardrun { 0% { left: -44px; } 100% { left: calc(100% + 4px); } }
-  @keyframes puff { 0% { transform: translate(0, 0) scale(.5); opacity: .9; } 100% { transform: translate(-10px, -12px) scale(1.4); opacity: 0; } }
-  html body .yard .note { display: none; }
   /* Engine Bay: hazard floor and a turning gear while its engine train or workers run */
   html body .room.r-engine.busy .prop svg.art { animation: gear 5s linear infinite; transform-origin: 50% 50%; }
   @keyframes gear { to { transform: rotate(360deg); } }
@@ -1002,6 +981,169 @@
   html body #arcade .xp span { font-size: var(--ds-t-s); color: var(--ds-muted); }
   html body #arcade .xp .bar i { background: var(--ds-info); }
   html body #arcade .screen .none { color: #c9d3dc; font-family: var(--ds-font); }
+
+  /* ==================================================================================================================
+     2.77.0: the field terminal. Scanlines and a soft phosphor glow over every view (off in the light set; the flicker
+     stops under reduced motion), framed panels with corner marks, a wrist-terminal tab bar, a bigger Studio floor.
+     ================================================================================================================== */
+  html { color-scheme: dark; background: var(--ds-bg); }
+  html[data-theme="light"] { color-scheme: light; }
+  html body[data-skin] { font: 14px/1.55 var(--ds-font); letter-spacing: 0; }
+  html body[data-skin]::after { content: ''; position: fixed; inset: 0; z-index: 100000; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px), radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0, 0, 0, .45) 100%);
+    animation: crt 6s steps(60) infinite; }
+  @keyframes crt { 0%, 100% { opacity: 1; } 48% { opacity: .94; } 50% { opacity: 1; } }
+  html[data-theme="light"] body[data-skin]::after { display: none; }
+  html body :is(#ops, #plan, #assets, #arcade, #away) > header h1, html body #tycoon > .top h1 { font: 700 22px/1.1 var(--ds-display); letter-spacing: .06em; color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body #ops h2, html body #plan h2, html body #assets h2, html body #arcade h2, html body .deck h2 { font: 700 16px/1.2 var(--ds-display); letter-spacing: .05em; color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body #ops h3, html body #plan h3, html body #arcade h3 { font: 700 14px/1.2 var(--ds-display); letter-spacing: .04em; color: var(--ds-text); }
+  html body .skin > header, html body #tycoon > .top { background: var(--ds-surface); border-bottom: 2px solid var(--ds-line); box-shadow: 0 1px 0 rgba(93, 255, 138, .08); }
+  /* panels: a frame with corner marks, like a terminal's readout */
+  html body #ops section, html body #plan section, html body #arcade section, html body .deck .panel, html body .deck .needs, html body #away .aw {
+    border-radius: var(--ds-r2); border: 1px solid var(--ds-line);
+    background:
+      linear-gradient(var(--ds-muted), var(--ds-muted)) top left / 12px 2px no-repeat, linear-gradient(var(--ds-muted), var(--ds-muted)) top left / 2px 12px no-repeat,
+      linear-gradient(var(--ds-muted), var(--ds-muted)) bottom right / 12px 2px no-repeat, linear-gradient(var(--ds-muted), var(--ds-muted)) bottom right / 2px 12px no-repeat,
+      var(--ds-surface);
+  }
+  html body .deck .needs.on { background:
+      linear-gradient(var(--ds-wait), var(--ds-wait)) top left / 12px 2px no-repeat, linear-gradient(var(--ds-wait), var(--ds-wait)) top left / 2px 12px no-repeat,
+      linear-gradient(90deg, var(--ds-wait-bg), transparent 45%), var(--ds-surface); }
+  /* the wrist-terminal tab bar */
+  html body .tabs { background: var(--ds-bg); border: 1px solid var(--ds-line); border-radius: var(--ds-r2); padding: 2px; gap: 0; }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab { font: 700 13px/1 var(--ds-font); letter-spacing: .05em; color: var(--ds-muted); border-radius: var(--ds-r1); padding: 9px 14px; }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab:hover { color: var(--ds-text); background: var(--ds-surface-2); }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab[aria-current="page"] { color: var(--ds-on-strong); background: var(--ds-go); box-shadow: var(--ds-glow); text-shadow: none; }
+  html body .themebtn { order: 7; font: 700 12px/1 var(--ds-font); letter-spacing: .04em; color: var(--ds-muted); background: transparent; border: 1px solid var(--ds-line); border-radius: var(--ds-r1); padding: 8px 10px; cursor: pointer; }
+  html body .themebtn:hover { color: var(--ds-text); }
+  /* buttons and inputs: phosphor outlines; the one next step is filled */
+  html body #ops button.act, html body .act-row button, html body #plan button:not(.tab), html body #assets button:not(.tab), html body #arcade button:not(.tab) { font: 700 12px/1.2 var(--ds-font); letter-spacing: .03em; border-radius: var(--ds-r1); background: transparent; border: 1px solid var(--ds-line); color: var(--ds-text); }
+  html body #ops button.act:hover, html body .act-row button:hover, html body #plan button:not(.tab):hover, html body #assets button:not(.tab):hover, html body #arcade button:not(.tab):hover { border-color: var(--ds-go); color: var(--ds-go); }
+  html body #plan button.go, html body #assets button.go, html body #arcade button.go, html body .need > button, html body .actbtn, html body #assets .acard .acts button.up { background: var(--ds-go); border-color: var(--ds-go); color: var(--ds-on-strong); box-shadow: var(--ds-glow); }
+  html body input, html body select, html body textarea { background: var(--ds-bg); border-radius: var(--ds-r1); border-color: var(--ds-line); font-family: var(--ds-font); }
+  html body input:focus, html body select:focus, html body textarea:focus { border-color: var(--ds-go); box-shadow: var(--ds-glow); outline: none; }
+  html body .sig { border-radius: var(--ds-r1); background: var(--ds-surface); font-family: var(--ds-font); }
+  html body .big b { font: 700 32px/1 var(--ds-display); color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body .live { font-family: var(--ds-font); border-radius: var(--ds-r1); }
+  html body .toast { font-family: var(--ds-font); border-radius: var(--ds-r2); }
+  html body .acard, html body .acard .view { border-radius: var(--ds-r2); }
+  html body .stb, html body .room .now .chip, html body .room .now button, html body .towerlog { font-family: var(--ds-font); }
+
+  /* ---- the Studio floor, bigger: full width, larger rooms, people and plates (the whole floor is drawn larger) ---- */
+  html body #tycoon .office { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; padding: var(--ds-5); }
+  @media (min-width: 900px) { html body #tycoon .office { zoom: 1.3; } }
+  @media (min-width: 1500px) { html body #tycoon .office { zoom: 1.55; } }
+  html body .room .sign, html body .room.r-production .sign { font: 700 12px/1.2 var(--ds-font); letter-spacing: .04em; }
+  html body .desk .tag b { font: 700 12px/1.1 var(--ds-font); letter-spacing: -.02em; }
+  html body .desk .tag i { font: 500 10px/1.1 var(--ds-font); }
+  /* cute and easy to see: the badge bobs, typing hands tick, a landed task bursts out of its room */
+  html body .person > .stb { animation: badgebob 2.2s ease-in-out infinite; }
+  @keyframes badgebob { 50% { transform: translateY(-3px); } }
+  html body .person.facing-left > .stb { animation: none; }
+  html body .burst { position: absolute; z-index: 6; left: 50%; top: 46%; pointer-events: none; }
+  html body .burst b { position: absolute; left: -60px; width: 120px; text-align: center; font: 700 15px/1 var(--ds-font); color: #fff7c2; text-shadow: 0 0 6px #ffb340, 2px 2px 0 #3a1d00; animation: burstup 1.8s ease-out forwards; }
+  html body .burst i { position: absolute; width: 8px; height: 8px; background: var(--c, #ffd54f); box-shadow: 0 0 6px var(--c, #ffd54f); animation: spark 1.2s ease-out forwards; }
+  @keyframes burstup { 0% { transform: translateY(10px) scale(.6); opacity: 0; } 20% { transform: translateY(0) scale(1.15); opacity: 1; } 100% { transform: translateY(-46px) scale(1); opacity: 0; } }
+  @keyframes spark { 0% { transform: translate(0, 0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+  html body #tycoon .dock { font-family: var(--ds-font); border-top: 2px solid var(--ds-line); }
+  html body #tycoon .build .bar i { background: var(--ds-go); box-shadow: var(--ds-glow); }
+
+  /* ---- the Train Room's loom: main a glowing central timeline, lanes as filaments woven back into it ---- */
+  html body .loom { width: 100%; max-width: 980px; height: auto; display: block; margin: 6px 0 10px; }
+  html body .loom .frame-o { fill: url(#loomBody); stroke: url(#loomGold); stroke-width: 6; }
+  html body .loom .main { stroke: #ff7a1a; stroke-width: 5; filter: url(#loomGlow); stroke-linecap: round; }
+  html body .loom .main.pulse { animation: mainpulse 2.4s ease-in-out infinite; }
+  @keyframes mainpulse { 50% { stroke: #ffb25e; } }
+  html body .loom .fil { fill: none; stroke-width: 2.6; stroke-linecap: round; }
+  html body .loom .fil.verifying { stroke: #ffd36b; stroke-dasharray: 10 7; animation: weave 1.4s linear infinite; filter: url(#loomGlow); }
+  html body .loom .fil.landed { stroke: #7dff9e; filter: url(#loomGlow); }
+  html body .loom .fil.dropped { stroke: #ff4d3d; stroke-dasharray: 3 5; animation: flicker 1.2s steps(2) infinite; }
+  html body .loom .fil.held, html body .loom .fil.deferred, html body .loom .fil.waiting { stroke: #c9a4ff; stroke-dasharray: 2 6; }
+  html body .loom text { fill: #ffe9c2; font: 700 12px var(--ds-font); }
+  html body .loom text.st { fill: #d9b98a; font-weight: 400; }
+  html body .loom .knot { fill: #7dff9e; filter: url(#loomGlow); }
+  @keyframes weave { to { stroke-dashoffset: -34; } }
+  /* the verify's real loading bar */
+  html body .vbar { margin: 6px 0 4px; }
+  html body .vbar .track { position: relative; height: 18px; border: 1px solid var(--ds-wait); border-radius: var(--ds-r1); background: repeating-linear-gradient(90deg, rgba(255, 179, 64, .08) 0 10px, transparent 10px 12px); overflow: hidden; }
+  html body .vbar .track i { display: block; height: 100%; background: repeating-linear-gradient(90deg, var(--ds-wait) 0 10px, transparent 10px 12px); box-shadow: var(--ds-glow-amber); transition: width .8s ease; }
+  html body .vbar .line { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: var(--ds-t-s); color: var(--ds-text); }
+  html body .vbar .line b { color: var(--ds-wait); }
+  html body .vbar .est { color: var(--ds-muted); }
+
+  /* every header: the title and its one-line state on top; the tab bar, MAX SPEED and the screen switch below */
+  html body :is(#ops, #plan, #assets, #arcade, #away) > header .spacer, html body #tycoon > .top .spacer { flex: 1 0 100%; height: 0; order: 4; }
+  html body .skin > header .meter, html body .skin > header #o-gates { order: 3; }
+  html body .desk .tag b, html body .desk.big .tag b { color: #10211a; }
+
+  @media (max-width: 600px) { html body .need { grid-template-columns: minmax(0, 1fr); } html body .need > button, html body .need > .actbtn { justify-self: start; } }
+
+
+  /* ---- 2.77.0: beta mode on the owner-proxy card ---- */
+  html body .betaline { margin: 0 0 8px; padding: 4px 8px; border-left: var(--ds-strip) solid var(--ds-off); background: var(--ds-surface-2); border-radius: var(--ds-r1); }
+  html body .betaline.on { border-left-color: var(--ds-hold); background: var(--ds-hold-bg); }
+  html body .betaline.on b { color: var(--ds-hold); }
+
+  /* ---- 2.77.0: the Control room's lower panels fold (one row under the columns; an open one takes the row) ---- */
+  html body #ops section.foldsec { padding: 0; }
+  html body #ops .fold > summary { list-style: none; cursor: pointer; padding: 12px 16px; display: flex; align-items: baseline; gap: 8px; }
+  html body #ops .fold > summary::-webkit-details-marker { display: none; }
+  html body #ops .fold > summary::before { content: '+'; font: 700 16px/1 var(--ds-font); color: var(--ds-wait); width: 14px; }
+  html body #ops .fold[open] > summary::before { content: '\2212'; }
+  html body #ops .fold > summary h2 { margin: 0; }
+  html body #ops .fold[open] { padding: 0 16px 14px; }
+  html body #ops .fold[open] > summary { padding-left: 0; padding-right: 0; }
+  html body #ops section.foldsec + section, html body #ops section + section.foldsec { margin-top: 10px; }
+  /* long lists scroll in their own box so the page stays short */
+  html body #o-timeline { max-height: 360px; overflow: auto; overscroll-behavior: contain; }
+  html body #o-agents { max-height: 440px; overflow: auto; overscroll-behavior: contain; }
+  html body #ops .foldrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--ds-3); padding: 0 var(--ds-5) var(--ds-6); max-width: 1520px; align-items: start; }
+  html body #ops .foldrow > .foldsec { margin: 0; }
+  html body #ops .foldrow .fold:not([open]) > summary { padding: 8px 12px; }
+  html body #ops .foldrow .fold:not([open]) > summary h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  html body #ops .foldrow .fold:not([open]) > summary h2 small { display: none; }
+  html body #ops .foldrow > .foldsec:has(> details[open]) { grid-column: 1 / -1; }
+  @media (max-width: 760px) { html body #ops .foldrow { padding-left: var(--ds-4); padding-right: var(--ds-4); grid-template-columns: 1fr; } }
+  html body #ops .card { background: var(--ds-surface-2); color: var(--ds-text); border: 1px solid var(--ds-line); border-top: 3px solid var(--ds-info); }
+  html body #ops #o-queue { max-height: 260px; overflow: auto; overscroll-behavior: contain; }
+
+  /* ---- 2.77.0: the fixed bars cover nothing: the floor's bottom bar ends the page, the Live badge sits in the header ---- */
+  html body #tycoon .dock { position: static; }
+  html body .live { position: static; order: 8; margin-left: auto; box-shadow: none; }
+  html body[data-skin="tycoon"] .live { bottom: auto; }
+
+  /* ---- 2.77.0: the Rail Yard, a loom chamber (two columns wide, so the loom reads at the room's size) ---- */
+  @media (min-width: 600px) { html body .room.r-rails { grid-column: span 2; } }
+  html body .room.r-rails .wall { background: radial-gradient(ellipse at 60% 80%, #2b1c05, #120b03 70%); border-bottom-color: #2a1d06; }
+  html body .room.r-rails .floor { background: linear-gradient(#18210f 1px, transparent 1px) 0 0 / 20px 20px, linear-gradient(90deg, #18210f 1px, #0a0f08 1px) 0 0 / 20px 20px; }
+  html body .rloom { position: absolute; z-index: 2; left: 8px; right: 8px; top: 30px; }
+  /* two columns wide: the keeper's desk on the left, the loom and its readout beside it (never over the keeper) */
+  @media (min-width: 600px) { html body .rloom { left: 132px; } }
+  html body .rloom svg.rl { display: block; width: 100%; height: auto; overflow: visible; }
+  html body .rl .rl-frame { fill: url(#rlBody); stroke: url(#rlGold); stroke-width: 5; }
+  html body .rl .rl-legs { fill: #8a6512; }
+  html body .rl .rl-main { stroke: #ff7a1a; stroke-width: 4.5; stroke-linecap: round; filter: url(#rlGlow); }
+  html body .rl .rl-main.pulse { animation: mainpulse 2.4s ease-in-out infinite; }
+  html body .rl .thr { fill: none; stroke-width: 2.6; stroke-linecap: round; }
+  html body .rl .thr.verifying { stroke: #ffd36b; stroke-dasharray: 8 6; animation: weave 1.3s linear infinite; filter: url(#rlGlow); }
+  html body .rl .thr.landed { stroke: #7dff9e; filter: url(#rlGlow); }
+  html body .rl .thr.dropped { stroke: #ff4d3d; stroke-dasharray: 3 4; animation: flicker 1.2s steps(2) infinite; }
+  html body .rl .thr.held, html body .rl .thr.deferred, html body .rl .thr.waiting { stroke: #c9a4ff; stroke-dasharray: 2 5; }
+  html body .rl .kn { fill: #7dff9e; filter: url(#rlGlow); } html body .rl .kn.v { fill: #ffd36b; animation: flicker 1s steps(2) infinite; }
+  html body .rl .spool rect { fill: #8a6512; } html body .rl .spool path { stroke: #ffd77a; stroke-width: 2.5; stroke-dasharray: 3 3; }
+  html body .rl .spool.held path { stroke: #c9a4ff; } html body .rl .spool.held rect { fill: #6a3fb0; }
+  html body .rl text { font: 700 13px var(--ds-font); fill: #ffe9c2; text-anchor: middle; }
+  html body .rl text.tl { text-anchor: start; font-size: 12px; }
+  html body .rl text.lbl { text-anchor: start; font-size: 11px; font-weight: 400; fill: #d9b98a; }
+  /* a phone draws the loom at about 60%: bigger numbers so they still read (after the sizes above, so it wins) */
+  @media (max-width: 599px) { html body .rl text { font-size: 20px; } html body .rl text.tl { font-size: 19px; } html body .rl text.lbl { font-size: 17px; } }
+  html body .rbar { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 8px; background: rgba(4, 10, 5, .92); border: 1px solid #2f6b3d; border-radius: 3px; font: 700 12px/1.2 var(--ds-font); color: #8dffab; text-shadow: 0 0 5px rgba(93, 255, 138, .45); }
+  html body .rbar .t { color: #5dff8a; letter-spacing: .06em; }
+  html body .rbar .track { flex: 0 1 140px; min-width: 50px; height: 10px; border: 1px solid #ffb340; background: rgba(255, 179, 64, .08); }
+  html body .rbar .track i { display: block; height: 100%; background: repeating-linear-gradient(90deg, #ffb340 0 6px, transparent 6px 8px); box-shadow: 0 0 6px rgba(255, 179, 64, .6); }
+  html body .rbar b { color: #ffb340; }
+  @media (max-width: 599px) { html body .rbar { font-size: 11px; gap: 6px; } html body .rbar .st, html body .rbar .t { display: none; } html body .rbar .track { flex-basis: 64px; } }
+  html body .rbar .w { flex: 1 1 auto; font-weight: 400; color: #b8f5c6; min-width: 0; overflow-wrap: anywhere; }
 </style>
 </head>
 <body data-skin="ops">
@@ -1014,7 +1156,7 @@
     <div class="spacer"></div>
     <div class="meter" title="Tasks done out of all tasks in studio/NEXT.md"><span id="o-prog">0 of 0 tasks done</span><span class="bar"><i id="o-progbar"></i></span></div>
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops" aria-current="page">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops" aria-current="page">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1036,13 +1178,16 @@
   <main>
     <div>
       <section><h2>Agents on cue <small>last 24 h</small></h2><div id="o-agents"></div><p class="note">Green: working. Amber: idle over 15 min. Amber ring: holds a task but silent 30 min (out of usage or stuck). Red: last action failed or escalated.</p></section>
-      <section><h2>Claims</h2><div id="o-locks"></div></section>
+      <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
     </div>
+    <div>
     <section>
       <h2>Activity</h2>
       <div class="filters" id="o-filters" role="toolbar" aria-label="Filter activity by agent"></div>
       <ol class="timeline" id="o-timeline"></ol>
     </section>
+    <section class="lane" id="o-queuebox"><h2>Queue</h2><div id="o-queue"></div></section>
+    </div>
     <div>
       <section id="o-act"><h2>Act <small id="o-actstate">read-only</small></h2>
         <div class="pairbox" id="o-pair" role="group" aria-labelledby="o-pairh"><b id="o-pairh">Pair this browser</b>
@@ -1075,21 +1220,23 @@
         </div>
         <p class="note" id="o-actmsg" role="status">Pair this browser (above) to use the buttons. Without it the page is read-only.</p>
       </section>
-      <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
-      <section><h2>Latest playtest</h2><div id="o-play"></div></section>
-      <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
-      <section><h2>Autonomy <small>npm run autonomy</small></h2><div id="o-autonomy"><p class="note">Not measured yet.</p></div><p class="note">Hours of supervisor running per unplanned intervention, hands-free landings, forced, reopened, your Redo verdicts. Moving a level is only ever a suggestion: you set it in <code>studio/autonomy.json</code>.</p></section>
-      <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
-      <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
-      <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
-      <section><h2>Sessions and context <small>refresh by default</small></h2><div id="o-sessions"></div></section>
-      <section id="o-ledgerbox"><h2>Token ledger</h2><div class="tiles" id="o-ledger"></div></section>
-      <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
-      <section><h2>Model calls today</h2><div id="o-router"></div></section>
-      <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
-      <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
     </div>
   </main>
+  <div class="foldrow" aria-label="More: folded sections (closed by default, remembered in this browser)">
+    <section class="foldsec"><details class="fold" data-fold="claims"><summary><h2>Claims</h2></summary><div id="o-locks"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="playtest"><summary><h2>Latest playtest</h2></summary><div id="o-play"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="bugs"><summary><h2>Bugs by model</h2></summary><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="autonomy"><summary><h2>Autonomy <small>npm run autonomy</small></h2></summary><div id="o-autonomy"><p class="note">Not measured yet.</p></div><p class="note">Hours of supervisor running per unplanned intervention, hands-free landings, forced, reopened, your Redo verdicts. Moving a level is only ever a suggestion: you set it in <code>studio/autonomy.json</code>.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="flow"><summary><h2>Floors and the flow <small>the Director's card</small></h2></summary><div id="o-flowbox"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="unattended"><summary><h2>Running unattended <small>npm run studio:start</small></h2></summary><div id="o-sup"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="budget"><summary><h2>Budget meter <small>cache reads count</small></h2></summary><div id="o-meter"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="sessions"><summary><h2>Sessions and context <small>refresh by default</small></h2></summary><div id="o-sessions"></div></details></section>
+    <section id="o-ledgerbox" class="foldsec"><details class="fold" data-fold="ledger"><summary><h2>Token ledger</h2></summary><div class="tiles" id="o-ledger"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="tokens"><summary><h2>Tokens used <small>measured</small></h2></summary><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="calls"><summary><h2>Model calls today</h2></summary><div id="o-router"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="divisions"><summary><h2>Divisions</h2></summary><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="shell"><summary><h2>Shell output saved</h2></summary><div id="o-rtk"></div></details></section>
+  </div>
 </div>
 
 <!-- Tycoon skin -->
@@ -1103,7 +1250,7 @@
     <span class="stat" title="Tokens reported today">Tokens used <b id="t-tokens">–</b></span>
     <span class="stat" title="Local time (2.30j: a clock, not a game day)">Time <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon" aria-current="page">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon" aria-current="page">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </div>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1124,7 +1271,7 @@
     <span class="game" id="p-game"></span>
     <span class="state" id="p-state">Loading…</span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan" aria-current="page">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan" aria-current="page">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1197,7 +1344,7 @@
     <h1>Asset studio</h1>
     <span class="state" id="a-state">Loading…</span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets" aria-current="page">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets" aria-current="page">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1231,8 +1378,8 @@
   <header>
     <h1>While you were away</h1>
     <span class="state" id="aw-state">Loading…</span>
-    <span class="spacer" style="flex:1"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <span class="spacer"></span>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
   </header>
   <div class="awaybar" id="aw-bar" hidden></div>
   <div class="aw-list" id="aw-list"></div>
@@ -1245,7 +1392,7 @@
     <h1>Arcade</h1>
     <span class="state" id="r-state"></span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade" aria-current="page">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade" aria-current="page">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1291,6 +1438,19 @@
   const ago = (m) => (m == null ? '' : m < 1 ? 'now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`);
   const short = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+  // 2.77.0: dark always, unless the person picks the light screen (remembered in this browser, never from the system).
+  const applyTheme = (t) => {
+    document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+    document.querySelectorAll('[data-themebtn]').forEach((b) => { b.setAttribute('aria-pressed', t === 'light' ? 'true' : 'false'); b.textContent = t === 'light' ? 'Dark screen' : 'Light screen'; });
+  };
+  applyTheme(store.get('hudTheme'));
+  // 2.77.0: the Control room's lower panels fold away, closed by default; each one's state is kept in this browser.
+  document.querySelectorAll('details.fold[data-fold]').forEach((d) => {
+    const k = `hudFold:${d.dataset.fold}`;
+    if (store.get(k) === 'open') d.open = true;
+    d.addEventListener('toggle', () => store.set(k, d.open ? 'open' : 'closed'));
+  });
+  document.querySelectorAll('[data-themebtn]').forEach((b) => b.addEventListener('click', () => { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; store.set('hudTheme', t); applyTheme(t); }));
 
   let state = null;
   let filter = null;
@@ -1302,7 +1462,8 @@
 
   // Skin: ?skin=tycoon wins, then the remembered choice.
   const fromUrl = new URL(location.href).searchParams.get('skin');
-  const setSkin = (s) => { if (!document.getElementById(s)) return; document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
+  const placeLive = (s) => { const h = document.querySelector(`#${s} > header, #${s} > .top`); const b = document.getElementById('live'); if (h && b && b.parentElement !== h) h.appendChild(b); };
+  const setSkin = (s) => { if (!document.getElementById(s)) return; placeLive(s); document.querySelectorAll('.skin').forEach((el) => { el.inert = el.id !== s; }); document.body.dataset.skin = s; store.set('hudSkin', s); if (s === 'plan') pollPlan(); else if (state) render(); };
   const SKINS = ['tycoon', 'ops', 'plan', 'assets', 'arcade', 'away'].filter((k) => document.getElementById(k));
   setSkin(SKINS.includes(fromUrl) ? fromUrl : SKINS.includes(store.get('hudSkin')) ? store.get('hudSkin') : 'ops');
   document.querySelectorAll('.switch').forEach((b) => b.addEventListener('click', () => setSkin(b.dataset.to)));
@@ -1814,18 +1975,50 @@
   // A time with its day when it isn't today ("Wed 05:56 PM"): a run's end or a delegation's can be days away.
   const when = (ts) => { if (!ts) return ''; const d = new Date(ts); return d.toDateString() === new Date().toDateString() ? hhmm(ts) : `${d.toLocaleDateString([], { weekday: 'short' })} ${hhmm(ts)}`; };
   const n1 = (x) => (x === null || x === undefined || !Number.isFinite(Number(x)) ? '?' : String(Math.round(Number(x) * 10) / 10));
-  /** A train's threads: one per lane, branching off main and woven back in when it lands (B-62). */
+  /**
+   * 2.77.0: a train as a loom. Main is the glowing central timeline; each lane a filament that branches off it and is
+   * woven back in when it lands (green, with a knot), pulses while it verifies, peels away red when handed back, waits
+   * violet for a release. Original art, drawn here.
+   */
   function threadsSvg(tr) {
     const lanes = tr.lanes || [];
     if (!lanes.length) return '';
-    const W = 640, top = 18, gap = 26, trunk = top + lanes.length * gap + 8, H = trunk + 14;
-    const paths = lanes.map((l, i) => {
-      const y = top + i * gap;
-      const word = { verifying: 'verifying', landed: 'landed: locked into main', dropped: 'handed back', held: 'waits for a release', deferred: 'next train' }[l.state] || l.state;
-      const d = l.state === 'dropped' ? `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L440,${y} C480,${y} 500,${y - 10} 540,${y - 16}` : l.state === 'landed' ? `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L480,${y} C540,${y} 540,${trunk} 600,${trunk}` : `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L470,${y}`;
-      return `<path class="lane ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(word)}</title></path><text x="206" y="${y - 5}">${esc(l.task)}</text><text class="st" x="290" y="${y - 5}">${esc(word)}</text>${l.state === 'landed' ? `<circle class="knot" cx="600" cy="${trunk}" r="4"></circle>` : ''}`;
+    const W = 900, mid = 0, rows = Math.ceil(lanes.length / 2), H = Math.max(150, 70 + rows * 52);
+    const cy = H / 2;
+    const word = { verifying: 'verifying', landed: 'landed: woven into main', dropped: 'handed back', held: 'waits for a release', deferred: 'next train', waiting: 'queued' };
+    const fil = lanes.map((l, i) => {
+      const side = i % 2 ? 1 : -1;
+      const y = cy + side * (30 + Math.floor(i / 2) * 24);
+      const x0 = 110 + i * 14;
+      const lift = `M${x0},${cy} C${x0 + 60},${cy} ${x0 + 50},${y} ${x0 + 120},${y}`;
+      const d = l.state === 'landed' ? `${lift} L660,${y} C730,${y} 720,${cy} 790,${cy}`
+        : l.state === 'dropped' ? `${lift} L520,${y} C580,${y} 600,${y + side * 26} 660,${y + side * 40}`
+          : l.state === 'verifying' ? `${lift} L700,${y}` : `${lift} L560,${y}`;
+      const tx = x0 + 128;
+      return `<path class="fil ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(word[l.state] || l.state)}</title></path>`
+        + `<text x="${tx}" y="${y - 6}">${esc(l.task)}</text><text class="st" x="${tx + 66}" y="${y - 6}">${esc(word[l.state] || l.state)}</text>`
+        + (l.state === 'landed' ? `<circle class="knot" cx="790" cy="${cy}" r="5"></circle>` : l.state === 'verifying' ? `<circle class="knot" cx="700" cy="${y}" r="3.5" style="fill:#ffd36b"></circle>` : '');
     }).join('');
-    return `<svg class="threads" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tr.name)} lanes: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', '))}"><path class="trunk" d="M20,${trunk} L620,${trunk}"></path><text x="20" y="${trunk - 6}">main</text>${paths}</svg>`;
+    // faint golden branches behind, for the loom's texture (decoration, not data)
+    const veins = Array.from({ length: 8 }, (_, k) => { const sy = k % 2 ? 1 : -1; const x = 150 + k * 80; return `<path d="M${x},${cy} C${x + 40},${cy} ${x + 30},${cy + sy * (H / 2 - 24)} ${x + 90},${cy + sy * (H / 2 - 22)}" stroke="#c8952c" stroke-width="1" fill="none" opacity=".22"></path>`; }).join('');
+    void mid;
+    return `<svg class="loom" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tr.name)} lanes: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', '))}">
+      <defs><linearGradient id="loomGold" x1="0" x2="1"><stop offset="0" stop-color="#7a5410"></stop><stop offset=".5" stop-color="#ffd77a"></stop><stop offset="1" stop-color="#7a5410"></stop></linearGradient>
+      <radialGradient id="loomBody" cx=".5" cy=".5" r=".75"><stop offset="0" stop-color="#3a2706"></stop><stop offset="1" stop-color="#0e0902"></stop></radialGradient>
+      <filter id="loomGlow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs>
+      <rect class="frame-o" x="6" y="6" width="${W - 12}" height="${H - 12}" rx="${Math.min(70, H / 2 - 10)}"></rect>
+      ${veins}
+      <path class="main${tr.running ? ' pulse' : ''}" d="M40,${cy} L${W - 40},${cy}"></path><text x="46" y="${cy - 10}">main</text>
+      ${fil}
+    </svg>`;
+  }
+  const dur = (ms) => { if (ms == null) return '?'; const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  /** 2.77.0: the running verify's real loading bar: gates finished of the run's gates; the ETA from recorded runs. */
+  function verifyBar(bar) {
+    if (!bar) return '';
+    const eta = bar.ended ? 'finished' : bar.etaMs == null ? `no ETA yet (${bar.why})` : `about ${dur(bar.etaMs)} left`;
+    return `<div class="vbar" role="group" aria-label="Verify progress"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${bar.percent}" aria-label="Verify ${bar.percent}% done"><i style="width:${bar.percent}%"></i></div>`
+      + `<div class="line"><b>${bar.percent}%</b><span>${bar.done} of ${bar.total} checks done</span><span>${bar.step ? `now: ${esc(bar.step)} (${dur(bar.stepElapsedMs)})` : bar.ended ? 'all checks ran' : 'between checks'}</span><span>${esc(eta)}</span>${bar.estimate && bar.etaMs != null ? `<span class="est">estimate: ${esc(bar.why)}</span>` : ''}${bar.failed?.length ? `<span style="color:var(--ds-stop)">red so far: ${esc(bar.failed.join(', '))}</span>` : ''}</div></div>`;
   }
   function renderDeck(s) {
     const w = s.warRoom || {};
@@ -1838,7 +2031,8 @@
       const head = tr.running ? `${esc(tr.id || '')} · ${esc(tr.step || '')}${tr.elapsedMin != null ? ` · ${esc(tr.elapsedMin)} min` : ''}${tr.eta ? ` · ${esc(tr.eta)}` : ''}${tr.by ? ` · by ${esc(tr.by)}` : ''}` : 'no train running';
       const waits = (tr.waiting || []).map((x) => { const key = `act:release:${x.task}`; return `<div class="need" data-rkey="${esc(key)}"><div class="what">${esc(x.task)}${x.agent ? ` <small>${esc(x.agent)}</small>` : ''}${x.held ? `<small>held: tier ${esc(x.held.tier)}: ${esc(x.held.why)}</small>` : x.released ? `<small>released by ${esc(x.released)}</small>` : '<small>queued for the next train</small>'}</div>${x.held ? `<button type="button" class="actbtn" data-act2="release" data-task="${esc(x.task)}" ${dis}>Release</button>` : '<span></span>'}${resultHtml(key)}</div>`; }).join('');
       const last = tr.last ? `<p class="tline">Last: ${esc(tr.last.id || '')} ${tr.last.at ? esc(when(tr.last.at)) : ''}: ${tr.last.landed?.length ? `landed ${esc(tr.last.landed.join(', '))}` : 'landed nothing'}${tr.last.dropped?.length ? `; handed back ${esc(tr.last.dropped.join(', '))}` : ''}</p>` : '';
-      return `<div class="train" data-train="${esc(tr.kind)}"><h3>${esc(tr.name)} <small class="note">${head}</small></h3>${tr.text ? `<p class="tline">${esc(tr.text)}</p>` : ''}${threadsSvg(tr)}${last}${waits ? `<div class="waitlist">${waits}</div>` : ''}</div>`;
+      const kr = tr.knownRed?.n ? `<p class="tline" data-knownred="${esc(tr.knownRed.n)}">Known red on main: ${esc(tr.knownRed.n)} test(s) (${esc(tr.knownRed.tests.join(', '))}): not blocking while they also fail on main</p>` : '';
+      return `<div class="train" data-train="${esc(tr.kind)}"><h3>${esc(tr.name)} <small class="note">${head}</small></h3>${tr.text ? `<p class="tline">${esc(tr.text)}</p>` : ''}${verifyBar(tr.bar)}${threadsSvg(tr)}${last}${kr}${waits ? `<div class="waitlist">${waits}</div>` : ''}</div>`;
     }).join('') : '<p class="note">No train yet. A lane joins the merge train with <code>npm run task -- done &lt;ID&gt; --train</code>; an engine track (Unity) gets its own train.</p>');
     const rc = w.runClock;
     sigOf($('o-clockbody'), rc ? `<div class="big"><b>${esc(n1(rc.elapsedH))} h</b><span>since ${esc(when(rc.t0))} (${esc(rc.from)})${rc.until ? `; ${rc.leftH > 0 ? `${esc(n1(rc.leftH))} h left, until ${esc(when(rc.until))}` : 'past its end'}` : ''}</span></div><div class="big"><b>${esc(rc.landed)}</b><span>landed · ${esc(n1(rc.perHour))}/h · ${esc(rc.lastHour)} in the last hour</span></div>` : '<p class="note">No run yet: <code>npm run studio:start -- --until 46h</code> starts the clock (STUDIO_RUN_T0 sets it by hand).</p>');
@@ -1846,7 +2040,9 @@
     sigOf($('o-machinebody'), m ? `<div class="mtiles"><div class="mtile"><b>${esc(n1(m.ram.usedGb))}/${esc(n1(m.ram.totalGb))} GB</b><span>RAM${m.ram.avgUsedGb != null ? ` · avg ${esc(n1(m.ram.avgUsedGb))}` : ''}</span>${pctBar(m.ram.totalGb ? (100 * m.ram.usedGb) / m.ram.totalGb : 0, 75, 90)}</div><div class="mtile"><b>${esc(m.cpu.busyPct ?? '?')}%</b><span>CPU${m.cpu.avgPct != null ? ` · avg ${esc(m.cpu.avgPct)}%` : ''}</span>${pctBar(m.cpu.busyPct)}</div><div class="mtile"><b>${m.gpu ? `${esc(m.gpu.busyPct ?? '?')}%` : '–'}</b><span>${m.gpu ? `GPU${m.gpu.avgPct != null ? ` · avg ${esc(m.gpu.avgPct)}%` : ''}` : 'no GPU found'}</span>${m.gpu ? pctBar(m.gpu.busyPct) : ''}</div><div class="mtile"><b>${esc(n1(m.disk.freeGb))} GB</b><span>disk free</span></div></div><p class="note">${m.ram.perSessionGb != null ? `About ${esc(m.ram.perSessionGb)} GB of RAM per running session; room for ${esc(m.ram.roomForMore)} more above the ${esc(m.ram.floorGb)} GB floor.` : `RAM floor ${esc(m.ram.floorGb)} GB (STUDIO_RAM_FLOOR_GB).`} ${esc(m.samples)} sample${m.samples === 1 ? '' : 's'}, last ${esc(hhmm(m.at))}.</p>${m.limit ? `<span class="limit">Limit: ${esc(m.limit)}</span>` : ''}` : '<p class="note">No machine scan yet: the supervisor samples it every pass (harness/machine.mjs).</p>');
     const p = w.ownerProxy;
     const d = p?.delegation;
-    sigOf($('o-proxybody'), p ? `${d ? `<p>${esc(d.agent)} acts for ${esc(d.by)}: ${esc((d.actions || []).join(', '))}, until ${esc(when(d.until))}. <b>${d.ok ? 'It counts now.' : `It doesn't count: ${esc(d.why)}`}</b></p><div class="need" data-rkey="act:revoke:"><div class="what">Revoke ends it on the next command (<code>npm run delegate -- revoke --by &lt;you&gt;</code>).</div><button type="button" class="actbtn danger" data-act2="revoke" ${dis}>Revoke</button>${resultHtml('act:revoke:')}</div>` : '<p class="note">No delegation on file: the owner grants one with npm run delegate -- grant.</p>'}<p class="note">${esc(p.count24h)} action${p.count24h === 1 ? '' : 's'} under it in 24 h${p.workarounds24h ? ` · ${esc(p.workarounds24h)} workaround event${p.workarounds24h === 1 ? '' : 's'}` : ''}.</p>${p.recent?.length ? `<ul class="plist">${p.recent.map((r) => `<li><time>${esc(hhmm(r.at))}</time><b>${esc(r.who)}</b> ${esc(r.what)}${r.kind === 'autonomous' ? ' <span class="note">(autonomous)</span>' : ''}</li>`).join('')}</ul>` : ''}` : '<p class="note">Not read yet.</p>');
+    const bt = p?.beta;
+    const betaLine = bt ? `<p class="betaline ${bt.on ? 'on' : 'off'}"><b>Beta mode ${bt.on ? 'on' : 'off'}</b>${bt.on ? `: set by ${esc(bt.by || '?')} since ${esc(when(bt.at))}${bt.agents?.length ? `; acting as the owner: ${esc(bt.agents.join(', '))}` : ''}${bt.why ? ` (${esc(bt.why)})` : ''}` : ` <span class="note">${esc(bt.why || 'studio/beta.json is not on')}</span>`}</p>` : '';
+    sigOf($('o-proxybody'), p ? `${betaLine}${d ? `<p>${esc(d.agent)} acts for ${esc(d.by)}: ${esc((d.actions || []).join(', '))}, until ${esc(when(d.until))}. <b>${d.ok ? 'It counts now.' : `It doesn't count: ${esc(d.why)}`}</b></p><div class="need" data-rkey="act:revoke:"><div class="what">Revoke ends it on the next command (<code>npm run delegate -- revoke --by &lt;you&gt;</code>).</div><button type="button" class="actbtn danger" data-act2="revoke" ${dis}>Revoke</button>${resultHtml('act:revoke:')}</div>` : '<p class="note">No delegation on file: the owner grants one with npm run delegate -- grant.</p>'}<p class="note">${esc(p.count24h)} action${p.count24h === 1 ? '' : 's'} under it in 24 h${p.workarounds24h ? ` · ${esc(p.workarounds24h)} workaround event${p.workarounds24h === 1 ? '' : 's'}` : ''}.</p>${p.recent?.length ? `<ul class="plist">${p.recent.map((r) => `<li><time>${esc(hhmm(r.at))}</time><b>${esc(r.who)}</b> ${esc(r.what)}${r.kind === 'autonomous' ? ' <span class="note">(autonomous)</span>' : ''}</li>`).join('')}</ul>` : ''}` : '<p class="note">Not read yet.</p>');
   }
 
   function renderMeter(m) {
@@ -1908,7 +2104,9 @@
       fbox = document.createElement('div');
       fbox.id = 'o-floors';
       fbox.className = 'card';
-      box.parentNode.insertBefore(fbox, box.nextSibling);
+      // 2.77.0: in the "Floors and the flow" fold (closed by default) instead of under Your call.
+      const flow = $('o-flowbox');
+      if (flow) flow.appendChild(fbox); else box.parentNode.insertBefore(fbox, box.nextSibling);
     }
     if (!s.floors?.configured) {
       fbox.style.display = 'none';
@@ -2148,6 +2346,20 @@
     }
   }
   const pendingFx = [];
+  const bursts = [];
+  /** A small pixel burst over a room: the words and a ring of sparks; nothing under reduced motion. */
+  function roomBurst(roomId, text) {
+    const el = roomId && document.getElementById(`room-${roomId}`);
+    if (!el || reduceMotion) return;
+    const cols = ['#ffd54f', '#7dff9e', '#66e3ff', '#ff8a65', '#d28cff'];
+    const sparks = Array.from({ length: 14 }, (_, k) => { const a = (k / 14) * Math.PI * 2; return `<i style="--c:${cols[k % 5]};--dx:${Math.round(Math.cos(a) * 70)}px;--dy:${Math.round(Math.sin(a) * 50)}px"></i>`; }).join('');
+    const b = document.createElement('span');
+    b.className = 'burst';
+    b.setAttribute('aria-hidden', 'true');
+    b.innerHTML = `<b>${esc(text)}</b>${sparks}`;
+    el.appendChild(b);
+    setTimeout(() => b.remove(), 1900);
+  }
   let lastWatchAt = null;
   function wakeWatcher(w) {
     const p = people.get('watch');
@@ -2275,8 +2487,10 @@
     engine: { cls: 'wl-rivet fl-hazard', v: '--wall:#607d8b;--wall2:#455a64;--trim:#fdd835;--fa:#9e9e9e;--fb:#757575',
       html: () => prop('right:10px;top:46px', '<div class="belt" data-dyn="enginetrain" title="The engine track\'s own train (harness/unity-train.mjs)"><span class="m">LANES</span><span class="track"><i></i></span><span class="m">LAND</span></div>') + prop('right:16px;bottom:110px', P.gear) },
     // 2.74.0: the merge train's yard: lanes as cars through QUEUE, VERIFY and LANDED.
-    rails: { cls: 'wl-brick fl-concrete r-rails', v: '--wall:#4e342e;--wall2:#3e2723;--trim:#ffb300;--fa:#6d5d4b;--fb:#5d4f40',
-      html: () => '<div class="yard" data-dyn="yard"><span class="stn q">QUEUE</span><span class="stn v">VERIFY</span><span class="stn l">LANDED</span><span class="rail"></span><span class="note"></span></div>' },
+    // 2.77.0: the Rail Yard is a loom chamber: the merge train's lanes as threads on a small golden timeline loom, the
+    // verify's real progress in a terminal readout under it, the train's keeper at the desk below.
+    rails: { cls: 'wl-plain r-rails', v: '--wall:#140d04;--wall2:#1d1407;--trim:#ffb340;--fa:#0b0f0a;--fb:#101a10',
+      html: () => '<div class="rloom" data-dyn="rloom"><div class="rl-svg"></div><div class="rbar"></div></div>' },
     // 2.74.0: the outside overseer / owner proxy: a beacon lit while it acted in the last hour, its log, Revoke.
     watchtower: { cls: 'wl-plain fl-concrete r-watchtower', v: '--wall:#263238;--wall2:#1c262b;--trim:#ffee58;--fa:#78909c;--fb:#6c818c',
       html: () => prop('right:20px;top:24px', '<div class="tower"><span class="beacon" data-dyn="beacon"></span></div>') + '<div class="towerlog" data-dyn="towerlog" style="right:58px;top:30px"></div>' },
@@ -2562,6 +2776,37 @@
   }
 
   // Room widgets that show real studio state.
+  /**
+   * 2.77.0: the Rail Yard's loom, drawn for the room: main as the glowing orange line; queued lanes as threads waiting
+   * on spools at the left (violet when they wait for a release); lanes in the train branch off main, pulse while they
+   * verify, weave back in green when they land, peel away red when handed back. Original art.
+   */
+  function miniLoom(web) {
+    const W = 560, H = 170, cy = 92;
+    const lanes = web?.lanes || [];
+    const waiting = (web?.waiting || []).slice(0, 6);
+    const num = (t) => String(t).replace(/^[A-Z]+-/, '');
+    const spools = waiting.map((w, i) => { const x = 46 + i * 20; return `<g class="spool ${w.held ? 'held' : 'queued'}"><title>${esc(w.task)}: ${w.held ? 'waits for a release' : 'queued for the next train'}</title><rect x="${x - 6}" y="22" width="12" height="7" rx="2"></rect><path d="M${x},29 L${x},52"></path><text x="${x}" y="62">${esc(num(w.task))}</text></g>`; }).join('');
+    const thr = lanes.slice(0, 6).map((l, i) => {
+      const side = i % 2 ? 1 : -1;
+      const y = cy + side * (20 + Math.floor(i / 2) * 22);
+      const x0 = 190 + i * 10;
+      const lift = `M${x0},${cy} C${x0 + 30},${cy} ${x0 + 24},${y} ${x0 + 56},${y}`;
+      const d = l.state === 'landed' ? `${lift} L420,${y} C450,${y} 446,${cy} 478,${cy}` : l.state === 'dropped' ? `${lift} L360,${y} C390,${y} 398,${y + side * 22} 426,${y + side * 34}` : l.state === 'verifying' ? `${lift} L450,${y}` : `${lift} L380,${y}`;
+      return `<path class="thr ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(l.state)}</title></path><text class="tl" x="${x0 + 60}" y="${y - 4}">${esc(num(l.task))}</text>${l.state === 'verifying' ? `<circle class="kn v" cx="450" cy="${y}" r="3"></circle>` : l.state === 'landed' ? `<circle class="kn" cx="478" cy="${cy}" r="4"></circle>` : ''}`;
+    }).join('');
+    return `<svg class="rl" viewBox="0 0 ${W} ${H}" role="img" aria-label="The merge train's loom: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', ') || 'no lanes on it')}${waiting.length ? `; waiting: ${esc(waiting.map((w) => w.task).join(', '))}` : ''}">
+      <defs><linearGradient id="rlGold" x1="0" x2="1"><stop offset="0" stop-color="#7a5410"></stop><stop offset=".5" stop-color="#ffd77a"></stop><stop offset="1" stop-color="#7a5410"></stop></linearGradient>
+      <radialGradient id="rlBody" cx=".5" cy=".55" r=".7"><stop offset="0" stop-color="#3a2706"></stop><stop offset="1" stop-color="#0e0902"></stop></radialGradient>
+      <filter id="rlGlow" x="-20%" y="-60%" width="140%" height="220%"><feGaussianBlur stdDeviation="2" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs>
+      <rect class="rl-frame" x="160" y="18" width="${W - 176}" height="${H - 30}" rx="56"></rect>
+      <rect class="rl-legs" x="${W / 2 + 60}" y="${H - 13}" width="10" height="12"></rect><rect class="rl-legs" x="${W / 2 - 70}" y="${H - 13}" width="10" height="12"></rect>
+      <path class="rl-main${web?.running ? ' pulse' : ''}" d="M172,${cy} L${W - 26},${cy}"></path>
+      <text class="lbl" x="40" y="14">waiting</text><text class="lbl" x="${W - 120}" y="14">main</text>
+      ${spools || '<text class="tl" x="46" y="44">none</text>'}${thr}
+    </svg>`;
+  }
+
   // 2.75.0: one badge over each person: what they are doing, in the same colors as everywhere else (the key in the dock).
   const STATE = { working: ['✎', 'working'], verifying: ['◷', 'verifying'], 'on-train': ['⇢', 'on the train'], 'needs-release': ['◆', 'waits for a release'], held: ['◆', 'held for landing'], 'handed-back': ['↩', 'handed back'], parked: ['!', 'parked'], stalled: ['!', 'stalled'], ending: ['⇥', 'ending: leaving the room'], idle: ['z', 'idle'] };
   function stateOf(a, s) {
@@ -2599,25 +2844,20 @@
 
   function renderWidgets(s) {
     // 2.74.0: the Rail Yard (the merge train), the Engine Bay belt (the engine train) and the Watchtower (the proxy).
-    const yard = office.querySelector('[data-dyn="yard"]');
+    const rl = office.querySelector('[data-dyn="rloom"]');
     const web = (s.warRoom?.trains || []).find((t) => t.kind === 'web');
-    if (yard) {
-      const cars = [...(web?.lanes || []).map((l) => ({ task: l.task, st: l.state })), ...(web?.waiting || []).map((w) => ({ task: w.task, st: w.held ? 'held' : 'waiting' }))].slice(0, 7);
-      const at = { waiting: 0, held: 0, deferred: 0, verifying: 42, dropped: 30, landed: 78 };
-      const sig = JSON.stringify(cars) + (web?.text || '');
-      if (yard.dataset.sig !== sig) {
-        yard.dataset.sig = sig;
-        yard.querySelectorAll('.car,.loco').forEach((e) => e.remove());
-        const byPos = {};
-        cars.forEach((c) => {
-          const base = at[c.st] ?? 0;
-          const k = (byPos[base] = (byPos[base] || 0) + 1) - 1;
-          yard.insertAdjacentHTML('beforeend', `<span class="car ${esc(c.st)}" style="left:calc(${base}% + ${k * 36}px)" title="${esc(c.task)}: ${esc(c.st)}">${esc(String(c.task).replace(/^[A-Z]+-/, ''))}</span>`);
-        });
-        if (web?.running) yard.insertAdjacentHTML('beforeend', '<span class="loco" style="left:calc(42% - 44px)" aria-hidden="true"></span>');
-        yard.querySelector('.note').textContent = web ? (web.running ? `${web.step}${web.elapsedMin != null ? ` ${web.elapsedMin} min` : ''}: ${web.text || ''}` : web.last ? `last: ${web.last.landed?.length ? `landed ${web.last.landed.join(', ')}` : 'landed nothing'}` : `${(web.waiting || []).length} queued`) : 'no train yet';
-      }
-      yard.title = web ? `Merge train${web.id ? ` ${web.id}` : ''}: ${web.running ? web.text || web.step : 'not running'}` : 'No merge train yet (npm run task -- done <ID> --train)';
+    if (rl) {
+      const svgHtml = miniLoom(web);
+      const box = rl.querySelector('.rl-svg');
+      if (box.dataset.sig !== svgHtml) { box.dataset.sig = svgHtml; box.innerHTML = svgHtml; }
+      const bar = web?.bar && !web.bar.ended ? web.bar : null;
+      const eta = bar ? (bar.etaMs == null ? 'no ETA yet' : `~${Math.max(1, Math.round(bar.etaMs / 60000))} min left`) : '';
+      const barHtml = bar
+        ? `<span class="t">Verify</span><span class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${bar.percent}" aria-label="Verify ${bar.percent}% done"><i style="width:${bar.percent}%"></i></span><b>${bar.percent}%</b><span class="w">${bar.done}/${bar.total}${bar.step ? `<span class="st"> · now ${esc(bar.step)}</span>` : ''} · ${esc(eta)}${bar.estimate && bar.etaMs != null ? ' (estimate)' : ''}</span>`
+        : `<span class="t">Idle</span><span class="w">${web?.running ? `train ${esc(web.id || '')}: ${esc(web.step || 'starting')}` : web?.last ? `last train: ${web.last.landed?.length ? `landed ${esc(web.last.landed.join(', '))}` : 'landed nothing'}` : 'no train yet: npm run task -- done <ID> --train'}</span>`;
+      const rb = rl.querySelector('.rbar');
+      if (rb.dataset.sig !== barHtml) { rb.dataset.sig = barHtml; rb.innerHTML = barHtml; }
+      rl.title = web ? `Merge train${web.id ? ` ${web.id}` : ''}: ${web.running ? web.text || web.step : 'not running'}` : 'No merge train yet (npm run task -- done <ID> --train)';
     }
     const belt = office.querySelector('[data-dyn="enginetrain"]');
     if (belt) {
@@ -2742,6 +2982,14 @@
         if (b && b.until > Date.now() && b.msg !== p.said) { p.said = b.msg; say(p, b.msg); }
       });
     }
+    // 2.77.0: bursts first (an agent that just finished still has its room), then the ones who leave walk out.
+    const cheered = new Set();
+    while (bursts.length) {
+      const b = bursts.shift();
+      const room = b.room || people.get(b.agent)?.room || s.agents.find((a) => a.name === b.agent)?.room;
+      if (b.agent) cheered.add(b.agent);
+      roomBurst(room, b.text);
+    }
     for (const [name, p] of people) {
       if (present.has(name)) continue;
       const g = geo(p.room);
@@ -2749,6 +2997,7 @@
       desks.get(name)?.remove();
       desks.delete(name);
       // 2.75.0: a finished agent walks out of its room's door and fades; with reduced motion it is simply gone.
+      if (cheered.has(name)) react(p, 'task.done');
       p.el.classList.add('leaving');
       p.el.dataset.leaving = '1';
       if (g && !reduceMotion) walkPath(p, [doorIn(g), doorOut(g)], () => { p.el.classList.add('gone'); setTimeout(() => p.el.remove(), 700); });
@@ -3429,6 +3678,9 @@
         seen.add(key);
         if (primed && e.agent && !talkIds.has(e.id)) bubbles.set(e.agent, { msg: e.msg, until: Date.now() + 9000 });
         if (primed && e.agent && /^task\.(done|not_done|forced|paused)$/.test(e.type)) pendingFx.push({ agent: e.agent, type: e.type });
+        // 2.77.0: a landed task bursts out of its room on the Studio floor; a train that lands bursts in the Rail Yard.
+        if (primed && e.type === 'task.done' && e.agent) bursts.push({ agent: e.agent, text: `${e.task || 'Task'} done!` });
+        if (primed && e.type === 'task.train.landed') bursts.push({ room: 'rails', text: `Landed ${(e.meta?.lanes || []).length || ''} ${(e.meta?.lanes || []).length === 1 ? 'lane' : 'lanes'}!`.replace('  ', ' ') });
       }
       primed = true;
       render();

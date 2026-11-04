@@ -26,6 +26,13 @@ Agents must keep durable work in files, never trapped in chat history.
    - Update `studio/CURRENT_TASK.md` and mark the item done in `studio/NEXT.md` (`node harness/task.mjs done <ID>`).
 6. At the end of a day or major session, fill `studio/daily/YYYY-MM-DD.md` (copied from `studio/daily/TEMPLATE.md`), including the task checklist and any before/after gameplay videos.
 
+**A session started on a task keeps it (2.77.0, B-92).** The launcher gives every session it starts with `--task`
+(any tool: claude, agy, codex, a custom command) `STUDIO_TASK_PIN=<task>`, records `pinned` on the session and says so
+in its kickoff. From that session `task start <another task>` is refused, and so is `task done <another task>` (plain
+or `--train`; `--check` and the train's `--train-check` are not); its own task is never refused
+(`harness/task-pin.mjs`). A builder started on T-152 had taken a P0 rescue instead and trained it under the wrong ID.
+A person's shell has no pin, so nothing changes there.
+
 ## Many Agents, One Board (crash-safe state, 2.57.0)
 
 Several agents change the board at once, and any of them can be killed mid-command. So the harness never
@@ -178,9 +185,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   linked to the main checkout's), so these can't change what the verify saw. 2.67.0 (B-29): the task records listed
   under `"taskRecords"` there (`studio/task-holds.json`, which `task yes` and holds write, and
   `studio/pending-review.json`) count too, when every entry they change is for a task that is not a lane of this train;
-  an entry of a train lane, another key or an entry without a task still means a new verify. Anything else (`studio/protected.json`,
-  `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
-  again, as before.
+  an entry of a train lane, another key or an entry without a task still means a new verify. 2.77.0 (P9.1): the list
+  also has decisions (`studio/decisions/**`, `studio/decisions.jsonl`), asks, `studio/daily/**`, `studio/harness-notes/**`
+  and the Bible's prose (`BIBLE.md`, `STORYBOARD.md`, `NOT-DOING.md`, `ideas/`, `systems/`, `reviews/`); an ADDED approval
+  (`"addOnlyPaths"`: `studio/approvals/**`) counts too (it only lets more pass); and a file only some required checks read
+  (`"recheckPaths"`: the Bible's `controls.json` -> controls, a changed approval -> protected and approvals, `studio/reviews/`
+  -> reviewer, producer and meeting notes -> docs) re-runs just those checks on the new tree (`run-gates --only`, log
+  `.studio/train/<id>-move-recheck.log`, `meta.rechecked` on the event): green lands on the same verify, red verifies
+  again. Anything else (`studio/protected.json`, `studio/game.json`, gates, keys, a deleted approval, code, goldens) or a
+  train with a pin-refresh commit: built and verified again, as before.
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
   `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
   each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
@@ -210,7 +223,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`, `.mixed`.
+  `.lane_recreated`, `.mixed`; 2.77.0: `.known_red`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -245,6 +258,13 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
     `Studio-Task:` trailer and not its own is refused before its verify (`task.train.mixed`): the hand-back names the
     commits and how to make a clean lane (a branch off main with only its own commits). `STUDIO_TRAIN_MIXED=off` skips
     the check.
+  - 2.77.0 (P2.4 / B-91): the same rule on the launcher's side. When a lane copy is made for task X (the launcher, `task
+    start`, the claim: `carryTaskBranch` in harness/worktree.mjs) and X's earlier branch has commits tagged for another
+    OPEN task (not X, not an `--after` dependency, not X's Rescue target: the train's `mixedLane` / `mayCarry`), that
+    branch is NOT merged. The copy starts from main plus X's own commits from it (cherry-picked in order; commits with no
+    `Studio-Task:` trailer are left on the branch), a `lane.mixed_skipped` event says which task's commits and how many
+    were picked, and the session's start output opens with `MIXED LANE NOT MERGED: …`. `STUDIO_TRAIN_MIXED=off` skips
+    this check too. UNTESTED on Windows (git cherry-pick in a lane copy).
   - A task held for landing (`npm run task -- hold <ID>`) stays out of every train (queued, riding along or its own
     `task done --train`): deferred with the hold's reason, `OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in
     `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the
@@ -255,7 +275,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.
 - Batching (2.63.0): `task train` waits up to `STUDIO_TRAIN_WAIT_MIN` (10, from when the oldest lane was queued; poll
   `STUDIO_TRAIN_POLL_S`, 15) for `STUDIO_TRAIN_MIN` (1) lanes that aren't held, then runs with what is queued
-  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too).
+  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too)
+  and, since 2.77.0, never more than `STUDIO_TRAIN_BATCH` (default 4; `0`/`off`: no cap): the smallest cap wins.
   A lane the manifest marks "runAlone" (more than `maxFiles` files, or a file under its `paths`) gets a train of its
   own: the oldest lane decides, the rest wait and `task train` runs the next train right after (`trains` in its
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
@@ -286,6 +307,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   queued again, a lane two trains died with at the same head is held for the Producer. None of it is a hand-back.
   A train from before 2.76.0 (a `status.json` only) is judged by the pid in its id when its status changed in the last
   24 h.
+- Known red on main (2.77.0, P9.3/P9.6, `harness/known-red.mjs`): when a train finds main itself red (its bisection's
+  "main itself fails its checks", or a verify of main alone), the failing test files are listed once in
+  `.studio/train/known-red.json` with the evidence (train, main's tree, the log; `task.train.known_red`). A later train
+  still runs its full verify on the exact tree; when its only red parts are listed tests (sub-ids naming a test file) in
+  files none of its lanes change, it re-runs just those files on main's tip alone: still red there, the train lands and
+  the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
+  the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
+  A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
+  `STUDIO_TRAIN_KNOWN_RED=off` turns it off.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
@@ -322,7 +352,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
-  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run, no rescue is filed or escalated for it,
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run (2.77.0, P9.2: and a queued task is not
+  offered or startable: `task next`, the supervisor's pick and `task start` skip a waiting one, "queued for the merge
+  train"; an in-progress one stays its lane agent's, another agent's `task start` is refused unless `--force`), no rescue is filed or escalated for it,
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
   (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
   `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.
@@ -379,6 +411,39 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
   EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
 
+## Pipelined trains (2.77.0, P9.6)
+
+A full verify takes about 25 minutes on a busy PC, so lanes waited in line. Two trains verifying side by side would
+each verify against a main that is about to move, so the trains are pipelined instead (`harness/train-pipeline.mjs`):
+
+- While train A verifies, at most ONE speculative train B takes the next ready lanes (up to `STUDIO_TRAIN_BATCH`) and
+  verifies **A's tree + its lanes** in its own scratch copy, under its own lock (`.studio/locks/train-next.lock`), as a
+  detached child (`node harness/train-daemon.mjs run-next <A>`, output in `.studio/train/next.log`). A starts it right
+  before its verify; the train daemon's pass also starts it while A verifies (`task.train.next_started`).
+- When A ends: main is exactly A's verified tree (A landed it), or that tree plus record files only (the B-29 board and
+  record rule; `nextBaseVerdict` in `harness/train.mjs` is the one check): B lands right after A, under the train lock
+  (never two trains landing at once; main moves by compare-and-swap from the tree B built on), **without verifying
+  again**. Anything else (A red, re-checking or bisecting, rebuilt on a moved main, held, ending without landing, main
+  moved by anything but records) discards B: `task.train.next_discarded` says why, its lanes keep their place in the
+  queue (no hand-back, nothing counted toward `STUDIO_TRAIN_MAX_HANDBACKS`) and go in the next normal train, which B's
+  process runs when the train daemon is on. A red B verify only discards B; the normal train bisects.
+- B is conservative: it never holds, hands back or bisects. A lane held for the owner or out of trains, tier C not
+  released, missing a Golden-Reason or Pin-Moves, over the hand-back cap, waiting on `--after` or a chain tail, refused
+  by its precheck, conflicting on A's tree, or run-alone behind other lanes is left for the next normal train, which
+  applies the rules as before; a fix-first lane (B-75) means no B at all. A run-alone lane first in line is B on its own.
+- `STUDIO_TRAIN_PIPELINE`: unset (auto) starts B only when the machine budget has room for a second train verify beside
+  A's (the machine:heavy admission; no machine scan: no room, trains wait as before); `on` starts it whenever lanes are
+  queued (its verify still waits for its own machine:heavy claim); `off` never. Drain, "Stop all" and a halt stop it.
+- A train that would start while a B can land (its A ended, main is the tree B built on) gives the train lock back and
+  waits for it (`task train` without `--wait` says so and lands nothing; the daemon doesn't start one).
+- Status: `npm run task -- train status` prints `Running: train <A> ...` and `Next: train <B> ... speculative on train
+  <A>'s tree`; `studio:status` prints the same two lines; `npm run lanes` and `status --brief` add `; next: ...`.
+  `readTrainStatus()` (harness/train-status.mjs) keeps its fields (train, step, text, eta, lanes, round, by, since) and
+  adds `next` (the speculative train's own status: train, step, text, eta, lanes, after, base, tasks, speculative: true;
+  null when none); every status write also refreshes `.studio/train/status.json`, a snapshot of it. The War Room's web
+  train adds `next` ({ id, step, text, after, base, lanes, laneCount, eta } or null). B has its own life record
+  (B-88): a dead B is found by the reaper and its `train-next.lock` freed.
+
 ## Less repeated work in the merge train (2.69.0)
 
 - **A lane's green verify stands for a train of one.** When a train holds ONE lane and its integration tree is the tree
@@ -409,6 +474,13 @@ supervisor's monitor) says is free. Default claims: game verify 1 GB + 0.45 GB p
 and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 GB VRAM (GPU only); asset round trip
 1 GB; anything else wrapped with `node harness/heavy.mjs run` 4 GB (`--kind <kind>`, `--ram-gb`, `--vram-gb`,
 `--gpu-only` change it). `studio/machine-budget.json` overrides them: `{ "jobs": { "unity": { "ramGb": 10 } } }`.
+2.77.0 (P4.2): an `art-bake` kind (lightmap, texture, mesh or atlas bake of an art pass; `--kind art-bake`) is in the
+catalog: 6 GB, 4 threads, 20 expected minutes, all three set in the same `"jobs"` data (`{ "jobs": { "art-bake": {
+"ramGb": 9, "cpuThreads": 6, "minutes": 45 } } }`; `minutes` works for any kind). It is rig kind "art", a fixed claim
+like Unity's. The priority order is one table, `RIG_PRIORITY` in harness/heavy-budget.mjs:
+train > builder verifies > Unity/art > soaks (playtest and other fixed-claim jobs share Unity/art's rank). The test-worker weights (4, 2, 2, 1) are
+read from that table; nothing else is scheduled by it yet (`jobCatalog()` lists the kinds by rank with their expected
+RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share).
 
 - **RAM**: the scan's free memory (commit headroom on Windows) less `STUDIO_RESERVE_RAM_GB` (default 4 GB or 10% of
   RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less

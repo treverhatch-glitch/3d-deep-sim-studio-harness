@@ -65,6 +65,17 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
     `--model` the launcher now picks `STUDIO_TOOL_AGY_MODEL`, else `gemini-4-argon-high` (`agy models` lists the names; a
     model from the budget order's `agy:<model>` entry wins). **Untested on real agy:** the flag's name;
     `STUDIO_AGY_MODEL_FLAG` names another flag, `=off` passes no model.
+  - **Gemini only (2.77.0):** an agy start whose model isn't a Gemini model (`gemini-…`) is refused: agy also serves
+    Claude models, and a Claude model inside agy spends Claude's pool under agy's name. `--force-model` (or
+    `STUDIO_AGY_ANY_MODEL=on`, or an `agy:<model>` entry the owner put in the budget order) runs it anyway. A model the
+    rescue, routing, tier-up or reroute picked for an agy session that isn't Gemini gives way to the Gemini default
+    (event `model.kept_gemini`), and a failover keeps a model only within its family.
+  - **Usage and model (2.77.0):** `agy -p` printed only its final text in the crew's logs, so every agy session
+    recorded 0 tokens. The session end now reads Gemini usage objects from agy's output (`usageMetadata` per response,
+    or a `stats.models.<model>.tokens` summary) and the model agy names (`modelVersion`/`model`: `meta.modelReported`);
+    with none it records `meta.usage: "not reported"` and tokens estimated from text length (the kickoff in, the
+    output out, about 4 characters a token; `meta.tokensEstimated`), never a silent 0 (`agyUsage` in harness/agent.mjs).
+    **Untested on real agy:** which of these shapes agy prints (none in the crew's logs).
   - In a lane copy the launcher writes `GEMINI.md` (agy reads it from its folder) with the shell rules: one plain
     command per call, no pipes, chains, redirects or `cd` (a refused command ends the session; the crew found Gemini
     pipes and chains by habit). The file is kept out of the copy's change (its exclude file); a repository that has its
@@ -225,6 +236,14 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
   and a refused entry is echoed only when it is plainly a variable's name.
 - Inside a launched session (an agent hiring an agent) a mapping counts only as written in the studio's `.env`; one set
   in the session's own shell is refused.
+
+## Scoped agents (`.claude/agents/`)
+
+Claude Code reads three agent definitions from `.claude/agents/`, so a session can hand work to the cheapest model that
+fits: **scout** (Haiku, read-only: Read, Grep, Glob, Bash; finds code and answers where/what/how with `path:line`
+references, never edits), **fixer** (Sonnet: a change someone already designed, with its tests and their PASS/FAIL
+lines) and **architect** (Opus: new subsystems, cross-cutting changes, permission rules and other work that needs
+judgement; hands mechanical follow-ups to the fixer). Each file's frontmatter names the agent and its model.
 
 ## Best practices for a run
 

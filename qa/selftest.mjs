@@ -25,6 +25,9 @@ const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === '
 const secs = (n) => `${Math.ceil(n * SLOW)}s`;
 let failed = 0;
 let n = 0;
+// 2.77.0 (n, B-92): a launched session's task pin (STUDIO_TASK_PIN) is about that session's own task commands; the
+// self-test's copies start and close their own test tasks, so a verify run inside a pinned session never inherits it.
+delete process.env.STUDIO_TASK_PIN;
 
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
@@ -4600,6 +4603,78 @@ if (inShard('selftest-276h')) {
   const dir = copyRepo();
   const { selftest276H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276h.mjs')).href);
   await selftest276H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (h): the train's second batch: record files on main during a verify (P9.1), queued tasks not startable (P9.2),
+// known-red-on-main tests (P9.3/P9.6), a new lane copy gets the task's newest approval (B-96).
+if (inShard('selftest-277h')) {
+  const dir = copyRepo();
+  const { selftest277H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277h.mjs')).href);
+  await selftest277H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
+// usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
+if (inShard('selftest-277n')) {
+  const dir = copyRepo();
+  const { selftest277N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277n.mjs')).href);
+  await selftest277N({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (helper o): remote (cloud) workers (npm run remote: mark, brief with a lease, fetch remote/* into the normal
+// train, expiry; the Line Producer's offer; the rig budget's 0 local CPU) and `npm run lane -- create` from chosen branches.
+if (inShard('selftest-277o')) {
+  const dir = copyRepo();
+  const { selftest277O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277o.mjs')).href);
+  await selftest277O({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (helper m): Windows-safe remote worker owner names (remote-<worker>), tests for the owner command rules and the scoped agents.
+if (inShard('selftest-277m')) {
+  const dir = copyRepo();
+  const { selftest277M } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277m.mjs')).href);
+  await selftest277M({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (f): beta uses in the daily digest (P1.1), the launcher's mixed-lane check (P2.4), the rig's art-bake job kind and
+// its one priority table (P4.2).
+if (inShard('selftest-277f')) {
+  const dir = copyRepo();
+  const { selftest277F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277f.mjs')).href);
+  await selftest277F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (w): the War Room as a field terminal: a verify's real progress (harness/gate-progress.mjs, written by run-gates)
+// on the running train, the cut hub pages (/legacy, the React sources, /human), dark always with a light screen by hand.
+if (inShard('selftest-277w')) {
+  const dir = copyRepo();
+  const { selftest277W } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277w.mjs')).href);
+  await selftest277W({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (u): engine passes inside the harness (P5.1-P5.6, P9.7): an engine pass in its own repo queues for its engine
+// train, the Line Producer starts that train in a quiet window, the land run is a recorded heavy job, the lane tunes its
+// listed settings, the visual check (shots, reference photos, the builder looked, a review by someone else), any engine.
+if (inShard('selftest-277u')) {
+  const dir = copyRepo();
+  const { selftest277U } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277u.mjs')).href);
+  await selftest277U({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.0 (p, P9.6): pipelined merge trains: a batch cap per train (STUDIO_TRAIN_BATCH), ONE speculative train verifying
+// main + A's tree while A verifies and landing right after A, discarded (no hand-back) when A goes red or main moves.
+if (inShard('selftest-277p')) {
+  const dir = copyRepo();
+  const { selftest277P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277p.mjs')).href);
+  await selftest277P({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 

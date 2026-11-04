@@ -13,7 +13,9 @@
  *     ("two sessions in a row ended with exit N", scope 'builders') stops new sessions, not the train: a lane already
  *     queued and verified still lands. A halt that names no scope still stops trains; studio:stop ends the supervisor
  *     and with it the daemon;
- *   - never two trains: no train lock held by a live process (.studio/locks/train.lock), no daemon train still running;
+ *   - never two trains: no train lock held by a live process (.studio/locks/train.lock), no daemon train still running,
+ *     no speculative train about to land (2.77.0, P9.6: harness/train-pipeline.mjs; while a train verifies the pass
+ *     may start ONE speculative train behind it, pipelineKick);
  *   - the queue has ready lanes by the batch rules that already exist (STUDIO_TRAIN_MIN lanes not held for the owner or
  *     out of trains, or the oldest has waited STUDIO_TRAIN_WAIT_MIN);
  *   - the machine budget has room for a verify claim (harness/heavy-budget.mjs jobClaim('verify') + admit, the same
@@ -26,7 +28,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent } from './event.mjs';
 
@@ -105,6 +107,8 @@ export function daemonDecision(f) {
   if (f.winddown) return no(`winding down: ${f.winddown}`);
   if (f.stopped) return no(`"Stop all" is on (${f.stopped})`);
   if (f.lock) return no(`another train is running (${f.lock.id || '?'}, by ${f.lock.by || '?'})`);
+  // 2.77.0 (p, P9.6): a speculative train that lands on main now (its train A ended) goes first.
+  if (f.next) return no(`the speculative train ${f.next.id || '?'} (after ${f.next.after || '?'}) lands first`);
   if (f.running) return no(`the daemon's train is still running (pid ${f.running.pid})`);
   const ready = (f.queue || []).filter((e) => !(f.heldNow || (() => false))(e) && !(f.heldOut || (() => false))(e.task));
   if (!ready.length) return no((f.queue || []).length ? 'every queued lane waits for the owner or is held out of trains' : 'no lane is queued');
@@ -125,6 +129,7 @@ export async function daemonFacts(root, { env = process.env, now = Date.now(), h
   if (!('winddown' in given)) { try { const w = (await import('./winddown.mjs')).readWinddown(); facts.winddown = w ? w.why || `since ${w.at}` : null; } catch { facts.winddown = null; } }
   if (!('stopped' in given)) { try { const s = (await import('./task.mjs')).readStop(); facts.stopped = s ? `by ${s.by}` : null; } catch { facts.stopped = null; } }
   if (!('lock' in given)) facts.lock = trainLockHeld(root, env, now);
+  if (!('next' in given)) { try { const pl = await import('./train-pipeline.mjs'); const wt = await import('./worktree.mjs'); const tip = String(spawnSync('git', ['rev-parse', `refs/heads/${wt.mainBranch(root)}`], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout || '').trim() || null; facts.next = pl.nextBusy(root, { env, now, tip }); } catch { facts.next = null; } }
   if (!('running' in given)) { const r = readJson(DAEMON_FILE(root)); facts.running = r && alive(r.pid) ? r : null; }
   if (!('queue' in given)) facts.queue = tr.readQueue(root);
   if (!('heldNow' in given)) facts.heldNow = tr.heldNow;
@@ -146,6 +151,8 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
   // 2.76.0 (B-88): a train that died without recording its end (process gone) is recorded, its lock freed, its lanes kept.
   if (!dryRun && !('lock' in given)) { try { (await import('./train.mjs')).reapTrains(root, { env }); } catch {} }
   const f = await daemonFacts(root, { env, now, halted, ...given });
+  // 2.77.0 (p, P9.6): while a train verifies, the pass may start ONE speculative train behind it (harness/train-pipeline.mjs).
+  if (f.lock && !dryRun && !('lock' in given) && !f.drain && !f.winddown && !f.stopped && !(f.halted && f.haltScope !== 'builders')) { try { f.pipeline = await (await import('./train-pipeline.mjs')).pipelineKick(root, { after: f.lock.id, env, emit }); } catch {} }
   // The machine budget is read only when everything else says go (it reads the scan and the heavy holders).
   if (!('room' in given)) f.room = { ok: true };
   let d = daemonDecision(f);
@@ -156,7 +163,7 @@ export async function trainDaemonPass({ root = null, env = process.env, now = Da
       try { fs.mkdirSync(path.join(root, '.studio', 'train'), { recursive: true }); fs.writeFileSync(path.join(root, '.studio', 'train', 'daemon-why.json'), JSON.stringify({ why: d.why, at: new Date(now).toISOString() })); } catch {}
       emit({ type: 'task.train.auto_waiting', agent: DAEMON_BY, status: 'warn', msg: `train daemon: not starting a train: ${d.why}`.slice(0, 600), meta: { why: d.why, queued: (f.queue || []).map((e) => e.task) } });
     }
-    return { started: false, why: d.why };
+    return { started: false, why: d.why, ...(f.pipeline?.started ? { next: f.pipeline } : {}) };
   }
   if (dryRun) return { started: false, why: `would start: ${d.why}`, lanes: d.lanes };
   const child = spawnTrain(root, env);
@@ -239,10 +246,36 @@ export async function runDaemonTrain({ root, env = process.env, runTrain = null,
   return { res, routed };
 }
 
+/**
+ * 2.77.0 (p, P9.6): the speculative train's detached child (harness/train-pipeline.mjs spawnNextTrain): runNextTrain
+ * behind train `after`; discarded, its lanes go in the next normal train, which this process runs when the train daemon
+ * is on (as the daemon would). Returns { res, rerun }.
+ */
+export async function runNextNow({ root, after, env = process.env, log = (m) => console.error(m) } = {}) {
+  const tr = await import('./train.mjs');
+  const pl = await import('./train-pipeline.mjs');
+  const busyMod = await import('./busy.mjs');
+  const deps = (await import('./task.mjs')).trainDeps(busyMod);
+  const res = await tr.runNextTrain({ root, after, deps, log });
+  let rerun = null;
+  if (res.discarded && !res.busy) {
+    const auto = trainAuto(root, env);
+    if (auto.on && tr.trainOn(env)) rerun = await tr.runTrain({ root, by: pl.NEXT_BY, now: true, waitMs: pl.staleMs(env), deps, log });
+    else log(`[train] the discarded lanes wait for the next train (the train daemon is off: ${auto.why || 'STUDIO_TRAIN is off'})`);
+  }
+  return { res, rerun };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const { mainRoot } = await import('./worktree.mjs');
   const root = mainRoot();
+  if (argv[0] === 'run-next' && argv[1]) {
+    const { res, rerun } = await runNextNow({ root, after: argv[1] });
+    console.log(res.message || '');
+    if (rerun) console.log(rerun.message || '');
+    process.exit(res.ok ? 0 : 1);
+  }
   if (argv[0] === 'run') {
     try { fs.mkdirSync(path.dirname(DAEMON_FILE(root)), { recursive: true }); const r = readJson(DAEMON_FILE(root)) || {}; fs.writeFileSync(DAEMON_FILE(root), `${JSON.stringify({ ...r, pid: process.pid, at: r.at || new Date().toISOString() })}\n`); } catch {}
     const { res } = await runDaemonTrain({ root });

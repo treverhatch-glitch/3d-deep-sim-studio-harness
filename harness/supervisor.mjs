@@ -477,7 +477,7 @@ export async function supervise(opts, state, now = Date.now()) {
         continue;
       }
     }
-    const lineHold = line ? line.holdFor(g, live) : '';
+    const lineHold = line ? line.holdFor(g, live) || (line.holdTask ? line.holdTask(g) : '') : '';
     if (lineHold) { why.push(lineHold); continue; }
     const perRole = (mode.perRole || {})[g.role] ?? 1;
     // One agent per lane (the clash check above); without a lane, the pace's per-role cap.
@@ -544,9 +544,9 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
       continue;
     }
-    const lr = line ? line.routeFor(g, { tool, preferred, custom, live }) : {};
-    const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
-    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model} (${lr.tier} tier, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, failed: lr.failed || 0 } });
+    const lr = line ? line.routeFor(g, { tool, preferred, custom, live, outUntil: (await import('./budget.mjs')).exhaustedUntil }) : {};
+    const r = startAgent({ role: g.role, agent, tool: lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
+    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
@@ -585,13 +585,20 @@ async function linePlanNow(now) {
     if (!plan) return null;
     return {
       orderGroups: (groups) => lp.orderGroups(groups, plan),
-      holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
-      routeFor: (g, { tool, preferred, custom }) => {
+      // 2.77.0 (u, P5.1): an engine pass's session (engine-porter) counts against the rig's cap with the builders.
+      holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : g.role === 'engine-porter' && plan.rigCap !== null && live.filter((s) => (s.role === 'builder' || s.role === 'engine-porter') && s.running !== false).length >= plan.rigCap ? `engine-porter: the Line Producer holds new engine passes (the rig can carry ${plan.rigCap} sessions now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
+      routeFor: (g, { tool, preferred, custom, outUntil }) => {
         const id = g.tasks[0]?.id;
         const r = plan.routes[id];
-        if (!r?.model || custom || (tool && tool !== preferred)) return {};
+        if (!r?.model || custom) return {};
+        // 2.77.0 (n): a model-pool route names its tool too (agy for Gemini, claude for Claude): it is taken unless that
+        // tool is marked out of quota now (the pool's own limits were weighed when the route was made).
+        if (r.tool) return outUntil && (outUntil(r.tool) || outUntil(`${r.tool}:${r.model}`)) ? {} : { tool: r.tool, model: r.model, tier: r.tier, why: r.why };
+        if (tool && tool !== preferred) return {};
         return { model: r.model, tier: r.tier, why: r.why };
       },
+      // 2.77.0 (n): a task whose protected step the Line Producer routed to an approver waits for that approval.
+      holdTask: (g) => (plan.hold && plan.hold.has(g.tasks[0]?.id) ? `${g.tasks[0].id}: ${String(plan.hold.get(g.tasks[0].id)).slice(0, 200)} (the Line Producer holds it until then)` : ''),
     };
   } catch { return null; }
 }
@@ -836,7 +843,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // 2.76.0 (j, B-87): agent-proposed tasks waiting on the dev's yes, named after the last pass (harness/yes-wait.mjs).
     const yesWaitText = async () => { try { const w = await (await import('./yes-wait.mjs')).readYesWaiting(); return w.count ? `; ${w.line}: npm run task -- yes <id> --by <dev>${w.beta.on ? ` (${w.beta.words})` : ''}` : ''; } catch { return ''; } };
     const s = readStatus();
-    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}` : 'The supervisor has not run here yet: npm run studio:start');
+    // 2.77.0 (p, P9.6): the merge train(s) now: the running one and the speculative one behind it.
+    const trainsNow = async () => { try { const ts = await import('./train-status.mjs'); const t = ts.readTrainStatus((await import('./worktree.mjs')).mainRoot()); return t ? `\n${ts.trainsText(t)}` : ''; } catch { return ''; } };
+    console.log(s ? `${s.status === 'running' && alive(s) ? 'Running' : 'Not running'} since ${s.startedAt}${s.opts?.until ? ` until ${s.opts.until}` : ''}${s.stopReason ? `; stopped: ${s.stopReason}` : ''}. Sessions started: ${s.sessions}; tasks done: ${s.tasksDone}; tokens: ${(s.tokens || 0).toLocaleString()}. Last pass: ${s.last ? `${s.last.started.join(', ') || 'nothing started'}${s.last.why?.length ? ` (${s.last.why.join('; ')})` : ''}` : 'none'}${await yesWaitText()}${s.hubDown?.length ? `. Hub down: ${s.hubDown.map((d) => `${d.from.slice(11, 16)}-${d.to.slice(11, 16)}`).join(', ')}` : ''}${await import('./hub-keeper.mjs').then((m) => m.hubKeepLine(s), () => '')}${await trainsNow()}` : `The supervisor has not run here yet: npm run studio:start${await trainsNow()}`);
     process.exit(0);
   }
   if (argv.includes('--install') || argv.includes('--uninstall')) {

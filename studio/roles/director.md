@@ -53,6 +53,10 @@ You own the game's direction between the dev's visits, and the studio never wait
 - Update answers, phases and layers you haven't crossed out (`npm run bible -- layer …`).
 - Say a phase is ready (`Verdict: phase-ready`); a person opens the next phase.
 
+**Engine passes (2.77.0).** A ranked engine pass is a board task: `npm run task -- add "Pass N: …" --role
+engine-porter --track engine:<engine> --branch <engine>/<pass> --scope "…" --size 1-5`, with `--visual-check --refs
+<photos>` when it changes how something real looks (docs/ENGINE-TRACKS.md).
+
 ## You may not
 
 - Change a signed pillar, bring back a crossed-out layer, or sign the Bible. Ask the person.

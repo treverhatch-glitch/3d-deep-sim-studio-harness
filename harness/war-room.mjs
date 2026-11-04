@@ -22,6 +22,7 @@ import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { readTrainStatus } from './train-status.mjs';
 import { readHolds } from './task-hold.mjs';
+import { progressOf } from './gate-progress.mjs';
 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const H = 3600000;
@@ -101,10 +102,12 @@ function webTrain(root, events, now) {
   const lanes = id ? laneStates(events, id) : [];
   const since = running?.since ? Date.parse(running.since) : null;
   const waiting = queue.filter((e) => !lanes.some((l) => l.task === e.task)).map((e) => ({ task: e.task, agent: e.agent || null, held: e.held && !(e.released && e.released.head === e.head) ? { tier: e.held.tier, why: String(e.held.why || '').split('\n')[0].slice(0, 200) } : null, released: e.released?.by || null }));
-  if (!running && !queue.length && !last && !lastId) return null;
+  if (!running && !queue.length && !last && !lastId && !(readJson(path.join(root, '.studio', 'train', 'known-red.json'), null)?.tests || []).length) return null;
   return {
     kind: 'web', name: 'Merge train', id,
     running: Boolean(running),
+    // 2.77.0: the running verify's real progress (scripts/run-gates.mjs writes it as train-<id>; harness/gate-progress.mjs).
+    bar: running && id ? safe(() => progressOf(path.join(root, '.studio'), `train-${id}`, { now })) : null,
     step: running ? running.step || 'starting' : null,
     text: running ? String(running.text || running.step || '').slice(0, 300) : null,
     eta: running?.eta?.text || null,
@@ -113,8 +116,13 @@ function webTrain(root, events, now) {
     lanes: lanes.length ? lanes : running?.lanes ? [] : [],
     laneCount: running?.lanes || lanes.length || null,
     waiting,
+    // 2.77.0 (P9.3): tests red on main itself (harness/known-red.mjs), counted on the train card.
+    knownRed: (() => { const k = readJson(path.join(root, '.studio', 'train', 'known-red.json'), null)?.tests; return Array.isArray(k) && k.length ? { n: k.length, tests: k.slice(0, 5).map((x) => String(x.test)) } : null; })(),
     needsRelease: waiting.filter((w) => w.held).map((w) => w.task),
     last,
+    // 2.77.0 (p, P9.6): the speculative train behind the running one (readTrainStatus().next), or null.
+    next: running?.next ? { id: running.next.train, step: running.next.step || 'starting', text: String(running.next.text || '').slice(0, 300), after: running.next.after || null, base: running.next.base || null, lanes: running.next.tasks || [], laneCount: running.next.lanes || null, eta: running.next.eta?.text || null } : null,
+    ...(running?.speculative ? { speculative: { after: running.after || null, base: running.base || null } } : {}),
   };
 }
 
@@ -191,8 +199,24 @@ function crewTile({ root = REPO_ROOT, launched = [], supervisor = null }) {
 // ---- the owner proxy ------------------------------------------------------------------------------------------------
 
 let decCache = { key: '', list: [] };
+let betaCache = { at: 0, key: '', v: null };
+/** 2.77.0: beta mode as it counts now (harness/beta-mode.mjs readBeta): { on, by, at, why, agents, setBy, signed }. */
+async function loadBeta(now = Date.now(), root = REPO_ROOT) {
+  const st = (rel) => { try { const x = fs.statSync(path.join(root, rel)); return `${x.mtimeMs}:${x.size}`; } catch { return '-'; } };
+  const key = `${st('studio/beta.json')}|${st('.git/HEAD')}|${st('.git/index')}`;
+  if (now - betaCache.at < 30000 && key === betaCache.key) return betaCache.v;
+  let v = null;
+  try {
+    const { readBeta } = await import('./beta-mode.mjs');
+    const b = readBeta();
+    v = { on: Boolean(b.on), by: b.doc?.by || null, at: b.doc?.at || null, why: b.on ? (b.doc?.why || '') : b.why || '', agents: Array.isArray(b.doc?.agents) ? b.doc.agents : b.doc?.agents ? String(b.doc.agents).split(',') : [], setBy: b.setBy || null, signed: Boolean(b.signed) };
+  } catch { v = null; }
+  betaCache = { at: now, key, v };
+  return v;
+}
 async function ownerProxy({ events, now = Date.now(), root = REPO_ROOT }) {
   const d = await loadProxy(now, root);
+  const beta = await loadBeta(now, root);
   const used = events.filter((e) => e.type === 'delegation.used' && ts(e) >= now - 7 * 24 * H).map((e) => ({ at: e.ts, who: e.agent, what: String(e.msg || '').slice(0, 220), action: e.meta?.action || null, task: e.task || null, kind: 'used' }));
   let decided = [];
   try {
@@ -204,7 +228,7 @@ async function ownerProxy({ events, now = Date.now(), root = REPO_ROOT }) {
   } catch {}
   const recent = [...used, ...decided].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 15);
   const workarounds = events.filter((e) => /^workaround\./.test(e.type) && ts(e) >= now - 24 * H).length;
-  return { delegation: d, recent, count24h: [...used, ...decided].filter((x) => (Date.parse(x.at) || 0) >= now - 24 * H).length, workarounds24h: workarounds };
+  return { delegation: d, beta, recent, count24h: [...used, ...decided].filter((x) => (Date.parse(x.at) || 0) >= now - 24 * H).length, workarounds24h: workarounds };
 }
 
 // ---- what each agent is doing now -----------------------------------------------------------------------------------
