@@ -178,9 +178,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   linked to the main checkout's), so these can't change what the verify saw. 2.67.0 (B-29): the task records listed
   under `"taskRecords"` there (`studio/task-holds.json`, which `task yes` and holds write, and
   `studio/pending-review.json`) count too, when every entry they change is for a task that is not a lane of this train;
-  an entry of a train lane, another key or an entry without a task still means a new verify. Anything else (`studio/protected.json`,
-  `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
-  again, as before.
+  an entry of a train lane, another key or an entry without a task still means a new verify. 2.77.0 (P9.1): the list
+  also has decisions (`studio/decisions/**`, `studio/decisions.jsonl`), asks, `studio/daily/**`, `studio/harness-notes/**`
+  and the Bible's prose (`BIBLE.md`, `STORYBOARD.md`, `NOT-DOING.md`, `ideas/`, `systems/`, `reviews/`); an ADDED approval
+  (`"addOnlyPaths"`: `studio/approvals/**`) counts too (it only lets more pass); and a file only some required checks read
+  (`"recheckPaths"`: the Bible's `controls.json` -> controls, a changed approval -> protected and approvals, `studio/reviews/`
+  -> reviewer, producer and meeting notes -> docs) re-runs just those checks on the new tree (`run-gates --only`, log
+  `.studio/train/<id>-move-recheck.log`, `meta.rechecked` on the event): green lands on the same verify, red verifies
+  again. Anything else (`studio/protected.json`, `studio/game.json`, gates, keys, a deleted approval, code, goldens) or a
+  train with a pin-refresh commit: built and verified again, as before.
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
   `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
   each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
@@ -210,7 +216,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`, `.mixed`.
+  `.lane_recreated`, `.mixed`; 2.77.0: `.known_red`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -286,6 +292,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   queued again, a lane two trains died with at the same head is held for the Producer. None of it is a hand-back.
   A train from before 2.76.0 (a `status.json` only) is judged by the pid in its id when its status changed in the last
   24 h.
+- Known red on main (2.77.0, P9.3/P9.6, `harness/known-red.mjs`): when a train finds main itself red (its bisection's
+  "main itself fails its checks", or a verify of main alone), the failing test files are listed once in
+  `.studio/train/known-red.json` with the evidence (train, main's tree, the log; `task.train.known_red`). A later train
+  still runs its full verify on the exact tree; when its only red parts are listed tests (sub-ids naming a test file) in
+  files none of its lanes change, it re-runs just those files on main's tip alone: still red there, the train lands and
+  the reds are reported (`task.train.known_red`, `meta.action` excused; its tasks close on that judgement); green there,
+  the entries clear and the red is the lanes' as before. A green landing that changed a listed test's file clears it too.
+  A test a lane changed is never excused. `npm run task -- train status` and the War Room's train card show the count.
+  `STUDIO_TRAIN_KNOWN_RED=off` turns it off.
 - The flake triager (2.69.0, `harness/flakes.mjs`): when a train's verify or re-check is red, each failing test file
   (at most `STUDIO_FLAKE_MAX_FILES`, 5; once per train) runs ALONE on the same tree, a focused run as a re-check:
   fails → `real`; passes and the file has a test-randomness finding (`harness/test-rng.mjs`) → `seed-flake`; passes,
@@ -322,7 +337,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
-  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run, no rescue is filed or escalated for it,
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run (2.77.0, P9.2: and a queued task is not
+  offered or startable: `task next`, the supervisor's pick and `task start` skip a waiting one, "queued for the merge
+  train"; an in-progress one stays its lane agent's, another agent's `task start` is refused unless `--force`), no rescue is filed or escalated for it,
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
   (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
   `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.

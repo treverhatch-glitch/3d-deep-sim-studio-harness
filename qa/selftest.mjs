@@ -4603,6 +4603,15 @@ if (inShard('selftest-276h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (h): the train's second batch: record files on main during a verify (P9.1), queued tasks not startable (P9.2),
+// known-red-on-main tests (P9.3/P9.6), a new lane copy gets the task's newest approval (B-96).
+if (inShard('selftest-277h')) {
+  const dir = copyRepo();
+  const { selftest277H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277h.mjs')).href);
+  await selftest277H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

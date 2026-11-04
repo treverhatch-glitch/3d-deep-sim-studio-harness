@@ -76,6 +76,7 @@ import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
+import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
 import { engineGates, relatedTestsOn, studioGame } from './game-gates.mjs';
@@ -653,7 +654,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   const vparts = trainVerifyParts(text, ok, [sc.dir, root]); // 2.72.0 (a)
   emitEvent({ type: 'task.train.verify', agent: owner, status: ok ? 'ok' : 'blocked', msg: `train ${id}: verify ${n} of ${tree.slice(0, 8)} ${ok ? 'green' : why} in ${Math.round((Date.now() - t0) / 1000)} s${vparts.flakes.length ? ` (timeout-flake, green for those files only: ${vparts.flakes.slice(0, 3).join(', ')})` : ''}`, meta: { train: id, tree, ok, gates, ms: Date.now() - t0, ...(vparts.subIds.length ? { subIds: vparts.subIds } : {}), ...(vparts.flakes.length ? { timeoutFlakes: vparts.flakes } : {}) } });
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
-  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}) };
+  const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
   if (!ok && !res.noCheck) flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r)
   const j = judged(res);
@@ -2197,6 +2198,12 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         const redEta = bisectMode() === 'prefix' && set.length > 1 ? etaFor(1 + stepsLeft(0, set.length)) : null;
         if (ft.list.length) log(`[train] ${id}: verify ${res.verifies} red; failing tests: ${ft.list.join('; ')}${ft.more ? ` (+${ft.more} more)` : ''}`);
         const redSub = trainVerifyParts(redText, false, [sc.dir, root]).subIds; // 2.72.0 (a): which parts failed
+        // 2.77.0 (P9.3/P9.6): red only on tests known red on main (no lane changes them) that still fail on main alone:
+        // the full verify ran on the exact tree; those reds are reported, not blocking (harness/known-red.mjs).
+        {
+          const kr = knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text: redText });
+          if (kr) { verdict = { built: kr.built, v: { ...v, ok: true, knownRed: kr.subs, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, knownRed: kr.subs.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } }; break; }
+        }
         noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
         // 2.67.0 (f): red on exactly the tests a chain failed before the verify (its tail is filed): the whole chain
@@ -2233,6 +2240,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           }
           if (plan.kind === 'noCheck') { deferNoCheck(res, set, defer, { id, log, by, what: plan.why }); set = []; break; }
           if (plan.kind === 'redMain') {
+            listRedMain(root, { id, logRel: plan.log, roots: [sc.dir, root], tree: out(git(root, 'rev-parse', `${tip}^{tree}`)), gates: plan.gates || v.gates }); // 2.77.0 (P9.3)
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${plan.why}; log ${plan.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
@@ -2296,6 +2304,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           if (!v0.cached && !v0.reused) res.verifies += 1;
           if (v0.noCheck) { deferNoCheck(res, set, defer, { id, log, by, what: `the verify of main alone ${v0.why}` }); set = []; break; }
           if (!v0.ok) {
+            listRedMain(root, { id, logRel: v0.log, roots: [sc.dir, root], tree: b0.tree, gates: v0.gates }); // 2.77.0 (P9.3)
             res.ok = false;
             res.redMain = true;
             res.message = `${main} itself fails its checks (${v0.gates.join(', ') || v0.why}; log ${v0.log || '-'}): nothing landed and no lane was handed back. Fix ${main} first.`;
@@ -2317,6 +2326,10 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       if (!verdict) break;
       // (d) Green: main moves to exactly the verified tree, then each task closes.
       const landed = landTrain(root, sc, main, tip, verdict, { id, by, deps, log, res, unionFiles });
+      // 2.77.0 (P9.3): a green landing that changed a known-red test's file is main going green on it.
+      if (landed !== 'moved' && res.landed.length && !verdict.v.knownRed && !verdict.v.excused?.length) {
+        try { const ch = changedVs(sc.dir, tip, verdict.built.head); const fixed = readKnownRed(root).filter((x) => ch.some((c) => c === fileSub(x.test) || c.endsWith(`/${fileSub(x.test)}`))).map((x) => x.test); if (fixed.length) clearKnownRed(root, fixed, `train ${id} landed a change to them on a green verify`); } catch {}
+      }
       if (landed === 'moved') {
         ev('moved', id, `${main} moved while the train was verified; building it again on the new ${main}`, { agent: by, status: 'warn' });
         continue;
@@ -2335,6 +2348,47 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   return res;
 }
 
+// ---- 2.77.0 (P9.3/P9.6): tests known red on main -----------------------------------------------------------------
+
+const knownRedOn = () => !/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_KNOWN_RED || '');
+
+/** A verify of main alone was red: list its failing test files as known red on main (harness/known-red.mjs). */
+function listRedMain(root, { id, logRel, roots, tree, gates }) {
+  if (!knownRedOn()) return;
+  try {
+    const text = logRel ? fs.readFileSync(path.join(root, logRel), 'utf8') : '';
+    const subs = trainVerifyParts(text, false, roots).subIds;
+    if (subs.length) addKnownRed(root, subs, { train: id, tree, log: logRel || null, gates });
+  } catch {}
+}
+
+/**
+ * The verify is red: if its only red parts are known-red tests no lane changes, re-run just those test files on main's
+ * tip alone. Still red there: { built, subs } (the train lands; the reds are reported). Green there: the entries clear,
+ * null (the red is the lanes'). Anything else: null. The scratch copy is back at the train's tree when it returns.
+ */
+function knownRedTry({ sc, tip, set, built, v, redSub, id, log, res, cache, all, main, root, unionFiles, depInfo, by, text }) {
+  if (!knownRedOn() || !readKnownRed(root).length) return null;
+  const changed = changedVs(sc.dir, tip, built.head);
+  const cand = knownRedCandidate(root, { redGates: v.gates, subs: redSub, changed });
+  if (!cand.ok) { log(`[train] ${id}: known red on ${main}: not excused (${cand.why})`); return null; }
+  const f = trainFocus(text);
+  const b0 = buildIntegration(sc, tip, [], { id, unionFiles });
+  const c = recheck(sc, { id, tree: b0.tree, gates: v.gates, changed: [], all, cache: cache.checks, log, res, label: `${main} alone`, focus: f.focus || null, question: `do the known-red tests (${cand.subs.slice(0, 3).join(', ')}) still fail on ${main} alone?` });
+  const back = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo);
+  if (back.tree !== built.tree) { log(`[train] ${id}: known red: the train's tree couldn't be rebuilt exactly (${String(back.tree).slice(0, 8)} vs ${built.tree.slice(0, 8)}); not excused`); return null; }
+  if (c.noCheck) return null;
+  if (c.ok) {
+    clearKnownRed(root, cand.subs, `green on ${main} alone in train ${id}`);
+    log(`[train] ${id}: ${cand.subs.join(', ')} pass on ${main} alone now (cleared from the known-red list): the red is this train's`);
+    return null;
+  }
+  addKnownRed(root, cand.subs, { train: id, tree: b0.tree, log: c.log, gates: v.gates });
+  log(`[train] ${id}: red only on tests known red on ${main} (${cand.subs.join(', ')}), and they still fail on ${main} alone (${c.log}): the full verify of tree ${built.tree.slice(0, 8)} ran; those reds are reported, not blocking`);
+  ev('known_red', id, `red only on known-red tests that also fail on ${main} alone (${cand.subs.slice(0, 4).join(', ')}${cand.subs.length > 4 ? ', …' : ''}): ${set.map((l) => l.task).join(', ')} land; the reds are reported, not blocking`, { agent: by, status: 'warn', meta: { action: 'excused', tests: cand.subs, lanes: set.map((l) => l.task), mainLog: c.log, verifyLog: v.log || null } });
+  return { built: back, subs: cand.subs };
+}
+
 // ---- 2.60.1 (B-29): main moved only by board/record files -----------------------------------------------
 
 /** The board/record paths a move of main may touch without a new verify (harness/train-board.json "boardPaths"). */
@@ -2347,16 +2401,30 @@ export function boardPaths(file = path.join(path.dirname(fileURLToPath(import.me
  * descendant of `tip`, and every path changed in tip..now must be on the list, added or modified (a delete or a
  * rename never counts: --no-renames shows a rename as a delete).
  */
-export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths() } = {}) {
+/** 2.77.0 (P9.1): files a board move may add, never change (train-board.json "addOnlyPaths"). */
+export function addOnlyPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(j.addOnlyPaths) ? j.addOnlyPaths.map(String) : []; } catch { return []; }
+}
+/** 2.77.0 (P9.1): files only some required checks read: glob -> [check id] (train-board.json "recheckPaths"). */
+export function recheckPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j.recheckPaths && typeof j.recheckPaths === 'object' ? j.recheckPaths : {}; } catch { return {}; }
+}
+
+export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths(), addOnly = addOnlyPaths(), rechecks = recheckPaths() } = {}) {
   if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
   if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
   const r = git(root, 'diff', '--name-status', '--no-renames', '-z', tip, now);
   if (r.status !== 0) return { ok: false, why: 'git diff failed' };
   const parts = String(r.stdout || '').split('\0').filter(Boolean);
   const files = [];
+  const recheck = new Set();
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const [st, f] = [parts[i], parts[i + 1]];
     if (!/^[AM]$/.test(st)) return { ok: false, why: `it ${st === 'D' ? 'deletes' : `changes (${st})`} ${f}` };
+    // 2.77.0 (P9.1): an added approval is a record (it only lets more pass); a file some checks read re-runs those.
+    if (!matchAny(f, list) && st === 'A' && matchAny(f, addOnly)) { files.push(f); continue; }
+    const rc = Object.entries(rechecks).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
+    if (!matchAny(f, list) && rc.length) { for (const x of rc) recheck.add(x); files.push(f); continue; }
     if (!matchAny(f, list)) {
       // 2.67.0 (B-29): a task record (holds, approval cards) counts when no entry it changes is a lane of this train.
       const rec = Array.isArray(lanes) && records[f] ? recordEntriesChanged(root, tip, now, f, records[f]) : null;
@@ -2366,7 +2434,7 @@ export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = nul
     }
     files.push(f);
   }
-  return files.length ? { ok: true, files } : { ok: false, why: 'no file changed' };
+  return files.length ? { ok: true, files, recheck: [...recheck].sort() } : { ok: false, why: 'no file changed' };
 }
 
 /** 2.67.0 (B-29): task records a board move may change for tasks outside the train (train-board.json "taskRecords": path -> key). */
@@ -2428,7 +2496,32 @@ function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
   const blob = (rev, f) => out(git(root, 'rev-parse', '-q', '--verify', `${rev}:${f}`));
   const odd = diff.find((f) => !move.files.includes(f) || blob(again.tree, f) !== blob(now, f));
   if (odd) return { ok: false, why: `the new tree differs from the verified one in ${odd}, not only by ${mainBranch(root)}'s board files` };
-  return { ok: true, built: again, files: move.files };
+  // 2.77.0 (P9.1): files some checks read (the Bible's controls list, a changed approval): those checks only, on the new tree.
+  const rc = recheckBoardMove(root, sc, { id, tree: again.tree, ids: move.recheck || [], files: move.files });
+  if (!rc.ok) return { ok: false, why: rc.why };
+  return { ok: true, built: again, files: move.files, ...(rc.ran.length ? { rechecked: rc.ran } : {}) };
+}
+
+/**
+ * 2.77.0 (P9.1): re-run only the checks `ids` (those the studio has) on the train copy's tree after main moved by files
+ * they read. { ok, ran: [ids], why }. Nothing to run: ok.
+ */
+function recheckBoardMove(root, sc, { id, tree, ids, files }) {
+  let have = [];
+  try { have = (JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates || []).map((x) => String(x.id)); } catch {}
+  const run = ids.filter((x) => have.includes(x));
+  if (!run.length) return { ok: true, ran: [] };
+  const owner = `train-${id}-move`;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
+  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', run.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(path.join(root, '.studio', 'gates', `${owner}.json`), 'utf8')); } catch {}
+  for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  try { fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-move-recheck.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
+  const rows = Array.isArray(rec?.rows) ? rec.rows : [];
+  const green = r.status === 0 && rec?.tree === tree && rows.length > 0 && rows.every((x) => x.ok || x.required === false);
+  return green ? { ok: true, ran: run } : { ok: false, ran: run, why: `the checks that read ${files.filter((f) => Object.keys(recheckPaths()).some((g) => matchAny(f, [g]))).join(', ')} (${run.join(', ')}) are ${r.status === 0 ? 'not clearly green' : 'red'} on the new tree` };
 }
 
 /**
@@ -2448,8 +2541,8 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
         const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
         if (!re.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}`); return 'moved'; }
         built = re.built;
-        board = { from: tip, to: now, files: re.files };
-        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused`);
+        board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
+        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
         ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
       }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };
@@ -2467,7 +2560,8 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
           requeue(root, lane, { head: now.head });
           continue;
         }
-        const c = deps.close ? deps.close(lane, { train: id, record: v.rec, head: built.head }) : { ok: true };
+        // 2.76.0 follow-up: a trust-note or known-red landing closes with the record as the train judged it (closeRec).
+        const c = deps.close ? deps.close(lane, { train: id, record: v.closeRec || v.rec, head: built.head }) : { ok: true };
         if (c?.ok === false) { ev('close_failed', id, `${lane.task} landed but couldn't be closed: ${c.message}`, { task: lane.task, agent: by, to: 'producer', status: 'warn' }); res.unclosed = [...(res.unclosed || []), { task: lane.task, why: c.message }]; }
         try { dequeue(root, lane.task); } catch {}
         if (lane.union?.length) res.union = [...(res.union || []), { task: lane.task, files: lane.union }];

@@ -186,6 +186,12 @@
   the crew's PC), with `npm run approve -- keygen`, commits only `studio/keys/owner-ed25519.pub.pem` and merges it to the
   studio's main branch. The private key never goes to the agents' PC; approvals are signed on that device. An agent
   asked to run keygen on the agents' PC refuses.
+- A new lane copy and the task's approval (2.77.0, B-96, `harness/lane-approvals.mjs`): when a lane copy is made for a
+  task, besides the task's previous lane it merges the newest local branch that carries the task's commits and holds
+  the protected files exactly as one of `studio/approvals/*.json` (kind protected) recorded them (each file's blob, or the
+  blob with CRLF endings), when that branch changes one of them and isn't in the copy yet (`lane.approval_carried`; a
+  conflict leaves the copy as it was, with a warning event). The newest `STUDIO_LANE_APPROVAL_SCAN` (200) branches are
+  looked at. It only picks the commits a copy starts from: the protected gate still checks the signature and the hashes.
 - It is enforced once the base branch has an owner key, like the protected files (before that it warns), or with
   `STUDIO_WEAKENED_TESTS=on`; `=off` turns it off. Only the owner approves an intended change: `npm run approve -- tests
   --note "why"` signs exactly the findings listed now, so an agent's own key or a later change doesn't pass.
