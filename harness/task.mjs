@@ -430,6 +430,17 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
   const held = holdReason(taskId, parseNextQueue());
   if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: `${taskId} can't start yet: ${held}. Pick another task (npm run task -- next), or a person releases it.` };
+  // 2.77.0 (P9.2): a task in progress whose lane is queued for the merge train is its lane agent's: another agent can't
+  // claim it (the supervisor's or a hand-started builder's --task) until it lands or leaves the queue. --force: a person.
+  if (!force) {
+    let tq = null;
+    try { tq = JSON.parse(fs.readFileSync(path.join(STUDIO_STATE_DIR, 'train', 'queue.json'), 'utf8')).find((e) => e?.task === taskId) || null; } catch {}
+    const mine = lockStatus(`task:${taskId}`).lock?.owner === agent;
+    if (tq && tq.agent && tq.agent !== agent && !mine) {
+      emitEvent({ type: 'task.lock_denied', agent, task: taskId, status: 'blocked', msg: `Task ${taskId}: queued for the merge train (lane of ${tq.agent})` });
+      return { error: 'queued', message: `${taskId} can't start: its lane (${tq.agent}, ${tq.branch || 'its branch'} at ${String(tq.head || '').slice(0, 8)}) is queued for the merge train${tq.released ? ` and released by ${tq.released.by}` : ''}; it lands with the next train. Pick another task (npm run task -- next); npm run task -- train leave ${taskId} --by <name> takes it out of the queue first.` };
+    }
+  }
   // 2.31.0: a task that used its budget (sessions, claimed minutes, tokens; harness/task-budget.mjs) is
   // parked and refused, even for a re-claim of work in progress: re-claiming is how a task loops.
   const overWhy = stopIfOverBudget(taskId, { by: 'budget' });

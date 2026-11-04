@@ -328,7 +328,9 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - Held lanes (2.60.1, B-39): `npm run task -- hold <ID> --by <name> --why "…"` (a person, a Producer or Director
   session, or an agent outside the harness such as a merge conductor; workers are refused) marks a lane that waits to
   land on purpose, e.g. in a hand-built merge chain; `task unhold <ID> --by <name>` ends it. While a lane is held or
-  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run, no rescue is filed or escalated for it,
+  queued for the train its claim clock (`STUDIO_TASK_MAX_MIN`) doesn't run (2.77.0, P9.2: and a queued task is not
+  offered or startable: `task next`, the supervisor's pick and `task start` skip a waiting one, "queued for the merge
+  train"; an in-progress one stays its lane agent's, another agent's `task start` is refused unless `--force`), no rescue is filed or escalated for it,
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
   (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
   `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.

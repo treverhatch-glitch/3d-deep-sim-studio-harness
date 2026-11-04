@@ -154,4 +154,34 @@ console.log(JSON.stringify(r));
     fs.writeFileSync(path.join(st.S, 'studio/bible/controls.json'), `${JSON.stringify({ controls: [{ id: 'pan', input: 'drag' }] }, null, 2)}\n`);
     gitIn(st.S, 'commit', '-q', '--no-verify', '-am', 'controls fixed');
   }
+
+  // ---- P9.2: a task queued for the train can't be started by another session ----
+  if (want('p92')) {
+    const st = trainStudio('p92', [{ id: 'game', command: 'node -e "process.exit(0)"', required: true, lite: true, cache: false }], (S) => {
+      writeIn(S, 'studio/NEXT.md', '# Studio Task Queue\n\n## IN_PROGRESS\n- [>] **T-952** [P1] (`builder`) — in progress, queued\n\n## BACKLOG\n- [ ] **T-951** [P0] (`builder`) — waiting, queued and released\n- [ ] **T-953** [P1] (`builder`) — waiting, not queued\n\n## DONE\n');
+    });
+    const { S, env } = st;
+    const head = gitIn(S, 'rev-parse', 'HEAD').stdout.trim();
+    st.setQueue([
+      { task: 'T-951', agent: 'builder-a', dir: path.join(S, '.lanes', 'builder-a'), branch: 'lane/builder-a', head, at: new Date().toISOString(), held: { tier: 'C', why: 'protected', head }, released: { by: 'the-owner', head, at: new Date().toISOString() } },
+      { task: 'T-952', agent: 'builder-b', dir: path.join(S, '.lanes', 'builder-b'), branch: 'lane/builder-b', head, at: new Date().toISOString() },
+    ]);
+    const tk = (cmd, agent) => run(S, `node harness/task.mjs ${cmd}${agent ? ` --agent ${agent}` : ''}`, { ...env, STUDIO_LOCK_OWNER: agent || '' });
+    await guard('2.77.0 (P9.2): a waiting task whose lane is queued (and released) for the train is neither offered (task next) nor startable (task start: "queued for the merge train"); an in-progress queued task can\'t be claimed by another agent (its lane agent keeps it); a task not queued starts as before (fails on 2.76.0: builder-z started T-951 and T-952)', () => {
+      const next = tk('next --role builder', 'builder-z');
+      const s1 = tk('start T-951', 'builder-z');
+      const s2 = tk('start T-952', 'builder-z');
+      const s3 = tk('start T-952', 'builder-b');
+      const s4 = tk('start T-953', 'builder-y');
+      const ok = !/T-951/.test(out(next)) && s1.status !== 0 && /queued for the merge train/.test(out(s1)) && s2.status !== 0 && /queued for the merge train/.test(out(s2)) && s3.status === 0 && s4.status === 0;
+      return [ok, [next, s1, s2, s3, s4].map((r) => `${r.status}: ${out(r).slice(-300)}`).join('\n---\n')];
+    });
+    await guard('2.77.0 (P9.2): a second lane copy queueing the same commit for a released task keeps the release (passes on 2.76.0 too: the release goes with the commit)', () => {
+      const r = probe(S, env, 'requeue', `import { enqueue, readQueue } from ${u(S, 'harness/train.mjs')};
+enqueue(process.cwd(), { task: 'T-951', agent: 'builder-c', dir: ${JSON.stringify(path.join(S, '.lanes', 'builder-c'))}, branch: 'lane/builder-c', head: ${JSON.stringify(head)} });
+console.log(JSON.stringify(readQueue(process.cwd()).find((e) => e.task === 'T-951')));
+`);
+      return [r.released?.by === 'the-owner' && r.agent === 'builder-c', JSON.stringify(r)];
+    });
+  }
 }
