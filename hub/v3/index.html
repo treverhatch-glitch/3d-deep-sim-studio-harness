@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -603,9 +603,6 @@
 
   /* ---------- 2.74.0: the refreshed War Room ---------- */
   body[data-skin="ops"] { --card: #212a36; --chip: #2f3a48; --ok-bg: rgba(61, 220, 132, .12); --bad-bg: rgba(255, 90, 95, .12); --wait: #c084fc; }
-  @media (prefers-color-scheme: light) {
-    body[data-skin="ops"] { --bg: #f3f5f8; --panel: #ffffff; --line: #d3dae3; --ink: #17202a; --quiet: #556273; --go: #13803d; --standby: #9a5b00; --hold: #c62828; --link: #0b5fae; --focus: #0b5fae; --card: #f7f9fb; --chip: #e7ecf2; --ok-bg: rgba(19, 128, 61, .09); --bad-bg: rgba(198, 40, 40, .08); --wait: #7e22ce; }
-  }
   body { font-family: Barlow, "Segoe UI", system-ui, -apple-system, sans-serif; }
   #ops h1, #ops h2 { font-family: "Barlow Condensed", "Segoe UI Semibold", "Arial Narrow", system-ui, sans-serif; }
   .deck { padding: 12px 20px 0; display: grid; gap: 14px; }
@@ -717,25 +714,27 @@
      edge and means the same thing everywhere (go, wait, stop, hold, info, off). Tokens for color, type, spacing and
      radius; light and dark follow the system; reduced motion is respected (the rule at the top of this sheet).
      ================================================================================================================== */
+  /* 2.77.0: a retro-futurist field terminal, dark always (a light set only when the person picks it: the theme button).
+     Two phosphors: green for reading, amber for what wants a person; status colors keep their one meaning. */
   :root {
-    --ds-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-    --ds-display: "Bahnschrift SemiCondensed", Bahnschrift, "DIN Alternate", "DIN Condensed", "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+    --ds-font: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Menlo", ui-monospace, monospace;
+    --ds-display: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Menlo", ui-monospace, monospace;
     --ds-1: 4px; --ds-2: 8px; --ds-3: 12px; --ds-4: 16px; --ds-5: 24px; --ds-6: 32px;
-    --ds-r1: 3px; --ds-r2: 6px; --ds-r3: 10px;
+    --ds-r1: 2px; --ds-r2: 4px; --ds-r3: 6px;
     --ds-t-xs: 12px; --ds-t-s: 13px; --ds-t-m: 15px; --ds-t-l: 17px; --ds-t-xl: 20px; --ds-t-2xl: 26px;
-    --ds-strip: 5px;
-    --ds-bg: #151c24; --ds-surface: #1c2530; --ds-surface-2: #232e3b; --ds-line: #314050; --ds-text: #e4eaf0; --ds-muted: #8e9dad;
-    --ds-go: #34a874; --ds-wait: #e2a03a; --ds-stop: #e05656; --ds-hold: #9378e0; --ds-info: #4c9be0; --ds-off: #7d8a97;
-    --ds-go-bg: rgba(52, 168, 116, .14); --ds-wait-bg: rgba(226, 160, 58, .14); --ds-stop-bg: rgba(224, 86, 86, .14); --ds-hold-bg: rgba(147, 120, 224, .15); --ds-info-bg: rgba(76, 155, 224, .13);
-    --ds-tape: #f2c94c; --ds-on-strong: #0f151b; --ds-floor: #10161d; --ds-floor-line: #1b2530;
+    --ds-strip: 4px;
+    --ds-bg: #050906; --ds-surface: #0a120c; --ds-surface-2: #0f1d13; --ds-line: #1d4a2a; --ds-text: #b8f5c6; --ds-muted: #6fae7f;
+    --ds-go: #5dff8a; --ds-wait: #ffb340; --ds-stop: #ff5f4f; --ds-hold: #d28cff; --ds-info: #66e3ff; --ds-off: #4d7058;
+    --ds-go-bg: rgba(93, 255, 138, .1); --ds-wait-bg: rgba(255, 179, 64, .12); --ds-stop-bg: rgba(255, 95, 79, .12); --ds-hold-bg: rgba(210, 140, 255, .12); --ds-info-bg: rgba(102, 227, 255, .1);
+    --ds-tape: #ffb340; --ds-on-strong: #041006; --ds-floor: #040805; --ds-floor-line: #0d1f12;
+    --ds-glow: 0 0 6px rgba(93, 255, 138, .35); --ds-glow-amber: 0 0 8px rgba(255, 179, 64, .45);
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --ds-bg: #e4e9ed; --ds-surface: #f7f9fa; --ds-surface-2: #edf1f4; --ds-line: #c6d0d9; --ds-text: #142029; --ds-muted: #4e5d6b;
-      --ds-go: #1f7f52; --ds-wait: #a4650f; --ds-stop: #b42f2f; --ds-hold: #6a4cc4; --ds-info: #1f69ae; --ds-off: #6b7784;
-      --ds-go-bg: rgba(31, 127, 82, .1); --ds-wait-bg: rgba(164, 101, 15, .1); --ds-stop-bg: rgba(180, 47, 47, .09); --ds-hold-bg: rgba(106, 76, 196, .1); --ds-info-bg: rgba(31, 105, 174, .09);
-      --ds-tape: #b8860b; --ds-on-strong: #ffffff; --ds-floor: #cfd6dc; --ds-floor-line: #c2cad1;
-    }
+  /* The light set, only on request (data-theme="light" on <html>, remembered in this browser). */
+  html[data-theme="light"] {
+    --ds-bg: #e9eee2; --ds-surface: #f6f8f1; --ds-surface-2: #e3eadb; --ds-line: #9bb59e; --ds-text: #10301a; --ds-muted: #3f6a4b;
+    --ds-go: #13803d; --ds-wait: #9a5b00; --ds-stop: #b42f2f; --ds-hold: #6a3fb0; --ds-info: #0d6a86; --ds-off: #6b7d70;
+    --ds-go-bg: rgba(19, 128, 61, .1); --ds-wait-bg: rgba(154, 91, 0, .1); --ds-stop-bg: rgba(180, 47, 47, .09); --ds-hold-bg: rgba(106, 63, 176, .1); --ds-info-bg: rgba(13, 106, 134, .09);
+    --ds-tape: #9a5b00; --ds-on-strong: #ffffff; --ds-floor: #d7dfcf; --ds-floor-line: #c7d2bf; --ds-glow: none; --ds-glow-amber: none;
   }
   /* Every view maps its own names onto the tokens, so the older rules below them pick the system up. */
   html body[data-skin] {
@@ -923,7 +922,7 @@
     padding: var(--ds-5) var(--ds-5) var(--ds-6); gap: 20px;
   }
   html body .room { border: 3px solid #0b1015; border-radius: var(--ds-r2); box-shadow: 0 2px 0 rgba(0, 0, 0, .35); }
-  @media (prefers-color-scheme: light) { html body .room { border-color: #4a5560; box-shadow: 0 2px 0 rgba(40, 50, 60, .25); } }
+  html[data-theme="light"] body .room { border-color: #4a5560; box-shadow: 0 2px 0 rgba(40, 50, 60, .25); }
   html body .room.busy { animation: setlit 3s ease-in-out infinite; }
   @keyframes setlit { 50% { box-shadow: 0 2px 0 rgba(0, 0, 0, .35), 0 0 0 3px var(--ds-tape), 0 0 22px rgba(242, 201, 76, .45); } }
   html body .room .sign, html body .room.r-production .sign { top: 8px; left: 8px; padding: 3px 8px; border: 0; border-radius: var(--ds-r1); background: #fdfaf2; color: #172029; font: 600 13px/1.2 var(--ds-display); box-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
@@ -1002,6 +1001,106 @@
   html body #arcade .xp span { font-size: var(--ds-t-s); color: var(--ds-muted); }
   html body #arcade .xp .bar i { background: var(--ds-info); }
   html body #arcade .screen .none { color: #c9d3dc; font-family: var(--ds-font); }
+
+  /* ==================================================================================================================
+     2.77.0: the field terminal. Scanlines and a soft phosphor glow over every view (off in the light set; the flicker
+     stops under reduced motion), framed panels with corner marks, a wrist-terminal tab bar, a bigger Studio floor.
+     ================================================================================================================== */
+  html { color-scheme: dark; background: var(--ds-bg); }
+  html[data-theme="light"] { color-scheme: light; }
+  html body[data-skin] { font: 14px/1.55 var(--ds-font); letter-spacing: 0; }
+  html body[data-skin]::after { content: ''; position: fixed; inset: 0; z-index: 100000; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px), radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0, 0, 0, .45) 100%);
+    animation: crt 6s steps(60) infinite; }
+  @keyframes crt { 0%, 100% { opacity: 1; } 48% { opacity: .94; } 50% { opacity: 1; } }
+  html[data-theme="light"] body[data-skin]::after { display: none; }
+  html body :is(#ops, #plan, #assets, #arcade, #away) > header h1, html body #tycoon > .top h1 { font: 700 22px/1.1 var(--ds-display); letter-spacing: .06em; color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body #ops h2, html body #plan h2, html body #assets h2, html body #arcade h2, html body .deck h2 { font: 700 16px/1.2 var(--ds-display); letter-spacing: .05em; color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body #ops h3, html body #plan h3, html body #arcade h3 { font: 700 14px/1.2 var(--ds-display); letter-spacing: .04em; color: var(--ds-text); }
+  html body .skin > header, html body #tycoon > .top { background: var(--ds-surface); border-bottom: 2px solid var(--ds-line); box-shadow: 0 1px 0 rgba(93, 255, 138, .08); }
+  /* panels: a frame with corner marks, like a terminal's readout */
+  html body #ops section, html body #plan section, html body #arcade section, html body .deck .panel, html body .deck .needs, html body #away .aw {
+    border-radius: var(--ds-r2); border: 1px solid var(--ds-line);
+    background:
+      linear-gradient(var(--ds-muted), var(--ds-muted)) top left / 12px 2px no-repeat, linear-gradient(var(--ds-muted), var(--ds-muted)) top left / 2px 12px no-repeat,
+      linear-gradient(var(--ds-muted), var(--ds-muted)) bottom right / 12px 2px no-repeat, linear-gradient(var(--ds-muted), var(--ds-muted)) bottom right / 2px 12px no-repeat,
+      var(--ds-surface);
+  }
+  html body .deck .needs.on { background:
+      linear-gradient(var(--ds-wait), var(--ds-wait)) top left / 12px 2px no-repeat, linear-gradient(var(--ds-wait), var(--ds-wait)) top left / 2px 12px no-repeat,
+      linear-gradient(90deg, var(--ds-wait-bg), transparent 45%), var(--ds-surface); }
+  /* the wrist-terminal tab bar */
+  html body .tabs { background: var(--ds-bg); border: 1px solid var(--ds-line); border-radius: var(--ds-r2); padding: 2px; gap: 0; }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab { font: 700 13px/1 var(--ds-font); letter-spacing: .05em; color: var(--ds-muted); border-radius: var(--ds-r1); padding: 9px 14px; }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab:hover { color: var(--ds-text); background: var(--ds-surface-2); }
+  html body :is(#ops, #tycoon, #plan, #assets, #arcade, #away) .tabs .tab[aria-current="page"] { color: var(--ds-on-strong); background: var(--ds-go); box-shadow: var(--ds-glow); text-shadow: none; }
+  html body .themebtn { order: 7; font: 700 12px/1 var(--ds-font); letter-spacing: .04em; color: var(--ds-muted); background: transparent; border: 1px solid var(--ds-line); border-radius: var(--ds-r1); padding: 8px 10px; cursor: pointer; }
+  html body .themebtn:hover { color: var(--ds-text); }
+  /* buttons and inputs: phosphor outlines; the one next step is filled */
+  html body #ops button.act, html body .act-row button, html body #plan button:not(.tab), html body #assets button:not(.tab), html body #arcade button:not(.tab) { font: 700 12px/1.2 var(--ds-font); letter-spacing: .03em; border-radius: var(--ds-r1); background: transparent; border: 1px solid var(--ds-line); color: var(--ds-text); }
+  html body #ops button.act:hover, html body .act-row button:hover, html body #plan button:not(.tab):hover, html body #assets button:not(.tab):hover, html body #arcade button:not(.tab):hover { border-color: var(--ds-go); color: var(--ds-go); }
+  html body #plan button.go, html body #assets button.go, html body #arcade button.go, html body .need > button, html body .actbtn, html body #assets .acard .acts button.up { background: var(--ds-go); border-color: var(--ds-go); color: var(--ds-on-strong); box-shadow: var(--ds-glow); }
+  html body input, html body select, html body textarea { background: var(--ds-bg); border-radius: var(--ds-r1); border-color: var(--ds-line); font-family: var(--ds-font); }
+  html body input:focus, html body select:focus, html body textarea:focus { border-color: var(--ds-go); box-shadow: var(--ds-glow); outline: none; }
+  html body .sig { border-radius: var(--ds-r1); background: var(--ds-surface); font-family: var(--ds-font); }
+  html body .big b { font: 700 32px/1 var(--ds-display); color: var(--ds-go); text-shadow: var(--ds-glow); }
+  html body .live { font-family: var(--ds-font); border-radius: var(--ds-r1); }
+  html body .toast { font-family: var(--ds-font); border-radius: var(--ds-r2); }
+  html body .acard, html body .acard .view { border-radius: var(--ds-r2); }
+  html body .stb, html body .room .now .chip, html body .room .now button, html body .yard .stn, html body .yard .car, html body .towerlog { font-family: var(--ds-font); }
+
+  /* ---- the Studio floor, bigger: full width, larger rooms, people and plates (the whole floor is drawn larger) ---- */
+  html body #tycoon .office { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; padding: var(--ds-5); }
+  @media (min-width: 900px) { html body #tycoon .office { zoom: 1.3; } }
+  @media (min-width: 1500px) { html body #tycoon .office { zoom: 1.55; } }
+  html body .room .sign, html body .room.r-production .sign { font: 700 12px/1.2 var(--ds-font); letter-spacing: .04em; }
+  html body .desk .tag b { font: 700 12px/1.1 var(--ds-font); letter-spacing: -.02em; }
+  html body .desk .tag i { font: 500 10px/1.1 var(--ds-font); }
+  /* cute and easy to see: the badge bobs, typing hands tick, a landed task bursts out of its room */
+  html body .person > .stb { animation: badgebob 2.2s ease-in-out infinite; }
+  @keyframes badgebob { 50% { transform: translateY(-3px); } }
+  html body .person.facing-left > .stb { animation: none; }
+  html body .burst { position: absolute; z-index: 6; left: 50%; top: 46%; pointer-events: none; }
+  html body .burst b { position: absolute; left: -60px; width: 120px; text-align: center; font: 700 15px/1 var(--ds-font); color: #fff7c2; text-shadow: 0 0 6px #ffb340, 2px 2px 0 #3a1d00; animation: burstup 1.8s ease-out forwards; }
+  html body .burst i { position: absolute; width: 8px; height: 8px; background: var(--c, #ffd54f); box-shadow: 0 0 6px var(--c, #ffd54f); animation: spark 1.2s ease-out forwards; }
+  @keyframes burstup { 0% { transform: translateY(10px) scale(.6); opacity: 0; } 20% { transform: translateY(0) scale(1.15); opacity: 1; } 100% { transform: translateY(-46px) scale(1); opacity: 0; } }
+  @keyframes spark { 0% { transform: translate(0, 0); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+  html body #tycoon .dock { font-family: var(--ds-font); border-top: 2px solid var(--ds-line); }
+  html body #tycoon .build .bar i { background: var(--ds-go); box-shadow: var(--ds-glow); }
+
+  /* ---- the Train Room's loom: main a glowing central timeline, lanes as filaments woven back into it ---- */
+  html body .loom { width: 100%; max-width: 980px; height: auto; display: block; margin: 6px 0 10px; }
+  html body .loom .frame-o { fill: url(#loomBody); stroke: url(#loomGold); stroke-width: 6; }
+  html body .loom .main { stroke: #ff7a1a; stroke-width: 5; filter: url(#loomGlow); stroke-linecap: round; }
+  html body .loom .main.pulse { animation: mainpulse 2.4s ease-in-out infinite; }
+  @keyframes mainpulse { 50% { stroke: #ffb25e; } }
+  html body .loom .fil { fill: none; stroke-width: 2.6; stroke-linecap: round; }
+  html body .loom .fil.verifying { stroke: #ffd36b; stroke-dasharray: 10 7; animation: weave 1.4s linear infinite; filter: url(#loomGlow); }
+  html body .loom .fil.landed { stroke: #7dff9e; filter: url(#loomGlow); }
+  html body .loom .fil.dropped { stroke: #ff4d3d; stroke-dasharray: 3 5; animation: flicker 1.2s steps(2) infinite; }
+  html body .loom .fil.held, html body .loom .fil.deferred, html body .loom .fil.waiting { stroke: #c9a4ff; stroke-dasharray: 2 6; }
+  html body .loom text { fill: #ffe9c2; font: 700 12px var(--ds-font); }
+  html body .loom text.st { fill: #d9b98a; font-weight: 400; }
+  html body .loom .knot { fill: #7dff9e; filter: url(#loomGlow); }
+  @keyframes weave { to { stroke-dashoffset: -34; } }
+  /* the verify's real loading bar */
+  html body .vbar { margin: 6px 0 4px; }
+  html body .vbar .track { position: relative; height: 18px; border: 1px solid var(--ds-wait); border-radius: var(--ds-r1); background: repeating-linear-gradient(90deg, rgba(255, 179, 64, .08) 0 10px, transparent 10px 12px); overflow: hidden; }
+  html body .vbar .track i { display: block; height: 100%; background: repeating-linear-gradient(90deg, var(--ds-wait) 0 10px, transparent 10px 12px); box-shadow: var(--ds-glow-amber); transition: width .8s ease; }
+  html body .vbar .line { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: var(--ds-t-s); color: var(--ds-text); }
+  html body .vbar .line b { color: var(--ds-wait); }
+  html body .vbar .est { color: var(--ds-muted); }
+
+  /* every header: the title and its one-line state on top; the tab bar, MAX SPEED and the screen switch below */
+  html body :is(#ops, #plan, #assets, #arcade, #away) > header .spacer, html body #tycoon > .top .spacer { flex: 1 0 100%; height: 0; order: 4; }
+  html body .skin > header .meter, html body .skin > header #o-gates { order: 3; }
+  html body .desk .tag b, html body .desk.big .tag b { color: #10211a; }
+
+  @media (max-width: 600px) { html body .need { grid-template-columns: minmax(0, 1fr); } html body .need > button, html body .need > .actbtn { justify-self: start; } }
+
+  html body .yard .ybar { position: absolute; left: 0; right: 0; top: 62px; height: 10px; border: 1px solid #ffb340; background: rgba(0, 0, 0, .5); }
+  html body .yard .ybar i { display: block; height: 100%; background: repeating-linear-gradient(90deg, #ffb340 0 6px, transparent 6px 8px); box-shadow: 0 0 6px rgba(255, 179, 64, .6); }
+  html body .yard .ybar b { position: absolute; right: 2px; top: -15px; font: 700 11px/1 var(--ds-font); color: #ffe2a8; text-shadow: 1px 1px 0 #000; }
 </style>
 </head>
 <body data-skin="ops">
@@ -1014,7 +1113,7 @@
     <div class="spacer"></div>
     <div class="meter" title="Tasks done out of all tasks in studio/NEXT.md"><span id="o-prog">0 of 0 tasks done</span><span class="bar"><i id="o-progbar"></i></span></div>
     <div id="o-gates" title="From the last npm run verify (.studio/gates-last.json)">Gates: not run yet</div>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops" aria-current="page">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops" aria-current="page">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1103,7 +1202,7 @@
     <span class="stat" title="Tokens reported today">Tokens used <b id="t-tokens">–</b></span>
     <span class="stat" title="Local time (2.30j: a clock, not a game day)">Time <b id="t-clock">--:--</b></span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon" aria-current="page">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon" aria-current="page">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </div>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1124,7 +1223,7 @@
     <span class="game" id="p-game"></span>
     <span class="state" id="p-state">Loading…</span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan" aria-current="page">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan" aria-current="page">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1197,7 +1296,7 @@
     <h1>Asset studio</h1>
     <span class="state" id="a-state">Loading…</span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets" aria-current="page">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets" aria-current="page">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1231,8 +1330,8 @@
   <header>
     <h1>While you were away</h1>
     <span class="state" id="aw-state">Loading…</span>
-    <span class="spacer" style="flex:1"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav>
+    <span class="spacer"></span>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
   </header>
   <div class="awaybar" id="aw-bar" hidden></div>
   <div class="aw-list" id="aw-list"></div>
@@ -1245,7 +1344,7 @@
     <h1>Arcade</h1>
     <span class="state" id="r-state"></span>
     <span class="spacer"></span>
-    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade" aria-current="page">Arcade</button></nav>
+    <nav class="tabs" aria-label="Views"><button class="switch tab" type="button" data-to="ops">Control room</button><button class="switch tab" type="button" data-to="tycoon">Studio floor</button><button class="switch tab" type="button" data-to="plan">Game plan</button><button class="switch tab" type="button" data-to="assets">Assets</button><button class="switch tab" type="button" data-to="arcade" aria-current="page">Arcade</button></nav><button type="button" class="themebtn" data-themebtn aria-pressed="false" title="Switch between the dark terminal and a light screen (remembered in this browser)">Light screen</button>
     <button class="speed" type="button" data-speed aria-pressed="false" title="MAX SPEED: more agents at once, started automatically, and the Director and Producer check in far more often"><span class="knob" aria-hidden="true"></span><span class="lbl">MAX SPEED</span></button>
   </header>
   <div class="signals" data-signals role="status" aria-live="polite"></div>
@@ -1291,6 +1390,13 @@
   const ago = (m) => (m == null ? '' : m < 1 ? 'now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`);
   const short = (s, n) => (String(s || '').length > n ? `${String(s).slice(0, n - 1)}…` : String(s || ''));
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+  // 2.77.0: dark always, unless the person picks the light screen (remembered in this browser, never from the system).
+  const applyTheme = (t) => {
+    document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+    document.querySelectorAll('[data-themebtn]').forEach((b) => { b.setAttribute('aria-pressed', t === 'light' ? 'true' : 'false'); b.textContent = t === 'light' ? 'Dark screen' : 'Light screen'; });
+  };
+  applyTheme(store.get('hudTheme'));
+  document.querySelectorAll('[data-themebtn]').forEach((b) => b.addEventListener('click', () => { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; store.set('hudTheme', t); applyTheme(t); }));
 
   let state = null;
   let filter = null;
@@ -1814,18 +1920,50 @@
   // A time with its day when it isn't today ("Wed 05:56 PM"): a run's end or a delegation's can be days away.
   const when = (ts) => { if (!ts) return ''; const d = new Date(ts); return d.toDateString() === new Date().toDateString() ? hhmm(ts) : `${d.toLocaleDateString([], { weekday: 'short' })} ${hhmm(ts)}`; };
   const n1 = (x) => (x === null || x === undefined || !Number.isFinite(Number(x)) ? '?' : String(Math.round(Number(x) * 10) / 10));
-  /** A train's threads: one per lane, branching off main and woven back in when it lands (B-62). */
+  /**
+   * 2.77.0: a train as a loom. Main is the glowing central timeline; each lane a filament that branches off it and is
+   * woven back in when it lands (green, with a knot), pulses while it verifies, peels away red when handed back, waits
+   * violet for a release. Original art, drawn here.
+   */
   function threadsSvg(tr) {
     const lanes = tr.lanes || [];
     if (!lanes.length) return '';
-    const W = 640, top = 18, gap = 26, trunk = top + lanes.length * gap + 8, H = trunk + 14;
-    const paths = lanes.map((l, i) => {
-      const y = top + i * gap;
-      const word = { verifying: 'verifying', landed: 'landed: locked into main', dropped: 'handed back', held: 'waits for a release', deferred: 'next train' }[l.state] || l.state;
-      const d = l.state === 'dropped' ? `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L440,${y} C480,${y} 500,${y - 10} 540,${y - 16}` : l.state === 'landed' ? `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L480,${y} C540,${y} 540,${trunk} 600,${trunk}` : `M110,${trunk} C150,${trunk} 150,${y} 200,${y} L470,${y}`;
-      return `<path class="lane ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(word)}</title></path><text x="206" y="${y - 5}">${esc(l.task)}</text><text class="st" x="290" y="${y - 5}">${esc(word)}</text>${l.state === 'landed' ? `<circle class="knot" cx="600" cy="${trunk}" r="4"></circle>` : ''}`;
+    const W = 900, mid = 0, rows = Math.ceil(lanes.length / 2), H = Math.max(150, 70 + rows * 52);
+    const cy = H / 2;
+    const word = { verifying: 'verifying', landed: 'landed: woven into main', dropped: 'handed back', held: 'waits for a release', deferred: 'next train', waiting: 'queued' };
+    const fil = lanes.map((l, i) => {
+      const side = i % 2 ? 1 : -1;
+      const y = cy + side * (30 + Math.floor(i / 2) * 24);
+      const x0 = 110 + i * 14;
+      const lift = `M${x0},${cy} C${x0 + 60},${cy} ${x0 + 50},${y} ${x0 + 120},${y}`;
+      const d = l.state === 'landed' ? `${lift} L660,${y} C730,${y} 720,${cy} 790,${cy}`
+        : l.state === 'dropped' ? `${lift} L520,${y} C580,${y} 600,${y + side * 26} 660,${y + side * 40}`
+          : l.state === 'verifying' ? `${lift} L700,${y}` : `${lift} L560,${y}`;
+      const tx = x0 + 128;
+      return `<path class="fil ${esc(l.state)}" d="${d}"><title>${esc(l.task)}: ${esc(word[l.state] || l.state)}</title></path>`
+        + `<text x="${tx}" y="${y - 6}">${esc(l.task)}</text><text class="st" x="${tx + 66}" y="${y - 6}">${esc(word[l.state] || l.state)}</text>`
+        + (l.state === 'landed' ? `<circle class="knot" cx="790" cy="${cy}" r="5"></circle>` : l.state === 'verifying' ? `<circle class="knot" cx="700" cy="${y}" r="3.5" style="fill:#ffd36b"></circle>` : '');
     }).join('');
-    return `<svg class="threads" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tr.name)} lanes: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', '))}"><path class="trunk" d="M20,${trunk} L620,${trunk}"></path><text x="20" y="${trunk - 6}">main</text>${paths}</svg>`;
+    // faint golden branches behind, for the loom's texture (decoration, not data)
+    const veins = Array.from({ length: 8 }, (_, k) => { const sy = k % 2 ? 1 : -1; const x = 150 + k * 80; return `<path d="M${x},${cy} C${x + 40},${cy} ${x + 30},${cy + sy * (H / 2 - 24)} ${x + 90},${cy + sy * (H / 2 - 22)}" stroke="#c8952c" stroke-width="1" fill="none" opacity=".22"></path>`; }).join('');
+    void mid;
+    return `<svg class="loom" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(tr.name)} lanes: ${esc(lanes.map((l) => `${l.task} ${l.state}`).join(', '))}">
+      <defs><linearGradient id="loomGold" x1="0" x2="1"><stop offset="0" stop-color="#7a5410"></stop><stop offset=".5" stop-color="#ffd77a"></stop><stop offset="1" stop-color="#7a5410"></stop></linearGradient>
+      <radialGradient id="loomBody" cx=".5" cy=".5" r=".75"><stop offset="0" stop-color="#3a2706"></stop><stop offset="1" stop-color="#0e0902"></stop></radialGradient>
+      <filter id="loomGlow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="2.4" result="b"></feGaussianBlur><feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs>
+      <rect class="frame-o" x="6" y="6" width="${W - 12}" height="${H - 12}" rx="${Math.min(70, H / 2 - 10)}"></rect>
+      ${veins}
+      <path class="main${tr.running ? ' pulse' : ''}" d="M40,${cy} L${W - 40},${cy}"></path><text x="46" y="${cy - 10}">main</text>
+      ${fil}
+    </svg>`;
+  }
+  const dur = (ms) => { if (ms == null) return '?'; const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  /** 2.77.0: the running verify's real loading bar: gates finished of the run's gates; the ETA from recorded runs. */
+  function verifyBar(bar) {
+    if (!bar) return '';
+    const eta = bar.ended ? 'finished' : bar.etaMs == null ? `no ETA yet (${bar.why})` : `about ${dur(bar.etaMs)} left`;
+    return `<div class="vbar" role="group" aria-label="Verify progress"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${bar.percent}" aria-label="Verify ${bar.percent}% done"><i style="width:${bar.percent}%"></i></div>`
+      + `<div class="line"><b>${bar.percent}%</b><span>${bar.done} of ${bar.total} checks done</span><span>${bar.step ? `now: ${esc(bar.step)} (${dur(bar.stepElapsedMs)})` : bar.ended ? 'all checks ran' : 'between checks'}</span><span>${esc(eta)}</span>${bar.estimate && bar.etaMs != null ? `<span class="est">estimate: ${esc(bar.why)}</span>` : ''}${bar.failed?.length ? `<span style="color:var(--ds-stop)">red so far: ${esc(bar.failed.join(', '))}</span>` : ''}</div></div>`;
   }
   function renderDeck(s) {
     const w = s.warRoom || {};
@@ -1838,7 +1976,7 @@
       const head = tr.running ? `${esc(tr.id || '')} · ${esc(tr.step || '')}${tr.elapsedMin != null ? ` · ${esc(tr.elapsedMin)} min` : ''}${tr.eta ? ` · ${esc(tr.eta)}` : ''}${tr.by ? ` · by ${esc(tr.by)}` : ''}` : 'no train running';
       const waits = (tr.waiting || []).map((x) => { const key = `act:release:${x.task}`; return `<div class="need" data-rkey="${esc(key)}"><div class="what">${esc(x.task)}${x.agent ? ` <small>${esc(x.agent)}</small>` : ''}${x.held ? `<small>held: tier ${esc(x.held.tier)}: ${esc(x.held.why)}</small>` : x.released ? `<small>released by ${esc(x.released)}</small>` : '<small>queued for the next train</small>'}</div>${x.held ? `<button type="button" class="actbtn" data-act2="release" data-task="${esc(x.task)}" ${dis}>Release</button>` : '<span></span>'}${resultHtml(key)}</div>`; }).join('');
       const last = tr.last ? `<p class="tline">Last: ${esc(tr.last.id || '')} ${tr.last.at ? esc(when(tr.last.at)) : ''}: ${tr.last.landed?.length ? `landed ${esc(tr.last.landed.join(', '))}` : 'landed nothing'}${tr.last.dropped?.length ? `; handed back ${esc(tr.last.dropped.join(', '))}` : ''}</p>` : '';
-      return `<div class="train" data-train="${esc(tr.kind)}"><h3>${esc(tr.name)} <small class="note">${head}</small></h3>${tr.text ? `<p class="tline">${esc(tr.text)}</p>` : ''}${threadsSvg(tr)}${last}${waits ? `<div class="waitlist">${waits}</div>` : ''}</div>`;
+      return `<div class="train" data-train="${esc(tr.kind)}"><h3>${esc(tr.name)} <small class="note">${head}</small></h3>${tr.text ? `<p class="tline">${esc(tr.text)}</p>` : ''}${verifyBar(tr.bar)}${threadsSvg(tr)}${last}${waits ? `<div class="waitlist">${waits}</div>` : ''}</div>`;
     }).join('') : '<p class="note">No train yet. A lane joins the merge train with <code>npm run task -- done &lt;ID&gt; --train</code>; an engine track (Unity) gets its own train.</p>');
     const rc = w.runClock;
     sigOf($('o-clockbody'), rc ? `<div class="big"><b>${esc(n1(rc.elapsedH))} h</b><span>since ${esc(when(rc.t0))} (${esc(rc.from)})${rc.until ? `; ${rc.leftH > 0 ? `${esc(n1(rc.leftH))} h left, until ${esc(when(rc.until))}` : 'past its end'}` : ''}</span></div><div class="big"><b>${esc(rc.landed)}</b><span>landed · ${esc(n1(rc.perHour))}/h · ${esc(rc.lastHour)} in the last hour</span></div>` : '<p class="note">No run yet: <code>npm run studio:start -- --until 46h</code> starts the clock (STUDIO_RUN_T0 sets it by hand).</p>');
@@ -2148,6 +2286,20 @@
     }
   }
   const pendingFx = [];
+  const bursts = [];
+  /** A small pixel burst over a room: the words and a ring of sparks; nothing under reduced motion. */
+  function roomBurst(roomId, text) {
+    const el = roomId && document.getElementById(`room-${roomId}`);
+    if (!el || reduceMotion) return;
+    const cols = ['#ffd54f', '#7dff9e', '#66e3ff', '#ff8a65', '#d28cff'];
+    const sparks = Array.from({ length: 14 }, (_, k) => { const a = (k / 14) * Math.PI * 2; return `<i style="--c:${cols[k % 5]};--dx:${Math.round(Math.cos(a) * 70)}px;--dy:${Math.round(Math.sin(a) * 50)}px"></i>`; }).join('');
+    const b = document.createElement('span');
+    b.className = 'burst';
+    b.setAttribute('aria-hidden', 'true');
+    b.innerHTML = `<b>${esc(text)}</b>${sparks}`;
+    el.appendChild(b);
+    setTimeout(() => b.remove(), 1900);
+  }
   let lastWatchAt = null;
   function wakeWatcher(w) {
     const p = people.get('watch');
@@ -2618,6 +2770,14 @@
         yard.querySelector('.note').textContent = web ? (web.running ? `${web.step}${web.elapsedMin != null ? ` ${web.elapsedMin} min` : ''}: ${web.text || ''}` : web.last ? `last: ${web.last.landed?.length ? `landed ${web.last.landed.join(', ')}` : 'landed nothing'}` : `${(web.waiting || []).length} queued`) : 'no train yet';
       }
       yard.title = web ? `Merge train${web.id ? ` ${web.id}` : ''}: ${web.running ? web.text || web.step : 'not running'}` : 'No merge train yet (npm run task -- done <ID> --train)';
+      // 2.77.0: the verify's real progress under the track (the Control room's Train Room has the words).
+      let yb = yard.querySelector('.ybar');
+      if (web?.bar && !web.bar.ended) {
+        if (!yb) { yb = document.createElement('span'); yb.className = 'ybar'; yb.innerHTML = '<i></i><b></b>'; yard.appendChild(yb); }
+        yb.querySelector('i').style.width = `${web.bar.percent}%`;
+        yb.querySelector('b').textContent = `${web.bar.percent}%${web.bar.etaMs != null ? ` · ${Math.max(1, Math.round(web.bar.etaMs / 60000))} min` : ''}`;
+        yb.title = `Verify: ${web.bar.done} of ${web.bar.total} checks${web.bar.step ? `, now ${web.bar.step}` : ''}${web.bar.estimate ? ' (estimate)' : ''}`;
+      } else if (yb) yb.remove();
     }
     const belt = office.querySelector('[data-dyn="enginetrain"]');
     if (belt) {
@@ -2742,6 +2902,14 @@
         if (b && b.until > Date.now() && b.msg !== p.said) { p.said = b.msg; say(p, b.msg); }
       });
     }
+    // 2.77.0: bursts first (an agent that just finished still has its room), then the ones who leave walk out.
+    const cheered = new Set();
+    while (bursts.length) {
+      const b = bursts.shift();
+      const room = b.room || people.get(b.agent)?.room || s.agents.find((a) => a.name === b.agent)?.room;
+      if (b.agent) cheered.add(b.agent);
+      roomBurst(room, b.text);
+    }
     for (const [name, p] of people) {
       if (present.has(name)) continue;
       const g = geo(p.room);
@@ -2749,6 +2917,7 @@
       desks.get(name)?.remove();
       desks.delete(name);
       // 2.75.0: a finished agent walks out of its room's door and fades; with reduced motion it is simply gone.
+      if (cheered.has(name)) react(p, 'task.done');
       p.el.classList.add('leaving');
       p.el.dataset.leaving = '1';
       if (g && !reduceMotion) walkPath(p, [doorIn(g), doorOut(g)], () => { p.el.classList.add('gone'); setTimeout(() => p.el.remove(), 700); });
@@ -3429,6 +3598,9 @@
         seen.add(key);
         if (primed && e.agent && !talkIds.has(e.id)) bubbles.set(e.agent, { msg: e.msg, until: Date.now() + 9000 });
         if (primed && e.agent && /^task\.(done|not_done|forced|paused)$/.test(e.type)) pendingFx.push({ agent: e.agent, type: e.type });
+        // 2.77.0: a landed task bursts out of its room on the Studio floor; a train that lands bursts in the Rail Yard.
+        if (primed && e.type === 'task.done' && e.agent) bursts.push({ agent: e.agent, text: `${e.task || 'Task'} done!` });
+        if (primed && e.type === 'task.train.landed') bursts.push({ room: 'rails', text: `Landed ${(e.meta?.lanes || []).length || ''} ${(e.meta?.lanes || []).length === 1 ? 'lane' : 'lanes'}!`.replace('  ', ' ') });
       }
       primed = true;
       render();

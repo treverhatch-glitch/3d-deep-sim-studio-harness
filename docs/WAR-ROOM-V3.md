@@ -82,7 +82,7 @@ needs release, held, handed back, parked) with the action for it right there (Re
 One design system for every view, a production stripboard: a status is a colored strip on a card's left edge and keeps
 its meaning everywhere: green working or landed, amber waiting on you or idle, red stopped or stalled, violet held or
 waiting for a release (and the owner's proxy), blue verifying or on the train, grey off or ending. Tokens (`--ds-*` in
-`hub/v3/index.html`) set color, type, spacing and radius, with a light set for a light system theme; motion stops under
+`hub/v3/index.html`) set color, type, spacing and radius, with a light set the person can pick (2.77.0: never from the system); motion stops under
 reduced motion. Headings use Bahnschrift (it ships with Windows; DIN and condensed fallbacks elsewhere), the text the
 system's UI font. Nothing is loaded from outside the hub. Every view has the same tab bar: Control room, Studio floor,
 Game plan, Assets, Arcade (the current one marked).
@@ -97,3 +97,33 @@ last 24 hours.
 
 `node qa/hud-check.mjs --only gallery --shots <folder>` shoots every view, desktop and phone, light and dark, into
 `<folder>/275/`.
+
+## 2.77.0: the field terminal
+
+- **Dark, always.** The War Room no longer follows a light system setting. "Light screen" in every view's header
+  switches to a light set; the choice is kept in this browser, and the same button brings the dark screen back. The
+  look is a retro-futurist field terminal (an original take): two phosphors on near-black (green to read, amber for what
+  wants you), scanlines and a soft glow (off in the light set; the flicker stops under reduced motion), framed panels,
+  a tab bar like a wrist terminal, the system's monospace font (Cascadia Mono or Consolas on Windows).
+- **The Studio floor is bigger**: drawn larger on wide screens (rooms, people, plates and text), with a badge that bobs
+  over each person, a burst over the room when a task lands (and in the Rail Yard when a train lands), and the
+  verify's progress under the Rail Yard's track. Finished agents still walk out (2.75.0).
+- **The Train Room is a loom**: main is the glowing central timeline; each lane a filament that branches off it and is
+  woven back in when it lands, pulses while verifying, peels away red when handed back, waits violet for a release.
+- **A real loading bar** for the running train's verify: `scripts/run-gates.mjs` writes its live progress to
+  `.studio/gates/progress/<owner>.json` (the train runs as `train-<id>`) and each passing gate's time to
+  `.studio/gates/gate-times.json` (the last 10 runs per gate; harness/gate-progress.mjs). The bar is the checks finished
+  out of the run's checks; the ETA is the median recorded time of each check still to run plus what is left of the
+  running one, and says "estimate" when any of them has fewer than 3 recorded runs (no ETA at all before a first run).
+
+### Pages
+
+| Page | 2.77.0 |
+| --- | --- |
+| Control room, Studio floor, Game plan, Assets, Arcade, While you were away (`/`) | kept, redone in the terminal look |
+| Arcade play (`/play/<build>/…`, `/engine-play/…`) | kept: the saved build plays in the page (checked end to end in qa/hud-check.mjs) |
+| Pairing (`/pair`), phone login (`/phone`) | kept |
+| `/legacy` (the React War Room retired in 2.4.0) and its source files (`/WarRoom.tsx` …) | cut: the War Room v3 does all of it |
+| `/human` (balance and fun sign-off) | cut: "Sign off balance" / "Sign off fun" in the Control room's Act box do the same (`/api/human/*` stays) |
+
+`node qa/hud-check.mjs --only gallery --shots <folder>` shoots every view, desktop and phone, in `<folder>/277/`.
