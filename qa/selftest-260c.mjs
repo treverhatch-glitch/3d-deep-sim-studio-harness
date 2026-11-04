@@ -203,10 +203,20 @@ export async function selftest260C({ dir, run, report, tmpRoot }) {
 
   // ---- #4: STUDIO_HARNESS_REF ----
   const hooks = (e = {}) => run(S, 'node harness/hook-stamp.mjs check', { ...env, ...e });
+  // 2.77.1 (B-100): `upgrade --merge` lists the update's own commits as exempt (the grandfather list), so right after
+  // the merge the gate is green with no STUDIO_HARNESS_REF. STUDIO_HARNESS_REF stays for release commits that came in
+  // without that step (a hand merge, or an update merged before 2.77.1): set aside the list to check it as before.
+  const afterMerge = hooks();
+  const gfFile = path.join(S, sg('rev-parse --git-common-dir').stdout.trim(), 'studio-hooks-grandfather.json');
+  const gfText = fs.existsSync(gfFile) ? fs.readFileSync(gfFile, 'utf8') : null;
+  report('2.77.1 (B-100): right after `upgrade --merge`, the update\'s own unstamped commits are exempt (listed by the merge), so the hooks gate is green without STUDIO_HARNESS_REF (fails on 2.77.0: they were listed until STUDIO_HARNESS_REF was set)',
+    afterMerge.status === 0 && !/the harness release commit/.test(out(afterMerge)) && gfText !== null, out(afterMerge).slice(0, 1200));
+  if (gfText !== null) fs.rmSync(gfFile, { force: true });
   const noRef = hooks();
   write(S, '.env', 'STUDIO_HARNESS_REF=origin/claude/260b\n');
   const withRef = hooks();
   fs.rmSync(path.join(S, '.env'));
+  if (gfText !== null) fs.writeFileSync(gfFile, gfText);
   const sha260b = sg('rev-parse origin/claude/260b').stdout.trim();
   report('2.60.0 (#4): the hooks gate lists the harness branch\'s unstamped release commits; with STUDIO_HARNESS_REF=origin/claude/260b in .env (confirmed on the remote) they are exempt and the output names the ref and commit used',
     noRef.status === 1 && /2\.60\.0: the harness release commit/.test(out(noRef))
