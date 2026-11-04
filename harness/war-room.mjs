@@ -194,8 +194,24 @@ function crewTile({ root = REPO_ROOT, launched = [], supervisor = null }) {
 // ---- the owner proxy ------------------------------------------------------------------------------------------------
 
 let decCache = { key: '', list: [] };
+let betaCache = { at: 0, key: '', v: null };
+/** 2.77.0: beta mode as it counts now (harness/beta-mode.mjs readBeta): { on, by, at, why, agents, setBy, signed }. */
+async function loadBeta(now = Date.now(), root = REPO_ROOT) {
+  const st = (rel) => { try { const x = fs.statSync(path.join(root, rel)); return `${x.mtimeMs}:${x.size}`; } catch { return '-'; } };
+  const key = `${st('studio/beta.json')}|${st('.git/HEAD')}|${st('.git/index')}`;
+  if (now - betaCache.at < 30000 && key === betaCache.key) return betaCache.v;
+  let v = null;
+  try {
+    const { readBeta } = await import('./beta-mode.mjs');
+    const b = readBeta();
+    v = { on: Boolean(b.on), by: b.doc?.by || null, at: b.doc?.at || null, why: b.on ? (b.doc?.why || '') : b.why || '', agents: Array.isArray(b.doc?.agents) ? b.doc.agents : b.doc?.agents ? String(b.doc.agents).split(',') : [], setBy: b.setBy || null, signed: Boolean(b.signed) };
+  } catch { v = null; }
+  betaCache = { at: now, key, v };
+  return v;
+}
 async function ownerProxy({ events, now = Date.now(), root = REPO_ROOT }) {
   const d = await loadProxy(now, root);
+  const beta = await loadBeta(now, root);
   const used = events.filter((e) => e.type === 'delegation.used' && ts(e) >= now - 7 * 24 * H).map((e) => ({ at: e.ts, who: e.agent, what: String(e.msg || '').slice(0, 220), action: e.meta?.action || null, task: e.task || null, kind: 'used' }));
   let decided = [];
   try {
@@ -207,7 +223,7 @@ async function ownerProxy({ events, now = Date.now(), root = REPO_ROOT }) {
   } catch {}
   const recent = [...used, ...decided].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 15);
   const workarounds = events.filter((e) => /^workaround\./.test(e.type) && ts(e) >= now - 24 * H).length;
-  return { delegation: d, recent, count24h: [...used, ...decided].filter((x) => (Date.parse(x.at) || 0) >= now - 24 * H).length, workarounds24h: workarounds };
+  return { delegation: d, beta, recent, count24h: [...used, ...decided].filter((x) => (Date.parse(x.at) || 0) >= now - 24 * H).length, workarounds24h: workarounds };
 }
 
 // ---- what each agent is doing now -----------------------------------------------------------------------------------
