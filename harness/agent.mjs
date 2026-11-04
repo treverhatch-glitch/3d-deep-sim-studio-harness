@@ -615,6 +615,49 @@ export function agyStopLine(log) {
   return hit ? hit.replace(/\s+/g, ' ').slice(0, 300) : null;
 }
 
+/**
+ * 2.77.0 (n, the owner's Priority 8 telemetry): what an agy session used, from its own output. agy -p printed only its
+ * final text in the crew's logs (no usage line, no model), so every agy session recorded 0 tokens and the session's
+ * model was whatever the launcher passed. Read here, newest session part only:
+ *   - Gemini usage objects: usageMetadata { promptTokenCount, candidatesTokenCount, cachedContentTokenCount } (one per
+ *     response id, the last one counts), or a stats.models.<model>.tokens { prompt, candidates, cached } summary (the
+ *     Gemini CLI's --output-format json shape); a plain `usage` line is tokensFrom's already;
+ *   - the model it names: modelVersion, model, or the stats.models key.
+ * { reported: true, tokensIn, tokensOut, cacheRead, model } or, with nothing reported, an estimate from text length
+ * (the kickoff in, the session's output out, ~4 characters a token): { reported: false, estimated: true, tokensIn,
+ * tokensOut, cacheRead: 0, model } — recorded as usage "not reported", never as 0.
+ */
+export function agyUsage(log, { kickoffChars = 0 } = {}) {
+  const part = newestSessionPart(String(log || ''));
+  let model = null;
+  const byResp = new Map();
+  let stats = null;
+  let n = 0;
+  for (const l of part.split(/\r?\n/)) {
+    const t = l.trim();
+    if (!t.startsWith('{')) continue;
+    let o; try { o = JSON.parse(t); } catch { continue; }
+    const m = o.modelVersion || o.model || o.response?.modelVersion || null;
+    if (typeof m === 'string' && /^[\w.:/-]{2,80}$/.test(m)) model = m.replace(/^models\//, '');
+    const um = o.usageMetadata || o.response?.usageMetadata;
+    if (um && typeof um === 'object') { byResp.set(o.responseId || o.response?.responseId || `n${n++}`, um); }
+    const sm = o.stats?.models;
+    if (sm && typeof sm === 'object' && Object.keys(sm).length) stats = sm;
+  }
+  if (stats) {
+    let i = 0, out = 0, cached = 0;
+    for (const [k, v] of Object.entries(stats)) { const tk = v?.tokens || {}; i += Number(tk.prompt ?? tk.input) || 0; out += Number(tk.candidates ?? tk.output) || 0; cached += Number(tk.cached) || 0; if (!model) model = k; }
+    if (i || out) return { reported: true, tokensIn: Math.max(0, i - cached), tokensOut: out, cacheRead: cached, model };
+  }
+  if (byResp.size) {
+    let i = 0, out = 0, cached = 0;
+    for (const um of byResp.values()) { const c = Number(um.cachedContentTokenCount) || 0; i += Math.max(0, (Number(um.promptTokenCount) || 0) - c); out += (Number(um.candidatesTokenCount) || 0) + (Number(um.thoughtsTokenCount) || 0); cached += c; }
+    if (i || out || cached) return { reported: true, tokensIn: i, tokensOut: out, cacheRead: cached, model };
+  }
+  const text = part.split(/\r?\n/).filter((l) => !/^\[launcher\]/.test(l)).join('\n');
+  return { reported: false, estimated: true, tokensIn: Math.ceil((Number(kickoffChars) || 0) / 4), tokensOut: Math.ceil(text.length / 4), cacheRead: 0, model };
+}
+
 export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
@@ -724,6 +767,21 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
     const st = streamUsage(usageLog ?? log);
     if (st) tok = st;
   }
+  // 2.77.0 (n): agy reported no usage line Claude's readers know: its own (Gemini) usage, else "not reported" with an
+  // estimate from text length (meta.usage, meta.tokensEstimated), never a silent 0; and the model agy names, if any.
+  let agyUse = null;
+  if (tool === 'agy' && !(tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    let kickoffChars = 0;
+    try { kickoffChars = fs.statSync(path.join(STUDIO_STATE_DIR, 'kickoff', `${agent}.md`)).size; } catch {}
+    agyUse = agyUsage(usageLog ?? log, { kickoffChars });
+    tok = { ...tok, tokensIn: agyUse.tokensIn, tokensOut: agyUse.tokensOut, cacheRead: agyUse.cacheRead || 0, ...(agyUse.estimated ? { usage: 'not reported', tokensEstimated: true } : { usage: 'reported' }) };
+  } else if (tool === 'agy') {
+    const named = agyUsage(usageLog ?? log).model;
+    agyUse = { reported: true, model: named };
+    tok = { ...tok, usage: 'reported' };
+  }
+  const modelReported = agyUse?.model && agyUse.model !== model ? agyUse.model : null;
+  if (modelReported) model = modelReported;
   if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
     const est = estimateCost(tok, { model, tool, role });
     if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
@@ -735,7 +793,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), ...(agyUse ? { usage: agyUse.estimated ? 'not reported' : 'reported', ...(agyUse.estimated ? { tokensEstimated: true, estimate: 'text length / 4 (kickoff in, output out)' } : {}), ...(modelReported ? { modelReported, modelAsked: s0.model || null } : {}) } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
