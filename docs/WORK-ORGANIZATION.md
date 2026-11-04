@@ -275,7 +275,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   ("tiers", docs/ONBOARDING-A-GAME.md), and never lowers a tier-C rule.
 - Batching (2.63.0): `task train` waits up to `STUDIO_TRAIN_WAIT_MIN` (10, from when the oldest lane was queued; poll
   `STUDIO_TRAIN_POLL_S`, 15) for `STUDIO_TRAIN_MIN` (1) lanes that aren't held, then runs with what is queued
-  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too).
+  (`--now` skips the wait; `task.train.waiting`); never more than `STUDIO_TRAIN_MAX` lanes (0: no cap; `--max` too)
+  and, since 2.77.0, never more than `STUDIO_TRAIN_BATCH` (default 4; `0`/`off`: no cap): the smallest cap wins.
   A lane the manifest marks "runAlone" (more than `maxFiles` files, or a file under its `paths`) gets a train of its
   own: the oldest lane decides, the rest wait and `task train` runs the next train right after (`trains` in its
   output). A lone `task done` in a lane copy takes the lanes already queued (not held, not run-alone) along in its
@@ -409,6 +410,39 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - A state file written in place because another program kept it open (Windows) leaves a `fsafe.warning` event.
 - The land lock (`.studio/locks/land.lock`, taken for a landing's fast-forward and board write) treats Windows'
   EPERM/EACCES/EBUSY while it is created or removed as busy and retries, instead of crashing the command.
+
+## Pipelined trains (2.77.0, P9.6)
+
+A full verify takes about 25 minutes on a busy PC, so lanes waited in line. Two trains verifying side by side would
+each verify against a main that is about to move, so the trains are pipelined instead (`harness/train-pipeline.mjs`):
+
+- While train A verifies, at most ONE speculative train B takes the next ready lanes (up to `STUDIO_TRAIN_BATCH`) and
+  verifies **A's tree + its lanes** in its own scratch copy, under its own lock (`.studio/locks/train-next.lock`), as a
+  detached child (`node harness/train-daemon.mjs run-next <A>`, output in `.studio/train/next.log`). A starts it right
+  before its verify; the train daemon's pass also starts it while A verifies (`task.train.next_started`).
+- When A ends: main is exactly A's verified tree (A landed it), or that tree plus record files only (the B-29 board and
+  record rule; `nextBaseVerdict` in `harness/train.mjs` is the one check): B lands right after A, under the train lock
+  (never two trains landing at once; main moves by compare-and-swap from the tree B built on), **without verifying
+  again**. Anything else (A red, re-checking or bisecting, rebuilt on a moved main, held, ending without landing, main
+  moved by anything but records) discards B: `task.train.next_discarded` says why, its lanes keep their place in the
+  queue (no hand-back, nothing counted toward `STUDIO_TRAIN_MAX_HANDBACKS`) and go in the next normal train, which B's
+  process runs when the train daemon is on. A red B verify only discards B; the normal train bisects.
+- B is conservative: it never holds, hands back or bisects. A lane held for the owner or out of trains, tier C not
+  released, missing a Golden-Reason or Pin-Moves, over the hand-back cap, waiting on `--after` or a chain tail, refused
+  by its precheck, conflicting on A's tree, or run-alone behind other lanes is left for the next normal train, which
+  applies the rules as before; a fix-first lane (B-75) means no B at all. A run-alone lane first in line is B on its own.
+- `STUDIO_TRAIN_PIPELINE`: unset (auto) starts B only when the machine budget has room for a second train verify beside
+  A's (the machine:heavy admission; no machine scan: no room, trains wait as before); `on` starts it whenever lanes are
+  queued (its verify still waits for its own machine:heavy claim); `off` never. Drain, "Stop all" and a halt stop it.
+- A train that would start while a B can land (its A ended, main is the tree B built on) gives the train lock back and
+  waits for it (`task train` without `--wait` says so and lands nothing; the daemon doesn't start one).
+- Status: `npm run task -- train status` prints `Running: train <A> ...` and `Next: train <B> ... speculative on train
+  <A>'s tree`; `studio:status` prints the same two lines; `npm run lanes` and `status --brief` add `; next: ...`.
+  `readTrainStatus()` (harness/train-status.mjs) keeps its fields (train, step, text, eta, lanes, round, by, since) and
+  adds `next` (the speculative train's own status: train, step, text, eta, lanes, after, base, tasks, speculative: true;
+  null when none); every status write also refreshes `.studio/train/status.json`, a snapshot of it. The War Room's web
+  train adds `next` ({ id, step, text, after, base, lanes, laneCount, eta } or null). B has its own life record
+  (B-88): a dead B is found by the reaper and its `train-next.lock` freed.
 
 ## Less repeated work in the merge train (2.69.0)
 

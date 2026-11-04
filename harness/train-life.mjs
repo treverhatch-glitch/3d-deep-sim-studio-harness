@@ -15,7 +15,8 @@
  *   - reapDeadTrains (called before every train and by the train daemon's pass) finds a train that never recorded its
  *     end and whose process is gone (or whose heartbeat stopped for STUDIO_TRAIN_DEAD_MIN, 30, minutes on two looks
  *     in a row: Windows reuses process ids). It records task.train.died "died: <last step>" and a job.done (result
- *     died), marks its status "died", frees the train lock if it still names that train, and keeps its lanes moving:
+ *     died), marks its status "died", frees the train lock (2.77.0: or the speculative train's train-next.lock) if it
+ *     still names that train, and keeps its lanes moving:
  *     a queued lane is still queued; a task done's own lane (not queued) is put in the queue once per head (a second
  *     death with the same head goes to the Producer instead). None of this is a hand-back, so it never counts toward
  *     STUDIO_TRAIN_MAX_HANDBACKS.
@@ -165,9 +166,12 @@ export function reapDeadTrains(root, { now = Date.now(), env = process.env, log 
       const step = stepOf(root, id);
       life.ended = { at: new Date(now).toISOString(), how: 'died', cause: j.why, step: step.step, found: 'reaper' };
       writeJson(lifeFile(root, id), life);
-      const lockF = path.join(root, '.studio', 'locks', 'train.lock');
-      const lk = readJson(lockF);
-      if (lk && String(lk.id) === String(id)) { try { fs.rmSync(lockF, { force: true }); } catch {} }
+      // 2.77.0 (p, P9.6): the speculative train's own lock (train-next.lock) too, when it names the dead train.
+      for (const name of ['train.lock', 'train-next.lock']) {
+        const lockF = path.join(root, '.studio', 'locks', name);
+        const lk = readJson(lockF);
+        if (lk && String(lk.id) === String(id)) { try { fs.rmSync(lockF, { force: true }); } catch {} }
+      }
       const requeued = [];
       const producer = [];
       const diedIn = { train: id, step: step.step, at: new Date(now).toISOString() };

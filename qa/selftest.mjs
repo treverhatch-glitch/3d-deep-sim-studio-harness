@@ -4669,6 +4669,15 @@ if (inShard('selftest-277u')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (p, P9.6): pipelined merge trains: a batch cap per train (STUDIO_TRAIN_BATCH), ONE speculative train verifying
+// main + A's tree while A verifies and landing right after A, discarded (no hand-back) when A goes red or main moves.
+if (inShard('selftest-277p')) {
+  const dir = copyRepo();
+  const { selftest277P } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277p.mjs')).href);
+  await selftest277P({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

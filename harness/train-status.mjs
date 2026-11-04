@@ -11,6 +11,10 @@
  * re-check time, plus one full verify (the last verify's duration, else the game checks' recorded quiet runs). Before
  * any re-check is timed the verify's duration stands in for one, and says so; with nothing measured at all it says
  * "ETA unknown (no timing yet)". Imports nothing from train.mjs (no cycle).
+ *
+ * 2.77.0 (p, P9.6): with a pipelined speculative train (harness/train-pipeline.mjs) the running train's status carries
+ * `next` (the speculative train's own status: train, step, text, eta, lanes, after, base, speculative: true), and every
+ * write also refreshes .studio/train/status.json, a snapshot of readTrainStatus() (the same fields, plus next).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -55,7 +59,7 @@ export function quietVerifyMs(root, game) {
   return sum > 0 ? sum : null;
 }
 
-/** Write train `id`'s current step. Never throws. */
+/** Write train `id`'s current step. Never throws. 2.77.0 (p, P9.6): and the snapshot of both trains (summaryFile). */
 export function writeTrainStatus(root, id, s) {
   try {
     const f = statusFile(root, id);
@@ -64,14 +68,42 @@ export function writeTrainStatus(root, id, s) {
     fs.writeFileSync(tmp, `${JSON.stringify({ train: id, at: new Date().toISOString(), ...s }, null, 2)}\n`);
     fs.renameSync(tmp, f);
   } catch {}
+  writeTrainsSummary(root);
 }
 
 /** The running train's status (the one holding .studio/locks/train.lock, its process alive), or null. */
 export function readTrainStatus(root) {
   const lock = readJson(path.join(root, '.studio', 'locks', 'train.lock'));
-  if (!lock?.id || (lock.pid && !alive(lock.pid))) return null;
+  // 2.77.0 (p, P9.6): the speculative train behind it (or, between A's end and B's landing, B alone) is `next`.
+  const next = readNextStatus(root);
+  if (!lock?.id || (lock.pid && !alive(lock.pid))) return next ? { ...next, next: null } : null;
   const s = readJson(statusFile(root, lock.id));
-  return s ? { ...s, by: lock.by || null, since: lock.at ? new Date(lock.at).toISOString() : null } : { train: lock.id, by: lock.by || null, since: lock.at ? new Date(lock.at).toISOString() : null, step: 'starting', text: 'starting', eta: null };
+  const nx = next && next.train !== lock.id ? next : null;
+  return s ? { ...s, by: lock.by || null, since: lock.at ? new Date(lock.at).toISOString() : null, next: nx } : { train: lock.id, by: lock.by || null, since: lock.at ? new Date(lock.at).toISOString() : null, step: 'starting', text: 'starting', eta: null, next: nx };
+}
+
+/**
+ * 2.77.0 (p, P9.6): the speculative train (harness/train-pipeline.mjs; .studio/locks/train-next.lock, its process alive),
+ * or null: { train, step, text, eta, lanes, round, speculative: true, after, base, tasks, by, since, at }.
+ */
+export function readNextStatus(root) {
+  const lock = readJson(path.join(root, '.studio', 'locks', 'train-next.lock'));
+  if (!lock?.id || !lock.pid || !alive(lock.pid)) return null;
+  const s = readJson(statusFile(root, lock.id)) || { train: lock.id, step: 'starting', text: `starting behind train ${lock.after || '?'}`, eta: null };
+  return { ...s, train: lock.id, speculative: true, after: lock.after || s.after || null, base: lock.base || s.base || null, by: lock.by || null, since: lock.at ? new Date(lock.at).toISOString() : null };
+}
+
+/** 2.77.0 (p, P9.6): .studio/train/status.json, a snapshot of readTrainStatus() (its fields, plus `next`) when written. */
+export const summaryFile = (root) => path.join(root, '.studio', 'train', 'status.json');
+export function writeTrainsSummary(root) {
+  try {
+    const cur = readTrainStatus(root);
+    const f = summaryFile(root);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify({ ...(cur || { train: null, step: null, next: null }), written: new Date().toISOString() }, null, 2)}\n`);
+    fs.renameSync(tmp, f);
+  } catch {}
 }
 
 /** A note when a train has more than 6 lanes: STUDIO_TRAIN_MAX caps them ('' otherwise). */
@@ -87,5 +119,14 @@ export function trainStatusLine(s, { short = false } = {}) {
   if (!s) return '';
   const eta = s.eta?.text ? (short ? s.eta.text.replace(/\s*\(.*\)$/, '') : s.eta.text) : '';
   const text = short ? String(s.text || s.step || '').split(';')[0].slice(0, 80) : String(s.text || s.step || '');
-  return `Train ${s.train}${s.lanes ? ` (${s.lanes} lanes)` : ''}: ${text}${eta ? `; ${eta}` : ''}`;
+  const spec = s.speculative ? ` (speculative, after ${s.after || '?'})` : '';
+  const nx = s.next ? `; next: train ${s.next.train}${s.next.lanes ? ` (${s.next.lanes} lanes)` : ''} speculative on ${s.next.after || '?'}: ${short ? String(s.next.text || s.next.step || '').split(';')[0].slice(0, 60) : String(s.next.text || s.next.step || '')}` : '';
+  return `Train ${s.train}${s.lanes ? ` (${s.lanes} lanes)` : ''}${spec}: ${text}${eta ? `; ${eta}` : ''}${nx}`;
+}
+
+/** 2.77.0 (p, P9.6): the running train and the speculative one behind it, one line each (task train status). */
+export function trainsText(s) {
+  if (!s) return '';
+  const one = (x, what) => `${what}: train ${x.train}${x.lanes ? ` (${x.lanes} lanes)` : ''}${x.speculative ? ` speculative on train ${x.after || '?'}'s tree${x.base ? ` ${String(x.base).slice(0, 8)}` : ''}` : ''}: ${x.step || 'starting'}: ${String(x.text || '').slice(0, 300)}${x.eta?.text ? `; ${x.eta.text}` : ''}`;
+  return [one(s, s.speculative ? 'Next (landing behind a train that ended)' : 'Running'), s.next ? one(s.next, 'Next') : ''].filter(Boolean).join('\n');
 }
