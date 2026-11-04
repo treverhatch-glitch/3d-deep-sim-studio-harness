@@ -74,7 +74,8 @@ import { recordFollow } from './scorecard.mjs';
 import { untrustedBlock, oneLine } from './untrusted.mjs';
 import { jobDone } from './jobs.mjs';
 import { isNim, providerConcurrency } from './families.mjs';
-import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf } from './stall.mjs';
+import { observe, logTokens, logStall, idleVerdict, readStall, stallEndOf, readLogFrom, resetStall, newestSessionPart } from './stall.mjs';
+import { readPrices, readPriceMultipliers, priceFor, dollarsOf } from './autonomy.mjs';
 import { reloadEnvIfChanged } from './env-reload.mjs';
 import { profileGuard, profileOf } from './profile-guard.mjs';
 import { toolCmd } from './spend-guard.mjs';
@@ -209,6 +210,27 @@ function agySettingsArg(file) {
 }
 
 /**
+ * 2.76.0 (B-80; the crew's local patches W-0072, W-0073): agy's options before --settings.
+ *   --print-timeout STUDIO_AGY_PRINT_TIMEOUT (5400s): 900 s ended a builder mid test run ("print timeout after 15m0s
+ *       while the agent was waiting on 1 background task"); a builder session runs up to 90 min (STUDIO_SESSION_MAX_MIN).
+ *   --mode STUDIO_AGY_MODE (accept-edits; off drops it): agy's analogue of Claude's acceptEdits. A headless agy session
+ *       ends at its first refused tool, and file writes were refused even with a write_file allow rule. Commands stay
+ *       on the --settings allow-list.
+ *   --model <model> when one is given (STUDIO_AGY_MODEL_FLAG names the flag; off drops it): with no model passed agy ran
+ *       its own default (a Claude model), not Gemini. UNTESTED on real agy: the flag's name (agy models lists the names).
+ * A value that isn't one plain word is ignored (the default is used).
+ */
+export const AGY_DEFAULT_MODEL = 'gemini-4-argon-high';
+export function agyOptions(model = null, env = process.env) {
+  const word = (v, d) => (/^[\w.:-]{1,60}$/.test(String(v ?? '').trim()) ? String(v).trim() : d);
+  const timeout = word(env.STUDIO_AGY_PRINT_TIMEOUT, '5400s');
+  const mode = /^(off|0|false|no|none)$/i.test(String(env.STUDIO_AGY_MODE || '')) ? null : word(env.STUDIO_AGY_MODE, 'accept-edits');
+  const flag = /^(off|0|false|no|none)$/i.test(String(env.STUDIO_AGY_MODEL_FLAG || '')) ? null : (/^--?[\w-]{1,30}$/.test(String(env.STUDIO_AGY_MODEL_FLAG || '').trim()) ? String(env.STUDIO_AGY_MODEL_FLAG).trim() : '--model');
+  const m = model && model !== 'unknown' ? word(model, null) : null;
+  return ['--print-timeout', /^\d+$/.test(timeout) ? `${timeout}s` : timeout, ...(mode ? ['--mode', mode] : []), ...(flag && m ? [flag, m] : [])];
+}
+
+/**
  * How each tool is started: an argv, the prompt on stdin (stdin) or as one argument (promptAt, its index in argv).
  * P-066 (crew P-036): harness/launch.mjs starts the argv with no shell on every OS, so each element arrives as one
  * argument. The prompt goes on stdin where the tool reads it there (claude -p with no prompt argument, codex's -, and
@@ -251,7 +273,7 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // M3 (2.58.3, crew P-037 addendum): agy takes a session settings file (--settings <file>); the studio's own
       // (.studio/agy-settings.json, written by `npm run agent -- allow agy`) is passed when it exists.
       const settings = agySettingsArg(agyStudioSettings());
-      const tail = ['--print-timeout', '900s', ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
+      const tail = [...agyOptions(m), ...(settings ? ['--settings', settings] : []), ...(bypass ? ['--dangerously-skip-permissions'] : [])];
       // H-2 (2.58.5): on Windows agy.exe got `-p <prompt>` as one argument (started directly, no shell, quoted by the
       // rules every Windows program reads) and still said `unexpected argument "are"`: the prompt ("You are …") was split
       // at its spaces after it reached agy.exe. agy reads a prompt from stdin too ("Prompts are read only from -p/--print,
@@ -709,7 +731,9 @@ export function parkIfLooping(id, now = Date.now()) {
 }
 
 /** The last part of a log (stream-json logs grow large; the refresh check needs only the latest usage). */
-function tailOf(file, bytes = 2 * 1024 * 1024) {
+function tailOf(file, bytes = 2 * 1024 * 1024, from = 0) {
+  // 2.76.0 (B-83): from = where this session's output starts in the (appended) log: earlier sessions never count.
+  if (from > 0) return readLogFrom(file, from, bytes);
   try {
     const size = fs.statSync(file).size;
     const fd = fs.openSync(file, 'r');
@@ -943,6 +967,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
   const logFile = path.join(AGENTS_DIR, `${agent}.log`);
   const out = fs.openSync(logFile, 'a');
+  // 2.76.0 (B-83, B-82): the log is appended to across sessions under one name (a relaunch, a refresh, a failover):
+  // this session's part starts here. The stall check, the refresh check and the session's usage read only that part.
+  let logFrom = 0;
+  try { logFrom = fs.fstatSync(out).size; } catch {}
   // A task on another version of the game (--track engine:godot) tags everything its agent records.
   const track = task ? readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task === task).pop()?.meta?.track : null;
   // 2.30q (#8): launched sessions get compact harness output (gate logs to files, a trimmed task list).
@@ -1022,8 +1050,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
+  resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
   // 2.73.1 (B-66): when this launcher ends the agent itself (stall, idle, budget), so the end records why.
   let killedBy = null;
@@ -1035,14 +1064,16 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     const wip = wipSummary(agent);
     let progress = null;
     try {
-      progress = heartbeatCheck(agent, { log: tailOf(logFile), model, task });
+      progress = heartbeatCheck(agent, { log: tailOf(logFile, undefined, logFrom), model, task });
     } catch {
       // the refresh check is a help, never a blocker
     }
     // 2.30o: the stall check (harness/stall.mjs): no progress, a read-only burn, or past the wall-clock cap ends it.
     let stall = null;
     try {
-      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile)), cwd });
+      // 2.76.0 (B-84): a copy made when the session claimed its task (harness/lane-at-claim.mjs) is where its work is.
+      const cwdNow = !copy && s.copy?.dir ? path.join(REPO_ROOT, s.copy.dir) : cwd;
+      stall = observe({ ...session, ...s }, { tokens: logTokens(tailOf(logFile, undefined, logFrom)), cwd: fs.existsSync(cwdNow) ? cwdNow : cwd });
     } catch {
       // the stall check is a guard, never a crash
     }

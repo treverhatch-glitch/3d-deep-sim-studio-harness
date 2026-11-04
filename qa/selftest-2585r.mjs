@@ -56,7 +56,7 @@ if (tool === 'agy') {
   let prompt = null;
   for (let i = 0; i < a.length; i++) {
     if (a[i] === '-p' || a[i] === '--print') { prompt = a[++i]; continue; }
-    if (a[i] === '--print-timeout' || a[i] === '--settings') { i++; continue; }
+    if (a[i] === '--print-timeout' || a[i] === '--settings' || a[i] === '--mode' || a[i] === '--model') { i++; continue; } // 2.76.0: agy's --mode and --model take a value
     if (a[i].startsWith('--')) continue;
     console.log('Error: unexpected argument "' + a[i] + '".');
     save({ error: 'unexpected argument "' + a[i] + '"', prompt });
@@ -192,7 +192,7 @@ console.log(JSON.stringify({ running: sessions().some((x) => x.agent === 'h9-slo
     const kick = path.join(dir, '.studio', 'kickoff', 'h2-agy.md');
     const kickText = fs.existsSync(kick) ? fs.readFileSync(kick, 'utf8') : null;
     report('H-2 (crew agy-1.log: "Error: unexpected argument "are". Prompts are read only from -p/--print, -i/--prompt-interactive, or stdin"): agent start --tool agy with an agy that splits its arguments again at whitespace (as agy.exe did): the whole kickoff arrives (on stdin), no "unexpected argument", and no argument carries the prompt',
-      s.status === 0 && r && !r.error && r.via === 'stdin' && kickText && r.prompt === kickText && /^You are /.test(r.prompt) && same(r.argv, ['--print-timeout', '900s']),
+      s.status === 0 && r && !r.error && r.via === 'stdin' && kickText && r.prompt === kickText && /^You are /.test(r.prompt) && same(r.argv, ['--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'm-1']),
       `record: ${JSON.stringify(r && { ...r, prompt: r.prompt?.slice(0, 120) })}\n${out(s).slice(-600)}`);
   }
   {
@@ -207,7 +207,7 @@ process.env.STUDIO_AGY_PROMPT = 'arg';
 const back = toolCommand('agy', { model: 'm', prompt });
 console.log(JSON.stringify({ stdin: c.stdin === prompt, mode: plan.mode, file: plan.file, args: plan.args, spaced: plan.args.filter((a) => /\\s/.test(a)), back: back.argv.slice(0, 3), backAt: back.promptAt, backStdin: back.stdin ?? null }));`);
     report('H-2: on Windows (simulated: agy.exe on PATH) the agy launch plan starts agy.exe directly with no argument holding a space (nothing for agy to split) and the prompt on stdin; STUDIO_AGY_PROMPT=arg brings back agy -p <prompt>',
-      t.stdin === true && t.mode === 'direct' && t.file === 'C:\\tools\\agy.exe' && same(t.args, ['--print-timeout', '900s']) && same(t.spaced, []) && t.back?.[1] === '-p' && /^You are agy-1/.test(t.back?.[2] || '') && t.backAt === 2 && t.backStdin === null,
+      t.stdin === true && t.mode === 'direct' && t.file === 'C:\\tools\\agy.exe' && same(t.args, ['--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'm']) && same(t.spaced, []) && t.back?.[1] === '-p' && /^You are agy-1/.test(t.back?.[2] || '') && t.backAt === 2 && t.backStdin === null,
       JSON.stringify(t).slice(0, 1500));
   }
 

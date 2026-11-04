@@ -365,8 +365,8 @@ console.log(JSON.stringify({ want: ALLOWED.map(([, q]) => 'Bash(' + q + ')') }))
   {
     const s = start(dir, ['--role', 'builder', '--agent', 'h259-agy', '--tool', 'agy', '--model', 'm-1', '--note', NOTE, '--by', 'h259']);
     const g = got('agy');
-    report('P-066 (crew P-036) end to end: `agent start --tool agy` (an npm .cmd shim on Windows): the prompt arrives whole, with the note\'s quotes, parentheses, &, %PATH%, ^, < | > and non-ASCII text and its line breaks unchanged (on stdin since 2.58.5, H-2), and the arguments are just --print-timeout 900s; no "unexpected argument"',
-      same(g?.argv, ['--print-timeout', '900s']) && g.stdin.includes(NOTE) && g.stdin.includes('\n'),
+    report('P-066 (crew P-036) end to end: `agent start --tool agy` (an npm .cmd shim on Windows): the prompt arrives whole, with the note\'s quotes, parentheses, &, %PATH%, ^, < | > and non-ASCII text and its line breaks unchanged (on stdin since 2.58.5, H-2), and the arguments are just --print-timeout 5400s --mode accept-edits --model <model> (2.76.0, B-80); no "unexpected argument"',
+      same(g?.argv, ['--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'm-1']) && g.stdin.includes(NOTE) && g.stdin.includes('\n'),
       `${JSON.stringify(g?.argv?.map((a) => a.slice(0, 200)) || null)}\n${out(s).slice(-800)}\n${logOf(dir, 'h259-agy').slice(-800)}`);
   }
   {
