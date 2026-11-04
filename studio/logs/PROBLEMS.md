@@ -1344,3 +1344,12 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Evidence:** after `upgrade --merge origin/claude/2771`, `hook-stamp.mjs check` listed b09c320d, 30b411ec, 596003a6 (B-104).
 - **Why:** that merge ran 2.77.0's upgrade guard, which has no grandfather step (it starts with 2.77.1's guard).
 - **Fix:** `grandfather --ref <remote ref>` lists them by hand; merging 2.77.2 with 2.77.1's guard lists them by itself. qa/selftest-2772.mjs.
+
+### P-256 — lanes could not be refreshed after a harness upgrade · fixed in 2.78.0
+- **Evidence:** train 20261104-200446-12184 dropped T-226: "git merge failed: studio/task-holds.json" in `.lanes/builder-p94a`; builder-s243 (T-132) was told to "git rebase main … then npm run hooks -- restamp, which I may not run" (B-105).
+- **Why:** a lane copy's `studio/` is a link to main's; once the lane's index lost its skip-worktree marks, a merge saw main's live board files as local changes (and, had it gone on, would have written them through the link). The builder's verify only refused, with steps a builder may not run.
+- **Fix:** every lane refresh re-marks the lane's `studio/` and `.studio/` paths left out first (`protectSharedLinks`, harness/lane-sparse.mjs); a builder's verify refreshes its own stale lane and runs again, or says to hand the task back. qa/selftest-278h.mjs.
+
+### P-257 — a timing test failed "alone" under load and finished work was handed back · fixed in 2.78.0
+- **Evidence:** the crew's M7: with 4–6 verifies plus a Unity gate, a 2 ms timing test ran 2.2–2.5 ms (0.7–1.1 ms on a quiet machine); T-133 was handed back four times and T-199 once. The flake log judged it "real: fails when run alone" from a run whose `lowLoad` was false.
+- **Fix:** a file that fails alone runs again at low load on a quiet machine before it is `real`; passing there labels it `load-sensitive`, and a train whose only reds are load-sensitive lands. qa/selftest-278a.mjs.
