@@ -69,11 +69,12 @@ export async function selftest275H({ dir, run, report, tmpRoot, root }) {
       const ok = seen.every((x) => x.order === ORDER && x.cur === (x.v === 'away' ? '' : x.v) && x.labels === 'Control room|Studio floor|Game plan|Assets|Arcade');
       return [ok && !/<button class="switch" data-to=/.test(page), JSON.stringify(seen)];
     });
-    await guard('275h tokens: one design system: --ds-* tokens with a light set, six status colors used by the badges, reduced motion honoured, no web font or outside stylesheet or script (fails on 2.74.0: no tokens)', () => {
-      const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--ds-bg:/.test(page);
+    await guard('275h tokens: one design system: --ds-* tokens with a light set (2.77.0: picked by the person, not the system), six status colors used by the badges, reduced motion honoured, no web font or outside stylesheet or script (fails on 2.74.0: no tokens)', () => {
+      // 2.77.0: the light set is the person's pick (html[data-theme="light"]), never the system's (the owner: dark always).
+      const light = /html\[data-theme="light"\] \{\s*--ds-bg:/.test(page) && !/prefers-color-scheme: light/.test(page);
       const status = ['go', 'wait', 'stop', 'hold', 'info', 'off'].every((k) => new RegExp(`--ds-${k}: #[0-9a-f]{6}`).test(page));
       const outside = /<(link|script)\b[^>]*\b(href|src)="https?:/i.test(page) || /fonts\.(googleapis|gstatic)\.com/.test(page) || /@import\s+url\(\s*['"]?https?:/i.test(page);
-      return [light && status && /@media \(prefers-reduced-motion: reduce\)/.test(page) && !outside && /--ds-display:[^;]*Bahnschrift/.test(page), JSON.stringify({ light, status, outside })];
+      return [light && status && /@media \(prefers-reduced-motion: reduce\)/.test(page) && !outside && /--ds-display: [^;]+;/.test(page) && /--ds-font: [^;]+;/.test(page), JSON.stringify({ light, status, outside })];
     });
     await guard('275h plates: a short name over the role ("builder-s12" is s12 over builder), a bare number keeps the whole name (prod-1), nothing is cut into "builde…", the full name stays on the title (fails on 2.74.0: the plate was the name, cut by CSS)', () => {
       const m = /\/\*\* \{ short, role, full \} for a desk plate[\s\S]*?\n {2}function plate\(a\) \{[\s\S]*?\n {2}\}\n/.exec(page);

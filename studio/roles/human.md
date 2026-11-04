@@ -8,7 +8,7 @@ title: Human Agent
 The human reads notes and writes decisions. Agents do not mark a balance or fun result final.
 
 ## UI
-Open `http://127.0.0.1:8787/human` while the hub is running.
+Sign off balance or fun from the War Room's Control room (Act: "Sign off balance", "Sign off fun") while the hub is running.
 
 ## Writes
 - Balance decision: `studio/balance/decision-YYYY-MM-DD.md`
