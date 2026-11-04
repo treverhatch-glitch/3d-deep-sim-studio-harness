@@ -4548,6 +4548,15 @@ if (inShard('selftest-275h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (helper i): the launcher and the agents: B-83 stall per session, B-82 cost of a launcher end, W-0072/73 and
+// B-80 agy (accept-edits, timeout, model, write_file, GEMINI.md, its stop line), B-84 lane copies, B-90 live owner, B-81.
+if (inShard('selftest-276i')) {
+  const dir = copyRepo();
+  const { selftest276I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276i.mjs')).href);
+  await selftest276I({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

@@ -101,6 +101,7 @@ import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGates
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
 import { checkStamped, stampWrite } from './workaround.mjs';
 import { gateEnv } from './gate-env.mjs';
+import { refreshStaleLane } from './train-refresh.mjs';
 
 const git = (cwd, ...args) => spawnSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const out = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -1940,9 +1941,16 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   for (const lane of lanes) {
     // A rider goes only with the caller's own lane: if that one can't go, the riders wait for the next train.
     if (lane.rider && !ready.some((l) => l.own)) continue;
-    const now = laneNow(lane);
+    let now = laneNow(lane);
     if (now.error) { drop(lane, now.error, { handBack: false }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
+    // 2.76.0 (B-81): a lane whose harness is behind main (an upgrade's refresh that didn't finish) is refreshed here
+    // (harness/train-refresh.mjs), not handed back by its hooks check; only a real conflict hands it back.
+    if (!dryRun) {
+      const rf = await (deps.refreshStale || refreshStaleLane)(root, { ...lane, head: now.head }, { log });
+      if (rf.handBack) { drop(lane, rf.why); continue; }
+      if (rf.refreshed) { now = laneNow(lane); if (now.error) { drop(lane, now.error, { handBack: false }); continue; } }
+    }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
     const c = await laneTier(root, { head: now.head, task: lane.task, agent: lane.agent, dir: lane.dir }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);
