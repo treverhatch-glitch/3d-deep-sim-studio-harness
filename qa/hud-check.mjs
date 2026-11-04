@@ -316,6 +316,11 @@ function seed274() {
   ];
   fs.appendFileSync(path.join(st, 'events.jsonl'), ev.map((e) => JSON.stringify(e)).join('\n') + '\n');
   fs.appendFileSync(path.join(st, 'decisions.jsonl'), JSON.stringify({ kind: 'decision', id: 'D-demo1', at: iso(35 * 60000), action: 'train-release', subject: 'T-188', by: 'crew-lead', as: `delegation ${iso(86400000)}`, why: 'released under the standing delegation', evidence: '', undo: null }) + '\n');
+  // 2.77.0: the train's verify as it runs (scripts/run-gates.mjs writes this): 3 of 6 checks done, browser running a
+  // minute; the gate history the ETA comes from (hub has only 2 recorded runs, so the ETA is an estimate).
+  fs.mkdirSync(path.join(st, 'gates', 'progress'), { recursive: true });
+  fs.writeFileSync(path.join(st, 'gates', 'progress', 'train-tr-demo.json'), JSON.stringify({ owner: 'train-tr-demo', startedAt: iso(5 * 60000), gates: ['docs', 'golden', 'game', 'browser', 'hub', 'secrets'], done: [{ id: 'docs', ms: 4000, ok: true }, { id: 'golden', ms: 20000, ok: true }, { id: 'game', ms: 180000, ok: true }], current: { id: 'browser', startedAt: iso(60000) }, endedAt: null }));
+  fs.writeFileSync(path.join(st, 'gates', 'gate-times.json'), JSON.stringify({ browser: [120000, 130000, 125000], hub: [60000, 70000], secrets: [5000, 6000, 7000] }));
   // The machine: a scan and a few samples.
   fs.writeFileSync(path.join(st, 'machine.json'), JSON.stringify({ at: iso(20000), os: 'linux', ram: { totalGb: 32, freeGb: 6.5 }, cpu: { busy: 0.46 }, gpus: [{ name: 'GPU', busy: 0.07, vramGb: 12, vramFreeGb: 10.4 }], disk: { freeGb: 180 } }));
   fs.writeFileSync(path.join(st, 'machine-history.jsonl'), [0.4, 0.5, 0.48].map((c, i) => JSON.stringify({ at: iso((3 - i) * 60000), ram: [24 + i, 32], cpu: Math.round(c * 100), gpu: [6, 1.6, 12], disk: 180 })).join('\n') + '\n');
@@ -370,9 +375,15 @@ async function warRoom274() {
   });
   await expect('2.74.0: the Train Room shows the running train, its lanes (verifying, handed back), the verify step and time, the last train and the held lane with Release', async () => {
     const t = await text(page, '#o-trainsbody');
-    const lanes = await page.locator('#o-trainsbody .threads .lane').evaluateAll((els) => els.map((e) => e.getAttribute('class')));
+    const lanes = await page.locator('#o-trainsbody .loom .fil').evaluateAll((els) => els.map((e) => e.getAttribute('class')));
     const rel = await page.locator('#o-trainsbody [data-act2="release"][data-task="T-204"]').count();
     return { ok: /tr-demo/.test(t) && /verify/.test(t) && /14 min/.test(t) && /about 11 min/.test(t) && /tr-prev/.test(t) && /landed T-190, T-191/.test(t) && lanes.filter((c) => /verifying/.test(c)).length === 2 && lanes.some((c) => /dropped/.test(c)) && rel === 1, seen: `lanes ${JSON.stringify(lanes)} | release buttons ${rel} | ${t.slice(0, 500)}` };
+  });
+  await expect('2.77.0: the Train Room draws the loom (main, a filament per lane) and the verify\'s real loading bar: 50%, 3 of 6 checks, the running check, the ETA from recorded runs, marked as an estimate', async () => {
+    const bar = await text(page, '#o-trainsbody .vbar');
+    const now = await page.locator('#o-trainsbody .vbar [role="progressbar"]').getAttribute('aria-valuenow').catch(() => null);
+    const loom = await page.locator('#o-trainsbody svg.loom .main').count();
+    return { ok: loom === 1 && now === '50' && /50%/.test(bar) && /3 of 6 checks done/.test(bar) && /now: browser/.test(bar) && /about 2 min left/.test(bar) && /estimate: fewer than 3 recorded runs of hub/.test(bar), seen: `loom ${loom} | aria ${now} | ${bar}` };
   });
   await expect('2.74.0: the held lane is also a Needs-a-person card with one Release button', async () => ({ ok: (await page.locator('#o-holdlist [data-act2="release"][data-task="T-204"]').count()) === 1, seen: await text(page, '#o-holdlist') }));
   await expect('2.74.0: the run clock shows the time since the supervisor started, the time left and landed per hour', async () => {
@@ -478,7 +489,7 @@ async function warRoom274() {
   }, { timeout: waitBudget(40000) });
   check('2.74.0: no script errors on the refreshed views', errs.length === 0, errs.join(' | '));
   // Light mode and the phone: the deck reads in both.
-  for (const [w, h, scheme, name] of [[1280, 900, 'light', '274-ops-light-desktop.png'], [390, 844, 'dark', '274-ops-deck-phone.png']]) {
+  for (const [w, h, scheme, name] of [[1280, 900, 'light', '274-ops-lightsystem-desktop.png'], [390, 844, 'dark', '274-ops-deck-phone.png']]) {
     const c2 = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
     const p2 = await c2.newPage();
     const e2 = [];
@@ -487,51 +498,62 @@ async function warRoom274() {
     await expect.quiet(async () => ({ ok: /Crew/.test(await text(p2, '#o-crew')) && !/Loading/.test(await text(p2, '#o-crewbody')), seen: '' }));
     const bg = await p2.evaluate(() => getComputedStyle(document.body).backgroundColor);
     const wide = await p2.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
-    check(`2.74.0: ${scheme} ${w}px: the deck loads without errors and nothing runs off the side`, e2.length === 0 && !wide && (scheme === 'light' ? (() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg) || []; return [1, 2, 3].every((i) => Number(m[i]) >= 200); })() : true), `${e2.join(' | ')} | sideways ${wide} | background ${bg}`);
+    // 2.77.0: dark always, also on a system set to light (the person can pick a light screen; see the gallery).
+    check(`2.74.0/2.77.0: ${scheme}-system ${w}px: the deck loads dark, without errors, and nothing runs off the side`, e2.length === 0 && !wide && (() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg) || []; return [1, 2, 3].every((i) => Number(m[i]) <= 40); })(), `${e2.join(' | ')} | sideways ${wide} | background ${bg}`);
     await shot(p2, name, { fullPage: scheme === 'dark' });
     await c2.close();
   }
   await ctx.close();
 }
 
-// 2.75.0: every view, desktop and phone, light and dark: drawn, no script errors, nothing off the side, one shared tab bar
-// (same order everywhere, the current view marked), screenshots in --shots/275/<scheme>-<size>-<view>.png.
+// 2.75.0 / 2.77.0: every view, desktop and phone: drawn, no script errors, nothing off the side, one shared tab bar (same
+// order everywhere, the current view marked), and dark: 2.77.0 is dark always, so the desktop pass runs with the system set
+// to light and must still be dark. Screenshots in --shots/277/<size>-<view>.png. Then the light screen, picked by hand.
 const VIEWS = ['ops', 'tycoon', 'plan', 'assets', 'arcade', 'away'];
+const luminance = (bg) => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg) || []; const c = [1, 2, 3].map((i) => { const x = Number(m[i] || 0) / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 async function gallery275() {
   if (!seeded274) { seed274(); seeded274 = true; }
-  const out = shotsAt ? path.join(shotsAt, '275') : null;
+  const out = shotsAt ? path.join(shotsAt, '277') : null;
   if (out) fs.mkdirSync(out, { recursive: true });
-  for (const scheme of ['dark', 'light']) {
-    for (const [w, h, size] of [[1280, 900, 'desktop'], [390, 844, 'phone']]) {
-      const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
-      const page = await ctx.newPage();
-      const errs = [];
-      page.on('pageerror', (e) => errs.push(String(e)));
-      page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-      for (const v of VIEWS) {
-        errs.length = 0;
-        await page.goto(`${BASE}/?skin=${v}`);
-        const drawn = await expect.quiet(async () => {
-          const t = v === 'away' ? await text(page, '#aw-state') : await text(page, `#${v} [data-signals]`);
-          return { ok: v === 'away' ? !/Loading/.test(t) : /Pace/.test(t), seen: t };
-        });
-        await wait(v === 'tycoon' ? 2500 : 900);
-        const look = await page.evaluate((view) => {
-          const tabs = [...document.querySelectorAll(`#${view} .tabs [data-to]`)].map((b) => b.dataset.to);
-          const cur = document.querySelector(`#${view} .tabs [aria-current="page"]`)?.dataset.to || null;
-          const bg = getComputedStyle(document.body).backgroundColor;
-          return { tabs: tabs.join(','), cur, wide: document.documentElement.scrollWidth > innerWidth + 1, bg };
-        }, v);
-        const order = 'ops,tycoon,plan,assets,arcade';
-        // The page follows the system's light or dark setting on every view (relative luminance of the background).
-        const lum = (() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(look.bg) || []; const c = [1, 2, 3].map((i) => { const x = Number(m[i] || 0) / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; })();
-        look.scheme = scheme === 'light' ? lum > 0.55 : lum < 0.08;
-        check(`2.75.0: ${scheme} ${size} ${v}: drawn, no script errors, nothing off the side, the ${scheme} theme, the shared tab bar (${order})`, drawn.ok && !errs.length && !look.wide && look.scheme && look.tabs === order && (v === 'away' ? look.cur === null : look.cur === v), JSON.stringify({ drawn: drawn.ok ? 'yes' : drawn.message, errs: errs.slice(0, 3), ...look }));
-        if (out) await page.screenshot({ path: path.join(out, `${scheme}-${size}-${v}.png`), fullPage: true }).catch(() => {});
-      }
-      await ctx.close();
+  for (const [w, h, size, system] of [[1280, 900, 'desktop', 'light'], [390, 844, 'phone', 'dark']]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: system });
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on('pageerror', (e) => errs.push(String(e)));
+    page.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+    for (const v of VIEWS) {
+      errs.length = 0;
+      await page.goto(`${BASE}/?skin=${v}`);
+      const drawn = await expect.quiet(async () => {
+        const t = v === 'away' ? await text(page, '#aw-state') : await text(page, `#${v} [data-signals]`);
+        return { ok: v === 'away' ? !/Loading/.test(t) : /Pace/.test(t), seen: t };
+      });
+      // The Studio floor: wait until nobody is walking in (the people have sat down), holding for half a second.
+      if (v === 'tycoon') await expect.quiet(async () => ({ ok: await page.evaluate(() => document.querySelectorAll('#t-crowd .person').length > 0 && !document.querySelector('#t-crowd .person.walking')), seen: '' }), { holdMs: 500 });
+      const look = await page.evaluate((view) => {
+        const tabs = [...document.querySelectorAll(`#${view} .tabs [data-to]`)].map((b) => b.dataset.to);
+        const cur = document.querySelector(`#${view} .tabs [aria-current="page"]`)?.dataset.to || null;
+        return { tabs: tabs.join(','), cur, wide: document.documentElement.scrollWidth > innerWidth + 1, bg: getComputedStyle(document.body).backgroundColor, theme: document.documentElement.dataset.theme };
+      }, v);
+      const order = 'ops,tycoon,plan,assets,arcade';
+      look.dark = luminance(look.bg) < 0.02 && look.theme === 'dark';
+      check(`2.77.0: ${size} ${v} (system ${system}): drawn, no script errors, nothing off the side, dark, the shared tab bar (${order})`, drawn.ok && !errs.length && !look.wide && look.dark && look.tabs === order && (v === 'away' ? look.cur === null : look.cur === v), JSON.stringify({ drawn: drawn.ok ? 'yes' : drawn.message, errs: errs.slice(0, 3), ...look }));
+      if (out) await page.screenshot({ path: path.join(out, `${size}-${v}.png`), fullPage: true }).catch(() => {});
     }
+    await ctx.close();
   }
+  // The light screen is the person's pick: the button switches it, it is remembered, the other button brings dark back.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/?skin=ops`);
+  await page.locator('#ops [data-themebtn]').click();
+  await page.reload();
+  const lit = await expect.quiet(async () => ({ ok: await page.evaluate(() => document.documentElement.dataset.theme === 'light' && getComputedStyle(document.body).backgroundColor !== 'rgb(5, 9, 6)'), seen: '' }));
+  if (out) await page.screenshot({ path: path.join(out, 'desktop-ops-light-screen.png'), fullPage: false }).catch(() => {});
+  await page.locator('#ops [data-themebtn]').click();
+  const back = await expect.quiet(async () => ({ ok: await page.evaluate(() => document.documentElement.dataset.theme === 'dark'), seen: '' }));
+  check('2.77.0: the light screen is the person\'s pick (the button), kept across a reload, and dark comes back with the same button', lit.ok && back.ok, JSON.stringify({ lit: lit.ok, back: back.ok }));
+  await ctx.close();
 }
 
 try {
