@@ -210,7 +210,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`.
+  `.lane_recreated`, `.mixed`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -241,6 +241,10 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   - 2.76.0 (W-0081): a queued lane whose copy folder (`.lanes/<name>`) is gone is made again from its branch
     (`task.train.lane_recreated`; links, `.env`, exclude file as a lane copy; the sparse checkout is the plain one) when the
     branch still holds the queued commit and no other worktree has it checked out; otherwise it leaves the queue as before.
+  - 2.76.0 (B-91/B-92): a lane whose own commits (those main doesn't already have, by patch) carry another OPEN task's
+    `Studio-Task:` trailer and not its own is refused before its verify (`task.train.mixed`): the hand-back names the
+    commits and how to make a clean lane (a branch off main with only its own commits). `STUDIO_TRAIN_MIXED=off` skips
+    the check.
   - A task held for landing (`npm run task -- hold <ID>`) stays out of every train (queued, riding along or its own
     `task done --train`): deferred with the hold's reason, `OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in
     `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the

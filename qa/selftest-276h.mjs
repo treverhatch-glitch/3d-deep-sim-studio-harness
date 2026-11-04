@@ -297,5 +297,33 @@ console.log(JSON.stringify(releaseLane(process.cwd(), 'T-924', { by: 'the-owner'
       const t = train('rel-2', 6);
       return [rel.ok === true && t.landed?.includes('T-924') && mainHas('misc/rel-276h.txt'), JSON.stringify({ rel, t }).slice(0, 3000)];
     });
+    await guard('2.76.0 (B-91/B-92): a lane carrying another open task\'s commits (Studio-Task: T-926) besides its own is refused before its verify (task.train.mixed, the hand-back names T-926 and how to make a clean lane); main is unchanged; a lane with only its own commits beside it lands (fails on 2.75.0: the mixed lane landed under T-925)', () => {
+      const before = events(ev).length;
+      const M = lane('mixed', 'T-925', { 'misc/mine-276h.txt': 'mine\n' }, { extra: [{ files: { 'misc/borrowed-276h.txt': 'another task\'s calendar work\n' }, tags: ['T-926'] }] });
+      const C = lane('clean', 'T-927', { 'docs/clean-276h.md': '# clean\n' });
+      setQueue([M, C]);
+      const t = train('mixed');
+      const later = events(ev).slice(before);
+      const hb = (t.calls?.handBack || []).find(([task]) => task === 'T-925');
+      const ok = later.some((e) => e.type === 'task.train.mixed' && e.task === 'T-925') && hb && /T-926/.test(hb[1]) && /clean lane/.test(hb[1]) && !mainHas('misc/borrowed-276h.txt') && t.landed?.includes('T-927') && !later.some((e) => e.type === 'task.train.verify' && /T-925/.test(e.msg));
+      return [ok, JSON.stringify({ t, later: later.filter((e) => /train/.test(e.type)).map((e) => `${e.type} ${e.msg}`.slice(0, 200)) }).slice(0, 3000)];
+    });
+    await guard('2.76.0 (B-91/B-92, what stays allowed): a lane stacked --after another task (studio/task-holds.json) may carry that task\'s commits, and so may a "Rescue: T-x" task carry T-x\'s; a lane with another open task\'s commits and none of its own is mixed (passes only on 2.76.0: mixedLane is new)', () => {
+      writeIn(S, 'studio/task-holds.json', `${JSON.stringify({ tasks: { 'T-928': { after: ['T-929'] } } }, null, 2)}\n`);
+      const nx = fs.readFileSync(path.join(S, 'studio', 'NEXT.md'), 'utf8').replace('## BACKLOG', '## BACKLOG\n- [ ] **T-928** [P1] (`builder`) — stacked work\n- [ ] **T-929** [P1] (`builder`) — its base\n- [ ] **T-930** [P0] (`builder`) — Rescue: T-929 stuck\n- [ ] **T-931** [P1] (`builder`) — drifted');
+      writeIn(S, 'studio/NEXT.md', nx);
+      const A = lane('stack', 'T-928', { 'misc/stack-276h.txt': 'on top\n' }, { extra: [{ files: { 'misc/base-276h.txt': 'base\n' }, tags: ['T-929'] }] });
+      const R = lane('resc', 'T-930', { 'misc/resc-276h.txt': 'rescue\n' }, { extra: [{ files: { 'misc/resc-base-276h.txt': 'base\n' }, tags: ['T-929'] }] });
+      const D = lane('drift', 'T-931', { 'misc/drift-276h.txt': 'not mine\n' }, { tags: ['T-929'] });
+      const r = probe(S, env, 'maycarry', `import { mixedLane, mayCarry } from ${u(S, 'harness/train-lanes.mjs')};
+import { readDeps, boardStates } from ${u(S, 'harness/train-deps.mjs')};
+import { spawnSync } from 'node:child_process';
+const root = process.cwd(); const tip = spawnSync('git', ['rev-parse', 'main'], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout.trim();
+const open = boardStates(root).open; const map = readDeps(root);
+const judge = (task, head) => { const ok = mayCarry(root, task, map); return mixedLane(root, { task, tip, head, open: (t) => open.has(t) && !ok.has(t) }); };
+console.log(JSON.stringify({ stack: judge('T-928', ${JSON.stringify(A.head)}).mixed, resc: judge('T-930', ${JSON.stringify(R.head)}).mixed, drift: judge('T-931', ${JSON.stringify(D.head)}) }));
+`);
+      return [r.stack === false && r.resc === false && r.drift?.mixed === true && r.drift.own === 0 && /none tagged Studio-Task: T-931/.test(r.drift.why), JSON.stringify(r).slice(0, 2000)];
+    });
   }
 }

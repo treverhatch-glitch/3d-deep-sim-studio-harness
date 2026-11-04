@@ -137,6 +137,22 @@ export function mixedLane(root, { task, tip, head, open = () => true } = {}) {
   } catch { return none; }
 }
 
+/**
+ * The tasks a lane may carry commits of: its --after dependencies (studio/task-holds.json, followed through) and, for a
+ * rescue ("Rescue: T-x …" on the board), the task it rescues. A Set of ids.
+ */
+export function mayCarry(root, task, depMap = new Map()) {
+  const ok = new Set();
+  const walk = (t) => { for (const d of depMap.get(t) || []) if (!ok.has(d)) { ok.add(d); walk(d); } };
+  walk(task);
+  try {
+    const line = fs.readFileSync(path.join(root, 'studio', 'NEXT.md'), 'utf8').split(/\r?\n/).find((l) => l.includes(`**${task}**`)) || '';
+    const m = line.match(/Rescue:?\s*(T-\d+)\b/i);
+    if (m && m[1] !== task) { ok.add(m[1]); walk(m[1]); }
+  } catch {}
+  return ok;
+}
+
 /** One event per mixed-lane refusal (task.train.mixed). */
 export function noteMixed(id, lane, m, by) {
   try { emitEvent({ type: 'task.train.mixed', agent: by || 'train', task: lane.task, to: lane.agent, status: 'blocked', msg: `train ${id}: ${lane.task} refused before its verify: ${m.why}`.slice(0, 600), meta: { train: id, infra: true, foreign: m.foreign.map((f) => ({ task: f.task, commits: f.commits.map((c) => c.sha) })), own: m.own } }); } catch {}

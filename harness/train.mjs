@@ -74,7 +74,7 @@ import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastFor
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
-import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease } from './train-lanes.mjs';
+import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { toolchainProtected } from './test-toolchain.mjs';
 import { fixFirstOrder, noteTrainRed, noteTrainLanded, noteFixTried } from './train-fix-first.mjs';
@@ -2026,6 +2026,15 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     }
     if (now.error) { drop(lane, now.error, { handBack: false, infra: true }); continue; }
     if (lane.branch && now.branch && now.branch !== lane.branch) { drop(lane, `its copy is on ${now.branch} now, not ${lane.branch}; queue it again`, { handBack: false }); continue; }
+    // 2.76.0 (B-91/B-92): a lane carrying another open task's commits (Studio-Task trailers) is refused before anything
+    // is spent on it, naming them (harness/train-lanes.mjs mixedLane). Not counted toward the hand-back cap.
+    if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_MIXED || '')) {
+      const dc = depContext(root, deps);
+      const openNow = dc.states?.open;
+      const allowed = mayCarry(root, lane.task, dc.map);
+      const m = mixedLane(root, { task: lane.task, tip: out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`)), head: now.head, open: (t) => (openNow ? openNow.has(t) : true) && !allowed.has(t) });
+      if (m.mixed) { if (!dryRun) noteMixed(id, lane, m, by); drop(lane, m.why, { infra: true }); continue; }
+    }
     // 2.63.0: the lane's blast-radius tier, from its own diff (code, never a model's confidence).
     const c = await laneTier(root, { head: now.head, task: lane.task, agent: lane.agent, dir: lane.dir }, { tip: tip0, settings: settings0 });
     const entry = queueNow.find((e) => e.task === lane.task);
