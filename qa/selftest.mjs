@@ -4548,6 +4548,15 @@ if (inShard('selftest-275h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (j): test workers shared by cores with priority (B-89, harness/rig-budget.mjs), "waiting on yes" in the status
+// lines and the War Room (B-87), and the first divergence for a cartridge whose loader is outside its folder (B-94).
+if (inShard('selftest-276j')) {
+  const dir = copyRepo();
+  const { selftest276J } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276j.mjs')).href);
+  await selftest276J({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

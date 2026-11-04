@@ -92,8 +92,11 @@ differs and names the first field there (`harness/divergence.mjs`):
 It runs only on a red (per-tick hashing of the whole state roughly doubles a run), locates the change and never
 decides red or green. When the reference commit doesn't reproduce the golden either, the line says so. The result is a
 `golden.divergence` event, part of the `gates.run` event (`meta.divergence`) and a "First divergence" line in the
-hand-back facts. `STUDIO_GOLDEN_DIVERGENCE=off` turns it off. A cartridge that imports files outside its folder
-can't be loaded from the reference commit; the line says so.
+hand-back facts. `STUDIO_GOLDEN_DIVERGENCE=off` turns it off. 2.76.0: a cartridge that imports files outside its
+folder (a game's own `game/<name>/tools/cartridge-loader.mjs` and the sim sources it loads) is compared too: the
+reference copy follows the cartridge's relative imports and takes each file as it was in that commit (a `.js` import of
+a `.ts` file takes the `.ts`; the package.json files on the way come along), and the checkout's `node_modules` is linked
+in. A file the reference commit doesn't have (a built bundle, an untracked file) is named in the line.
 
 2.73.0: the result is also the golden's signed first-divergence report, `.studio/gates/divergence/<golden path, / as
 __>.json` (`harness/golden-report.mjs`), written on a red and by `npm run golden -- --update` before it overwrites a
