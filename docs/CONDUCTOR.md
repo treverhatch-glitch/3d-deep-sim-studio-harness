@@ -62,6 +62,19 @@ Results go to events `lanes.refresh.ok`, `lanes.refresh.conflict`, `lanes.refres
 `lanes.refresh.refused`, and to `.studio/lanes/refresh.json` (the LAST TEST column). Exit codes: 0 all ok,
 1 a conflict or a red, 2 refused.
 
+### Building a clean lane: `npm run lane -- create` (2.77.0)
+
+```
+npm run lane -- create T-181 --from part-a --from part-b --agent clean-181 --by opus-1   [--allow-mixed] [--json]
+```
+
+Makes the lane copy the way the launcher does (studio/ and .studio/ linked to main, the sparse plan, the lane record
+`.studio/lanes/<agent>.lane.json`, the task's branch remembered) and merges the branches in order; with no `--from`,
+the task's own unlanded branch. A branch carrying another open task's commits is refused unless `--allow-mixed`; a
+conflict removes the copy and names the files. Use it instead of `git worktree add` (a bare worktree's studio/ is its
+own, so `task done` there says "Task not found"). docs/REMOTE-WORKERS.md has the details; remote (cloud) workers
+come back through it too.
+
 ## 3. The status post: `npm run status -- --brief`
 
 ```

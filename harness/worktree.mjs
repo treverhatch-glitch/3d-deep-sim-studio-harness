@@ -152,9 +152,9 @@ export function nodeModuleDirs(root) {
 
 /**
  * Make the lane copy for an agent. Returns { dir, branch } or { error }. Any work an earlier agent left
- * on this task's branch is merged in.
+ * on this task's branch is merged in (carry: false leaves it out: harness/lane-create.mjs merges chosen branches).
  */
-export function createLaneCopy(agent, { task = null, lane = null } = {}) {
+export function createLaneCopy(agent, { task = null, lane = null, carry = true } = {}) {
   // 2.60.0 (#6): a task id that isn't on the board (studio/NEXT.md or DONE.md) is refused before anything is made or
   // written: a guessed id (T-115) used to leave a stale key in .studio/lane-branches.json.
   if (task) {
@@ -203,7 +203,8 @@ export function createLaneCopy(agent, { task = null, lane = null } = {}) {
   fs.mkdirSync(path.dirname(exclude), { recursive: true });
   fs.writeFileSync(exclude, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));
   git(dir, 'config', '--worktree', 'core.excludesFile', exclude);
-  const carried = task ? carryTaskBranch(task, dir) : null;
+  // 2.77.0 (o): `npm run lane -- create <T-ID> --from <branch>...` merges the branches it was given instead (carry: false).
+  const carried = task && carry ? carryTaskBranch(task, dir) : null;
   if (plan.on) writeSparseRecord(root, agent, { agent, task, at: new Date().toISOString(), exclude: plan.exclude, keep: plan.keep, from: plan.from, patterns: plan.patterns, widened: [] });
   else removeSparseRecord(root, agent);
   emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}${plan.on ? `; ${plan.why}` : ''}`.slice(0, 500), ...(plan.on ? { meta: { exclude: plan.exclude, keep: plan.keep } } : {}) });

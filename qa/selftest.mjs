@@ -4594,6 +4594,15 @@ if (inShard('selftest-276i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (helper o): remote (cloud) workers (npm run remote: mark, brief with a lease, fetch remote/* into the normal
+// train, expiry; the Line Producer's offer; the rig budget's 0 local CPU) and `npm run lane -- create` from chosen branches.
+if (inShard('selftest-277o')) {
+  const dir = copyRepo();
+  const { selftest277O } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277o.mjs')).href);
+  await selftest277O({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();
