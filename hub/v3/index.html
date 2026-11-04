@@ -1106,6 +1106,29 @@
   html body .betaline.on { border-left-color: var(--ds-hold); background: var(--ds-hold-bg); }
   html body .betaline.on b { color: var(--ds-hold); }
 
+  /* ---- 2.77.0: the Control room's lower panels fold (one row under the columns; an open one takes the row) ---- */
+  html body #ops section.foldsec { padding: 0; }
+  html body #ops .fold > summary { list-style: none; cursor: pointer; padding: 12px 16px; display: flex; align-items: baseline; gap: 8px; }
+  html body #ops .fold > summary::-webkit-details-marker { display: none; }
+  html body #ops .fold > summary::before { content: '+'; font: 700 16px/1 var(--ds-font); color: var(--ds-wait); width: 14px; }
+  html body #ops .fold[open] > summary::before { content: '\2212'; }
+  html body #ops .fold > summary h2 { margin: 0; }
+  html body #ops .fold[open] { padding: 0 16px 14px; }
+  html body #ops .fold[open] > summary { padding-left: 0; padding-right: 0; }
+  html body #ops section.foldsec + section, html body #ops section + section.foldsec { margin-top: 10px; }
+  /* long lists scroll in their own box so the page stays short */
+  html body #o-timeline { max-height: 360px; overflow: auto; overscroll-behavior: contain; }
+  html body #o-agents { max-height: 440px; overflow: auto; overscroll-behavior: contain; }
+  html body #ops .foldrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--ds-3); padding: 0 var(--ds-5) var(--ds-6); max-width: 1520px; align-items: start; }
+  html body #ops .foldrow > .foldsec { margin: 0; }
+  html body #ops .foldrow .fold:not([open]) > summary { padding: 8px 12px; }
+  html body #ops .foldrow .fold:not([open]) > summary h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  html body #ops .foldrow .fold:not([open]) > summary h2 small { display: none; }
+  html body #ops .foldrow > .foldsec:has(> details[open]) { grid-column: 1 / -1; }
+  @media (max-width: 760px) { html body #ops .foldrow { padding-left: var(--ds-4); padding-right: var(--ds-4); grid-template-columns: 1fr; } }
+  html body #ops .card { background: var(--ds-surface-2); color: var(--ds-text); border: 1px solid var(--ds-line); border-top: 3px solid var(--ds-info); }
+  html body #ops #o-queue { max-height: 260px; overflow: auto; overscroll-behavior: contain; }
+
 </style>
 </head>
 <body data-skin="ops">
@@ -1140,13 +1163,16 @@
   <main>
     <div>
       <section><h2>Agents on cue <small>last 24 h</small></h2><div id="o-agents"></div><p class="note">Green: working. Amber: idle over 15 min. Amber ring: holds a task but silent 30 min (out of usage or stuck). Red: last action failed or escalated.</p></section>
-      <section><h2>Claims</h2><div id="o-locks"></div></section>
+      <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
     </div>
+    <div>
     <section>
       <h2>Activity</h2>
       <div class="filters" id="o-filters" role="toolbar" aria-label="Filter activity by agent"></div>
       <ol class="timeline" id="o-timeline"></ol>
     </section>
+    <section class="lane" id="o-queuebox"><h2>Queue</h2><div id="o-queue"></div></section>
+    </div>
     <div>
       <section id="o-act"><h2>Act <small id="o-actstate">read-only</small></h2>
         <div class="pairbox" id="o-pair" role="group" aria-labelledby="o-pairh"><b id="o-pairh">Pair this browser</b>
@@ -1179,21 +1205,23 @@
         </div>
         <p class="note" id="o-actmsg" role="status">Pair this browser (above) to use the buttons. Without it the page is read-only.</p>
       </section>
-      <section class="lane"><h2>Queue</h2><div id="o-queue"></div></section>
-      <section><h2>Latest playtest</h2><div id="o-play"></div></section>
-      <section><h2>Bugs by model</h2><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></section>
-      <section><h2>Autonomy <small>npm run autonomy</small></h2><div id="o-autonomy"><p class="note">Not measured yet.</p></div><p class="note">Hours of supervisor running per unplanned intervention, hands-free landings, forced, reopened, your Redo verdicts. Moving a level is only ever a suggestion: you set it in <code>studio/autonomy.json</code>.</p></section>
-      <section><h2>Running unattended <small>npm run studio:start</small></h2><div id="o-sup"></div></section>
-      <section><h2>Your call <small>only you can answer these</small></h2><div id="o-yourcall"></div></section>
-      <section><h2>Budget meter <small>cache reads count</small></h2><div id="o-meter"></div></section>
-      <section><h2>Sessions and context <small>refresh by default</small></h2><div id="o-sessions"></div></section>
-      <section id="o-ledgerbox"><h2>Token ledger</h2><div class="tiles" id="o-ledger"></div></section>
-      <section><h2>Tokens used <small>measured</small></h2><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></section>
-      <section><h2>Model calls today</h2><div id="o-router"></div></section>
-      <section><h2>Divisions</h2><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></section>
-      <section><h2>Shell output saved</h2><div id="o-rtk"></div></section>
     </div>
   </main>
+  <div class="foldrow" aria-label="More: folded sections (closed by default, remembered in this browser)">
+    <section class="foldsec"><details class="fold" data-fold="claims"><summary><h2>Claims</h2></summary><div id="o-locks"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="playtest"><summary><h2>Latest playtest</h2></summary><div id="o-play"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="bugs"><summary><h2>Bugs by model</h2></summary><div id="o-score"></div><p class="note">Bugs: a bug filed with <code>--caused-by</code>, a task reopened, or a bug traced through commit tags to the change that caused it. Per 10 pts: bugs per 10 points of finished work (size 1 to 5), so harder work isn't punished for its size. <code>npm run scorecard</code> for the full table.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="autonomy"><summary><h2>Autonomy <small>npm run autonomy</small></h2></summary><div id="o-autonomy"><p class="note">Not measured yet.</p></div><p class="note">Hours of supervisor running per unplanned intervention, hands-free landings, forced, reopened, your Redo verdicts. Moving a level is only ever a suggestion: you set it in <code>studio/autonomy.json</code>.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="flow"><summary><h2>Floors and the flow <small>the Director's card</small></h2></summary><div id="o-flowbox"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="unattended"><summary><h2>Running unattended <small>npm run studio:start</small></h2></summary><div id="o-sup"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="budget"><summary><h2>Budget meter <small>cache reads count</small></h2></summary><div id="o-meter"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="sessions"><summary><h2>Sessions and context <small>refresh by default</small></h2></summary><div id="o-sessions"></div></details></section>
+    <section id="o-ledgerbox" class="foldsec"><details class="fold" data-fold="ledger"><summary><h2>Token ledger</h2></summary><div class="tiles" id="o-ledger"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="tokens"><summary><h2>Tokens used <small>measured</small></h2></summary><div class="act-row" role="group" aria-label="Window"><button type="button" class="tokwin" data-w="last5h">Last 5 h</button> <button type="button" class="tokwin" data-w="today">Today</button> <button type="button" class="tokwin" data-w="all">All</button> <select id="o-tokby" aria-label="Group by"><option value="byRole">by role</option><option value="byModel">by model</option><option value="byAgent">by agent</option></select></div><div id="o-tokens"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="calls"><summary><h2>Model calls today</h2></summary><div id="o-router"></div></details></section>
+    <section class="foldsec"><details class="fold" data-fold="divisions"><summary><h2>Divisions</h2></summary><div class="divs" id="o-divs"></div><p class="note">Off divisions switch on in <code>studio/divisions.json</code>.</p></details></section>
+    <section class="foldsec"><details class="fold" data-fold="shell"><summary><h2>Shell output saved</h2></summary><div id="o-rtk"></div></details></section>
+  </div>
 </div>
 
 <!-- Tycoon skin -->
@@ -1401,6 +1429,12 @@
     document.querySelectorAll('[data-themebtn]').forEach((b) => { b.setAttribute('aria-pressed', t === 'light' ? 'true' : 'false'); b.textContent = t === 'light' ? 'Dark screen' : 'Light screen'; });
   };
   applyTheme(store.get('hudTheme'));
+  // 2.77.0: the Control room's lower panels fold away, closed by default; each one's state is kept in this browser.
+  document.querySelectorAll('details.fold[data-fold]').forEach((d) => {
+    const k = `hudFold:${d.dataset.fold}`;
+    if (store.get(k) === 'open') d.open = true;
+    d.addEventListener('toggle', () => store.set(k, d.open ? 'open' : 'closed'));
+  });
   document.querySelectorAll('[data-themebtn]').forEach((b) => b.addEventListener('click', () => { const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; store.set('hudTheme', t); applyTheme(t); }));
 
   let state = null;
@@ -2053,7 +2087,9 @@
       fbox = document.createElement('div');
       fbox.id = 'o-floors';
       fbox.className = 'card';
-      box.parentNode.insertBefore(fbox, box.nextSibling);
+      // 2.77.0: in the "Floors and the flow" fold (closed by default) instead of under Your call.
+      const flow = $('o-flowbox');
+      if (flow) flow.appendChild(fbox); else box.parentNode.insertBefore(fbox, box.nextSibling);
     }
     if (!s.floors?.configured) {
       fbox.style.display = 'none';
