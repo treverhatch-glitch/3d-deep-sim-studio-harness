@@ -30,11 +30,14 @@ and the upgrade note for Patch: docs/RELEASE-2.77.1.md.
   events show no repeat.
 ### Medium, and two items from the dev plan
 - `upgrade --smoke`'s made-up task has `--phase 1 --prototype` (M2).
+- The War Room machine tile: per-session RAM from an idle baseline, the scheduler's room-for-N, the sample's age (B-101).
+- `comm` and `report` end without `process.exit` after a post (the Windows libuv assertion, M4; untested on Windows).
+- `studio:boot` starts the supervisor when the recorded one isn't really alive (a reused pid on Windows, M5).
 - **PU-44 (P-252):** a session's permission denials are read from its own part of the appended agent log (182 of the
   crew's 248 records were copies).
 - **PU-45:** harness messages give one command per call (task done's uncommitted refusal, adopt's install hint).
 - Tests: qa/selftest-2771.mjs (B-102, B-99, B-103, B-100, PU-44, PU-45), qa/selftest-2771a.mjs (B-98),
-  qa/selftest-2771b.mjs (H5, M2).
+  qa/selftest-2771b.mjs (H5, M2), qa/selftest-2771c.mjs (B-101, M4, M5).
 
 ## [2.77.0] — 2026-11-04
 2.77.0 is "Patch #2": everything on the crew's 2026-11-04 list that 2.76 didn't finish. The item-by-item status is in

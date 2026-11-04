@@ -646,7 +646,8 @@ function ramNote(ram, now) {
 async function keepHubUp(state, port, child) {
   try {
     const { keepHub } = await import('./hub-keeper.mjs');
-    return (await keepHub({ state, port, child, loopMs: LOOP_MS })).child;
+    // 2.77.1 (B-102): bounded like every step of a pass; still pending, the pass goes on with the hub child it had.
+    return await boundedStep('hub', async () => (await keepHub({ state, port, child, loopMs: LOOP_MS })).child, { state, fallback: child });
   } catch { return child; }
 }
 
@@ -704,7 +705,7 @@ async function main(argv) {
     if (stopping) return;
     reloadEnvIfChanged({ by: 'supervisor', ack: true });
     // 1. The hub: up, or restart it (with backoff) and remember how long it was down and why (2.74.0, harness/hub-keeper.mjs).
-    if (opts.hub) hub = await boundedStep('hub', () => keepHubUp(state, port, hub), { state, fallback: hub });
+    if (opts.hub) hub = await keepHubUp(state, port, hub);
     // 2.76.0 (k): the Line Producer's pass (harness/line-producer.mjs): mechanical unblocks, the order, the routes, the
     // rig's builder cap, .studio/line/status.json; supervise() below follows the plan. Code only, never a crash.
     await boundedStep('line-producer', () => import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})), { state }).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});

@@ -37,11 +37,11 @@ read-only.
 
 | Item | Status | |
 |---|---|---|
-| M1 / B-101: misleading machine tile | see below | |
+| M1 / B-101: misleading machine tile | FIXED (2.77.1) | Per session is (used now − the last idle sample) / sessions. With no idle sample yet it is labelled "average incl. other apps". Room-for-N uses the scheduler's own figure (`STUDIO_SESSION_RAM_GB`, 0.6), and the tile shows how old the sample is. Display only. qa/selftest-2771c.mjs. |
 | M2: `upgrade --smoke` train step lacks `--phase` | FIXED (2.77.1) | The smoke's made-up task is `--phase 1 --prototype`. qa/selftest-2771b.mjs. |
 | M3 / B-94: no first-divergence report for golden moves | NOT FIXED | It's a feature (state hashes every N ticks, PU-09), not a patch. Still planned. |
-| M4: libuv assertion when `comm -- test` exits on Windows | see below | |
-| M5: `studio:boot` didn't start the supervisor after it was killed | see below | |
+| M4: libuv assertion when `comm -- test` exits on Windows | FIXED (2.77.1), untested on Windows | `comm` and `report` no longer call `process.exit` right after a post. They set the exit code and close the HTTP client so Node ends on its own (harness/exit-drain.mjs). The assertion itself can only show on Windows, so it is untested there. qa/selftest-2771c.mjs. |
+| M5: `studio:boot` didn't start the supervisor after it was killed | FIXED (2.77.1) | On Windows a dead supervisor's pid, taken over by another program, still counted as "running". Boot now asks the OS what program holds that pid, the same check `studio:stop` uses. If the OS can't say, a `lastLoop` older than 5 minutes means the supervisor is gone. A stale record is marked stopped and a supervisor starts. The Windows start-time query is untested here. qa/selftest-2771c.mjs. |
 | M6: the game gate's dynamic timeout | No change | Fixed by T-181 landing, as the note says. |
 
 ## Also in 2.77.1 (from the dev plan)

@@ -4641,6 +4641,15 @@ if (inShard('selftest-2771b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.1 (c): the War Room machine tile's per-session RAM and sample age (B-101), a clean exit after a post (M4),
+// boot starting the supervisor when the recorded one isn't really alive (M5).
+if (inShard('selftest-2771c')) {
+  const dir = copyRepo();
+  const { selftest2771C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2771c.mjs')).href);
+  await selftest2771C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

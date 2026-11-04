@@ -464,15 +464,19 @@ export function commStatus({ env = process.env, root = REPO_ROOT, now = Date.now
   };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  const argv = process.argv.slice(2);
+/**
+ * The CLI: the exit code, never process.exit. 2.77.1 (M4): on Windows process.exit() while fetch's keep-alive socket was
+ * still closing printed "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76" (the
+ * libuv exit race). The caller sets process.exitCode and lets the loop drain (exitWhenDrained).
+ */
+export async function commCli(argv = process.argv.slice(2)) {
   const usage = 'Usage: npm run comm -- status|preview|test [--json]   (posts to STUDIO_COMM_WEBHOOK or STUDIO_REPORT_WEBHOOK; tags from studio/communicator.json)';
   const cmd = argv[0] || 'status';
   const json = argv.includes('--json');
-  if (argv.includes('--help') || argv.includes('-h')) { console.log(usage); process.exit(0); }
+  if (argv.includes('--help') || argv.includes('-h')) { console.log(usage); return (0); }
   if (cmd === 'status') {
     const r = commStatus();
-    if (json) { console.log(JSON.stringify(r, null, 2)); process.exit(0); }
+    if (json) { console.log(JSON.stringify(r, null, 2)); return (0); }
     console.log(`[comm] ${r.on ? 'on' : `off (${r.why})`}; webhook: ${r.webhook}; posts as "${r.username}"`);
     console.log(`[comm] tags: ${ROLES.map((k) => `${k} ${r.tags[k]}`).join('; ')}`);
     for (const n of r.notes) console.log(`[comm] note: ${n}`);
@@ -480,7 +484,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (r.lastPost) console.log(`[comm] last post ${hhmm(Date.parse(r.lastPost.at))}: ${r.lastPost.kind}, ${r.lastPost.ok ? 'sent' : `failed (${r.lastPost.why})`}`);
     for (const x of r.recent) console.log(`[comm] ${x.open ? 'open' : 'cleared'} ${x.key}: tagged ${x.who.join(', ')} at ${hhmm(Date.parse(x.at))}${x.count > 1 ? ` (${x.count} times)` : ''}`);
     for (const h of r.held) console.log(`[comm] held for quiet hours: ${h.key} since ${hhmm(Date.parse(h.since))}`);
-    process.exit(0);
+    return (0);
   }
   if (cmd === 'preview') {
     const root = REPO_ROOT; const env = process.env; const now = Date.now();
@@ -491,23 +495,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const text = [...(open.length ? [`Studio alert ${hhmm(now)}`, ...open.map((a) => alertLine(a, cfg, { preview: true })), ''] : []), statusText(f, { alerts: open })].join('\n');
     const hook = commWebhook(env, root);
     const en = commEnabled({ env, root, hook, config: cfg });
-    if (json) { console.log(JSON.stringify({ on: en.on, why: en.why, target: hook?.url ? maskWebhook(hook.url) : 'none', username: cfg.username, alerts: open.map((a) => ({ ...a, who: routeAlert(a).map((r) => `@${cfg.names[r]}`) })), text }, null, 2)); process.exit(0); }
+    if (json) { console.log(JSON.stringify({ on: en.on, why: en.why, target: hook?.url ? maskWebhook(hook.url) : 'none', username: cfg.username, alerts: open.map((a) => ({ ...a, who: routeAlert(a).map((r) => `@${cfg.names[r]}`) })), text }, null, 2)); return (0); }
     console.log(`[comm] preview as "${cfg.username}" to ${hook?.url ? maskWebhook(hook.url) : 'no webhook'}${en.on ? '' : ` (off: ${en.why})`}. Nothing was sent.\n`);
     console.log(text);
-    process.exit(0);
+    return (0);
   }
   if (cmd === 'test') {
     const env = process.env; const root = REPO_ROOT;
     const hook = commWebhook(env, root);
-    if (!hook?.url) { console.error(`[comm] not sent: ${hook?.bad ? `${hook.name} isn't an http(s) URL` : 'no webhook set: put STUDIO_COMM_WEBHOOK (or STUDIO_REPORT_WEBHOOK) in the environment or the studio\'s .env (never commit it)'}`); process.exit(1); }
+    if (!hook?.url) { console.error(`[comm] not sent: ${hook?.bad ? `${hook.name} isn't an http(s) URL` : 'no webhook set: put STUDIO_COMM_WEBHOOK (or STUDIO_REPORT_WEBHOOK) in the environment or the studio\'s .env (never commit it)'}`); return (1); }
     const cfg = readCommConfig(root);
     const tagged = ROLES.filter((r) => cfg.mentions[r]).map((r) => cfg.names[r]);
     const r = await send(hook, `${cfg.username} test ${hhmm(Date.now())}: the Communicator can post here. Tags set up for: ${tagged.length ? tagged.join(', ') : 'no one yet'} (${CONFIG_REL}); no one is tagged by this test.`, { kind: 'test', env, cfg, now: Date.now() });
     try { emitEvent({ type: 'comm.posted', agent: 'communicator', to: 'human', status: r.ok ? 'ok' : 'error', msg: r.ok ? 'Posted the test line' : `Couldn't post the test line: ${r.why}`, meta: { kind: 'test', ok: r.ok, parts: r.parts, source: hook.source } }); } catch {}
     if (r.ok) console.log(`[comm] posted the test line to ${r.target} (${r.format}).`);
     else console.error(`[comm] not posted: ${r.why} (${r.target})`);
-    process.exit(r.ok ? 0 : 1);
+    return (r.ok ? 0 : 1);
   }
   console.error(usage);
-  process.exit(2);
+  return (2);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const { exitWhenDrained } = await import('./exit-drain.mjs');
+  exitWhenDrained(await commCli());
 }

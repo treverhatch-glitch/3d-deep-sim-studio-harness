@@ -18,7 +18,8 @@
  *      stopped; one boot.stale_cleared event names each. Live, unreadable or pid-less files are left. Lane copies, claims,
  *      logs and work are never touched;
  *   3. the hub, then the supervisor, each started only when not already running (the hub: /health answers on HUB_PORT;
- *      the supervisor: supervisor.json running with a live process), detached and hidden (windowsHide), output in
+ *      the supervisor: supervisor.json running with a live process that is still that supervisor, not another program
+ *      holding a reused pid: supervisorAlive, 2.77.1 M5), detached and hidden (windowsHide), output in
  *      .studio/logs/hub.log and .studio/logs/supervisor.log. The train daemon runs inside each supervisor pass
  *      (harness/train-daemon.mjs), so it is up when the supervisor is; its switch is reported. The daemons get this
  *      shell's environment minus the session identity (STUDIO_LOCK_OWNER, STUDIO_ROLE, STUDIO_AGENT, STUDIO_MAIN_ROOT):
@@ -36,7 +37,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
 import { identityLines, SESSION_IDENTITY_KEYS } from './dotenv.mjs';
-import { pidAlive } from './proc-identity.mjs';
+import { pidAlive, readStarts, sameProcess } from './proc-identity.mjs';
 import { which, versionAtLeast } from './upgrade-preflight.mjs';
 
 const BY = 'studio-boot';
@@ -86,7 +87,7 @@ export function sweepTargets(root = REPO_ROOT) {
  * Step 2: [{ file, what, pid, action: cleared|would clear|kept, why }]. dry: nothing is changed. Only the listed files,
  * only when their recorded process is gone.
  */
-export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, alive = pidAlive } = {}) {
+export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, alive = pidAlive, starts = readStarts, now = Date.now(), env = process.env } = {}) {
   const out = [];
   for (const t of sweepTargets(root)) {
     if (!fs.existsSync(t.file)) continue;
@@ -96,7 +97,7 @@ export function staleSweep({ root = REPO_ROOT, dry = false, emit = emitEvent, al
     if (t.kind === 'supervisor' && h.status !== 'running') continue;
     const pid = Number(h.pid) || null;
     if (!pid) { out.push({ file: r, what: t.what, pid: null, action: 'kept', why: 'no process recorded' }); continue; }
-    if (alive(pid, h.identity)) { out.push({ file: r, what: t.what, pid, action: 'kept', why: `pid ${pid} is running` }); continue; }
+    if (t.kind === 'supervisor' ? supervisorAlive(h, { alive, starts, now, env }) : alive(pid, h.identity)) { out.push({ file: r, what: t.what, pid, action: 'kept', why: `pid ${pid} is running` }); continue; }
     const why = `pid ${pid} is gone${h.id ? ` (${h.id})` : ''}`;
     if (dry) { out.push({ file: r, what: t.what, pid, action: 'would clear', why }); continue; }
     try {
@@ -113,10 +114,30 @@ export const hubPort = (env = process.env) => Number(env.HUB_PORT || 3847);
 export function hubUp(port) {
   return fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok, () => false);
 }
-/** The supervisor's status record when its process is alive, else null (the supervisor's own test). */
-export function runningSupervisor(root = REPO_ROOT, alive = pidAlive) {
+/**
+ * Is the supervisor that supervisor.json describes really running? 2.77.1 (M5). The cheap test (the pid exists; on Linux
+ * its /proc start matches) can't tell on Windows and macOS: the OS reuses pids, so a killed supervisor's number held by
+ * another program looked alive, boot said "running" and started nothing (and a supervisor started anyway refuses at
+ * once, "already running", by the same cheap test). So a pid that exists is asked once what program it is (the kill-time
+ * query of harness/proc-identity.mjs: its start time against the one on record). Same: running. Different: gone.
+ * Can't be read: only a recent loop (lastLoop, as studio:stop judges it) counts.
+ */
+export function supervisorAlive(s, { alive = pidAlive, starts = readStarts, now = Date.now(), env = process.env } = {}) {
+  if (!s || s.status !== 'running' || !s.pid) return false;
+  if (!alive(s.pid, s.identity, { eperm: false })) return false;
+  let cur = null;
+  try { cur = starts([s.pid]).get(Number(s.pid)) || null; } catch { cur = null; }
+  const same = cur ? sameProcess(s.identity, cur) : null;
+  if (same !== null) return same;
+  const loopMs = Number(env.STUDIO_SUPERVISOR_SEC || 60) * 1000;
+  const age = now - Date.parse(s.lastLoop || s.startedAt || '');
+  return Number.isFinite(age) && age <= Math.max(5 * 60000, 3 * loopMs);
+}
+
+/** The supervisor's status record when its process is alive, else null (supervisorAlive). */
+export function runningSupervisor(root = REPO_ROOT, alive = pidAlive, opts = {}) {
   const s = readJson(path.join(root, '.studio', 'supervisor.json'));
-  return s?.status === 'running' && s.pid && alive(s.pid, s.identity, { eperm: false }) ? s : null;
+  return supervisorAlive(s, { alive, ...opts }) ? s : null;
 }
 
 /** This shell's environment for a studio daemon: the session identity left out (B-60). */
@@ -148,7 +169,7 @@ export function supervisorArgs(argv) {
 }
 
 /** Step 3: { hub: { state, pid?, why? }, supervisor: { state, pid?, why? } }. check: report only. */
-export async function startDaemons({ root = REPO_ROOT, env = process.env, argv = [], check = false, up = hubUp, start = startDetached, alive = pidAlive, waitMs = HUB_WAIT_MS, emit = emitEvent } = {}) {
+export async function startDaemons({ root = REPO_ROOT, env = process.env, argv = [], check = false, up = hubUp, start = startDetached, alive = pidAlive, starts = readStarts, waitMs = HUB_WAIT_MS, emit = emitEvent } = {}) {
   const port = hubPort(env);
   const res = { port };
   const denv = daemonEnv(env);
@@ -166,7 +187,7 @@ export async function startDaemons({ root = REPO_ROOT, env = process.env, argv =
       try { emit({ type: ok ? 'boot.started' : 'boot.start_failed', agent: BY, status: ok ? 'ok' : 'warn', msg: `studio:boot ${ok ? 'started' : 'could not confirm'} the War Room hub (pid ${pid}, port ${port})`, meta: { what: 'hub', pid, port } }); } catch {}
     }
   }
-  const sup = runningSupervisor(root, alive);
+  const sup = runningSupervisor(root, alive, { starts, env });
   if (argv.includes('--no-supervisor')) res.supervisor = { state: 'skipped', why: '--no-supervisor' };
   else if (sup) res.supervisor = { state: 'running', pid: sup.pid, why: `since ${String(sup.startedAt || '').slice(0, 16).replace('T', ' ')}` };
   else if (check) res.supervisor = { state: 'down', why: 'not running' };

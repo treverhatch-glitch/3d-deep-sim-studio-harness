@@ -511,6 +511,12 @@ export function testWorkers({ profile = null, env = process.env, holdClaim = nul
   return { workers: w, why: `${cs.why}${ramW < cs.workers ? `; RAM allows ${ramW}: ${ramWhy}` : ''}`, share: { workers: cs.workers, ramWorkers: ramW, cores: cs.cores, weight: cs.weight, weightAll: cs.weightAll, coming: cs.coming }, machineWorkers: w + cs.used };
 }
 
+/** 2.77.1 (B-101): the GB one session counts for in sessionCap (STUDIO_SESSION_RAM_GB, studio/machine-budget.json sessionRamGb; 0.6). */
+export function sessionRamGb({ env = process.env, root = process.cwd() } = {}) {
+  const { env: e } = cfgEnv(root, env);
+  return Math.max(0.05, num(e.STUDIO_SESSION_RAM_GB, 0.6));
+}
+
 /**
  * The supervisor's session cap by RAM: { cap, why }. cap = min(configured, floor((RAM budget - heavy claims) /
  * STUDIO_SESSION_RAM_GB (0.6))); no scan: configured (2.67).
