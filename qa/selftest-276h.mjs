@@ -93,7 +93,7 @@ process.exit(process.env.FAIL_276H ? 1 : 0);
     const trainVerify = (name) => { fresh(); return probe(S, env, `vt-${name}`, `import { verifyTree } from ${u(S, 'harness/train.mjs')};
 const logs = [];
 const r = verifyTree({ root: process.cwd(), dir: process.cwd() }, { id: 'tt-${name}', n: 1, tree: ${JSON.stringify(tree)}, changed: [], all: false, seen: new Map(), log: (m) => logs.push(m) });
-console.log(JSON.stringify({ ok: r.ok, why: r.why, logs }));
+console.log(JSON.stringify({ ok: r.ok, why: r.why, logs, closeDirty: r.closeRec ? r.closeRec.dirty : null }));
 `); };
     await guard('2.76.0 (B-85 (1)(2)): a second verify in the same checkout, after the check itself wrote git-ignored unpacked art (public/art/refs/), a .tsbuild/ folder of *.tsbuildinfo and a .vite-cache/, is clean (dirty false, nothing hidden); the files were remembered as the checks\' output (fails on 2.75.0: dirty true, "web/mini/.tsbuild/" and the art folder listed as hidden inputs)', () => {
       const v1 = verify('b85-1');
@@ -128,11 +128,11 @@ console.log(JSON.stringify({ ok: r.ok, why: r.why, logs }));
       const has = (r, re) => r?.dirty === true && (r.hidden || []).some((h) => re.test(h));
       return [has(res.untracked, /web\/mini\/vitest\.config\.ts$/) && has(res.config, /textures/) && has(res.edited, /art\/refs/) && has(res.npmrc, /^\.npmrc$/), JSON.stringify(Object.fromEntries(Object.entries(res).map(([k, r]) => [k, r && { dirty: r.dirty, hidden: r.hidden }])))];
     });
-    await guard('2.76.0 (B-85 (3)): a train verify whose gates all pass and whose record is "dirty" only from an ignored non-config file (not generated, not declared) is green with a trust note (a task.train.trust_note event), not "its record is not a clean full verify" (fails on 2.75.0: ok false, the lane handed back)', () => {
+    await guard('2.76.0 (B-85 (3)): a train verify whose gates all pass and whose record is "dirty" only from an ignored non-config file (not generated, not declared) is green with a trust note (a task.train.trust_note event, and the record its tasks close with is the train\'s judgement: closeRec, dirty false), not "its record is not a clean full verify" (fails on 2.75.0: ok false, the lane handed back)', () => {
       writeIn(S, 'web/mini/public/art/notes.bin', 'a cache file nobody declared');
       const t = trainVerify('note');
       fs.rmSync(path.join(S, 'web/mini/public/art/notes.bin'), { force: true });
-      return [t.ok === true && t.logs?.some((l) => /trust note/.test(l)), JSON.stringify(t).slice(0, 2500)];
+      return [t.ok === true && t.logs?.some((l) => /trust note/.test(l)) && t.closeDirty === false, JSON.stringify(t).slice(0, 2500)];
     });
     await guard('2.76.0 (B-85 (3), the other side): the same train verify beside an untracked vitest.config in the game is not green: its record is not a clean full verify, so the lane is handed back (passes on 2.75.0 too)', () => {
       writeIn(S, 'web/mini/vitest.config.ts', 'export default {}\n');

@@ -4,6 +4,13 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.76.1] — 2026-11-04
+- **A lane landed under a trust note closes its task (B-85 follow-up):** the train closed the task with the verify's
+  own record ("dirty"), which the close refuses, so the lane landed and its task stayed open. It now closes with the
+  record as the train judged it (clean, with the trust note). qa/selftest-276h.mjs checks it.
+
+---
+
 ## [2.76.0] — 2026-11-04
 2.76.0 is the beta release the owner asked for: the crew's orchestrator gets the owner's permissions in beta mode, a
 Line Producer keeps the work moving, the Communicator reports to Discord, Gemini builders run headless, and the crew's
