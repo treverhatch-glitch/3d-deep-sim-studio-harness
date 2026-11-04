@@ -32,7 +32,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalBytes } from './hash.mjs';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainCheckout, ownerPubAt, proxyShell, inLane } from './owner-proxy.mjs';
 
 export const BETA_REL = 'studio/beta.json';
@@ -166,8 +166,54 @@ function logBeta({ action, by, why, evidence, root }) {
 
 /** One beta-mode use, for the digest and the War Room (a delegation.used event with meta.beta). */
 export function recordBetaUse(actor, { action, subject = '', why = '' } = {}) {
-  try { emitEvent({ type: 'delegation.used', agent: String(actor.who || 'beta').slice(0, 60), msg: `${actor.who} ${action}${subject ? ` ${subject}` : ''} in beta mode${why ? `: ${String(why).slice(0, 160)}` : ''}`.slice(0, 400), meta: { beta: true, action, via: actor.via } }); } catch {}
+  try { emitEvent({ type: 'delegation.used', agent: String(actor.who || 'beta').slice(0, 60), msg: `${actor.who} ${action}${subject ? ` ${subject}` : ''} in beta mode${why ? `: ${String(why).slice(0, 160)}` : ''}`.slice(0, 400), meta: { beta: true, action, via: actor.via, subject: String(subject || '').slice(0, 120), why: String(why || '').slice(0, 160) } }); } catch {}
 }
+
+export const BETA_DIGEST_LINES = 30;
+const DAYMS = 86400000;
+/**
+ * 2.77.0 (f, P1.1): the daily digest's "Beta mode" section, as an array of lines for the digest's period (24 h):
+ * whether beta was on, who turned it on or off and when (the beta.on / beta.off events and the decisions log), and each
+ * use (who, action, subject, why; the delegation.used events with meta.beta), at most `max` lines with a count of the
+ * rest. [] when there were no uses, no switch and beta is off. Never throws.
+ */
+export async function betaDigestLines({ events = null, now = Date.now(), root = mainCheckout(), max = BETA_DIGEST_LINES, since = now - DAYMS } = {}) {
+  try {
+    let ev = events;
+    if (!ev) { try { ev = readRecentEvents(20000); } catch { ev = []; } }
+    const inP = (t) => { const ms = Date.parse(t); return Number.isFinite(ms) && ms >= since && ms <= now + 60000; };
+    const uses = (ev || []).filter((e) => e?.type === 'delegation.used' && e.meta?.beta && inP(e.ts));
+    const sw = (ev || []).filter((e) => (e?.type === 'beta.on' || e?.type === 'beta.off') && inP(e.ts))
+      .map((e) => ({ on: e.type === 'beta.on', at: e.ts, by: e.meta?.by || e.agent, rec: e.meta?.recordedBy || '', why: '' }));
+    try {
+      const { decisions } = (await import('./decisions-log.mjs')).readLog(root);
+      for (const d of decisions) {
+        if ((d.action !== 'beta-on' && d.action !== 'beta-off') || !inP(d.at)) continue;
+        const on = d.action === 'beta-on';
+        const hit = sw.find((x) => x.on === on && Math.abs(Date.parse(x.at) - Date.parse(d.at)) < 120000);
+        if (hit) hit.why = d.why || ''; else sw.push({ on, at: d.at, by: d.by, rec: '', why: d.why || '' });
+      }
+    } catch {}
+    sw.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const cur = readBeta({ root });
+    if (!uses.length && !sw.length && !cur.on) return [];
+    const L = [];
+    L.push(cur.on ? `Beta mode: ON now (set by ${cur.doc.by} at ${short(cur.doc.at)}${cur.doc.why ? `: ${String(cur.doc.why).slice(0, 100)}` : ''}).` : `Beta mode: off now${sw.length ? '' : ' (it was on while these uses ran)'}.`);
+    for (const x of sw) L.push(`  ${short(x.at)} turned ${x.on ? 'ON' : 'OFF'} by ${x.by}${x.rec ? ` (recorded by ${x.rec})` : ''}${x.why ? `: ${String(x.why).slice(0, 100)}` : ''}`);
+    L.push(`${uses.length} beta use${uses.length === 1 ? '' : 's'} in 24 h${uses.length ? ' (who, action, subject, why)' : ''}:`);
+    const room = Math.max(0, max - L.length);
+    const shown = uses.length > room ? Math.max(0, room - 1) : uses.length;
+    for (const e of uses.slice(0, shown)) {
+      const m = e.meta || {};
+      const subject = m.subject || '';
+      const why = m.why || (String(e.msg || '').match(/in beta mode: (.*)$/) || [])[1] || '';
+      L.push(`  ${short(e.ts)} ${e.agent}: ${m.action || 'action'}${subject ? ` ${subject}` : ''}${why ? ` (${String(why).slice(0, 100)})` : ' (no reason given)'}`);
+    }
+    if (uses.length > shown) L.push(`  ... and ${uses.length - shown} more (npm run events -- --type delegation.used)`);
+    return L.slice(0, Math.max(max, 1));
+  } catch { return []; }
+}
+
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);

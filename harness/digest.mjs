@@ -158,6 +158,10 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   // 2.67.0: owner actions an outside agent ran under the owner's standing delegation (harness/delegation.mjs).
   let delegLine = '';
   try { delegLine = (await import('./delegation.mjs')).delegationDigestLine({ events: ev, now }); } catch { delegLine = ''; }
+  // 2.77.0 (f, P1.1): beta mode: whether it was on, who switched it, and each use (harness/beta-mode.mjs). Not counted
+  // in MAX_WORDS: it is the owner's after-the-fact review list, capped by its own line count.
+  let betaLines = [];
+  try { betaLines = await (await import('./beta-mode.mjs')).betaDigestLines({ events: ev, now, root }); } catch { betaLines = []; }
   // 2.71.0 (x): autonomous mode: decisions per day, approved vs reverted, the review list, time saved (harness/decisions.mjs).
   let autoLine = '';
   try { autoLine = await (await import('./decisions-log.mjs')).autonomyDigestLine({ events: ev, now }); } catch { autoLine = ''; }
@@ -185,7 +189,9 @@ export async function buildDigest({ now = Date.now(), root = REPO_ROOT, events =
   if (words(text) >= MAX_WORDS && candLine) { candLine = `Allowlist candidates: ${cands.length} (npm run denials; never added automatically).`; text = compose(items); }
   while (words(text) >= MAX_WORDS && items.length > 1) { items = items.slice(0, -1); text = compose(items).replace(/Needs you \((\d+)\):/, `Needs you ($1; ${need.length - items.length} more: npm run digest -- --all):`); }
   if (words(text) >= MAX_WORDS) { line = line.split(' · ').slice(0, 3).join(' · '); text = compose(items); }
-  return { text, need, fixes: byFix, line, candidates: cands, date: d, words: words(text) };
+  const coreWords = words(text);
+  if (betaLines.length) text = [text.replace(/\n+$/, ''), '', '## Beta mode', ...betaLines, ''].join('\n');
+  return { text, need, fixes: byFix, line, candidates: cands, date: d, words: coreWords, beta: betaLines };
 }
 
 /** Write studio/digest/<date>.md and one digest.written event. */
