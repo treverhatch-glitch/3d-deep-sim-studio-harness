@@ -154,3 +154,61 @@ a person.
 
 **Already in the harness, don't rebuild:** fails-before regressions, cross-family review, refresh by hand-back,
 stall and burn checks, lessons with a "didn't stick" check, one task per session.
+
+## Planned updates from the harness-ideas research (2026-11-04) · PLANNED, nothing built
+From Hatch's PDF (the Harmony Harness paper, arXiv 2610.15150, and two X articles on failure ledgers and ratchets),
+an independent read of 20 sources (below), and lab tests on a local scratch branch against the crew's own logs
+(read-only copies, Oct 31 to Nov 4: 17,379 events, crew on 2.56 to 2.75). The lab's scripts and data stay local: the
+data is the crew's. Numbers below are from those tests unless a source is named. Each item needs Hatch's OK before it
+is built. Same size scale as above.
+
+| # | Update | Verdict | Priority | Size | How we test it |
+| --- | --- | --- | --- | --- | --- |
+| PU-44 | **Denials recorded once:** at a session's end the launcher harvests permission denials from the whole agent log, which is appended to across sessions under one name, so every end records all earlier sessions' denials again. Read only this session's part, as B-83 does for tokens | ADOPT | P1 | S | Lab replay on 2.77: 11, then 22, then 33 records from one log; 182 of the crew's 248 denial records are copies. Selftest: two sessions in one log, the second end records only its own; the crew's log replayed records 11 once |
+| PU-45 | **One command per suggested command, and a Next step on every refusal:** messages that suggest a chained command (`git add <files> && git commit` in task done, `cd … && npx` in game-gates, and in train-tail and adopt) say it as single commands; refusals with no fix (a claimed task, some locks) end with one `Next:` command | ADOPT | P1 | S | Lab: 5 real refusals × 3 wordings, Haiku ×2 and Sonnet ×1. The fix text took the right next step from 56% to 92% (3 tuned cases) and 67% to 100% (2 held out). Terse text made every run invent a test script that doesn't exist. The chained suggestion tripled chained commands, which the permission rules refuse (15 real chained denials). A check that no harness message suggests `&&`, `;` or `cd … &&`; re-run the lab cases: chained 0, right step not lower |
+| PU-46 | **"Is it learning" line in the daily digest:** failure signatures per day and the share already seen before; refusal families that kept happening after the last update reached the crew; time from first seen to the fix running on the crew. Coordination refusals (locks, holds) kept apart from mistakes | ADOPT | P2 | S | The lab script reads 17k events in 0.3 s. Its first number was wrong until the PU-44 copies were dropped (denial repeats 75% → 6%), so the selftest feeds duplicates on purpose. Today: 6 of 17 frequent families stopped after an update, 11 continued (most are locks and holds) |
+| PU-47 | **Guard census in the digest:** gates that never run in the current scope; guard events silent for 7 days; warnings repeated with nobody acting; sim gates that only check the example cartridge. A list for a person to review; nothing is removed automatically (removal goes through `npm run bench -- --without`) | ADOPT | P2 | S | Lab: in Lite 24 of 35 gates never ran; purity, isolation and golden ran on all 301 verifies, never failed, and checked example-sim rather than the game; 13 of 25 guard event types never fired; `prompt.prefix.volatile` fired 205 times after 2.75 with no action |
+| PU-48 | **Fix the prompt-prefix leak** the stable-prefix check keeps flagging (a timestamp and the task ID in builder prefixes), so sessions share the prompt cache | ADOPT | P2 | S–M | Prefix hash identical for two builder sessions on different tasks; no volatile event in a crew hour; cache hit rate before and after (median today 0.91 for builders, 0.83 for the Director) |
+| PU-49 | **Repeat detector inside a session:** the same refusal family 3 times in one session gives a one-line nudge naming the Next step; 5 times hands the task back with the facts. `task next` doesn't offer a task that refused this agent in the last hour | ADAPT | P2 | M | Sources: LangChain's loop detection (Terminal Bench 2.0 52.8 → 66.5 with the model fixed, their benchmark), MAST (step repetition is the top failure mode, 15.7% of 1,642 traces). Lab: 18 of 40 "held" refusals came back to the same agent within an hour. Selftest with a synthetic session |
+| PU-50 | **Hotfix lane to the crew:** a fix for a failure the crew is hitting now ships as x.y.z on its own, without waiting for a feature release; time-to-guard counts until the crew runs it | ADOPT | P1 | S (release doc and process) | Lab: B-83 (false stall on an appended log) was fixed in 2.76.0, but the crew on 2.75 hit it 24 times; the replay reproduces the crew's exact "read 3,023,656 tokens" on 2.75 and reads 0 on 2.77. Measure: days from a PROBLEMS entry to the crew's upgrade |
+| PU-51 | **Situation eval before each release:** ~10 frozen refusal and gate situations from the crew's logs, answered by a cheap model, scored on three axes (right next step, one-command rule, command exists); a third held out and never tuned on | ADAPT | P2 | S–M | The PU-45 lab is the first version. Keep it cheap: one Haiku call per wording (about 93k tokens of context each, mostly cached). A release that drops any axis says so. Complements PU-01 and the bench, which still has no cases |
+| PU-52 | **Seed the replay bench:** `npm run bench` exists (pass@1, pass^k, `--without` to test removing a guard) but `studio/bench/cases/` is empty; add the first 10 cases from crew tasks with hidden tests (= PU-01) | ADOPT | P2 | M | Needs the owner (graders live in a protected folder). First run on 2.77 as the baseline |
+| PU-53 | **Rule-following per model:** the follow telemetry (`skill.follow`) shown per model in the models report; rules-heavy tasks routed away from a model that follows rules poorly | ADAPT | P3 | S | Source: "Harness Updating Is Not Harness Benefit" (weaker models load and follow harness rules far less: 0.14 vs 0.76 adherence). Matters for the Flash lanes. Follow rate per model on one crew day |
+
+**Also strengthens PU-05** (review before landing, still planned): Cognition's clean-context, diff-only reviewer, and
+"Are Solved Issues in SWE-bench Really Solved Correctly?" (7.8% of plausible patches pass only on weak tests). Keep it
+to risky lanes; it costs tokens.
+
+**Suggested order:** PU-44, PU-45 and PU-50 first (small, and they fix the crew's data and time now), then PU-46 to
+PU-48, then PU-49 and PU-51, then PU-52 and PU-53.
+
+**Not adopting:** a harness that rewrites itself (Harmony Harness, Darwin Gödel Machine, ADAS): DGM's run took about
+two weeks and "significant API costs", and upgrades already cost more than runs; harness updates gave strong models
+little (+2.6 points for Opus 4.6 on SWE-bench Verified in "Harness Updating Is Not Harness Benefit"). Also not: pools
+of candidate harnesses, a composition agent per task, an LLM judge as a gate. The Harmony paper's results tables
+weren't in the HTML version that could be opened, so its headline numbers are unchecked here.
+
+**Already in the harness, don't rebuild:** the failure ledger (PROBLEMS, workarounds with signatures, error memory,
+flakes); MAST failure labels (PU-03); a fails-before test per fix (177 of 246 PROBLEMS entries name one; most of the
+rest are setup issues no test can check); refusals that name the fix (`Fix:` lines, gate-fix); done granted by
+scripts, not the model; only the owner loosens a rule (protected files, weakened-tests); the bench's `--without` for
+removing a guard on evidence; the stable-prefix check; stall and burn checks; progress and hand-back notes.
+
+Sources (opened and read):
+[Harmony Harness](https://arxiv.org/html/2610.15150) ·
+[Harness Updating Is Not Harness Benefit](https://huggingface.co/papers/2605.30621.md) ·
+[LangChain, deep agents](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering) ·
+[METR, reward hacking](https://metr.org/blog/2025-06-05-recent-reward-hacking) ·
+[MAST](https://arxiv.org/html/2503.13657v3) ·
+[SWE-bench patches](https://arxiv.org/html/2503.15223v2) ·
+[Darwin Gödel Machine](https://arxiv.org/pdf/2505.22954) ·
+[Live-SWE-agent](https://arxiv.org/html/2511.13646v3) ·
+[Cognition, multi-agents](https://cognition.com/blog/multi-agents-working) ·
+[Cognition, don't build multi-agents](https://cognition.com/blog/dont-build-multi-agents) ·
+[Anthropic, C compiler](https://anthropic.com/engineering/building-c-compiler) ·
+[Anthropic, multi-agent research](https://www.anthropic.com/engineering/multi-agent-research-system) ·
+[Anthropic, context engineering](https://anthropic.com/engineering/effective-context-engineering-for-ai-agents) ·
+[Cursor, scaling agents](https://cursor.com/blog/scaling-agents) ·
+[OpenAI, harness engineering](https://www.openai.com/index/harness-engineering) ·
+[OpenHands SDK](https://arxiv.org/pdf/2511.03690) ·
+[mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent)
