@@ -4596,6 +4596,14 @@ if (inShard('selftest-276i')) {
   await selftest276I({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
+
+// 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
+// usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
+if (inShard('selftest-277n')) {
+  const dir = copyRepo();
+  const { selftest277N } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277n.mjs')).href);
+  await selftest277N({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
