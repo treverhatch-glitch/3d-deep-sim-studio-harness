@@ -36,7 +36,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+const fileURLToPathOf = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 import { decodePng } from './png.mjs';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { gameCapture } from './visual-capture.mjs';
@@ -346,6 +347,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const a = process.argv.slice(2);
   const opt = (k, d = null) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   const [cmd, x, y] = a;
+  // 2.77.0 (u, P5.5): the visual check's records (harness/visual-check.mjs): shots, asset, looked, review, send, status.
+  if (['shots', 'asset', 'looked', 'review', 'send', 'status'].includes(cmd)) process.exit(spawnSync(process.execPath, [fileURLToPathOf('./visual-check.mjs'), ...a], { stdio: 'inherit', windowsHide: true }).status ?? 1); // a child: visual-check imports this module
   if (cmd === 'stats' && x) { console.log(JSON.stringify(imageStats(load(x)))); process.exit(0); }
   if (cmd === 'diff' && x && y) { console.log(JSON.stringify({ diff: imageDiff(load(x), load(y)) })); process.exit(0); }
   if (cmd === 'capture' && x && /^(before|after)$/.test(y || '') && opt('--godot')) {
@@ -377,6 +380,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     else console.log(`[visual] ${res.ok ? 'PASS' : 'FAIL'} ${x}${res.why ? `: ${res.why}` : ''}${res.ok && res.noise?.length ? ` (noise baseline: ${res.noise.join('; ')})` : ''}${res.notes?.length ? ` (re-baselined: ${res.notes.join('; ')})` : ''}`);
     process.exit(res.ok ? 0 : 1);
   }
-  console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after [--godot <project>] [--cams a,b] | check <TASK> | stats <png> | diff <a> <b>');
+  console.log('Usage: node harness/visual-proof.mjs capture <TASK> before|after [--godot <project>] [--cams a,b] | check <TASK> | stats <png> | diff <a> <b> | shots|asset|looked|review|send|status <TASK> … (the visual check, harness/visual-check.mjs)');
   process.exit(2);
 }
