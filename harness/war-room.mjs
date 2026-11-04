@@ -115,6 +115,9 @@ function webTrain(root, events, now) {
     waiting,
     needsRelease: waiting.filter((w) => w.held).map((w) => w.task),
     last,
+    // 2.77.0 (p, P9.6): the speculative train behind the running one (readTrainStatus().next), or null.
+    next: running?.next ? { id: running.next.train, step: running.next.step || 'starting', text: String(running.next.text || '').slice(0, 300), after: running.next.after || null, base: running.next.base || null, lanes: running.next.tasks || [], laneCount: running.next.lanes || null, eta: running.next.eta?.text || null } : null,
+    ...(running?.speculative ? { speculative: { after: running.after || null, base: running.base || null } } : {}),
   };
 }
 

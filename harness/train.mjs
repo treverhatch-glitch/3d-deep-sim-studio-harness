@@ -93,7 +93,8 @@ import { rerecordTier, rerecordRefusal, rerecordEvidence } from './golden-report
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
-import { trainEta, stepsLeft, writeTrainStatus, quietVerifyMs, capNote } from './train-status.mjs';
+import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote } from './train-status.mjs';
+import { batchCap, batchSize, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
 import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
@@ -1542,7 +1543,22 @@ export async function runTrain(opts = {}) {
   if (!opts.lanes && !opts.dryRun && !opts.now) waitForBatch(root, { log, id });
   // 2.76.0 (B-88): a train that died without recording its end (its process gone) is recorded now, before this one.
   if (!opts.dryRun) reapTrains(root, { log });
-  const one = (tid, extra = {}) => withTrainLock(root, { id: tid, by }, () => livedTrain(root, { id: tid, by, dryRun: opts.dryRun }, (life) => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by, life })), { waitMs: opts.waitMs ?? 0, log });
+  // 2.77.0 (p, P9.6): a speculative train that can land on main now (its train A ended and main is the tree it built on)
+  // goes first: a train that gets the train lock before it gives the lock back and waits for it (within waitMs).
+  const tipNow = () => out(git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`));
+  const one = async (tid, extra = {}, waitMs = opts.waitMs ?? 0) => {
+    const until = Date.now() + waitMs;
+    for (;;) {
+      const r = await withTrainLock(root, { id: tid, by }, () => {
+        const nb = opts.dryRun ? null : nextBusy(root, { tip: tipNow(), self: tid });
+        return nb ? { yieldTo: nb } : livedTrain(root, { id: tid, by, dryRun: opts.dryRun }, (life) => trainBody({ ...opts, ...extra, root, log, deps, id: tid, by, life }));
+      }, { waitMs: Math.max(0, until - Date.now()), log });
+      if (!r?.yieldTo) return r;
+      log(`[train] ${tid}: the speculative train ${r.yieldTo.id} (after ${r.yieldTo.after || '?'}) lands on ${mainBranch(root)} first`);
+      const w = await waitForNext(root, { maxMs: Math.max(0, until - Date.now()), tipOf: tipNow, self: tid, log });
+      if (!w.gone) return { busy: { id: r.yieldTo.id, by: r.yieldTo.by || NEXT_BY, why: `the speculative train ${r.yieldTo.id} lands first` } };
+    }
+  };
   let locked = await one(id);
   if (locked?.busy) return { ok: false, id, busy: locked.busy, message: `Another train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}); run this again when it ends.`, landed: [], dropped: [], deferred: [] };
   // 2.63.0 (run alone): lanes that waited because a lane ran alone get the next train(s) now, one after another.
@@ -1550,7 +1566,7 @@ export async function runTrain(opts = {}) {
   // 2.65.3 (B-43, c): after an early landing of a green prefix, the lanes deferred behind its culprit (queued) get the
   // next train now, also after a task done's own train (then as a queued train: its riders are in the queue).
   for (let k = 1; locked.more && !opts.dryRun && (!opts.lanes || locked.prefixMore) && k <= 50; k += 1) {
-    const next = await one(`${id}-${k}`, opts.lanes ? { lanes: undefined, oneLane: false, rideAlong: false } : {});
+    const next = await one(`${id}-${k}`, opts.lanes ? { lanes: undefined, oneLane: false, rideAlong: false } : {}, Number(process.env.STUDIO_TRAIN_STALE_MIN || 360) * 60000); // 2.77.0 (p): after a speculative train behind it
     if (next?.busy) break;
     trains.push(next.id);
     const later = new Set([...next.landed, ...next.dropped.map((d) => d.task), ...next.held.map((h) => h.task)]);
@@ -1948,8 +1964,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   sweepScratch(root, log);
   const queued = !given;
   const rules = batchRules();
-  const cap = [Number(max) > 0 ? Number(max) : 0, rules.max].filter((n) => n > 0);
-  const maxLanes = cap.length ? Math.min(...cap) : 0;
+  // 2.77.0 (p, P9.6): a train takes at most STUDIO_TRAIN_BATCH lanes (default 4), beside --max and STUDIO_TRAIN_MAX.
+  const maxLanes = batchCap({ max, rulesMax: rules.max });
   let lanes = given ? given.map((l) => ({ ...l, own: oneLane })) : readQueue(root).map((l) => ({ ...l, fromQueue: true }));
   // 2.63.0: a lane held for the owner (tier C, or handed back too often) stays in the queue until a person releases it.
   clearContractHolds(root, lanes, log); // 2.72.0 (c): a reviewer's signature clears a contract-only hold
@@ -1976,7 +1992,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   waits.push(...chainTailWaits(root, lanes.filter((l) => !waits.some((w) => w.lane === l)), deps));
   lanes = lanes.filter((l) => !waits.some((w) => w.lane === l));
   lanes = fixFirst(root, lanes, { id, by, dryRun, log }); // 2.73.2 (d, B-75), before the cap so the fix is never cut
-  if (maxLanes > 0) lanes = lanes.slice(0, maxLanes);
+  // 2.77.0 (p, P9.6): the lanes past the cap wait for the next train (behind this one's speculative train, if any).
+  if (maxLanes > 0 && lanes.length > maxLanes) { res.batchCut = lanes.slice(maxLanes).map((l) => l.task); lanes = lanes.slice(0, maxLanes); log(`[train] ${id}: ${res.batchCut.length} more lane(s) wait for the next train (at most ${maxLanes} per train: STUDIO_TRAIN_BATCH ${batchSize() || 'off'}, STUDIO_TRAIN_MAX ${rules.max || 0}${Number(max) > 0 ? `, --max ${max}` : ''}): ${res.batchCut.join(', ')}`); }
   if (!lanes.length && waits.length) { waitActions(root, waits, { id, by, dryRun, res, log, deps }); res.ok = !res.dropped.length; res.message = summary(res); ev('done', id, res.message, { agent: by, meta: brief(res) }); return res; }
   if (!lanes.length) { res.message = res.held.length ? `No lane can land now: ${res.held.map((h) => `${h.task} needs the owner (tier ${h.tier})`).join('; ')}.` : 'No lane is waiting to land (the train queue is empty: task done <ID> --train adds one).'; return res; }
   ev('start', id, `${lanes.length} lane(s): ${lanes.map((l) => l.task).join(', ')}${dryRun ? ' (dry run)' : ''}`, { agent: by, meta: { lanes: lanes.map((l) => l.task), dryRun, ...(lanes.some((l) => l.rider) ? { riders: lanes.filter((l) => l.rider).map((l) => l.task) } : {}) } });
@@ -2184,7 +2201,9 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
           set = built.included;
           if (!set.length) break;
         }
-        writeTrainStatus(root, id, { step: 'verify', text: `verify ${res.verifies + 1}: lanes 1-${set.length}${res.roundWithout.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}, ${set.map((l) => l.task).join(', ')}`, lanes: ready.length, round: res.round, eta: etaFor(0) });
+        // 2.77.0 (p, P9.6): the tree under verify (head, tree, base, tasks) is what a speculative train builds on.
+        writeTrainStatus(root, id, { step: 'verify', text: `verify ${res.verifies + 1}: lanes 1-${set.length}${res.roundWithout.length ? ` (round ${res.round}: without ${res.roundWithout.join(', ')})` : ''}, ${set.map((l) => l.task).join(', ')}`, lanes: ready.length, round: res.round, eta: etaFor(0), head: built.head, tree: built.tree, base: tip, tasks: set.map((l) => l.task) });
+        await pipelineKick(root, { after: id, log, ...(deps.startNext ? { spawn: deps.startNext } : {}) });
         const v = await verifyRemoteFirst(sc, { id, n: res.verifies + 1, tree: built.tree, changed: changedVs(sc.dir, tip, built.head), all, seen, tasks: set.map((l) => l.task), lanes: set, whole: wholeEquiv(root, tip, settings), log }, { head: built.head, by, deps, res });
         if (!v.cached && !v.reused && !v.remote) { res.verifies += 1; if (v.ms) res.lastVerifyMs = v.ms; }
         if (v.reused) res.reused += 1;
@@ -2328,6 +2347,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (sc) removeScratch(sc);
   }
   if (res.landed.length && !dryRun) noteTrainLanded(root); // 2.73.2 (d, B-75): main is green again
+  if (res.batchCut?.length && res.landed.length && queued) res.more = true; // 2.77.0 (p): the next batch runs right after
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   res.message = res.message || summary(res);
   writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });
@@ -2496,6 +2516,194 @@ function summary(res) {
   if (res.config?.length) parts.push(`config proposals: ${res.config.map((c) => `${c.task} applied ${c.applied.join(', ') || 'nothing'}${c.held.length ? `, HELD for a person: ${c.held.map((h) => h.file).join(', ')} (npm run task -- train config ${c.task})` : ''}`).join('; ')}`);
   if (res.held?.length) parts.push(`needs the owner (held in the queue until a person releases it: npm run task -- train release <ID> --by <name>): ${res.held.map((h) => `${h.task} (tier ${h.tier}: ${String(h.why).split('\n')[0].slice(0, 300)})`).join('; ')}`);
   return parts.join('. ') || 'nothing to land';
+}
+
+// ---- 2.77.0 (p, P9.6): the speculative train behind a verifying one (harness/train-pipeline.mjs) ----------------
+
+/**
+ * B's "did main move" check, the ONE place for it: is main now exactly the tree B assumed (train A's verified head), or
+ * that tree plus record files only? The record rule is boardOnlyMove (B-29's board/record paths, task records outside
+ * B's lanes); P9.1's record-only rule plugs in here. { land, how: 'same'|'record', files? } | { land: false, why }.
+ */
+export function nextBaseVerdict(root, { assumed, now, lanes = [] }) {
+  return speculativeBaseVerdict(root, { assumed, now, lanes }, { recordMove: (r, from, to, l) => boardOnlyMove(r, from, to, boardPaths(), { lanes: l }) });
+}
+
+const nextPollMs = () => 1000;
+
+/**
+ * Run the speculative train behind train `after` (opts: { root, after, deps, log, by, quietJob }): its lanes from the
+ * queue (not A's; held, tier-C, run-alone-behind-others, waiting and refused lanes left for the next normal train), built
+ * on A's verified head in its own scratch copy, ONE verify, then it waits for A: landed exactly that tree (or plus record
+ * files): B lands under the train lock without verifying again; anything else: discarded (lanes untouched, a
+ * task.train.next_discarded event). Its own lock: .studio/locks/train-next.lock; its own life record (B-88).
+ * Returns the train result plus { speculative: true, after, discarded?: why }.
+ */
+export async function runNextTrain(opts = {}) {
+  const root = opts.root || mainRoot();
+  const log = opts.log || ((m) => console.error(m));
+  const deps = opts.deps || {};
+  const after = String(opts.after || '');
+  const by = opts.by || NEXT_BY;
+  const id = `${stamp()}-${process.pid}`;
+  const empty = (message, extra = {}) => ({ ok: true, id, after, speculative: true, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message, ...extra });
+  const stopped = deps.stopped?.();
+  if (stopped) return empty(`The studio is stopped (${stopped}): no speculative train.`, { ok: false });
+  const a0 = trainState(root, after);
+  if (!a0.live || a0.step !== 'verify' || !a0.head) return empty(`No speculative train: train ${after} is not verifying a known tree (${a0.step || 'not running'}).`);
+  const nl = takeNextLock(root, { id, after, base: a0.head, by, lanes: [] });
+  if (!nl.ok) return empty(`A speculative train is already running (${nl.holder?.id || '?'}).`, { busy: nl.holder });
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await livedTrain(root, { id, by, dryRun: false }, (life) => nextBody({ root, log, deps, id, by, after, a0, lock: nl, life }));
+  } finally { nl.release(); writeTrainsSummary(root); }
+  if (!opts.quietJob) trainJobDone(res, t0, { extra: { speculative: true, after, ...(res.discarded ? { discarded: res.discarded } : {}) } });
+  return res;
+}
+
+async function nextBody({ root, log, deps, id, by, after, a0, lock, life }) {
+  const res = { ok: true, id, after, speculative: true, landed: [], dropped: [], deferred: [], held: [], tiers: {}, verifies: 0, reused: 0, message: '' };
+  const main = mainBranch(root);
+  const base = a0.head;
+  const tip0 = out(git(root, 'rev-parse', `refs/heads/${main}`));
+  const L = (m) => log(`[train] ${id} (speculative, after ${after}): ${m}`);
+  const status = (step, text, extra = {}) => writeTrainStatus(root, id, { step, text: String(text).slice(0, 400), speculative: true, after, base, eta: null, ...extra });
+  let names = [];
+  const end = (message) => { res.message = message; L(message); status('done', message, { lanes: names.length || null }); return res; };
+  const discard = (why) => {
+    res.discarded = why;
+    res.message = `Speculative train ${id} discarded: ${why}${names.length ? `. ${names.join(', ')} keep their place in the train queue (no hand-back) and go in the next normal train` : ''}.`;
+    L(res.message);
+    ev('next_discarded', id, `discarded: ${why}${names.length ? `; ${names.join(', ')} keep their place in the queue (no hand-back)` : ''}`, { agent: by, status: 'warn', meta: { after, base, why, lanes: names, speculative: true } });
+    status('done', `discarded: ${why}`, { lanes: names.length || null });
+    return res;
+  };
+
+  // (a) Which queued lanes go: the cheap facts, the tier (as A judges it), then the pick (pure), then the precheck.
+  status('precheck', `choosing lanes behind train ${after}`);
+  const settings0 = await trainManifest(root, tip0);
+  const aTasks = new Set(a0.tasks);
+  const cands = readQueue(root).map((l) => ({ ...l, fromQueue: true })).filter((l) => !aTasks.has(l.task));
+  if (!cands.length) return end(`no lane is queued behind train ${after}`);
+  let fixTask = null;
+  try { fixTask = fixFirstOrder(root, cands, { tip: tip0, gameIds: gameGateIds(root), headOf: (l) => laneNow(l).head || null }).fix?.task || null; } catch {}
+  const waits = laneWaits(root, cands, deps);
+  try { waits.push(...chainTailWaits(root, cands.filter((l) => !waits.some((w) => w.lane === l)), deps)); } catch {}
+  const rows = [];
+  for (const l of cands) {
+    const row = { task: l.task, lane: l };
+    const w = waits.find((x) => x.lane === l);
+    if (w) row.wait = w.why;
+    if (l.task === fixTask) row.fixFirst = true;
+    if (heldNow(l)) row.held = l.held;
+    if (taskHoldOf(root, l.task)) row.out = true;
+    if (!row.wait && !row.held && !row.out && !row.fixFirst) {
+      const now = laneNow(l);
+      if (now.error) row.wait = now.error;
+      else if (l.branch && now.branch && now.branch !== l.branch) row.wait = `its copy is on ${now.branch} now`;
+      else if (git(root, 'merge-base', '--is-ancestor', now.head, base).status === 0) row.wait = `it is already in train ${after}'s tree`;
+      else {
+        row.head = now.head;
+        row.branch = now.branch || l.branch;
+        if (!/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_MIXED || '')) {
+          const dc = depContext(root, deps);
+          const allowed = mayCarry(root, l.task, dc.map);
+          const m = mixedLane(root, { task: l.task, tip: tip0, head: now.head, open: (t) => (dc.states?.open ? dc.states.open.has(t) : true) && !allowed.has(t) });
+          if (m.mixed) row.wait = m.why;
+        }
+        const c = await laneTier(root, { head: now.head, task: l.task, agent: l.agent, dir: l.dir }, { tip: tip0, settings: settings0 });
+        const kept = releasedFor(l, now.head) ? null : keptRelease(root, l.task, now.head);
+        row.tier = c.tier;
+        row.runAlone = c.runAlone;
+        row.all = Boolean(c.needs.all);
+        row.released = releasedFor(l, now.head) ? l.released : kept || null;
+        if (c.needs.goldenReason.length) row.needs = 'it moves goldens with no Golden-Reason trailer';
+        else if (c.needs.pinMoves.length) row.needs = 'it changes pinned expectations with no Pin-Moves trailer';
+        const cp = laneProposal(root, { task: l.task, head: now.head, tip: tip0 });
+        if (cp && !cp.ok) row.needs = `its config proposal: ${cp.why}`;
+        if (c.tier === 'B' && !row.released && (deps.handBacks || handBackCount)(l.task) > maxHandBacks()) row.capped = true;
+      }
+    }
+    rows.push(row);
+  }
+  const pick = pickNextLanes(rows, { batch: batchSize() });
+  if (pick.wait) return end(`waits as before: ${pick.wait}`);
+  for (const sk of pick.skipped) L(`${sk.task} is left for the next normal train: ${sk.why}`);
+  const ready = [];
+  for (const r of pick.lanes) {
+    status('precheck', `checking ${r.task} in its own copy`);
+    const lane = { ...r.lane, head: r.head, branch: r.branch };
+    const pre = (deps.precheck || ((x) => precheckChild(root, x)))(lane);
+    if (!pre.ok || (pre.head && pre.head !== r.head)) { L(`${r.task} is left for the next normal train: ${pre.ok ? 'its copy changed while it was checked' : String(pre.message || 'its checks failed').split('\n')[0].slice(0, 300)}`); continue; }
+    ready.push({ ...lane, all: Boolean(pre.all || lane.all || r.all), tier: r.tier, runAlone: r.runAlone, released: r.released || null });
+    res.tiers[r.task] = r.tier;
+  }
+  if (!ready.length) return end(`no lane behind train ${after} can go speculatively`);
+  names = ready.map((l) => l.task);
+  const judge = () => judgeTrainA({ a: trainState(root, after), base, tip0, mainNow: out(git(root, 'rev-parse', `refs/heads/${main}`)), verdict: (now) => nextBaseVerdict(root, { assumed: base, now, lanes: names }) });
+  const j0 = judge();
+  if (j0.discard) return discard(j0.discard);
+
+  // (b) Build train A's tree + these lanes in its own scratch copy, then ONE verify.
+  lock.update({ lanes: names });
+  life?.lanes(ready);
+  ev('start', id, `${names.length} lane(s) speculatively on train ${after}'s tree ${base.slice(0, 8)}: ${names.join(', ')}`, { agent: by, meta: { lanes: names, speculative: true, after, base } });
+  for (const l of ready) deps.markRunning?.(l.task, l.agent);
+  let sc = null;
+  try {
+    status('build', `building train ${after}'s tree + ${names.join(', ')}`, { lanes: names.length, tasks: names });
+    sc = makeScratch(root, id, base);
+    if (sc.error) { const why = sc.error; sc = null; return discard(`its scratch copy couldn't be made: ${why}`); }
+    const settings = await trainManifest(root, tip0);
+    const built = buildIntegration(sc, base, ready, { id, unionFiles: settings.unionFiles });
+    for (const l of [...built.deferred, ...built.conflictMain]) L(`${l.task} is left for the next normal train: ${l.why}`);
+    const set = built.included;
+    if (!set.length) return discard(`no lane merges onto train ${after}'s tree`);
+    names = set.map((l) => l.task);
+    lock.update({ lanes: names });
+    const j1 = judge();
+    if (j1.discard) return discard(j1.discard);
+    status('verify', `verify of train ${after}'s tree + ${names.join(', ')} (speculative)`, { lanes: names.length, head: built.head, tree: built.tree, tasks: names });
+    const v = await verifyRemoteFirst(sc, { id, n: 1, tree: built.tree, changed: changedVs(sc.dir, tip0, built.head), all: set.some((l) => l.all), seen: new Map(), tasks: [...a0.tasks, ...names], lanes: set, whole: wholeEquiv(root, tip0, settings), log }, { head: built.head, by, deps, res });
+    if (!v.cached && !v.reused && !v.remote) res.verifies += 1;
+    if (v.reused) res.reused += 1;
+    // (c) Wait for train A's outcome (B holds no machine claim while it waits), then land or discard.
+    status(v.ok ? 'ready' : 'waiting', v.ok ? `green on train ${after}'s tree + ${names.join(', ')}; lands right after train ${after}` : `red (${v.why}); waits for train ${after}'s result`, { lanes: names.length, head: built.head, tree: built.tree, tasks: names });
+    if (v.ok) L(`green on train ${after}'s tree + ${names.join(', ')}; it lands right after train ${after} if ${main} is then exactly that tree`);
+    const stale = Number(process.env.STUDIO_TRAIN_STALE_MIN || 360) * 60000;
+    let j = judge();
+    for (const t1 = Date.now(); j.wait && Date.now() - t1 < stale; j = judge()) {
+      const st = deps.stopped?.();
+      if (st) return discard(`the studio was stopped (${st})`);
+      sleep(nextPollMs());
+    }
+    if (j.wait) return discard(`train ${after} is still running after STUDIO_TRAIN_STALE_MIN`);
+    if (j.discard) return discard(j.discard);
+    if (!v.ok) return discard(v.noCheck ? `its verify ran no check (${v.why})` : `its own verify on train ${after}'s tree was red (${v.why}; log ${v.log || '-'}): the next normal train bisects it`);
+    if (j.how === 'record') L(`${main} moved past train ${after}'s tree by record files only (${(j.files || []).join(', ')}): the verify stands`);
+    // (d) Land, under the train lock (never two trains landing at once): main moves only from the tree B assumed.
+    status('landing', `landing ${names.join(', ')} right after train ${after}`, { lanes: names.length, head: built.head, tree: built.tree, tasks: names });
+    const r = await withTrainLock(root, { id, by, speculative: true, after }, () => {
+      const q = readQueue(root);
+      const gone = set.filter((l) => !q.some((e) => e.task === l.task));
+      if (gone.length) return { gone: gone.map((l) => l.task) };
+      const lt = landTrain(root, sc, main, base, { built, v }, { id, by, deps, log, res, unionFiles: settings.unionFiles });
+      return lt === 'moved' ? { moved: true } : { done: true };
+    }, { waitMs: 10 * 60000, poll: 500, log });
+    if (r?.busy) return discard(`the train lock stayed busy (${r.busy.id || '?'}, by ${r.busy.by || '?'})`);
+    if (r?.gone) return discard(`${r.gone.join(', ')} left the train queue while it verified`);
+    if (r?.moved) return discard(`${main} moved before it could land`);
+    if (res.landed.length) noteTrainLanded(root);
+  } finally {
+    for (const l of ready) deps.clearRunning?.(l.task);
+    if (sc) removeScratch(sc);
+  }
+  if (res.ok) res.ok = res.landed.length > 0;
+  res.message = res.message || `speculative train after ${after}: ${summary(res)}`;
+  status('done', `done: ${res.message.slice(0, 300)}`, { lanes: names.length || null });
+  ev('done', id, res.message, { agent: by, status: res.landed.length ? 'ok' : 'warn', meta: { ...brief(res), speculative: true, after, base } });
+  return res;
 }
 
 /** The lane copy this process runs in, as a train lane: { dir, branch, head } (task done's one-lane train). */
