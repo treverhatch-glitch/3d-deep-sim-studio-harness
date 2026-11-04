@@ -264,7 +264,12 @@ const compact = /^(on|1|true|yes)$/i.test(process.env.STUDIO_COMPACT_OUTPUT || '
 // 2.58.0 (F2): the tracked files as they are before any gate runs, to name the ones this verify changes.
 const trackedBefore = trackedSnapshot();
 let firstRed = null;
+// 2.77.0: the live progress of this run, for the War Room's loading bar (harness/gate-progress.mjs): written in the
+// checkout's .studio/ (a lane or train copy's is the main checkout's), as STUDIO_LOCK_OWNER (the train's is train-<id>).
+const gp = await import('../harness/gate-progress.mjs');
+const progress = gp.startProgress({ stateDir: path.join(root, '.studio'), owner: process.env.STUDIO_LOCK_OWNER || null, gates: gates.map((g) => g.id) });
 for (const gate of gates) {
+  progress.started(gate.id);
   const cacheable = gate.cache !== false && (gate.lite || gate.cache === true);
   let key;
   // Only the in-session fast tier reads the cache; everyday verify, --deep and the merge tier always run.
@@ -274,6 +279,7 @@ for (const gate of gates) {
     const cached = get(gate, key);
     if (cached) {
       rows.push({ id: gate.id, ok: true, required: gate.required !== false, ms: cached.ms || 0, cached: true, cartridge: active.name });
+      progress.finished(gate.id, { ms: cached.ms || 0, ok: true, cached: true });
       console.log(`[gates] PASS ${gate.id} (cached ${key.slice(0, 8)}: command and files unchanged since its last pass)`);
       cachedCount++;
       continue;
@@ -317,6 +323,7 @@ for (const gate of gates) {
   const notRunLine = !ok && res.status === 3 ? (fenced.text.match(/^\[(?:engine|unity|engine-gate|heavy)\] NOT RUN\b[^\n]*/m) || [])[0] : null;
   const notRun = notRunLine ? notRunLine.replace(/^\[[\w-]+\] NOT RUN\s*/, '').replace(/^[^:]*:\s*not run:\s*/, '').slice(0, 300) : null;
   rows.push({ id: gate.id, ok, required, ms, cached: false, cartridge: active.name, ...facts, ...(notRun ? { notRun } : {}) });
+  progress.finished(gate.id, { ms, ok });
   if (!ok && required && !firstRed && !notRun) firstRed = { id: gate.id, text: fenced.text }; // 2.72.0 (b): the round cap's signature
   console.log(notRun ? `[gates] NOT RUN ${gate.id}: not run: ${notRun}` : `[gates] ${ok ? 'PASS' : required ? 'FAIL' : 'WARN'} ${gate.id}`);
   if (facts.sub?.length && !(facts.sub.length === 1 && facts.sub[0] === gate.id)) console.log(`[gates] ${gate.id} failed in: ${facts.sub.slice(0, 8).join(', ')}${facts.sub.length > 8 ? ` (+${facts.sub.length - 8} more)` : ''}`);
@@ -328,6 +335,9 @@ for (const gate of gates) {
   }
 }
 
+// 2.77.0: the run is over for the bar; its passing gate times join the history the next ETA comes from.
+progress.end();
+gp.recordGateTimes(path.join(root, '.studio'), rows);
 // 2.30c (G3): failing first, in plain words; "not run" apart from "pass".
 {
   const { gateWords } = await import('../harness/gate-words.mjs');

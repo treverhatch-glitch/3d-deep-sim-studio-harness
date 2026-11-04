@@ -22,6 +22,7 @@ import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { pidAlive } from './proc-identity.mjs';
 import { readTrainStatus } from './train-status.mjs';
 import { readHolds } from './task-hold.mjs';
+import { progressOf } from './gate-progress.mjs';
 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const H = 3600000;
@@ -105,6 +106,8 @@ function webTrain(root, events, now) {
   return {
     kind: 'web', name: 'Merge train', id,
     running: Boolean(running),
+    // 2.77.0: the running verify's real progress (scripts/run-gates.mjs writes it as train-<id>; harness/gate-progress.mjs).
+    bar: running && id ? safe(() => progressOf(path.join(root, '.studio'), `train-${id}`, { now })) : null,
     step: running ? running.step || 'starting' : null,
     text: running ? String(running.text || running.step || '').slice(0, 300) : null,
     eta: running?.eta?.text || null,
