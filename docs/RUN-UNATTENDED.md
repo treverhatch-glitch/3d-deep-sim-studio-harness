@@ -57,6 +57,14 @@ follows the file; a line removed from `.env` gives that setting its default back
 `STUDIO_ROLE`, `STUDIO_AGENT`, `STUDIO_MAIN_ROOT`) are never taken from `.env`. Read once at start, so a restart is still
 needed: `STUDIO_SUPERVISOR_SEC`, `STUDIO_HEARTBEAT_SEC`, `HUB_PORT`.
 
+2.77.1 (B-102): a pass never stops the loop. The loop is set before the first pass, passes never overlap, and each step of
+a pass (the hub, the Line Producer, the launch step, the Director's flow, the machine scan, the Communicator, the
+workaround pass, the train daemon) is bounded: a step still running after `STUDIO_SUPERVISOR_STEP_SEC` (300; the launch
+step twice that) is reported as `supervisor.step_timeout` and the pass goes on without it. A whole pass still running after
+`STUDIO_SUPERVISOR_STUCK_MIN` (15) minutes is reported once as `supervisor.pass_stuck`. `.studio/supervisor.json` counts
+the finished passes (`passes`). Before 2.77.1 the first pass could wait on itself (a pass that imports supervisor.mjs back,
+such as the Communicator's needs-a-person list) and Node exited with code 13 ("unsettled top-level await").
+
 Every minute it keeps the War Room hub up (and logs how long it was down; 2.74.0: harness/hub-keeper.mjs, below), then starts a fresh agent
 for the next waiting task of each role, one task per session, within the pace's caps. When a session
 ends, the next minute starts the next. It starts nothing while "Stop all agents" is on, outside the

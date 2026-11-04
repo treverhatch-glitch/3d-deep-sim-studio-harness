@@ -326,6 +326,26 @@ export async function writeGrandfather(cwd = ROOT) {
   fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
   return { ok: true, file: f, added: unstamped.size - [...unstamped].filter((x) => old.shas.has(x)).length, total: shas.size };
 }
+/**
+ * 2.77.1 (B-100): add the unstamped commits of one range (`<old head>..<merged ref>`: a harness update's own commits,
+ * made on GitHub without this studio's hooks) to the grandfather list, by sha and patch-id. `upgrade --merge` calls it
+ * right after its merge commit, so the hooks gate on main doesn't start red. Adds only; never removes an entry.
+ */
+export async function grandfatherRange(range, cwd = ROOT) {
+  const f = grandfatherPath(cwd);
+  if (!f) return { ok: false, why: 'not a git checkout' };
+  const list = gitAll(['log', '--no-merges', '--format=%x1e%H%x1f%B', range], { cwd });
+  if (list.status !== 0) return { ok: false, why: (list.stderr || '').trim().split('\n')[0] || `git log ${range} failed` };
+  const unstamped = list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, msg]) => !parseStamps(msg).length).map(([sha]) => sha.trim());
+  const old = readGrandfather(cwd);
+  const fresh = unstamped.filter((x) => !old.shas.has(x));
+  if (!fresh.length) return { ok: true, file: f, added: 0, total: old.shas.size };
+  const pids = new Set(old.pids);
+  for (const pid of (await patchIdsOf(fresh, 'p', cwd)).values()) pids.add(pid);
+  const shas = new Set([...old.shas, ...fresh]);
+  fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
+  return { ok: true, file: f, added: fresh.length, total: shas.size };
+}
 const grandfathered = (g, sha, pid) => g.shas.has(sha) || Boolean(pid && g.pids.has(pid));
 /** Was HEAD checked? A valid stamp, a commit other branches hold (already shared), or one exempt from stamping. */
 async function headChecked(cwd) {

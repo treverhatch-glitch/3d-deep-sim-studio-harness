@@ -119,10 +119,12 @@ export function describe(tool, input = {}) {
 }
 
 /** Harvest a finished session's denials into .studio/denials.jsonl. Returns how many were recorded (0 with no field). */
-export function recordDenials({ log, logFile = null, task = null, agent = null, role = null, now = Date.now() } = {}) {
-  // The whole log when there is one (the launcher keeps only its last 20k characters; a session can end several results).
+export function recordDenials({ log, logFile = null, from = 0, task = null, agent = null, role = null, now = Date.now() } = {}) {
+  // The session's own part of the log (the launcher keeps only its last 20k characters; a session can end several
+  // results). 2.77.1 (PU-44): from this session's start (its logFrom): the log is appended to across sessions under one
+  // name, so reading all of it recorded every earlier session's denials again at each end (182 of the crew's 248 were copies).
   let text = log;
-  try { if (logFile && fs.existsSync(logFile)) text = fs.readFileSync(logFile, 'utf8'); } catch { text = log; }
+  try { if (logFile && fs.existsSync(logFile)) { const buf = fs.readFileSync(logFile); text = buf.subarray(Math.min(buf.length, Math.max(0, Number(from) || 0))).toString('utf8'); } } catch { text = log; }
   const found = parseDenials(text);
   if (!found || !found.length) return 0;
   const ts = new Date(now).toISOString();

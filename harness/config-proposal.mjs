@@ -31,6 +31,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { betaApprovalOk } from './beta-mode.mjs';
+import { proxyApprovalOk } from './owner-proxy.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalBytes } from './hash.mjs';
 import { matchAny } from './merge-lane.mjs';
@@ -191,7 +193,9 @@ export const ownerKeyAt = (root, rev) => { const pem = show(root, rev, OWNER_PUB
 
 /** The owner's signed approval for these protected changes of `task` (studio/approvals/*.json, kind "proposal"), or null. */
 export function signedProposal(root, { task, hash, pub }) {
-  if (!pub || !hash) return null;
+  // 2.77.1 (B-103): beta-mode and owner-proxy approvals count here as they do in every other gate (approve.mjs
+  // verifyApproval); before, only the owner key's signature did, so `approve -- proposal` in beta mode was never applied.
+  if (!hash) return null;
   const dir = path.join(root, 'studio', 'approvals');
   let names = [];
   try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return null; }
@@ -201,8 +205,11 @@ export function signedProposal(root, { task, hash, pub }) {
     const a = doc?.approval;
     if (a?.kind !== 'proposal' || a.task !== task || a.change !== hash) continue;
     let ok = false;
-    try { ok = crypto.verify(null, Buffer.from(canonicalBytes(a)), crypto.createPublicKey(pub), Buffer.from(String(doc.signature), 'base64')); } catch { ok = false; }
-    if (ok) return { file: `studio/approvals/${f}`, by: a.by, note: a.note };
+    let via = 'owner key';
+    if (!doc.signature && doc.beta) { ok = betaApprovalOk(doc, { root }); via = 'beta mode'; }
+    else if (!doc.signature && doc.proxy) { ok = Boolean(pub) && proxyApprovalOk(doc, pub, { root }); via = 'owner proxy'; }
+    else if (pub) { try { ok = crypto.verify(null, Buffer.from(canonicalBytes(a)), crypto.createPublicKey(pub), Buffer.from(String(doc.signature), 'base64')); } catch { ok = false; } }
+    if (ok) return { file: `studio/approvals/${f}`, by: a.by, note: a.note, via, recordedBy: a.recordedBy || null };
   }
   return null;
 }
@@ -266,8 +273,8 @@ export function landConfig(root, { task, main, base = null, released = null, ff,
     const chk = checkProposal(root, { text, base: baseRev, tip, globs });
     const pub = ownerKeyAt(root, tip);
     const part = protectedPart(p.changes, globs);
-    const signed = pub ? signedProposal(root, { task, hash: part.hash, pub }) : null;
-    const protOk = !part.changes.length || (pub ? Boolean(signed) : Boolean(released?.by));
+    const signed = signedProposal(root, { task, hash: part.hash, pub });
+    const protOk = !part.changes.length || Boolean(signed) || (!pub && Boolean(released?.by));
     const protWhy = pub ? `this studio has an owner key: a protected file changes only with the owner's signed approval of exactly this change (on the owner's device: npm run approve -- proposal ${task} --note "…", commit the approval to main), then npm run task -- train config ${task}`
       : `a protected file changes only with a person's decision: a person releases the lane (npm run task -- train release ${task} --by <name>) or applies it (npm run task -- train config ${task} --by <name>)`;
     for (const c of p.changes) {
@@ -279,7 +286,7 @@ export function landConfig(root, { task, main, base = null, released = null, ff,
       files[c.file] = r.text;
       applied.push(c.file);
     }
-    if (applied.length && part.changes.length && protOk) applied.decision = signed ? `the owner's signed approval (${signed.file})` : released?.by ? `${released.by}'s release of the lane${released.recordedBy ? ` (recorded by ${released.recordedBy})` : ''}` : '';
+    if (applied.length && part.changes.length && protOk) applied.decision = signed ? (signed.via === 'owner key' ? `the owner's signed approval (${signed.file})` : `${signed.recordedBy || signed.by}'s ${signed.via} approval (${signed.file})`) : released?.by ? `${released.by}'s release of the lane${released.recordedBy ? ` (recorded by ${released.recordedBy})` : ''}` : '';
   }
   const heldChanges = held.filter((h) => h.change).map((h) => ({ file: h.change.file, set: h.change.set }));
   if (held.length && heldChanges.length) {

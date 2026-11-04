@@ -408,6 +408,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const file = writeApproval(`protected-${id.slice(0, 16)}`, { kind: 'protected', change: id, files: changes, base: b.ref, by, note, at: new Date().toISOString() });
       emitEvent({ type: 'approval.protected', agent: by, msg: `${by} approved ${changes.length} protected change(s): ${note.slice(0, 200)}` });
       console.log(`Approved ${changes.length} protected change(s). Commit ${file} with them. Any later edit to these files needs a new approval.`);
+      // 2.77.1 (H7): the train and the gates read approvals from the studio's main branch (a lane copy's studio/ is main's).
+      console.log('Approvals are read from the studio\'s main branch (studio/approvals/): commit it on main, not only on a lane branch, or the merge train won\'t see it.');
     } else if (cmd === 'force') {
       const task = a[1];
       const reason = flag('--reason') || '';

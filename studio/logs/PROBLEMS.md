@@ -1301,3 +1301,32 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-245 — lanes waited in line behind one 25-minute verify · fixed in 2.77.0
 - **Evidence:** the crew's notes (P9.6); one train at a time.
 - **Fix:** one speculative train on train A's tree, landing only on A's exact tree (or plus record files that need no re-check). qa/selftest-277p.mjs.
+
+### P-246 — the supervisor exited after its first pass (exit 13, "unsettled top-level await") · fixed in 2.77.1
+- **Evidence:** the crew's PC on 2.77.0 (B-102): `supervisor.mjs --foreground` ran one pass and exited 13; `.studio/supervisor.json` stayed at 15:46 UTC; no builders were started by themselves; Patch ran it in a 60 s loop.
+- **Why:** main() ran as a top-level await, and a pass (the Communicator's needs-a-person list via digest.mjs, self-triage) imports supervisor.mjs back for readStatus: that import waits for the module to finish loading, which waits for the pass. Each pass run alone settled, which is why it looked like supervise() hung.
+- **Fix:** the CLI runs in an async function; the loop is set before the first pass; passes never overlap; each step is bounded (supervisor.step_timeout) and a stuck pass is reported (supervisor.pass_stuck). Reproduced on 2.77.0 with the Communicator on (exit 13, nothing saved). qa/selftest-2771.mjs.
+
+### P-247 — agy builders ended mid-task with exit 0 and the fallback never fired · fixed in 2.77.1 (partly)
+- **Evidence:** builder-agyf6 (6 min) and builder-agyf7 (34 min) ended on "jetski: … the "command" permission that headless mode cannot prompt for, so it was auto-denied"; builder-agy14 when its agent went idle with a background test (B-99).
+- **Fix:** that exit counts as a failed run (the hand-back says which), so --fallback starts the next model; GEMINI.md says foreground only and one test form (`npm --prefix <game folder> run test -- <test file>`). Not fixed: agy prints no text for the refused command, so it can't be logged. qa/selftest-2771.mjs.
+
+### P-248 — a beta-mode approval of a config proposal was not applied · fixed in 2.77.1
+- **Evidence:** T-197: `approve -- proposal T-197` under beta said "Approved", but `train config T-197` held it "only the owner's signed approval" (B-103); grokbot had to sign with the key.
+- **Fix:** the config-proposal path accepts beta-mode and owner-proxy approvals as every other gate does. qa/selftest-2771.mjs.
+
+### P-249 — an update's own commits failed the hooks gate on main · fixed in 2.77.1
+- **Evidence:** after the 2.77.0 merge, `hook-stamp.mjs check` on main listed db1b0d03, 57412089, … "no Studio-Hooks stamp" (B-100); task done on main failed.
+- **Fix:** `upgrade --merge` lists the update's commits (from the hooks gate's base, so 2.77.0's are covered by the 2.77.1 merge) in the grandfather list. qa/selftest-2771.mjs.
+
+### P-250 — `train leave` didn't stop the running train's checks · fixed in 2.77.1
+- **Evidence:** a train kept re-checking a lane that had left for about an hour, holding a heavy slot (B-98).
+- **Fix:** leave writes a cancel marker; the running train stops before its next verify or re-check (the check already running finishes first). qa/selftest-2771a.mjs.
+
+### P-251 — a reused agent name with a leftover lane copy idled for an hour · fixed in 2.77.1
+- **Evidence:** builder-p89a on T-199: "no lane copy could be made … still in use", then idle 16:56–18:01 and a hand-back (H5).
+- **Fix:** the launch is refused at once (agent.start_refused) with what to do. M2: the upgrade smoke's task add now has --phase. qa/selftest-2771b.mjs.
+
+### P-252 — permission denials were recorded again at every session end · fixed in 2.77.1
+- **Evidence:** the lab replay of the crew's logs (2026-11-04): 182 of 248 denial records were copies (director-1's one session, 13 times), which made the repeat-rate numbers wrong.
+- **Fix:** denials are read from the session's own part of the appended agent log (PU-44). Also PU-45: harness messages give one command per call (no `git add … && git commit`). qa/selftest-2771.mjs.

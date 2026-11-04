@@ -142,7 +142,7 @@ export async function adoptGame({ src, name, ref = null, root = REPO_ROOT }) {
     const st = starterManifest(dest);
     if (st) { fs.writeFileSync(bf, `${JSON.stringify(st, null, 2)}\n`); wroteBrowser = true; }
   }
-  if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: cd ${rel} && npm ci`);
+  if (fs.existsSync(path.join(dest, 'package.json'))) warnings.push(`install its packages before the first verify: npm --prefix ${rel} ci`);
   if (fs.existsSync(path.join(dest, 'ProjectSettings', 'ProjectVersion.txt')) && !fs.existsSync(path.join(dest, 'Assets', 'Sim'))) warnings.push(`it is a Unity project with no pure sim assembly (Assets/Sim with noEngineReferences): its rules can't be tested without the editor or kept free of engine time and randomness until they move there (see engine/_unity and docs/UNITY-TRACK.md)`);
   return { ok: true, slug, dir: rel, origin, gates, wroteGates, wroteBrowser, warnings };
 }

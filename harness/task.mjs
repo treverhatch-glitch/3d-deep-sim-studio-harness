@@ -716,7 +716,7 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
       }
       if (dirty.length) {
         emitEvent({ type: 'task.not_done', agent: agent || target.role, task: target.id, status: 'blocked', msg: `${target.id} not done yet: ${dirty.length} uncommitted change${dirty.length === 1 ? '' : 's'} (${dirty.slice(0, 3).join(', ')})` });
-        return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them (git add <files> && git commit -m "${target.id}: …"), then run task done again.` };
+        return { error: 'uncommitted', dirty, message: `${target.id} is not done: these changes aren't committed yet:\n${dirty.slice(0, 10).map((d) => `  ${d}`).join('\n')}\nCommit them, one command per call (agent shells refuse chained commands): git add <files>, then git commit -m "${target.id}: …", then run task done again.` };
       }
     }
   }

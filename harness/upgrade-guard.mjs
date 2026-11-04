@@ -357,6 +357,18 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     return stop(`the hooks refused the merge commit (the merge is still in progress; fix what they say and run --continue, or undo it with git merge --abort):\n${`${c.stdout}${c.stderr}`.trim().split('\n').slice(-15).map((l) => `  ${l}`).join('\n')}`, { backup });
   }
   const commit = out1(git(['rev-parse', 'HEAD'], root));
+  // 2.77.1 (B-100): the update's own commits were made on GitHub, without this studio's hooks: list them as exempt
+  // (the grandfather list, by sha and patch-id) so the hooks gate on main doesn't fail on them. The studio's own new
+  // commits are still judged. The merged harness's helper, loaded from the studio; a failure is said, never fatal.
+  try {
+    const hs = await import(pathToFileURL(path.join(root, 'harness', 'hook-stamp.mjs')).href);
+    // From the hooks gate's own base, not just the old head: commits of an earlier update that was merged before this
+    // step existed (2.77.0 on the crew's main) are listed too. Only the ref's history: the studio's own commits aren't in it.
+    const b = hs.changeBase ? await hs.changeBase(env).catch(() => null) : null;
+    const gf = hs.grandfatherRange ? await hs.grandfatherRange(`${b?.base || head}..${sha}`, root) : null;
+    if (gf?.ok && gf.added) lines.push(`[upgrade] ${gf.added} commit(s) of the update listed as made without this studio's hooks (exempt from the hooks gate).`);
+    else if (gf && !gf.ok) lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${gf.why}): node harness/hook-stamp.mjs grandfather adds them by hand.`);
+  } catch (e) { lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${String(e?.message || e).slice(0, 160)}).`); }
   await emit(root, {
     type: 'upgrade.merged', agent: String(by).trim().slice(0, 60),
     msg: `harness update ${ref} (${from} -> ${to}) merged into ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission: "${who.permission.slice(0, 120)}")` : ''}; backup ${backup}`.slice(0, 600),

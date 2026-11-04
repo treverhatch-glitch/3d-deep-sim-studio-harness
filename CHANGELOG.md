@@ -4,6 +4,38 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.77.1] — 2026-11-05
+The crew's live-run blockers on 2.77.0 (their list of 2026-11-04, B-92 to B-103). Item-by-item status, with what is left
+and the upgrade note for Patch: docs/RELEASE-2.77.1.md.
+### Critical
+- **The supervisor keeps running (B-102, P-246).** The CLI no longer runs as a top-level await, so a pass that imports
+  supervisor.mjs back (the Communicator's needs-a-person list) no longer waits on itself; Node had exited with code 13
+  after the first pass. The loop is set before the first pass, passes never overlap, every step is bounded
+  (`STUDIO_SUPERVISOR_STEP_SEC`, `supervisor.step_timeout`), a stuck pass is reported (`STUDIO_SUPERVISOR_STUCK_MIN`,
+  `supervisor.pass_stuck`), and `.studio/supervisor.json` counts `passes`.
+- **agy cut short mid-task (B-99, P-247).** An agy session that exits 0 on a headless denial, or while idle with a
+  background task, is a failed run: `--fallback` starts the next model and the hand-back says why. GEMINI.md: foreground
+  only, and one test form (`npm --prefix <game folder> run test -- <test file>`). agy prints no text for the refused
+  command, so that part can't be logged.
+- **Beta approvals of config proposals (B-103, P-248)** are applied when the lane lands, like every other approval kind.
+- **An update's own commits and the hooks gate (B-100, P-249).** `upgrade --merge` lists them as exempt (from the hooks
+  gate's base, so 2.77.0's commits on main are covered by the 2.77.1 merge).
+### High
+- **`train leave` stops a running train (B-98, P-250)** before its next verify or re-check (`task.train.cancelled`).
+- **A reused agent name with a leftover lane copy is refused at once (H5, P-251)** (`agent.start_refused`), not idle for
+  an hour.
+- **Approvals are the owner's, whoever recorded them (B-97):** AGENTS.md and AGENTS.lite.md tell builders an approval the
+  protected check passes counts (key, proxy or beta); `approve -- protected` says approvals are read from main (H7).
+- H2, H4, H6 and H8 were fixed in 2.76.0 and 2.77.0. Their evidence predates the crew's 2.77 install, and the crew's 2.77
+  events show no repeat.
+### Medium, and two items from the dev plan
+- `upgrade --smoke`'s made-up task has `--phase 1 --prototype` (M2).
+- **PU-44 (P-252):** a session's permission denials are read from its own part of the appended agent log (182 of the
+  crew's 248 records were copies).
+- **PU-45:** harness messages give one command per call (task done's uncommitted refusal, adopt's install hint).
+- Tests: qa/selftest-2771.mjs (B-102, B-99, B-103, B-100, PU-44, PU-45), qa/selftest-2771a.mjs (B-98),
+  qa/selftest-2771b.mjs (H5, M2).
+
 ## [2.77.0] — 2026-11-04
 2.77.0 is "Patch #2": everything on the crew's 2026-11-04 list that 2.76 didn't finish. The item-by-item status is in
 docs/PATCH-2-CROSSCHECK.md.
