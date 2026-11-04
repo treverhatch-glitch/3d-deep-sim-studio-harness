@@ -659,10 +659,27 @@ export function agyUsage(log, { kickoffChars = 0 } = {}) {
   return { reported: false, estimated: true, tokensIn: Math.ceil((Number(kickoffChars) || 0) / 4), tokensOut: Math.ceil(text.length / 4), cacheRead: 0, model };
 }
 
+/**
+ * 2.77.1 (B-99): did agy end this session mid-task with exit 0? 'denied' (a command refused in headless mode: its
+ * jetski line), 'idle' (its agent went idle while a background tool task still ran), or null.
+ */
+export function agyCutShort({ tool, code, log }) {
+  if (tool !== 'agy' || code !== 0) return null;
+  const line = agyStopLine(log);
+  if (/^jetski:|auto-denied|headless mode cannot prompt/i.test(line || '')) return 'denied';
+  if (/root agent idle; waiting up to [^\n]*background task/i.test(String(log || '').slice(-4000))) return 'idle';
+  return null;
+}
+
 export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
   // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
   const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
   const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
+  // 2.77.1 (B-99): agy -p exits 0 mid-task when one command is refused in headless mode (its jetski line) or when its
+  // root agent goes idle while a background tool task (a test run) is still pending. Neither is a finish: the session
+  // counts as a failed run, so --fallback starts the next model and the hand-back says why (it never halts the
+  // supervisor: that counts non-zero exit codes).
+  const agyCut = agyCutShort({ tool, code, log: usageLog ?? log });
   const found = providerTrouble(log, code);
   // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
   // never this session's (test #2: claude was marked out of quota for agy's limit).
@@ -679,7 +696,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // Windows) or a signal, but that's a stop, not a crash: no failover, no "error", and the supervisor's halt, the
   // loop park, the breaker and the tier-up don't count it. stopAgent wrote who before it killed (stopMark).
   const stop = !capped ? stopMark(agent) : null;
-  const bad = !capped && !stop && (code !== 0 || Boolean(trouble) || reasoningOnly);
+  const bad = !capped && !stop && (code !== 0 || Boolean(trouble) || reasoningOnly || agyCut);
   // PU-19 (P-042): the session stopped at a usage limit: its own, or for a custom command (no tool name of its
   // own) the one its line names. That's waiting for the reset, not a failure: the tool is marked out until
   // then (below), and the hand-back says "usage limit", so the breaker, the loop park, the model escalation
@@ -738,7 +755,7 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
       : limit
       ? `${agent} (${tool}, ${model}) stopped at its usage limit: the provider said "${String(limit.line || limit.text).replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim().slice(0, 160)}".${limitMark ? ` ${limitMark.on} is out until ${limitMark.until}${limitMark.resetKnown ? '' : ' (no reset time given: 1 h assumed)'}.` : ''} Not a failure: the task goes back to the queue for the next tool in the order, or for after the reset.${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : bad
-      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
+      ? `${agent} (${tool}, ${model}) stopped: ${trouble ? `provider said "${trouble}"` : reasoningOnly ? 'it replied with reasoning only (no answer, no work): a failed hand-off; the Director routes this task to another model family' : agyCut ? (agyCut === 'denied' ? 'agy ended the session mid-task: one shell command was refused in headless mode (one plain command per call; see GEMINI.md)' : 'agy ended the session mid-task: its agent went idle while a background command (a test run) was still running (run commands in the foreground)') : `exit code ${code}`}.${agySaid}${patch ? ` Uncommitted work saved to ${patch} (git apply it to continue).` : ' No uncommitted work.'}${onBranch} Picked up by the launcher.`
       : `${agent} (${tool}, ${model}) ended without task done or a hand-back.${agySaid}${s0.now ? ` It last said: "${s0.now}".` : ''}${s0.wip ? ` Work in progress: ${s0.wip}.` : ''}${patch ? ` Uncommitted work ${copyDir ? 'was in its copy and is' : 'is in the tree and'} saved to ${patch}.` : ' No uncommitted work.'}${onBranch} Check its commits (git log --grep ${id}) before redoing anything. Picked up by the launcher.`;
     pauseTask(id, agent, af && !af.ok && af.output ? `${note} Launcher verify: ${af.output.replace(/\n/g, ' ')}` : note, { force: true });
     if (reasoningOnly) emitEvent({ type: 'agent.reasoning_only', agent, model, task: id, status: 'warn', msg: `${agent} (${model}) replied with reasoning only on ${id}: failed hand-off, the next session goes to another model family`, meta: { role, tool } });
@@ -802,11 +819,11 @@ export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, mo
   // 2.61.0: which skills and pitfall lines this session was given, and whether its log shows it used them (telemetry only).
   try { recordFollow({ agent, model, role, task: s0.task || tasks[0] || null, log }); } catch { /* telemetry, never a blocker */ }
   // 2.66.0 (c): Claude Code's permission_denials, harvested into .studio/denials.jsonl (redacted; candidates only, never allowed).
-  try { recordDenials({ log, logFile: s0.log ? path.join(REPO_ROOT, s0.log) : null, task: s0.task || tasks[0] || null, agent, role }); } catch { /* evidence, never a blocker */ }
+  try { recordDenials({ log, logFile: s0.log ? path.join(REPO_ROOT, s0.log) : null, from: s0.logFrom || 0, task: s0.task || tasks[0] || null, agent, role }); } catch { /* evidence, never a blocker */ }
   const s = readJson(sessionFile(agent)) || {};
   fs.writeFileSync(sessionFile(agent), JSON.stringify({ ...s, status: 'ended', endedAt: s.status === 'ended' && s.endedAt ? s.endedAt : new Date().toISOString(), code, reason, exitCause: cause, handed, ...(outcome ? { outcome } : {}), ...(stop ? { stoppedBy: stop.by } : {}), ...tok }, null, 2));
   fs.rmSync(stopFile(agent), { force: true });
-  return { bad, trouble, troubleKind: t?.kind, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
+  return { bad, trouble, troubleKind: t?.kind || (agyCut ? 'agy-cut' : undefined), agyCut, handed, finished, reason, capped, usageLimit: Boolean(limit), stoppedBy: stop?.by || null };
 }
 
 /**
@@ -1024,6 +1041,18 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   const laneless = !laneWantsCopy(lane) && !rehearsal && lanelessWantsCopy({ role, lane, task });
   if ((laneWantsCopy(lane) || laneless) && !process.env.STUDIO_MAIN_ROOT) {
     const c = createLaneCopy(agent, { task, lane });
+    // 2.77.1 (H5): a copy that was wanted and could be made here but wasn't (a leftover .lanes/<agent> still in use, a failed
+    // worktree add) refuses the start at once. It used to fall through to the shared checkout and the tool started anyway:
+    // the session sat idle for an hour (crew, Windows). Git too old / STUDIO_WORKTREES=off / an unknown task id keep the
+    // shared-checkout fallback. Nothing has been claimed for the task yet (the session claims it with `task start`).
+    if (c.error && worktreeSupport().ok && !/is not on the board/.test(c.error)) {
+      for (const q of held) release(`path:${q}`, agent);
+      dropStarting(agent);
+      const rel = `.lanes/${agent}`;
+      const message = `Not started: no lane copy could be made for ${agent} (${c.error}). Use another agent name, or remove the leftover copy ${rel} first: git worktree remove --force ${rel} (npm run janitor -- --lanes --yes --by <you> removes stale ones).`;
+      emitEvent({ type: 'agent.start_refused', agent, to: 'human', task: task || undefined, status: 'warn', msg: message.slice(0, 600), meta: { role, dir: rel, error: c.error } });
+      return { ok: false, skipped: true, message };
+    }
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = { ...c, laneless };
   }

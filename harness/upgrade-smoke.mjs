@@ -121,7 +121,7 @@ function makeCopy(root, scratch, env) {
 }
 
 function tinyTrain(scratch, env, run) {
-  const add = run(scratch, ['harness/task.mjs', 'add', 'Code: smoke change (a throwaway made-up task)', '--role', 'builder', '--priority', 'P1']);
+  const add = run(scratch, ['harness/task.mjs', 'add', 'Code: smoke change (a throwaway made-up task)', '--role', 'builder', '--priority', 'P1', '--phase', '1', '--prototype']);
   const id = (`${add.stdout}`.match(/"id": "(T-\d+)"/) || [])[1];
   if (!id) return item('train', 'FAIL', `task add gave no task id in the copy: ${tail(add)}`, 'run npm run task -- add "Code: x" --role builder in a scratch studio and read the error; npm run upgrade -- --rollback --by <you> if it is the update');
   const probe = path.join(scratch, '.studio', 'smoke-lane.mjs');

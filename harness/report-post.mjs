@@ -253,20 +253,25 @@ export async function reportPass({ root = REPO_ROOT, env = process.env, now = Da
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  const argv = process.argv.slice(2);
+/** The CLI: returns the exit code, never calls process.exit (2.77.1, M4: the Windows libuv exit race, see exit-drain.mjs). */
+export async function reportCli(argv = process.argv.slice(2)) {
   const usage = 'Usage: npm run report -- post [--what status|next|digest] [--dry-run]   (posts to STUDIO_REPORT_WEBHOOK; STUDIO_REPORT_FORMAT=discord|slack|json)';
-  if (argv.includes('--help') || argv.includes('-h')) { console.log(usage); process.exit(0); }
-  if (argv[0] !== 'post') { console.error(usage); process.exit(2); }
+  if (argv.includes('--help') || argv.includes('-h')) { console.log(usage); return (0); }
+  if (argv[0] !== 'post') { console.error(usage); return (2); }
   const what = argv.includes('--what') ? String(argv[argv.indexOf('--what') + 1] || '') : 'status';
-  if (!WHATS.includes(what)) { console.error(`Unknown --what "${what}". ${usage}`); process.exit(2); }
+  if (!WHATS.includes(what)) { console.error(`Unknown --what "${what}". ${usage}`); return (2); }
   const r = await postReport({ what, dryRun: argv.includes('--dry-run'), auto: argv.includes('--auto') });
   if (r.dryRun) {
     console.log(`[report] dry run: the ${what} report as ${r.format}, ${r.parts} part${r.parts === 1 ? '' : 's'}, to ${r.target}${r.why ? ` (${r.why})` : ''}. Nothing was sent.`);
     for (const p of r.payloads) console.log(JSON.stringify(p, null, 2));
-    process.exit(0);
+    return (0);
   }
   if (r.ok) console.log(`[report] posted the ${what} report to ${r.target} (${r.format}, ${r.parts} part${r.parts === 1 ? '' : 's'}${r.attempts > r.parts ? `, after a retry` : ''}).`);
   else console.error(`[report] not posted: ${r.why}${r.target ? ` (${r.target})` : ''}`);
-  process.exit(r.ok ? 0 : 1);
+  return (r.ok ? 0 : 1);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const { exitWhenDrained } = await import('./exit-drain.mjs');
+  exitWhenDrained(await reportCli());
 }

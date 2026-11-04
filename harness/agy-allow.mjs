@@ -110,6 +110,11 @@ export const AGY_SHELL_RULES = [
   '  A command the allow-list refuses ends your session at once, with your work unsaved.',
   '- You are already in the right folder. Use relative paths; never cd elsewhere.',
   '- To see less output, run the command plainly; the harness keeps its own output short.',
+  // 2.77.1 (B-99): agy -p ends the session (exit 0, work unsaved) when its agent goes idle while a background command
+  // runs, and a cd-prefixed test command is refused. The crew's fix, shipped: foreground only, and one test form.
+  '- Run every command in the foreground and wait for it to finish. Never start one in the background: if you go idle',
+  '  while a background command (a test run) is still running, the session ends.',
+  '- Tests of a game in its own folder: npm --prefix <game folder> run test -- <test file> (one command; never cd first).',
   '- Allowed: node, npm, npx, git status, git diff, git add, git commit, git log. Edit files with your file tools.',
   '- Commit as you go (git add <files>, then git commit -m "<task id>: <what>"), then npm run task -- done <ID> --agent <you>.',
   '',

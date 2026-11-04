@@ -44,6 +44,22 @@ import { selfIdentity, pidAlive, pidExists, readStarts, sameProcess } from './pr
 export const STATUS_FILE = path.join(STUDIO_STATE_DIR, 'supervisor.json');
 const STOP_FILE = path.join(STUDIO_STATE_DIR, 'supervisor-stop');
 const LOOP_MS = Number(process.env.STUDIO_SUPERVISOR_SEC || 60) * 1000;
+const num = (v, d) => (Number.isFinite(Number(v)) && String(v ?? '').trim() !== '' ? Number(v) : d);
+/**
+ * 2.77.1 (B-102): one step of a pass, bounded. A step still pending after `ms` is reported (supervisor.step_timeout)
+ * and the pass goes on with `fallback`, so one hung step can't keep the Communicator, the machine scan, the train
+ * daemon and the status save from running. The step itself is not killed; it may still finish later.
+ */
+export async function boundedStep(label, fn, { ms = num(process.env.STUDIO_SUPERVISOR_STEP_SEC, 300) * 1000, fallback, state = null, emit = emitEvent } = {}) {
+  if (state) state.step = label;
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((resolve) => { timer = setTimeout(() => { try { emit({ type: 'supervisor.step_timeout', agent: 'supervisor', to: 'producer', status: 'warn', msg: `supervisor step "${label}" still running after ${Math.round(ms / 1000)} s; the pass went on without it`, meta: { step: label, ms } }); } catch {} resolve(typeof fallback === 'function' ? fallback() : fallback); }, ms); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
 const readJson = (f, d = null) => {
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -630,7 +646,8 @@ function ramNote(ram, now) {
 async function keepHubUp(state, port, child) {
   try {
     const { keepHub } = await import('./hub-keeper.mjs');
-    return (await keepHub({ state, port, child, loopMs: LOOP_MS })).child;
+    // 2.77.1 (B-102): bounded like every step of a pass; still pending, the pass goes on with the hub child it had.
+    return await boundedStep('hub', async () => (await keepHub({ state, port, child, loopMs: LOOP_MS })).child, { state, fallback: child });
   } catch { return child; }
 }
 
@@ -691,30 +708,47 @@ async function main(argv) {
     if (opts.hub) hub = await keepHubUp(state, port, hub);
     // 2.76.0 (k): the Line Producer's pass (harness/line-producer.mjs): mechanical unblocks, the order, the routes, the
     // rig's builder cap, .studio/line/status.json; supervise() below follows the plan. Code only, never a crash.
-    await import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});
+    await boundedStep('line-producer', () => import('./line-producer.mjs').then(({ lineProducerPass }) => lineProducerPass({})), { state }).then((lp) => { if (lp && !lp.off) state.line = { at: lp.at, mode: lp.mode, builders: lp.builders ? { running: lp.builders.running, target: lp.builders.target } : null, blocked: lp.blocked?.length || 0, error: lp.error || undefined }; }).catch(() => {});
     // 2-4. Work.
-    const r = await supervise(opts, state).catch((err) => ({ started: [], why: [`error: ${err.message}`] }));
+    const r = await boundedStep('supervise', () => supervise(opts, state), { state, ms: num(process.env.STUDIO_SUPERVISOR_STEP_SEC, 300) * 2000, fallback: () => ({ started: [], why: ['the launch step was still running; see supervisor.step_timeout'] }) }).catch((err) => ({ started: [], why: [`error: ${err.message}`] }));
     state.sessions += r.started.length;
     state.last = { at: new Date().toISOString(), started: r.started, why: r.why.slice(0, 6) };
     if (r.started.length) emitEvent({ type: 'supervisor.started', agent: 'supervisor', to: 'producer', msg: `Started ${r.started.join(', ')}` });
     // 2.30h (2): the Director's flow pass sees what the supervisor couldn't start, and why (no model, no tokens).
-    await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
+    await boundedStep('director-flow', () => import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })), { state }).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
-    await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    await boundedStep('machine', () => import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })), { state }).catch(() => {});
     // 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag who must
     // act. After the machine scan (it reads that scan) and before a stop ends the loop (so a stop file is reported).
-    await import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })).catch(() => {});
+    await boundedStep('communicator', () => import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })), { state }).catch(() => {});
     // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
     // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
-    await import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})).catch(() => {});
+    await boundedStep('workaround', () => import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})), { state }).catch(() => {});
     // 2.69.0 (r): the train daemon (harness/train-daemon.mjs, STUDIO_TRAIN_AUTO): a train starts, detached, when lanes
     // are ready and the machine has room for a verify; never two at once, never while halted or winding down.
-    if (!r.stop) await trainDaemonTick(state, r);
+    if (!r.stop) await boundedStep('train-daemon', () => trainDaemonTick(state, r), { state }).catch(() => {});
+    state.passes = (state.passes || 0) + 1; // 2.77.1 (B-102): passes finished since the start, in supervisor.json
     save();
     if (r.stop) finish(r.why[0]);
   };
-  await tick();
-  setInterval(tick, LOOP_MS);
+  // 2.77.1 (B-102): the loop is set before the first pass, passes never overlap, and a pass still running after
+  // STUDIO_SUPERVISOR_STUCK_MIN (15) is reported once (supervisor.pass_stuck) instead of silently stopping the studio.
+  let busySince = 0;
+  let stuckSaid = false;
+  const loop = async () => {
+    if (busySince) {
+      const min = (Date.now() - busySince) / 60000;
+      if (!stuckSaid && min >= num(process.env.STUDIO_SUPERVISOR_STUCK_MIN, 15)) {
+        stuckSaid = true;
+        emitEvent({ type: 'supervisor.pass_stuck', agent: 'supervisor', to: 'producer', status: 'warn', msg: `A supervisor pass has run ${Math.round(min)} min (last step: ${state.step || '?'}); the next pass waits for it` });
+      }
+      return;
+    }
+    busySince = Date.now();
+    try { await tick(); } catch (err) { console.error(`[supervisor] pass failed: ${err?.message || err}`); } finally { busySince = 0; stuckSaid = false; state.step = undefined; }
+  };
+  setInterval(loop, LOOP_MS);
+  await loop();
 }
 
 /** Start at login: launchd on macOS, systemd --user on Linux, Task Scheduler on Windows. */
@@ -781,7 +815,11 @@ function install(argv, remove = false) {
   return `Installed ${unit} (systemd --user, this terminal's PATH): the supervisor starts at login. Keep it running while logged out: loginctl enable-linger $USER. Remove: npm run studio:start -- --uninstall${warn}`;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// 2.77.1 (B-102): the CLI runs in an async function, never as a top-level await. With main() awaited at the top level,
+// any pass that imports this file back (the Communicator's needs-a-person list, self-triage, the digest read
+// readStatus from here) waited for this module to finish loading, which waited for the pass: Node exited with code 13
+// ("unsettled top-level await") after the first pass on the crew's PC.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) (async () => {
   const argv = process.argv.slice(2);
   // 2.67.0 (B-47): --help / -h prints usage and never starts, stops or resumes anything.
   if (argv.includes('--help') || argv.includes('-h')) {
@@ -868,4 +906,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     process.exit(0);
   }
   await main(argv.filter((a) => a !== '--foreground'));
-}
+})().catch((err) => { console.error(`[supervisor] ${err?.stack || err}`); process.exit(1); });

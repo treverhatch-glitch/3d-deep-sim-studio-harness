@@ -4615,6 +4615,41 @@ if (inShard('selftest-277h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.1: the crew's live-run blockers on 2.77.0: the supervisor's first pass waiting on itself (B-102), agy cut short
+// mid-task (B-99), beta approvals of config proposals (B-103), an update's own commits and the hooks gate (B-100), a
+// session's denials recorded once (PU-44), no chained command suggested (PU-45).
+if (inShard('selftest-2771')) {
+  const dir = copyRepo();
+  const { selftest2771 } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2771.mjs')).href);
+  await selftest2771({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.1 (a, B-98): `train leave` stops a running train with that lane before its next check.
+if (inShard('selftest-2771a')) {
+  const dir = copyRepo();
+  const { selftest2771A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2771a.mjs')).href);
+  await selftest2771A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.1 (b): a session whose lane copy can't be made is refused at once (H5); the upgrade smoke's task add (M2).
+if (inShard('selftest-2771b')) {
+  const dir = copyRepo();
+  const { selftest2771B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2771b.mjs')).href);
+  await selftest2771B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.1 (c): the War Room machine tile's per-session RAM and sample age (B-101), a clean exit after a post (M4),
+// boot starting the supervisor when the recorded one isn't really alive (M5).
+if (inShard('selftest-2771c')) {
+  const dir = copyRepo();
+  const { selftest2771C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2771c.mjs')).href);
+  await selftest2771C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

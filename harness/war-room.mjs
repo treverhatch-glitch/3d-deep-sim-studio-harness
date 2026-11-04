@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, readRecentEvents } from './event.mjs';
 import { pidAlive } from './proc-identity.mjs';
+import { sessionRamGb } from './heavy-budget.mjs';
 import { readTrainStatus } from './train-status.mjs';
 import { readHolds } from './task-hold.mjs';
 import { progressOf } from './gate-progress.mjs';
@@ -164,7 +165,18 @@ export function runClock({ events, supervisor = null, env = process.env, now = D
   return { t0: new Date(t0).toISOString(), from: env.STUDIO_RUN_T0 ? 'STUDIO_RUN_T0' : 'supervisor start', until: until ? new Date(until).toISOString() : null, elapsedH: Math.round(hours * 10) / 10, leftH: until ? Math.round(((until - now) / H) * 10) / 10 : null, landed: landed.size, perHour: Math.round((landed.size / hours) * 10) / 10, lastHour: lastHour.size };
 }
 
-export function machineTiles({ root = REPO_ROOT, sessions = 0, env = process.env } = {}) {
+/**
+ * The machine tile. 2.77.1 (B-101): used RAM / sessions counted the OS, browsers and Unity editors as session cost
+ * (20.4 GB used, 2 sessions: "10.2 GB per session, room for 0 more"). Now:
+ *  - perSessionGb = (used now - used at the baseline) / sessions, the baseline being the last sample seen with no
+ *    session running (kept in .studio/machine-baseline.json, written here whenever the tile is built idle);
+ *    perSessionLabel says "per session". With no baseline it stays used / sessions, labelled "average incl. other apps".
+ *  - roomForMore and limit use the scheduler's own per-session figure (heavy-budget.mjs sessionRamGb:
+ *    STUDIO_SESSION_RAM_GB, 0.6), not a second rule.
+ *  - sampleAgeMin / sampleAgeText ("sampled 3 min ago"): machine.json is written by the supervisor's pass, not live.
+ * Display only: scheduling is heavy-budget.mjs.
+ */
+export function machineTiles({ root = REPO_ROOT, sessions = 0, env = process.env, now = Date.now() } = {}) {
   const m = readJson(path.join(root, '.studio', 'machine.json'));
   let hist = [];
   try { hist = fs.readFileSync(path.join(root, '.studio', 'machine-history.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-12).map((l) => JSON.parse(l)); } catch {}
@@ -174,16 +186,31 @@ export function machineTiles({ root = REPO_ROOT, sessions = 0, env = process.env
   const usedGb = Number.isFinite(r.totalGb) && Number.isFinite(r.freeGb) ? Math.round((r.totalGb - r.freeGb) * 10) / 10 : null;
   const floorGb = env.STUDIO_RAM_FLOOR_GB === undefined || env.STUDIO_RAM_FLOOR_GB === '' ? 3 : Number(env.STUDIO_RAM_FLOOR_GB);
   const g = (m?.gpus || [])[0] || null;
-  const perSession = sessions > 0 && usedGb !== null ? Math.round((usedGb / sessions) * 10) / 10 : null;
-  const roomFor = perSession && Number.isFinite(r.freeGb) ? Math.max(0, Math.floor((r.freeGb - floorGb) / perSession)) : null;
+  const at = m?.at || hist.at(-1)?.at || null;
+  const baseFile = path.join(root, '.studio', 'machine-baseline.json');
+  let base = readJson(baseFile);
+  if (sessions === 0 && usedGb !== null && at && base?.at !== at) {
+    base = { usedGb, at };
+    try { fs.mkdirSync(path.dirname(baseFile), { recursive: true }); fs.writeFileSync(baseFile, `${JSON.stringify(base)}\n`); } catch {}
+  }
+  const baseGb = Number.isFinite(base?.usedGb) ? base.usedGb : null;
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const perSession = sessions > 0 && usedGb !== null ? r1((baseGb !== null ? Math.max(0, usedGb - baseGb) : usedGb) / sessions) : null;
+  const perSessionLabel = perSession === null ? null : baseGb !== null ? 'per session' : 'average incl. other apps';
+  const schedPer = sessionRamGb({ env, root });
+  const roomFor = Number.isFinite(r.freeGb) ? Math.max(0, Math.floor((r.freeGb - floorGb) / schedPer)) : null;
+  const ageMs = at && Number.isFinite(Date.parse(at)) ? Math.max(0, now - Date.parse(at)) : null;
+  const ageMin = ageMs === null ? null : Math.floor(ageMs / 60000);
   return {
-    at: m?.at || hist.at(-1)?.at || null,
-    ram: { usedGb, totalGb: r.totalGb ?? null, freeGb: r.freeGb ?? null, avgUsedGb: avg(hist.map((h) => h.ram?.[0])), floorGb, perSessionGb: perSession, roomForMore: roomFor },
+    at,
+    sampleAgeMin: ageMin,
+    sampleAgeText: ageMin === null ? null : ageMin < 1 ? 'sampled under a minute ago' : `sampled ${ageMin} min ago`,
+    ram: { usedGb, totalGb: r.totalGb ?? null, freeGb: r.freeGb ?? null, avgUsedGb: avg(hist.map((h) => h.ram?.[0])), floorGb, perSessionGb: perSession, perSessionLabel, baselineGb: baseGb, baselineAt: base?.at || null, schedulerPerSessionGb: schedPer, roomForMore: roomFor },
     cpu: { busyPct: Number.isFinite(m?.cpu?.busy) ? Math.round(m.cpu.busy * 100) : null, avgPct: avg(hist.map((h) => h.cpu)) },
     gpu: g ? { name: g.name || null, busyPct: Number.isFinite(g.busy) ? Math.round(g.busy * 100) : null, avgPct: avg(hist.map((h) => h.gpu?.[0])), vramGb: g.vramGb ?? null } : null,
     disk: { freeGb: m?.disk?.freeGb ?? hist.at(-1)?.disk ?? null },
     samples: hist.length,
-    limit: usedGb !== null && Number.isFinite(r.freeGb) && r.freeGb - floorGb < (perSession || 2) ? 'RAM' : null,
+    limit: usedGb !== null && Number.isFinite(r.freeGb) && r.freeGb - floorGb < schedPer ? 'RAM' : null,
   };
 }
 
@@ -295,7 +322,7 @@ export async function warRoomState(hud = {}, { root = REPO_ROOT, env = process.e
     crew: crewTile({ root, launched, supervisor: hud.supervisor }),
     trains,
     runClock: runClock({ events, supervisor: hud.supervisor, env, now }),
-    machine: machineTiles({ root, sessions: launched.filter((s) => s.running).length, env }),
+    machine: machineTiles({ root, sessions: launched.filter((s) => s.running).length, env, now }),
     ownerProxy: proxy,
     steps: agentSteps({ root, agents: hud.agents || [], queue: hud.queue, holds: hud.holds || safe(() => readHolds(), {}), trainQueue: readJson(path.join(root, '.studio', 'train', 'queue.json'), []) || [], events: events.slice(-3000) }),
     rooms: ASSIGNMENT_ROOMS,

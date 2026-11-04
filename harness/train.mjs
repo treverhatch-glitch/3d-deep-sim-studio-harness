@@ -94,7 +94,7 @@ import { rerecordTier, rerecordRefusal, rerecordEvidence } from './golden-report
 import { jobDone } from './jobs.mjs';
 import { boardStates, readDeps, droppedTasks, judgeDeps, orderByDeps } from './train-deps.mjs';
 import { trainFocus, failingTestsLine } from './train-focus.mjs';
-import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote } from './train-status.mjs';
+import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote, readTrainStatus } from './train-status.mjs';
 import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
 import { triageRed, triageOn, fileQuarantineTasks } from './flakes.mjs';
@@ -178,12 +178,46 @@ export async function leaveTrain(root, task, { by = '', why = '', env = process.
   const e = readQueue(root).find((x) => x.task === task);
   if (!e) return { ok: false, message: `${task} isn't in the train queue (npm run task -- train status lists it).` };
   dequeue(root, task);
+  // 2.77.1 (B-98): a train already running with this lane stops before its next check (it can only look between steps).
+  const running = [];
+  try { const st = readTrainStatus(root); for (const t of [st?.train, st?.next?.train]) if (t && !running.includes(String(t))) running.push(String(t)); } catch {}
   const rec = { task, by: String(by).trim().slice(0, 60), why: String(why).trim().slice(0, 300), at: new Date().toISOString(), head: e.head || null, branch: e.branch || null };
   const f = path.join(root, TRAIN_DIR, 'left.json');
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify([...readLeft(root), rec].slice(-200), null, 2));
-  emitEvent({ type: 'task.train.left', agent: rec.by, task, to: e.agent || undefined, status: 'warn', msg: `${task} left the train queue (by ${rec.by}): ${rec.why}`.slice(0, 600), meta: { head: rec.head, branch: rec.branch } });
-  return { ok: true, entry: rec, message: `${task} is out of the train queue (by ${rec.by}: ${rec.why}). Its copy and commits are unchanged; npm run task -- done ${task} --train queues it again.` };
+  for (const tid of running) writeCancel(root, tid, rec);
+  emitEvent({ type: 'task.train.left', agent: rec.by, task, to: e.agent || undefined, status: 'warn', msg: `${task} left the train queue (by ${rec.by}): ${rec.why}`.slice(0, 600), meta: { head: rec.head, branch: rec.branch, ...(running.length ? { runningTrains: running } : {}) } });
+  return { ok: true, entry: rec, cancelled: running, message: `${task} is out of the train queue (by ${rec.by}: ${rec.why}). Its copy and commits are unchanged; npm run task -- done ${task} --train queues it again.${running.length ? ` Train ${running.join(', ')} is running: if it has ${task}, it stops before its next check and the other lanes stay queued.` : ''}` };
+}
+
+// ---- 2.77.1 (B-98): a lane that leaves a running train stops that train ------------------------------------------------
+
+/** .studio/train/<train id>.cancel.json = { tasks, by, why, at }: written by leaveTrain, read by the running train. */
+const cancelFile = (root, id) => path.join(root, TRAIN_DIR, `${id}.cancel.json`);
+export function readCancel(root, id) {
+  try { const j = JSON.parse(fs.readFileSync(cancelFile(root, id), 'utf8')); return j && Array.isArray(j.tasks) ? j : null; } catch { return null; }
+}
+function writeCancel(root, id, rec) {
+  try {
+    const old = readCancel(root, id);
+    const f = cancelFile(root, id);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, `${JSON.stringify({ tasks: [...new Set([...(old?.tasks || []), rec.task])], by: rec.by, why: rec.why, at: rec.at }, null, 2)}\n`);
+  } catch {}
+}
+/** Running trains in this process: id -> () => the tasks still riding it (not handed back, not landed). */
+const activeLanes = new Map();
+class TrainCancelled extends Error {
+  constructor(marker) { super(`${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; }
+}
+/** Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round). */
+function checkCancel(root, id) {
+  const lanes = activeLanes.get(String(id));
+  if (!lanes) return;
+  const m = readCancel(root, id);
+  if (!m) return;
+  const left = m.tasks.filter((t) => lanes().includes(t));
+  if (left.length) throw new TrainCancelled({ ...m, tasks: left });
 }
 
 // ---- one train at a time ------------------------------------------------------------------------
@@ -598,6 +632,7 @@ export function failLines(text) {
  * lanes in it, whose claim baselines may excuse checks that were already red (excusedRed).
  */
 export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], lanes = [], whole = null, log = () => {} }) {
+  checkCancel(sc.root, id); // 2.77.1 (B-98)
   const judged = (raw) => {
     if (raw.ok || raw.reused || !raw.rec || raw.rec.tree !== tree || (all && raw.rec.scoped)) return raw;
     const ex = excusedRed(raw.rec, tasks);
@@ -707,6 +742,7 @@ async function verifyRemoteFirst(sc, o, { head, by, deps = {}, res }) {
 /** 2.69.0 (q): run-gates --only <the safety gates> on the train's tree: { ok, rec, rows, gates, detail, why, log, excused }. */
 function localSafetyGates(sc, { id, n, tree, all, tasks = [], log }, ids, games) {
   const root = sc.root;
+  checkCancel(root, id); // 2.77.1 (B-98)
   const owner = `train-${id}-local`;
   const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
   for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
@@ -747,6 +783,7 @@ const mergeEnv = () => { const env = { ...process.env }; for (const k of ['STUDI
  * prefix. Cached by tree and gates. Returns { ok, gates, detail, log }.
  */
 function recheckStart(sc, { id, tree, gates, changed, all, cache, log, res, label, focus = null, question = '', about = 0, eta = null, owner: ownerGiven = null, workers = null }) {
+  checkCancel(sc.root, id); // 2.77.1 (B-98): a lane left this train: no further re-check
   const key = `${tree}:${gates.join(',')}${focus ? `:${JSON.stringify(focus)}` : ''}`;
   if (cache.has(key)) return { cached: cache.get(key) };
   const root = sc.root;
@@ -833,6 +870,7 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
     const runAlone = ({ check, file, lowLoad }) => {
+      checkCancel(root, id); // 2.77.1 (B-98): swallowed by the catch below; the next verify or re-check stops the train
       n += 1;
       const owner = `train-${id}-flake`;
       const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
@@ -2150,6 +2188,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
   res.trainLanes = ready.length;
   { const cn = capNote(ready.length); if (cn) log(`[train] ${id}: note: ${cn}`); }
   let sc = null;
+  activeLanes.set(String(id), () => ready.map((l) => l.task).filter((t) => !res.dropped.some((d) => d.task === t) && !res.landed.includes(t)));
   try {
     for (let attempt = 0; attempt < Number(process.env.STUDIO_TRAIN_TRIES || 3); attempt += 1) {
       const tip = out(git(root, 'rev-parse', `refs/heads/${main}`));
@@ -2157,6 +2196,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         sc = makeScratch(root, id, tip);
         if (sc.error) { res.ok = false; res.message = `The train couldn't make its scratch copy: ${sc.error}`; sc = null; return res; }
       }
+      checkCancel(root, id); // 2.77.1 (B-98)
       const seen = new Map();
       // 2.60.0: the game's pins and union files (its manifest, as main has it).
       const settings = await trainManifest(root, tip);
@@ -2202,6 +2242,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       const etaFor = (rechecks, verifies = 1) => trainEta({ rechecks, verifies, recheckMs: res.recheckMs, verifyMs: res.lastVerifyMs || quiet, quiet: !res.lastVerifyMs && Boolean(quiet) });
       res.roundWithout = [];
       for (let round = 0; set.length && round <= ready.length + 1; round += 1) {
+        checkCancel(root, id); // 2.77.1 (B-98)
         res.round = round + 1;
         if (round > 0) { built = buildInOrder(sc, tip, set, { id, unionFiles }, depInfo); for (const l of built.depWait) defer(l, l.why); }
         // (Round 0's build was handled above; 2.59.0 handled it twice: a deferral logged twice, a hand-back made twice.)
@@ -2364,7 +2405,16 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       }
       break;
     }
+  } catch (e) {
+    if (!(e instanceof TrainCancelled)) throw e;
+    // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
+    const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
+    res.cancelled = e.marker;
+    res.message = `Train ${id} stopped: ${e.marker.tasks.join(', ')} left the train (by ${e.marker.by || '?'}: ${e.marker.why || '-'}); no further checks.${stay.length ? ` ${stay.join(', ')} stay queued for the next train (nobody handed back).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+    log(`[train] ${id}: ${res.message}`);
+    ev('cancelled', id, res.message, { agent: by, status: 'warn', meta: { left: e.marker.tasks, leftBy: e.marker.by || null, why: e.marker.why || null, stay } });
   } finally {
+    activeLanes.delete(String(id));
     for (const l of ready) deps.clearRunning?.(l.task);
     if (sc) removeScratch(sc);
   }
