@@ -119,6 +119,8 @@
     "beta": "node harness/beta-mode.mjs",
     "line": "node harness/line-producer.mjs",
     "models": "node harness/model-pools.mjs",
+    "remote": "node harness/remote-workers.mjs",
+    "lane": "node harness/lane-create.mjs",
     "delegate": "node harness/delegation.mjs",
     "decisions": "node harness/decisions.mjs",
     "policy": "node harness/policy.mjs",

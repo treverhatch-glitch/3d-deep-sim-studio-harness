@@ -29,7 +29,10 @@
  *      STUDIO_LINE_EXPANSION_MIN (2) such tasks are open it files ONE "Director: next ranked slice for phase <n>" task
  *      (never two open);
  *   f. one Producer note (.studio/line/producer-note.md, a line.plan_blocked event when its reasons change) when the plan
- *      can't run.
+ *      can't run;
+ *   g. 2.77.0 (o): remote workers (harness/remote-workers.mjs): when the local builders are at their target, the
+ *      remote-eligible ready tasks are offered to remote (cloud) workers (status "remote", `line -- plan`); with
+ *      STUDIO_REMOTE=on the pass also ends leases that ran out and starts a background fetch of remote/* when due.
  * It writes .studio/line/status.json (lineStatus(): what the Communicator posts and the supervisor reads for its order).
  *
  * STUDIO_LINE_PRODUCER: on (default) | report (status only: no fixes, no task filed, the supervisor ignores the plan) |
@@ -225,8 +228,12 @@ export function linePlan(f) {
   for (const d of f.dangling || []) reasons.push(`${d.task} waits for ${d.on}, which isn't on the board: the chain can't finish`);
   if (blocked.some((b) => b.kind === 'trunk')) reasons.push('the trunk is red: only fix tasks start until it is green');
   const why = [`pace ${f.pace?.label || '?'} allows ${paceCap} builder${paceCap === 1 ? '' : 's'}`, rigCap === null ? rigWhy : `rig: ${rigWhy}`, `${builders.length} running`, `${readyB.length} ready`, blocked.length ? `${blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : null].filter(Boolean).join('; ');
+  // 2.77.0 (o): remote (cloud) workers: remote-eligible ready tasks offered when the local builders are at their target.
+  let remote = null;
+  if (f.remote && f.remote.remotePlan) remote = f.remote.remotePlan(f.remote, { order, target, running: builders.length, roleOf: (id) => byTask.get(id)?.role });
   return {
     builders: { running: builders.length, target, paceCap, rigCap, ready: readyB.length, why },
+    ...(remote ? { remote } : {}),
     order,
     routes,
     blocked,
@@ -490,7 +497,12 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     models = rp.models?.length || Object.keys(rp.tiers || {}).length ? rt.tierModels(rp, env) : {};
   } catch { models = {}; }
   if (!Object.keys(models).length) for (const t of TIERS) { const m = String(env[`STUDIO_TIER_${t.toUpperCase()}_MODEL`] || '').trim(); if (m) models[t] = m; }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps };
+  // 2.77.0 (o): remote workers (harness/remote-workers.mjs): the live leases and which ready tasks may go out.
+  let remote = deps.remote || null;
+  if (!remote) {
+    try { const rw = await import('./remote-workers.mjs'); remote = { ...(await rw.remoteFacts({ tasks, holds, events, env, root })), remotePlan: rw.remotePlan }; } catch { remote = null; }
+  } else if (!remote.remotePlan) { try { remote = { ...remote, remotePlan: (await import('./remote-workers.mjs')).remotePlan }; } catch {} }
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, remote, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps };
 }
 
 /**
@@ -592,6 +604,10 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
     }
     let note = null;
     if (acting) { try { note = writeNote(p.reasons, { now }); } catch {} }
+    // 2.77.0 (o): STUDIO_REMOTE=on: leases that ran out end (the claim released, the task back on the board), a
+    // background fetch of remote/* starts when one is due, and a changed offer is one remote.offer event.
+    let remotePass = null;
+    if (acting && p.remote?.on) { try { remotePass = await (await import('./remote-workers.mjs')).remotePass({ env, now, plan: p.remote, ...(deps.spawnFetch ? { spawnFetch: deps.spawnFetch } : {}), ...(deps.root ? { root: deps.root } : {}) }); } catch {} }
     const status = {
       at: new Date(now).toISOString(),
       mode,
@@ -601,6 +617,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       chainBreakers: p.chainBreakers,
       expansion: { ...p.expansion, ...(slice ? { sliceFiled: slice } : {}) },
       rig: f.rig,
+      ...(p.remote ? { remote: { ...p.remote, ...(remotePass ? { swept: remotePass.swept, fetch: remotePass.fetch } : {}) } } : {}),
       order: p.order,
       routes: Object.fromEntries(Object.entries(p.routes).filter(([id]) => p.order.includes(id) || p.chainBreakers.some((c) => c.task === id))),
       reasons: p.reasons,
@@ -628,6 +645,7 @@ export function summaryLine(s) {
     s.blocked?.length ? `${s.blocked.length} blocked (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : 'nothing blocked',
     cb ? `chain-breaker ${cb.task} (${cb.n} wait${cb.state === 'blocked' ? ', blocked' : ''})` : null,
     s.expansion?.slots ? `expansion ${s.expansion.running}/${s.expansion.slots}` : null,
+    s.remote?.on && (s.remote.out || s.remote.queued || s.remote.offer?.length) ? `remote ${s.remote.out}/${s.remote.max}${s.remote.offer?.length ? ` (offer ${s.remote.offer.map((o) => o.task).join(', ')})` : ''}` : null,
     s.fixed?.length ? `fixed ${s.fixed.length}` : null,
     s.reasons?.length ? 'a Producer note is open' : null,
   ].filter(Boolean).join('; ');
@@ -673,6 +691,7 @@ export function statusText(s) {
   L.push(`Order: ${s.order?.length ? s.order.slice(0, 8).map((id) => `${id}${s.routes?.[id]?.model ? ` (${s.routes[id].model})` : ''}`).join(', ') : 'nothing ready'}${s.order?.length > 8 ? ` (+${s.order.length - 8})` : ''}.`);
   const e = s.expansion || {};
   L.push(`Expansion: ${e.slots} slot(s) at share ${e.share}, ${e.running} running, ${e.open} open (${['1', '2', '3'].map((p) => `${e.byPhase?.[p]?.label} ${e.byPhase?.[p]?.open}`).join(', ')}${e.byPhase?.unphased?.open ? `, unphased ${e.byPhase.unphased.open}` : ''})${e.sliceOpen ? `; Director slice open: ${e.sliceOpen}` : ''}${e.sliceFiled ? `; asked the Director: ${e.sliceFiled}` : ''}.`);
+  if (s.remote) L.push(remoteText(s.remote));
   if (s.blocked?.length) { L.push('Blocked:'); for (const b of s.blocked.slice(0, 12)) L.push(`  ${b.task} [${b.kind}] ${b.why}${b.fix ? ` -> ${b.fix}` : ''}`); if (s.blocked.length > 12) L.push(`  … and ${s.blocked.length - 12} more (npm run line -- status --json)`); }
   if (s.models?.on) L.push(`Model pools (npm run models -- status): ${Object.entries(s.models.pools || {}).map(([k, v]) => `${k} ${v.out ? 'out' : v.near ? `near (${v.usedPct}%)` : `${v.usedPct}%`}`).join(', ')}.`);
   if (s.protectedSteps?.length) L.push(`Protected steps: ${s.protectedSteps.map((p) => `${p.task} -> ${p.actor || 'the owner'}${p.hold ? ' (held)' : ''}`).join('; ')}.`);
@@ -680,6 +699,11 @@ export function statusText(s) {
   if (s.fixed?.length) L.push(`Fixed this pass: ${s.fixed.map((a) => a.what).join('; ')}.`);
   if (s.actions?.length) L.push(`Last actions: ${s.actions.slice(-5).map((a) => `${String(a.at).slice(11, 16)} ${a.what}`).join('; ')}.`);
   return L.join('\n');
+}
+
+/** 2.77.0 (o): the "remote" line (harness/remote-workers.mjs remoteLine's words; inline so the CLI never fails on it). */
+export function remoteText(r) {
+  return `Remote: ${r.out} out${r.queued ? `, ${r.queued} queued for the train` : ''} (0 local CPU until queued; at most ${r.max}); ${r.offer?.length ? `offer: ${r.offer.map((o) => o.task).join(', ')} -> npm run remote -- brief <T-ID> --worker <name> --by <you>` : r.why}${r.leases?.length ? `; leases: ${r.leases.map((l) => `${l.task} ${l.owner} ${l.status} until ${String(l.until).slice(11, 16)} UTC`).join(', ')}` : ''}.`;
 }
 
 export function whyText(s, id) {
