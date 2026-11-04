@@ -17,7 +17,7 @@ const readJson = (rel, fallback = null) => {
 
 // Core divisions and Art are on; the rest ship switched off. studio/divisions.json overrides this list.
 export const DEFAULT_DIVISIONS = [
-  { id: 'production', name: 'Producer', roles: ['producer'], core: true },
+  { id: 'production', name: 'Producer', roles: ['producer', 'line-producer'], core: true },
   { id: 'engineering', name: 'Engineering', roles: ['builder'], core: true },
   { id: 'qa', name: 'QA Lab', roles: ['qa-playtester'], core: true },
   { id: 'design', name: 'Design & Balance', roles: ['rnd', 'designer-calibrator', 'planner'], core: true },

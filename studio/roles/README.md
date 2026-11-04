@@ -3,6 +3,7 @@
 | Role | File | One-line description |
 |------|------|----------------------|
 | Producer | producer.md | Oversees work and assigns non-overlapping tasks |
+| Line Producer | line-producer.md | Harness code on the supervisor's loop: orders launches, routes models, watches the rig, unblocks, reports up |
 | Builder | builder.md | Implements cartridge and harness changes |
 | Playtester | playtester.md | Seed/tick replay and bug reports |
 | QA Playtester | qa-playtester.md | Stage 1 state checks and stage 2 visual checks |
