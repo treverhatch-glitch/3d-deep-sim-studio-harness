@@ -111,6 +111,7 @@
     "usage": "node harness/usage.mjs",
     "digest": "node harness/digest.mjs",
     "report": "node harness/report-post.mjs",
+    "comm": "node harness/communicator.mjs",
     "next-board": "node harness/next-board.mjs",
     "denials": "node harness/denials.mjs",
     "workaround": "node harness/workaround.mjs",

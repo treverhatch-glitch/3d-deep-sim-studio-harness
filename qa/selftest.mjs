@@ -4557,6 +4557,15 @@ if (inShard('selftest-276g')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag exactly who
+// must act (orchestrator, key holder, owner), dedup, quiet hours, beta mode, the Line Producer's status, the webhook kept secret.
+if (inShard('selftest-276l')) {
+  const dir = copyRepo();
+  const { selftest276L } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276l.mjs')).href);
+  await selftest276L({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

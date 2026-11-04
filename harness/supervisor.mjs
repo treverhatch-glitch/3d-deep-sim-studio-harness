@@ -660,6 +660,9 @@ async function main(argv) {
     await import('./director-flow.mjs').then(({ flowPass }) => flowPass({ fill: false, launcherWhy: r.why, throttleMs: 55000 })).catch(() => {});
     // 2.68.0 (m): the resource monitor: a machine scan every STUDIO_MACHINE_SAMPLE_S into machine.sample (harness/machine.mjs).
     await import('./machine.mjs').then(({ sampleMachine }) => sampleMachine({ emit: emitEvent })).catch(() => {});
+    // 2.76.0 (l): the Communicator (harness/communicator.mjs): the 30-minute status post and the alerts that tag who must
+    // act. After the machine scan (it reads that scan) and before a stop ends the loop (so a stop file is reported).
+    await import('./communicator.mjs').then(({ communicatorPass }) => communicatorPass({ passWhy: r.why })).catch(() => {});
     // 2.71.0 (z): the self-repair loop's pass (harness/workaround.mjs): hand-edited records, supervisor restarts, killed
     // launchers, harness tasks and their "maybe fixed" marks. Itself throttled to STUDIO_WORKAROUND_SCAN_MIN (10).
     await import('./workaround.mjs').then(({ workaroundPass }) => workaroundPass({})).catch(() => {});
