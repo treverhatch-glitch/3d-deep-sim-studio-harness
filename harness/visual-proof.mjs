@@ -278,7 +278,7 @@ export function captureGodot(project, outDir, { cams = [], frames = 30, bin = pr
   const scriptFile = path.join(os.tmpdir(), `studio-capture-${process.pid}-${Date.now()}.gd`);
   fs.writeFileSync(scriptFile, captureScript());
   const shell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
-  const opts = { cwd: REPO_ROOT, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, shell };
+  const opts = { cwd: REPO_ROOT, windowsHide: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, shell };
   let log = '';
   const imp = spawnSync(bin, ['--headless', '--path', proj, '--import'], { windowsHide: true, ...opts });
   log += `${imp.stdout || ''}${imp.stderr || ''}`;
@@ -325,7 +325,7 @@ export function captureWithCommand(template, outDir, { cams = [], task = '', pha
   const vals = { out: path.resolve(outDir), cams: cams.join(','), task, phase };
   const cmd = template.replace(/\{(out|cams|task|phase)\}/g, (_, k) => (vals[k] === '' ? '""' : quoteArg(vals[k])));
   const rv = rendererEnv(outDir, phase);
-  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: rv.env });
+  const r = spawnSync(cmd, { cwd: REPO_ROOT, shell: true, windowsHide: true, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, env: rv.env });
   rv.done();
   const log = `${rv.note ? `[visual] ${rv.note}\n` : ''}${r.stdout || ''}${r.stderr || ''}`;
   const files = pngs(outDir);
