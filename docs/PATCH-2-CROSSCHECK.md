@@ -48,5 +48,5 @@ DONE = shipped (version, commit). DONE (differently) = shipped another way, with
 | P9.3 | DONE | 2.77.0 fd52df7: known-red-on-main tests listed once, with a counter. |
 | P9.4 | DONE | 2.77.0 5d45bdd: `npm run lane -- create`. |
 | P9.5 | DONE | 2.77.0 fd52df7: if the only reds are known-red tests that also fail on main alone, the train lands and reports them. |
-| P9.6 | PIPELINE | see the 2.77.0 CHANGELOG entry. |
+| P9.6 | DONE | 2.77.0 ba81d8d: one speculative train verifies main + train A + the next lanes and lands right after A; discarded (lanes kept, no hand-back) when A goes red or main moves. Batches of 4 when a second train can follow. `STUDIO_TRAIN_PIPELINE` auto/on/off. Left: B's verify isn't stopped early when A goes red. |
 | P9.7 | DONE | = P5.2. |

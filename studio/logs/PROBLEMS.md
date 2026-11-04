@@ -1297,3 +1297,7 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-244 — the War Room was light, long and covered its own content; the Train Room ETA was a guess · fixed in 2.77.0
 - **Evidence:** the owner: "darkmode not light mode"; a 7,896 px Control room; the floor bar over the Train Room.
 - **Fix:** the dark terminal, folds, page flow, a recorded verify progress. qa/selftest-277w.mjs, qa/hud-check.mjs.
+
+### P-245 — lanes waited in line behind one 25-minute verify · fixed in 2.77.0
+- **Evidence:** the crew's notes (P9.6); one train at a time.
+- **Fix:** one speculative train on train A's tree, landing only on A's exact tree (or plus record files that need no re-check). qa/selftest-277p.mjs.

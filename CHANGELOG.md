@@ -22,7 +22,11 @@ docs/PATCH-2-CROSSCHECK.md.
   lands with them reported (P9.3/P9.5, `STUDIO_TRAIN_KNOWN_RED`). A new lane copy carries the branch holding the
   task's approved contents (B-96); the launcher doesn't merge a mixed lane into a new copy (P2.4).
 - `npm run lane -- create <T-ID> --from <branch>...` makes a proper lane copy from chosen branches (P9.4).
-<!-- P96 -->
+- **Pipelined trains (P9.6):** while a train verifies, one speculative train verifies its tree plus the next lanes
+  and lands right after it without verifying again; if the first goes red or main moves (by code, or by a file that
+  needs checks re-run), it is discarded and its lanes keep their place, never handed back. A train takes at most
+  `STUDIO_TRAIN_BATCH` lanes (4) when a speculative train can follow; otherwise one train takes them all, as before.
+  `STUDIO_TRAIN_PIPELINE` auto (only with room for a second verify), on or off. Status and the War Room show both.
 ### Remote (cloud) workers
 - `npm run remote -- mark|brief|fetch|release|status`: a cloud session does a self-contained task on a 12 h lease,
   pushes `remote/<T-ID>-…`, and the PC lands it only through the normal train. docs/REMOTE-WORKERS.md.

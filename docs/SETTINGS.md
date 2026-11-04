@@ -672,7 +672,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## TRAIN_* (28)
 
 - `STUDIO_TRAIN` · no simple default · harness/bench.mjs, harness/done-check.mjs, harness/heavy-budget.mjs (+27 more) · [RELEASE.md:196](RELEASE.md)
-- `STUDIO_TRAIN_*` · no simple default · harness/train-daemon.mjs · [RELEASE.md:117](RELEASE.md)
+- `STUDIO_TRAIN_*` · no simple default · harness/train-daemon.mjs · [PATCH-2-CROSSCHECK.md:51](PATCH-2-CROSSCHECK.md)
 - `STUDIO_TRAIN_AUTO` · no simple default · harness/heavy-budget.mjs, harness/supervisor.mjs, harness/train-daemon.mjs (+10 more) · [WORK-ORGANIZATION.md:285](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BATCH` · no simple default · harness/train-pipeline.mjs, harness/train.mjs, qa/selftest-2653a.mjs (+3 more) · [WORK-ORGANIZATION.md:279](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BISECT` · no simple default · harness/train.mjs, qa/selftest-259a.mjs, qa/selftest-260a.mjs (+9 more) · [WORK-ORGANIZATION.md:112](WORK-ORGANIZATION.md)
@@ -689,7 +689,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_MAX_HANDBACKS` · no simple default · harness/tiers.mjs, harness/train-lanes.mjs, harness/train-life.mjs (+8 more) · [WORK-ORGANIZATION.md:247](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_MIN` · default `1` · harness/train-daemon.mjs, harness/train.mjs, qa/selftest-263i.mjs (+9 more) · [WORK-ORGANIZATION.md:277](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_MIXED` · no simple default · harness/train.mjs, harness/worktree.mjs, qa/selftest-277f.mjs · [WORK-ORGANIZATION.md:259](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_PIPELINE` · no simple default · harness/train-pipeline.mjs, qa/selftest-2653a.mjs, qa/selftest-269q.mjs (+1 more) · [WORK-ORGANIZATION.md:434](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_PIPELINE` · no simple default · harness/train-pipeline.mjs, qa/selftest-2653a.mjs, qa/selftest-269q.mjs (+1 more) · [PATCH-2-CROSSCHECK.md:51](PATCH-2-CROSSCHECK.md)
 - `STUDIO_TRAIN_POLL_S` · default `15` · harness/train.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs · [WORK-ORGANIZATION.md:277](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_PREDICT` · no simple default · harness/train-predict.mjs, qa/selftest-260b.mjs, qa/selftest-2651a.mjs (+2 more) · [WORK-ORGANIZATION.md:203](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_REFRESH` · no simple default · harness/train-refresh.mjs, qa/selftest-276i.mjs · [RELEASE.md:117](RELEASE.md)
