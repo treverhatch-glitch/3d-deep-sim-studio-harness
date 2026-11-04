@@ -19,6 +19,10 @@
  * judged a "change" task (no regression replay), said as "type: change (evidence: …)" and logged once as a
  * task.type.evidence event (evidenceType). An owner or permission record always outranks the evidence; a change in
  * a sim path keeps "bug" and its replay. STUDIO_TYPE_EVIDENCE=off: the title decides, as before.
+ * 2.77.0 (u, P5.1/P5.5): an engine pass whose work lives in the engine's own repo (harness/engine-tracks.mjs engineRepo)
+ * is judged there (engineWorkChecks): commits on its branch that the engine's target lacks; the engine's land run (the
+ * gate or its train) stands for the studio's verify, so the studio-repo rows (changes, verify, size, reach) don't apply.
+ * A task added with --visual-check or --refs also needs the visual check (harness/visual-check.mjs visualCheckRows).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,6 +50,8 @@ import { judgeFiles, manifestSettings, evidenceWords } from './type-evidence.mjs
 import { activeGame } from './cartridge.mjs';
 import { regressionHowTo, regressionMissing } from './regression-howto.mjs';
 import { checkResearch, ensureResearchTemplate } from './research.mjs';
+import { engineTask, engineRepo, engineTarget } from './engine-tracks.mjs';
+import { visualCheckRows } from './visual-check.mjs';
 
 /** Which part of the game a task touches (task add --part sim|renderer|both); null when not said. */
 export const partOf = (id) => readRecentEvents(20000).find((e) => e.type === 'task.added' && e.task === id)?.meta?.part || null;
@@ -651,7 +657,46 @@ export function gameplayChecks(task, part, since, check) {
  * Returns { ok, type, means, skill, checks: [{ label, ok, why }], missing: [why…] }.
  * Each check reads what the work contains, not only when a file was touched.
  */
+/**
+ * 2.77.0 (u): the engine pass's work in its own repo: { engine, label, repo, branch, target, ahead, rows } or null (not
+ * an engine task, or its engine's work lives in the studio repo).
+ */
+export function engineWorkChecks(task) {
+  let rec = null;
+  try { rec = engineTask(task.id); } catch { rec = null; }
+  if (!rec) return null;
+  const repo = engineRepo(rec.engine);
+  if (!repo) return null;
+  const t = engineTarget(rec.engine);
+  const target = t?.cfg?.target || null;
+  const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const rows = [];
+  const br = rec.branch;
+  let ahead = 0;
+  if (!br) rows.push({ label: `A ${t.label} branch for this pass`, ok: false, why: `no ${t.label} branch recorded for ${task.id}: task done ${task.id} --train --branch <its branch> (or node harness/unity-gate.mjs branch ${task.id} <branch>)` });
+  else {
+    const head = g('rev-parse', '--verify', '--quiet', `refs/heads/${br}^{commit}`).stdout.trim();
+    const base = target ? g('rev-parse', '--verify', '--quiet', `refs/heads/${target}^{commit}`).stdout.trim() : '';
+    ahead = head && base ? Number(g('rev-list', '--count', `${base}..${head}`).stdout.trim()) || 0 : head ? 1 : 0;
+    const dirtyIn = (() => { const wt = g('worktree', 'list', '--porcelain').stdout.split('\n\n').map((b) => ({ dir: (b.match(/^worktree (.+)$/m) || [])[1], br: (b.match(/^branch refs\/heads\/(.+)$/m) || [])[1] })).find((w) => w.br === br && w.dir); if (!wt) return []; return g('-C', wt.dir, 'status', '--porcelain').stdout.split('\n').filter(Boolean).filter((l) => !/(^|\/)(Library|Temp|Logs|obj|UserSettings|\.godot)\//.test(l.slice(3))); })();
+    rows.push({ label: `Commits on ${br} in the ${t.label} repo that ${target || 'its target'} doesn't have`, ok: Boolean(head) && ahead > 0, why: !head ? `the ${t.label} repo (${repo}) has no branch ${br}` : `${br} has no commits that ${target} lacks: commit the pass's work on ${br}` });
+    rows.push({ label: `Everything on ${br} is committed`, ok: !dirtyIn.length, why: `${dirtyIn.length} uncommitted file(s) in ${br}'s worktree (${dirtyIn.slice(0, 3).map((l) => l.slice(3)).join(', ')}): commit them first (only committed work lands)` });
+  }
+  return { engine: rec.engine, label: t.label, repo, branch: br, target, ahead, rows };
+}
+const ENGINE_WORK_TYPES = new Set(['change', 'chore', 'bug', 'system', 'whole', 'docs']);
+
 export function checkDone(task, since = startedAt(task.id)) {
+  // 2.77.0 (u): an engine pass in its own repo is judged there; the engine's land run is its verify.
+  const ew = (() => { try { return engineWorkChecks(task); } catch { return null; } })();
+  if (ew && ENGINE_WORK_TYPES.has(typeOf(task).type)) {
+    const checks = [...ew.rows];
+    try { for (const r of visualCheckRows(task.id)) checks.push(r); } catch (e) { checks.push({ label: 'The visual check', ok: false, why: `could not be read: ${e.message}` }); }
+    try { const k = contractChecks(task, 'change', { defer: false }); for (const c of k.checks) checks.push({ label: c.label, ok: Boolean(c.ok), why: c.ok ? null : c.why }); } catch {}
+    const missing = checks.filter((c) => !c.ok).map((c) => c.why);
+    const typed = typeOf(task);
+    return { ok: !missing.length, type: typed.type, typeSource: typed.source, titleType: typed.titleType, part: null, since, checks, missing, notes: [], engineWork: { engine: ew.engine, repo: ew.repo, branch: ew.branch, target: ew.target, ahead: ew.ahead }, skill: 'studio/roles/engine-porter.md', means: `an engine pass in the ${ew.label} repo: commits on its branch that ${ew.target || 'the target'} lacks, all committed${checks.some((c) => /visual|screenshots|reference photo|looked|Reviewed/i.test(c.label)) ? ', the visual check' : ''}; the ${ew.label} land run (task done --train, then the ${ew.label} train; or the gate at done) is its verify` };
+  }
   const typed = typeOf(task);
   // 2.65.0: a bug whose diff is only tests, docs or config is a change (evidence; an owner record outranks it).
   const ev = evidenceType(task, typed, { since });
@@ -864,6 +909,8 @@ export function checkDone(task, since = startedAt(task.id)) {
     check('Screenshots, each with a line saying what it shows', pr.shots && pr.fresh, `no screenshots for ${task.id} since it started: npm run play:browser, then npm run proof -- add ${task.id} <png> "<what it shows>"`);
     check('Checked by someone other than the builder', pr.checked, pr.wrong ? `the last check said they don't match: ${pr.wrong}` : `nobody else has checked them yet: npm run proof -- check ${task.id} --by <name> --verdict matches|wrong`);
   }
+  // 2.77.0 (u, P5.5): a task added with --visual-check or --refs needs the visual check (harness/visual-check.mjs).
+  try { for (const r of visualCheckRows(task.id)) check(r.label, r.ok, r.why); } catch { /* not readable: no rows */ }
   // 2.62.0 (H): an agreed acceptance contract (studio/contracts/<ID>.json, harness/contracts.mjs) needs every
   // criterion in force passing; no contract, no change (unless studio/game.json "contracts.required" names the type).
   {

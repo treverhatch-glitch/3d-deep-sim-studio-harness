@@ -57,6 +57,7 @@ import { taskType } from './done-check.mjs';
 import { listLocks, release, claim, renewOwner, tooBroad } from './lock.mjs';
 import { savePatch } from './wip.mjs';
 import { laneList, readHolds } from './task-hold.mjs';
+import { engineLaunch } from './engine-tracks.mjs';
 import { laneWantsCopy, lanelessWantsCopy, laneShareDirs, createLaneCopy, removeLaneCopy, unmerged, rememberTaskBranch, worktreeSupport } from './worktree.mjs';
 import { effectiveMode, AUTOSTART_OFF } from './mode.mjs';
 import { markExhausted, toolNamed, weightedTokens, dailyCap, QUOTA_ERROR, LIMIT_STOP, customKey } from './budget.mjs';
@@ -952,6 +953,9 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (c.error) emitEvent({ type: 'lane.shared', agent, task, msg: `${agent} works in the shared checkout: ${c.error}` });
     else copy = { ...c, laneless };
   }
+  // 2.77.0 (u, P5.1): an engine pass whose work lives in the engine's own repo gets a worktree of that repo on its branch
+  // (harness/engine-tracks.mjs engineLaunch), named in its prompt and passed to the tool as an extra folder.
+  const engineLane = launchEngineLane({ task, agent });
   // 2.76.0 (B-80 part 2): an agy session reads GEMINI.md in its folder: the shell rules, kept out of the lane's change.
   if (copy && tool === 'agy' && !custom) writeAgyLaneRules(copy.dir, { excludeFile: path.join(REPO_ROOT, '.studio', 'lanes', `${agent}.exclude`) });
   // 2.59.0 (#8): the broad paths left unheld for a copy: held after all (a person kept them wide) or refused when the
@@ -987,6 +991,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + kickTail
     + (task ? `\nStart with ${task}: node harness/task.mjs start ${task} --agent ${agent} --model ${model}\n` : '')
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
+    + (engineLane?.note ? `\n${engineLane.note}\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
     + refreshRule({ oneTask, task })
     // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
@@ -1030,7 +1035,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     if (prog.cmd && prog.via !== 'PATH') launchNotes.push(`aider: ${prog.cmd} (${prog.via === 'venv' ? "the studio's .studio/aider-venv" : 'STUDIO_AIDER_CMD'})`);
     if (ignoreFile) launchNotes.push(`aider ignores the harness's folders and the protected paths (${path.relative(REPO_ROOT, ignoreFile).split(path.sep).join('/')})${aider.reads.length ? `; the brief is passed with --read` : ''}`);
   }
-  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: copy ? laneShareDirs() : [], aider });
+  const cmd = custom ? null : toolCommand(tool, { model, file, prompt, effort, addDirs: [...(copy ? laneShareDirs() : []), ...(engineLane?.dir ? [engineLane.dir] : [])], aider });
   if (!custom && !cmd) dropStarting(agent);
   if (!custom && !cmd) return { ok: false, message: `No launch command for tool "${tool}". Use --tool claude|codex|agy|cursor|grok|aider|nim, or set STUDIO_${roleKey(role)}_CMD (with {kickoff}, {agent}, {model}).` };
   fs.mkdirSync(AGENTS_DIR, { recursive: true });
@@ -1675,6 +1680,21 @@ export function agentLog(agent, tail = 60, { raw = false } = {}) {
 }
 
 /** Start one agent, after the stop switch, caps and spend checks. */
+/**
+ * 2.77.0 (u, P5.1): the engine worktree of a launched engine pass ({ dir, branch, note }), or null. An error becomes the
+ * prompt's note and an engine.lane event: the session still starts (its brief says what to fix), never a crash.
+ */
+function launchEngineLane({ task, agent }) {
+  if (!task || /^(off|0|false|no)$/i.test(String(process.env.STUDIO_ENGINE_LANES || ''))) return null;
+  try {
+    const r = engineLaunch({ task, agent });
+    if (!r) return null;
+    if (r.error) { emitEvent({ type: 'engine.lane', agent, task, status: 'warn', msg: `${agent}: no engine worktree for ${task}: ${r.error}`.slice(0, 400) }); return { note: `Your task is an engine pass, but its worktree couldn't be made: ${r.error}. Fix that first, or hand it back with a note.` }; }
+    emitEvent({ type: 'engine.lane', agent, task, msg: `${agent}: ${task} works in ${r.dir.split(path.sep).join('/')} on ${r.branch}${r.created ? ' (new)' : ''}`.slice(0, 400), meta: { dir: r.dir, branch: r.branch, repo: r.repo } });
+    return r;
+  } catch (e) { return { note: `Your task is an engine pass, but its worktree couldn't be made (${e.message}).` }; }
+}
+
 export function startAgent(opts, { detach = false } = {}) {
   const { role } = opts;
   const agent = opts.agent || (role ? nextAgentName(role) : null);
