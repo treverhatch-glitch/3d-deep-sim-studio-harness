@@ -548,7 +548,61 @@ export function exitCause({ code, exit = {}, stop = null } = {}) {
   return { ...base, kind: 'exit' };
 }
 
-export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, exit = {} }) {
+/**
+ * 2.76.0 (B-82): a session's usage from its stream (each assistant message's usage, once per message id, newest Claude
+ * session only), for a session that ended with no result line of its own: the launcher ended it (stall, idle, budget),
+ * or it crashed. Same shape as tokensFrom; null when the stream carries no usage.
+ */
+export function streamUsage(log) {
+  const seen = new Set();
+  let n = 0; const r = { in: 0, cacheRead: 0, out: 0, cacheWrite: 0, cacheWrite5m: null, cacheWrite1h: null };
+  for (const l of newestSessionPart(log).split(/\r?\n/)) {
+    const t = l.trim();
+    if (!t.startsWith('{') || !t.includes('usage')) continue;
+    let o; try { o = JSON.parse(t); } catch { continue; }
+    if (o.type === 'result') continue;
+    const u = o.message?.usage;
+    if (!u || typeof u !== 'object') continue;
+    const id = o.message?.id;
+    if (id) { if (seen.has(id)) continue; seen.add(id); }
+    n += 1;
+    const w = writeSplit(u);
+    r.in += (Number(u.input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0);
+    r.cacheRead += Number(u.cache_read_input_tokens) || 0;
+    r.out += Number(u.output_tokens) || 0;
+    r.cacheWrite += w.cacheWrite;
+    if (w.cacheWrite5m !== null) r.cacheWrite5m = (r.cacheWrite5m || 0) + w.cacheWrite5m;
+    if (w.cacheWrite1h !== null) r.cacheWrite1h = (r.cacheWrite1h || 0) + w.cacheWrite1h;
+  }
+  return n ? { tokensIn: r.in, tokensOut: r.out, cacheRead: r.cacheRead, costUsd: null, turns: n, cacheWrite: r.cacheWrite, cacheWrite5m: r.cacheWrite5m, cacheWrite1h: r.cacheWrite1h, fromStream: true } : null;
+}
+
+/** 2.76.0 (B-82): dollars for a session's usage at studio/prices.json (harness/autonomy.mjs), or null with no price row. */
+export function estimateCost(tok, { model, tool, role } = {}) {
+  try {
+    const prices = readPrices();
+    if (!prices || !priceFor(prices, model, tool)) return null;
+    const meta = { tool, cacheRead: tok.cacheRead, cacheWrite: tok.cacheWrite, cacheWrite5m: tok.cacheWrite5m, cacheWrite1h: tok.cacheWrite1h, cacheTtl: tok.cacheWrite ? cacheTtlAsked(role) : undefined };
+    const d = dollarsOf([{ model, tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, meta }], prices, readPriceMultipliers());
+    return d.priced ? Math.round(d.usd * 10000) / 10000 : null;
+  } catch { return null; }
+}
+
+/**
+ * 2.76.0 (B-80, the crew's adapter checklist item 3): why a headless agy session stopped, from its own log: the
+ * "jetski: …" line or a "… permission that headless mode cannot prompt for" refusal (one denial ends the session).
+ * null when there is none.
+ */
+export function agyStopLine(log) {
+  const lines = String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const hit = [...lines].reverse().find((l) => /^jetski:|headless mode cannot prompt|auto-denied|print timeout after/i.test(l));
+  return hit ? hit.replace(/\s+/g, ' ').slice(0, 300) : null;
+}
+
+export function cleanUp(agent, { code, log = '', usageLog = null, role, tool, model, cmd = null, exit = {} }) {
+  // 2.76.0 (B-80): an agy session's real reason (its jetski / permission line) goes into its hand-back and its end.
+  const agyLine = tool === 'agy' ? agyStopLine(usageLog ?? log) : null;
+  const agySaid = agyLine ? ` agy said: "${agyLine}".` : '';
   const found = providerTrouble(log, code);
   // An error that names another tool (agy's 429 printed by a command this session ran) is that tool's,
   // never this session's (test #2: claude was marked out of quota for agy's limit).
@@ -646,7 +700,18 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
       if (outcome && finished.includes(oTask)) outcome = { ...outcome, done: true, noWork: false, stuck: false, why: '' };
     }
   } catch { outcome = null; }
-  const tok = tokensFrom(log);
+  let tok = tokensFrom(log);
+  // 2.76.0 (B-82): no result line of its own (the launcher ended it, it crashed): its usage from the stream, and its
+  // cost estimated at studio/prices.json (meta.costEstimated), so API spend isn't undercounted.
+  let costEstimated = false;
+  if (!(tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    const st = streamUsage(usageLog ?? log);
+    if (st) tok = st;
+  }
+  if (tok.costUsd === null && (tok.tokensIn || tok.tokensOut || tok.cacheRead)) {
+    const est = estimateCost(tok, { model, tool, role });
+    if (est !== null) { tok = { ...tok, costUsd: est }; costEstimated = true; }
+  }
   // 2.30g: cache hit vs write from Claude's own usage lines, and which prompt prefix the session started from.
   const cache = cacheStats(log);
   const prefixHash = (readJson(sessionFile(agent)) || {}).prefixHash || null;
@@ -654,7 +719,7 @@ export function cleanUp(agent, { code, log = '', role, tool, model, cmd = null, 
   // 2.73.2 (B-72): recorded once: a stop's endAsDead (or the watch pass) may have recorded this session's end already.
   const firstEnd = claimSessionEnd(agent, s0.startedAt, 'launcher');
   const reason = stop ? `${stop.kind === 'pause' ? 'paused' : 'stopped'} by ${stop.by}` : capped ? 'refreshed (session cap): a fresh session continues' : limit ? `usage limit: ${limit.text}${limitMark ? `, ${limitMark.on} out until ${limitMark.until}` : ''}` : trouble ? `provider: ${trouble}` : code === 0 ? (handed.length ? 'finished without task done' : finished.length ? 'finished (the launcher closed its task)' : 'finished') : `exit ${code}${cause.kind === 'signal' ? `, ${cause.why}` : ['stall', 'idle', 'budget'].includes(cause.kind) ? `, ended by the launcher (${cause.kind}: ${cause.why})` : cause.kind === 'spawn-error' ? `, it never started: ${cause.why}` : ''}`;
-  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
+  if (firstEnd) emitEvent({ type: 'agent.session.end', agent, model, task: oTask || claimedSince(agent, s0.startedAt) || undefined, status: bad ? (limit ? 'warn' : 'error') : 'ok', tokensIn: tok.tokensIn, tokensOut: tok.tokensOut, msg: `${agent} ended (${reason})${agyLine ? `; agy said: ${agyLine}` : ''}${handed.length ? `; handed back ${handed.map((h) => h.task).join(', ')}` : ''}${other ? `; ${other} reported its own limit inside this session (marked on ${other})` : ''}${outcome?.why ? `; no work on ${outcome.task}: ${outcome.why}` : ''}`.slice(0, 900), meta: { role, tool, code, reason, handed, ...(outcome ? { outcome } : {}), finishedByLauncher: finished, costUsd: tok.costUsd, ...(costEstimated ? { costEstimated: true } : {}), ...(tok.fromStream ? { usageFrom: 'stream' } : {}), ...(agyLine ? { agyStop: agyLine } : {}), cacheRead: tok.cacheRead, cacheWrite: cache.cacheWrite || tok.cacheWrite || 0, cacheWrite5m: tok.cacheWrite5m ?? undefined, cacheWrite1h: tok.cacheWrite1h ?? undefined, cacheTtl: (cache.cacheWrite || tok.cacheWrite) ? cacheTtlAsked(role) : undefined, cacheHitRate: cache.cacheRead + cache.cacheWrite + cache.input ? Number(cache.hitRate.toFixed(3)) : undefined, prefixHash: prefixHash || undefined, turns: tok.turns, otherToolLimit: other, refreshed: capped || undefined, usageLimit: limit ? { on: limitMark?.on || null, until: limitMark?.until || null } : undefined, stoppedBy: stop?.by || undefined, stopKind: stop?.kind || undefined, exitCause: cause } });
   if (outcome?.counts && (outcome.noWork || outcome.stuck)) {
     try { parkIfNoWork(outcome.task, readRecentEvents(20000), { park: parkOnce, ask: (m) => emitEvent({ type: 'agent.ask', agent: 'launcher', to: 'producer', task: outcome.task, msg: m }) }); } catch { /* the park is a help, never a crash */ }
   }
@@ -1141,7 +1206,11 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   if (!killedBy) { const st = stallEndOf(agent, startedAt); if (st && st.by !== 'launcher') killedBy = { kind: 'stall', why: st.why, stallKind: st.kind, at: st.at, by: st.by }; }
   markAgentExited(agent, startedAt, { at: exitedAt || new Date().toISOString(), code, signal: exitSignal, kind: killedBy?.kind || (spawnError ? 'spawn-error' : exitSignal ? 'signal' : 'exit') });
   fs.closeSync(out);
-  const log = fs.readFileSync(logFile, 'utf8').slice(-20000);
+  // 2.76.0 (B-82): this session's own part of the log (an earlier session's result line in the tail was reported as
+  // this one's usage and cost: two session ends with the same costUsd), and all of it for the usage of a session the
+  // launcher ended (no result line of its own).
+  const log = readLogFrom(logFile, logFrom, 256 * 1024).slice(-20000);
+  const usageLog = readLogFrom(logFile, logFrom, 64 * 1024 * 1024);
   // B-37 (2.60.1): a failed aider session (nim, aider) leaves evidence: the last lines of its output in a file beside
   // the log, and its lane copy kept for a look (STUDIO_KEEP_FAILED_LANE=off removes it as before). Before H-1's line,
   // which stays the log's last.
