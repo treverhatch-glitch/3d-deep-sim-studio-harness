@@ -477,7 +477,7 @@ export async function supervise(opts, state, now = Date.now()) {
         continue;
       }
     }
-    const lineHold = line ? line.holdFor(g, live) : '';
+    const lineHold = line ? line.holdFor(g, live) || (line.holdTask ? line.holdTask(g) : '') : '';
     if (lineHold) { why.push(lineHold); continue; }
     const perRole = (mode.perRole || {})[g.role] ?? 1;
     // One agent per lane (the clash check above); without a lane, the pace's per-role cap.
@@ -596,6 +596,8 @@ async function linePlanNow(now) {
         if (tool && tool !== preferred) return {};
         return { model: r.model, tier: r.tier, why: r.why };
       },
+      // 2.77.0 (n): a task whose protected step the Line Producer routed to an approver waits for that approval.
+      holdTask: (g) => (plan.hold && plan.hold.has(g.tasks[0]?.id) ? `${g.tasks[0].id}: ${String(plan.hold.get(g.tasks[0].id)).slice(0, 200)} (the Line Producer holds it until then)` : ''),
     };
   } catch { return null; }
 }

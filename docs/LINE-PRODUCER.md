@@ -43,6 +43,7 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_LINE_CPU_BUSY_PCT` | `90` | CPU busy at or above this (the last machine scan): no new builder. |
 | `STUDIO_LINE_RIG` | (auto) | `heavy`: read the heavy budget even when `harness/rig-budget.mjs` is there. |
 | `STUDIO_LINE_PLAN_MAX_SEC` | `300` | The supervisor ignores a status older than this. |
+| `STUDIO_LINE_PROTECTED_HOLD_MIN` | `120` | How long a task whose protected step was routed to an approver is held from new builders (or until an approval names it). |
 
 ## Model pools: quota-aware routing that prefers Gemini (2.77.0)
 
@@ -83,3 +84,12 @@ a rescue keeps the rescue model. With every pool on the list passed over, the le
   rates per pool and size, and what routing would pick now for small, normal and hard tasks (and after a Gemini
   failure), with why.
 
+### Protected steps go to an approver
+
+A builder (Gemini does this correctly) hands back the part of a task that changes a protected file. In beta mode
+(`harness/beta-mode.mjs`: its named agents, else a Producer session) or with the owner proxy (`harness/delegation.mjs`
+`delegationFor`; it signs with the owner's recorded yes), the Line Producer routes that step to the one who may approve
+it: one `line.protected_routed` event to them per hand-back (the approve command in it), the task shown as blocked
+`protected` and held from new builders until an approval names it (`approval.protected` / `.proposal`, or a beta or
+proxy approve use) or `STUDIO_LINE_PROTECTED_HOLD_MIN` passes. Without beta mode or a proxy it is only reported: only
+the owner approves.

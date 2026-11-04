@@ -54,7 +54,7 @@ export const LINE_NOTE_FILE = () => path.join(LINE_DIR(), 'producer-note.md');
 export const SLICE_TITLE = /^Director: next ranked slice\b/i;
 export const PHASE_LABEL = { 1: 'early', 2: 'mid', 3: 'late' };
 export const TIERS = ['cheap', 'mid', 'top'];
-const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'lane'];
+const KIND_ORDER = ['trunk', 'chain', 'park', 'cooldown', 'blocked', 'budget', 'lock', 'busy', 'merge', 'yes', 'held', 'protected', 'lane'];
 const OWNER_KINDS = new Set(['yes', 'park', 'held']);
 const PRI = (p) => { const m = String(p || '').match(/P(\d)/i); return m ? Number(m[1]) : 9; };
 const num = (v, d) => { const s = String(v ?? '').trim(); const n = Number(s); return s !== '' && Number.isFinite(n) ? n : d; };
@@ -448,6 +448,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
   // 2.77.0 (n): model pools (harness/model-pools.mjs), when on: each task's size class, its last failed pool, the model
   // it started on, whether it is protected-heavy; the outcomes file is rebuilt (written only when this pass acts).
   let pools = null;
+  let protectedSteps = [];
   try {
     const mp = await import('./model-pools.mjs');
     pickPoolImpl = mp.pickPool;
@@ -470,6 +471,13 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       if (st) t.startedOn = { model: st.model, tool: st.meta?.tool || null };
     }
     if (mc.on) pools = { cfg: mc.cfg, state: mc.state, rates: mc.rates, recentProt: mc.recentProt, pickPool: mp.pickPool, why: mc.why, quota: mc.quota.why };
+    // 2.77.0 (n, Priority 8): a protected step a builder handed back goes to someone who may approve it (beta mode or
+    // the owner proxy) instead of stranding the task; it is held from new builders until approved (or the hold ends).
+    protectedSteps = await protectedRoutes({ tasks, events, now, env, act: fix });
+    for (const ps of protectedSteps) {
+      const t = tasks.find((x) => x.id === ps.task);
+      if (t && ps.hold && t.state === 'ready') { t.state = 'blocked'; t.block = { kind: 'protected', why: ps.why, fix: ps.fix }; }
+    }
   } catch { pools = null; }
   const sliceOpen = [...q.inProgress, ...q.backlog].find((t) => SLICE_TITLE.test(t.title || '')) || null;
   const pace = deps.pace || (await import('./mode.mjs')).effectiveMode();
@@ -482,7 +490,66 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     models = rp.models?.length || Object.keys(rp.tiers || {}).length ? rt.tierModels(rp, env) : {};
   } catch { models = {}; }
   if (!Object.keys(models).length) for (const t of TIERS) { const m = String(env[`STUDIO_TIER_${t.toUpperCase()}_MODEL`] || '').trim(); if (m) models[t] = m; }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools };
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools, protectedSteps };
+}
+
+/**
+ * 2.77.0 (n): who may approve a protected step now: beta mode's named agents (harness/beta-mode.mjs; betaActor asked as
+ * each), else the owner proxy's agent (harness/delegation.mjs delegationFor, which then needs the owner's recorded yes
+ * as --permission). { who, via, note } or null (only the owner).
+ */
+export async function protectedApprover({ env = process.env } = {}) {
+  try {
+    const { readBeta, betaActor } = await import('./beta-mode.mjs');
+    const b = readBeta();
+    if (b.on) {
+      for (const a of b.doc.agents || []) { const x = betaActor({ env: { STUDIO_LOCK_OWNER: String(a) } }); if (x.ok) return { who: String(a), via: 'beta mode', note: 'approves without the owner key while beta mode is on' }; }
+      return { who: 'producer', via: 'beta mode (a Producer session)', note: 'a Producer session approves while beta mode is on' };
+    }
+  } catch {}
+  try {
+    const d = await import('./delegation.mjs');
+    const doc = d.readDelegation().doc;
+    if (doc?.agent && doc.proxy && d.delegationFor({ action: 'approve-protected', by: doc.agent, env: { STUDIO_LOCK_OWNER: String(doc.agent) }, autonomy: false }).ok) return { who: String(doc.agent), via: 'the owner proxy', note: 'signs with the owner\'s recorded yes (--permission "<the owner\'s words>")' };
+  } catch {}
+  void env;
+  return null;
+}
+
+/**
+ * The protected steps waiting (each task whose newest hand-back since its last start names a protected file and has
+ * no approval since): routed once per hand-back (a line.protected_routed event to the approver) and held from new
+ * builders for STUDIO_LINE_PROTECTED_HOLD_MIN (120) after it was routed, or until an approval names it (approval.protected
+ * or .proposal, or a beta/proxy approve-protected use, after the hand-back). No approver: reported only.
+ */
+export async function protectedRoutes({ tasks, events, now = Date.now(), env = process.env, act = true } = {}) {
+  const { PROTECTED_RX } = await import('./model-pools.mjs');
+  const holdMs = Math.max(0, num(env.STUDIO_LINE_PROTECTED_HOLD_MIN, 120)) * 60000;
+  const out = [];
+  let approver;
+  for (const t of tasks) {
+    if (t.state === 'running') continue;
+    const mine = events.filter((e) => e.task === t.id || (e.type && /^approval\.|^delegation\.used$/.test(e.type) && String(e.msg || '').includes(t.id)));
+    const lastStart = mine.filter((e) => e.type === 'task.start' || e.type === 'agent.session.start').pop();
+    const pause = mine.filter((e) => e.type === 'task.paused' && (!lastStart || Date.parse(e.ts) >= Date.parse(lastStart.ts))).pop();
+    if (!pause || !PROTECTED_RX.test(String(pause.msg || ''))) continue;
+    const at = Date.parse(pause.ts);
+    const approved = mine.some((e) => Date.parse(e.ts) > at && (/^approval\.(protected|proposal)$/.test(e.type) || (e.type === 'delegation.used' && /approve-(protected|proposal)/.test(String(e.meta?.action || '')))));
+    if (approved) continue;
+    if (approver === undefined) approver = await protectedApprover({ env });
+    const note = String(pause.msg || '').replace(/^Handed back \S+: /, '').slice(0, 220);
+    if (!approver) { out.push({ task: t.id, at: pause.ts, by: pause.agent || null, actor: null, hold: false, why: `handed back a protected step: ${note}`, fix: 'only the owner approves it (no beta mode or owner proxy): npm run approve -- protected --note "…" in its lane' }); continue; }
+    const routedEv = events.filter((e) => e.type === 'line.protected_routed' && e.task === t.id && e.meta?.handBack === pause.ts).pop();
+    const routed = Boolean(routedEv);
+    const routedAt = routedEv ? Date.parse(routedEv.ts) : now;
+    const fixText = `routed to ${approver.who} (${approver.via}): in ${t.id}'s lane copy run npm run approve -- protected --note "${t.id}: <which file and why>"${/proxy/.test(approver.via) ? ' --permission "<the owner\'s words>"' : ''}, then it restarts`;
+    if (!routed && act) {
+      try { emitEvent({ type: 'line.protected_routed', agent: LINE_AGENT, to: approver.who, task: t.id, msg: `Line Producer: ${t.id}'s protected step (handed back by ${pause.agent || 'its builder'}: "${note.slice(0, 160)}") goes to ${approver.who} (${approver.via}), who may approve it: ${fixText}`.slice(0, 600), meta: { handBack: pause.ts, by: pause.agent || null, actor: approver.who, via: approver.via } }); } catch {}
+      logAction({ kind: 'protected', task: t.id, what: `routed ${t.id}'s protected step to ${approver.who} (${approver.via})`, meta: { handBack: pause.ts } }, { emit: false });
+    }
+    out.push({ task: t.id, at: pause.ts, by: pause.agent || null, actor: approver.who, via: approver.via, hold: (routed || act) && now - routedAt < holdMs, routed: routed || act, why: `its protected step waits for ${approver.who} (${approver.via}): ${note}`, fix: fixText });
+  }
+  return out;
 }
 
 /** The Producer note: one file, rewritten when its reasons change, and one line.plan_blocked event per change. */
@@ -541,6 +608,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       fixed: f.fixed.map((a) => ({ kind: a.kind, task: a.task, what: a.what })),
       actions: readActions(10),
       models: f.pools ? { on: true, why: f.pools.why, pools: Object.fromEntries(Object.entries(f.pools.state).map(([k, v]) => [k, { model: v.model, tool: v.tool, usedPct: v.usedPct, near: v.near, out: v.out }])) } : { on: false },
+      protectedSteps: (f.protectedSteps || []).map(({ task, actor, via, hold, why, fix }) => ({ task, actor, via: via || null, hold, why, fix })),
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -582,7 +650,7 @@ export function supervisorPlan({ now = Date.now(), env = process.env } = {}) {
   const s = readLineStatus();
   if (!s || s.mode !== 'on' || s.error || s.dryRun || !Array.isArray(s.order)) return null;
   if (now - Date.parse(s.at) > num(env.STUDIO_LINE_PLAN_MAX_SEC, 300) * 1000) return null;
-  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)) };
+  return { order: new Map(s.order.map((id, i) => [id, i])), routes: s.routes || {}, hold: new Map((s.protectedSteps || []).filter((p) => p.hold).map((p) => [p.task, p.why])), rigCap: Number.isFinite(s.builders?.rigCap) ? s.builders.rigCap : null, rigWhy: s.builders?.why || '', cbs: new Set((s.chainBreakers || []).map((c) => c.task)) };
 }
 /** Sort the supervisor's groups (and each group's tasks) by the plan's order; tasks not in it keep their place after. */
 export function orderGroups(groups, plan) {
@@ -607,6 +675,7 @@ export function statusText(s) {
   L.push(`Expansion: ${e.slots} slot(s) at share ${e.share}, ${e.running} running, ${e.open} open (${['1', '2', '3'].map((p) => `${e.byPhase?.[p]?.label} ${e.byPhase?.[p]?.open}`).join(', ')}${e.byPhase?.unphased?.open ? `, unphased ${e.byPhase.unphased.open}` : ''})${e.sliceOpen ? `; Director slice open: ${e.sliceOpen}` : ''}${e.sliceFiled ? `; asked the Director: ${e.sliceFiled}` : ''}.`);
   if (s.blocked?.length) { L.push('Blocked:'); for (const b of s.blocked.slice(0, 12)) L.push(`  ${b.task} [${b.kind}] ${b.why}${b.fix ? ` -> ${b.fix}` : ''}`); if (s.blocked.length > 12) L.push(`  … and ${s.blocked.length - 12} more (npm run line -- status --json)`); }
   if (s.models?.on) L.push(`Model pools (npm run models -- status): ${Object.entries(s.models.pools || {}).map(([k, v]) => `${k} ${v.out ? 'out' : v.near ? `near (${v.usedPct}%)` : `${v.usedPct}%`}`).join(', ')}.`);
+  if (s.protectedSteps?.length) L.push(`Protected steps: ${s.protectedSteps.map((p) => `${p.task} -> ${p.actor || 'the owner'}${p.hold ? ' (held)' : ''}`).join('; ')}.`);
   if (s.reasons?.length) L.push(`For the Producer (this plan can't run because): ${s.reasons.join('; ')}.`);
   if (s.fixed?.length) L.push(`Fixed this pass: ${s.fixed.map((a) => a.what).join('; ')}.`);
   if (s.actions?.length) L.push(`Last actions: ${s.actions.slice(-5).map((a) => `${String(a.at).slice(11, 16)} ${a.what}`).join('; ')}.`);
