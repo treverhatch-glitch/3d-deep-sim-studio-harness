@@ -240,12 +240,25 @@ Each supervisor pass (code only, no model) also does three things:
   `npm run crew -- resume <role> --by <name>` (a person, an agent under the owner's delegation for hold, or a
   Producer/Director session or outside agent with `--permission "<the person's words>"`; never a worker). `npm run crew`
   shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off.
-- **Futility cap, shadow first** (`harness/futility.mjs`): a running session past the 90th percentile of its task
+- **Futility cap, auto** (`harness/futility.mjs`): a running session past the 90th percentile of its task
   type's successful sessions (weighted tokens, or wall time) raises one `futility.check` ("past the p90 of good runs").
-  Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=shadow` (default)
-  stops nothing; when the session ends, `futility.shadow` and `.studio/futility-log.jsonl` record what a cap would have
-  saved and whether it would have cut a good run short. `=on` also hands the task back (the diff is saved, the lane copy
-  kept); `=off` turns it off.
+  Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=auto` (the default,
+  2.78.0) enforces for a type only when it has those 20 good runs and its shadow record (at least
+  `STUDIO_FUTILITY_AUTO_MIN_SHADOW`, 5, ended flagged sessions) shows that at most `STUDIO_FUTILITY_AUTO_MAX_LATE`
+  (0.10) of the sessions the cap would have stopped went on to succeed anyway (`taskDone` in the log: their task was done by
+  the time they ended). Why: the cap was measured in shadow first, and a cap that cuts good runs short costs more than it
+  saves, so each type is switched on only by its own data; a type without that data stays in shadow. Each type that
+  switches on emits one `futility.auto_on` event. `=shadow` stops nothing; when the session ends, `futility.shadow` and
+  `.studio/futility-log.jsonl` record what a cap would have saved and whether it would have cut a good run short. `=on` always
+  hands the task back (the diff is saved, the lane copy kept); `=off` turns it off.
+- **Start backoff and loop jitter** (`harness/supervisor.mjs`, 2.78.0): a start of task T refused for the same reason as
+  last time (`task.start_refused`, `task.lock_denied`, a start the launcher refused) is skipped in later passes for 2, 4, 8
+  ... minutes, at most `STUDIO_START_BACKOFF_MAX_MIN` (30); a changed reason or a changed task state (held, unheld,
+  handed back, started, its lock taken or freed) resets it. The pass's `why` says so once per backoff; state in
+  `.studio/start-backoff.json`. Why: a launcher once retried one refused start 61 times in 85 minutes, and 18 of 40 "can't
+  start yet" refusals came back to the same agent within an hour. The loop waits `STUDIO_SUPERVISOR_SEC` +-
+  `STUDIO_SUPERVISOR_JITTER` (0.1; 0 = fixed) so several studios on one PC don't fire together. A new agent name never reuses
+  one with a leftover `.lanes/<name>` folder or one another launch just took.
 - **Usage wind-down** (`harness/winddown.mjs`): with `STUDIO_USAGE_WINDDOWN_PCT` set (unset: off), when the highest
   share of a tool's week used (`npm run budget`; a tool out of quota counts as 100%) reaches it, no new session starts,
   the running ones finish, `.studio/restart-log.md` lists what was running, queued and held with the next steps, and a

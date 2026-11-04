@@ -60,6 +60,61 @@ export async function boundedStep(label, fn, { ms = num(process.env.STUDIO_SUPER
     ]);
   } finally { clearTimeout(timer); }
 }
+/**
+ * 2.78.0 (PU-63): start backoff. A start of task T refused for the same reason as last time (task.start_refused,
+ * task.lock_denied, a start the launcher refused) is skipped in later passes for 2, 4, 8 ... minutes (doubling per repeat,
+ * capped at STUDIO_START_BACKOFF_MAX_MIN, 30). It resets when the reason changes or the task's state changes (a hold, an
+ * unhold, a hand-back, a start, a lock taken or freed). The state is in state.startBackoff (mirrored to
+ * .studio/start-backoff.json so a restart or the watcher's fresh state keeps it).
+ */
+export const START_BACKOFF_FILE = path.join(STUDIO_STATE_DIR, 'start-backoff.json');
+export const startBackoffMaxMin = (env = process.env) => { const v = num(env.STUDIO_START_BACKOFF_MAX_MIN, 30); return v > 0 ? v : 30; };
+/** The wait after `repeats` same-reason refusals in a row (1 -> 2 min, 2 -> 4, 3 -> 8 ...), in ms; 0 for the first refusal. */
+export const startBackoffMs = (repeats, env = process.env) => (repeats >= 1 ? Math.min(startBackoffMaxMin(env), 2 ** Math.min(repeats, 20)) * 60000 : 0);
+export const refusalKey = (reason) => String(reason || '').toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 160);
+const TASK_STATE_EVENTS = new Set(['task.added', 'task.start', 'task.done', 'task.paused', 'task.reopened', 'task.dropped', 'task.held', 'task.unheld', 'task.hold', 'task.lane', 'task.dev_yes', 'task.retyped', 'task.reordered']);
+/** What "the task's state" is for the backoff: its latest state-changing event and whether its task lock is held. */
+export function taskStateSig(events, task, locked = false) {
+  let last = null;
+  for (const e of events) if (e.task === task && TASK_STATE_EVENTS.has(e.type)) last = e;
+  return `${last ? `${last.type}@${last.ts}` : 'none'}|${locked ? 'locked' : 'free'}`;
+}
+/** Record a refusal of `task` for `reason` in state.startBackoff; returns the entry ({ count, until, … }). */
+export function noteStartRefusal(state, task, reason, sig, now = Date.now(), env = process.env) {
+  const bo = (state.startBackoff ||= {});
+  const key = refusalKey(reason);
+  const prev = bo[task];
+  const count = prev && prev.reason === key && prev.sig === sig ? prev.count + 1 : 1;
+  bo[task] = { reason: key, sig, count, until: now + startBackoffMs(count - 1, env), said: false };
+  return bo[task];
+}
+/** The live backoff entry for `task`, or null (none, expired, or the task's state changed, which resets it). */
+export function startBackedOff(state, task, sig, now = Date.now()) {
+  const e = state.startBackoff?.[task];
+  if (!e) return null;
+  if (e.sig !== sig) { delete state.startBackoff[task]; return null; }
+  return now < e.until ? e : null;
+}
+const START_REFUSALS = new Set(['task.start_refused', 'task.lock_denied']);
+/** Fold the log's refusals since the last look into state.startBackoff. Returns how many it noted. */
+export function ingestRefusals(state, events, sigOf, now = Date.now(), env = process.env) {
+  const from = state.startBackoffSeen ?? state.startedAt ?? now;
+  let seen = from; let k = 0;
+  for (const e of [...events].sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))) {
+    const t = Date.parse(e.ts);
+    if (!START_REFUSALS.has(e.type) || !e.task || !(t > from)) continue;
+    noteStartRefusal(state, e.task, `${e.type} ${e.msg || ''}`.replace(new RegExp(String(e.task).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'T'), sigOf(e.task), now, env);
+    seen = Math.max(seen, t); k += 1;
+  }
+  state.startBackoffSeen = seen;
+  return k;
+}
+/**
+ * 2.78.0 (PU-63): the loop's delay with +-STUDIO_SUPERVISOR_JITTER (0.1; 0 = off) so several supervisors or watchers on one PC
+ * don't fire in lockstep. rnd() is in [0, 1).
+ */
+export const supervisorJitter = (env = process.env) => Math.min(0.5, Math.max(0, num(env.STUDIO_SUPERVISOR_JITTER, 0.1)));
+export const jitteredDelay = (baseMs, frac = supervisorJitter(), rnd = Math.random) => Math.max(1, Math.round(baseMs * (1 + (rnd() * 2 - 1) * frac)));
 const readJson = (f, d = null) => {
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -423,7 +478,19 @@ export async function supervise(opts, state, now = Date.now()) {
   const gameCartridge = readJson(path.join(REPO_ROOT, 'studio', 'game.json'))?.cartridge ?? readJson(path.join(REPO_ROOT, 'studio', 'gates.json'))?.cartridge;
   const { taskType } = await import('./done-check.mjs');
 
+  // 2.78.0 (PU-63): a task whose start was refused for the same reason as last time waits out a doubling backoff.
+  const sigOf = (id) => taskStateSig(evs, id, lockStatus(`task:${id}`).locked);
+  if (!state.startBackoff) { const f = readJson(START_BACKOFF_FILE, {}) || {}; state.startBackoff = f.tasks || {}; state.startBackoffSeen ??= f.seen; }
+  try { ingestRefusals(state, evs, sigOf, now); } catch { /* a backoff is a courtesy, never a crash */ }
+  const backedOff = [];
+  const saveBackoff = () => { if (opts.dryRun) return; try { fs.mkdirSync(STUDIO_STATE_DIR, { recursive: true }); fs.writeFileSync(START_BACKOFF_FILE, `${JSON.stringify({ seen: state.startBackoffSeen, tasks: state.startBackoff }, null, 2)}\n`); } catch { /* best effort */ } };
+
   for (const t of waiting) {
+    const bo = startBackedOff(state, t.id, sigOf(t.id), now);
+    if (bo) {
+      if (!bo.said) { bo.said = true; backedOff.push(`${t.id} (refused ${bo.count}x for the same reason; skipped for ${Math.max(1, Math.round((bo.until - now) / 60000))} min)`); }
+      continue;
+    }
     // Lanes always count now: a task's own lane, `task lane`, or its --part (harness/task-hold.mjs).
     let lane = laneOf(t.id, evs) || null;
     if (!lane && floorsConfig && gameCartridge && ['change', 'system'].includes(taskType(t))) {
@@ -436,6 +503,8 @@ export async function supervise(opts, state, now = Date.now()) {
     if (!groups.has(key)) groups.set(key, { role: t.role, lane, tasks: [] });
     groups.get(key).tasks.push(t);
   }
+  if (backedOff.length) why.push(`start backoff: ${backedOff.slice(0, 4).join('; ')}${backedOff.length > 4 ? ` (+${backedOff.length - 4})` : ''}`);
+  saveBackoff();
   // 2.30c (#12): skip a task whose prerequisite isn't merged yet or whose folder another agent holds,
   // and try the next one in its group; mark it "waiting on X" for the War Room.
   const { handoutBlock, writeWaiting } = await import('./handout.mjs');
@@ -569,7 +638,10 @@ export async function supervise(opts, state, now = Date.now()) {
       live.push({ agent, role: g.role, lane: g.lane || null, task: taskId, running: true });
       if (g.role === 'producer') (await import('./producer-wake.mjs')).producerLaunched(now);
       room -= 1;
-    } else why.push(`${g.role}: ${r.message}`);
+    } else {
+      why.push(`${g.role}: ${r.message}`);
+      try { noteStartRefusal(state, taskId, `start_agent ${r.message}`, sigOf(taskId), now); saveBackoff(); } catch { /* best effort */ }
+    }
   }
   if (!groups.size) why.push('no waiting tasks for agents');
   return { started, why };
@@ -747,7 +819,11 @@ async function main(argv) {
     busySince = Date.now();
     try { await tick(); } catch (err) { console.error(`[supervisor] pass failed: ${err?.message || err}`); } finally { busySince = 0; stuckSaid = false; state.step = undefined; }
   };
-  setInterval(loop, LOOP_MS);
+  // 2.78.0 (PU-63): a self-rescheduling timeout with +-STUDIO_SUPERVISOR_JITTER (0.1) instead of a fixed interval, so
+  // several studios or watchers on one PC don't fire in lockstep. The next timer is set when this one fires (before its
+  // pass), so a pass that runs long is still seen by the next call (the stuck report) and passes still never overlap.
+  const schedule = () => { if (stopping) return; setTimeout(() => { schedule(); loop(); }, jitteredDelay(LOOP_MS)); };
+  schedule();
   await loop();
 }
 

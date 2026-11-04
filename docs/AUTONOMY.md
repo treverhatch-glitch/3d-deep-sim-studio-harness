@@ -365,8 +365,8 @@ and no permission words. Each is recorded `as: "autonomous"` and goes on a **rev
   a person or an agent on a person's permission, never an agent that claimed, ran or landed the task, nor the deciding
   agent. Approving an audited decision passes its audit; reverting or editing it fails it. Each verdict is an `audit`
   record in the log and an `audit.verdict` event; a failed audit counts as a Redo in the redo rate and the L3 bar.
-- **Cheap-first routing (2.73.0, harness/routing.mjs; the holdout is OFF).** `"routing": { "cheapFirst": ["chore",
-  "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top": "<model>" }, "models": [...], "holdout": 0 }`.
+- **Cheap-first routing (2.73.0, harness/routing.mjs).** `"routing": { "cheapFirst": ["chore",
+  "docs", "test"], "tiers": { "cheap": "<model>", "mid": "<model>", "top": "<model>" }, "models": [...], "holdout": 0.1 }`.
   When the launcher picks a writer's model (no `--model`), a task whose type, track or role is listed starts on the
   cheapest tier the policy names a model for and goes one tier up per red round (a failed hand-back, as the 2.30d
   tier-up counts them), capped at the top listed. Only models the policy lists are picked (`STUDIO_TIER_<TIER>_MODEL`,
@@ -375,8 +375,10 @@ and no permission words. Each is recorded `as: "autonomous"` and goes on a **rev
   routed task skips the 2.30d tier-up and the reasoning-only reroute. Each routed start is a `model.routed` event.
   `npm run autonomy -- routing [--days 14] [--json]` shows, per task type and tier, sessions, landings (credited to
   the last session before each), the success rate and tokens per landed change, from session ends. The holdout (a
-  seeded share of matching tasks sent to the default tier, to measure the difference) is built but off: the owner
-  deferred it until API credit is available, and the output says so.
+  seeded share of matching tasks sent to the default tier, to measure the difference) stays 0 unless the policy sets
+  `"holdout"`: the owner deferred it until API credit is available, because the share it sends to the default tier costs
+  more. Without a comparison group, cheap-first's savings can't be told apart from easier tasks, so `"holdout": 0.1` is
+  the suggested share once it's affordable; with routing off nothing changes.
 - **Time saved** per action is the median owner wait for that action over the last 14 days from events (held to
   released, an agent's proposal to the dev's yes, a review request to its answer, a proposed quarantine to its
   confirm) less the autonomous decision's own wait; under `STUDIO_DECISION_MIN_N` (10) waits it says "not enough data".

@@ -14,8 +14,9 @@
  *   - The model never changes mid-task: the route is picked when a session starts, a task already started on another
  *     model (before the policy, or by hand) keeps it, and the tier only moves after a red round.
  *   - --model on the launch always wins (a person's or the Producer's explicit choice).
- *   - The holdout (a seeded share of matching tasks sent to the default tier, to measure the difference) is built but
- *     OFF: "holdout": 0 is the default; the owner deferred it until API credit is available. The output says so.
+ *   - The holdout (a seeded share of matching tasks sent to the default tier, to measure the difference): 2.78.0 (PU-62)
+ *     defaults to 0.1 whenever routing is on and the policy sets no "holdout"; "holdout": 0 turns it off. With routing
+ *     off nothing changes (holdout 0, no routing).
  * Each routed start is one `model.routed` event (meta: task, type, arm 'cheap-first' | 'holdout', tier, model, failed).
  *
  * routingStats(): per task type and tier, from agent.session.end events (they name their task since 2.71.1): sessions,
@@ -31,6 +32,9 @@ import { readPolicy } from './policy-rules.mjs';
 
 export const TIER_ORDER = ['cheap', 'mid', 'top'];
 export const HOLDOUT_NOTE = 'off (0): the owner deferred it until API credit is available, so cheap-first is not compared with the default tier on the same kind of task';
+// 2.78.0: the owner deferred the holdout until API credit is available (it sends a share of cheap tasks to the default,
+// dearer tier), so an unset holdout stays 0; set "routing.holdout" (0.1 is the suggested share) to turn it on.
+export const DEFAULT_HOLDOUT = 0;
 const DAY = 86400000;
 const ts = (e) => Date.parse(e?.ts) || 0;
 
@@ -39,7 +43,10 @@ export function routingPolicy(policy) {
   const r = policy?.counts ? policy.effective?.routing : null;
   if (!policy?.counts) return { on: false, cheapFirst: [], tiers: {}, models: [], holdout: 0, why: policy?.why || 'no studio policy counts' };
   if (!r || !r.cheapFirst.length) return { on: false, cheapFirst: [], tiers: r?.tiers || {}, models: r?.models || [], holdout: 0, why: 'the policy lists no "routing.cheapFirst"' };
-  return { on: true, ...r, why: '' };
+  // 2.78.0 (PU-62): with routing on, an unset holdout is DEFAULT_HOLDOUT (0 while the owner defers it); an explicit value wins.
+  const raw = policy.doc ? policy.doc.routing?.holdout : r.holdout;
+  const unset = raw === undefined || raw === null || String(raw).trim() === '' || !Number.isFinite(Number(raw));
+  return { on: true, ...r, holdout: unset ? DEFAULT_HOLDOUT : r.holdout, holdoutDefault: unset, why: '' };
 }
 
 /** The model for each tier: the policy's tiers, else STUDIO_TIER_<TIER>_MODEL when the policy lists that model. */
