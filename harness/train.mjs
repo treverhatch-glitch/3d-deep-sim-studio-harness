@@ -619,6 +619,11 @@ export function greenFirst(root, tip, lanes, { id = '', log = () => {}, whole = 
   return ordered;
 }
 
+/** 2.78.0 (PU-54): the ids of the gates studio/gates.json marks trainOnly (they run at the train, never in a lane). */
+export function trainOnlyGates(dir) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(dir, 'studio', 'gates.json'), 'utf8')); return (j.gates || []).filter((g) => g && g.trainOnly === true && g.id).map((g) => String(g.id)); } catch { return []; }
+}
+
 /** The FAIL lines of a verify's output, for a hand-back note: the gates, and the game checks' own lines. */
 export function failLines(text) {
   const lines = String(text || '').split('\n');
@@ -653,6 +658,22 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
       const laneOf = lanes.length === 1 ? lanes[0].task : rec._lane || null;
       if (laneOf) log(`[train] ${id}: reused ${laneOf}'s green verify of tree ${tree.slice(0, 8)} (${c.why}); not run again`);
       else log(`[train] ${id}: the tree ${tree.slice(0, 8)} already has a green full verify (${c.why}); not run again`);
+      // 2.78.0 (PU-54): a lane's own verify skips the train-only gates (the held-out cases), so a reused record never ran
+      // them: the train runs just those here, on the same tree, before it counts the record as green.
+      const tro = trainOnlyGates(sc.dir);
+      if (tro.length) {
+        const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
+        for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_FOCUS', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event']) delete env[k];
+        const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', tro.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        const text = `${r.stdout || ''}${r.stderr || ''}`;
+        log(`[train] ${id}: the train-only gate(s) ${tro.join(', ')} on tree ${tree.slice(0, 8)}: ${r.status === 0 ? 'green' : 'red'}`);
+        if (r.status !== 0) {
+          const fl = failLines(text);
+          const red = { ok: false, rec: null, gates: fl.gates.length ? fl.gates : tro, detail: fl.detail, why: `train-only gate(s) failed: ${(fl.gates.length ? fl.gates : tro).join(', ')}`, log: null };
+          seen.set(tree, red);
+          return red;
+        }
+      }
       const res = { ok: true, reused: true, rec, gates: [], detail: [] };
       seen.set(tree, res);
       return res;

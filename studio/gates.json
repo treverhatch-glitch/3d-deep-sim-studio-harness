@@ -35,6 +35,8 @@
     { "id": "engine", "command": "node scripts/check-engine.mjs", "required": false },
     { "id": "parity", "command": "node qa/parity.mjs", "required": false },
     { "id": "vision", "command": "node qa/vision-check.mjs", "required": false },
-    { "id": "reviewer", "command": "node scripts/check-reviewer.mjs", "required": true }
+    { "id": "holdout", "command": "node harness/holdout.mjs run", "required": true, "lite": true, "cache": false, "trainOnly": true, "description": "2.78.0 (PU-54): held-out cases the builders cannot read (STUDIO_HOLDOUT_DIR, outside every checkout), run at the merge train only. In a lane's own verify it is skipped (\"runs at the train only\"); with no cases it passes. A failure names only the case id and its note. docs/HOLDOUT.md" },
+    { "id": "reviewer", "command": "node scripts/check-reviewer.mjs", "required": true },
+    { "id": "journey", "command": "node qa/journey.mjs", "required": true, "lite": true, "cache": false, "description": "2.78.0 (PU-55): plays each studio/journeys/<game>/<id>.json through public inputs: the goal must hold, the same seed with no input must not reach it, and a save, new process, load reaches the same state digest. No journeys: passes with a WARN. docs/JOURNEYS.md" }
   ]
 }
