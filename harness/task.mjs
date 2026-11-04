@@ -1719,6 +1719,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       console.error(started.error === 'locked' && started.lock?.owner && !started.message ? `Task "${targetId}" is claimed by ${started.lock.owner}. Pick another task.` : started.message || `Task "${targetId}" can't be claimed right now. Pick another task.`);
       process.exit(1);
     }
+    // 2.76.0 (B-84): a code-writing session claiming from the main checkout gets its lane copy now; none: hand it back.
+    const atClaim = (await import('./lane-at-claim.mjs')).laneAtClaim({ agent: whoAmI(flags), task: started.id });
+    if (atClaim?.error) {
+      pauseTask(started.id, whoAmI(flags), `${whoAmI(flags)} claimed ${started.id} from the main checkout and ${atClaim.error}; a builder session never works in the main checkout. Start it again once a lane copy can be made (npm run lanes shows the copies).`, { force: true });
+      console.error(`${started.id} handed back: ${atClaim.error}. A builder session never works in the main checkout.`);
+      process.exit(1);
+    }
+    if (atClaim) for (const l of (await import('./lane-at-claim.mjs')).laneAtClaimLines(atClaim)) console.error(l);
     // 2.30c (#4): short output. The brief's path and a 10-line summary; the carry-forward note (newest
     // notes, at most 3k characters) replaces re-reading the whole hand-off history.
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
@@ -1729,7 +1737,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     (await import('./hotspots.mjs')).warnAt('start', { task: started.id, agent: whoAmI(flags) }); // 2.60.0: lines several lanes change
     await startDiskWarning(); // 2.68.0 (m)
     const { handoff, ...rest } = started;
-    console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}) }, null, 2));
+    console.log(JSON.stringify({ ...rest, ...(handoff ? { handoffFile: `studio/handoffs/${started.id}.md` } : {}), ...(atClaim ? { laneCopy: atClaim.rel, laneDir: atClaim.dir } : {}) }, null, 2));
     process.exit(0);
   }
 

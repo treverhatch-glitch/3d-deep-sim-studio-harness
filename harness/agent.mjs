@@ -1235,8 +1235,10 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
       emitEvent({ type: 'agent.model_gone', agent, to: 'human', task: task || undefined, status: 'error', msg: `${agent}: ${gone}`.slice(0, 400), meta: { tool: 'nim', model } });
     }
   }
-  const result = cleanUp(agent, { code, log, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
+  const atClaim = !copy ? (readJson(sessionFile(agent)) || {}).copy || null : null; // 2.76.0 (B-84): made at task start
+  const result = cleanUp(agent, { code, log, usageLog, role, tool: session.tool, model, cmd: session.tool === 'custom' ? custom : null, exit: { signal: exitSignal, killedBy, spawnError, at: exitedAt, ranMs: Date.now() - t0 } });
   if (copy && !keptCopy) removeLaneCopy(agent, { keepBranch: unmerged(copy.branch) > 0 });
+  if (atClaim?.branch && fs.existsSync(path.join(REPO_ROOT, atClaim.dir || ''))) removeLaneCopy(agent, { keepBranch: unmerged(atClaim.branch) > 0 });
   for (const p of lanePaths) release(`path:${p}`, agent);
   // Refreshed (2.29.2): the launcher reopens the same task at once in a fresh session that reads the hand-back.
   // The task it handed back, or the task it was started on when it hadn't claimed it yet (and it isn't done).

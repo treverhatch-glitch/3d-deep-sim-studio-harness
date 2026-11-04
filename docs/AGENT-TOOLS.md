@@ -232,7 +232,11 @@ STUDIO_KEYMAP_AGENT_BUILDER_S3=ANTHROPIC_API_KEY:ANTHROPIC_API_KEY_S3   # builde
   locks and events live in this checkout's `studio/` and `.studio/`. The launcher's lane copies (`.lanes/<agent>`)
   link those back. A code lane gets a copy, and since 2.58.3 so does a code-writing role (anyone but the Producer,
   Director, planner and liaison) on a task with no lane: its staged files then can't block other tasks' `task done`
-  in the main checkout. `STUDIO_LANELESS=shared` keeps such sessions in the main checkout; `STUDIO_WORKTREES=off`
+  in the main checkout. 2.76.0 (B-84): so does such a session started with no task at all, and a code-writing session
+  that still claims a task from the main checkout (one an older launcher started) gets its copy at `task start`
+  (`harness/lane-at-claim.mjs`: `.lanes/<agent>`, the task's earlier work merged in, recorded on its session; the output
+  says to cd there). If no copy can be made, the claim is handed back: a builder session never works in the main
+  checkout. `STUDIO_LANELESS=shared` keeps such sessions in the main checkout; `STUDIO_WORKTREES=off`
   turns copies off.
 - **Name every agent.** One `--agent` per running agent, never shared. The scorecard, locks and HUD
   all go by that name.
