@@ -25,6 +25,9 @@ const SLOW = Number(process.env.STUDIO_SELFTEST_SLOW) || (process.platform === '
 const secs = (n) => `${Math.ceil(n * SLOW)}s`;
 let failed = 0;
 let n = 0;
+// 2.77.0 (n, B-92): a launched session's task pin (STUDIO_TASK_PIN) is about that session's own task commands; the
+// self-test's copies start and close their own test tasks, so a verify run inside a pinned session never inherits it.
+delete process.env.STUDIO_TASK_PIN;
 
 // The self-test never reads the live studio: every copy starts from the template's board and an
 // empty pre-production state (qa/fixtures/studio/), whatever game this checkout is building.
@@ -4592,6 +4595,7 @@ if (inShard('selftest-276i')) {
   const { selftest276I } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276i.mjs')).href);
   await selftest276I({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
 }
 
 // new-game produces a cartridge that passes purity, golden, slice and playtest.

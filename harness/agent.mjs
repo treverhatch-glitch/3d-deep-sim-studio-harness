@@ -40,6 +40,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { allowedToolsList } from './allowlist.mjs';
 import { fillCommand, localizeCommand, launchPlan, spawnPlan, describePlan, resolveCommand, envValue } from './launch.mjs';
+import { pinKickoff } from './task-pin.mjs';
 import { agyAllowHint, noteAgyHint, allowCli, agyStudioSettings, AGY_SHELL_RULES, writeAgyLaneRules } from './agy-allow.mjs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -766,7 +767,7 @@ export function autoFinish(agent, id, copyDir, mine, code) {
     const dirty = spawnSync('git', ['status', '--porcelain', '--', ...paths], { windowsHide: true, cwd, encoding: 'utf8' }).stdout || '';
     if (dirty.trim()) return { ok: false, output: 'working tree dirty' };
   }
-  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
+  const env = { ...process.env, STUDIO_LOCK_OWNER: agent, STUDIO_TASK_PIN: id, ...(cwd !== REPO_ROOT ? { STUDIO_MAIN_ROOT: REPO_ROOT } : {}) };
   const g = spawnSync(process.execPath, [path.join(cwd, 'scripts', 'run-gates.mjs')], { windowsHide: true, cwd, env: gateEnv(env), encoding: 'utf8', timeout: 20 * 60000 }); // 2.71.1 (B): harness/gate-env.mjs
   if (g.status !== 0) {
     const out = `${g.stderr || ''}${g.stdout || ''}`.trim().split('\n').slice(-15).join('\n');
@@ -1004,6 +1005,8 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
     + (lane ? `\nYour lane is \`${lane}\` (claimed for you): edit files only under it. Work outside it goes to the Producer as a task.\n` : '')
     + (copy ? `\nYou work in your own copy of the repo (\`.lanes/${agent}\`, branch \`${copy.branch}\`): other agents' unfinished work can't reach your tests, and yours can't reach theirs. \`studio/\` and \`.studio/\` are shared with everyone. Commit your work as you go; \`task done\` adds your commits to the studio's branch once your checks pass (it rebases first and tells you if anything conflicts). Uncommitted work never leaves your copy.${copy.laneless ? ' Your task has no lane: claim the folders you edit (node harness/lock.mjs claim path:<dir> --owner $STUDIO_LOCK_OWNER) as usual.' : ''}\n` : '')
     + refreshRule({ oneTask, task })
+    // 2.77.0 (n, B-92): a session started on a task works only that task (harness/task-pin.mjs; task start/done refuse others).
+    + (task ? pinKickoff(task) : '')
     // 2.76.0 (B-80 part 2): one refused command ends a headless agy session; these rules steer it (and GEMINI.md below).
     + (tool === 'agy' && !custom ? `\n${AGY_SHELL_RULES.split('\n').slice(2).join('\n')}` : '')
     // 2.58.0 (PU-36): a refresh relaunch is the launcher's own instruction, so it is said here, not as a note.
@@ -1064,7 +1067,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // B-18 (2.60.1): a custom command for --tool nim (STUDIO_TOOL_NIM_CMD, the old venv workaround, or a role's command)
   // keeps nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (as a 'custom' tool it had no key).
   const nimCustom = Boolean(custom) && tool === 'nim' && !rehearsal;
-  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}) } });
+  const env = agentEnv({ tool: custom && !nimCustom ? 'custom' : tool, role, model, agent, notes: keyNotes, extra: { STUDIO_LOCK_OWNER: agent, STUDIO_AGENT_MODEL: model, STUDIO_ROLE: role, STUDIO_COMPACT_OUTPUT: process.env.STUDIO_COMPACT_OUTPUT ?? 'on', ...(track ? { STUDIO_TRACK: track } : {}), STUDIO_TASK_PIN: task || '' } });
   for (const n of launchNotes) fs.writeSync(out, `[launcher] ${n}\n`);
   if (nimCustom) fs.writeSync(out, `[launcher] the custom command for --tool nim gets nim's environment: the NIM key as OPENAI_API_KEY and AIDER_OPENAI_API_KEY (value not shown)\n`);
   // B-37 (2.60.1): Python holds its output in a buffer when stdout is a file, so an aider that died left nothing in the
@@ -1134,7 +1137,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   }
   const startedAt = new Date().toISOString();
   clearFlag(agent);
-  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
+  const session = { agent, role, tool: custom && !viaTool ? 'custom' : tool, model, profile: profileOf(role, custom || ''), pid: child.pid, supervisor: process.pid, identity, status: 'running', startedAt, lastBeat: startedAt, log: path.relative(REPO_ROOT, logFile), task, ...(task ? { pinned: task } : {}), lane, oneTask, division, hiredBy: by, prefixHash: prefix?.hash || null, logFrom, ...(copy ? { copy: { dir: path.relative(REPO_ROOT, copy.dir).split(path.sep).join('/'), branch: copy.branch } } : {}) };
   fs.writeFileSync(sessionFile(agent), JSON.stringify(session, null, 2));
   resetStall(agent); // 2.76.0 (B-83): the last session's stall record never judges this one
   emitEvent({ type: 'agent.session.start', agent, model, status: 'running', task, msg: `${agent} started (${role}, ${session.tool}, ${model})${by ? `, hired by ${by}` : ''}${division ? ` into ${division}` : ''}`, meta: { role, tool: session.tool, pid: child.pid, division, hiredBy: by, lane } });
@@ -1840,7 +1843,8 @@ export function startAgent(opts, { detach = false } = {}) {
   if (detach) {
     // A supervisor process of its own, so the agent outlives this command (the HUB and the watcher use this).
     const args = [fileURLToPath(import.meta.url), 'start', '--role', role, '--agent', agent, '--tool', tool, '--model', model, ...(opts.fallback?.length ? ['--fallback', opts.fallback.join(',')] : []), ...(opts.task ? ['--task', opts.task] : []), ...(opts.lane ? ['--lane', opts.lane] : []), ...(opts.oneTask ? ['--one-task'] : []), ...(opts.extra ? ['--extra', String(opts.extra)] : []), ...(opts.division ? ['--division', opts.division] : []), ...(opts.note ? ['--note', String(opts.note)] : []), ...(opts.by ? ['--by', opts.by] : []), ...(opts.loop ? ['--loop', String(opts.loop)] : []), ...(opts.approved ? ['--approved'] : []), ...(opts.forceModel || (tool === 'agy' && !isGeminiModel(model)) ? ['--force-model'] : [])];
-    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: process.env });
+    // 2.77.0 (n, B-92): the launcher is not the pinned session that may have started it (its agent gets its own pin).
+    const sup = spawn(process.execPath, args, { windowsHide: true, cwd: REPO_ROOT, detached: true, stdio: 'ignore', env: { ...process.env, STUDIO_TASK_PIN: '' } });
     sup.unref();
     // PU-17: the launcher's spawn time (in-process, no OS query), for a stop that comes while it is still starting.
     const supId = spawnedIdentity(sup.pid, process.execPath);
