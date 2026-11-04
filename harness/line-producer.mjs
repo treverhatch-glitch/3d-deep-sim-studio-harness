@@ -142,6 +142,19 @@ export function routeTask(t, { meta = {}, type = '', chainBreaker = false, faile
 }
 
 /**
+ * 2.77.0 (n): the route by model pool (harness/model-pools.mjs pickPool): Gemini first (Flash small, Argon normal),
+ * Claude for hard work, chain-breakers and after a Gemini failure, quota-aware. { tier (the size class), model, tool,
+ * pool, why }; model null: the launcher's default. A rescue keeps the rescue model.
+ */
+export function poolRoute(t, { chainBreaker = false, pools }) {
+  if (/^Rescue:/i.test(String(t.title || ''))) return { tier: null, model: null, why: 'a rescue: the rescue model starts it' };
+  const r = pickPoolFn(pools)({ size: t.size || 'normal', chainBreaker, failed: t.poolFailed ?? t.failed ?? 0, lastFailedPool: t.lastFailedPool || null, protectedHeavy: Boolean(t.protectedHeavy), startedOn: t.started && t.state !== 'running' ? t.startedOn || null : null }, pools);
+  return { tier: r.size, model: r.model, ...(r.tool ? { tool: r.tool } : {}), ...(r.pool ? { pool: r.pool } : {}), why: r.why };
+}
+let pickPoolImpl = null;
+const pickPoolFn = (pools) => pools.pickPool || pickPoolImpl;
+
+/**
  * The plan from plain data (pure, testable). facts: { now, tasks: [{ id, title, role, priority, meta, type, state:
  * 'ready'|'running'|'blocked', block: { kind, why, fix, mechanical? }, failed, started }], holds, done (Set), sessions:
  * [{ role, task, running }], pace: { maxAgents, perRole, label }, rig: { known, byRam, cpuBusy, cpuHold, why },
@@ -195,7 +208,7 @@ export function linePlan(f) {
   }
   ready.slice().sort((a, b) => PRI(a.priority) - PRI(b.priority) || boardIdx.get(a.id) - boardIdx.get(b.id)).forEach(take);
   const routes = {};
-  for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
+  for (const t of tasks.filter((x) => x.state !== 'blocked' || cbSet.has(x.id))) routes[t.id] = f.pools ? poolRoute(t, { chainBreaker: cbSet.has(t.id), pools: f.pools }) : routeTask(t, { meta: t.meta || {}, type: t.type, chainBreaker: cbSet.has(t.id), failed: t.failed || 0, started: Boolean(t.started), models: f.models || {} });
   // Plans that can't run: for the Producer.
   const reasons = [];
   for (const c of cbs) {
@@ -432,6 +445,32 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
       tasks.push({ ...row, state: block ? 'blocked' : 'ready', ...(block ? { block } : {}) });
     }
   }
+  // 2.77.0 (n): model pools (harness/model-pools.mjs), when on: each task's size class, its last failed pool, the model
+  // it started on, whether it is protected-heavy; the outcomes file is rebuilt (written only when this pass acts).
+  let pools = null;
+  try {
+    const mp = await import('./model-pools.mjs');
+    pickPoolImpl = mp.pickPool;
+    const sizes = new Map(tasks.map((t) => [t.id, mp.sizeClass(t.meta || {}, t.type)]));
+    const mc = await mp.modelContext({ env, now, events, sizeOf: (id) => sizes.get(String(id)) || mp.sizeClass(added.get(String(id)) || {}, ''), write: fix, deps: deps.models || {} });
+    const byTaskOut = new Map();
+    for (const o of mc.outcomes) { if (!byTaskOut.has(o.task)) byTaskOut.set(o.task, []); byTaskOut.get(o.task).push(o); }
+    for (const t of tasks) {
+      const outs = byTaskOut.get(t.id) || [];
+      t.size = sizes.get(t.id);
+      // A red round here is a session handed back for its own reasons since the task last landed: not a protected
+      // step (that is correct behaviour, routed to an approver below), not a usage limit or a person's stop.
+      const sinceLand = outs.slice(outs.map((o) => o.result).lastIndexOf('landed') + 1);
+      t.poolFailed = sinceLand.filter((o) => o.result === 'handed' && !o.protected).length;
+      t.lastFailedPool = sinceLand.filter((o) => o.result === 'handed' && !o.protected).pop()?.pool || null;
+      t.protectedHeavy = Boolean(t.meta?.protected) || outs.some((o) => o.protected);
+      const mine = events.filter((e) => e.task === t.id);
+      const lastDone = mine.filter((e) => e.type === 'task.done').pop();
+      const st = (lastDone ? mine.slice(mine.indexOf(lastDone) + 1) : mine).filter((e) => e.type === 'agent.session.start' && e.model && e.model !== 'unknown').pop();
+      if (st) t.startedOn = { model: st.model, tool: st.meta?.tool || null };
+    }
+    if (mc.on) pools = { cfg: mc.cfg, state: mc.state, rates: mc.rates, recentProt: mc.recentProt, pickPool: mp.pickPool, why: mc.why, quota: mc.quota.why };
+  } catch { pools = null; }
   const sliceOpen = [...q.inProgress, ...q.backlog].find((t) => SLICE_TITLE.test(t.title || '')) || null;
   const pace = deps.pace || (await import('./mode.mjs')).effectiveMode();
   const rig = deps.rig || (await rigNow({ env, now }));
@@ -443,7 +482,7 @@ export async function gatherFacts({ now = Date.now(), dryRun = false, env = proc
     models = rp.models?.length || Object.keys(rp.tiers || {}).length ? rt.tierModels(rp, env) : {};
   } catch { models = {}; }
   if (!Object.keys(models).length) for (const t of TIERS) { const m = String(env[`STUDIO_TIER_${t.toUpperCase()}_MODEL`] || '').trim(); if (m) models[t] = m; }
-  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed };
+  return { now, tasks, holds, done: doneSet, sessions: live, pace: { maxAgents: pace.maxAgents, perRole: pace.perRole, label: pace.label }, rig, models, share: expansionShare(env), chainMin: Math.max(1, num(env.STUDIO_LINE_CHAIN_MIN, 3)), expansionMin: Math.max(0, num(env.STUDIO_LINE_EXPANSION_MIN, 2)), sliceOpen: sliceOpen ? { id: sliceOpen.id, title: sliceOpen.title } : null, extraBlocked, dangling, fixed, pools };
 }
 
 /** The Producer note: one file, rewritten when its reasons change, and one line.plan_blocked event per change. */
@@ -501,6 +540,7 @@ export async function lineProducerPass({ now = Date.now(), dryRun = false, env =
       note: p.reasons.length ? '.studio/line/producer-note.md' : null,
       fixed: f.fixed.map((a) => ({ kind: a.kind, task: a.task, what: a.what })),
       actions: readActions(10),
+      models: f.pools ? { on: true, why: f.pools.why, pools: Object.fromEntries(Object.entries(f.pools.state).map(([k, v]) => [k, { model: v.model, tool: v.tool, usedPct: v.usedPct, near: v.near, out: v.out }])) } : { on: false },
     };
     // One plain line for the Communicator (helper l reads { at, builders: { running, target }, blocked, text }).
     status.text = summaryLine(status);
@@ -566,6 +606,7 @@ export function statusText(s) {
   const e = s.expansion || {};
   L.push(`Expansion: ${e.slots} slot(s) at share ${e.share}, ${e.running} running, ${e.open} open (${['1', '2', '3'].map((p) => `${e.byPhase?.[p]?.label} ${e.byPhase?.[p]?.open}`).join(', ')}${e.byPhase?.unphased?.open ? `, unphased ${e.byPhase.unphased.open}` : ''})${e.sliceOpen ? `; Director slice open: ${e.sliceOpen}` : ''}${e.sliceFiled ? `; asked the Director: ${e.sliceFiled}` : ''}.`);
   if (s.blocked?.length) { L.push('Blocked:'); for (const b of s.blocked.slice(0, 12)) L.push(`  ${b.task} [${b.kind}] ${b.why}${b.fix ? ` -> ${b.fix}` : ''}`); if (s.blocked.length > 12) L.push(`  … and ${s.blocked.length - 12} more (npm run line -- status --json)`); }
+  if (s.models?.on) L.push(`Model pools (npm run models -- status): ${Object.entries(s.models.pools || {}).map(([k, v]) => `${k} ${v.out ? 'out' : v.near ? `near (${v.usedPct}%)` : `${v.usedPct}%`}`).join(', ')}.`);
   if (s.reasons?.length) L.push(`For the Producer (this plan can't run because): ${s.reasons.join('; ')}.`);
   if (s.fixed?.length) L.push(`Fixed this pass: ${s.fixed.map((a) => a.what).join('; ')}.`);
   if (s.actions?.length) L.push(`Last actions: ${s.actions.slice(-5).map((a) => `${String(a.at).slice(11, 16)} ${a.what}`).join('; ')}.`);

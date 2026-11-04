@@ -118,6 +118,7 @@
     "overseer": "node harness/overseer.mjs",
     "beta": "node harness/beta-mode.mjs",
     "line": "node harness/line-producer.mjs",
+    "models": "node harness/model-pools.mjs",
     "delegate": "node harness/delegation.mjs",
     "decisions": "node harness/decisions.mjs",
     "policy": "node harness/policy.mjs",

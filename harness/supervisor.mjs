@@ -544,9 +544,9 @@ export async function supervise(opts, state, now = Date.now()) {
       why.push(`${taskId} is being started by ${launch.lock?.owner || 'another pass'}`);
       continue;
     }
-    const lr = line ? line.routeFor(g, { tool, preferred, custom, live }) : {};
-    const r = startAgent({ role: g.role, agent, tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
-    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model} (${lr.tier} tier, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, failed: lr.failed || 0 } });
+    const lr = line ? line.routeFor(g, { tool, preferred, custom, live, outUntil: (await import('./budget.mjs')).exhaustedUntil }) : {};
+    const r = startAgent({ role: g.role, agent, tool: lr.tool || tool, task: g.tasks[0].id, lane: g.lane, oneTask: true, extra, ...(lr.model ? { model: lr.model } : {}) }, { detach: true });
+    if (r.ok && lr.model) emitEvent({ type: 'model.routed', agent: 'line-producer', task: taskId, msg: `${taskId}: starts on ${lr.model}${lr.tool ? ` (${lr.tool})` : ''} (${lr.tier} ${lr.tool ? 'task' : 'tier'}, the Line Producer): ${lr.why}`.slice(0, 400), meta: { task: taskId, arm: 'line-producer', tier: lr.tier, model: lr.model, ...(lr.tool ? { tool: lr.tool } : {}), failed: lr.failed || 0 } });
     if (r.ok) {
       started.push(`${agent} on ${g.tasks[0].id}${g.lane ? ` in ${g.lane}` : ''}${tool && tool !== preferred ? ` (${tool}: ${preferred} is out of quota)` : ''}`);
       // Count it at once, so the next group in this pass sees it (a lane taken, or the whole game).
@@ -586,10 +586,14 @@ async function linePlanNow(now) {
     return {
       orderGroups: (groups) => lp.orderGroups(groups, plan),
       holdFor: (g, live) => (g.role === 'builder' && plan.rigCap !== null && live.filter((s) => s.role === 'builder' && s.running !== false).length >= plan.rigCap ? `builder: the Line Producer holds new builders (the rig can carry ${plan.rigCap} now: ${String(plan.rigWhy).slice(0, 160)})` : ''),
-      routeFor: (g, { tool, preferred, custom }) => {
+      routeFor: (g, { tool, preferred, custom, outUntil }) => {
         const id = g.tasks[0]?.id;
         const r = plan.routes[id];
-        if (!r?.model || custom || (tool && tool !== preferred)) return {};
+        if (!r?.model || custom) return {};
+        // 2.77.0 (n): a model-pool route names its tool too (agy for Gemini, claude for Claude): it is taken unless that
+        // tool is marked out of quota now (the pool's own limits were weighed when the route was made).
+        if (r.tool) return outUntil && (outUntil(r.tool) || outUntil(`${r.tool}:${r.model}`)) ? {} : { tool: r.tool, model: r.model, tier: r.tier, why: r.why };
+        if (tool && tool !== preferred) return {};
         return { model: r.model, tier: r.tier, why: r.why };
       },
     };
