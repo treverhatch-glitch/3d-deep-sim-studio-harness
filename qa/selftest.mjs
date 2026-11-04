@@ -4548,6 +4548,16 @@ if (inShard('selftest-275h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.76.0 (k): the Line Producer (harness/line-producer.mjs): why each waiting task waits, chain-breakers first on the top
+// model, size routing, mechanical fixes (dead holders' locks, a lost train lane copy, past-due cooldowns), the rig's
+// builder target, the expansion share and its one Director slice, the Producer note, the supervisor following the plan.
+if (inShard('selftest-276k')) {
+  const dir = copyRepo();
+  const { selftest276K } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-276k.mjs')).href);
+  await selftest276K({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

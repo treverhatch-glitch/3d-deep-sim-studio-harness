@@ -119,6 +119,11 @@ Scheduler (Windows); `--uninstall` removes it.
   already queued still run (the train daemon, docs/WORK-ORGANIZATION.md).
   While the supervisor is halted, or nothing can start agents, a queued rescue's pick-up clock
   (`STUDIO_RESCUE_WAIT_MIN`) is stopped and the Producer is told once; it counts again from when agents can start.
+- **The Line Producer (2.76.0, docs/LINE-PRODUCER.md).** Each pass, before the supervisor picks what to start,
+  `harness/line-producer.mjs` frees locks of ended sessions, recreates a train lane's lost copy from its branch, clears
+  cooldowns whose time has passed, puts chain-breakers first on the strongest model, keeps a share of builders on
+  research/expansion across the early/mid/late phases, and holds builders back when the rig is full (never more than
+  the pace allows). `npm run line -- status`; `STUDIO_LINE_PRODUCER=report|off`.
 - **Only real limit errors count as out of quota** (a 429, "usage limit reached", "credit balance is too
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
