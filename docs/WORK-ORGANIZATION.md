@@ -245,6 +245,13 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
     `Studio-Task:` trailer and not its own is refused before its verify (`task.train.mixed`): the hand-back names the
     commits and how to make a clean lane (a branch off main with only its own commits). `STUDIO_TRAIN_MIXED=off` skips
     the check.
+  - 2.77.0 (P2.4 / B-91): the same rule on the launcher's side. When a lane copy is made for task X (the launcher, `task
+    start`, the claim: `carryTaskBranch` in harness/worktree.mjs) and X's earlier branch has commits tagged for another
+    OPEN task (not X, not an `--after` dependency, not X's Rescue target: the train's `mixedLane` / `mayCarry`), that
+    branch is NOT merged. The copy starts from main plus X's own commits from it (cherry-picked in order; commits with no
+    `Studio-Task:` trailer are left on the branch), a `lane.mixed_skipped` event says which task's commits and how many
+    were picked, and the session's start output opens with `MIXED LANE NOT MERGED: …`. `STUDIO_TRAIN_MIXED=off` skips
+    this check too. UNTESTED on Windows (git cherry-pick in a lane copy).
   - A task held for landing (`npm run task -- hold <ID>`) stays out of every train (queued, riding along or its own
     `task done --train`): deferred with the hold's reason, `OUT (held)` in `npm run lanes`, `OUT OF TRAINS` in
     `task train status` (2.67.2). `npm run task -- train leave <ID> --by <name> --why "…"` takes a queued lane out of the
@@ -409,6 +416,13 @@ supervisor's monitor) says is free. Default claims: game verify 1 GB + 0.45 GB p
 and 2 GB VRAM; browser playtest 5 GB and 1 GB VRAM; Blender preview 2 GB and 1 GB VRAM (GPU only); asset round trip
 1 GB; anything else wrapped with `node harness/heavy.mjs run` 4 GB (`--kind <kind>`, `--ram-gb`, `--vram-gb`,
 `--gpu-only` change it). `studio/machine-budget.json` overrides them: `{ "jobs": { "unity": { "ramGb": 10 } } }`.
+2.77.0 (P4.2): an `art-bake` kind (lightmap, texture, mesh or atlas bake of an art pass; `--kind art-bake`) is in the
+catalog: 6 GB, 4 threads, 20 expected minutes, all three set in the same `"jobs"` data (`{ "jobs": { "art-bake": {
+"ramGb": 9, "cpuThreads": 6, "minutes": 45 } } }`; `minutes` works for any kind). It is rig kind "art", a fixed claim
+like Unity's. The priority order is one table, `RIG_PRIORITY` in harness/heavy-budget.mjs:
+train > builder verifies > Unity/art > soaks (playtest and other fixed-claim jobs share Unity/art's rank). The test-worker weights (4, 2, 2, 1) are
+read from that table; nothing else is scheduled by it yet (`jobCatalog()` lists the kinds by rank with their expected
+RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share).
 
 - **RAM**: the scan's free memory (commit headroom on Windows) less `STUDIO_RESERVE_RAM_GB` (default 4 GB or 10% of
   RAM, whichever is more) and the claims of jobs started since the scan. **GPU**: the largest GPU's free VRAM less
