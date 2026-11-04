@@ -23,7 +23,7 @@ import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
-import { inLaneCopy, catchUp, carryTaskBranch, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
+import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
@@ -499,9 +499,12 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   }
   // In a lane copy (2.29): start from the studio's latest work, plus any earlier agent's unmerged work on this task.
   let carried = null;
+  let mixedSkipped = null;
   if (inLaneCopy()) {
     catchUp();
-    carried = carryTaskBranch(target.id);
+    const cx = carryTaskBranchEx(target.id);
+    carried = cx.carried;
+    mixedSkipped = cx.mixed?.line || null;
   }
   syncCurrentTaskCheckpoint(target, `Started ${target.id} (${target.role}) — owner ${agent}`);
   const handoff = readTaskHandoff(target.id);
@@ -518,7 +521,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
     // the brief is a help, never a blocker
   }
   const research = researchAtStart(target);
-  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}), ...(research ? { research } : {}) };
+  return { ...target, owner: agent, ...(brief ? { brief } : {}), ...(handoff ? { handoff } : {}), ...(carried ? { carried } : {}), ...(mixedSkipped ? { mixedSkipped } : {}), ...(research ? { research } : {}) };
 }
 
 /** 2.71.0 (y): a research task's write-up template, written where the task is worked (harness/research.mjs). */
@@ -1748,6 +1751,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     // notes, at most 3k characters) replaces re-reading the whole hand-off history.
     if (started.brief) console.error(`Your brief: ${started.brief} (read it instead of the repo)\n${startSummary(started)}`);
     if (started.carried) console.error(`The earlier agent's commits on ${started.carried} are merged into your copy.`);
+    if (started.mixedSkipped) console.error(`MIXED LANE NOT MERGED: ${started.mixedSkipped}`); // 2.77.0 (f, P2.4)
     if (started.research) console.error(`Research task: write it up in ${started.research} (the template is there): every source with its link; task done refuses a write-up without them.`);
     if (started.handoff) console.error(`Picking up where someone else stopped. Carry-forward note (newest, at most 3k characters; all of it in studio/handoffs/${started.id}.md):\n${carryForward(started.handoff, started.id)}`);
     for (const l of startOv?.lines || []) console.error(l); // 2.69.0 (s): overlap advice, once the task is started

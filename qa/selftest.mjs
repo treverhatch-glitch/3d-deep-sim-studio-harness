@@ -4641,6 +4641,15 @@ if (inShard('selftest-277m')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.0 (f): beta uses in the daily digest (P1.1), the launcher's mixed-lane check (P2.4), the rig's art-bake job kind and
+// its one priority table (P4.2).
+if (inShard('selftest-277f')) {
+  const dir = copyRepo();
+  const { selftest277F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-277f.mjs')).href);
+  await selftest277F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // new-game produces a cartridge that passes purity, golden, slice and playtest.
 if (inShard('new-game')) {
   const dir = copyRepo();

@@ -64,7 +64,7 @@ export async function rigBudget({ root = null, env = process.env, now = Date.now
   const typical = typicalMinutes(evs || []);
   const eta = (kind, at) => { const m = typical[ETA_KIND[kind] || 'heavy']; const t = Number(typeof at === 'number' ? at : Date.parse(at)); return m && Number.isFinite(t) ? Math.max(0, Math.round((m - (now - t) / 60000) * 10) / 10) : null; };
   const running = [];
-  for (const j of hb.rigJobs(holders)) running.push({ kind: j.kind, label: j.label, workers: j.workers, ramGb: j.ramGb, threads: j.threads, startedAt: iso(j.at), etaMin: eta(j.kind, j.at), pid: j.pid, owner: j.owner, source: 'machine:heavy' });
+  for (const j of hb.rigJobs(holders)) running.push({ kind: j.kind, rank: hb.rigRank(j.kind), label: j.label, workers: j.workers, ramGb: j.ramGb, threads: j.threads, startedAt: iso(j.at), etaMin: eta(j.kind, j.at), pid: j.pid, owner: j.owner, source: 'machine:heavy' });
   for (const g of slots) running.push({ kind: 'check', label: g.label, workers: null, ramGb: null, threads: null, startedAt: iso(g.at), etaMin: eta('check', g.at), pid: g.pid, owner: null, source: 'gate slot' });
   // Verify records whose process lives but that hold no machine:heavy slot (waiting for one, or a light run).
   const held = new Set(holders.map((h) => Number(h.pid)));
@@ -88,7 +88,7 @@ export async function rigBudget({ root = null, env = process.env, now = Date.now
   try {
     for (const as of ['train', 'verify']) { const c = hb.jobClaim('verify', { root: hroot, env, profile, state, as, extraJobs: laneJobs, ...(as === 'train' ? { coming: [] } : {}) }); shares[as] = { workers: c.workers, ramGb: c.ramGb, why: c.workersWhy || '' }; }
     for (const self of ['check', 'soak']) { const t = hb.testWorkers({ profile, env, holders, laneChecks: slots.length, root: hroot, trainRoot: hroot, self }); shares[self] = { workers: t.workers, why: t.why }; }
-    for (const [k, kind] of [['unity', 'unity'], ['art', 'blender-preview'], ['playtest', 'browser-playtest'], ['other', 'heavy']]) { const c = hb.jobClaim(kind, { root: hroot, env, profile, state }); shares[k] = { threads: c.cpuThreads, ramGb: c.ramGb, why: `a fixed claim (${c.label})${c.areaWhy ? `; ${c.areaWhy}` : ''}` }; }
+    for (const [k, kind] of [['unity', 'unity'], ['art', 'blender-preview'], ['artBake', 'art-bake'], ['playtest', 'browser-playtest'], ['other', 'heavy']]) { const c = hb.jobClaim(kind, { root: hroot, env, profile, state }); shares[k] = { threads: c.cpuThreads, ramGb: c.ramGb, why: `a fixed claim (${c.label})${c.areaWhy ? `; ${c.areaWhy}` : ''}` }; }
   } catch {}
   // 2.77.0 (o): tasks on remote (cloud) workers cost this machine nothing until their branch is queued for the train
   // (then the train's verify counts, as for any lane): listed, never counted (harness/remote-workers.mjs).

@@ -28,6 +28,8 @@ import { listLocks } from './lock.mjs';
 import { changedSince, readPass, recordPass, canReuse, withLandLock, landingRecheckEnv } from './merge-lane.mjs';
 import { PLANNING_ROLES } from './planning-roles.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
+import { mixedLane, mayCarry } from './train-lanes.mjs';
+import { boardStates, readDeps } from './train-deps.mjs';
 import { lanePlan, writeRecord as writeSparseRecord, removeRecord as removeSparseRecord, widenStrays } from './lane-sparse.mjs';
 import { approvedBranchFor } from './lane-approvals.mjs';
 
@@ -205,11 +207,13 @@ export function createLaneCopy(agent, { task = null, lane = null, carry = true }
   fs.writeFileSync(exclude, ['/studio', '/.studio', '/.env', 'node_modules', ''].join('\n'));
   git(dir, 'config', '--worktree', 'core.excludesFile', exclude);
   // 2.77.0 (o): `npm run lane -- create <T-ID> --from <branch>...` merges the branches it was given instead (carry: false).
-  const carried = task && carry ? carryTaskBranch(task, dir) : null;
+  // 2.77.0 (f): a previous lane that carries another open task's commits isn't merged (carryTaskBranchEx).
+  const cx = task && carry ? carryTaskBranchEx(task, dir) : { carried: null, mixed: null };
+  const carried = cx.carried;
   if (plan.on) writeSparseRecord(root, agent, { agent, task, at: new Date().toISOString(), exclude: plan.exclude, keep: plan.keep, from: plan.from, patterns: plan.patterns, widened: [] });
   else removeSparseRecord(root, agent);
   emitEvent({ type: 'lane.copy', agent, task, msg: `${agent} works in its own copy (${LANES_DIR}/${agent}, branch ${branch})${carried ? `, with ${carried} merged in` : ''}${plan.on ? `; ${plan.why}` : ''}`.slice(0, 500), ...(plan.on ? { meta: { exclude: plan.exclude, keep: plan.keep } } : {}) });
-  return { dir, branch, carried, sparse: plan.on ? { exclude: plan.exclude, keep: plan.keep } : null };
+  return { dir, branch, carried, mixed: cx.mixed, sparse: plan.on ? { exclude: plan.exclude, keep: plan.keep } : null };
 }
 
 /** 2.70.0 (w): the sparse plan for a new lane copy; the 2.29 patterns if it can't be worked out. */
@@ -259,17 +263,38 @@ export function taskOnBoard(task) {
  * this copy's branch becomes the task's branch. Returns the branch merged in, or null.
  */
 export function carryTaskBranch(task, dir = REPO_ROOT) {
+  return carryTaskBranchEx(task, dir).carried;
+}
+
+/**
+ * 2.77.0 (f, P2.4 / B-91): carryTaskBranch with the launcher-side mixed-lane check. A branch whose own commits carry
+ * another OPEN task's Studio-Task trailer (not this task, not a declared --after dependency, not the task this one
+ * rescues: train-lanes.mjs mixedLane / mayCarry, the rules the train uses) is NOT merged: the copy stays on the studio's
+ * branch plus this task's own commits from that branch (cherry-picked, in order), one lane.mixed_skipped event says so.
+ * STUDIO_TRAIN_MIXED=off turns the check off (as for the train). Returns { carried, mixed: null | { branch, why, foreign,
+ * picked, left, line } }.
+ */
+export function carryTaskBranchEx(task, dir = REPO_ROOT) {
   const root = mainRoot();
   const mine = git(dir, 'symbolic-ref', '--short', 'HEAD').stdout?.trim();
   const b = readBranches();
   const prev = b[task];
   let carried = null;
+  let mixed = null;
   if (prev && prev !== mine && git(root, 'rev-parse', '--verify', '--quiet', prev).status === 0 && unmerged(prev, root) > 0) {
-    const m = git(dir, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-edit', prev);
-    if (m.status === 0) {
-      carried = prev;
-      b[`${task}:carried`] = [...new Set([...(b[`${task}:carried`] || []), prev])];
-    } else git(dir, 'merge', '--abort');
+    mixed = launcherMixed(root, task, prev);
+    if (mixed) {
+      const lines = pickOwn(dir, root, task, prev);
+      mixed = { ...mixed, ...lines };
+      mixed.line = `${mixed.line}${lines.picked ? ` Started from ${mainBranch(root)} plus ${lines.picked} of ${task}'s own commit(s) from it.` : ` Started from ${mainBranch(root)}.`}${lines.left ? ` ${lines.left} commit(s) of it carry no Studio-Task: ${task} and were left (still on ${prev}).` : ''}`;
+      try { emitEvent({ type: 'lane.mixed_skipped', agent: process.env.STUDIO_LOCK_OWNER || null, task, status: 'warn', msg: mixed.line.slice(0, 600), meta: { branch: prev, foreign: mixed.foreign.map((f) => ({ task: f.task, commits: f.commits.map((c) => c.sha) })), picked: lines.picked, left: lines.left } }); } catch {}
+    } else {
+      const m = git(dir, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-edit', prev);
+      if (m.status === 0) {
+        carried = prev;
+        b[`${task}:carried`] = [...new Set([...(b[`${task}:carried`] || []), prev])];
+      } else git(dir, 'merge', '--abort');
+    }
   }
   // 2.77.0 (B-96): and the lane branch holding the contents the task's owner approval was signed for, when it isn't the
   // previous lane (harness/lane-approvals.mjs). A conflict leaves the copy as it was, with an event saying so.
@@ -289,7 +314,39 @@ export function carryTaskBranch(task, dir = REPO_ROOT) {
     b[task] = mine;
     writeBranches(b);
   }
-  return carried;
+  return { carried, mixed };
+}
+
+/** The launcher's mixed-lane judgement of `branch` for `task` (null: fine, or the check is off). Never throws. */
+function launcherMixed(root, task, branch) {
+  try {
+    if (/^(off|0|false|no)$/i.test(process.env.STUDIO_TRAIN_MIXED || '')) return null;
+    const st = boardStates(root) || { open: new Set(), done: new Set() };
+    const allowed = mayCarry(root, task, readDeps(root));
+    const tip = git(root, 'rev-parse', `refs/heads/${mainBranch(root)}`).stdout?.trim();
+    const head = git(root, 'rev-parse', `${branch}^{commit}`).stdout?.trim();
+    const m = mixedLane(root, { task, tip, head, open: (t) => st.open.has(t) && !allowed.has(t) });
+    if (!m.mixed) return null;
+    const shown = m.foreign.map((f) => `${f.task} (${f.commits.length} commit(s))`).join(', ');
+    return { branch, why: m.why, foreign: m.foreign, tip, head, line: `Did not merge ${branch} into your copy: it carries commits of another open task (${shown}), and a lane trains only its own task's commits.` };
+  } catch { return null; }
+}
+
+/** Cherry-pick the branch's commits tagged Studio-Task: <task> (oldest first) into dir. { picked, left }. */
+function pickOwn(dir, root, task, branch) {
+  const r = git(root, 'log', '--no-merges', '--reverse', '--right-only', '--cherry-pick', '--format=%x1e%H%x09%(trailers:key=Studio-Task,valueonly,separator=%x2C)', `${mainBranch(root)}...${branch}`);
+  let picked = 0; let left = 0;
+  if (r.status !== 0) return { picked, left };
+  let stop = false;
+  for (const blk of String(r.stdout).split('\x1e').filter((x) => x.trim())) {
+    const [sha, tags = ''] = blk.trim().split('\t');
+    if (!tags.split(/[,\s]+/).includes(task)) { if (!tags.split(/[,\s]+/).some((x) => /^[A-Z]+-\d+$/.test(x))) left += 1; continue; }
+    if (stop) continue;
+    const c = git(dir, '-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'cherry-pick', '--allow-empty', sha);
+    if (c.status === 0) picked += 1;
+    else { git(dir, 'cherry-pick', '--abort'); stop = true; left += 1; }
+  }
+  return { picked, left };
 }
 
 /** Remember which branch holds a task's unmerged work (the launcher, when a session ends). */

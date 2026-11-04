@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { STUDIO_STATE_DIR, emitEvent, readRecentEvents } from './event.mjs';
-import { inLaneCopy, mainRoot, MAIN_CHECKOUT_ROLES, laneWantsCopy, lanelessWantsCopy, worktreeSupport, createLaneCopy, carryTaskBranch, LANES_DIR } from './worktree.mjs';
+import { inLaneCopy, mainRoot, MAIN_CHECKOUT_ROLES, laneWantsCopy, lanelessWantsCopy, worktreeSupport, createLaneCopy, carryTaskBranchEx, LANES_DIR } from './worktree.mjs';
 import { laneOf } from './task-hold.mjs';
 
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -59,26 +59,27 @@ export function laneAtClaim({ agent, task, env = process.env, lane } = {}) {
   const rec = readJson(recFile);
   const dir = path.join(root, LANES_DIR, agent);
   const rel = `${LANES_DIR}/${agent}`;
-  let made = false; let branch = null; let carried = null;
+  let made = false; let branch = null; let carried = null; let mixed = null;
   if (isWorktree(dir)) {
     branch = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim() || null;
-    try { carried = carryTaskBranch(task, dir); } catch { carried = null; }
+    try { const cx = carryTaskBranchEx(task, dir); carried = cx.carried; mixed = cx.mixed; } catch { carried = null; }
   } else {
     const c = createLaneCopy(agent, { task, lane: w.lane });
     if (c.error) return { error: `no lane copy could be made for ${agent} (${c.error})` };
-    made = true; branch = c.branch; carried = c.carried || null;
+    made = true; branch = c.branch; carried = c.carried || null; mixed = c.mixed || null;
   }
   if (rec && rec.status === 'running') {
     try { fs.writeFileSync(recFile, JSON.stringify({ ...rec, copy: { dir: rel, branch }, copyAtClaim: { task, at: new Date().toISOString() } }, null, 2)); } catch {}
   }
   emitEvent({ type: 'lane.at_claim', agent, task, msg: `${agent} claimed ${task} from the main checkout: it works in ${rel} (branch ${branch || '?'})${made ? '' : ', its existing copy'}${carried ? `, with ${carried} merged in` : ''}`, meta: { dir: rel, branch, made } });
-  return { dir, rel, branch, made, carried };
+  return { dir, rel, branch, made, carried, mixed };
 }
 
 /** The lines `task start` prints for it. */
 export function laneAtClaimLines(r) {
   if (!r || r.error) return [];
   return [
+    ...(r.mixed ? [`MIXED LANE NOT MERGED: ${r.mixed.line}`] : []),
     `Your lane copy: ${r.rel} (${r.dir}), branch ${r.branch || '?'}${r.carried ? `, with the earlier agent's commits on ${r.carried} merged in` : ''}.`,
     `Work ONLY there from now on: cd ${JSON.stringify(r.dir.replace(/\\/g, '/'))} and edit, test and commit inside it. The main checkout refuses game commits; studio/ and .studio/ in the copy are the shared board and state. Then run task done from the copy.`,
   ];
