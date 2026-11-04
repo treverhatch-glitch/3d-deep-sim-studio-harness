@@ -2338,16 +2338,30 @@ export function boardPaths(file = path.join(path.dirname(fileURLToPath(import.me
  * descendant of `tip`, and every path changed in tip..now must be on the list, added or modified (a delete or a
  * rename never counts: --no-renames shows a rename as a delete).
  */
-export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths() } = {}) {
+/** 2.77.0 (P9.1): files a board move may add, never change (train-board.json "addOnlyPaths"). */
+export function addOnlyPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(j.addOnlyPaths) ? j.addOnlyPaths.map(String) : []; } catch { return []; }
+}
+/** 2.77.0 (P9.1): files only some required checks read: glob -> [check id] (train-board.json "recheckPaths"). */
+export function recheckPaths(file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'train-board.json')) {
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j.recheckPaths && typeof j.recheckPaths === 'object' ? j.recheckPaths : {}; } catch { return {}; }
+}
+
+export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths(), addOnly = addOnlyPaths(), rechecks = recheckPaths() } = {}) {
   if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
   if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
   const r = git(root, 'diff', '--name-status', '--no-renames', '-z', tip, now);
   if (r.status !== 0) return { ok: false, why: 'git diff failed' };
   const parts = String(r.stdout || '').split('\0').filter(Boolean);
   const files = [];
+  const recheck = new Set();
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const [st, f] = [parts[i], parts[i + 1]];
     if (!/^[AM]$/.test(st)) return { ok: false, why: `it ${st === 'D' ? 'deletes' : `changes (${st})`} ${f}` };
+    // 2.77.0 (P9.1): an added approval is a record (it only lets more pass); a file some checks read re-runs those.
+    if (!matchAny(f, list) && st === 'A' && matchAny(f, addOnly)) { files.push(f); continue; }
+    const rc = Object.entries(rechecks).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
+    if (!matchAny(f, list) && rc.length) { for (const x of rc) recheck.add(x); files.push(f); continue; }
     if (!matchAny(f, list)) {
       // 2.67.0 (B-29): a task record (holds, approval cards) counts when no entry it changes is a lane of this train.
       const rec = Array.isArray(lanes) && records[f] ? recordEntriesChanged(root, tip, now, f, records[f]) : null;
@@ -2357,7 +2371,7 @@ export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = nul
     }
     files.push(f);
   }
-  return files.length ? { ok: true, files } : { ok: false, why: 'no file changed' };
+  return files.length ? { ok: true, files, recheck: [...recheck].sort() } : { ok: false, why: 'no file changed' };
 }
 
 /** 2.67.0 (B-29): task records a board move may change for tasks outside the train (train-board.json "taskRecords": path -> key). */
@@ -2419,7 +2433,32 @@ function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
   const blob = (rev, f) => out(git(root, 'rev-parse', '-q', '--verify', `${rev}:${f}`));
   const odd = diff.find((f) => !move.files.includes(f) || blob(again.tree, f) !== blob(now, f));
   if (odd) return { ok: false, why: `the new tree differs from the verified one in ${odd}, not only by ${mainBranch(root)}'s board files` };
-  return { ok: true, built: again, files: move.files };
+  // 2.77.0 (P9.1): files some checks read (the Bible's controls list, a changed approval): those checks only, on the new tree.
+  const rc = recheckBoardMove(root, sc, { id, tree: again.tree, ids: move.recheck || [], files: move.files });
+  if (!rc.ok) return { ok: false, why: rc.why };
+  return { ok: true, built: again, files: move.files, ...(rc.ran.length ? { rechecked: rc.ran } : {}) };
+}
+
+/**
+ * 2.77.0 (P9.1): re-run only the checks `ids` (those the studio has) on the train copy's tree after main moved by files
+ * they read. { ok, ran: [ids], why }. Nothing to run: ok.
+ */
+function recheckBoardMove(root, sc, { id, tree, ids, files }) {
+  let have = [];
+  try { have = (JSON.parse(fs.readFileSync(path.join(root, 'studio', 'gates.json'), 'utf8')).gates || []).map((x) => String(x.id)); } catch {}
+  const run = ids.filter((x) => have.includes(x));
+  if (!run.length) return { ok: true, ran: [] };
+  const owner = `train-${id}-move`;
+  const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off' };
+  for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE', 'STUDIO_GATE_FOCUS']) delete env[k];
+  const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', run.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(path.join(root, '.studio', 'gates', `${owner}.json`), 'utf8')); } catch {}
+  for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
+  try { fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-move-recheck.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
+  const rows = Array.isArray(rec?.rows) ? rec.rows : [];
+  const green = r.status === 0 && rec?.tree === tree && rows.length > 0 && rows.every((x) => x.ok || x.required === false);
+  return green ? { ok: true, ran: run } : { ok: false, ran: run, why: `the checks that read ${files.filter((f) => Object.keys(recheckPaths()).some((g) => matchAny(f, [g]))).join(', ')} (${run.join(', ')}) are ${r.status === 0 ? 'not clearly green' : 'red'} on the new tree` };
 }
 
 /**
@@ -2439,8 +2478,8 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
         const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
         if (!re.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}`); return 'moved'; }
         built = re.built;
-        board = { from: tip, to: now, files: re.files };
-        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused`);
+        board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
+        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
         ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
       }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };

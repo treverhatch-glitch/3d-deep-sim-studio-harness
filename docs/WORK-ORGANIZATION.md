@@ -178,9 +178,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   linked to the main checkout's), so these can't change what the verify saw. 2.67.0 (B-29): the task records listed
   under `"taskRecords"` there (`studio/task-holds.json`, which `task yes` and holds write, and
   `studio/pending-review.json`) count too, when every entry they change is for a task that is not a lane of this train;
-  an entry of a train lane, another key or an entry without a task still means a new verify. Anything else (`studio/protected.json`,
-  `studio/game.json`, gates, keys, approvals, code, goldens) or a train with a pin-refresh commit: built and verified
-  again, as before.
+  an entry of a train lane, another key or an entry without a task still means a new verify. 2.77.0 (P9.1): the list
+  also has decisions (`studio/decisions/**`, `studio/decisions.jsonl`), asks, `studio/daily/**`, `studio/harness-notes/**`
+  and the Bible's prose (`BIBLE.md`, `STORYBOARD.md`, `NOT-DOING.md`, `ideas/`, `systems/`, `reviews/`); an ADDED approval
+  (`"addOnlyPaths"`: `studio/approvals/**`) counts too (it only lets more pass); and a file only some required checks read
+  (`"recheckPaths"`: the Bible's `controls.json` -> controls, a changed approval -> protected and approvals, `studio/reviews/`
+  -> reviewer, producer and meeting notes -> docs) re-runs just those checks on the new tree (`run-gates --only`, log
+  `.studio/train/<id>-move-recheck.log`, `meta.rechecked` on the event): green lands on the same verify, red verifies
+  again. Anything else (`studio/protected.json`, `studio/game.json`, gates, keys, a deleted approval, code, goldens) or a
+  train with a pin-refresh commit: built and verified again, as before.
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
   `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
   each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",
