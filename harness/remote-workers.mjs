@@ -12,7 +12,7 @@
  *       `npm test` when package.json has one). Never eligible: a person's or a planning role's task, a Unity task
  *       (Windows, GPU and a licence), a task whose lane is studio/ or .studio/ (the board and the state are local).
  *   npm run remote -- brief <T-ID> [--worker <name>] --by <name> [--json]
- *       claims the task for remote:<worker> with a lease of STUDIO_REMOTE_LEASE_H hours (12) and writes a
+ *       claims the task for remote-<worker> with a lease of STUDIO_REMOTE_LEASE_H hours (12) and writes a
  *       self-contained brief for the cloud session (.studio/remote/briefs/<T-ID>.md, printed): the task and what done
  *       means, the commands for its own tests, the branch to push (remote/<T-ID>-<short>), the Studio-Task trailer,
  *       the "Studio-Remote: done" marker, what not to touch. The lease is on the board (studio/task-holds.json), in
@@ -52,7 +52,10 @@ import { mainRoot, mainBranch, MAIN_CHECKOUT_ROLES, removeLaneCopy, LANES_DIR } 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASK_ID = /^[A-Z]+-\d+$/;
 const WORKER = /^[a-z0-9][a-z0-9-]{0,30}$/i;
-export const OWNER_PREFIX = 'remote:';
+export const OWNER_PREFIX = 'remote-';
+/** 2.77.0: the old form "remote:<worker>" (a colon is an NTFS stream separator on Windows) is still recognized when read, never written. */
+export const OLD_OWNER_PREFIX = 'remote:';
+export const isRemoteOwner = (o) => typeof o === 'string' && (o.startsWith(OWNER_PREFIX) || o.startsWith(OLD_OWNER_PREFIX));
 export const BRANCH_PREFIX = 'remote/';
 export const ACTIVE = new Set(['leased', 'working', 'refused', 'needs-review', 'queued']);
 export const NEVER = [/^studio\//, /^\.studio\//, /^\.lanes\//, /^\.env($|\.)/, /(^|\/)node_modules(\/|$)/, /^\.git\//];

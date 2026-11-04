@@ -41,7 +41,7 @@ current main for them to start from:
    `remote`). A research, design or docs task needs nothing more; a code task needs the commands that run its own tests
    (or the repo's `npm test`). `--allow` limits the files the branch may change (the task's lane counts too). A person's
    task, a planning role's task, a Unity task or a task whose lane is `studio/` or `.studio/` is refused.
-2. **Brief** it: `npm run remote -- brief <T-ID> --worker <name> --by <name>` claims the task for `remote:<name>` with a
+2. **Brief** it: `npm run remote -- brief <T-ID> --worker <name> --by <name>` claims the task for `remote-<name>` (no colon: it is a file name on Windows; a lease made as `remote:<name>` before 2.77.0 is still honored) with a
    lease of `STUDIO_REMOTE_LEASE_H` hours (12): the claim lock, the task in progress on the board, the lease in
    studio/task-holds.json and `.studio/remote/leases.json`. It prints the brief (also in `.studio/remote/briefs/<T-ID>.md`):
    the task and what done means, the notes left on it, the commands for its own tests, the branch to push
@@ -57,7 +57,7 @@ current main for them to start from:
    - working: no `Studio-Remote: done` on its last commit yet;
    - needs review: it changes the harness's own code. Read it, then queue it by hand:
      `npm run lane -- create <T-ID> --from cloud/remote/<T-ID>-<short> --agent remote-<t-id>` and, in that copy,
-     `npm run task -- done <T-ID> --agent remote:<name> --train`;
+     `npm run task -- done <T-ID> --agent remote-<name> --train`;
    - handed back: `Studio-Remote: handback <why>`: the task goes back on the board with that note;
    - queued: a lane copy `.lanes/remote-<t-id>` is made for it (`npm run lane -- create`: studio/ linked to main), its
      commits re-stamped through the local hooks when needed (as `npm run lanes -- refresh` does), and

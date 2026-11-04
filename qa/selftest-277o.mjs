@@ -7,12 +7,12 @@
  *              conflict leaves no copy and no branch; a launched worker session is refused
  *   eligible   `remote -- mark`: a docs task is eligible, a code task needs its own test commands, a Unity task and a
  *              person's task never are
- *   brief      `remote -- brief` claims the task for remote:<worker> with a STUDIO_REMOTE_LEASE_H lease (the lock, the
+ *   brief      `remote -- brief` claims the task for remote-<worker> with a STUDIO_REMOTE_LEASE_H lease (the lock, the
  *              board's record, the lease file), writes the self-contained brief (branch, trailer, done marker, tests,
  *              never-touch list); the rig budget counts it as 0 local CPU; its claim clock doesn't run
  *   fetch      `remote -- fetch` from a push-enabled remote: a branch with a commit lacking the trailer, or touching
  *              studio/, is refused; one without "Studio-Remote: done" is still working; harness code waits for a
- *              person; a finished one gets a lane copy and is queued for the normal train under remote:<worker>
+ *              person; a finished one gets a lane copy and is queued for the normal train under remote-<worker>
  *   expire     a lease past its time releases the claim and hands the task back (a Line Producer pass, STUDIO_REMOTE=on)
  *   line       the Line Producer offers remote-eligible ready tasks when the local builders are at their target (a
  *              "remote" line in `line -- plan` and its status), local first when a slot is free
@@ -135,7 +135,7 @@ export async function selftest277O({ dir, run, report, tmpRoot, root }) {
     g(st.S, ['fetch', '-q', 'cloud']);
     return { ...st, bare, env: { ...st.env, STUDIO_REMOTE_NAME: 'cloud', STUDIO_REMOTE_LEASE_H: '12' } };
   };
-  await guard('277o brief: remote -- brief claims the task for remote:<worker> with a 12 h lease (lock, board record, lease file), the brief names the branch, the trailer, the done marker and the never-touch list; the rig budget counts 0 local CPU; the claim clock doesn\'t run; a worker session is refused (fails on 2.76.0)', async () => {
+  await guard('277o brief: remote -- brief claims the task for remote-<worker> with a 12 h lease (lock, board record, lease file), the brief names the branch, the trailer, the done marker and the never-touch list; the rig budget counts 0 local CPU; the claim clock doesn\'t run; a worker session is refused (fails on 2.76.0)', async () => {
     const { S, env } = remoteStudio('brief');
     node(S, env, ['harness/remote-workers.mjs', 'mark', 'T-301', '--by', 'opus-1']);
     const w = node(S, { ...env, STUDIO_ROLE: 'builder', STUDIO_LOCK_OWNER: 'builder-z1' }, ['harness/remote-workers.mjs', 'brief', 'T-301', '--worker', 'web1', '--by', 'builder-z1']);
@@ -151,13 +151,13 @@ export async function selftest277O({ dir, run, report, tmpRoot, root }) {
     const { j: rig } = probe(S, env, `import { rigBudget } from '../harness/rig-budget.mjs'; import { taskSpend } from '../harness/task-budget.mjs'; import { readRecentEvents } from '../harness/event.mjs';
 const b = await rigBudget({}); const ev = readRecentEvents(5000);
 console.log(JSON.stringify({ remote: b.remote, spend: taskSpend('T-301', ev, Date.now() + 5 * 3600000) }));`);
-    const ok = w.status !== 0 && /Refused/.test(out(w)) && r.status === 0 && j?.ok && lock?.owner === 'remote:web1' && hours > 11.9 && hours < 12.1 && inProg && hold?.owner === 'remote:web1' && j.lease.branch === 'remote/T-301-docs-the-save-format'
+    const ok = w.status !== 0 && /Refused/.test(out(w)) && r.status === 0 && j?.ok && lock?.owner === 'remote-web1' && hours > 11.9 && hours < 12.1 && inProg && hold?.owner === 'remote-web1' && j.lease.branch === 'remote/T-301-docs-the-save-format'
       && /git push cloud remote\/T-301-docs-the-save-format/.test(brief) && /Studio-Task: T-301/.test(brief) && /Studio-Remote: done/.test(brief) && /Never touch `studio\/`/.test(brief) && /npm ci/.test(brief)
       && rig?.remote?.out === 1 && rig.remote.cpu === 0 && rig.spend.minutes === 0;
     return [ok, `worker ${w.status}: ${out(w)}\nbrief ${r.status}: ${out(r).slice(0, 1500)}\nlock ${JSON.stringify(lock)} hours ${hours}\nhold ${JSON.stringify(hold)}\nrig ${JSON.stringify(rig)}`];
   });
 
-  await guard('277o fetch: remote -- fetch refuses a branch with a commit lacking the Studio-Task trailer or touching studio/, keeps one without "Studio-Remote: done" working, holds harness code for a person, and queues a finished one for the normal train in its own lane copy under remote:<worker> (fails on 2.76.0)', async () => {
+  await guard('277o fetch: remote -- fetch refuses a branch with a commit lacking the Studio-Task trailer or touching studio/, keeps one without "Studio-Remote: done" working, holds harness code for a person, and queues a finished one for the normal train in its own lane copy under remote-<worker> (fails on 2.76.0)', async () => {
     const { S, ev, env, bare } = remoteStudio('fetch');
     node(S, env, ['harness/remote-workers.mjs', 'mark', 'T-301', '--by', 'opus-1']);
     const b = json(node(S, env, ['harness/remote-workers.mjs', 'brief', 'T-301', '--worker', 'web1', '--by', 'opus-1', '--json']));
@@ -199,7 +199,7 @@ console.log(JSON.stringify({ remote: b.remote, spend: taskSpend('T-301', ev, Dat
     const ok = f1.st?.status === 'refused' && /no "Studio-Task: T-301" trailer/.test(f1.st.why)
       && f2.st?.status === 'refused' && /studio\/NEXT\.md/.test(f2.st.why)
       && f3.st?.status === 'working' && f4.st?.status === 'needs-review' && /harness\/extra-277o\.mjs/.test(f4.st.why)
-      && f5.st?.status === 'queued' && entry?.agent === 'remote:web1' && real(entry.dir) === real(lane) && fs.existsSync(path.join(lane, 'docs', 'save-format-277o.md')) && real(path.join(lane, 'studio')) === real(path.join(S, 'studio'))
+      && f5.st?.status === 'queued' && entry?.agent === 'remote-web1' && real(entry.dir) === real(lane) && fs.existsSync(path.join(lane, 'docs', 'save-format-277o.md')) && real(path.join(lane, 'studio')) === real(path.join(S, 'studio'))
       && lease?.status === 'queued' && evs.includes('task.remote.refused') && evs.includes('task.remote.queued');
     return [ok, `f1 ${JSON.stringify(f1.st)}\nf2 ${JSON.stringify(f2.st)}\nf3 ${JSON.stringify(f3.st)}\nf4 ${JSON.stringify(f4.st)}\nf5 ${JSON.stringify(f5.st)} ${out(f5.r)}\nqueue ${JSON.stringify(q)}\nlease ${JSON.stringify(lease)}`];
   });
