@@ -52,7 +52,7 @@ export const OWNER_PUB_REL = 'studio/keys/owner-ed25519.pub.pem';
 export const APPROVALS_REL = 'studio/approvals';
 const PROTECTED_REL = 'studio/protected.json';
 export const DEFAULT_PROTECTED = [
-  'studio/protected.json', 'studio/keys/**', 'studio/gates.json', 'studio/bible/controls.json',
+  'studio/protected.json', 'studio/keys/**', 'studio/beta.json', 'studio/gates.json', 'studio/bible/controls.json',
   'cartridges/*/qa.mjs', 'web/*/sim/qa.mjs', 'game/*/sim/qa.mjs', 'qa/regressions/**',
   'qa/controls-check.mjs', 'qa/protected-check.mjs', 'harness/approve.mjs',
   '**/tools/controls.gd', '**/tools/gate.gd', '.github/workflows/**',

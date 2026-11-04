@@ -115,6 +115,7 @@
     "denials": "node harness/denials.mjs",
     "workaround": "node harness/workaround.mjs",
     "overseer": "node harness/overseer.mjs",
+    "beta": "node harness/beta-mode.mjs",
     "delegate": "node harness/delegation.mjs",
     "decisions": "node harness/decisions.mjs",
     "policy": "node harness/policy.mjs",
