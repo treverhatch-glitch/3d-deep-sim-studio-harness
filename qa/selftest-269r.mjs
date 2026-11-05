@@ -200,7 +200,7 @@ console.log(JSON.stringify({ labels: r?.labels || null, quarantined: r?.quaranti
   const before = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);
   const ran1 = ranNow();
   report('2.69.0 (r, d): the harness never silences a test on its own authority: a proposed entry is NOT in STUDIO_TEST_QUARANTINE, so the game\'s runner still runs it (fails on the first 2.69.0 (r) commit: the runner skipped it at once)',
-    ran1.length === 3 && ran1.some((x) => x[0] === 'game/demo/tests/b.test.mjs') && ran1.every((x) => x[2] === '') && !/quarantined test file\(s\) skipped/.test(out(before)),
+    ran1.length === 3 && ran1.some((x) => x[0] === 'game/demo/tests/b.test.mjs') && ran1.every((x) => x[2] === '') && !/quarantined test file\(s\) (skipped|passed to the game's runner)/.test(out(before)),
     `${out(before).slice(-1000)}\nran=${JSON.stringify(ran1)}`);
 
   // ---- (d) the fix task is filed for a proposed entry; the digest lists it; confirm (never a worker); tier C; release ----
@@ -241,7 +241,7 @@ console.log(JSON.stringify(r));
   const after = run(dir, 'node scripts/run-gates.mjs --no-detach --only game', env);
   const ran2 = ranNow();
   report('2.69.0 (r, d): once confirmed, the game\'s checks get it as STUDIO_TEST_QUARANTINE (a JSON list of test files) and the game\'s runner skips it; the real failure still fails the check (fails on 2.68.0: no such variable)',
-    ran2.length === 2 && ran2.every((x) => x[0] !== 'game/demo/tests/b.test.mjs' && x[2] === 'game/demo/tests/b.test.mjs') && after.status !== 0 && /quarantined test file\(s\) skipped/.test(out(after)),
+    ran2.length === 2 && ran2.every((x) => x[0] !== 'game/demo/tests/b.test.mjs' && x[2] === 'game/demo/tests/b.test.mjs') && after.status !== 0 && /quarantined test file\(s\) (skipped|passed to the game's runner)/.test(out(after)),
     `${out(after).slice(-1200)}\nran=${JSON.stringify(ran2)}`);
 
   // ---- (d) autoQuarantine: the owner's or a game dev's choice makes the harness's additions active at once ----
