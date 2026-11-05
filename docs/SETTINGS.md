@@ -152,8 +152,8 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## DEP_* (2)
 
-- `STUDIO_DEP_HISTORY_MB` · no simple default · harness/handout.mjs · [WORK-ORGANIZATION.md:427](WORK-ORGANIZATION.md)
-- `STUDIO_DEP_LANDED_EVIDENCE` · no simple default · harness/handout.mjs, qa/selftest-2781d.mjs · [WORK-ORGANIZATION.md:429](WORK-ORGANIZATION.md)
+- `STUDIO_DEP_HISTORY_MB` · no simple default · harness/handout.mjs · [RELEASE-2.78.1.md:25](RELEASE-2.78.1.md)
+- `STUDIO_DEP_LANDED_EVIDENCE` · no simple default · harness/handout.mjs, qa/selftest-2781d.mjs · [RELEASE-2.78.1.md:25](RELEASE-2.78.1.md)
 
 ## DEV_* (3)
 
@@ -250,7 +250,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_FLAKE_QUIET_WAIT_MIN` · no simple default · harness/flake-quiet.mjs, harness/flakes.mjs, harness/train.mjs (+3 more) · [RELEASE-2.78.0.md:21](RELEASE-2.78.0.md)
 - `STUDIO_FLAKE_TRIAGE` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:353](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_WAIT_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2773b.mjs (+1 more) · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
-- `STUDIO_FLAKE_WINDOW_DAYS` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:343](WORK-ORGANIZATION.md)
+- `STUDIO_FLAKE_WINDOW_DAYS` · no simple default · harness/flakes.mjs · [RELEASE-2.78.1.md:24](RELEASE-2.78.1.md)
 
 ## FLOW_* (2)
 
@@ -751,9 +751,9 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_BISECT_PARALLEL` · no simple default · harness/train-parallel.mjs, harness/train.mjs, qa/selftest-269q.mjs (+1 more) · [WORK-ORGANIZATION.md:130](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_BUSY_WAIT_MIN` · no simple default · harness/train-busy.mjs, harness/train-parallel.mjs, qa/selftest-2672a.mjs · [WORK-ORGANIZATION.md:104](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_CHAIN_TAIL` · no simple default · harness/train-tail.mjs, harness/train.mjs, qa/selftest-267f.mjs (+2 more) · [WORK-ORGANIZATION.md:149](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_CLOSE_MAIN_MERGES` · no simple default · harness/train.mjs · [WORK-ORGANIZATION.md:219](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_CLOSE_MAIN_MERGES` · no simple default · harness/train.mjs · [RELEASE-2.78.1.md:27](RELEASE-2.78.1.md)
 - `STUDIO_TRAIN_DEAD_MIN` · no simple default · harness/communicator.mjs, harness/train-life.mjs · [WORK-ORGANIZATION.md:314](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_EMPTY_DIFF` · no simple default · harness/train.mjs, qa/selftest-2781d.mjs · [WORK-ORGANIZATION.md:224](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_EMPTY_DIFF` · no simple default · harness/train.mjs, qa/selftest-2781d.mjs · [RELEASE-2.78.1.md:64](RELEASE-2.78.1.md)
 - `STUDIO_TRAIN_FIX_FIRST` · no simple default · harness/train-fix-first.mjs, qa/selftest-2732d.mjs · [WORK-ORGANIZATION.md:102](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_GREEN_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:534](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_HARNESS_GUARD` · no simple default · harness/harness-version.mjs, harness/train.mjs, qa/selftest-2781c.mjs · [RELEASE-2.78.1.md:22](RELEASE-2.78.1.md)
@@ -941,7 +941,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_LAUNCH_LOCK_SEC` · default `120` · harness/supervisor.mjs, qa/selftest-268o.mjs, qa/selftest-269s.mjs (+2 more) · undocumented
 - `STUDIO_LAYOUT_GATE` · no simple default · harness/game-gates.mjs · undocumented
 - `STUDIO_LEDGER_LOGS` · no simple default · harness/ledger.mjs · undocumented
-- `STUDIO_LOAD_SENSITIVE_TRUST` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2781d.mjs · [WORK-ORGANIZATION.md:364](WORK-ORGANIZATION.md)
+- `STUDIO_LOAD_SENSITIVE_TRUST` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2781d.mjs · [RELEASE-2.78.1.md:24](RELEASE-2.78.1.md)
 - `STUDIO_LOGIC_STALE_DAYS` · no simple default · harness/logic-library.mjs, qa/selftest-272d.mjs · [LOGIC-LIBRARY.md:43](LOGIC-LIBRARY.md)
 - `STUDIO_LONG_CACHE` · no simple default · harness/agent.mjs, qa/selftest-2652a.mjs · [TOKEN-SAVERS.md:10](TOKEN-SAVERS.md)
 - `STUDIO_LOOP_HANDBACKS` · default `3` · harness/agent.mjs, harness/bench.mjs, harness/session-outcome.mjs (+1 more) · undocumented

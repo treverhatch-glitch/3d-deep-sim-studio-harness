@@ -21,16 +21,16 @@ unless it says otherwise. 2.78.1 adds no human approval step.
 | **B-121** a builder launched on a task in a Unity train | FIXED | Every engine queue and every live train's lanes count as in progress. qa/selftest-2781f.mjs. |
 | **B-122** an old train chain-started after the upgrade | FIXED | A train process records the harness it started with; if it changed, it starts no further train (the queue waits for the fresh daemon, `task.train.chain_stopped`). `STUDIO_TRAIN_HARNESS_GUARD=off`. qa/selftest-2781c.mjs. |
 | **B-117** Unity vs game trains; the host stage vs heavy slots | FIXED | The host stage did take a slot: each waiter counted against its own copy of `STUDIO_HEAVY_SLOTS`, so sessions started before `.env` was lowered admitted by the old number. Now the main checkout's `.env` is read each time and the lower count wins (`STUDIO_HEAVY_SLOTS_LIVE=off`). Unity lands take their own engine slot (`STUDIO_ENGINE_SLOTS`, 1; needs a fresh machine scan), their RAM still counts, and they give way while a game train verifies, a game landing is queued or a quiet hold is up. A running engine train's 8 GB counts in the room for builders (`STUDIO_ENGINE_TRAIN_RESERVE`). qa/selftest-2781f.mjs. |
-| Load failures dominate trains | see part (d) below | |
-| **B-114** still on 2.78 | see part (d) below | |
+| Load failures dominate trains | FIXED (no red lands without evidence) | A test file recorded load-sensitive at least `STUDIO_LOAD_SENSITIVE_TRUST` (2) times on a quiet machine within `STUDIO_FLAKE_WINDOW_DAYS`, and never `real` since, is re-run alone at low load straight away (no quiet wait); it must still pass there. A lane whose only reds are such files lands, logged "trusted". A trusted label never earns more trust, and any `real` label ends it. `=0`/`off` turns it off. qa/selftest-2781d.mjs. |
+| **B-114** still on 2.78 | FIXED (cause not pinned) | The "done, but N commits on lane/… not merged yet" check read only the last 20000 events and the dependency's own closing record. Now a dependency also counts as landed when a done `Rescue: <ID>` task landed, its lane branch brings nothing to main, or the full event history (up to `STUDIO_DEP_HISTORY_MB`) shows a landing. A forced done still waits. Without the crew's event log the exact trigger wasn't confirmed. `STUDIO_DEP_LANDED_EVIDENCE=off`. qa/selftest-2781d.mjs. |
 | **B-119** engine-porter with its branch in another worktree | FIXED | A clean worktree that already has the branch is reused; a dirty one, or the land script's own gate worktree, refuses the launch with what to do (`STUDIO_ENGINE_LANE_REQUIRED=off`). qa/selftest-2781e.mjs. |
-| Partial landing leaves the task open | see part (d) below | |
+| Partial landing leaves the task open | FIXED | When the lane's only commits not on main are merges of main that bring nothing beyond it, the task closes as landed (`task.train.main_merges_only`; `STUDIO_TRAIN_CLOSE_MAIN_MERGES=off`). Needs git 2.38+ for the merge check. qa/selftest-2781d.mjs. |
 
 ## Medium / low
 
 | Item | Status | What changed |
 |---|---|---|
-| **B-106** alerts for discarded speculative trains | see part (d) below | |
+| **B-106** alerts for discarded speculative trains | FIXED | A train with a `task.train.next_discarded` event or an ended `life.json` is not "died silently". qa/selftest-2781d.mjs. |
 | **B-116** "main itself fails its checks" right after an upgrade | FIXED | When the checked copy's harness differs from the running one (or an import error names a harness file), the re-check is "not run (harness changed underneath)": main isn't blamed and nobody is handed back. qa/selftest-2781c.mjs. |
 | **M7** playtest:stage1 passes in ~33 ms on a lane | FIXED (warns) | On a lane without `--cartridge`, stage 1 played the template example, not the studio's game. Every run now prints the cartridge, ticks, seed and time; when it wasn't the studio's game it WARNs (`QA-STAGE1-NOT-THE-GAME`) in the playtest output, `task done` and done-check. `STUDIO_PLAYTEST_GAME_CHECK=fail` makes it a failure; a 0-tick stage still fails. Default warn so builders' playtests don't all go red mid-run. qa/selftest-2781f.mjs. |
 | Orphaned `run-gates.mjs` ran 13 h | FIXED | Each supervisor pass ends gate runs whose parent is gone and that are older than `STUDIO_ORPHAN_GATE_MIN` (60), with their tree, and logs `gate.orphan_ended`; `npm run verify`'s host counts while its verify record names it. qa/selftest-2781c.mjs. |
@@ -61,7 +61,7 @@ unless it says otherwise. 2.78.1 adds no human approval step.
 | Item | Status | What changed |
 |---|---|---|
 | Orphaned finished work | FIXED | `npm run lanes -- orphans [ID]` lists task commits on lanes that main lacks; `npm run lanes -- carry <ID> --by <you>` cherry-picks only commits naming the task onto a fresh lane (a builder only into its own copy), stopping on a conflict. |
-| Empty-diff lanes close at once | see part (d) below | |
+| Empty-diff lanes close at once | FIXED | A tier-A lane whose tip has no file change against main lands and closes without a train verify (`task.train.empty_diff`); its lane check still runs; in a mixed train it lands first (`STUDIO_TRAIN_EMPTY_DIFF=off`). qa/selftest-2781d.mjs. |
 | Gemini stream progress watch | FIXED | No tool call and no file write for `STUDIO_AGY_NUDGE_MIN` (10) while the task is in progress sends the "continue" nudge, before the stall kill. |
 | Long-run preflight (added) | NEW | `npm run upgrade -- --preflight` gains a "before a long run" section (WARN only): `.env` workarounds a later release made unnecessary (`harness/upgrade-leftovers.json`), ready builder tasks with no lane, uncommitted changes in `harness/` or `scripts/`, and trains or verifies still running from before the upgrade. |
 
