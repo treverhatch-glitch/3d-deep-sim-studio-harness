@@ -129,7 +129,9 @@ supervisor runs it once per pass.
     "agents": { "orchestrator": "<its STUDIO_LOCK_OWNER>" }, "username": "Studio Status" }
   ```
 
-  The orchestrator: a train that died (its lock's process is gone, or it started and never ended) or is red on real
+  The orchestrator: a train that died (its lock's process is gone, or it started and never ended: 2.77.2, a train still
+  beating isn't; 2.78.1, nor is a discarded speculative train, `task.train.next_discarded`, or one whose
+  `.studio/train/<id>/life.json` recorded its end) or is red on real
   failures (main red; a red train that isn't flaky or infrastructure), fewer builders busy than the Line Producer's target
   for 10 minutes (without a Line Producer: `STUDIO_COMM_MIN_BUILDERS`, off by default), the crew breaker or a supervisor
   halt, a stop file, a stuck lane (queued over `STUDIO_COMM_STUCK_MIN`, 120, with no train running, or a stalled

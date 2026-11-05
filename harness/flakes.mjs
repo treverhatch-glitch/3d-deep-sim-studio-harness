@@ -13,6 +13,10 @@
  *   load-sensitive (2.78.0, PU-56) it fails alone, then passes alone at low load once the machine is quiet (no other heavy
  *                job: harness/flake-quiet.mjs; waits up to STUDIO_FLAKE_QUIET_WAIT_MIN, 10). Fails there too: real. Quiet not
  *                reached in time: real, "unconfirmed under load" (never a pass without evidence). Listed in .studio/load-sensitive.json.
+ *                2.78.1 (d): a file listed there with at least STUDIO_LOAD_SENSITIVE_TRUST (2) quiet-confirmed load-sensitive
+ *                labels in STUDIO_FLAKE_WINDOW_DAYS and no "real" label since (loadSensitiveTrust) skips the quiet wait:
+ *                it runs alone at low load at once; a pass there is load-sensitive "trusted" (the row says trusted: true;
+ *                it never counts toward trust); a fail there goes on to the quiet re-run as before. 0/off: never trusted.
  *   timeout-flake (2.72.0) a game check's timeout-only red whose file passed when the check re-ran it alone at low load
  *                (harness/game-gates.mjs timeoutOnlyRerun, recordTimeoutFlakes below); the check counted green for it.
  *   port-collision (2.77.3, C2/B-108) the run's output shows a test server that couldn't take its port (EADDRINUSE,
@@ -160,7 +164,7 @@ export function flakeHoldMin(env = process.env) {
  * is "port-collision", else seed-flake / load-flake / intermittent. A notRun from any run: label null, the triage stops.
  * Returns { label, why, runs: [{ ok, lowLoad, quiet? }], rng, port? } (label null with notRun when it didn't run).
  */
-export function labelTest({ check, file, runAlone, rng = null, env = process.env, redText = '' }) {
+export function labelTest({ check, file, runAlone, rng = null, env = process.env, redText = '', trust = null }) {
   const runs = [];
   const first = runAlone({ check, file, lowLoad: false });
   if (first?.notRun) return { label: null, notRun: String(first.notRun).slice(0, 300), why: `not run alone (${String(first.notRun).slice(0, 200)})`, runs, rng: [] };
@@ -169,6 +173,16 @@ export function labelTest({ check, file, runAlone, rng = null, env = process.env
     // 2.77.3 (C2): the alone run names its cause (a port already in use): no quiet wait is spent on it.
     const pc = portCollision(first?.text || '', { file });
     if (pc) return { label: 'port-collision', why: portCollisionWhy(pc, { alone: true }), runs, rng: [], port: pc.port };
+    // 2.78.1 (d): a file already recorded load-sensitive often enough (loadSensitiveTrust) skips the quiet wait: it runs
+    // alone at low load (one test worker) at once. Passes: load-sensitive, "trusted". Anything else: the quiet path below.
+    if (trust?.trusted) {
+      const t = runAlone({ check, file, lowLoad: true, trusted: true });
+      if (t?.notRun) return { label: null, notRun: String(t.notRun).slice(0, 300), why: `failed alone; the low-load re-run was not run (${String(t.notRun).slice(0, 200)})`, runs, rng: [] };
+      runs.push({ ok: Boolean(t?.ok), lowLoad: true, trusted: true });
+      if (t?.ok) return { label: 'load-sensitive', trusted: true, why: `fails when run alone while other work runs, passes alone at low load (one test worker); trusted without a quiet machine: ${trust.why}`, runs, rng: [] };
+      const pcT = portCollision(t?.text || '', { file });
+      if (pcT) return { label: 'port-collision', why: portCollisionWhy(pcT, { alone: true }), runs, rng: [], port: pcT.port };
+    }
     // 2.78.0 (PU-56): "alone" isn't quiet while other verifies run: a red alone is confirmed at quiet low load first.
     const wait = quietWaitMin(env);
     const q = runAlone({ check, file, lowLoad: true, quiet: true, quietWaitMin: wait });
@@ -198,6 +212,28 @@ export function labelTest({ check, file, runAlone, rng = null, env = process.env
 export function readLoadSensitive(root) {
   const j = readJson(path.join(root, LOAD_SENSITIVE_REL), []);
   return (Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : []).filter((e) => e && typeof e.test === 'string');
+}
+/**
+ * 2.78.1 (d): may this file's red alone skip the quiet wait? Yes when it is listed in .studio/load-sensitive.json and
+ * .studio/flakes.jsonl has at least STUDIO_LOAD_SENSITIVE_TRUST (default 2; 0 or off: never) load-sensitive labels for
+ * it (same check) within STUDIO_FLAKE_WINDOW_DAYS that a quiet machine confirmed (a trusted label never counts toward
+ * trust), and no "real" label for that file (any check) since its first load-sensitive label. Returns { trusted, n, why }.
+ */
+export function loadSensitiveTrust(root, { test, check, now = Date.now(), env = process.env } = {}) {
+  const v = String(env.STUDIO_LOAD_SENSITIVE_TRUST ?? '').trim();
+  const need = off(v) ? 0 : Math.floor(num(v, 2));
+  if (!need) return { trusted: false, n: 0, why: 'STUDIO_LOAD_SENSITIVE_TRUST is off' };
+  const listed = readLoadSensitive(root).find((e) => (!e.check || e.check === check) && samePath(e.test, test));
+  if (!listed) return { trusted: false, n: 0, why: `not in ${LOAD_SENSITIVE_REL}` };
+  const rows = readFlakes(root).filter((r) => samePath(r.test, test));
+  const sens = rows.filter((r) => r.label === 'load-sensitive' && (!r.check || r.check === check));
+  const firstAt = Math.min(...[...sens.map((r) => Date.parse(r.at) || Infinity), Date.parse(listed.first || '') || Infinity]);
+  const real = rows.find((r) => r.label === 'real' && (Date.parse(r.at) || 0) >= (Number.isFinite(firstAt) ? firstAt : 0));
+  if (real) return { trusted: false, n: 0, why: `labelled real at ${real.at} after it was recorded load-sensitive` };
+  const days = flakeRules(env).days;
+  const n = sens.filter((r) => !r.trusted && (Date.parse(r.at) || 0) >= now - days * DAY).length;
+  if (n < need) return { trusted: false, n, why: `${n} quiet-confirmed load-sensitive label(s) in ${days} days, ${need} needed (STUDIO_LOAD_SENSITIVE_TRUST)` };
+  return { trusted: true, n, why: `recorded load-sensitive ${n} times in ${days} days on a quiet machine and never real since (STUDIO_LOAD_SENSITIVE_TRUST ${need})` };
 }
 function noteLoadSensitive(root, row) {
   const list = readLoadSensitive(root);
@@ -257,7 +293,9 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
     const { check, file } = todo[k];
     seen.add(`${check}|${file}`);
     let l;
-    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k: k + 1, of: todo.length }), rng: facts, env, redText: text }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
+    let trust = null;
+    try { trust = loadSensitiveTrust(root, { test: normTestPath(file), check, now, env }); } catch { trust = null; } // 2.78.1 (d)
+    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k: k + 1, of: todo.length }), rng: facts, env, redText: text, trust }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
     if (!l.label) {
       // 2.77.3 (H2): refused before it ran (busy): no label, and the rest would wait the same way.
       out.notRun = { test: normTestPath(file), check, why: l.notRun };
@@ -265,7 +303,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
       for (const p of pairs) seen.add(`${p.check}|${p.file}`); // not again in this train (its next reds would wait the same way)
       break;
     }
-    const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng.length ? { rng: l.rng } : {}), ...(l.port ? { port: l.port } : {}) };
+    const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng.length ? { rng: l.rng } : {}), ...(l.port ? { port: l.port } : {}), ...(l.trusted ? { trusted: true } : {}) };
     try { appendFlake(root, row); } catch {}
     if (row.label === 'load-sensitive') { try { noteLoadSensitive(root, row); } catch {} }
     out.labels.push(row);
@@ -285,7 +323,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
   // 2.78.0 merge: every failing file is a port collision or load-sensitive, at least one a collision (the lanes wait, see the header).
   out.portCollisionWait = out.labels.length > 0 && !out.real && !out.notRun && pairs.length <= todo.length && out.labels.length === pairs.length && out.labels.every((r) => r.label === 'port-collision' || r.label === 'load-sensitive') && out.labels.some((r) => r.label === 'port-collision');
   if (out.labels.length) {
-    try { emit({ type: 'test.flake_triage', agent: 'train', status: out.labels.some((r) => r.label === 'real') ? 'blocked' : 'warn', msg: `${train ? `train ${train}: ` : ''}failing tests run alone: ${out.labels.map((r) => `${r.test} ${r.label}${r.port ? ` (port ${r.port})` : ''}`).join(', ')}`.slice(0, 600), meta: { train, tree, labels: out.labels.map(({ test, check, label, port }) => ({ test, check, label, ...(port ? { port } : {}) })) } }); } catch {}
+    try { emit({ type: 'test.flake_triage', agent: 'train', status: out.labels.some((r) => r.label === 'real') ? 'blocked' : 'warn', msg: `${train ? `train ${train}: ` : ''}failing tests run alone: ${out.labels.map((r) => `${r.test} ${r.label}${r.trusted ? ' (trusted)' : ''}${r.port ? ` (port ${r.port})` : ''}`).join(', ')}`.slice(0, 600), meta: { train, tree, labels: out.labels.map(({ test, check, label, port, trusted }) => ({ test, check, label, ...(port ? { port } : {}), ...(trusted ? { trusted: true } : {}) })) } }); } catch {}
   }
   return out;
 }
