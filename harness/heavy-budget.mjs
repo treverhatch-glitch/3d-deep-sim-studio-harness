@@ -443,15 +443,23 @@ export function jobClaim(kind, { root = process.cwd(), env = process.env, label 
  * Does `claim` fit now? { ok, area: 'slots'|'ram'|'gpu'|'cpu'|null, line, alone? }. `holders` are the live records,
  * `slots` the holder cap. Without a profile only the slot count decides (2.67).
  */
-export function admit(claim, state, { slots = 1, holders = [], kindMax = null, groupMax = null } = {}) {
+export function admit(claim, state, { slots = 1, holders = [], kindMax = null, groupMax = null, engineSlots = 0 } = {}) {
   const capLine = (same, name, max) => `waiting: ${same} ${name} job${same === 1 ? '' : 's'} already running (max ${max}; STUDIO_HEAVY_MAX_${String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_')} or studio/machine-budget.json "maxConcurrent")`;
   // 2.68.0 (n): a per-kind cap (maxConcurrent), before the areas.
   if (kindMax && claim.kind) {
     const same = holders.filter((h) => claimOf(h).kind === claim.kind).length;
     if (same >= kindMax) return { ok: false, area: 'kind', line: capLine(same, claim.kind, kindMax) };
   }
-  const slotHolders = state.known ? holders.filter((h) => !claimOf(h).gpuOnly).length : holders.length;
-  if (!(state.known && claim.gpuOnly) && slotHolders >= slots) return { ok: false, area: 'slots', line: `all ${slots} machine:heavy slot${slots === 1 ? '' : 's'} are taken (STUDIO_HEAVY_SLOTS)` };
+  // 2.78.1 (f, B-117): an engine land (claim.engine) has its own line, STUDIO_ENGINE_SLOTS: it never takes one of the
+  // game's machine:heavy slots, and the game's slots don't count it. Its RAM, VRAM and CPU still count in every area below.
+  const isEngine = (h) => Boolean(claimOf(h).engine);
+  if (claim.engine) {
+    const eng = holders.filter(isEngine).length;
+    if (eng >= Math.max(1, Number(engineSlots) || 1)) return { ok: false, area: 'slots', line: `the engine line is full: ${eng} engine land${eng === 1 ? '' : 's'} running (STUDIO_ENGINE_SLOTS ${Math.max(1, Number(engineSlots) || 1)})` };
+  }
+  const gameHolders = holders.filter((h) => !isEngine(h));
+  const slotHolders = state.known ? gameHolders.filter((h) => !claimOf(h).gpuOnly).length : gameHolders.length;
+  if (!claim.engine && !(state.known && claim.gpuOnly) && slotHolders >= slots) return { ok: false, area: 'slots', line: `all ${slots} machine:heavy slot${slots === 1 ? '' : 's'} are taken (STUDIO_HEAVY_SLOTS)` };
   // 2.70.0 (t): the cap group's cap (CAP_GROUPS: every Unity kind is one "unity", the harness's Blender jobs one
   // "blender"), counting every kind in the group.
   if (groupMax && claim.kind && isGrouped(claim.kind)) {
@@ -518,19 +526,51 @@ export function sessionRamGb({ env = process.env, root = process.cwd() } = {}) {
 }
 
 /**
- * The supervisor's session cap by RAM: { cap, why }. cap = min(configured, floor((RAM budget - heavy claims) /
- * STUDIO_SESSION_RAM_GB (0.6))); no scan: configured (2.67).
+ * 2.78.1 (f, Line Producer "rig-aware scheduling"): the RAM a running engine train will take again between its land runs
+ * (its merge-tree checks, a refusal's retry wait, the next bisection run), which no machine:heavy claim shows then.
+ * Every live <root>/.studio/locks/<engine>-train.lock (not the web train's train.lock) counts its recorded ramGb
+ * (unity-train.mjs writes it at start; an older lock: the engine kind's claim, Unity 8 GB), unless a live holder is that
+ * engine's land right now (its claim already counts). { gb, trains: [{ engine, id, ramGb }], why }. Never throws.
+ * STUDIO_ENGINE_TRAIN_RESERVE=off: { gb: 0 }.
  */
-export function sessionCap({ configured, profile = null, holders = [], env = process.env, root = process.cwd() } = {}) {
+export function engineTrainReserve(root, holders = [], { env = process.env, now = Date.now() } = {}) {
+  const none = { gb: 0, trains: [], why: '' };
+  if (!root || off(env.STUDIO_ENGINE_TRAIN_RESERVE)) return none;
+  let names = [];
+  try { names = fs.readdirSync(path.join(root, '.studio', 'locks')); } catch { return none; }
+  const stale = num(env.STUDIO_UNITY_TRAIN_STALE_MIN, 1440) * 60000;
+  const landing = new Set(holders.map((h) => claimOf(h).engine).filter(Boolean));
+  const trains = [];
+  for (const n of names) {
+    const m = n.match(/^([a-z][a-z0-9-]{1,30})-train\.lock$/);
+    if (!m) continue;
+    const h = readJson(path.join(root, '.studio', 'locks', n));
+    if (!h || !aliveP(h.pid) || now - Number(h.at || 0) > stale) continue;
+    const engine = String(h.engine || m[1]);
+    if (landing.has(engine)) continue;
+    const ramGb = Number(h.ramGb) > 0 ? Number(h.ramGb) : (JOB_KINDS[engine] || JOB_KINDS.heavy).ramGb;
+    trains.push({ engine, id: h.id || null, ramGb });
+  }
+  const gb = r1(trains.reduce((a, t) => a + t.ramGb, 0));
+  return { gb, trains, why: trains.length ? `${trains.map((t) => `the ${t.engine} train${t.id ? ` ${t.id}` : ''} (${t.ramGb} GB between its land runs)`).join(', ')}: STUDIO_ENGINE_TRAIN_RESERVE` : '' };
+}
+
+/**
+ * The supervisor's session cap by RAM: { cap, why }. cap = min(configured, floor((RAM budget - heavy claims - running
+ * engine trains between their land runs (engineTrainReserve; 2.78.1)) / STUDIO_SESSION_RAM_GB (0.6))); no scan:
+ * configured (2.67). heavyRoot: where the locks are (the main checkout's .studio), default root.
+ */
+export function sessionCap({ configured, profile = null, holders = [], env = process.env, root = process.cwd(), heavyRoot = null } = {}) {
   if (!profile) return { cap: configured, why: '' };
   const { env: e } = cfgEnv(root, env);
   const st = budgetState(profile, holders, { env: e });
   if (!fin(st.usableRamGb)) return { cap: configured, why: '' };
   const per = Math.max(0.05, num(e.STUDIO_SESSION_RAM_GB, 0.6));
-  const room = Math.max(0, st.usableRamGb - st.claimedGb);
+  const er = engineTrainReserve(heavyRoot || root, holders, { env: e });
+  const room = Math.max(0, st.usableRamGb - st.claimedGb - er.gb);
   const byRam = Math.floor(room / per);
-  if (byRam >= configured) return { cap: configured, why: '', byRam };
-  return { cap: byRam, byRam, why: `RAM: ${st.usableRamGb} GB budget (${st.totalRamGb} GB, ${st.reserveGb} kept back) - ${st.claimedGb} GB of heavy claims leaves room for ${byRam} session${byRam === 1 ? '' : 's'} at ${per} GB each (STUDIO_SESSION_RAM_GB), under the pace's ${configured}` };
+  if (byRam >= configured) return { cap: configured, why: '', byRam, ...(er.gb ? { engineReserveGb: er.gb } : {}) };
+  return { cap: byRam, byRam, ...(er.gb ? { engineReserveGb: er.gb } : {}), why: `RAM: ${st.usableRamGb} GB budget (${st.totalRamGb} GB, ${st.reserveGb} kept back) - ${st.claimedGb} GB of heavy claims${er.gb ? ` - ${er.gb} GB for ${er.why}` : ''} leaves room for ${byRam} session${byRam === 1 ? '' : 's'} at ${per} GB each (STUDIO_SESSION_RAM_GB), under the pace's ${configured}` };
 }
 
 /**

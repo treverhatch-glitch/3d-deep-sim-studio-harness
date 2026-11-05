@@ -705,7 +705,7 @@ async function sessionCapNow(configured) {
     const hb = await import('./heavy-budget.mjs');
     const h = await import('./heavy.mjs');
     const root = await h.heavyRoot();
-    return hb.sessionCap({ configured, profile: hb.machineProfile(root), holders: h.heavyHolders(root), root: REPO_ROOT });
+    return hb.sessionCap({ configured, profile: hb.machineProfile(root), holders: h.heavyHolders(root), root: REPO_ROOT, heavyRoot: root });
   } catch { return { cap: configured, why: '' }; }
 }
 

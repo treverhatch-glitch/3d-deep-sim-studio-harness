@@ -90,7 +90,7 @@ export async function verifyRoom(root, env = process.env) {
     const holders = h.heavyHolders(hroot, { env });
     const state = hb.budgetState(profile, holders, { env });
     const claim = hb.jobClaim('verify', { root, env, profile, state, as: 'train' }); // 2.76.0 (j, B-89): sized as the train's verify
-    const a = hb.admit(claim, state, { slots: h.heavySlots(env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
+    const a = hb.admit(claim, state, { slots: h.heavySlotsAt(hroot, env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
     return { ok: a.ok, line: a.ok ? '' : a.line };
   } catch (e) { return { ok: false, line: `the machine budget couldn't be read (${e.message})` }; }
 }

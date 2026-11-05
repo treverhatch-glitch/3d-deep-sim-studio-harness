@@ -404,6 +404,13 @@ A game with more than one build (for example a browser build under `web/` and an
 - `task done` in a lane copy runs only the gates whose `paths` its diff touches and logs each skipped gate with the reason. A change under `shared` (or `harness/`, `scripts/`, `studio/gates.json`, package files, the manifest) runs every gate. A gate without `paths` always runs, so manifests without them behave as before.
 - The pass is recorded with its commit and scope. If the studio's branch moves before the lane lands, and everything it brought in is outside that scope, the pass is reused instead of re-run.
 - Only the final fast-forward and the board write take the short land lock, so the tracks verify and land in parallel.
+- 2.78.1 (M7): with a game that has checks of its own, `npm run playtest:stage1` (the cartridge playtest) has nothing
+  of the game to play unless a cartridge drives its sim: run without `--cartridge` it played the template
+  (example-sim) in milliseconds and passed. Now stage 1 always prints what it stepped (`[playtest] stage 1: … stepped N
+  tick(s) of cartridge X …; the studio's game is Y`), records `studioGame` and `ofStudioGame` in its report, and fails
+  with `QA-STAGE1-NOT-THE-GAME` when it played only the template. Play the game with its own checks (`npm run gates --
+  --only game`, or the manifest's playtest check) or `--cartridge <a cartridge that drives the game's sim>`.
+  `STUDIO_PLAYTEST_GAME_CHECK=off` restores the old pass.
 
 ## Pins and union files for the merge train (2.60.0)
 

@@ -359,6 +359,10 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `STUDIO_GAME_GATE_TIMEOUT_MS`, 30 minutes with the defaults; 0 or off: no hold), released when the re-run ends,
   ignored and removed once past its bound or when the train's process is gone. Verifies already running are never
   stopped: the quiet wait waits for them.
+  2.78.1 (B-117): an engine land (a Unity train's land run) is no longer a landing for this hold, the train's slot
+  priority or the queue: it waits for them like a builder's verify, and while the game's train verifies; it takes its
+  own engine line, not a game slot (docs/ENGINE-TRACKS.md). The same marker, tagged (`-chain-breaker`), is the Line
+  Producer's chain-breaker push (docs/LINE-PRODUCER.md).
   2.77.3 (H2, B-112): each alone-run shows in the train's status (`flake check k of n: <file> alone`) and waits at
   most `STUDIO_FLAKE_WAIT_MIN` (10) minutes for a machine:heavy slot; a run refused as busy, or stopped before any gate
   ran, is "not run" (no label, never `real`) and the triage stops; the triage also stops at the first `real` label (the
@@ -525,7 +529,11 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   `STUDIO_GPU_RESERVE_GB` (2.5 when it drives the display). **CPU**: claimed threads stay within
   `STUDIO_CPU_OVERCOMMIT` (1.5) times the cores. **Slots**: at most `STUDIO_HEAVY_SLOTS` jobs (default computed from
   the scan, 1 to 6). A GPU-only job takes no slot or CPU share, so it runs beside a verify (2.70.0: the GPU area
-  below).
+  below). 2.78.1 (B-117): the slot count is the machine's, not each process's: every waiter also reads the main
+  checkout's `.env` on each look, and with both set the lower of the two wins, so lowering `STUDIO_HEAVY_SLOTS` in
+  `.env` reaches builder sessions already running (each used to admit by the value it was started with: 4-5 verifies
+  ran with slots=2), and `0` still turns the lock off. `STUDIO_HEAVY_SLOTS_LIVE=off`: the process's own value only. An
+  engine land takes the engine line (`STUDIO_ENGINE_SLOTS`, docs/ENGINE-TRACKS.md), never one of these slots.
 - **Per kind**: at most one Unity editor run and one browser playtest at a time, whatever the slots (others: no cap
   within the budget). `studio/machine-budget.json` `"maxConcurrent": { "unity": 2 }` or `STUDIO_HEAVY_MAX_<KIND>`
   (`STUDIO_HEAVY_MAX_UNITY`, `STUDIO_HEAVY_MAX_BROWSER_PLAYTEST`; `0` or `off`: no cap) changes it. A job at its cap

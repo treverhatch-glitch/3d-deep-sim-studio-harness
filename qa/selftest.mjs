@@ -4792,6 +4792,15 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (f): B-121 (a task in any train counts as in progress), B-117 (the machine's slot count; the engine line),
+// rig-aware room for builders, the chain-breaker push, engine twins, M7 (stage 1 on the template isn't the game).
+if (inShard('selftest-2781f')) {
+  const dir = copyRepo();
+  const { selftest2781F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781f.mjs')).href);
+  await selftest2781F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

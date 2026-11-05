@@ -108,6 +108,27 @@ The Line Producer doesn't start the same engine's train again within `STUDIO_ENG
 
 The land run itself still takes `machine:heavy` as that engine's job kind, with its RAM and its free-RAM floor.
 
+**The engine line (2.78.1, B-117).** A Unity land (8 GB, 2 GB VRAM) used to take one of the game's `STUDIO_HEAVY_SLOTS`
+and go as a landing: with few slots a game train's flake re-run waited 20+ minutes behind it. Now an engine land
+(`harness/unity-gate.mjs`, any engine) takes the engine line instead: at most `STUDIO_ENGINE_SLOTS` (default 1; read
+live like the heavy slots) engine lands at once, never a game slot, so builders and the game's train keep every game
+slot. Its RAM, VRAM and threads still count in the budget every job is admitted against. It gives way to the game's
+train (the owner's order, train > builder verifies > engine): it doesn't start while a game train's verify holds a
+slot, while a game landing waits in the queue, while the train-wait marker (M6) is up, or while a quiet hold is (a flake
+check's quiet re-run, the chain-breaker push). A land that waits too long is refused (never red) and the engine train
+tries again as before. The line needs a fresh machine scan (`npm run machine`; older than `STUDIO_MACHINE_MAX_AGE_MIN`
+counts as none): with none, the slot count is the only guard on the machine, so the land keeps sharing the game's slots
+(it still gives way to the train). `STUDIO_ENGINE_SLOTS=0` or `off`: the 2.78.0 behaviour (a game slot, a landing).
+
+**Room for builders.** A running engine train (its lock live) keeps its land run's RAM (the engine table's `rig.ramGb`,
+written to the lock) off the room for builder sessions between its land runs too (the supervisor's session cap and the
+Line Producer's rig; `heavy-budget.mjs` `engineTrainReserve`). While a land holds its slot its claim counts instead,
+never both. `STUDIO_ENGINE_TRAIN_RESERVE=off` turns it off.
+
+**Twins (2.78.1).** `"engines": { "unity": { "twins": ["web/my-game/sim/**"] } }` lists the game paths whose change
+needs a twin in the engine slice (a fuel ladder's "Unity models" step). When a game task touching one lands, the Line
+Producer adds the twin task (docs/LINE-PRODUCER.md). None are listed by default.
+
 - **Recorded durations.** Every land run that runs to the end (pass, red or conflict) records its length in
   `.studio/engine/durations.json`. The median of the last 12 runs becomes the expected minutes; until there are any,
   the table's number is used.
