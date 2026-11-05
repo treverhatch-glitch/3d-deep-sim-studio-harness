@@ -25,6 +25,8 @@
  *      it. A title that doesn't look like render work but changes render files gets a warning ("a visual result is
  *      recommended"), and needs the result only with "visualStrict": true (studio/game.json) or STUDIO_VISUAL_STRICT=on.
  *      No render paths configured, or no commits yet: the title decides, as before.
+ *      2.77.3 (B-111): test files are never render files, even under a render path: a unit, spec or end-to-end test
+ *      (panel.e2e.test.ts, *.spec.*, *.e2e.*, tests/, e2e/ ...; isRenderTestFile) checks the screen, it doesn't change it.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +37,7 @@ import { ownerType, ownerVisual, ownerVisualWords } from './reclassify.mjs';
 import { taskChanges, startedAt } from './done-check.mjs';
 import { activeGame } from './cartridge.mjs';
 import { parseNextQueue } from './task.mjs';
+import { isTestPath } from './test-weakening.mjs';
 
 export const PARTS = ['build', 'logic', 'runtime', 'visual', 'viewport'];
 const file = (task) => path.join(STUDIO_STATE_DIR, 'proof', task, 'verdict.json');
@@ -82,6 +85,15 @@ export function renderPaths(root = REPO_ROOT, env = process.env) {
   const strict = g.visualStrict === true || /^(on|1|true|yes)$/i.test(String(env.STUDIO_VISUAL_STRICT || ''));
   return { globs: (globs || []).map(String).filter(Boolean), from, strict };
 }
+/**
+ * 2.77.3 (B-111): a test file (harness/test-weakening.mjs isTestPath, plus end-to-end names: *.e2e.*, *-e2e.*, an e2e/
+ * folder), which never makes a task a render task.
+ */
+export function isRenderTestFile(f) {
+  const p = String(f || '').replace(/\\/g, '/');
+  return isTestPath(p) || /(^|\/)[^/]+[._-]e2e(\.[^/]+)?$/i.test(p) || /(^|\/)[^/]+\.e2e\.[^/]+$/i.test(p) || /(^|\/)e2e\//i.test(p);
+}
+
 /** A glob as a regexp: ** any depth, * one name, a folder (no wildcard, or a trailing /) everything under it. */
 export function globRx(glob) {
   const g = String(glob).replace(/\\/g, '/').replace(/^\.\//, '');
@@ -120,7 +132,7 @@ export function renderDecision(t = {}, { env = process.env } = {}) {
   }
   if (!cfg.globs.length || !changed?.length) return out(titled, 'title', titled ? 'its title looks like render work' : '');
   const rxs = cfg.globs.map(globRx);
-  const renderFiles = changed.filter((f) => rxs.some((rx) => rx.test(String(f).replace(/\\/g, '/'))));
+  const renderFiles = changed.filter((f) => !isRenderTestFile(f) && rxs.some((rx) => rx.test(String(f).replace(/\\/g, '/'))));
   const list = (a) => `${a.slice(0, 5).join(', ')}${a.length > 5 ? ` (+${a.length - 5} more)` : ''}`;
   if (titled && !renderFiles.length) return out(false, 'evidence', `no render files changed: ${changed.length} file${changed.length === 1 ? '' : 's'} (${list(changed)}), none under ${cfg.from}`, { renderFiles });
   if (titled) return out(true, 'evidence', `it changes render files: ${list(renderFiles)}`, { renderFiles });

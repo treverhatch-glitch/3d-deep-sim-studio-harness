@@ -23,6 +23,10 @@
  *     with such a proposal is tier C, harness/tiers.mjs, held until a person releases it). Otherwise the protected part
  *     is held: it stays on main in studio-proposals/<ID>.json (with "held" saying why), an event asks a person, and
  *     npm run task -- train config <ID> applies it once that is settled. Nothing is dropped silently.
+ * 2.77.3 (B-111): in beta mode (harness/beta-mode.mjs) a beta stand-in's release of the lane (npm run task -- train
+ * release <ID>, whose hold names the protected keys and values) decides the protected part as the owner's would, also
+ * with an owner key, while beta mode is still on with the same studio/beta.json (betaReleaseOk); before, the release was
+ * accepted and the protected part then held at landing ("only the owner's signed approval").
  * The applying commit is the harness's own (commit-tree on main, landed by compare-and-swap like a lane), carries
  * `Studio-Harness: config-from` and changes only studio/*.json and studio-proposals/ (harness/hook-stamp.mjs exempts
  * exactly that). The train's verify can't see it first: a train copy's studio/ is main's live folder.
@@ -31,7 +35,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { betaApprovalOk } from './beta-mode.mjs';
+import { betaApprovalOk, readBeta } from './beta-mode.mjs';
 import { proxyApprovalOk } from './owner-proxy.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalBytes } from './hash.mjs';
@@ -214,6 +218,21 @@ export function signedProposal(root, { task, hash, pub }) {
   return null;
 }
 
+const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
+/**
+ * 2.77.3 (B-111): a lane release made in beta mode ({ beta, betaAt, by, recordedBy? }: harness/train.mjs releaseLane or
+ * train config) counts as the owner's decision while beta mode is still on with the studio/beta.json it was made under,
+ * and neither the releaser nor the one who recorded it is a worker.
+ */
+export function betaReleaseOk(released, root) {
+  if (!released?.beta || !released.betaAt) return false;
+  const names = [released.by, released.recordedBy].map((x) => String(x || '').trim()).filter(Boolean);
+  if (!names.length || names.some((x) => WORKER.test(x))) return false;
+  let cur = null;
+  try { cur = readBeta({ root }); } catch { return false; }
+  return Boolean(cur?.on) && String(cur.doc.at) === String(released.betaAt);
+}
+
 /** New text for a JSON file with these keys set (the file's own indent kept; 2 spaces for a new file). */
 function rewrite(text, keys) {
   const j = parseJson(text);
@@ -274,8 +293,9 @@ export function landConfig(root, { task, main, base = null, released = null, ff,
     const pub = ownerKeyAt(root, tip);
     const part = protectedPart(p.changes, globs);
     const signed = signedProposal(root, { task, hash: part.hash, pub });
-    const protOk = !part.changes.length || Boolean(signed) || (!pub && Boolean(released?.by));
-    const protWhy = pub ? `this studio has an owner key: a protected file changes only with the owner's signed approval of exactly this change (on the owner's device: npm run approve -- proposal ${task} --note "…", commit the approval to main), then npm run task -- train config ${task}`
+    const betaRelease = !signed && part.changes.length > 0 && betaReleaseOk(released, root);
+    const protOk = !part.changes.length || Boolean(signed) || (!pub && Boolean(released?.by)) || betaRelease;
+    const protWhy = pub ? `this studio has an owner key: a protected file changes only with the owner's signed approval of exactly this change (on the owner's device: npm run approve -- proposal ${task} --note "…", commit the approval to main; in beta mode the owner's stand-in approves it or releases the lane), then npm run task -- train config ${task}`
       : `a protected file changes only with a person's decision: a person releases the lane (npm run task -- train release ${task} --by <name>) or applies it (npm run task -- train config ${task} --by <name>)`;
     for (const c of p.changes) {
       const bad = chk.conflicts.filter((x) => x.file === c.file);
@@ -286,7 +306,7 @@ export function landConfig(root, { task, main, base = null, released = null, ff,
       files[c.file] = r.text;
       applied.push(c.file);
     }
-    if (applied.length && part.changes.length && protOk) applied.decision = signed ? (signed.via === 'owner key' ? `the owner's signed approval (${signed.file})` : `${signed.recordedBy || signed.by}'s ${signed.via} approval (${signed.file})`) : released?.by ? `${released.by}'s release of the lane${released.recordedBy ? ` (recorded by ${released.recordedBy})` : ''}` : '';
+    if (applied.length && part.changes.length && protOk) applied.decision = signed ? (signed.via === 'owner key' ? `the owner's signed approval (${signed.file})` : `${signed.recordedBy || signed.by}'s ${signed.via} approval (${signed.file})`) : betaRelease ? `${released.recordedBy || released.by}'s beta mode release of the lane (for ${released.by}; studio/beta.json at ${String(released.betaAt).slice(0, 16).replace('T', ' ')})` : released?.by ? `${released.by}'s release of the lane${released.recordedBy ? ` (recorded by ${released.recordedBy})` : ''}` : '';
   }
   const heldChanges = held.filter((h) => h.change).map((h) => ({ file: h.change.file, set: h.change.set }));
   if (held.length && heldChanges.length) {
