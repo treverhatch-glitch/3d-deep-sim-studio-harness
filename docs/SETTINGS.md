@@ -234,10 +234,10 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## FLAKE_* (7)
 
-- `STUDIO_FLAKE_HOLD_MIN` · no simple default · harness/flakes.mjs, harness/heavy.mjs, harness/train.mjs (+1 more) · [RELEASE-2.78.0.md:18](RELEASE-2.78.0.md)
+- `STUDIO_FLAKE_HOLD_MIN` · no simple default · harness/flakes.mjs, harness/heavy.mjs, harness/train.mjs (+1 more) · [RELEASE-2.78.0.md:21](RELEASE-2.78.0.md)
 - `STUDIO_FLAKE_MAX_FILES` · no simple default · harness/flakes.mjs, harness/game-gates.mjs · [WORK-ORGANIZATION.md:330](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_QUARANTINE_AFTER` · no simple default · harness/flakes.mjs, qa/selftest-278a.mjs · [WORK-ORGANIZATION.md:333](WORK-ORGANIZATION.md)
-- `STUDIO_FLAKE_QUIET_WAIT_MIN` · no simple default · harness/flake-quiet.mjs, harness/flakes.mjs, harness/train.mjs (+2 more) · [RELEASE-2.78.0.md:18](RELEASE-2.78.0.md)
+- `STUDIO_FLAKE_QUIET_WAIT_MIN` · no simple default · harness/flake-quiet.mjs, harness/flakes.mjs, harness/train.mjs (+2 more) · [RELEASE-2.78.0.md:21](RELEASE-2.78.0.md)
 - `STUDIO_FLAKE_TRIAGE` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:344](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_WAIT_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2773b.mjs (+1 more) · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
 - `STUDIO_FLAKE_WINDOW_DAYS` · no simple default · harness/flakes.mjs · [WORK-ORGANIZATION.md:334](WORK-ORGANIZATION.md)
@@ -249,10 +249,10 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## FUTILITY_* (4)
 
-- `STUDIO_FUTILITY` · no simple default · harness/futility.mjs, harness/supervisor.mjs, qa/selftest-268o.mjs (+2 more) · [RELEASE-2.78.0.md:23](RELEASE-2.78.0.md)
-- `STUDIO_FUTILITY_AUTO_MAX_LATE` · no simple default · harness/futility.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:23](RELEASE-2.78.0.md)
-- `STUDIO_FUTILITY_AUTO_MIN_SHADOW` · no simple default · harness/futility.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:23](RELEASE-2.78.0.md)
-- `STUDIO_FUTILITY_MIN_N` · no simple default · harness/futility.mjs, qa/selftest-268o.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:23](RELEASE-2.78.0.md)
+- `STUDIO_FUTILITY` · no simple default · harness/futility.mjs, harness/supervisor.mjs, qa/selftest-268o.mjs (+2 more) · [RELEASE-2.78.0.md:26](RELEASE-2.78.0.md)
+- `STUDIO_FUTILITY_AUTO_MAX_LATE` · no simple default · harness/futility.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:26](RELEASE-2.78.0.md)
+- `STUDIO_FUTILITY_AUTO_MIN_SHADOW` · no simple default · harness/futility.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:26](RELEASE-2.78.0.md)
+- `STUDIO_FUTILITY_MIN_N` · no simple default · harness/futility.mjs, qa/selftest-268o.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:26](RELEASE-2.78.0.md)
 
 ## FUZZ_* (2)
 
@@ -645,8 +645,8 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## SUPERVISOR_* (4)
 
-- `STUDIO_SUPERVISOR_JITTER` · no simple default · harness/supervisor.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:22](RELEASE-2.78.0.md)
-- `STUDIO_SUPERVISOR_SEC` · default `60` · harness/boot.mjs, harness/env-reload.mjs, harness/heavy.mjs (+7 more) · [RELEASE-2.78.0.md:22](RELEASE-2.78.0.md)
+- `STUDIO_SUPERVISOR_JITTER` · no simple default · harness/supervisor.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:25](RELEASE-2.78.0.md)
+- `STUDIO_SUPERVISOR_SEC` · default `60` · harness/boot.mjs, harness/env-reload.mjs, harness/heavy.mjs (+7 more) · [RELEASE-2.78.0.md:25](RELEASE-2.78.0.md)
 - `STUDIO_SUPERVISOR_STEP_SEC` · no simple default · harness/supervisor.mjs · [RELEASE-2.77.1.md:18](RELEASE-2.77.1.md)
 - `STUDIO_SUPERVISOR_STUCK_MIN` · no simple default · harness/supervisor.mjs · [RUN-UNATTENDED.md:66](RUN-UNATTENDED.md)
 
@@ -832,7 +832,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## WAVES_* (3)
 
 - `STUDIO_WAVES` · no simple default · harness/plan-waves.mjs, qa/selftest-278f.mjs · [WORK-ORGANIZATION.md:633](WORK-ORGANIZATION.md)
-- `STUDIO_WAVES_MAX_SHARE` · no simple default · harness/plan-waves.mjs, qa/selftest-278f.mjs · [RELEASE-2.78.0.md:34](RELEASE-2.78.0.md)
+- `STUDIO_WAVES_MAX_SHARE` · no simple default · harness/plan-waves.mjs, qa/selftest-278f.mjs · [RELEASE-2.78.0.md:37](RELEASE-2.78.0.md)
 - `STUDIO_WAVES_MIN` · no simple default · harness/plan-waves.mjs, harness/watch.mjs, qa/selftest-278f.mjs · [WORK-ORGANIZATION.md:633](WORK-ORGANIZATION.md)
 
 ## WHOLE_* (3)
@@ -940,7 +940,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_SKETCHFAB_KEY` · no simple default · harness/asset-need.mjs, qa/selftest-2671l.mjs · [ART-PIPELINE.md:42](ART-PIPELINE.md)
 - `STUDIO_SKIP_LOG_MIN` · default `10` · harness/agent.mjs · undocumented
 - `STUDIO_SOUND_DESIGNER_CMD` · no simple default · qa/selftest.mjs · undocumented
-- `STUDIO_START_BACKOFF_MAX_MIN` · no simple default · harness/supervisor.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:22](RELEASE-2.78.0.md)
+- `STUDIO_START_BACKOFF_MAX_MIN` · no simple default · harness/supervisor.mjs, qa/selftest-278g.mjs · [RELEASE-2.78.0.md:25](RELEASE-2.78.0.md)
 - `STUDIO_TAKEOVER` · no simple default · harness/agent.mjs, qa/selftest-258d.mjs, qa/selftest-2601n.mjs · undocumented
 - `STUDIO_TASKS` · no simple default · scripts/hooks/commit-msg · undocumented
 - `STUDIO_TELEGRAM_BOT_TOKEN` · no simple default · harness/alerts.mjs, qa/selftest.mjs · [AWAY-AND-ALERTS.md:45](AWAY-AND-ALERTS.md)
