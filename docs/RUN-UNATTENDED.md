@@ -284,7 +284,11 @@ Each supervisor pass (code only, no model) also does three things:
   It resumes on its own when a task the role worked lands or new work for it appears, or on
   `npm run crew -- resume <role> --by <name>` (a person, an agent under the owner's delegation for hold, or a
   Producer/Director session or outside agent with `--permission "<the person's words>"`; never a worker). `npm run crew`
-  shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off.
+  shows each role's hour. `STUDIO_CREW_WATCH=off` turns it off. 2.78.2: a pause also ends by itself after
+  `STUDIO_CREW_BREAKER_RESUME_MIN` (30; `0` or `off`: never) minutes, when the evidence no longer trips the breaker
+  (for example the supervisor was down and the sessions aged out of the hour), or once for that cause (the same
+  tasks): the window starts again and a second trip on the same tasks stays paused. Each is a `crew.resumed` event
+  (`meta.auto`).
 - **Futility cap, auto** (`harness/futility.mjs`): a running session past the 90th percentile of its task
   type's successful sessions (weighted tokens, or wall time) raises one `futility.check` ("past the p90 of good runs").
   Fewer than `STUDIO_FUTILITY_MIN_N` (20) successful sessions of that type: no cap. `STUDIO_FUTILITY=auto` (the default,

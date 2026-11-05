@@ -4875,6 +4875,15 @@ if (inShard('selftest-2782d')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (c): board moves by agent logs/reviews/quarantine growth, the review Verdict line, the crew breaker's auto-resume,
+// a relaunch starting from the task's earlier lane branch, `lanes carry` skipping applied commits, no game suite for non-code done.
+if (inShard('selftest-2782c')) {
+  const dir = copyRepo();
+  const { selftest2782C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782c.mjs')).href);
+  await selftest2782C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

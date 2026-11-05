@@ -33,4 +33,6 @@ the author can act on.
 - **Ask:** does this match the task and the Bible (phase, pillar, crossed-out layers)? Would the
   next agent understand it? What breaks if this is wrong?
 - **Example:** "Review of T-014: spawn timing correct, invariant added. Request changes: the golden
-  changed but the commit doesn't say why. Verdict: request changes."
+  changed but the commit doesn't say why." Its last line: `Verdict: changes requested`.
+- **The verdict line:** end the note with its own line `Verdict: approve` or `Verdict: changes requested`. The last
+  `Verdict:` line in the file is the one the task's done check reads (a re-review appended later replaces the first).

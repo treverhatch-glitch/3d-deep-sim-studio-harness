@@ -699,3 +699,20 @@ nothing: no task is started, held or blocked by it.
 - Keep `studio/CURRENT_TASK.md` short and current.
 - Prefer appending to `studio/NEXT.md` (`node harness/task.mjs add "..."`) over creating scattered tracking files.
 - The Producer role is responsible for keeping `studio/CURRENT_TASK.md` and `studio/NEXT.md` accurate.
+
+## 2.78.2 (c): relaunches, carries, board moves and non-code done
+
+- **A relaunch keeps the earlier builder's commits.** A new lane copy for a task starts from the task's remembered lane
+  branch (`.studio/lane-branches.json`) when it holds commits the studio's branch lacks (and isn't a mixed lane), then
+  merges the studio's branch in if that applies cleanly (a conflict is left for the builder; nothing is lost).
+  `STUDIO_LANE_START_FROM_PREV=off`: start from the studio's branch and merge the old branch in, as before.
+- **`npm run lanes -- carry` skips what is already there.** A commit whose change the target already has (same patch, or a
+  pick that comes out empty) is listed as skipped and the rest carried. `STUDIO_CARRY_SKIP_APPLIED=off`: stop on it.
+- **Board moves that don't restart a verified train** (`harness/train-board.json`): `studio/producer/**` and
+  `studio/reviews/**` are board paths; a `studio/quarantine.json` change counts only when it skips more tests than
+  before (a release means a test the verify never ran will run, so it verifies again);
+  `STUDIO_TRAIN_QUARANTINE_MOVE=off`: any quarantine change verifies again. The docs check skips `studio/producer/`,
+  `studio/reviews/`, `studio/handoffs/` and `studio/notes/` (agent-written).
+- **Non-code tasks skip the game suite at done.** A direction, review, docs, idea, research or study task whose changed
+  files are all Markdown or under `studio/`, `docs/` or `.studio/` doesn't run the game's own checks at `task done`;
+  the board and docs checks still do. `STUDIO_DONE_SKIP_GAME_NONCODE=off`: run them.

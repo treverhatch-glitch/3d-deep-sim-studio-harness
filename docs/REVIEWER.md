@@ -33,3 +33,8 @@ turn on. To add one: add an entry to `PROVIDERS` in harness/models.config.mjs (p
 `model`, `envKeys: ['<YOUR_KEY_NAME>']`) and put its id in the `reviewer` chain, or run the review on the provider's own
 site and record it with the command above. Both leave the family check in place.
 
+
+**The verdict line (2.78.2).** End the note with its own line `Verdict: approve` or `Verdict: changes requested`. The
+done check reads the LAST `Verdict:` line in the file, so a re-review appended later decides and a "non-blocking note"
+doesn't count against an approval. A note with no `Verdict:` line is read the old way (any "changes requested",
+"reject" or "blocking" in it means no approval). `STUDIO_REVIEW_VERDICT_LINE=off`: always the old way.
