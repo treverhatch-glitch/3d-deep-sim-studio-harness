@@ -71,7 +71,9 @@ console.log(JSON.stringify({
   report('2.58.5 (H-3): a verify record names the tree it tested (HEAD^{tree} at the start) and the paths that scoped its game gate',
     v.status === 0 && rec?.tree === tree && rec.dirty === false && Array.isArray(rec.gatePaths), `${out(v).slice(-1200)}\n${JSON.stringify(rec)?.slice(0, 600)}`);
 
-  const done = (extra = {}) => run(dir, `node harness/task.mjs done ${id} --agent bld-s1`, as('bld-s1', { FAKE_LOAD_FAIL: '1', ...extra }));
+  // 2.78.2: a docs task that changes only a README now skips the game's checks (STUDIO_DONE_SKIP_GAME_NONCODE, checked in
+  // selftest-2782c); this check is about reusing a verify, so it pins the old rule.
+  const done = (extra = {}) => run(dir, `node harness/task.mjs done ${id} --agent bld-s1`, as('bld-s1', { FAKE_LOAD_FAIL: '1', STUDIO_DONE_SKIP_GAME_NONCODE: 'off', ...extra }));
   // Refusals first (each leaves the task open): an untracked file, the switch off, a record whose tree isn't its commit's.
   const untracked = done();
   fs.rmSync(path.join(dir, 'scratch-2585s.txt'), { force: true });

@@ -244,7 +244,7 @@ console.log(JSON.stringify({ ok: r.ok, id: r.id, landed: r.landed, dropped: r.dr
     const own = otherWork(S, { env: { ...e, STUDIO_LOCK_OWNER: 'porter-1' } });
     const offed = otherWork(S, { env: { ...e, STUDIO_QUIET_BUSY_ROLES: 'off' } });
     fs.rmSync(path.join(S, '.studio', 'agents'), { recursive: true, force: true });
-    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { windowsHide: true });
     porter(S, dead.pid || 999999, 'porter-dead');
     writeIn(S, '.studio/agents/builder-9.json', JSON.stringify({ agent: 'builder-9', role: 'builder', status: 'running', pid: process.pid }));
     const deadW = otherWork(S, { env: e });
