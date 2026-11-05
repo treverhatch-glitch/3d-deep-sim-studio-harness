@@ -4792,6 +4792,16 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (d): trusted load-sensitive files skip the quiet wait; a dependency landed under other hashes, by a rescue or
+// before the event window; a lane that gained only merges of main closes; empty-diff lanes land without a verify; a
+// discarded speculative train is not "dead".
+if (inShard('selftest-2781d')) {
+  const dir = copyRepo();
+  const { selftest2781D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781d.mjs')).href);
+  await selftest2781D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

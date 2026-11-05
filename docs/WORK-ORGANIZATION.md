@@ -213,6 +213,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
 - A lane that conflicts with the lanes before it waits for the next train; one that conflicts with main is handed
   back ("merge main into your copy"). A queued lane with uncommitted work waits; one whose claim moved to another
   agent leaves the queue; one that gained commits after its check lands as checked and stays queued.
+  2.78.1 (d): unless those commits are only merges of main that bring nothing beyond it (each one a merge with a parent
+  on main, and merging the lane's tip into main changes no file: `harness/landed-content.mjs onlyMainMerges`): then
+  what was checked is all its work, and the task closes as landed (`task.train.main_merges_only`).
+  `STUDIO_TRAIN_CLOSE_MAIN_MERGES=off` keeps it open and queued (2.78.0).
+- Empty-diff lanes (2.78.1, d): a tier-A lane whose tip changes no file against main (`git diff <main> <tip>` is empty,
+  e.g. a close-out) lands and closes without a verify: there is nothing to verify that main hasn't
+  (`task.train.empty_diff`, logged). Its own lane check (`task done --train-check`) still runs. With other lanes in
+  the train it lands first and the rest are built again on the new main and verified; a lane that waits on another
+  lane of the same train (`--after`) rides the verify. `STUDIO_TRAIN_EMPTY_DIFF=off`: it rides the verify (2.78.0).
 - `npm run task -- done <ID>` in a lane copy with commits of its own is a one-lane train: main + the lane, verified
   (or the lane's own green verify of that tree reused), then main moves. Unlike the old path, a lane main has moved
   past is merged (not rebased) and main + lane gets a full verify before main moves (the old path re-checked only
@@ -223,7 +232,7 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   wait like a done. The verify takes gate slots as a landing. Events: `task.train.start`, `.queued`, `.verify`,
   `.red`, `.bisect`, `.dropped`, `.deferred`, `.moved`, `.landed`, `.partial`, `.red_main`, `.flaky`, `.pins`,
   `.pin_refresh`, `.pin_refresh_red`, `.tier`, `.held`, `.released`, `.waiting`, `.done`; 2.76.0: `.died`, `.trust_note`,
-  `.lane_recreated`, `.mixed`; 2.77.0: `.known_red`.
+  `.lane_recreated`, `.mixed`; 2.77.0: `.known_red`; 2.78.1: `.main_merges_only`, `.empty_diff`.
 - Lane copies made before 2.59.0 run their own older `harness/task.mjs`: `task done` there lands the old way, and a
   queued lane whose copy's harness predates the train is taken out of the queue with a note (merge main into it).
 - Landing tiers (2.63.0, `harness/tiers.mjs`): every lane gets a tier from its own diff (merge-base with main ..
@@ -351,6 +360,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   train whose red has ONLY `load-sensitive` failing test files (each labelled in that triage) doesn't hand its lanes
   back for them, like a timeout-flake that passed alone at low load: it lands, the reds are reported
   (`task.train.load_sensitive`, the log says so).
+  2.78.1 (d): a file the record already trusts skips the quiet wait. Listed in `.studio/load-sensitive.json`, with at
+  least `STUDIO_LOAD_SENSITIVE_TRUST` (default 2; 0 or off: never) load-sensitive labels for the same check in
+  `.studio/flakes.jsonl` within `STUDIO_FLAKE_WINDOW_DAYS` that a quiet machine confirmed, and no `real` label for
+  the file since its first load-sensitive one (`harness/flakes.mjs loadSensitiveTrust`): when it fails alone it runs
+  again alone at low load (one test worker) at once, without waiting for a quiet machine or holding other verifies.
+  The alone low-load pass is still required: it passes → `load-sensitive` with `trusted: true` in its row (a trusted
+  label never counts toward trust, so the record is renewed only by quiet runs); it fails → the quiet re-run as above.
+  A lane whose only reds are such files lands, and `task.train.load_sensitive` says "trusted" (`meta.trusted` lists
+  them). Every other red keeps the path above.
   2.78.0 (C2c): the quiet re-run also holds other verifies back, since an alone run isn't alone when another verify
   starts on the same fixed port: from the start of its quiet wait to the end of its run, the train leaves
   `.studio/locks/machine-heavy-quiet-hold-<pid>.json` and new heavy work that isn't a landing (builder and lane
@@ -396,6 +414,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   its rescue tasks can't start, and holding it lifts a budget park and closes its waiting rescues. When a task lands
   (task done, a train) its open rescues are closed with a note (event `task.rescue.closed`; one already claimed gets
   `task.rescue.obsolete`). A lane that is neither held nor queued is clocked and rescued as before.
+- Done dependencies (2.30c; 2.77.3 H4; 2.78.1 d, B-114): a task whose `--after` dependency is done but still has commits
+  on its old lane branch (`.studio/lane-branches.json`) not on main is not handed out ("waiting on T-x: done, but N
+  commits on lane/… not merged yet"), unless the work landed some other way: the dependency's last closing record in
+  the last 20000 events is a landing (task done, a train landing, a lane merge); a done rescue of it (`Rescue: T-x`)
+  landed; its branch brings nothing to main (every commit's patch is on main, or merging it changes no file: a rescue
+  or another task carried the work under new hashes); or the window has no closing record for it and its last one in
+  the whole event history (rolled files too, newest first up to `STUDIO_DEP_HISTORY_MB`, default 200) is a landing.
+  A forced done or a reopen as its last record, with commits not on main, still waits, and so does a done task with no
+  record at all. `STUDIO_DEP_LANDED_EVIDENCE=off`: only the window's own record counts (2.78.0).
 - `studio/` in a lane copy is the main checkout's (a link, 2.60.1, B-40): only the board commands (`npm run task`,
   lock, proof ...) write there, and a lane's commits can never carry studio config. A config change (`studio/*.json`,
   `studio/bible/*.json`, keys, approvals, presets) goes to the owner or the Producer on main: hand the task back with
