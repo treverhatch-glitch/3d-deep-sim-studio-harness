@@ -60,7 +60,7 @@
  * other verify starts on the same fixed port, or loads the machine again); bounded by STUDIO_FLAKE_HOLD_MIN (default
  * the quiet wait + STUDIO_FLAKE_WAIT_MIN + STUDIO_GAME_GATE_TIMEOUT_MS; 0/off: no hold), released when the run ends,
  * ignored once its train's process is gone. Running verifies are never stopped: the quiet wait waits for them.
- * 2.78.2 (b): with STUDIO_FLAKE_TOGETHER=on (default off: one file at a time as above; see togetherOn), a check with two
+ * 2.78.2 (b): by default (STUDIO_FLAKE_TOGETHER=off: one file at a time as above; see togetherOn), a check with two
  * or more failing files is triaged TOGETHER when the caller can run several files at once (triageRed's `together`): ONE
  * run of all of them at low load (one test worker; the runner takes the files), then ONE quiet low-load re-run of those
  * still failing. Each file is labelled from the run's own per-file result (game-gates' "failing test files in <check>"
@@ -281,11 +281,13 @@ export function collisionWaitExcuse(a = {}) {
 }
 
 /**
- * 2.78.2 (b): STUDIO_FLAKE_TOGETHER=on: several failing files of one check are triaged in one run. Default off (one file
- * at a time, as 2.78.1): qa/selftest-269r.mjs (c) and qa/selftest-2773b.mjs expect the per-file runs on purpose (a file
- * whose run never ends must not be run once another file is real), so the default is the owner's call.
+ * 2.78.2 (b): several failing files of one check are triaged in one run (default ON, the owner's call; STUDIO_FLAKE_TOGETHER=off
+ * restores one file at a time, as 2.78.1: qa/selftest-269r.mjs (c) and qa/selftest-2773b.mjs pin that path on purpose). A run
+ * that never ends can't hold the group: the run is the game check's own run (bounded by STUDIO_GAME_GATE_TIMEOUT_MS; a timeout
+ * can't be split by file, so `attribute` falls back to per-file runs), and the red budget (STUDIO_TRAIN_RED_BUDGET_MIN) is
+ * checked before every run.
  */
-export const togetherOn = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_FLAKE_TOGETHER ?? '').trim());
+export const togetherOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_FLAKE_TOGETHER ?? '').trim());
 
 /**
  * 2.78.2 (b): which files of a group run failed, from that run's output: { ok: true, failing, passing } or { ok: false,
@@ -376,7 +378,7 @@ const quietWhy = (m) => `fails alone at low load while other work runs, passes a
  * there too), allPortCollision (every failing file was labelled port-collision), portCollisionWait (2.78.0: every failing
  * file was labelled port-collision or load-sensitive, at least one port-collision). runAlone also gets { k, of }.
  * 2.78.2 (b): together (the caller's runAlone takes { files: [...] } and runs them in one run): a check with two or more
- * failing files is labelled with labelGroup (STUDIO_FLAKE_TOGETHER=off: one file at a time, as before).
+ * failing files is labelled with labelGroup (default; STUDIO_FLAKE_TOGETHER=off: one file at a time, as before).
  */
 export function triageRed({ root, dir = root, text, train = '', tree = '', runAlone, seen = new Set(), now = Date.now(), env = process.env, log = () => {}, emit = emitEvent, rng, together = false } = {}) {
   const out = { labels: [], quarantined: [] }; // 2.77.3: + real (the file red alone), notRun, skipped, allPortCollision; 2.78.0: portCollisionWait

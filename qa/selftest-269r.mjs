@@ -172,6 +172,7 @@ console.log(JSON.stringify({ calls, routed: r.routed }));
   const vlog = path.join(tmpRoot, `verify-269r-${process.pid}.log`);
   fs.writeFileSync(vlog, verifyText);
   try { fs.rmSync(ranLog, { force: true }); } catch {}
+  // 2.78.2: per-file triage is now STUDIO_FLAKE_TOGETHER=off; the together path is checked in selftest-2782b
   const c2 = probe('triage', `import fs from 'node:fs'; import path from 'node:path';
 import { flakeTriage } from ${u('harness/train.mjs')};
 const root = path.resolve('.');
@@ -180,7 +181,7 @@ const lines = [];
 const r = flakeTriage({ root, dir: root }, { id: 'tr-flake', tree: 'cafe1234', text, log: (m) => lines.push(m) });
 const again = flakeTriage({ root, dir: root }, { id: 'tr-flake-1', tree: 'cafe1234', text, log: (m) => lines.push(m) });
 console.log(JSON.stringify({ labels: r?.labels || null, quarantined: r?.quarantined || null, again: again ? again.labels.length : null, lines }));
-`);
+`, { STUDIO_FLAKE_TOGETHER: 'off' });
   const ran = (() => { try { return fs.readFileSync(ranLog, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\t')); } catch { return []; } })();
   const lab = (t) => (c2.labels || []).find((x) => x.test.endsWith(t));
   const flakeRows = (() => { try { return fs.readFileSync(path.join(dir, '.studio', 'flakes.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } })();

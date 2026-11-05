@@ -124,7 +124,7 @@ console.log(JSON.stringify({ ok: r.ok, id: r.id, landed: r.landed, dropped: r.dr
   const failText = (check, files) => `[game-gates] FAIL ${check}: exit 1\n[game-gates] failing test files in ${check}: ${JSON.stringify(files)}\n`;
 
   // ---- Together: a check's failing files run in one run, then one quiet re-run ----
-  await guard('2.78.2 (b, together): with STUDIO_FLAKE_TOGETHER=on, four failing files of one check are triaged in three runs, not eight: all four together at low load, the three still failing together at quiet low load, then the first still failing BY ITSELF (real only once it fails alone; the triage stops at the first real), each labelled from that run\'s per-file result (load-flake, load-sensitive, real; runs[].together in the rows); a file that fails only beside the others passes by itself and is load-flake, not real; an output that names no failing file falls back to one run per file; unset (the default) or off: one run per file, as 2.78.1 (fails on 2.78.1: one or two runs per file)', async () => {
+  await guard('2.78.2 (b, together): with STUDIO_FLAKE_TOGETHER=on, four failing files of one check are triaged in three runs, not eight: all four together at low load, the three still failing together at quiet low load, then the first still failing BY ITSELF (real only once it fails alone; the triage stops at the first real), each labelled from that run\'s per-file result (load-flake, load-sensitive, real; runs[].together in the rows); a file that fails only beside the others passes by itself and is load-flake, not real; an output that names no failing file falls back to one run per file; unset (the default, the owner\'s call) is together like on; STUDIO_FLAKE_TOGETHER=off: one run per file, as 2.78.1 (fails on 2.78.1: one or two runs per file)', async () => {
     const { triageRed } = await imp('harness/flakes.mjs');
     const files = ['game/demo/tests/a.test.mjs', 'game/demo/tests/b.test.mjs', 'game/demo/tests/c.test.mjs', 'game/demo/tests/d.test.mjs'];
     const text = failText('game:unit', files);
@@ -148,7 +148,7 @@ console.log(JSON.stringify({ ok: r.ok, id: r.id, landed: r.landed, dropped: r.dr
     const ok = tog.calls.join(',') === 'abcd-low,bcd-low-quiet,c-low-quiet' && tog.labels.join(',') === 'a.test.mjs:load-flake,b.test.mjs:load-sensitive,c.test.mjs:real' && tog.together.join(',') === '4,4/3,4/3/0' && /c\.test/.test(tog.real || '')
       && crowd.calls.join(',') === 'abcd-low,bcd-low-quiet,c-low-quiet,d-low-quiet' && crowd.labels.join(',') === 'a.test.mjs:load-flake,b.test.mjs:load-sensitive,c.test.mjs:load-flake,d.test.mjs:real'
       && noname.calls[0] === 'abcd-low' && noname.calls.length > 2 && noname.calls.slice(1).every((c) => /^[abcd](-|$)/.test(c))
-      && perFile(dflt) && perFile(offed);
+      && dflt.calls.join(',') === tog.calls.join(',') && dflt.labels.join(',') === tog.labels.join(',') && !perFile(dflt) && perFile(offed);
     return [ok, JSON.stringify({ tog, crowd, noname, dflt: dflt.calls, offed: offed.calls })];
   });
 

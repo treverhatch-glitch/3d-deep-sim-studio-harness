@@ -381,8 +381,8 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   label never counts toward trust, so the record is renewed only by quiet runs); it fails → the quiet re-run as above.
   A lane whose only reds are such files lands, and `task.train.load_sensitive` says "trusted" (`meta.trusted` lists
   them). Every other red keeps the path above.
-  2.78.2 (b): `STUDIO_FLAKE_TOGETHER=on` (default off: one file at a time, as above) triages a check's failing files
-  TOGETHER: one run of all of them at low load (one test worker), then one quiet low-load re-run of those still failing,
+  2.78.2 (b): By default (the owner's call; `STUDIO_FLAKE_TOGETHER=off` restores one file at a time, as above) the triage runs a check's failing files
+  TOGETHER (a hanging file can't hold the group: the run is bounded by the game check's timeout, which falls back to per-file runs, and by the red budget): one run of all of them at low load (one test worker), then one quiet low-load re-run of those still failing,
   each file labelled from that run's per-file result (game-gates' `failing test files in <check>` line). A file still
   failing beside the others is `real` only once it fails by itself at quiet low load (one at a time, up to the first
   real); passing by itself it is `load-flake`. A run whose output can't be split by file (no failing file named, one

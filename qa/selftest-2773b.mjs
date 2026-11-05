@@ -122,7 +122,8 @@ console.log(JSON.stringify({ ok: r.ok, id: r.id, landed: r.landed, dropped: r.dr
   await guard('2.77.3 (b, H2/B-112): a red train whose first failing file fails alone ("real") goes on at once: the other failing file is not run alone (here that run would never end), the train bisects and hands the lane back as for any real red, its status says "flake check 1 of 2", and train.lock is released (fails on 2.77.2: after the real verdict it ran the next file alone, a child that never returned, holding the lock)', async () => {
     const st = studio('real');
     st.queue([st.lane('r1', 'T-951', 'RED a.test.mjs\nRED b.test.mjs\nHANGALONE b.test.mjs')]);
-    const p = await probeAsync(st.S, trainProbe(st.S), st.env, 75000);
+    // 2.78.2: per-file triage is now STUDIO_FLAKE_TOGETHER=off; the together path is checked in selftest-2782b
+    const p = await probeAsync(st.S, trainProbe(st.S), { ...st.env, STUDIO_FLAKE_TOGETHER: 'off' }, 75000);
     const runs = st.runs();
     const triage = st.events().find((e) => e.type === 'test.flake_triage');
     const statuses = (p.j?.logs || []).filter((l) => /flake check 1 of 2: game\/demo\/tests\/a\.test\.mjs alone/.test(l));
