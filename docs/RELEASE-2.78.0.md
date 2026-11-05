@@ -2,7 +2,10 @@
 
 2.78 takes the dev plan's research items (PU-54 to PU-63 in `studio/logs/PROPOSALS.md`) that make a builder more likely
 to finish a task correctly, or that stop the harness from grading a wrong result as right. It also carries the crew's
-B-105 from the 2.77.1 run. None of it adds a human approval step: beta mode stays as it is.
+B-105 from the 2.77.1 run and the crew's C2(c) from the 48-hour run, and it includes 2.77.3 (docs/RELEASE-2.77.3.md):
+a test file that fails alone with a port collision in its output is `port-collision` at once (no quiet wait), and a red
+whose failures are only port collisions and load-sensitive files hands nobody back (the lanes wait, as in 2.77.3). None
+of it adds a human approval step: beta mode stays as it is.
 
 Each item is marked:
 
@@ -48,12 +51,12 @@ Each item is marked:
 
 ## Upgrade note for Patch
 
-Take this only after the 2.77.x run the owner asked for.
+Take this only after the 2.77.x run the owner asked for. Everything in 2.77.3's upgrade note (docs/RELEASE-2.77.3.md) applies too if you skip 2.77.3.
 
 1. `npm run upgrade -- --merge origin/main --by hatch --permission "Hatch: take 2.78.0"`. It adds two required gates
    (`holdout`, `journey`) to `studio/gates.json`; both pass until the studio adds held-out cases or journeys.
 2. `npm ci`, `npm run upgrade -- --smoke`, restart the supervisor once (`npm run studio:stop`, `npm run studio:start`).
 3. Lanes made before the upgrade: nothing to do. The train or the builder's own verify refreshes them.
-4. To compare: `.studio/upgrades/2.77.2-to-2.78.0.json` is the before snapshot. After a day, look at hand-backs
+4. To compare: `.studio/upgrades/<the version you ran>-to-2.78.0.json` is the before snapshot. After a day, look at hand-backs
    for load-sensitive tests (`.studio/load-sensitive.json`), refused starts (`.studio/start-backoff.json`) and any
    `futility.auto_on` events.
