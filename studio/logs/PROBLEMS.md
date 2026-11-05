@@ -1401,3 +1401,23 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-268 — work that had landed kept tasks open or waiting · fixed in 2.78.1
 - **Evidence:** "T-124 waiting on T-152: done, but 14 commits on lane/builder-agy11 not merged yet" (B-114); T-173 stayed open after landing; it bounced 3 times on tests that pass alone.
 - **Fix:** rescue and content evidence for dependencies, merge-of-main-only and empty-diff lanes close, trusted load-sensitive files skip the quiet wait. qa/selftest-2781d.mjs.
+
+### P-269 — trains died with the builder that started them · fixed in 2.78.2
+- **Evidence:** 6 train deaths 08:11–11:16 UTC on 2.78.1: a lane's `task done` ran the train inside the builder's shell, which Claude Code ends after 10 min (W-0090).
+- **Fix:** done queues the lane; trains run detached from their starter; `train cancel`. qa/selftest-2782a.mjs.
+
+### P-270 — one red result cost 1–2 hours · fixed in 2.78.2
+- **Evidence:** train 111009 ran 106 min and landed nothing; train 125652 ran over 2 h 15 min on load-flaky and perf tests; a builder verify waited 858 s behind the bisect.
+- **Fix:** failing files triaged together, a 30-minute red budget, a `game:perf` step on a quiet machine, a Unity porter counts as load, the bisect leaves a slot. qa/selftest-2782b.mjs.
+
+### P-271 — green trains were re-verified after unrelated commits to main · fixed in 2.78.2
+- **Evidence:** train 125652's green verify (674 s) was discarded after a Producer log commit; verify 5 (594 s) after a notes commit.
+- **Fix:** log paths are board paths, no gating check reads agent logs, a green tree lands over commits no check reads. qa/selftest-2782c.mjs, qa/selftest-2782g.mjs.
+
+### P-272 — quarantined tests ran anyway, and re-checks ran the whole suite · fixed in 2.78.2
+- **Evidence:** "3 quarantined test file(s) skipped" while the game's test config never read the list (train 133702); without `focus`, every re-check ran the ~20-minute suite.
+- **Fix:** quarantine verified with the runner's list mode, inferred focus for vitest/jest, preflight and onboarding FAIL. qa/selftest-2782f.mjs.
+
+### P-273 — an uncommitted beta approval passed the protected check · fixed in 2.78.2
+- **Evidence:** the 2.79 cleanup audit (D1.1), reproduced: a beta-format approval dropped into `studio/approvals/` and never committed turned `approve show` from NEEDS APPROVAL to OK.
+- **Fix:** one predicate for every beta record (committed, in the main checkout, current session, no worker), and the owner's role split for protected decisions. qa/selftest-2782h.mjs.

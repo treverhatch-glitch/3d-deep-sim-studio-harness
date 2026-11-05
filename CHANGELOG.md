@@ -4,6 +4,34 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.78.2] — 2026-11-06
+The crew's train-speed request from the first run on 2.78.1 (items 1–18) and the owner's decision on who may approve
+what. Item-by-item status and Patch's upgrade note: docs/RELEASE-2.78.2.md.
+- **Trains outlive their builder (item 1, P-269).** `task done` queues the lane and exits "queued" (`STUDIO_DONE_QUEUE`);
+  the daemon, or a background train, runs it; every train started for someone else is detached from its starter.
+  `npm run task -- train cancel` stops a train cleanly.
+- **One red no longer costs hours (items 2, 4, P-270).** Failing files are triaged together; the red chain is capped at
+  `STUDIO_TRAIN_RED_BUDGET_MIN` (30), then the newest lane is handed back and a verified-green prefix lands; a
+  `game:perf` step runs wall-clock tests alone on a quiet machine (WARN when busy); a Unity porter counts as not quiet;
+  the bisect leaves a slot for builders.
+- **Main moves stop costing landings (items 3, 16, P-271).** Producer and review logs are board paths, gating checks
+  don't read agent logs, and a green tree lands over new commits that touch only files no check reads.
+- **Test configs are checked (items 13–15, P-272):** quarantine is verified with the runner's list mode, the focus
+  command is inferred for vitest/jest (preflight and the new `onboard -- --check` FAIL when neither works), and
+  ms-budget assertions outside the perf tests are flagged.
+- **Approvals (items 7, 17, P-273, and the 2.79 audit):** one base and key for every approve kind; lane-copy approvals log
+  to main; a beta approval counts only committed by a non-worker in the main checkout; protected decisions are the
+  owner's and outside agents' (Producers only with `STUDIO_PRODUCER_APPROVES=protected`).
+- **Reviews, quotas, owner-only steps (items 5, 6, 8):** the last `Verdict:` line decides; quota stops per `tool:model`;
+  `review -- record` for an outside reviewer; a task needing an owner-only step is parked for the owner and the
+  orchestrator is paged.
+- **Lanes and engines (items 9, 11, 18):** opt-in region lanes for big shared files; a relaunch starts from the previous
+  lane branch; `lanes carry` skips commits already on main; `"unity"` reads as `engine:unity`, `task track`, and the
+  upgrade backfills engine tracks.
+- **Medium (items 10, 12):** the crew breaker resumes by itself; docs-only direction and review tasks skip the game's
+  checks.
+- Tests: qa/selftest-2782a.mjs to qa/selftest-2782h.mjs.
+
 ## [2.78.1] — 2026-11-05
 The crew's patch request from the first day on 2.78 (B-106 to B-123, M7, the Line Producer and fresh-session asks),
 the War Room's Planning Room and a long-run preflight. Item-by-item status and Patch's upgrade note:

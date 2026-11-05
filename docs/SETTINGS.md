@@ -145,7 +145,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## CREW_* (5)
 
-- `STUDIO_CREW_BREAKER_RESUME_MIN` · no simple default · harness/crew-watch.mjs, qa/selftest-2782c.mjs · [RUN-UNATTENDED.md:288](RUN-UNATTENDED.md)
+- `STUDIO_CREW_BREAKER_RESUME_MIN` · no simple default · harness/crew-watch.mjs, qa/selftest-2782c.mjs · [RELEASE-2.78.2.md:30](RELEASE-2.78.2.md)
 - `STUDIO_CREW_MAX_SESSIONS` · no simple default · harness/crew-watch.mjs, harness/supervisor.mjs, qa/selftest-268o.mjs · [RUN-UNATTENDED.md:282](RUN-UNATTENDED.md)
 - `STUDIO_CREW_SHORT_SEC` · no simple default · harness/crew-watch.mjs · [RUN-UNATTENDED.md:281](RUN-UNATTENDED.md)
 - `STUDIO_CREW_WATCH` · no simple default · harness/crew-watch.mjs, qa/selftest-268o.mjs, qa/selftest-269s.mjs (+3 more) · [RUN-UNATTENDED.md:287](RUN-UNATTENDED.md)
@@ -185,11 +185,11 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 - `STUDIO_DONE_GAME_GATES` · no simple default · harness/task.mjs, qa/selftest-232.mjs, qa/selftest-2582k.mjs (+8 more) · undocumented
 - `STUDIO_DONE_NOOP` · no simple default · harness/task.mjs, harness/upgrade-smoke.mjs, qa/selftest-230n.mjs (+30 more) · undocumented
-- `STUDIO_DONE_QUEUE` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-259a.mjs (+2 more) · [WORK-ORGANIZATION.md:365](WORK-ORGANIZATION.md)
+- `STUDIO_DONE_QUEUE` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-259a.mjs (+2 more) · [RELEASE-2.78.2.md:11](RELEASE-2.78.2.md)
 - `STUDIO_DONE_REUSE_MAX_H` · default `24` · harness/task.mjs, harness/train.mjs · undocumented
 - `STUDIO_DONE_REUSE_VERIFY` · no simple default · harness/merge-lane.mjs, harness/task.mjs, qa/selftest-243.mjs (+16 more) · [DISCORD-CREW.md:177](DISCORD-CREW.md)
 - `STUDIO_DONE_RUNNING_MAX_MIN` · default `90` · harness/agent.mjs, harness/busy.mjs, harness/stall.mjs (+2 more) · [RUN-UNATTENDED.md:169](RUN-UNATTENDED.md)
-- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-243.mjs (+1 more) · [WORK-ORGANIZATION.md:788](WORK-ORGANIZATION.md)
+- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-243.mjs (+1 more) · [RELEASE-2.78.2.md:32](RELEASE-2.78.2.md)
 - `STUDIO_DONE_UNCOMMITTED` · no simple default · harness/task.mjs, qa/selftest-230m.mjs, qa/selftest-230n.mjs (+11 more) · undocumented
 - `STUDIO_DONE_UNITY_GATE` · no simple default · harness/engine-tracks.mjs, harness/task.mjs, qa/selftest-263j.mjs (+3 more) · [ENGINE-TRACKS.md:118](ENGINE-TRACKS.md)
 
@@ -254,7 +254,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_FLAKE_MAX_FILES` · no simple default · harness/flakes.mjs, harness/game-gates.mjs · [WORK-ORGANIZATION.md:396](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_QUARANTINE_AFTER` · no simple default · harness/flakes.mjs, qa/selftest-278a.mjs · [WORK-ORGANIZATION.md:399](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_QUIET_WAIT_MIN` · no simple default · harness/flake-quiet.mjs, harness/flakes.mjs, harness/train.mjs (+4 more) · [RELEASE-2.78.0.md:21](RELEASE-2.78.0.md)
-- `STUDIO_FLAKE_TOGETHER` · no simple default · harness/flakes.mjs, qa/selftest-269r.mjs, qa/selftest-2773b.mjs (+1 more) · [WORK-ORGANIZATION.md:429](WORK-ORGANIZATION.md)
+- `STUDIO_FLAKE_TOGETHER` · no simple default · harness/flakes.mjs, qa/selftest-269r.mjs, qa/selftest-2773b.mjs (+1 more) · [RELEASE-2.78.2.md:12](RELEASE-2.78.2.md)
 - `STUDIO_FLAKE_TRIAGE` · no simple default · harness/flakes.mjs, qa/selftest-2782a.mjs · [WORK-ORGANIZATION.md:410](WORK-ORGANIZATION.md)
 - `STUDIO_FLAKE_WAIT_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2773b.mjs (+1 more) · [RELEASE-2.77.3.md:21](RELEASE-2.77.3.md)
 - `STUDIO_FLAKE_WINDOW_DAYS` · no simple default · harness/flakes.mjs · [RELEASE-2.78.1.md:24](RELEASE-2.78.1.md)
@@ -477,7 +477,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## MAIN_* (3)
 
-- `STUDIO_MAIN_CHECKOUT_ENFORCE` · no simple default · harness/approve.mjs, harness/test-weakening.mjs, qa/selftest-2782e.mjs (+1 more) · [SECURITY.md:174](SECURITY.md)
+- `STUDIO_MAIN_CHECKOUT_ENFORCE` · no simple default · harness/approve.mjs, harness/test-weakening.mjs, qa/selftest-2782e.mjs (+1 more) · [RELEASE-2.78.2.md:22](RELEASE-2.78.2.md)
 - `STUDIO_MAIN_COMMIT` · no simple default · harness/adopt.mjs, scripts/hooks/pre-commit, qa/selftest-259b.mjs (+8 more) · [RELEASE.md:96](RELEASE.md)
 - `STUDIO_MAIN_ROOT` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+151 more) · [AGENT-TOOLS.md:156](AGENT-TOOLS.md)
 
@@ -516,7 +516,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## OWNER_* (2)
 
 - `STUDIO_OWNER_KEY` · no simple default · harness/agent-env.mjs, harness/approve.mjs, harness/beta-mode.mjs (+84 more) · [SECURITY.md:38](SECURITY.md)
-- `STUDIO_OWNER_ONLY_PARK` · no simple default · harness/owner-only.mjs, qa/selftest-2782d.mjs · [RUN-UNATTENDED.md:150](RUN-UNATTENDED.md)
+- `STUDIO_OWNER_ONLY_PARK` · no simple default · harness/owner-only.mjs, qa/selftest-2782d.mjs · [RELEASE-2.78.2.md:23](RELEASE-2.78.2.md)
 
 ## PERF_* (2)
 
@@ -545,7 +545,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## PRODUCER_* (7)
 
-- `STUDIO_PRODUCER_APPROVES` · no simple default · harness/beta-mode.mjs, harness/config-proposal.mjs, harness/line-producer.mjs (+4 more) · [SECURITY.md:257](SECURITY.md)
+- `STUDIO_PRODUCER_APPROVES` · no simple default · harness/beta-mode.mjs, harness/config-proposal.mjs, harness/line-producer.mjs (+4 more) · [RELEASE-2.78.2.md:49](RELEASE-2.78.2.md)
 - `STUDIO_PRODUCER_CMD` · no simple default · harness/watch.mjs, qa/selftest-230q.mjs, qa/selftest-2583m.mjs (+12 more) · [PACE-AND-AGENTS.md:44](PACE-AND-AGENTS.md)
 - `STUDIO_PRODUCER_MIN_MIN` · default `15` · harness/producer-wake.mjs · [RELEASE.md:252](RELEASE.md)
 - `STUDIO_PRODUCER_NAME` · default `'producer'` (also `'producer-1'`) · harness/art.mjs, harness/ask.mjs, harness/bible.mjs (+32 more) · [STRESS-TEST.md:37](STRESS-TEST.md)
@@ -570,7 +570,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## QUOTA_* (3)
 
-- `STUDIO_QUOTA_MODEL_TOOLS` · default `'agy,gemini'` · harness/budget.mjs, qa/selftest-2782d.mjs · [RUN-UNATTENDED.md:142](RUN-UNATTENDED.md)
+- `STUDIO_QUOTA_MODEL_TOOLS` · default `'agy,gemini'` · harness/budget.mjs, qa/selftest-2782d.mjs · [RELEASE-2.78.2.md:21](RELEASE-2.78.2.md)
 - `STUDIO_QUOTA_PROBE` · no simple default · harness/budget.mjs, harness/supervisor.mjs, qa/selftest-268o.mjs (+11 more) · undocumented
 - `STUDIO_QUOTA_SKIP` · no simple default · harness/agent.mjs, qa/selftest-2782d.mjs, qa/selftest.mjs · [RUN-UNATTENDED.md:138](RUN-UNATTENDED.md)
 
@@ -628,7 +628,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_REVIEW_FILE_MIN` · default `60` · harness/gamedev-loop.mjs · undocumented
 - `STUDIO_REVIEW_MIN` · default `60` · harness/gamedev-loop.mjs · undocumented
 - `STUDIO_REVIEW_TOOLS` · no simple default · harness/review.mjs, qa/selftest-2781b.mjs, qa/selftest-2782d.mjs · [AGENT-TOOLS.md:136](AGENT-TOOLS.md)
-- `STUDIO_REVIEW_VERDICT_LINE` · no simple default · harness/done-check.mjs, qa/selftest-2782c.mjs · [REVIEWER.md:40](REVIEWER.md)
+- `STUDIO_REVIEW_VERDICT_LINE` · no simple default · harness/done-check.mjs, qa/selftest-2782c.mjs · [RELEASE-2.78.2.md:20](RELEASE-2.78.2.md)
 
 ## REVIEWER_* (2)
 
@@ -781,14 +781,14 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_CHAIN_TAIL` · no simple default · harness/train-tail.mjs, harness/train.mjs, qa/selftest-267f.mjs (+2 more) · [WORK-ORGANIZATION.md:161](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_CLOSE_MAIN_MERGES` · no simple default · harness/train.mjs · [RELEASE-2.78.1.md:27](RELEASE-2.78.1.md)
 - `STUDIO_TRAIN_DEAD_MIN` · no simple default · harness/communicator.mjs, harness/train-life.mjs · [WORK-ORGANIZATION.md:341](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_DETACH` · no simple default · harness/task.mjs, harness/train-detach.mjs · [WORK-ORGANIZATION.md:372](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_DETACH` · no simple default · harness/task.mjs, harness/train-detach.mjs · [RELEASE-2.78.2.md:11](RELEASE-2.78.2.md)
 - `STUDIO_TRAIN_EMPTY_DIFF` · no simple default · harness/train.mjs, qa/selftest-2781d.mjs · [RELEASE-2.78.1.md:64](RELEASE-2.78.1.md)
 - `STUDIO_TRAIN_FIX_FIRST` · no simple default · harness/train-fix-first.mjs, qa/selftest-2732d.mjs · [WORK-ORGANIZATION.md:102](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_FOLLOWED` · no simple default · harness/train-detach.mjs · [WORK-ORGANIZATION.md:371](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_GREEN_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:600](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_HARNESS_GUARD` · no simple default · harness/harness-version.mjs, harness/train.mjs, qa/selftest-2781c.mjs · [RELEASE-2.78.1.md:22](RELEASE-2.78.1.md)
 - `STUDIO_TRAIN_KNOWN_RED` · no simple default · harness/train.mjs · [WORK-ORGANIZATION.md:394](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_LAND_OVER_NONCODE` · no simple default · harness/train.mjs, qa/selftest-2782g.mjs · [WORK-ORGANIZATION.md:223](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_LAND_OVER_NONCODE` · no simple default · harness/train.mjs, qa/selftest-2782g.mjs · [RELEASE-2.78.2.md:41](RELEASE-2.78.2.md)
 - `STUDIO_TRAIN_LAND_OVER_NONCODE_MAX` · default `200` · harness/train.mjs · [WORK-ORGANIZATION.md:222](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_LAND_PREFIX` · no simple default · harness/train.mjs, qa/selftest-260a.mjs, qa/selftest-2653a.mjs (+4 more) · [WORK-ORGANIZATION.md:123](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_LOCK_WAIT_MIN` · no simple default · harness/task.mjs, harness/train-detach.mjs, qa/selftest-263i.mjs (+2 more) · [WORK-ORGANIZATION.md:256](WORK-ORGANIZATION.md)
@@ -800,7 +800,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_TRAIN_POLL_S` · default `15` · harness/train.mjs, qa/selftest-263i.mjs, qa/selftest-265s.mjs · [WORK-ORGANIZATION.md:313](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_PREDICT` · no simple default · harness/train-predict.mjs, qa/selftest-260b.mjs, qa/selftest-2651a.mjs (+2 more) · [WORK-ORGANIZATION.md:230](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_QUARANTINE_MOVE` · no simple default · harness/train.mjs · [WORK-ORGANIZATION.md:784](WORK-ORGANIZATION.md)
-- `STUDIO_TRAIN_RED_BUDGET_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2782b.mjs (+1 more) · [WORK-ORGANIZATION.md:136](WORK-ORGANIZATION.md)
+- `STUDIO_TRAIN_RED_BUDGET_MIN` · no simple default · harness/flakes.mjs, harness/train.mjs, qa/selftest-2782b.mjs (+1 more) · [RELEASE-2.78.2.md:12](RELEASE-2.78.2.md)
 - `STUDIO_TRAIN_REFRESH` · no simple default · harness/train-refresh.mjs, qa/selftest-276i.mjs, qa/selftest-278h.mjs · [RELEASE.md:123](RELEASE.md)
 - `STUDIO_TRAIN_RELATED_FIRST` · no simple default · harness/train.mjs, qa/selftest-269p.mjs · [WORK-ORGANIZATION.md:606](WORK-ORGANIZATION.md)
 - `STUDIO_TRAIN_RESERVE` · no simple default · harness/heavy-budget.mjs, qa/selftest-276j.mjs, qa/selftest-277p.mjs · [WORK-ORGANIZATION.md:680](WORK-ORGANIZATION.md)
