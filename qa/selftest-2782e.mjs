@@ -6,7 +6,8 @@
  *   7c  an approval made in a lane copy wrote its event to that copy's own log (a copy without the .studio link), so the
  *       Line Producer kept holding the task.
  *   7d  an engine-porter task with no engine record got a plain lane.
- *   7e  REPORT ONLY (the 2.79 audit, D1.1): does the protected check accept a beta-format approval nobody committed?
+ *   7e  (the 2.79 audit, D1.1; an assertion since 2.78.2 (h)): the protected check accepted a beta-format approval nobody
+ *       committed.
  *   9   lane overlap was file-level: two lanes on regions of one big shared file never ran side by side.
  */
 import fs from 'node:fs';
@@ -173,7 +174,7 @@ export async function selftest2782E({ dir, report, tmpRoot, root }) {
       JSON.stringify({ id, byWorker: out(byWorker).slice(-200), byPerson: out(byPerson).slice(-200), rec: rec.j })]);
   }
 
-  // ---- 7e (REPORT ONLY): an uncommitted beta-format protected approval ----
+  // ---- 7e: an uncommitted beta-format protected approval (report only in (e); an assertion since (h)) ----
   {
     const { S, env } = studio('7e');
     const owner = keyPair('owner');
@@ -191,10 +192,14 @@ export async function selftest2782E({ dir, report, tmpRoot, root }) {
     const after = node(S, ['harness/approve.mjs', 'show'], env);
     const accepted = after.status === 0 && /OK: approved by/.test(out(after));
     const valid = before.status === 3 && drop.j?.betaOk === true && drop.j?.committed === false && /^\?\? studio\/approvals\//.test(status);
-    // Report only: passes whichever way the check decides, once the setup is shown valid; the detail says which.
-    await guard(`2.78.2 (e, 7e, REPORT ONLY, no behaviour change; the 2.79 audit D1.1): a builder-dropped, uncommitted beta-format protected approval of exactly the lane's change set, under beta mode, is ${accepted ? 'ACCEPTED by the protected check (real: approve.mjs verifyApproval treats committedByAgent()=null, uncommitted, as fine, while beta-mode.mjs betaRecordCommitted refuses it)' : 'REFUSED by the protected check (not reproduced)'}`, () => [
-      valid,
-      JSON.stringify({ accepted, before: out(before).slice(-200), drop: drop.j || out(drop).slice(-300), status, after: out(after).slice(-300) })]);
+    // 2.78.2 (h): the same record, committed by the orchestrator (opus-1, an outside agent), counts.
+    g(S, 'add', '--', 'studio/approvals/protected-dropped.json');
+    g(S, 'commit', '-qm', 'the orchestrator commits its approval', '-m', 'Studio-Agent: opus-1', '--no-verify', '--', 'studio/approvals/protected-dropped.json');
+    const committed = node(S, ['harness/approve.mjs', 'show'], env);
+    const acceptedCommitted = committed.status === 0 && /OK: approved by/.test(out(committed));
+    await guard('2.78.2 (e, 7e; an assertion since (h); the 2.79 audit D1.1): a builder-dropped, uncommitted beta-format protected approval of exactly the lane\'s change set, under beta mode, is REFUSED by the protected check; the same approval committed by the orchestrator (opus-1) is accepted (fails on 2.78.1: approve.mjs verifyApproval treated committedByAgent()=null, uncommitted, as fine, while beta-mode.mjs betaRecordCommitted refused it)', () => [
+      valid && !accepted && /isn't committed/.test(out(after)) && acceptedCommitted,
+      JSON.stringify({ accepted, acceptedCommitted, before: out(before).slice(-200), drop: drop.j || out(drop).slice(-300), status, after: out(after).slice(-300), committed: out(committed).slice(-200) })]);
   }
 
   // ---- 9: region lanes ----

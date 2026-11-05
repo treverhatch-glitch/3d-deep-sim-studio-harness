@@ -37,6 +37,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { readBeta, betaRecordCommitted } from './beta-mode.mjs';
 import { proxyApprovalOk } from './owner-proxy.mjs';
+import { WORKER_NAME, recordTier, mayDecide } from './permission.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalBytes } from './hash.mjs';
 import { matchAny } from './merge-lane.mjs';
@@ -221,7 +222,6 @@ export function signedProposal(root, { task, hash, pub }) {
   return null;
 }
 
-const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
 /**
  * 2.77.3 (B-111): a lane release made in beta mode ({ beta, betaAt, by, recordedBy? }: harness/train.mjs releaseLane or
  * train config) counts as the owner's decision while beta mode is still on with the studio/beta.json it was made under,
@@ -230,10 +230,16 @@ const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|ar
 export function betaReleaseOk(released, root) {
   if (!released?.beta || !released.betaAt) return false;
   const names = [released.by, released.recordedBy].map((x) => String(x || '').trim()).filter(Boolean);
-  if (!names.length || names.some((x) => WORKER.test(x))) return false;
+  if (!names.length || names.some((x) => WORKER_NAME.test(x))) return false;
   let cur = null;
   try { cur = readBeta({ root }); } catch { return false; }
-  return Boolean(cur?.on) && String(cur.doc.at) === String(released.betaAt);
+  if (!(Boolean(cur?.on) && String(cur.doc.at) === String(released.betaAt))) return false;
+  // 2.78.2 (h): applying a protected config part is a protected decision (permission.mjs mayDecide): a release recorded by
+  // a Producer/Director session counts only with STUDIO_PRODUCER_APPROVES=protected, or (grandfathered) one made before
+  // 2.78.2 (no `decides` field) under the beta session still on. Otherwise the part stays held for the outside agents.
+  const tier = recordTier({ via: typeof released.beta === 'string' ? released.beta : '', recordedBy: released.recordedBy, committers: [released.by] }, root);
+  if (mayDecide('proposal', { tier }, { root }).ok) return true;
+  return tier === 'decider' && !released.decides;
 }
 
 /** New text for a JSON file with these keys set (the file's own indent kept; 2 spaces for a new file). */

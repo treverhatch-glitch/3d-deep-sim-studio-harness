@@ -90,7 +90,7 @@ import { classifyLane, tierLine } from './tiers.mjs';
 import { recordRound, redSignature } from './round-cap.mjs';
 import { unverifiedMust, contractHoldWhy, contractOnlyHold, CONTRACT_HOLD } from './contracts.mjs';
 import { laneProposal, configLine, isProposalPath, proposalTargets, proposalRel, parseProposal, protectedGlobsAt, applyLandedConfig as applyLandedConfigWith } from './config-proposal.mjs';
-import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL } from './permission.mjs';
+import { agentOnPermission, permissionText, WORKER_NAME, AGENT_SHELL, mayDecide, actorOf } from './permission.mjs';
 import { agentLikeName, launchedSession } from './agent-env.mjs';
 import { delegationFor, recordUse } from './delegation.mjs';
 import { autonomousReleaseRefusal } from './policy-rules.mjs';
@@ -1474,7 +1474,13 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   // 2.77.3 (B-111): in beta mode the owner's stand-in decides a held protected part as the owner would, key or not
   // (config-proposal.mjs betaReleaseOk); logged as a beta use.
   const dgb = String(by || '').trim() ? delegationFor({ action: 'train-config', by, env, root }) : { ok: false };
-  if (dgb.ok && dgb.beta) released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at };
+  if (dgb.ok && dgb.beta) {
+    // 2.78.2 (h): a protected config part is a protected decision (permission.mjs mayDecide): the owner's and the outside
+    // agents', not a Producer/Director session's unless STUDIO_PRODUCER_APPROVES=protected; never a worker's.
+    const d = mayDecide('train-config', actorOf({ env, root }), { root, agents: dgb.doc?.agents || [] });
+    if (!d.ok) return { ok: false, message: `Refused: ${d.why}. Nothing was applied.` };
+    released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at, decides: d.cls };
+  }
   else if (String(by || '').trim() && !ownerKey) {
     const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
     if (refusal) return { ok: false, message: `${refusal.replace(/Landing a tier-C lane/, 'Applying a protected config change')} Nothing was applied.` };
@@ -1568,7 +1574,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at, decides: 'board' } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at, decides: 'board' } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;

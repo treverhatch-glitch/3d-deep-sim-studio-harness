@@ -43,8 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, emitEvent, boardRoot } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
-import { betaActor, betaApprovalOk } from './beta-mode.mjs';
-import { WORKER_NAME } from './permission.mjs';
+import { betaActor, betaRecordVerdict } from './beta-mode.mjs';
 import { matchAny, matchAnyFold } from './merge-lane.mjs';
 import { protectRoot, trustedEnv, mainRootTrust } from './gate-trust.mjs';
 import { TOOLCHAIN_GLOBS, toolchainProtected } from './test-toolchain.mjs';
@@ -319,7 +318,8 @@ export const changeId = (changes) => crypto.createHash('sha256').update(canonica
 export function readApprovals() {
   const dir = path.join(ROOT, APPROVALS_REL);
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => { try { return { file: `${APPROVALS_REL}/${f}`, ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) }; } catch { return null; } }).filter(Boolean);
+  // 2.78.2 (h; the 2.79 audit D1.1): the real file name wins over a "file" key in the JSON, which could name another file.
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => { try { return { ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')), file: `${APPROVALS_REL}/${f}` }; } catch { return null; } }).filter(Boolean);
 }
 
 /** The Studio-Agent trailer of the last commit that touched rel ('' = a person's commit), or null when uncommitted. */
@@ -334,11 +334,11 @@ export function verifyApproval(doc, publicPem) {
   // that grant is still the one on file and the owner's yes is recorded (harness/owner-proxy.mjs).
   // A committed proxy approval also has to be the proxy's own commit (the commit-msg hook's Studio-Agent trailer: the
   // proxy's name, or none for a person): a builder's lane can't carry one in.
-  if (!doc?.signature && doc?.beta) {
-    if (!betaApprovalOk(doc)) return false;
-    const who = doc.file ? committedByAgent(doc.file) : null;
-    return who === null || who === '' || !WORKER_NAME.test(who); // a worker's lane can't carry one in
-  }
+  // 2.78.2 (h; the 2.79 audit D1.1): a beta approval of any kind (protected files, weakened tests, hooks, a forced done)
+  // is judged by the one beta predicate (beta-mode.mjs betaRecordVerdict): committed exactly as written, under the beta
+  // session on now, not by a worker, and made by someone who may make that decision (permission.mjs mayDecide). Before,
+  // an uncommitted one (committedByAgent null) passed: a builder could drop one in studio/approvals/, which lanes share.
+  if (!doc?.signature && doc?.beta) return betaVerdict(doc).ok;
   if (!doc?.signature && doc?.proxy) {
     if (!proxyApprovalOk(doc, publicPem)) return false;
     const who = doc.file ? committedByAgent(doc.file) : null;
@@ -349,6 +349,12 @@ export function verifyApproval(doc, publicPem) {
   } catch {
     return false;
   }
+}
+
+/** 2.78.2 (h): betaRecordVerdict for an approval read here (readApprovals: { file, ...doc }). */
+export function betaVerdict(doc) {
+  if (!doc?.file) return { ok: false, why: 'no file to find its commit', grandfathered: false };
+  return betaRecordVerdict(ROOT, doc.file, doc);
 }
 
 /** Is this exact set of protected changes approved? { enforced, ok, changes, why } */
@@ -384,7 +390,10 @@ function checkProtectedWith(env) {
   const approved = readApprovals().filter((a) => a.approval?.kind === 'protected' && a.approval.change === id && verifyApproval(a, pub));
   if (approved.length) return { enforced: true, ok: true, changes, base: b.ref, why: `approved by ${approved[0].approval.by} (${approved[0].file})`, change: id };
   const stale = readApprovals().filter((a) => a.approval?.kind === 'protected' && verifyApproval(a, pub)).length;
-  return { enforced: true, ok: false, changes, base: b.ref, change: id, why: `${changes.length} protected file(s) changed since ${b.ref} with no owner approval for exactly these contents${stale ? ' (an approval exists, but for different contents: the files changed after it was signed)' : ''}` };
+  // 2.78.2 (h): a beta approval of exactly this set that doesn't count says why (not committed, a Producer's, …).
+  const beta = readApprovals().find((a) => a.approval?.kind === 'protected' && a.approval.change === id && !a.signature && a.beta);
+  const betaWhy = beta ? ` (${beta.file} doesn't count: ${betaVerdict(beta).why})` : '';
+  return { enforced: true, ok: false, changes, base: b.ref, change: id, why: `${changes.length} protected file(s) changed since ${b.ref} with no owner approval for exactly these contents${stale ? ' (an approval exists, but for different contents: the files changed after it was signed)' : ''}${betaWhy}` };
 }
 
 /** A task done --force / --accepted-by for this task: is it signed by the owner? null = no owner key (not enforced). */
@@ -414,10 +423,13 @@ function signOrProxy(approval) {
   if (fs.existsSync(ownerKeyPath())) return { approval, signature: sign(approval) };
   // 2.76.0: in beta mode (harness/beta-mode.mjs) the owner's stand-ins approve without the key or per-step words; the
   // approval carries studio/beta.json and counts while beta mode is still on with it. Logged like every owner act.
-  const b = betaActor({ allowLane: true });
+  const b = betaActor({ allowLane: true, kind: approval.kind });
+  // 2.78.2 (h): a protected decision a Producer/Director session may not make (or a worker) is refused, saying who may.
+  if (b.refused) throw new Error(`${b.why} Nothing was written.`);
   if (b.ok) {
     const yes = String(proxyPermission || '').trim();
-    const a = { ...approval, recordedBy: String(b.who), via: b.via, ...(yes ? { permission: yes.slice(0, 500) } : {}) };
+    // decides: the class it was made as (2.78.2); a record without it was made before 2.78.2 (see betaRecordVerdict).
+    const a = { ...approval, recordedBy: String(b.who), via: b.via, decides: b.decides, ...(yes ? { permission: yes.slice(0, 500) } : {}) };
     emitEvent({ type: 'delegation.used', agent: String(b.who).slice(0, 60), msg: `${b.who} approved ${approval.kind} in beta mode${approval.note ? `: ${String(approval.note).slice(0, 160)}` : ''}`.slice(0, 400), meta: { beta: true, action: `approve-${approval.kind}`, by: approval.by } });
     import('./decisions-log.mjs').then((dm) => dm.logDecision({ action: `approve-${approval.kind}`, subject: approval.change || approval.task || approval.kind, by: String(b.doc.by).slice(0, 60), as: 'beta', why: String(approval.note || approval.reason || '').slice(0, 300), evidence: `${b.via} ${b.who}${yes ? `: ${yes.slice(0, 160)}` : ''}`, undo: null })).catch(() => {});
     return { approval: a, signature: null, beta: { by: b.doc.by, at: b.doc.at } };
@@ -457,8 +469,15 @@ function approvalTask(note = '') {
 /** 2.78.2 (B-120 again): say so when the approval just written won't verify with the key the checks use. */
 function checkSigned(rel, key) {
   try {
-    if (!key?.pub) return;
     const doc = JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    // 2.78.2 (h): a beta approval counts once committed (betaRecordVerdict); say so instead of "doesn't verify".
+    if (!doc.signature && doc.beta) {
+      const v = betaVerdict({ ...doc, file: rel });
+      if (!v.ok && /isn't committed/.test(v.why)) { console.log(`Note: a beta-mode approval counts only once committed, exactly as written: commit ${rel} now (git add ${rel}, then git commit).`); return; }
+      if (!v.ok) { console.log(`Note: ${rel} doesn't count: ${v.why}.`); return; }
+      return;
+    }
+    if (!key?.pub) return;
     if (!verifyApproval({ file: rel, ...doc }, key.pub)) console.log(`Note: ${rel} does not verify with the owner key the checks read (${key.ref || 'the base'}${key.from === 'main' ? ', the key-carrying base' : ''}): it was signed with another key, or the stand-in's record doesn't count here. The checks will not accept it.`);
   } catch {}
 }
