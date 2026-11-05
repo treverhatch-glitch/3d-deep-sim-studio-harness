@@ -27,6 +27,11 @@ your own account's quota page rather than trusting a number in a doc, this one i
 The launcher (`npm run agent -- start`, hires, the supervisor, and the reviewer and quota checks) starts every
 tool without a shell, on every OS, so each argument reaches the tool exactly as built (`harness/launch.mjs`):
 
+2.78.1: `agent stop` then `agent start` with the same name collided with the stopped session's lane copy (its
+clean-up still running, or changed minutes ago). The start is now refused up front with a fresh name to use
+(`builder-agyf9` → `builder-agyf10`, reserved like the supervisor's names); `--auto-name` (or `STUDIO_AUTO_NAME=on`)
+starts under it and logs `agent.renamed`.
+
 - On Windows the tool is looked up on the agent's PATH, each PATHEXT extension in turn, never in the current folder.
   An `.exe` (Claude Code's own installer) starts directly. An npm shim (`claude.cmd`, `agy.cmd` from
   `npm install -g`) is read for the `.js` file it runs, and node starts that file (the shim's own `node.exe` if it

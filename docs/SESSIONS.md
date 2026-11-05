@@ -42,6 +42,32 @@ The studio's files are the memory, not the chat.
 - `npm run session` lists every launched session's turns and context, with the model named.
 - Limits: `STUDIO_SESSION_TURNS` (40), `STUDIO_SESSION_CONTEXT` (120000), `STUDIO_SESSION_CEILING_TURNS`
   (80), `STUDIO_CHECK_TURNS` (20), `STUDIO_CHECK_TOKENS` (40000); 0 turns one off.
+- **Refresh points per role (2.78.1).** Reviewers and engine-porters re-read big diffs or engine logs and drift, so
+  they refresh earlier: `STUDIO_SESSION_CONTEXT_EARLY` (70000) for the roles in `STUDIO_SESSION_EARLY_ROLES`
+  (`reviewer,engine-porter`). `STUDIO_SESSION_CONTEXT_<ROLE>` sets one role's point (`STUDIO_SESSION_CONTEXT_REVIEWER=60000`).
+  A model factor scales it: the first `STUDIO_SESSION_CONTEXT_FACTOR_<WORD>` whose word is in the model's name
+  (`STUDIO_SESSION_CONTEXT_FACTOR_SONNET=0.8` puts a Sonnet builder at 96k). The kickoff's refresh rule, the heartbeat's
+  "passed the refresh point" and `npm run session` use the role's point (harness/session-cap.mjs `contextPoint`).
+- **A red on a different cause (2.78.1).** When a builder's verify goes red on another cause (failing gate and first
+  failing line) than its previous red in the same session, and its context is past `STUDIO_REFRESH_NEW_RED_SHARE`
+  (0.5) of its refresh point, the launcher ends the session as a refresh (`agent.refresh.new_red`). The fresh session
+  starts from the hand-back, whose facts carry the failure, not from a context full of the first red.
+  `STUDIO_REFRESH_ON_NEW_RED=off` turns it off; `STUDIO_REFRESH_NEW_RED_ROLES` (`builder`) names the roles. A session
+  flagged mid-debug (`npm run session -- exception`) keeps going, so a long investigation still waits for its commit.
+  Reviewers are always fresh sessions: no launch resumes one (no `--resume`/`--continue`), and agy's stream mode stays
+  one turn for them.
+- **Hand-off facts carry the next step (2.78.1).** The facts block also names the task's lane (and its copy's
+  branch), the commits it made since its start (sha and subject; in the shared checkout only those naming the task),
+  the last verify (green, red with the failing gates, or not run) and the exact next command, all from harness state.
+  A refresh relaunch's prompt quotes the newest block, so the fresh session starts from it. The merge train's drop
+  note keeps the shorter block: its reason already names the next step (make a clean lane, fix the red).
+- **The prompt cache (2.78.1).** The launch prompt above the stable marker is the same bytes for every session of a
+  role (harness/agent.mjs `sessionPromptParts`); the leak warning (`prompt.prefix.volatile`) no longer counts text in a
+  marked block (a pitfall line an agent wrote with a clock time is the file's, the same for every session) and names
+  the line a leak is on. Claude Code reads CLAUDE.md ahead of the prompt, and it imports `studio/CURRENT_TASK.md`:
+  a launched session no longer rewrites that file at task start, done or pause (it carried the time and the task, so
+  every session's context differed before the prompt). `STUDIO_CURRENT_TASK_FILE`: `auto` (hand-run sessions only, the
+  default), `on` (every session, as before), `off`.
 
 Turns and context come from Claude Code's stream-json log, read at each heartbeat. Other tools don't
 report per-turn usage, so for them only the kickoff rule and the task boundary apply.

@@ -2163,7 +2163,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       // the cap's summary and its restart-from-the-spec note to the hand-back.
       let capNoteText = '';
       try { const rc = trainRound(lane, why); if (rc?.capped) capNoteText = `\n${rc.note}`; } catch {}
-      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}${capNoteText}`, { agent: lane.agent, dir: lane.dir, root })); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
+      try { deps.handBack?.(lane, withFacts(lane.task, `Not landed by merge train ${id}: ${why}${capNoteText}`, { agent: lane.agent, dir: lane.dir, root, withNext: false })); } catch (e) { log(`[train] ${id}: could not hand ${lane.task} back: ${e.message}`); }
     }
   };
   const defer = (lane, why) => { res.deferred.push({ task: lane.task, why }); if (!dryRun) ev('deferred', id, `${lane.task} waits for the next train: ${why}`, { task: lane.task, agent: by, to: lane.agent, status: 'warn' }); };

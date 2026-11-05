@@ -307,7 +307,23 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   }
 }
 
+/**
+ * 2.78.1 (e): studio/CURRENT_TASK.md is imported into every Claude Code session's context by CLAUDE.md
+ * (@studio/CURRENT_TASK.md), ahead of the launch prompt, and a lane copy reads the main checkout's through its studio/
+ * link. Rewritten (with the time and the task) by every launched session's task start, done and pause, it made each
+ * session's prompt differ before the stable marker: a prompt-cache miss for every session of every role. It is one
+ * agent's checkpoint (a hand-run session's), so a launched session (STUDIO_ROLE set by the launcher) leaves it as it is.
+ * STUDIO_CURRENT_TASK_FILE: auto (the default: hand-run sessions only), on (every session, as before), off (never).
+ */
+export function currentTaskWrites(env = process.env) {
+  const v = String(env.STUDIO_CURRENT_TASK_FILE || 'auto').toLowerCase();
+  if (/^(off|0|false|no|never)$/.test(v)) return false;
+  if (/^(on|1|true|yes|always)$/.test(v)) return true;
+  return !String(env.STUDIO_ROLE || '').trim();
+}
+
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
+  if (!currentTaskWrites()) return;
   const ts = new Date().toISOString();
   const content = `# Active Session State (\`studio/CURRENT_TASK.md\`)
 

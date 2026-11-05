@@ -75,6 +75,24 @@ conflict removes the copy and names the files. Use it instead of `git worktree a
 own, so `task done` there says "Task not found"). docs/REMOTE-WORKERS.md has the details; remote (cloud) workers
 come back through it too.
 
+### Orphaned finished work: `npm run lanes -- orphans` and `carry` (2.78.1)
+
+```
+npm run lanes -- orphans [<T-ID>] [--all] [--json]
+npm run lanes -- carry T-105 [--from lane/builder-agy11-20261101-0930] --by opus-1 [--json]
+```
+
+`orphans` lists the task commits on lane branches (`refs/heads/lane/*`) that main lacks by patch, grouped by the task
+id their message names: task, lane branch, sha, subject, age, and whether the task's next lane copy merges that branch
+in. Branches checked out in a live lane copy are left out unless `--all`. `carry` cherry-picks only the commits whose
+message names the task, oldest first, and lists the others it left out. Without `--from` it takes the one lane branch
+holding the task's orphaned commits (several: refused, pass `--from`). From the main checkout (the Producer or
+Director, a person, a conductor) it makes a fresh lane copy off main (`.lanes/carry-<id>`, branch
+`lane/carry-<id>-<time>`), remembers it as the task's branch so the next session's copy merges exactly those commits
+in, and removes the copy folder. A builder carries into its own lane copy, only for the task it holds. A conflict
+aborts the cherry-pick, takes back what was carried, and names the commit and its files (exit 1). Events:
+`lanes.carry.carried`, `.nothing`, `.conflict`, `.refused`.
+
 ## 3. The status post: `npm run status -- --brief`
 
 ```

@@ -15,6 +15,11 @@
  *   - Failing seed: <n>                                         only when the log names one
  *   - Test randomness (advisory|required): N finding(s): …      2.67.0: harness/test-rng.mjs, only when it finds any
  *   - Last verify log: <path>
+ *   - Lane: <paths> (copy .lanes/<agent>, branch <b>)          2.78.1 (e): from studio/task-holds.json / the task's add
+ *   - Commits since <base> (N): <sha> <subject>; …              2.78.1 (e): git log, the task's own copy (or --grep <ID>)
+ *   - Last verify: green|red (<failing gate>) | not run         2.78.1 (e): from the gate evidence above
+ *   - Next command: <the exact command to run next>             2.78.1 (e): from the above, never from the note
+ *     (the four 2.78.1 lines are left out of the merge train's drop note, whose reason names its own next step)
  *   End of hand-back facts.
  *
  * Where the gate evidence comes from, newest wins: a log the note itself names ("Full log: …" / "Log: …", the train's
@@ -32,10 +37,12 @@ import { subIdsFromLog } from './gate-subids.mjs';
 import { divergenceFromLog, divergenceText } from './divergence.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { seenBefore, seenLine } from './error-memory.mjs';
+import { laneOf } from './task-hold.mjs';
 
 export const FACTS_HEAD = 'Hand-back facts (written by the harness from git and the gate logs; the note after them is the agent\'s or the train\'s):';
 export const FACTS_END = 'End of hand-back facts.';
 export const FILES_CAP = 30;
+export const COMMITS_CAP = 10;
 const REFUSALS_DIR = () => path.join(STUDIO_STATE_DIR, 'handback-facts');
 const BOOKKEEPING = /^(studio|\.studio|\.lanes|node_modules|qa\/reports)(\/|$)/;
 const slash = (p) => String(p || '').split(path.sep).join('/');
@@ -171,10 +178,58 @@ function ownVerify(agent, since) {
 }
 
 /**
+ * 2.78.1 (e): the cause of a session's newest verify since `since` (its own record, .studio/gates/<agent>[-full].json):
+ * { at, ok, gates (the failing ids), failGate, line, key, log } or null when it ran none. `key` names the cause: the
+ * failing gate and its first failing line (signatureKey), so the same red seen again has the same key.
+ */
+export function verifyCause(agent, since = 0) {
+  const v = ownVerify(agent, since);
+  if (!v) return null;
+  const r = readGateLog(v.text);
+  const fails = v.gates.filter((g) => !g.ok).map((g) => g.id);
+  const failGate = fails[0] || r.failGate || null;
+  const ok = !fails.length;
+  return { at: v.at, ok, gates: fails, failGate, line: ok ? null : r.failLine || null, key: ok ? null : signatureKey(failGate || '', r.failLine || ''), log: v.log };
+}
+
+/**
+ * 2.78.1 (e): the commits the task made: in its own copy every commit since the task's start (merges of main left out),
+ * in the shared checkout only those naming the task. { list: [{ sha, subject }], total } or null when git can't say.
+ */
+export function taskCommits(dir, base, taskId, { shared = false } = {}) {
+  const range = base && git(dir, 'cat-file', '-e', `${base}^{commit}`).status === 0 ? `${base}..HEAD` : null;
+  if (!range) return null;
+  const r = git(dir, 'log', '--no-merges', '--format=%h%x09%s', ...(shared ? ['--grep', String(taskId), '--fixed-strings'] : []), range);
+  if (r.status !== 0) return null;
+  const all = r.stdout.split('\n').filter(Boolean).map((l) => { const [sha, ...rest] = l.split('\t'); return { sha, subject: rest.join('\t').slice(0, 100) }; }).reverse();
+  return { list: all.slice(-COMMITS_CAP), total: all.length };
+}
+
+/** 2.78.1 (e): the task's lane (task-holds / its add) and the branch of the copy it works in. */
+function laneFacts(taskId, cwd) {
+  let paths = null;
+  try { paths = laneOf(taskId); } catch { paths = null; }
+  const inCopy = path.resolve(cwd) !== path.resolve(mainRootOf()) && fs.existsSync(path.join(cwd, '.git'));
+  const branch = inCopy ? String(git(cwd, 'symbolic-ref', '--short', 'HEAD').stdout || '').trim() || null : null;
+  return { paths, copy: inCopy ? slash(path.relative(mainRootOf(), cwd)) : null, branch };
+}
+
+/** 2.78.1 (e): the exact next command, from the harness's facts only. */
+export function nextCommand(f) {
+  const id = f.task;
+  const red = (f.gates || []).find((g) => !g.ok);
+  if (red) return `fix ${red.id}${f.log ? ` (log: ${f.log})` : ''}, then npm run verify -- --only ${red.id}, then npm run verify`;
+  if (f.gates?.length && (f.commits?.total || 0) > 0) return `node harness/task.mjs done ${id} --agent $STUDIO_LOCK_OWNER --check, then node harness/task.mjs done ${id} --agent $STUDIO_LOCK_OWNER`;
+  if (f.gates?.length) return `commit the work (nothing committed since the task started), then node harness/task.mjs done ${id} --agent $STUDIO_LOCK_OWNER --check`;
+  if ((f.commits?.total || 0) > 0 || (f.total || 0) > 0) return 'npm run verify (in the foreground)';
+  return `node harness/task.mjs show ${id} (nothing changed or verified yet: start from the brief)`;
+}
+
+/**
  * The facts for a hand-back of `taskId`: { base, files, total, gates, where, at, signature, seed, log }.
  * `opts`: { agent, dir, note (a log it names is read), root (what that log is relative to), now }.
  */
-export function buildFacts(taskId, { agent = null, dir = null, note = '', root = null } = {}) {
+export function buildFacts(taskId, { agent = null, dir = null, note = '', root = null, withNext = true } = {}) {
   const start = taskStart(taskId);
   const since = start?.at || 0;
   const cwd = workDir(agent, dir);
@@ -210,7 +265,15 @@ export function buildFacts(taskId, { agent = null, dir = null, note = '', root =
   // 2.72.0 (c): the same red fixed before (harness/error-memory.mjs).
   let seen = null;
   try { seen = signature ? seenBefore(signature.key) : null; } catch { seen = null; }
-  return { ...(seen ? { seenBefore: seen } : {}), task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
+  // 2.78.1 (e): lane, commits and the next command, so a refresh never starts from scratch.
+  // The merge train's drop note names its own next step (make a clean lane, fix the red): it keeps the 2.66 block.
+  let lane = null;
+  let commits = null;
+  if (withNext) {
+    try { lane = laneFacts(taskId, cwd); } catch { lane = null; }
+    try { commits = start?.head ? taskCommits(cwd, start.head, taskId, { shared: !lane?.copy }) : null; } catch { commits = null; }
+  }
+  return { ...(seen ? { seenBefore: seen } : {}), ...(withNext ? { lane, commits } : {}), task: taskId, base: start?.head || null, files: ch?.files || null, total: ch?.total ?? null, gates, where: best?.where || null, at: best?.at || null, signature, seed, log: best?.log || null, ...(testRng ? { testRng } : {}), ...(parts.subIds.length ? { subIds: parts.subIds } : {}), ...(parts.divergence ? { divergence: parts.divergence } : {}), ...(parts.timeoutFlakes.length ? { timeoutFlakes: parts.timeoutFlakes } : {}) };
 }
 
 /** The block, as written into the hand-back. */
@@ -229,6 +292,14 @@ export function renderFacts(f) {
   if (f.seed !== null && f.seed !== undefined) L.push(`- Failing seed: ${f.seed}`);
   if (f.testRng?.count) L.push(`- Test randomness (${f.testRng.mode === 'required' ? 'required' : 'advisory'}, node harness/test-rng.mjs): ${f.testRng.count} finding(s): ${f.testRng.items.slice(0, 5).join(', ')}${f.testRng.count > 5 ? ` (+${f.testRng.count - 5} more)` : ''}`);
   L.push(`- Last verify log: ${f.log || 'none'}`);
+  // 2.78.1 (e): lane, commits, verdict and the next command (absent in a block built by an older harness).
+  if (f.lane !== undefined) L.push(`- Lane: ${f.lane?.paths || 'none (the whole game)'}${f.lane?.copy ? ` (copy ${f.lane.copy}${f.lane.branch ? `, branch ${f.lane.branch}` : ''})` : ''}`);
+  if (f.commits !== undefined) L.push(f.commits === null ? '- Commits: unknown (no start commit in this checkout)' : `- Commits since ${String(f.base).slice(0, 8)} (${f.commits.total}): ${f.commits.total ? `${f.commits.total > f.commits.list.length ? `(${f.commits.total - f.commits.list.length} older) ` : ''}${f.commits.list.map((c) => `${c.sha} ${c.subject}`).join('; ')}` : 'none'}`);
+  if (f.lane !== undefined) {
+    const red = (f.gates || []).find((g) => !g.ok);
+    L.push(`- Last verify: ${!f.gates?.length ? 'not run since the task started' : red ? `red (${(f.gates || []).filter((g) => !g.ok).map((g) => g.id).join(', ')})` : 'green'}${f.where ? ` (${f.where})` : ''}`);
+    L.push(`- Next command: ${nextCommand(f)}`);
+  }
   L.push(FACTS_END);
   return L.join('\n');
 }

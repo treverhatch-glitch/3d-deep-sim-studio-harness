@@ -16,7 +16,9 @@
  * (continue, or hand off now), so it never runs unchecked. A session past the refresh point without the
  * exception gets the same check. Nothing here waits: checks are cards, the agent keeps working.
  *
- * Limits (environment, 0 turns one off): STUDIO_SESSION_TURNS (40), STUDIO_SESSION_CONTEXT (120000),
+ * Limits (environment, 0 turns one off): STUDIO_SESSION_TURNS (40), STUDIO_SESSION_CONTEXT (120000; 2.78.1: per role
+ * STUDIO_SESSION_CONTEXT_<ROLE>, STUDIO_SESSION_CONTEXT_EARLY 70000 for STUDIO_SESSION_EARLY_ROLES reviewer,engine-porter,
+ * and a model factor STUDIO_SESSION_CONTEXT_FACTOR_<WORD>: contextPoint),
  * STUDIO_SESSION_CEILING_TURNS (80, passed to Claude Code as --max-turns), STUDIO_CHECK_TURNS (20),
  * STUDIO_CHECK_TOKENS (40000). Counts are the tool's own (Claude Code stream-json usage), named with
  * the model, since every model family counts tokens differently.
@@ -25,16 +27,54 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
+import { verifyCause } from './handback-facts.mjs';
 
 export const REFRESH_DIR = path.join(STUDIO_STATE_DIR, 'refresh');
 const AGENTS_DIR = path.join(STUDIO_STATE_DIR, 'agents');
 const num = (v, d) => (v === undefined || v === null || v === '' ? d : Number.isFinite(Number(v)) ? Number(v) : d);
 
-/** The limits in force. */
-export function sessionLimits(env = process.env) {
+/** 2.78.1 (e): roles that re-read big diffs or engine logs and drift: they refresh earlier by default. */
+export const EARLY_REFRESH_ROLES = 'reviewer,engine-porter';
+const envKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+
+/**
+ * The context refresh point for a role and model (2.78.1, e). In order: STUDIO_SESSION_CONTEXT_<ROLE> (e.g.
+ * STUDIO_SESSION_CONTEXT_REVIEWER=60000); else, for a role in STUDIO_SESSION_EARLY_ROLES (reviewer,engine-porter),
+ * STUDIO_SESSION_CONTEXT_EARLY (70000); else STUDIO_SESSION_CONTEXT (120000). Then a model factor: the first
+ * STUDIO_SESSION_CONTEXT_FACTOR_<WORD> whose word is in the model's name (STUDIO_SESSION_CONTEXT_FACTOR_SONNET=0.8 moves
+ * a Sonnet session's point to 80 %); none set: 1. 0 anywhere turns the context refresh off for that role.
+ * Returns { context, from }.
+ */
+export function contextPoint(env = process.env, { role = null, model = null } = {}) {
+  const base = num(env.STUDIO_SESSION_CONTEXT, 120000);
+  const rk = envKey(role);
+  const early = String(env.STUDIO_SESSION_EARLY_ROLES || EARLY_REFRESH_ROLES).toLowerCase().split(/[,\s]+/).filter(Boolean);
+  let context = base;
+  let from = 'STUDIO_SESSION_CONTEXT';
+  if (rk && env[`STUDIO_SESSION_CONTEXT_${rk}`] !== undefined && env[`STUDIO_SESSION_CONTEXT_${rk}`] !== '' && Number.isFinite(Number(env[`STUDIO_SESSION_CONTEXT_${rk}`]))) {
+    context = Number(env[`STUDIO_SESSION_CONTEXT_${rk}`]);
+    from = `STUDIO_SESSION_CONTEXT_${rk}`;
+  } else if (role && early.includes(String(role).toLowerCase())) {
+    context = num(env.STUDIO_SESSION_CONTEXT_EARLY, 70000);
+    from = 'STUDIO_SESSION_CONTEXT_EARLY';
+  }
+  const m = String(model || '').toLowerCase();
+  if (m && context > 0) {
+    const f = Object.keys(env).filter((k) => k.startsWith('STUDIO_SESSION_CONTEXT_FACTOR_')).sort()
+      .find((k) => { const w = k.slice('STUDIO_SESSION_CONTEXT_FACTOR_'.length).toLowerCase().replace(/_/g, '-'); return w && m.includes(w); });
+    const v = f ? Number(env[f]) : NaN;
+    if (f && Number.isFinite(v) && v > 0) { context = Math.round(context * v); from += ` × ${f}`; }
+  }
+  return { context, from };
+}
+
+/** The limits in force; with a role (and model), its own context refresh point (contextPoint). */
+export function sessionLimits(env = process.env, { role = null, model = null } = {}) {
+  const cp = contextPoint(env, { role, model });
   return {
     turns: num(env.STUDIO_SESSION_TURNS, 40),
-    context: num(env.STUDIO_SESSION_CONTEXT, 120000),
+    context: cp.context,
+    contextFrom: cp.from,
     ceilingTurns: num(env.STUDIO_SESSION_CEILING_TURNS, 80),
     checkTurns: num(env.STUDIO_CHECK_TURNS, 20),
     checkTokens: num(env.STUDIO_CHECK_TOKENS, 40000),
@@ -141,13 +181,13 @@ export function recordCheck(agent, decision, { by, note = '' } = {}) {
  * Called from the launcher's heartbeat: read the session's log, record where it stands, and raise one
  * card per owed check (to the Producer, copied to the Director). Never stops anything by itself.
  */
-export function heartbeatCheck(agent, { log, model = 'unknown', task = null, lim = sessionLimits() } = {}) {
+export function heartbeatCheck(agent, { log, model = 'unknown', task = null, role = null, lim = sessionLimits(process.env, { role, model }) } = {}) {
   const p = sessionProgress(log);
   const f = readFlag(agent) || { agent, checks: [] };
   const st = refreshState(p, f, lim);
   const prev = f.last?.state;
-  f.last = { ...p, model, state: st.state, at: new Date().toISOString(), task };
-  if (st.state === 'due' && prev !== 'due') emitEvent({ type: 'agent.refresh.due', agent, task, msg: `${agent} passed the refresh point (${p.turns} turns, ${p.context.toLocaleString()} tokens of context, ${model}): hand off at the next breakpoint` });
+  f.last = { ...p, model, role, point: lim.context, state: st.state, at: new Date().toISOString(), task };
+  if (st.state === 'due' && prev !== 'due') emitEvent({ type: 'agent.refresh.due', agent, task, msg: `${agent} passed the refresh point (${p.turns} turns, ${p.context.toLocaleString()} tokens of context, ${model}; its point: ${lim.turns || '∞'} turns or ${lim.context ? `${Math.round(lim.context / 1000)}k` : '∞'} tokens${role ? ` for a ${role}` : ''}): hand off at the next breakpoint` });
   if (st.checkDue && f.cardFor !== st.checksOwed) {
     f.cardFor = st.checksOwed;
     f.cardAt = new Date().toISOString();
@@ -155,6 +195,48 @@ export function heartbeatCheck(agent, { log, model = 'unknown', task = null, lim
   }
   writeFlag(agent, f);
   return { ...p, ...st };
+}
+
+/**
+ * 2.78.1 (e): fresh session for a red on a different cause. A builder whose verify goes red on another cause (failing gate
+ * and first failing line, harness/handback-facts.mjs verifyCause) than its previous red in this session, once its context
+ * is past STUDIO_REFRESH_NEW_RED_SHARE (0.5) of its refresh point, hands off: a fresh session starts from the hand-back
+ * (its facts carry the failure), not from a context full of the first red. STUDIO_REFRESH_ON_NEW_RED=off turns it off;
+ * STUDIO_REFRESH_NEW_RED_ROLES (builder) names the roles. A session flagged mid-debug (npm run session -- exception)
+ * keeps going: a long investigation still waits for its commit or breakpoint. Returns { handoff, why }.
+ */
+export function newRedDecision({ reds = [], red = null, context = 0, point = 0, exception = false, env = process.env } = {}) {
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_REFRESH_ON_NEW_RED || ''))) return { handoff: false, why: 'STUDIO_REFRESH_ON_NEW_RED=off' };
+  if (!red || red.ok) return { handoff: false, why: 'not red' };
+  const prev = reds.filter((r) => r.key && (Number(r.at) || 0) < (Number(red.at) || 0)).pop();
+  if (!prev) return { handoff: false, why: 'its first red in this session' };
+  if (prev.key === red.key) return { handoff: false, why: 'the same cause as its previous red' };
+  const share = num(env.STUDIO_REFRESH_NEW_RED_SHARE, 0.5);
+  if (!(point > 0) || context < point * share) return { handoff: false, why: `context ${context} under ${Math.round(share * 100)} % of its refresh point` };
+  if (exception) return { handoff: false, why: 'flagged mid-debug (session exception)' };
+  const k = (n) => `${Math.round(n / 1000)}k`;
+  return { handoff: true, why: `verify red on a different cause (${red.failGate || 'a gate'}${red.line ? `: ${String(red.line).slice(0, 120)}` : ''}) than its previous red (${prev.gate || 'a gate'}), at ${k(context)} of its ${k(point)} refresh point: a fresh session starts from the hand-back with the failure only` };
+}
+
+/** The launcher's beat: record a new verify of this session and decide (newRedDecision); writes the refresh flag. */
+export function newRedCheck(agent, { since = 0, context = 0, role = null, model = null, env = process.env } = {}) {
+  const roles = String(env.STUDIO_REFRESH_NEW_RED_ROLES || 'builder').toLowerCase().split(/[,\s]+/).filter(Boolean);
+  if (!role || !roles.includes(String(role).toLowerCase())) return null;
+  const red = verifyCause(agent, since);
+  if (!red) return null;
+  const f = readFlag(agent) || { agent, checks: [] };
+  const reds = f.reds || [];
+  if (reds.some((r) => r.at === red.at) || f.endedBy) return { handoff: false, why: 'seen' };
+  const lim = sessionLimits(env, { role, model });
+  const d = newRedDecision({ reds, red, context, point: lim.context, exception: Boolean(f.exception), env });
+  f.reds = [...reds, { at: red.at, key: red.key, gate: red.failGate, ok: red.ok }].slice(-10);
+  if (d.handoff) {
+    f.endedBy = d.why;
+    f.newRed = { at: red.at, gate: red.failGate, line: red.line, key: red.key, log: red.log };
+    emitEvent({ type: 'agent.refresh.new_red', agent, to: 'producer', msg: `${agent} hands off: ${d.why}`.slice(0, 500), meta: { gate: red.failGate, key: red.key, previous: reds.filter((r) => r.key).pop()?.key || null, context, point: lim.context } });
+  }
+  writeFlag(agent, f);
+  return d;
 }
 
 /**
@@ -182,7 +264,7 @@ export function refreshBoard() {
     try {
       running = JSON.parse(fs.readFileSync(path.join(AGENTS_DIR, f), 'utf8')).status === 'running';
     } catch {}
-    const st = refreshState(r.last || {}, r, lim);
+    const st = refreshState(r.last || {}, r, r.last?.role ? sessionLimits(process.env, { role: r.last.role, model: r.last.model }) : lim);
     return { agent: r.agent || f.slice(0, -5), running, turns: r.last?.turns ?? 0, context: r.last?.context ?? 0, model: r.last?.model || 'unknown', task: r.last?.task || null, state: st.state, checkDue: st.checkDue, exception: r.exception || null, checks: r.checks || [], handoffAsked: r.handoffAsked || null, endedBy: r.endedBy || null };
   }).filter(Boolean);
 }
