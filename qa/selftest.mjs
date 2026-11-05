@@ -4810,6 +4810,16 @@ if (inShard('selftest-2781a')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (c): the hooks check's key-carrying base on a studio that doesn't push (B-120), a release's merge commits in the
+// grandfather list, no chain-start across a harness update (B-122), "not run (harness changed underneath)" (B-116), the
+// orphaned gate reaper, and the preflight's "before a long run" section.
+if (inShard('selftest-2781c')) {
+  const dir = copyRepo();
+  const { selftest2781C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781c.mjs')).href);
+  await selftest2781C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

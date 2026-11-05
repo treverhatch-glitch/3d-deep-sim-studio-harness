@@ -472,6 +472,15 @@ each verify against a main that is about to move, so the trains are pipelined in
 - `STUDIO_TRAIN_PIPELINE`: unset (auto) starts B only when the machine budget has room for a second train verify beside
   A's (the machine:heavy admission; no machine scan: no room, trains wait as before); `on` starts it whenever lanes are
   queued (its verify still waits for its own machine:heavy claim); `off` never. Drain, "Stop all" and a halt stop it.
+- A train never starts another train from a process whose harness changed since it started (2.78.1, B-122): an update
+  merged while it ran (`harness/harness-version.mjs`: the package.json version, the committed harness/ and scripts/
+  trees, uncommitted changes there). The next train of the same run (run-alone, a green prefix's rest, the next batch),
+  a speculative B, and the rerun after a discarded B are then left to the train daemon, a fresh process on the new
+  harness; the queued lanes keep their place and `task.train.chain_stopped` says why. Each train's
+  `.studio/train/<id>/life.json` records the harness it ran. And a red re-check of main whose copy ran another harness
+  than the main checkout has now, or whose train's own harness changed underneath it (B-116), is "not run (harness
+  changed underneath)": main isn't blamed, nothing is listed as known red, nobody is handed back and the lanes wait for
+  the next train. `STUDIO_TRAIN_HARNESS_GUARD=off` turns both off.
 - A train that would start while a B can land (its A ended, main is the tree B built on) gives the train lock back and
   waits for it (`task train` without `--wait` says so and lands nothing; the daemon doesn't start one).
 - Status: `npm run task -- train status` prints `Running: train <A> ...` and `Next: train <B> ... speculative on train

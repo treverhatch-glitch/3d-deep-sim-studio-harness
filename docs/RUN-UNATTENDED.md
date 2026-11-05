@@ -250,6 +250,17 @@ as `unscoped` (`STUDIO_LINE_LANES`); builders with no lane run side by side when
 they don't overlap (`STUDIO_UNSCOPED_PARALLEL=off` turns that off); a task on shared sim code waits for the open task on
 the same shared files (`STUDIO_SHARED_SIM`). docs/LINE-PRODUCER.md has the details.
 
+## Orphaned gate runs (2.78.1)
+
+A `run-gates.mjs --only protected` once ran 13 h on the main checkout with no live parent. Each supervisor pass (at most
+every `STUDIO_ORPHAN_GATE_SCAN_MIN`, 10, minutes; `harness/gate-reaper.mjs`) ends every `scripts/run-gates.mjs` process
+whose parent is gone and that is older than `STUDIO_ORPHAN_GATE_MIN` (60) minutes, with its whole tree (taskkill /T on
+Windows, the process and its children on POSIX), and logs a `gate.orphan_ended` event (pid, age, why, its command line).
+"Parent gone": no process has its parent's pid, or a newer one does (Windows reuses pids and keeps the dead parent's
+number), or on POSIX it was re-parented to pid 1 or an init/systemd reaper. `npm run verify`'s host is parentless on
+purpose: it counts as alive while its verify record still names it as running (no longer than `STUDIO_VERIFY_MAX_MIN`,
+360). `STUDIO_ORPHAN_GATE_MIN=0` or `off`: never.
+
 ## Crew watchdog, futility cap, wind-down and janitor (2.68.0)
 
 Each supervisor pass (code only, no model) also does three things:
