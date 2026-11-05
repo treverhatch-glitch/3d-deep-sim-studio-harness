@@ -242,3 +242,20 @@ at session start when a studio's protection isn't enforced.
 **Suggested order:** PU-56 now (its cap is a setting today; the triage fix is small), then PU-54 and PU-55 (the two
 strongest-evidence gaps, and they work together: held-out journeys are the hidden graders), then PU-58 and PU-59, then
 PU-57, PU-60 and the rest. All of them add checks or measurements, none adds an approval step.
+
+## Planned: 2.79, a cleanup release (2026-11-05) · PLANNED, nothing built
+Owner's call (Hatch, 2026-11-05): the next upgrade after 2.78.1 and a clean 48 h run is a cleanup, no new features.
+Why: at 2.78.1 the harness is 288 modules (~74k lines; agent.mjs, task.mjs and train.mjs are 2.4k–3k lines each), about
+650 STUDIO_* settings and 256 test units, and almost every bug the crew now reports is two parts of the harness
+disagreeing (two owner-key readers, the flake triage vs heavy slots, lanes vs the supervisor), not an agent's mistake.
+The 48 h run comes first so the cleanup can use its data (which settings and paths were actually used).
+
+| # | Update | Priority | Size | How we test it |
+| --- | --- | --- | --- | --- |
+| PU-64 | **Settings census and cut:** list every STUDIO_* setting with its default, who reads it and whether any studio has ever set it (the crew's .env, events); drop the ones nobody sets that only switch a fix back off after a release has held, fold near-duplicates (several `*_WAIT_MIN`, `*_HOLD_MIN`), keep a frozen list of removed names that warns when set | P1 | M | docs check stays green; a removed name set in .env gives one WARN with what replaced it; the settings count goes down |
+| PU-65 | **One owner of each decision:** one module per question the harness asks in many places (is this task free? which owner key? is this lane live? may this role do X?), every caller through it; 2.77.3's `ownerDecision` and 2.78.1's `currentLane` are the pattern | P1 | L | a "no second reader" check: a grep-based gate that fails when a second module reads the raw file a decision owner owns (task-holds.json, the approvals folder, heavy markers) |
+| PU-66 | **Split the giant modules:** agent.mjs, task.mjs, train.mjs and supervisor.mjs into parts of at most ~800 lines by concern (launch, prompt, refresh; board commands; triage, landing), no behaviour change | P2 | L | goldens and every selftest unchanged; the module-size gate's limit lowered to the new size |
+| PU-67 | **Remove dead and superseded paths:** code kept for a workaround a later release made unnecessary (each release's "off" switch after two releases), unused exports, tests that only test a removed path | P2 | M | a dead-export report before and after; CI time and the selftest count go down, no test that guards current behaviour is lost |
+| PU-68 | **A size budget:** a report per release of modules, lines, settings and test units, with a budget; a release that grows past it says why in its notes | P3 | S | the release check prints the numbers and the delta |
+
+**Suggested order:** PU-64 and PU-65 first (they remove the class of bug the crew keeps hitting), then PU-67, PU-66, PU-68.
