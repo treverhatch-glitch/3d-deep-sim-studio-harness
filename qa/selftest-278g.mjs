@@ -182,11 +182,11 @@ console.log(JSON.stringify({ waits, skipNow, afterWait, afterReason, heldBefore,
   // ---- PU-63: jitter ----
   if (want('jitter')) await guard('2.78.0 (PU-63): the supervisor loop delay is within +-10% of STUDIO_SUPERVISOR_SEC (0 turns jitter off) and the loop is a self-rescheduling timeout set before the first pass (fails on 2.77.1: a fixed setInterval)', async () => {
     const { S, env } = studio('jitter');
-    const r = probe(S, env, `import * as sup from ${u(S, 'harness/supervisor.mjs')}; import fs from 'node:fs';
+    const r = probe(S, env, `import * as sup from ${u(S, 'harness/supervisor.mjs')}; import fs from 'node:fs'; import { fileURLToPath } from 'node:url';
 const base = 60000;
 const lo = sup.jitteredDelay(base, 0.1, () => 0); const hi = sup.jitteredDelay(base, 0.1, () => 0.999999); const mid = sup.jitteredDelay(base, 0.1, () => 0.5);
 let min = Infinity; let max = -Infinity; for (let i = 0; i < 2000; i++) { const d = sup.jitteredDelay(base); min = Math.min(min, d); max = Math.max(max, d); }
-const src = fs.readFileSync(new URL(${u(S, 'harness/supervisor.mjs')}).pathname.replace(/^\\/([A-Za-z]:)/, '$1'), 'utf8');
+const src = fs.readFileSync(fileURLToPath(${u(S, 'harness/supervisor.mjs')}), 'utf8');
 console.log(JSON.stringify({ lo, hi, mid, min, max, off: sup.jitteredDelay(base, 0), envDefault: sup.supervisorJitter({}), envOff: sup.supervisorJitter({ STUDIO_SUPERVISOR_JITTER: '0' }), envSet: sup.supervisorJitter({ STUDIO_SUPERVISOR_JITTER: '0.2' }), interval: /setInterval\\(loop/.test(src), scheduled: /schedule\\(\\);\\s*\\n\\s*await loop\\(\\)/.test(src) }));
 `);
     const ok = r.lo === 54000 && r.hi >= 65999 && r.hi <= 66000 && r.mid === 60000 && r.min >= 54000 && r.max <= 66000 && r.max - r.min > 6000

@@ -73,7 +73,8 @@ export async function selftest278C({ dir, run, report, tmpRoot, root }) {
     const { S, env } = studio('b', (S0) => {
       writeIn(S0, 'tools278/cheat.mjs', CHEAT);
       writeIn(S0, 'tools278/visible.mjs', `import { execFileSync } from 'node:child_process';
-const v = execFileSync(process.execPath, [new URL('./cheat.mjs', import.meta.url).pathname.replace(/^\\/([A-Za-z]:)/, '$1'), '1'], { encoding: 'utf8' }).trim();
+import { fileURLToPath } from 'node:url';
+const v = execFileSync(process.execPath, [fileURLToPath(new URL('./cheat.mjs', import.meta.url)), '1'], { encoding: 'utf8' }).trim();
 if (v !== '42') { console.log('visible FAIL'); process.exit(1); }
 console.log('visible PASS');
 `);
