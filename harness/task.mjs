@@ -1136,6 +1136,56 @@ async function predictAtQueue(pre, agent) {
   }
 }
 
+/**
+ * 2.59.0: queue a checked lane for the next merge train (`task done <ID> --train`); 2.78.2 (a, W-0090): also a lane's
+ * plain `task done` (STUDIO_DONE_QUEUE, default on), which then makes sure a train runs (harness/train-detach.mjs
+ * kickTrain: the supervisor's train daemon, else one detached train), so the train never runs in the builder's shell.
+ * Prints what happened; returns the exit code (0: queued). The task stays in progress until the train lands it.
+ */
+async function queueLaneForTrain(targetId, flags, noopFlag, { kick = false } = {}) {
+  const who = whoAmI(flags);
+  const pre = completeTask(targetId, '', who, { trainCheck: true, noop: noopFlag });
+  if (!pre) { console.error(`Task "${targetId}" not found.`); return 1; }
+  if (pre.error) { console.error(pre.message); return 1; }
+  const predicted = await predictAtQueue(pre, who);
+  if (predicted.refuse) { console.error(predicted.refuse); return 1; }
+  const { enqueue } = await import('./train.mjs');
+  const e = enqueue(mainRoot(), { task: pre.id, agent: who, dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}) });
+  for (const l of predicted.lines || []) console.log(l);
+  emitEvent({ type: 'task.train.queued', agent: who, task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch, ...(kick ? { viaDone: true } : {}) } });
+  console.log(kick
+    ? `${pre.id} is checked and queued for the merge train (${e.branch} at ${String(e.head).slice(0, 8)}). The train lands it (one full verify for every lane in it); until then it stays in progress, and if the train hands it back you get it back with the reason.`
+    : `${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
+  let tierC = false;
+  // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
+  try {
+    const tr = await import('./train.mjs');
+    const c = await tr.laneTier(mainRoot(), { head: pre.head, task: pre.id });
+    console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
+    if (c.tier === 'C') {
+      tierC = true;
+      tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
+      emitEvent({ type: 'task.train.held', agent: who, task: pre.id, to: 'producer', status: 'blocked', msg: `${pre.id} needs the owner (tier C): ${c.why.join('; ')}`.slice(0, 600), meta: { tier: 'C', why: c.why } });
+      console.log(`${pre.id} needs the owner: tier C never lands by itself. It waits in the queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); you can stop here (task pause ${pre.id} --note "…").`);
+    }
+    if (c.needs.goldenReason.length) console.log(`${pre.id}: note: it moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer: the train hands it back unless a commit says why.`);
+    if (c.needs.pinMoves.length) console.log(`${pre.id}: note: it changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer: the train hands it back unless a commit declares them.`);
+  } catch (err) { console.warn(`[task done] note: could not work out the lane's tier (${err.message}); the train will`); }
+  (await import('./hotspots.mjs')).warnAt('train-queue', { task: pre.id, agent: who }); // 2.60.0: lines another lane changes too
+  if (kick && !tierC) {
+    // How long a train it starts waits for a running one: STUDIO_TRAIN_LOCK_WAIT_MIN (before 2.63.0 STUDIO_TRAIN_WAIT_MIN), 120.
+    const lockWait = Number([process.env.STUDIO_TRAIN_LOCK_WAIT_MIN, process.env.STUDIO_TRAIN_WAIT_MIN].map((v) => String(v ?? '').trim()).find((v) => v !== '' && Number.isFinite(Number(v))) ?? 120);
+    let k;
+    try { k = await (await import('./train-detach.mjs')).kickTrain(mainRoot(), { by: who, waitMin: lockWait }); } catch (err) { k = { how: 'failed', line: `Couldn't make sure a train runs (${err.message}); npm run task -- train --by <you> lands the queue.` }; }
+    console.log(k.line);
+    console.log(`Follow it: npm run task -- train status (the running train, its step and ETA, and the queue). It ends with task.train.done: ${pre.id} closes (task.done) when it lands, or comes back to the board with the train's reason (task.paused). Nothing more to run here: you can end your session.`);
+    emitEvent({ type: 'task.done.queued', agent: who, task: pre.id, msg: `${pre.id}: task done queued the lane for the merge train (${k.how}${k.pid ? `, pid ${k.pid}` : ''})`, meta: { head: pre.head, branch: pre.branch, how: k.how, ...(k.pid ? { pid: k.pid } : {}) } });
+  }
+  if (kick) console.log(JSON.stringify({ id: pre.id, status: 'queued', branch: pre.branch, head: pre.head, ...(tierC ? { held: 'tier C: waits for the owner' } : {}) }, null, 2));
+  // A plain task done of a tier C lane says "not done yet" (exit 1), as its inline train did: it waits for the owner.
+  return kick && tierC ? 1 : 0;
+}
+
 /** 2.59.0: what the merge train needs from the board (harness/train.mjs never imports this module). */
 export function trainDeps(busyMod, { forDone = false } = {}) {
   return {
@@ -1999,31 +2049,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         (r.ok ? console.log : console.error)(r.message);
         process.exit(r.ok ? 0 : 1);
       }
-      const pre = completeTask(targetId, '', whoAmI(flags), { trainCheck: true, noop: noopFlag });
-      if (!pre) { console.error(`Task "${targetId}" not found.`); process.exit(1); }
-      if (pre.error) { console.error(pre.message); process.exit(1); }
-      const predicted = await predictAtQueue(pre, whoAmI(flags));
-      if (predicted.refuse) { console.error(predicted.refuse); process.exit(1); }
-      const { enqueue } = await import('./train.mjs');
-      const e = enqueue(mainRoot(), { task: pre.id, agent: whoAmI(flags), dir: REPO_ROOT, branch: pre.branch, head: pre.head, all: pre.all, note: typeof flags.note === 'string' ? flags.note : '', ...(predicted.after ? { after: predicted.after } : {}) });
-      for (const l of predicted.lines || []) console.log(l);
-      emitEvent({ type: 'task.train.queued', agent: whoAmI(flags), task: pre.id, to: 'producer', msg: `${pre.id} is checked and waits for the next merge train (${pre.branch} at ${String(pre.head).slice(0, 8)})`, meta: { head: pre.head, branch: pre.branch } });
-      console.log(`${pre.id} is checked and queued for the next merge train (${e.branch} at ${String(e.head).slice(0, 8)}). npm run task -- train lands it (one full verify for every lane in the train); until then it stays in progress.`);
-      // 2.63.0: the lane's landing tier (harness/tiers.mjs, from its own diff); tier C waits for the owner.
-      try {
-        const tr = await import('./train.mjs');
-        const c = await tr.laneTier(mainRoot(), { head: pre.head, task: pre.id });
-        console.log(`${pre.id}: ${(await import('./tiers.mjs')).tierLine(c)}${c.runAlone.yes ? `; it trains alone (${c.runAlone.why})` : ''}`);
-        if (c.tier === 'C') {
-          tr.holdLane(mainRoot(), { ...e, head: pre.head, branch: pre.branch, dir: REPO_ROOT }, { tier: 'C', why: c.why.join('; ') });
-          emitEvent({ type: 'task.train.held', agent: whoAmI(flags), task: pre.id, to: 'producer', status: 'blocked', msg: `${pre.id} needs the owner (tier C): ${c.why.join('; ')}`.slice(0, 600), meta: { tier: 'C', why: c.why } });
-          console.log(`${pre.id} needs the owner: tier C never lands by itself. It waits in the queue until a person releases it (npm run task -- train release ${pre.id} --by <name>); you can stop here (task pause ${pre.id} --note "…").`);
-        }
-        if (c.needs.goldenReason.length) console.log(`${pre.id}: note: it moves goldens (${c.needs.goldenReason.slice(0, 3).join(', ')}) with no Golden-Reason trailer: the train hands it back unless a commit says why.`);
-        if (c.needs.pinMoves.length) console.log(`${pre.id}: note: it changes pinned expectations (${c.needs.pinMoves.slice(0, 3).join(', ')}) with no Pin-Moves trailer: the train hands it back unless a commit declares them.`);
-      } catch (err) { console.warn(`[task done] note: could not work out the lane's tier (${err.message}); the train will`); }
-      (await import('./hotspots.mjs')).warnAt('train-queue', { task: pre.id, agent: whoAmI(flags) }); // 2.60.0: lines another lane changes too
-      process.exit(0);
+      process.exit(await queueLaneForTrain(targetId, flags, noopFlag));
+    }
+    // 2.78.2 (a, W-0090): in a lane copy with commits to land, task done queues the lane and a train lands it outside
+    // this shell (it died with the builder's command at Claude Code's 10-minute limit or the session cap).
+    // STUDIO_DONE_QUEUE=0/off: the train runs here, as before 2.78.2.
+    if ((await import('./train-detach.mjs')).doneQueueOn() && !flags.force && !flags['accepted-by'] && inLaneCopy()) {
+      const { trainOn } = await import('./train.mjs');
+      let lb = '';
+      try { lb = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim(); } catch {}
+      if (trainOn() && lb && unmerged(lb) > 0) process.exit(await queueLaneForTrain(targetId, flags, noopFlag, { kick: true }));
     }
     const busyMod = await import('./busy.mjs');
     // 2.30q: drain on: a new done waits here (before its marker, so drain wait doesn't wait for it).
@@ -2106,6 +2141,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   // 2.59.0: the merge train (harness/train.mjs): land the queued lanes on one full verify.
   if (cmd === 'train') {
     const tr = await import('./train.mjs');
+    // 2.78.2 (a, W-0090): from an agent's shell the train runs detached (it outlives the shell) and this command follows
+    // it (harness/train-detach.mjs; STUDIO_TRAIN_DETACH auto|on|off, --detach / --foreground).
+    if ((!arg1 || arg1 === 'run') && !flags.status) {
+      const dt = await import('./train-detach.mjs');
+      dt.recordFollowedExit();
+      if (dt.detachTrain(flags)) { const code = await dt.followDetached({ root: mainRoot(), argv: process.argv.slice(2) }); if (code !== null) process.exit(code); }
+    }
     // 2.63.0: the Unity merge train (harness/unity-train.mjs): `train --unity` (or --track engine:unity).
     // 2.77.0 (u, P5.6): `train --engine <name>` (or --track engine:<name>) for any engine target; --unity is --engine unity.
     const trainEng = typeof flags.engine === 'string' ? flags.engine : flags.unity ? 'unity' : engineOfTrack(flags.track);
@@ -2161,7 +2203,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       (r.ok ? console.log : console.error)(r.message);
       process.exit(r.ok ? 0 : 1);
     }
-    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity | --engine <name>] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
+    // 2.78.2 (a): stop the running train cleanly (harness/train-cancel.mjs): a person, the orchestrator or a Producer.
+    if (arg1 === 'cancel') {
+      const tid = flags._[2] || null;
+      if (typeof flags.by !== 'string') { console.error('Usage: npm run task -- train cancel [<train id>] --by <name> [--why "…"]'); process.exit(1); }
+      const r = await (await import('./train-cancel.mjs')).cancelTrain(mainRoot(), { id: tid, by: flags.by, why: typeof flags.why === 'string' ? flags.why : '' });
+      (r.ok ? console.log : console.error)(r.message);
+      process.exit(r.ok ? 0 : 1);
+    }
+    if (arg1 && arg1 !== 'run') { console.error('Usage: npm run task -- train [--unity | --engine <name>] [--max N] [--now] [--dry-run] [--by <name>] [--wait <min>] [--detach | --foreground] | train status | train release <ID> --by <name> [--permission "…"] | train leave <ID> --by <name> --why "…" | train cancel [<train id>] --by <name> [--why "…"] | train config <ID> [--by <name>] | train auto [off|on --by <name>]'); process.exit(1); }
     const busyMod = await import('./busy.mjs');
     const by = typeof flags.by === 'string' ? flags.by : whoAmI(flags) || process.env.STUDIO_LOCK_OWNER || 'human';
     const r = await tr.runTrain({ root: mainRoot(), max: flags.max ? Number(flags.max) : 0, dryRun: Boolean(flags['dry-run']), now: Boolean(flags.now), by, waitMs: Number(flags.wait || 0) * 60000, deps: trainDeps(busyMod) });

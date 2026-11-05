@@ -4903,6 +4903,15 @@ if (inShard('selftest-2782b')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (a, W-0090): a merge train outlives whoever started it (task done queues, a detached train lands it; task train
+// from an agent's shell runs detached), and `task train cancel` stops a running train cleanly.
+if (inShard('selftest-2782a')) {
+  const dir = copyRepo();
+  const { selftest2782A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782a.mjs')).href);
+  await selftest2782A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

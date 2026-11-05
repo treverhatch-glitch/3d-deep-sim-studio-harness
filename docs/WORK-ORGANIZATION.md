@@ -338,6 +338,36 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   from it, nobody is handed back, its lanes keep their place in the queue (a lane that stalls a second train at the
   same head is held for the Producer), and the train lock is released as at any end. If the process still hasn't
   moved `STUDIO_TRAIN_STALL_GRACE_S` (300) seconds later, the worker ends it and the reaper above records it.
+- A train outlives whoever started it (2.78.2 (a), W-0090, `harness/train-detach.mjs`). Claude Code ends a shell
+  command after 10 minutes and the watchdog ends a session at its cap, so a train run inline by a lane's `task done`
+  died with its builder. Now a lane's plain `task done` (in its copy, commits to land) runs the quick checks of
+  `--train`, queues the lane and exits 0 with "queued" and how to follow it (`npm run task -- train status`; the train
+  ends with `task.train.done`, the task with `task.done` when it lands or `task.paused` when it is handed back). The task
+  stays in progress until the train lands it; the builder's session ends there, and the launcher leaves a queued task
+  to the train (no launcher verify, no hand-back). Who runs the train: the train daemon's next pass when a supervisor
+  runs with train auto on; otherwise `task done` starts one train detached (`train-daemon.mjs run`, log
+  `.studio/train/daemon.log`) that first waits for a running train (`STUDIO_TRAIN_LOCK_WAIT_MIN`, 120). A tier C lane
+  is queued and held for the owner (exit 1, as before). `STUDIO_DONE_QUEUE` (default on; `0`/`off`: the train runs
+  inside `task done`, as before 2.78.2). Every train started for someone else (that one, the daemon's, the speculative
+  one) is detached from its starter: started through a launcher process that exits at once, output to a log file,
+  `windowsHide` on Windows, so a kill of the starter's process tree or group doesn't reach it. `npm run task -- train`
+  run from an agent's shell (a launched session, or a shell with `CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX`,
+  `GEMINI_CLI`, or an agent's `STUDIO_LOCK_OWNER`) runs its train the same way and follows it (its output and exit
+  code; the detached run is marked by `STUDIO_TRAIN_FOLLOWED`, the file its exit code goes to); if the shell is ended,
+  the train goes on. `STUDIO_TRAIN_DETACH`: `auto` (default: only from an agent's
+  shell), `on`, `off`; `--detach` / `--foreground` for one run. A person's terminal keeps the inline train. The train's
+  life record, heartbeat and lock hold the train process's own pid, so a train whose starter is gone is alive to the
+  reaper, the communicator and the daemon.
+- `npm run task -- train cancel [<train id>] --by <name> [--why "…"]` (2.78.2 (a), `harness/train-cancel.mjs`): a
+  person, the orchestrator or a Producer/Director session (never a worker, as for `train leave`) stops the running train
+  (default: the one holding the train lock). It writes the train's cancel marker (`{ cancel: true, by, why }`), stops
+  its running checks by the stall watch's kill path (its tree below the train), and waits up to
+  `STUDIO_TRAIN_CANCEL_WAIT_S` (120) seconds for it to end by itself: nothing more lands from that attempt, nobody is
+  handed back, every lane still riding keeps (or gets) its place in the queue, the lock is released as at any end
+  (`task.train.cancel_ended` from the train). A train that doesn't end in that time, and a speculative train, is ended
+  with its tree; its life record says `cancelled`, its lock is freed and its lanes kept. Either way ONE
+  `task.train.cancelled` (to the Producer) names who, why and how it ended. The daemon starts the next train at its next
+  pass: `npm run task -- train auto off --by <name>` keeps trains from starting.
 - Known red on main (2.77.0, P9.3/P9.6, `harness/known-red.mjs`): when a train finds main itself red (its bisection's
   "main itself fails its checks", or a verify of main alone), the failing test files are listed once in
   `.studio/train/known-red.json` with the evidence (train, main's tree, the log; `task.train.known_red`). A later train

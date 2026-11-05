@@ -216,7 +216,7 @@ function writeCancel(root, id, rec) {
 /** Running trains in this process: id -> () => the tasks still riding it (not handed back, not landed). */
 const activeLanes = new Map();
 class TrainCancelled extends Error {
-  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
+  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : marker.cancel ? `the train was cancelled (by ${marker.by}${marker.why ? `: ${marker.why}` : ''})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
 }
 // ---- 2.78.2 (b): the red chain's time cap -------------------------------------------------------------------------
 
@@ -266,7 +266,7 @@ function checkCancel(root, id) {
   if (!lanes) return;
   const m = readCancel(root, id);
   if (!m) return;
-  if (m.stall) throw new TrainCancelled({ ...m, tasks: lanes() });
+  if (m.stall || m.cancel) throw new TrainCancelled({ ...m, tasks: lanes() }); // 2.78.2 (a): `train cancel` stops it all
   const left = m.tasks.filter((t) => lanes().includes(t));
   if (left.length) throw new TrainCancelled({ ...m, tasks: left });
 }
@@ -2716,6 +2716,26 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
       res.message = `Train ${id} stalled and ended this attempt: ${e.marker.why}. Its running checks were stopped; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${held.length ? ` ${held.join(', ')} stalled a train before at the same head: held for the Producer (npm run task -- train release <ID> --by <name>).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
       log(`[train] ${id}: ${res.message}`);
       ev('stall_ended', id, res.message, { agent: by, to: 'producer', status: 'blocked', meta: { why: e.marker.why, step: e.marker.step || null, kept, held } });
+    } else if (e.marker.cancel) {
+      // 2.78.2 (a): `npm run task -- train cancel` (harness/train-cancel.mjs): nothing more lands from this attempt, nobody
+      // is handed back, and every lane still riding keeps (or gets) its place in the queue; no hold, no count.
+      const riding = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.landed.includes(l.task));
+      const kept = [];
+      for (const l of riding) {
+        try {
+          const q = readQueue(root).find((x) => x.task === l.task);
+          if (!q && !dryRun) enqueue(root, { task: l.task, agent: l.agent, dir: l.dir, branch: l.branch, head: l.head, all: Boolean(l.all), note: `queued again: train ${id} was cancelled` });
+        } catch {}
+        defer(l, `train ${id} was cancelled by ${e.marker.by || '?'}${e.marker.why ? ` (${e.marker.why})` : ''}`);
+        kept.push(l.task);
+      }
+      res.ok = res.landed.length > 0;
+      res.cancelled = e.marker;
+      res.more = false;
+      res.prefixMore = false;
+      res.message = `Train ${id} was cancelled by ${e.marker.by || '?'}${e.marker.why ? ` (${e.marker.why})` : ''}: its running checks were stopped and nothing more lands from it; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('cancel_ended', id, res.message, { agent: by, to: 'producer', status: 'warn', meta: { by: e.marker.by || null, why: e.marker.why || null, kept } });
     } else {
       // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
       const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
@@ -2731,7 +2751,7 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     if (sc) removeScratch(sc);
   }
   if (res.landed.length && !dryRun) noteTrainLanded(root); // 2.73.2 (d, B-75): main is green again
-  if (res.batchCut?.length && res.landed.length && queued) res.more = true; // 2.77.0 (p): the next batch runs right after
+  if (res.batchCut?.length && res.landed.length && queued && !res.cancelled?.cancel) res.more = true; // 2.77.0 (p): the next batch runs right after (2.78.2: not after a cancel)
   if (res.ok) res.ok = res.landed.length > 0 || (!res.dropped.length && !res.deferred.length);
   res.message = res.message || summary(res);
   writeTrainStatus(root, id, { step: 'done', text: `done: ${res.message.slice(0, 300)}`, lanes: res.trainLanes || null, round: res.round || 1, eta: null });

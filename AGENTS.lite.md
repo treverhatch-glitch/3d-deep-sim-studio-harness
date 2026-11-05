@@ -21,6 +21,7 @@ rules are in `AGENTS.md`; open them only if something here doesn't cover your ca
   "studio/<name>.json", "set": { "<a.b>": <value> } } ], "why": "…" }`; it is applied to main when your lane lands. A
   protected file in it waits for the owner. Not your task's change? Hand it back with a note (`npm run task -- pause`).
 - Done: `npm run task -- done <ID> --agent <you> --check` first (seconds), then `npm run verify` in the foreground, then `npm run task -- done <ID> --agent <you>`.
+  In a lane copy it queues your lane and prints "queued": you're done; the merge train lands it or hands it back.
   If your verify's shell was killed, the run goes on: `npm run verify -- --wait` shows it and its result.
   `node harness/done-check.mjs <ID>` says what is missing.
 - Stopping early: `npm run task -- pause <ID> --agent <you> --note "where you stopped"`.
