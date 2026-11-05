@@ -189,7 +189,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_DONE_REUSE_MAX_H` · default `24` · harness/task.mjs, harness/train.mjs · undocumented
 - `STUDIO_DONE_REUSE_VERIFY` · no simple default · harness/merge-lane.mjs, harness/task.mjs, qa/selftest-243.mjs (+16 more) · [DISCORD-CREW.md:177](DISCORD-CREW.md)
 - `STUDIO_DONE_RUNNING_MAX_MIN` · default `90` · harness/agent.mjs, harness/busy.mjs, harness/stall.mjs (+2 more) · [RUN-UNATTENDED.md:169](RUN-UNATTENDED.md)
-- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-2782c.mjs · [WORK-ORGANIZATION.md:773](WORK-ORGANIZATION.md)
+- `STUDIO_DONE_SKIP_GAME_NONCODE` · no simple default · harness/done-check.mjs, harness/task.mjs, qa/selftest-243.mjs (+1 more) · [WORK-ORGANIZATION.md:773](WORK-ORGANIZATION.md)
 - `STUDIO_DONE_UNCOMMITTED` · no simple default · harness/task.mjs, qa/selftest-230m.mjs, qa/selftest-230n.mjs (+11 more) · undocumented
 - `STUDIO_DONE_UNITY_GATE` · no simple default · harness/task.mjs, qa/selftest-263j.mjs, qa/selftest-2671j.mjs (+1 more) · [UNITY-TRACK.md:197](UNITY-TRACK.md)
 
