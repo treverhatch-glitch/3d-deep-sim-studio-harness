@@ -26,6 +26,7 @@ import { REPO_ROOT, STUDIO_STATE_DIR, emitEvent } from './event.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { createExclusive, moveAside, onFsafeWarning, sweepTemps, withFileLock, writeAtomic } from './fsafe.mjs';
 import { watchCommand } from './workaround.mjs';
+import { inNoteDir } from './reviewer-scope.mjs';
 
 // 2.58.0 (PU-43): fsafe's warnings (a state file written in place because another program held it open) are logged
 // as events too, not only printed to a console nobody may read. Every command that changes studio state loads this.
@@ -180,6 +181,12 @@ export function claim(key, owner, ttlSec = 3600, { wide = null, byHand = false }
   if (k.startsWith('path:') && WIDE_PATHS.has(k.slice(5).replace(/\/+$/, '')) && !wide) {
     const at = k.slice(5).replace(/\/+$/, '');
     return { ok: false, reason: 'too-wide', message: `path:${at} is a whole top-level folder and would block every other agent. Claim the narrowest folder or file you will edit (for example path:${at || '<folder>'}/<subfolder or file>), or pass --wide "<why you need all of it>".` };
+  }
+  // 2.77.3 (M4): a note folder (studio/reviews: one file per review) is never claimed whole: a reviewer held it for 90+
+  // min and every other reviewer and commit waited. Claim the one file you write.
+  if (byHand && k.startsWith('path:') && !wide && inNoteDir(k.slice(5))?.isDir) {
+    const at = k.slice(5).replace(/\/+$/, '');
+    return { ok: false, reason: 'too-wide', message: `path:${at} holds one file per note (each review is its own file), so nobody claims the whole folder: a folder lock held every other reviewer and every commit that carried a note. Claim only the file you write (path:${at}/<date>-<ID>-<you>.md), or write it without a claim.` };
   }
   if (byHand && k.startsWith('path:') && !wide) {
     const why = tooBroad(k.slice(5));
@@ -432,7 +439,11 @@ export function checkStaged(owner, { strict = process.env.STUDIO_LOCK_STRICT ===
     const lock = coveringLock(file, locks);
     if (lock && lock.owner !== owner) {
       const line = `${file} is locked by ${lock.owner} (${lock.key}, until ${lock.expiresAt})`;
-      if (lane && !laneBlocks && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
+      // 2.77.3 (M4): a file in a note folder (studio/reviews, STUDIO_LOCK_NOTE_DIRS) is its own note: committing it can't
+      // undo anybody's edit, so another owner's lock there is a note, not a refusal (a reviewer's lock on studio/reviews
+      // refused every main commit that carried a review file for 90+ min).
+      if (inNoteDir(file, env)) warnings.push(`${line}: a note folder (one file per note), so the commit goes ahead`);
+      else if (lane && !laneBlocks && lock.owner !== lane) warnings.push(`${line}: this is lane copy ${lane}, so it is checked when the lane lands`);
       else problems.push(line);
     } else if (!lock && strict) problems.push(`${file} has no lock. Run: node harness/lock.mjs claim path:${file} --owner ${owner || '<you>'}`);
   }

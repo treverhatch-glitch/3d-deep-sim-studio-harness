@@ -258,7 +258,27 @@ the owner proxy's agent) and launched Producer/Director sessions act as the owne
 - approvals (`npm run approve -- protected|tests|hooks|force`): an approval with no signature that carries beta.json; it
   counts while beta mode is still on with that file, and only from a commit that isn't a worker's;
 - answering owner asks (`npm run ask -- answer <A-ID> <answer> --by <agent>`, recorded as the owner's answer with
-  `recordedBy`).
+  `recordedBy`);
+- 2.77.3 (B-111): task types and visual-proof decisions (`npm run task -- type|visual <ID> … --by <agent>`): kept as a
+  beta-format approval (`studio/approvals/type-<ID>.json` / `visual-<ID>.json`, no signature, beta.json's by/at,
+  `recordedBy`) and committed, also with an owner key; done-check, verify and the train count it while beta mode is
+  still on with that file, only as committed (same content) and only from a commit that isn't a worker's. Logged "as
+  beta" in the decision log;
+- 2.77.3 (B-111): a protected config proposal (`studio-proposals/<ID>.json`): the stand-in's `train release <ID>` of the
+  lane held for it (the hold names the keys and values) decides the protected part when it lands, as an approval would
+  (the release carries `betaAt`, beta.json's time; a release under an older beta session, or by a worker, doesn't);
+  `train config <ID> --by <agent>` applies one held on main the same way. A beta `approve -- proposal` approval counts
+  under the same rule as a beta type or visual record (harness/beta-mode.mjs `betaRecordCommitted`): committed with
+  exactly that content, under the current beta session, not by a worker's commit and not recorded by a worker.
+
+Outside beta mode, with an owner key (the base branch's, or the one committed in the main checkout when the base has
+none), `task type` and `task visual` refuse an unsigned record up front (exit 1, "needs the owner's signature", and how
+to get it) rather than record one every check would ignore; after writing, they read their record back as the checks do
+and exit 1 if it doesn't count.
+
+2.77.3 (B-111): test files (`*.test.*`, `*.spec.*`, `*.e2e.*`, `tests/`, `e2e/` …; harness/verdict-split.mjs
+`isRenderTestFile`) are never render files, even under the game's `visualPaths`: editing `panel.e2e.test.ts` doesn't
+make a task need a visual result.
 
 Every use is logged (`delegation.used` events, the decision log, the daily digest, the War Room's Owner proxy panel), so
 the owner reviews afterwards instead of approving before. Never: money, deletes, worker sessions or workers' names

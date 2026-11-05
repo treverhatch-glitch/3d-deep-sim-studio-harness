@@ -4674,6 +4674,52 @@ if (inShard('selftest-2772')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (e): the stall killer counted cache reads (H1), owner allow rules for hooks restamp/grandfather (H6), reload-env
+// "queued" (M5), a playtest stage that ran 0 steps (M7).
+if (inShard('selftest-2773e')) {
+  const dir = copyRepo();
+  const { selftest2773E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773e.mjs')).href);
+  await selftest2773E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.3 (d): a builder task with no folders blocked every launch (H3), a rescue-landed dependency stayed "not merged" (H4),
+// a Producer undid the orchestrator's parks (H5), a builder's stop cooldown refused a reviewer (M1), task add named one flag (M2).
+if (inShard('selftest-2773d')) {
+  const dir = copyRepo();
+  const { selftest2773D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773d.mjs')).href);
+  await selftest2773D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.3 (c): an agy builder's session stays open across turns, with follow-ups while its task is in progress (C1 / B-99);
+// a reviewer reads and writes one review file: no verify, no studio/reviews folder lock (M4).
+if (inShard('selftest-2773c')) {
+  const dir = copyRepo();
+  const { selftest2773C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773c.mjs')).href);
+  await selftest2773C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.3 (a): beta-mode owner records (task type, task visual, a protected config proposal's release) were accepted, then
+// ignored; an unsigned record with an owner key is refused up front; test files are not render files (B-111).
+if (inShard('selftest-2773a')) {
+  const dir = copyRepo();
+  const { selftest2773A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773a.mjs')).href);
+  await selftest2773A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.77.3 (b): a train idle after a "real" flake verdict, holding train.lock (H2/B-112: the triage ends at the first real
+// label, busy alone-runs are "not run", a stall watch); port collisions as their own label and fixed test ports flagged
+// (C2/B-108); a waiting train gets the next free heavy slot (M6).
+if (inShard('selftest-2773b')) {
+  const dir = copyRepo();
+  const { selftest2773B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773b.mjs')).href);
+  await selftest2773B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.78.0 (PU-56): load-sensitive tests: a red is "real" only if it also fails at quiet low load.
 if (inShard('selftest-278a')) {
   const dir = copyRepo();

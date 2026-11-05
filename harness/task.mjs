@@ -17,7 +17,7 @@ import { summarize as summarizeVerdict, renderDecision } from './verdict-split.m
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -382,7 +382,7 @@ export function nextFor({ role = null, agent = null } = {}, q = parseNextQueue()
   let evs = null;
   const open = q.backlog
     .map((t, i) => [t, i])
-    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
+    .filter(([t]) => !lockStatus(`task:${t.id}`).locked && (!role || t.role === role || !t.role) && !holdReason(t.id, q, Date.now(), undefined, role || process.env.STUDIO_ROLE || null) && !liveOwner(t.id, agent, (evs ||= readRecentEvents(20000)), { waiting: true }))
     .sort((a, b) => (PRI[a[0].priority] ?? 9) - (PRI[b[0].priority] ?? 9) || a[1] - b[1]);
   return { task: open[0]?.[0] || null, held: false };
 }
@@ -434,7 +434,7 @@ export function startTask(taskId, agent = null, { model = null, force = false } 
   const stop = readStop();
   if (stop) return { error: 'stopped', message: `The studio is stopped (by ${stop.by}${stop.reason ? `: ${stop.reason}` : ''}). Don't start work: finish or hand back what you hold (task pause <ID> --note "..."), then wait. A person resumes it with: npm run task -- resume --by <name>` };
   // Dependencies, parking and a stop's cooldown (harness/task-hold.mjs). Work already in progress may continue.
-  const held = holdReason(taskId, parseNextQueue());
+  const held = holdReason(taskId, parseNextQueue(), Date.now(), undefined, process.env.STUDIO_ROLE || null);
   if (held && !force && !parseNextQueue().inProgress.some((t) => t.id === taskId)) return { error: 'held', message: `${taskId} can't start yet: ${held}. Pick another task (npm run task -- next), or a person releases it.` };
   // 2.77.0 (P9.2): a task in progress whose lane is queued for the merge train is its lane agent's: another agent can't
   // claim it (the supervisor's or a hand-started builder's --task) until it lands or leaves the queue. --force: a person.
@@ -1300,6 +1300,11 @@ export function reopenTask(taskId, reason = '', agent = PRODUCER_NAME()) {
  *   - can't touch a crossed-out layer.
  * Any task with --idea needs that idea approved. Warns when the Director hasn't reviewed lately.
  */
+/** 2.77.3 (H3): existing files or folders named in a --scope text (a/b/c.js), used as the lane when none is given. */
+function scopePaths(text) {
+  return [...new Set(String(text || '').split(/[\s,;]+/).map((w) => w.replace(/^[`'"(]+|[`'").:]+$/g, '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')).filter((w) => /^[\w.-]+\/[\w./-]*$/.test(w) && !w.includes('..') && fs.existsSync(path.join(REPO_ROOT, w))))];
+}
+
 export function gateTask({ title, role = 'builder', meta = {} }) {
   const b = readBible();
   const warnings = [];
@@ -1308,28 +1313,42 @@ export function gateTask({ title, role = 'builder', meta = {} }) {
     if (!idea) return { ok: false, message: `No idea ${meta.idea} on the Idea Board.` };
     if (!['approved', 'scheduled'].includes(idea.stage)) return { ok: false, message: `${meta.idea} is "${idea.stage}". Ideas go captured, shaped, placed, then approved by the Director before they become work (npm run idea -- show ${meta.idea}).` };
   }
-  if (!b || !['change', 'system'].includes(taskType({ title, role }))) return { ok: true, warnings };
+  // 2.77.3 (H3, M2): a builder's code task from `task add` names its folders (--lane/--paths/--part), or they can be worked out
+  // from its title; else it would count as "working on the whole game" and stop every other builder. All missing flags are
+  // named in one message, each with what it takes.
+  const buildTask = ['change', 'system'].includes(taskType({ title, role }));
+  const laneMode = laneRequired();
+  const laneNeeded = Boolean(meta.requireLane) && laneMode !== 'off' && role === 'builder' && buildTask && !meta.lane && !meta.paths?.length && !meta.part && !meta.wholeGame && !inferLaneAtAdd({ title, meta });
+  const laneMissing = laneNeeded && laneMode === 'on';
+  if (laneNeeded && !laneMissing) warnings.push(`${title}: no folders given (--lane <folders>, --paths, --part; --lane all for the whole game on purpose). A builder task with no folders counts as working on the whole game: no other builder runs beside it. npm run task -- lane <ID> <folders> sets them later; STUDIO_REQUIRE_LANE=on refuses such a task.`);
+  const LANE_FLAG = '--lane <folder>[,<folder>…] (or --paths <files>, or --part sim|renderer; --lane all means the whole game on purpose)';
+  if (!b || !buildTask) return laneMissing ? { ok: false, message: `Missing flag: ${LANE_FLAG}. A builder task with no folders would count as working on the whole game and block every other builder.` } : { ok: true, warnings };
   const notLayers = new Set(String(meta.notLayer || '').split(',').filter(Boolean));
   const crossed = crossedLayersIn(title, b).filter((l) => !notLayers.has(l.id));
   if (crossed.length) return { ok: false, message: `"${title}" touches a crossed-out layer: ${crossed.map((l) => `${l.label} (the word "${l.word}")`).join(', ')} (studio/bible/NOT-DOING.md). If the task really is about that, only a person brings the layer back: npm run bible -- layer ${crossed[0].id} yes --by <name>. If the word means something else here, reword the title, or add --not-layer ${crossed[0].id} (logged for the Director's drift report).` };
   if (notLayers.size) emitEvent({ type: 'task.scope_override', agent: meta.by || PRODUCER_NAME(), to: 'director', msg: `"${title}" queued with --not-layer ${[...notLayers].join(',')}: the title matched a crossed-out layer's keyword, and the author says it is not about that layer` });
-  if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return { ok: true, warnings };
+  if (meta.prototype || meta.infra || /^prototype\b/i.test(title)) return laneMissing ? { ok: false, message: `Missing flag: ${LANE_FLAG}. A builder task with no folders would count as working on the whole game and block every other builder.` } : { ok: true, warnings };
   if (b.signed && b.amended) return { ok: false, message: `The Game Bible changed after ${b.signed.by} signed it (${b.amended.changes.map((c) => c.field).join(', ')}). New build tasks wait until a person re-signs the new design: npm run bible -- sign --by <name> [--via "<where they approved>"]. Work already queued carries on.` };
   if (!b.signed) return { ok: false, message: 'The Game Bible is not signed yet, so this is still pre-production: build tasks wait. Allowed now: studies, storyboards, docs, throwaway prototypes (--prototype) and tooling that isn\'t game content (--infra). See npm run bible -- check.' };
   const phase = Number(meta.phase);
-  if (![1, 2, 3].includes(phase)) return { ok: false, message: 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' };
-  const openFloors = (b.phase?.floors || []).map(f => f.n);
-  if (phase > (b.phase?.open || 1) && !openFloors.includes(phase)) {
-    const openList = [b.phase?.open || 1, ...openFloors].filter(Boolean).sort();
-    return { ok: false, message: `Phase ${phase} isn't open yet (open: ${[...new Set(openList)].join(', ')}). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
-  }
+  const phaseBad = ![1, 2, 3].includes(phase);
   const serves = String(meta.serves || '');
   const pillarOk = /^pillar:/i.test(serves) && (b.pillars || []).some((p) => p.name.toLowerCase().startsWith(serves.slice(7).trim().toLowerCase()) && serves.slice(7).trim());
   const layerId = /^layer:/i.test(serves) ? serves.slice(6).trim() : null;
   const layerOk = layerId && b.layers?.[layerId]?.answer === 'yes';
-  if (!pillarOk && !layerOk && !meta.idea) {
+  const servesBad = !pillarOk && !layerOk && !meta.idea;
+  if (phaseBad || servesBad || laneMissing) {
     const kept = LAYERS.filter((l) => b.layers?.[l.id]?.answer === 'yes').map((l) => `layer:${l.id}`);
-    return { ok: false, message: `Say what this serves: --serves ${[...(b.pillars || []).map((p) => `pillar:${p.name}`), ...kept].slice(0, 6).join(' | ')} (or --idea <approved idea>).${layerId && b.layers?.[layerId]?.answer === 'no' ? ` ${layerId} is crossed out.` : ''}` };
+    const parts = [];
+    if (phaseBad) parts.push('--phase 1 (early) | 2 (mid) | 3 (endgame): which part of the game it is for');
+    if (servesBad) parts.push(`--serves ${[...(b.pillars || []).map((p) => `pillar:${p.name}`), ...kept].slice(0, 6).join(' | ')} (or --idea <approved idea>)${layerId && b.layers?.[layerId]?.answer === 'no' ? `; ${layerId} is crossed out` : ''}`);
+    if (laneMissing) parts.push(LANE_FLAG);
+    return { ok: false, message: parts.length === 1 && phaseBad ? 'Build tasks say which part of the game they are for: --phase 1 (early), 2 (mid) or 3 (endgame).' : parts.length === 1 && servesBad ? `Say what this serves: ${parts[0]}.` : `Missing flag${parts.length > 1 ? 's' : ''}:\n${parts.map((x) => `  ${x}`).join('\n')}` };
+  }
+  const openFloors = (b.phase?.floors || []).map(f => f.n);
+  if (phase > (b.phase?.open || 1) && !openFloors.includes(phase)) {
+    const openList = [b.phase?.open || 1, ...openFloors].filter(Boolean).sort();
+    return { ok: false, message: `Phase ${phase} isn't open yet (open: ${[...new Set(openList)].join(', ')}). Finish and prove the earlier phase first; designing later phases is fine as a study or docs task.` };
   }
   const r = latestReview();
   const since = r ? r.at : 0;
@@ -1415,6 +1434,7 @@ function addTaskInner({ title, role = 'builder', priority = 'P1', agent = PRODUC
     emitEvent({ type: 'task.refused', agent, status: 'blocked', msg: `Not queued: ${title}. ${gate.message}` });
     return { error: 'gated', message: gate.message };
   }
+  if (meta.requireLane) { const { requireLane: _r, ...rest } = meta; meta = rest; }
   if (['change', 'system'].includes(taskType({ title, role }))) meta = { ...meta, build: true };
   // 2.69.0 (s): overlap with open tasks' lanes, lanes in flight and near-duplicate titles (harness/task-overlap.mjs).
   // Advisory unless STUDIO_OVERLAP=block. A planner's split and a rescue's pieces overlap their parent on purpose.
@@ -2173,7 +2193,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     const all = [...q.inProgress, ...q.backlog, ...q.done];
     if (cmd === 'holds') {
       const h = readHolds();
-      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.held ? `held for landing (${x.held.by}: ${x.held.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)}` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
+      const rows = Object.entries(h).map(([id, x]) => `${id}: ${[x.parked ? `parked (${x.parked.by}: ${x.parked.why || ''})` : '', x.held ? `held for landing (${x.held.by}: ${x.held.why || ''})` : '', x.after?.length ? `after ${x.after.join(', ')}` : '', x.until ? `until ${x.until}` : '', x.cooldownUntil ? `cooldown until ${x.cooldownUntil.slice(11, 16)} UTC` : '', 'lane' in x ? `lane ${x.lane || 'whole game'}` : ''].filter(Boolean).join('; ')}`);
       console.log(rows.length ? rows.join('\n') : 'No holds: every waiting task can start.');
       process.exit(0);
     }
@@ -2186,15 +2206,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error('Say why it is parked: --why "…" (the Producer and Director read it).');
         process.exit(1);
       }
-      const until = typeof flags.until === 'string' ? flags.until : null;
-      if (until && !/^[A-Z]+-\d+$/.test(until) && !/^phase:\d+$/i.test(until) && !Number.isFinite(Date.parse(until))) {
-        console.error('--until takes a task id (T-011), phase:2 (when Phase 2 opens) or a time (2026-10-22T09:00).');
-        process.exit(1);
-      }
+      let until = typeof flags.until === 'string' ? flags.until : null;
+      // 2.77.3 (H5): --until "<condition text>" isn't a date or task: it is a note shown when someone tries to unpark
+      // (nothing ends the park by itself; the same rank or higher lifts it).
+      let note = null;
+      if (until && !/^[A-Z]+-\d+$/.test(until) && !/^phase:\d+$/i.test(until) && !Number.isFinite(Date.parse(until))) { note = until.trim().slice(0, 300); until = null; }
+      const parker = parkRank({ by });
       const stamp = until && Number.isFinite(Date.parse(until)) && !/^[A-Z]+-\d+$/.test(until) && !/^phase:/i.test(until) ? new Date(Date.parse(until)).toISOString() : until;
-      setHold(arg1, { parked: { by, why: flags.why, at: new Date().toISOString(), ...(stamp ? { until: stamp } : {}) } }, { by, msg: `${by} parked ${arg1}${stamp ? ` until ${stamp}` : ''}: ${flags.why}` });
+      setHold(arg1, { parked: { by, why: flags.why, at: new Date().toISOString(), rank: parker.rank, byRole: parker.role, ...(note ? { note } : {}), ...(stamp ? { until: stamp } : {}) } }, { by, msg: `${by} parked ${arg1}${stamp ? ` until ${stamp}` : ''}: ${flags.why}` });
       console.log(stamp ? `${arg1} is parked until ${stamp}; then it can start on its own.` : `${arg1} is parked: it won't start until someone runs npm run task -- unpark ${arg1} --by <name> (or park it with --until T-ID|phase:N|time).`);
     } else if (cmd === 'unpark') {
+      const refusedUnpark = unparkRefusal(arg1, { by });
+      if (refusedUnpark) { console.error(refusedUnpark); process.exit(1); }
       setHold(arg1, { parked: null }, { by, msg: `${by} unparked ${arg1}` });
       console.log(`${arg1} can start again.`);
     } else if (cmd === 'block') {
@@ -2207,12 +2230,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       }
       console.log(`${arg1} is blocked until ${u}.`);
     } else {
-      const folder = flags._[2];
+      const folders = flags._.slice(2);
+      const folder = folders.join(',');
       if (!folder) {
-        console.error(`Usage: npm run task -- lane ${arg1} <folder|none> --by <name>`);
+        console.error(`Usage: npm run task -- lane ${arg1} <folder> [<folder>…] [--by <name>]   (or "all" / "none": the whole game, no other builder runs beside it)`);
         process.exit(1);
       }
-      const lane = folder === 'none' ? null : laneList(folder).join(',') || null;
+      const lane = ['none', 'all', '.'].includes(folder) ? null : laneList(folder).join(',') || null;
       if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
         process.exit(1);
@@ -2373,8 +2397,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.serves === 'string' ? { serves: flags.serves } : {}),
         ...(typeof flags.idea === 'string' ? { idea: flags.idea } : {}),
         ...(typeof flags.part === 'string' ? { part: flags.part } : {}),
-        ...(typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
-        ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneList(flags.paths) } : {}),
+        // 2.77.3 (H3): --lane all (or .) is the whole game on purpose; a builder task with no folders is refused (gateTask).
+        requireLane: true,
+        ...(typeof flags.lane === 'string' && ['all', '.', './'].includes(flags.lane.trim()) ? { wholeGame: true } : typeof flags.lane === 'string' ? { lane: flags.lane.replace(/\/+$/, '') } : {}),
+        ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneList(flags.paths) } : typeof flags.scope === 'string' && typeof flags.lane !== 'string' && scopePaths(flags.scope).length ? { paths: scopePaths(flags.scope) } : {}),
         // 2.59.0 (#8): a person keeps a broad lane for a launch in the main checkout: --wide "<why>" (harness/agent.mjs).
         ...(typeof flags.wide === 'string' && (typeof flags.lane === 'string' || typeof flags.paths === 'string') ? { laneWide: { lane: laneList(typeof flags.paths === 'string' && laneList(flags.paths).length ? flags.paths : flags.lane).join(','), why: flags.wide, by: typeof flags.by === 'string' ? flags.by : actor(), ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } } : {}),
         ...(typeof flags.track === 'string' ? { track: flags.track } : {}),

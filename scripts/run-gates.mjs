@@ -61,6 +61,11 @@ const FULL_FILE = path.join(VERIFY_DIR, CHECKOUT.file);
 {
   const stage = argv.indexOf('--verify-stage');
   if (stage >= 0) process.exit(await verifyStage(argv[stage + 1], argv[stage + 2]));
+  // 2.77.3 (M4): a reviewer reads and writes one review file; it never runs the gates (harness/reviewer-scope.mjs).
+  if (!process.env.STUDIO_VERIFY_RUN) {
+    const rv = (await import('../harness/reviewer-scope.mjs')).verifyRefusal();
+    if (rv) { console.error(`[gates] refused: ${rv}. Nothing was run.`); process.exit(1); }
+  }
   // 2.69.0 (p): `npm run gates -- --tier slow` is the nightly slow tier (harness/slow-tier.mjs): the game's slow checks and
   // slow tests only, on this checkout, one bug task per new failure. It is never a verify and writes no verify record.
   if (argv.includes('--tier') && argv[argv.indexOf('--tier') + 1] === 'slow') process.exit(await (await import('../harness/slow-tier.mjs')).slowTierCli(argv, { root }));

@@ -74,6 +74,7 @@ import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastFor
 import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
+import { cancelPath } from './train-watch.mjs';
 import { recreateLaneCopy, infraHandBack, keepRelease, keptRelease, forgetRelease, mixedLane, mayCarry, noteMixed } from './train-lanes.mjs';
 import { readBeta, betaActor, recordBetaUse } from './beta-mode.mjs';
 import { addKnownRed, clearKnownRed, knownRedCandidate, readKnownRed, fileSub } from './known-red.mjs';
@@ -97,11 +98,11 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote, readTrainStatus } from './train-status.mjs';
 import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
-import { triageRed, triageOn, fileQuarantineTasks, loadSensitiveExcuse } from './flakes.mjs';
+import { triageRed, triageOn, fileQuarantineTasks, loadSensitiveExcuse, collisionWaitExcuse, flakeRules } from './flakes.mjs';
 import { waitQuiet } from './flake-quiet.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
-import { runGatesWaiting } from './train-busy.mjs';
+import { runGatesWaiting, busyWhy, ranNoCheck } from './train-busy.mjs';
 import { remoteMode, remoteVerify, remoteCheckPattern, localGateIds } from './remote-verify.mjs';
 import { bisectWidth, karySearch, karyCost, focusWorkers, spawnCollect, runGatesWaitingAsync } from './train-parallel.mjs';
 import { chainTailOn, readTails, updateTails, trainChains, touchedTests, chainFocus, failingTests, tailSignature, tailsExplaining, tailTitle, tailNote, tailWaitWhy, pinDiffLines } from './train-tail.mjs';
@@ -194,7 +195,7 @@ export async function leaveTrain(root, task, { by = '', why = '', env = process.
 // ---- 2.77.1 (B-98): a lane that leaves a running train stops that train ------------------------------------------------
 
 /** .studio/train/<train id>.cancel.json = { tasks, by, why, at }: written by leaveTrain, read by the running train. */
-const cancelFile = (root, id) => path.join(root, TRAIN_DIR, `${id}.cancel.json`);
+const cancelFile = cancelPath; // .studio/train/<id>.cancel.json (2.77.3: the stall watch writes one too, { stall: true })
 export function readCancel(root, id) {
   try { const j = JSON.parse(fs.readFileSync(cancelFile(root, id), 'utf8')); return j && Array.isArray(j.tasks) ? j : null; } catch { return null; }
 }
@@ -209,14 +210,18 @@ function writeCancel(root, id, rec) {
 /** Running trains in this process: id -> () => the tasks still riding it (not handed back, not landed). */
 const activeLanes = new Map();
 class TrainCancelled extends Error {
-  constructor(marker) { super(`${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; }
+  constructor(marker) { super(marker.stall ? `the train stalled (${marker.why})` : `${marker.tasks.join(', ')} left the train (by ${marker.by}: ${marker.why})`); this.marker = marker; this.name = 'TrainCancelled'; this.stopsTriage = true; }
 }
-/** Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round). */
+/**
+ * Throws TrainCancelled when a lane of train `id` has left it (called before each verify, re-check and round, and
+ * 2.77.3 right after each check's run). 2.77.3 (H2): a stall marker (harness/train-watch.mjs) stops the whole train.
+ */
 function checkCancel(root, id) {
   const lanes = activeLanes.get(String(id));
   if (!lanes) return;
   const m = readCancel(root, id);
   if (!m) return;
+  if (m.stall) throw new TrainCancelled({ ...m, tasks: lanes() });
   const left = m.tasks.filter((t) => lanes().includes(t));
   if (left.length) throw new TrainCancelled({ ...m, tasks: left });
 }
@@ -687,6 +692,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   log(`[train] ${id}: verify ${n} of tree ${tree.slice(0, 8)} (${changed.length} changed file(s)${all ? ', --all' : ''})`);
   // 2.67.2 (B-50): a run refused before any gate ran (busy) waits and runs again, bounded; it is never read as red.
   const { r, text, busy, noCheck } = runGatesWaiting(() => spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', ...(all ? ['--all'] : [])], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }), { log: (m) => log(`[train] ${id}: ${m}`), label: `verify ${n}` });
+  checkCancel(root, id); // 2.77.3 (H2): a run the stall watch stopped judges nothing
   const recDir = path.join(root, TRAIN_DIR, 'records');
   fs.mkdirSync(recDir, { recursive: true });
   const logFile = path.join(root, TRAIN_DIR, `${id}-verify-${n}.log`);
@@ -714,7 +720,7 @@ export function verifyTree(sc, { id, n, tree, changed, all, seen, tasks = [], la
   if (vparts.flakes.length) log(`[train] ${id}: verify ${n}: ${vparts.flakes.length} test file(s) timed out and passed alone at low load (timeout-flake; the lane is not blamed for them): ${vparts.flakes.slice(0, 5).join(', ')}`);
   const res = { ok, rec, gates, detail, why, log: path.relative(root, logFile).split(path.sep).join('/'), ms: Date.now() - t0, ...(ok ? {} : noCheck ? { noCheck: true, busy: busy || null } : {}), ...(trustNote ? { trustNote, closeRec: { ...rec, dirty: false, trustNote } } : {}) };
   if (!res.noCheck) seen.set(tree, res); // a run that judged nothing is not cached: the next ask runs it again
-  if (!ok && !res.noCheck) res.triage = flakeTriage(sc, { id, tree, text, log }); // 2.69.0 (r); 2.78.0: the labels decide a load-sensitive excuse
+  if (!ok && !res.noCheck) { res.triage = flakeTriage(sc, { id, tree, text, log }); if (!res.triage) delete res.triage; } // 2.69.0 (r); 2.77.3: its result; 2.78.0: the labels decide a load-sensitive excuse
   const j = judged(res);
   if (j.excused?.length) log(`[train] ${id}: red only in ${j.excused.join(', ')}, already red when ${tasks.join(', ')} ${tasks.length === 1 ? 'was' : 'were'} claimed: counts as green, as at task done`);
   return j;
@@ -850,6 +856,7 @@ function recheck(sc, o) {
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
   const w = runGatesWaiting(() => spawnSync(process.execPath, job.args, { windowsHide: true, ...job.opts }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  checkCancel(sc.root, o.id); // 2.77.3 (H2)
   return recheckEnd(sc, o, job, w);
 }
 
@@ -859,6 +866,7 @@ async function recheckAsync(sc, o) {
   if (s.cached) return s.cached;
   const job = { ...s.job, id: o.id };
   const w = await runGatesWaitingAsync(() => spawnCollect(process.execPath, job.args, { cwd: job.opts.cwd, env: job.opts.env }), { log: (m) => o.log(`[train] ${o.id}: ${m}`), label: `re-check ${job.n}` });
+  checkCancel(sc.root, o.id); // 2.77.3 (H2)
   return recheckEnd(sc, o, job, w, { triage: false });
 }
 
@@ -880,7 +888,11 @@ const flakeSeen = new Map();
  * After a red verify or re-check: each failing test file runs ALONE on this same tree (run-gates --only the game's
  * gates, STUDIO_GATE_FOCUS, as a 2.65.3 re-check; the second, low-load run with STUDIO_TEST_WORKERS=1), at most once
  * per train, and is labelled real / seed-flake / load-flake / intermittent in .studio/flakes.jsonl. Labels only: what
- * the train does next is decided as before. Never throws.
+ * the train does next is decided as before. Never throws (but a stall or a lane leaving still stops the train).
+ * 2.77.3 (H2, B-112): each run says so in the train's status ("flake check k of n: <file> alone"), waits at most
+ * STUDIO_FLAKE_WAIT_MIN (10) for a machine:heavy slot (its STUDIO_HEAVY_WAIT_MIN), and a run refused as busy or stopped
+ * before any gate is "not run" (no label), never "real"; the triage ends at the first real label (harness/flakes.mjs).
+ * 2.77.3 (C2): a red whose every failing file is a port collision is not the lanes' (trainBody defers them).
  */
 export function flakeTriage(sc, { id, tree, text, log }) {
   if (!triageOn()) return null;
@@ -891,26 +903,42 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     const base = String(id).replace(/-\d+$/, '');
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
-    const runAlone = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10 }) => {
-      checkCancel(root, id); // 2.77.1 (B-98): swallowed by the catch below; the next verify or re-check stops the train
+    const waitMin = flakeRules().waitMin;
+    const runAlone = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10, k = 1, of = 1 }) => {
+      checkCancel(root, id); // 2.77.1 (B-98); 2.77.3: rethrown below, so the train stops here
       // 2.78.0 (PU-56): the confirming re-run of a red alone waits for a quiet machine (no other heavy job), bounded.
+      // It is an alone-run like the others: it shows in the status ("flake check k of n") while it waits and runs.
       if (quiet) {
+        const wl = `flake check ${k} of ${of}: ${file} failed alone; waiting up to ${quietWaitMin} min for a quiet machine (STUDIO_FLAKE_QUIET_WAIT_MIN) to run it again at low load, on tree ${String(tree).slice(0, 8)}`;
+        writeTrainStatus(root, id, { step: 'flake-check', text: wl, eta: null });
+        log(`[train] ${id}: ${wl}`);
         const q = waitQuiet(root, { waitMin: quietWaitMin, log: (m) => log(`[train] ${id}: ${m}`) });
+        checkCancel(root, id);
         if (!q.quiet) { log(`[train] ${id}: no quiet machine within ${quietWaitMin} min (${q.busy.slice(0, 2).join('; ')}): ${file} stays real, unconfirmed under load`); return { ok: false, quietUnreached: true }; }
       }
       n += 1;
       const owner = `train-${id}-flake`;
       const env = { ...process.env, STUDIO_MAIN_ROOT: root, STUDIO_LOCK_OWNER: owner, STUDIO_GATE_PRIORITY: 'landing', STUDIO_VERIFY_DETACH: 'off', STUDIO_GATE_FOCUS: JSON.stringify({ [check]: [file] }) };
-      for (const k of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[k];
+      for (const x of ['STUDIO_GATE_CHANGED', 'STUDIO_GATE_PATHS', 'STUDIO_GATE_INCOMING_FILE', 'STUDIO_VERIFY_RUN', 'npm_lifecycle_event', 'STUDIO_TASK_BASE']) delete env[x];
       if (lowLoad) env.STUDIO_TEST_WORKERS = '1';
       env.STUDIO_TIMEOUT_RERUN = 'off'; // 2.72.0 (a): the triager wants the raw answer, not the gate's own timeout re-run
+      // 2.77.3 (H2): a focused run waits at most STUDIO_FLAKE_WAIT_MIN for a machine:heavy slot, then is "not run".
+      const hw = Number(process.env.STUDIO_HEAVY_WAIT_MIN);
+      env.STUDIO_HEAVY_WAIT_MIN = String(Math.min(Number.isFinite(hw) && String(process.env.STUDIO_HEAVY_WAIT_MIN ?? '').trim() !== '' ? hw : 60, waitMin));
+      const line = `flake check ${k} of ${of}: ${quiet ? `${file} again, on a quiet machine at low load (one test worker; it failed alone)` : `${file} alone${lowLoad ? ' at low load (one test worker)' : ''}`}, on tree ${String(tree).slice(0, 8)} (the verify was red; up to ${waitMin} min for a slot, STUDIO_FLAKE_WAIT_MIN)`;
+      writeTrainStatus(root, id, { step: 'flake-check', text: line, eta: null });
+      log(`[train] ${id}: ${line}`);
       const r = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'run-gates.mjs'), '--no-detach', '--only', gates.join(',')], { windowsHide: true, cwd: sc.dir, env: gateEnv(env), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-      try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), `${r.stdout || ''}${r.stderr || ''}`); } catch {}
+      const out2 = `${r.stdout || ''}${r.stderr || ''}`;
+      try { fs.mkdirSync(path.join(root, TRAIN_DIR), { recursive: true }); fs.writeFileSync(path.join(root, TRAIN_DIR, `${id}-flake-${n}.log`), out2); } catch {}
       for (const f of [`${owner}.json`, `${owner}-full.json`]) { try { fs.rmSync(path.join(root, '.studio', 'gates', f), { force: true }); } catch {} }
-      return { ok: r.status === 0 };
+      checkCancel(root, id); // 2.77.3 (H2): stopped by the stall watch: judge nothing
+      const busy = r.status !== 0 ? busyWhy(out2) : '';
+      if (r.status !== 0 && (busy || ranNoCheck(out2))) return { ok: false, notRun: busy || `it stopped before any gate ran (${r.status === null ? `signal ${r.signal || '?'}` : `exit ${r.status}`})`, text: out2 };
+      return { ok: r.status === 0, text: out2 };
     };
     return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`) });
-  } catch (e) { log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
+  } catch (e) { if (e instanceof TrainCancelled) throw e; log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }
 }
 
 /** Run the pins' report on the scratch copy's tree: { report } ({ pin: value }) or { error }. Cached by tree. */
@@ -1346,7 +1374,11 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   if (git(root, 'cat-file', '-e', `${tip}:${proposalRel(task)}`).status !== 0) return { ok: false, message: `${main} holds no config proposal for ${task} (${proposalRel(task)}).` };
   const ownerKey = /BEGIN PUBLIC KEY/.test(out(git(root, 'show', `${tip}:studio/keys/owner-ed25519.pub.pem`)));
   let released = null;
-  if (String(by || '').trim() && !ownerKey) {
+  // 2.77.3 (B-111): in beta mode the owner's stand-in decides a held protected part as the owner would, key or not
+  // (config-proposal.mjs betaReleaseOk); logged as a beta use.
+  const dgb = String(by || '').trim() ? delegationFor({ action: 'train-config', by, env, root }) : { ok: false };
+  if (dgb.ok && dgb.beta) released = { by: String(dgb.owner || by).trim().slice(0, 60), recordedBy: String(dgb.agent || '').slice(0, 60), beta: true, betaAt: dgb.at };
+  else if (String(by || '').trim() && !ownerKey) {
     const refusal = releaseRefusal({ by, permission, env, ownerKey, stateDir: path.join(root, '.studio') });
     if (refusal) return { ok: false, message: `${refusal.replace(/Landing a tier-C lane/, 'Applying a protected config change')} Nothing was applied.` };
     const perm = permissionText(permission);
@@ -1356,7 +1388,7 @@ export function applyHeldConfig(root, task, { by = '', permission = '', env = pr
   let r;
   try { r = withLandLock(root, () => applyLandedConfig(root, main, [{ task, released }], { by: released?.recordedBy || released?.by || 'train-config' })[0]); } catch (e) { return { ok: false, message: `could not apply it: ${e.message}` }; }
   if (!r) return { ok: false, message: `${task}'s proposal could not be read.` };
-  if (!r.held.length && released) logDecision({ action: 'config-apply', subject: task, by: released.by, as: asOf({ via: released.recordedBy ? 'outside agent' : 'person', permission }), why: `applied ${task}'s held config proposal`, evidence: proposalRel(task), undo: null, root });
+  if (!r.held.length && released) logDecision({ action: 'config-apply', subject: task, by: released.beta ? released.recordedBy : released.by, as: released.beta ? 'beta' : asOf({ via: released.recordedBy ? 'outside agent' : 'person', permission }), why: `applied ${task}'s held config proposal`, evidence: released.beta ? `beta mode ${released.recordedBy}: ${proposalRel(task)}` : proposalRel(task), undo: null, root });
   return { ok: !r.held.length, message: configLine(task, { ...r, decision: '' }) };
 }
 
@@ -1439,7 +1471,7 @@ export function releaseLane(root, task, { by, permission = '', env = process.env
     // first-divergence report, a person (harness/golden-report.mjs).
     const second = rerecordRefusal(e.held, { by, agent: dg.ok ? dg.agent : '', recordedBy: rec?.recordedBy || '', delegated: dg.ok, beta: Boolean(dg.beta) });
     if (second) return { ok: false, message: `Refused: ${second}. Nothing was released.` };
-    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true } : {}), ...(ba.ok ? { beta: ba.via } : {}) };
+    e.released = { by: String(by).trim().slice(0, 60), at: new Date().toISOString(), head: e.head, tier: e.held.tier, why: e.held.why, ...(rec && rec.via !== 'person' ? { permission: perm.slice(0, 500), recordedBy: rec.recordedBy } : {}), ...(dg.ok ? { delegation: dg.at } : {}), ...(dg.autonomous ? { autonomous: true } : {}), ...(dg.beta ? { beta: true, betaAt: dg.at } : {}), ...(ba.ok ? { beta: ba.via, betaAt: ba.doc.at } : {}) };
     return { ok: true, entry: { ...e } };
   });
   if (!r.ok) return r;
@@ -2097,6 +2129,26 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     const h = holdLane(root, lane, { tier, why, ...extra });
     if (h.fresh) ev('held', id, `${lane.task} ${extra.beta ? 'is held for the orchestrator and the Producer (beta mode)' : 'needs the owner'} (tier ${tier}): ${why}. It waits in the queue; ${who} releases it with npm run task -- train release ${lane.task} --by <name>${extra.beta ? '' : ' [--permission "…"]'}`, { task: lane.task, agent: by, to: 'producer', status: 'blocked', meta: { tier, why, ...(extra.beta ? { beta: true } : {}) } });
   };
+  // 2.77.3 (H2, C2): an attempt that ended for no fault of the lane (the train stalled; a port collision): the lane keeps
+  // its place in the queue (queued if it wasn't: a task done's own lane), marked with `key`; a second time at the same
+  // head (another train) it is held for the Producer instead, so it can't loop. Never a hand-back.
+  const keepOrHold = (lane, key, why, what) => {
+    if (dryRun) { defer(lane, why); return 'kept'; }
+    let e = null;
+    try { e = readQueue(root).find((x) => x.task === lane.task) || null; } catch {}
+    const head = lane.head || e?.head || null;
+    if (e?.[key]?.head && head && e[key].head === head && e[key].train !== id) {
+      hold(lane, 'B', `${what} twice with ${lane.task} at ${String(head).slice(0, 8)} (train ${e[key].train}, then ${id}): ${why}; the Producer looks before it trains again`);
+      return 'held';
+    }
+    const mark = { [key]: { train: id, head, at: new Date().toISOString() } };
+    try {
+      if (e) requeue(root, lane, mark);
+      else enqueue(root, { task: lane.task, agent: lane.agent, dir: lane.dir, branch: lane.branch, head, all: Boolean(lane.all), note: `queued again: ${what}`, ...mark });
+    } catch {}
+    defer(lane, why);
+    return 'kept';
+  };
 
   waitActions(root, waits, { id, by, dryRun, res, log, deps });
 
@@ -2302,6 +2354,8 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
         }
         // 2.78.0 (PU-56): red only on tests that failed alone under load and passed alone at quiet low load (load-sensitive):
         // like a timeout-flake that passed alone at low load, the lane isn't handed back for them; the reds are reported.
+        // A red that also has a port collision (2.77.3) never lands on this excuse: it waits below (harness/flakes.mjs header).
+        const pcMix = !v.triage?.allPortCollision && v.triage?.portCollisionWait ? collisionWaitExcuse({ subs: redSub, gates: v.gates, labels: v.triage.labels }) : null;
         {
           const ls = loadSensitiveExcuse({ subs: redSub, gates: v.gates, labels: v.triage?.labels || [] });
           if (ls.ok) {
@@ -2309,7 +2363,20 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
             ev('load_sensitive', id, `red only in load-sensitive tests (passed alone at quiet low load): ${set.map((l) => l.task).join(', ')} not handed back; the reds are reported`, { agent: by, status: 'warn', meta: { action: 'excused', tests: ls.tests, lanes: set.map((l) => l.task), verifyLog: v.log || null } });
             verdict = { built, v: { ...v, ok: true, loadSensitive: ls.tests, closeRec: v.rec ? { ...v.rec, rows: (v.rec.rows || []).map((r) => (!r.ok && v.gates.includes(r.id) ? { ...r, ok: true, loadSensitive: ls.tests.filter((x) => x.split(':')[0] === r.id) } : r)) } : null } };
             break;
-          } else if (v.triage?.labels?.some((l) => l.label === 'load-sensitive')) log(`[train] ${id}: some failing tests are load-sensitive but the red is not only that (${ls.why}); handled as a real red`);
+          } else if (v.triage?.labels?.some((l) => l.label === 'load-sensitive') && !pcMix?.ok) log(`[train] ${id}: some failing tests are load-sensitive but the red is not only that (${ls.why}); handled as a real red`);
+        }
+        // 2.77.3 (C2, B-108): every failing test file failed on a port collision (the flake triage): another verify ran the
+        // same test on the same fixed port. Not the lanes' failure: nobody is handed back, they wait for the next train.
+        // 2.78.0 merge: so does a red mixing port collisions and load-sensitive files (pcMix; every failed gate has a file part).
+        if (v.triage?.allPortCollision || pcMix?.ok) {
+          const ports = [...new Set(v.triage.labels.map((r) => r.port).filter(Boolean))];
+          const sens = v.triage.labels.filter((r) => r.label === 'load-sensitive').map((r) => r.test);
+          const why = `the verify failed only on port collisions${sens.length ? ` and load-sensitive tests (${sens.slice(0, 3).join(', ')})` : ''} (${v.triage.labels.filter((r) => r.label === 'port-collision').map((r) => r.test).slice(0, 3).join(', ')}${ports.length ? `; port ${ports.join(', ')}` : ''}): another verify ran the same test on the same fixed port at the same time. Not this lane's failure; it waits for the next train. Give those tests a free port (studio/rules/test-ports.md)`;
+          log(`[train] ${id}: ${why}`);
+          ev('port_collision', id, `${set.map((l) => l.task).join(', ')}: ${why}`.slice(0, 600), { agent: by, to: 'producer', status: 'warn', meta: { lanes: set.map((l) => l.task), ports, tests: v.triage.labels.map((r) => r.test), ...(sens.length ? { loadSensitive: sens } : {}), log: v.log || null } });
+          for (const l of set) keepOrHold(l, 'portCollisionIn', why, 'a train failed only on port collisions');
+          set = [];
+          break;
         }
         noteTrainRed(root, { id, gates: v.gates }); // 2.73.2 (d, B-75): the streak a fix lane is put first for
         ev('red', id, `the train of ${set.map((l) => l.task).join(', ')} is red (${v.why})${ft.list.length ? `; failing: ${ft.list.slice(0, 3).join('; ')}${ft.list.length + ft.more > 3 ? ` (+${ft.list.length + ft.more - 3} more)` : ''}` : ''}; log ${v.log || '-'}`, { agent: by, status: 'blocked', meta: { lanes: set.map((l) => l.task), gates: v.gates, ...(redSub.length ? { subIds: redSub } : {}), ...(ft.list.length ? { failingTests: ft.list, moreTests: ft.more } : {}), ...(redEta ? { eta: { ms: redEta.ms, text: redEta.text } } : {}) } });
@@ -2445,12 +2512,27 @@ async function trainBody({ root, log, deps, id, by, lanes: given, max, dryRun = 
     }
   } catch (e) {
     if (!(e instanceof TrainCancelled)) throw e;
-    // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
-    const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
-    res.cancelled = e.marker;
-    res.message = `Train ${id} stopped: ${e.marker.tasks.join(', ')} left the train (by ${e.marker.by || '?'}: ${e.marker.why || '-'}); no further checks.${stay.length ? ` ${stay.join(', ')} stay queued for the next train (nobody handed back).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
-    log(`[train] ${id}: ${res.message}`);
-    ev('cancelled', id, res.message, { agent: by, status: 'warn', meta: { left: e.marker.tasks, leftBy: e.marker.by || null, why: e.marker.why || null, stay } });
+    if (e.marker.stall) {
+      // 2.77.3 (H2, B-112): the stall watch (harness/train-watch.mjs) stopped this attempt: nothing more lands from it,
+      // nobody is handed back; each lane still riding keeps its place (held for the Producer if it stalled a train before).
+      const riding = ready.filter((l) => !res.dropped.some((d) => d.task === l.task) && !res.landed.includes(l.task));
+      const why = `train ${id} stalled: ${e.marker.why}`;
+      const kept = [];
+      const held = [];
+      for (const l of riding) (keepOrHold(l, 'stalledIn', why, 'a train stalled') === 'held' ? held : kept).push(l.task);
+      res.ok = res.landed.length > 0;
+      res.stalled = { why: e.marker.why, step: e.marker.step || null, at: e.marker.at || null };
+      res.message = `Train ${id} stalled and ended this attempt: ${e.marker.why}. Its running checks were stopped; nobody was handed back.${kept.length ? ` ${kept.join(', ')} keep their place in the train queue.` : ''}${held.length ? ` ${held.join(', ')} stalled a train before at the same head: held for the Producer (npm run task -- train release <ID> --by <name>).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('stall_ended', id, res.message, { agent: by, to: 'producer', status: 'blocked', meta: { why: e.marker.why, step: e.marker.step || null, kept, held } });
+    } else {
+      // 2.77.1 (B-98): ended like a train that lands nothing: lanes kept (queued for the next train), nobody handed back.
+      const stay = ready.map((l) => l.task).filter((t) => !e.marker.tasks.includes(t) && !res.dropped.some((d) => d.task === t) && !res.landed.includes(t));
+      res.cancelled = e.marker;
+      res.message = `Train ${id} stopped: ${e.marker.tasks.join(', ')} left the train (by ${e.marker.by || '?'}: ${e.marker.why || '-'}); no further checks.${stay.length ? ` ${stay.join(', ')} stay queued for the next train (nobody handed back).` : ''}${res.landed.length ? ` ${summary(res)}` : ''}`;
+      log(`[train] ${id}: ${res.message}`);
+      ev('cancelled', id, res.message, { agent: by, status: 'warn', meta: { left: e.marker.tasks, leftBy: e.marker.by || null, why: e.marker.why || null, stay } });
+    }
   } finally {
     activeLanes.delete(String(id));
     for (const l of ready) deps.clearRunning?.(l.task);

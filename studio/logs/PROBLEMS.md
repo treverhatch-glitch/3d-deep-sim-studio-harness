@@ -1345,11 +1345,34 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 - **Why:** that merge ran 2.77.0's upgrade guard, which has no grandfather step (it starts with 2.77.1's guard).
 - **Fix:** `grandfather --ref <remote ref>` lists them by hand; merging 2.77.2 with 2.77.1's guard lists them by itself. qa/selftest-2772.mjs.
 
-### P-256 — lanes could not be refreshed after a harness upgrade · fixed in 2.78.0
+### P-256 — beta-mode owner records were "recorded", then ignored · fixed in 2.77.3
+- **Evidence:** `task type T-210 change --by opus-1 --permission …` printed "recorded by opus-1 on hatch's permission", yet `task done T-210 --train` still demanded spec, hand-off, playtest and a cross-family review; `task visual T-235 off` likewise (B-111). Four finished tasks parked.
+- **Why:** in beta mode with an owner key the orchestrator was refused outright; and a checkout whose origin/main lagged the key commit wrote an unsigned record the train (reading the local main) ignored.
+- **Fix:** one owner key and one beta-record predicate for writers and readers; unsigned records outside beta are refused up front. qa/selftest-2773a.mjs.
+
+### P-257 — a train sat 35 minutes holding its lock after a "real" verdict · fixed in 2.77.3
+- **Evidence:** train 20261104-203215-38488: "[flakes] panel.e2e … real: fails when run alone", then idle with train.lock and "verify 1 … ETA ~4 min" (B-112).
+- **Why:** the triage went on running the other failing files alone, each waiting up to 60 min for a heavy slot without a status update.
+- **Fix:** stop at the first real file, bounded alone-runs, and a stall watch that ends the attempt. qa/selftest-2773b.mjs.
+
+### P-258 — fixed e2e ports collided between verifies and were called flakes · fixed in 2.77.3
+- **Evidence:** trains failed on a different browser e2e file each run; the flake check called one a timing flake for hours and builders handed back finished work (B-108, T-188).
+- **Fix:** a `port-collision` verdict, the `game:test-ports` warning, and slot priority for the train (M6). The game side gives each run a free port (its T-235). qa/selftest-2773b.mjs.
+
+### P-259 — the stall killer stopped a P0 session twice in its first minutes · fixed in 2.77.3
+- **Evidence:** "read 2169593 tokens and wrote 267 (8126:1, limit 120:1)" after 4 min, then 1.2M/136 after 8 min (B-109).
+- **Why:** cache reads (the same context re-read each turn) counted as input.
+- **Fix:** uncached input plus cache creation only, and a 15-minute grace. qa/selftest-2773e.mjs.
+
+### P-260 — board state that blocked launches or undid parks · fixed in 2.77.3
+- **Evidence:** a lane-less task held the whole game (B-113); "T-124 waiting on T-152 … not merged" after a rescue landing (B-114); a Producer unparked the orchestrator's parks (H5); a builder's stop cooldown refused a reviewer, in local time (B-115).
+- **Fix:** lane warning and `task lane`, landed-on-board dependencies, ranked parks, per-role UTC cooldowns. qa/selftest-2773d.mjs.
+
+### P-261 — lanes could not be refreshed after a harness upgrade · fixed in 2.78.0
 - **Evidence:** train 20261104-200446-12184 dropped T-226: "git merge failed: studio/task-holds.json" in `.lanes/builder-p94a`; builder-s243 (T-132) was told to "git rebase main … then npm run hooks -- restamp, which I may not run" (B-105).
 - **Why:** a lane copy's `studio/` is a link to main's; once the lane's index lost its skip-worktree marks, a merge saw main's live board files as local changes (and, had it gone on, would have written them through the link). The builder's verify only refused, with steps a builder may not run.
 - **Fix:** every lane refresh re-marks the lane's `studio/` and `.studio/` paths left out first (`protectSharedLinks`, harness/lane-sparse.mjs); a builder's verify refreshes its own stale lane and runs again, or says to hand the task back. qa/selftest-278h.mjs.
 
-### P-257 — a timing test failed "alone" under load and finished work was handed back · fixed in 2.78.0
+### P-262 — a timing test failed "alone" under load and finished work was handed back · fixed in 2.78.0
 - **Evidence:** the crew's M7: with 4–6 verifies plus a Unity gate, a 2 ms timing test ran 2.2–2.5 ms (0.7–1.1 ms on a quiet machine); T-133 was handed back four times and T-199 once. The flake log judged it "real: fails when run alone" from a run whose `lowLoad` was false.
 - **Fix:** a file that fails alone runs again at low load on a quiet machine before it is `real`; passing there labels it `load-sensitive`, and a train whose only reds are load-sensitive lands. qa/selftest-278a.mjs.

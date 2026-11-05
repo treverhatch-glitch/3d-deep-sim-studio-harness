@@ -9,7 +9,10 @@
  *     (fingerprint = HEAD + `git status --porcelain` of its working copy + its task.* events)
  *   - stall: no progress for STUDIO_STALL_MIN minutes (15; Producer/Director/planner: STUDIO_STALL_PLAN_MIN, 8)
  *   - burn: over the last STUDIO_STALL_RATIO_WINDOW_TOKENS (300000) input tokens the input:output ratio
- *     passed STUDIO_STALL_RATIO (120:1) with no progress in that window
+ *     passed STUDIO_STALL_RATIO (120:1) with no progress in that window. 2.77.3 (B-109): the input counted here is
+ *     uncached input plus cache creation only: a cache read is the same context re-read on every turn (an Opus turn
+ *     re-reads ~100k tokens), not new work, and it ended a session after 4 min ("read 2169593, wrote 267"). And no burn
+ *     verdict in the first STUDIO_STALL_GRACE_MIN (15) minutes of a session. STUDIO_STALL_RATIO=0 turns the check off.
  *   - wall clock: the session ran longer than STUDIO_SESSION_MAX_MIN (90; planning roles
  *     STUDIO_SESSION_PLAN_MAX_MIN, 25)
  * A stalled session is ended and its task handed back with the reason (event session.stall). 0 turns a
@@ -47,6 +50,7 @@ export function stallLimits(role, env = process.env) {
     maxMin: plan ? num(env.STUDIO_SESSION_PLAN_MAX_MIN, 25) : num(env.STUDIO_SESSION_MAX_MIN, 90),
     ratio: num(env.STUDIO_STALL_RATIO, 120),
     ratioWindow: num(env.STUDIO_STALL_RATIO_WINDOW_TOKENS, 300000),
+    graceMin: num(env.STUDIO_STALL_GRACE_MIN, 15),
     busyMaxMin: num(env.STUDIO_STALL_VERIFY_MAX_MIN, 60),
   };
 }
@@ -144,7 +148,7 @@ export function stallVerdict(s, now = Date.now(), lim = stallLimits(s.role)) {
   if (lim.maxMin > 0 && ran >= lim.maxMin + stretch) return { stalled: true, kind: 'wall-clock', why: `ran ${Math.round(ran)} min, past the ${lim.maxMin} min cap for a ${s.role} session${stretch ? ` (+${stretch} min while it waits on its own ${s.busy.kind}, STUDIO_STALL_VERIFY_MAX_MIN)` : ''}` };
   if (lim.stallMin > 0 && quiet >= lim.stallMin) return { stalled: true, kind: 'no-progress', why: `no file write, commit or task change for ${Math.round(quiet)} min (limit ${lim.stallMin})` };
   const wi = Number(s.windowIn || 0); const wo = Number(s.windowOut || 0);
-  if (lim.ratio > 0 && lim.ratioWindow > 0 && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
+  if (lim.ratio > 0 && lim.ratioWindow > 0 && ran >= num(lim.graceMin, 15) && wi >= lim.ratioWindow && wi / Math.max(1, wo) >= lim.ratio) return { stalled: true, kind: 'read-burn', why: `read ${wi} tokens and wrote ${wo} (${Math.round(wi / Math.max(1, wo))}:1, limit ${lim.ratio}:1) with no progress` };
   return { stalled: false, kind: null, why: '', ranMin: Math.round(ran), quietMin: Math.round(quiet) };
 }
 
@@ -168,6 +172,8 @@ export function observe(session, { tokens = { in: 0, out: 0 }, cwd = REPO_ROOT, 
   const fp = progressFingerprint(session.agent, cwd, events);
   const prev = readStall(session.agent);
   const fresh = !prev || prev.startedAt !== session.startedAt;
+  // 2.77.3 (B-109): the burn ratio counts uncached input + cache creation (tokens.fresh from logTokens), not cache reads.
+  tokens = { ...tokens, in: tokens.fresh ?? tokens.in };
   let s = fresh ? { agent: session.agent, role: session.role, startedAt: session.startedAt, fp, lastProgressAt: session.startedAt, baseIn: 0, baseOut: 0 } : prev;
   // 2.76.0 (B-83, the crew's W-0070): fewer tokens than the last observation means the count started over (a new Claude
   // session inside this launcher run: logTokens counts only the newest one). The window starts again from here, so the
@@ -231,7 +237,7 @@ export function resetStall(agent) {
 /** Cumulative tokens from a stream-json log (each assistant message's usage), for a live session. 2.76.0 (B-83): only
  * the newest Claude session's lines count (newestSessionPart). */
 export function logTokens(log) {
-  let tin = 0; let tout = 0; const seen = new Set();
+  let tin = 0; let tfresh = 0; let tout = 0; const seen = new Set();
   for (const l of newestSessionPart(log).split(/\r?\n/)) {
     const t = l.trim();
     if (!t.startsWith('{')) continue;
@@ -240,10 +246,13 @@ export function logTokens(log) {
     if (!u) continue;
     const id = o.message?.id;
     if (id) { if (seen.has(id)) continue; seen.add(id); }
-    tin += (u.input_tokens ?? u.prompt_tokens ?? 0) + (u.cache_read_input_tokens || u.cached_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    const plain = (u.input_tokens ?? u.prompt_tokens ?? 0) + (u.cache_creation_input_tokens || 0);
+    tfresh += plain;
+    tin += plain + (u.cache_read_input_tokens || u.cached_input_tokens || 0);
     tout += u.output_tokens ?? u.completion_tokens ?? 0;
   }
-  return { in: tin, out: tout };
+  // in = everything read (as before); fresh = without cache reads, which is what the read-burn ratio uses (2.77.3, B-109).
+  return { in: tin, fresh: tfresh, out: tout };
 }
 
 /**

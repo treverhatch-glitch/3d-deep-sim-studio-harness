@@ -78,6 +78,11 @@ export async function runStage1ProgrammaticQA({ seed = 1337, ticks, cartridge, s
     if (outcome) break;
   }
 
+  // 2.77.3 (M7): a stage that stepped nothing (no ticks asked, a bad --ticks, a scenario with maxTicks 0) proved nothing.
+  if (!findings.length && ticksRun === 0) {
+    add({ id: 'QA-STAGE1-RAN-NOTHING', severity: 'P0', summary: `stage 1 ran 0 steps (maxTicks ${maxTicks}): nothing was played, so it can't pass`, expected: 'at least 1 tick', actual: '0 ticks' }, 0);
+  }
+
   const finalHash = adapter.getHash();
   const finalSha256 = cart.sha256(adapter.getState());
   if (!findings.length) {
