@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { modelFamily } from './families.mjs';
-import { setHold, heldForLanding, heldWords } from './task-hold.mjs';
+import { setHold, readHolds, heldForLanding, heldWords } from './task-hold.mjs';
 import { budgetStopFor } from './budget.mjs';
 
 export const RESCUE_RE = /^Rescue:\s*(T-\d+)\b/;
@@ -127,7 +127,8 @@ export function applyRescue(rescueTask, { by = 'rescue' } = {}) {
   if (!stuck) return null;
   const r = readRescue(stuck);
   if (r?.decision === 'retry') {
-    setHold(stuck, { parked: null }, { by, msg: `${by} unparked ${stuck}: rescue ${rescueTask.id} cleared it (budget starts again)` });
+    // 2.77.3 (H5): a park a person or the orchestrator made on purpose (it carries a rank) isn't cleared by a rescue.
+    if (!(readHolds()[stuck]?.parked?.rank > 0)) setHold(stuck, { parked: null }, { by, msg: `${by} unparked ${stuck}: rescue ${rescueTask.id} cleared it (budget starts again)` });
     emitEvent({ type: 'task.rescue.done', agent: by, task: stuck, msg: `${stuck} back in the queue after rescue ${rescueTask.id}: ${r.diagnosis.split('\n')[0].slice(0, 200)}`, meta: { decision: 'retry', rescue: rescueTask.id } });
   } else if (r?.decision === 'split') {
     setHold(stuck, { parked: { by: 'rescue', why: `split by rescue ${rescueTask.id} into smaller tasks; close it when they land`, rescue: 'split', at: new Date().toISOString() } }, { by, msg: `${stuck} split by rescue ${rescueTask.id}` });

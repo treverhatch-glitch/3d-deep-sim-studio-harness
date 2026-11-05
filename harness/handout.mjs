@@ -11,7 +11,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { STUDIO_STATE_DIR } from './event.mjs';
+import { STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { readHolds, lanesClash } from './task-hold.mjs';
 
 const WAIT_FILE = () => path.join(STUDIO_STATE_DIR, 'handout-waiting.json');
@@ -24,13 +24,29 @@ const readJson = (f, d) => {
 };
 
 /**
+ * 2.77.3 (B-114): a task the board closed as landed (its last closing event is task.done, a merge-train landing or a lane
+ * merge; a forced done or a reopen after it doesn't count) is landed, whatever an old lane branch's commit hashes say: a
+ * rescue lands the same work under new hashes, and the dead branch would otherwise hold its dependants for ever.
+ */
+export function landedOnBoard(taskId, events = readRecentEvents(20000)) {
+  let last = null;
+  for (const e of events) {
+    if (e.task !== taskId && !(e.type === 'task.train.landed' && Array.isArray(e.meta?.lanes) && e.meta.lanes.map(String).includes(taskId))) continue;
+    if (['task.done', 'task.train.landed', 'lane.merged'].includes(e.type)) last = true;
+    else if (['task.forced', 'task.reopened'].includes(e.type)) last = false;
+  }
+  return last === true;
+}
+
+/**
  * Why this task should not be handed out now, as { owner, why }, or null.
  * deps: { locks: listLocks(), unmerged(branch) => count, lane } — injectable for tests.
  */
-export function handoutBlock(taskId, q, { locks = [], unmerged = () => 0, lane = null, holds = readHolds(), branches = readJson(path.join(STUDIO_STATE_DIR, 'lane-branches.json'), {}) } = {}) {
+export function handoutBlock(taskId, q, { locks = [], unmerged = () => 0, lane = null, holds = readHolds(), branches = readJson(path.join(STUDIO_STATE_DIR, 'lane-branches.json'), {}), landed = landedOnBoard } = {}) {
   const done = new Set(q.done.map((t) => t.id));
   for (const pre of holds[taskId]?.after || []) {
     if (!done.has(pre) || !branches[pre]) continue;
+    if (landed(pre)) continue; // 2.77.3 (B-114)
     let n = 0;
     try {
       n = unmerged(branches[pre]);

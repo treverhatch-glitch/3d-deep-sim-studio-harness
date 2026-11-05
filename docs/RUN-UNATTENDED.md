@@ -226,7 +226,16 @@ regression exactly: `qa/regressions/<ID>.json`, its fields, `node qa/check-regre
 `node qa/fails-before.mjs qa/regressions/<ID>.json "<fix>^"` (`harness/regression-howto.mjs`).
 
 `npm run agent -- stop <name>` (and Pause) keep that task from restarting for 15 minutes
-(`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back.
+(`STUDIO_STOP_COOLDOWN_MIN`). "Stop all" also stops running agents and hands their tasks back. The cooldown (2.77.3)
+holds only the stopped role: a stopped builder's task can't restart as a builder for 15 minutes, but a reviewer can start;
+the restart time is shown in UTC.
+
+2.77.3: `task park <ID> --why "…" --until "<condition>"` stores the condition as a note (shown on every refusal) when it
+isn't a task id, `phase:N` or a time. A park records its rank (owner > orchestrator > producer/director > any agent);
+`task unpark` (and `task unblock`) by a lower rank is refused, naming who parked it. A builder task added by `task add` must name its folders
+(`--lane <folders>`, `--paths`, `--part`, or `--lane all` for the whole game on purpose) unless they can be worked out from
+its title: `STUDIO_REQUIRE_LANE=on` refuses it, `warn` (the default) queues it with a warning, `off` is silent. Without folders
+it counts as working on the whole game and no other builder runs beside it. `task lane <ID> <folder> [<folder>…]` sets them afterwards.
 
 ## Crew watchdog, futility cap, wind-down and janitor (2.68.0)
 

@@ -4659,6 +4659,15 @@ if (inShard('selftest-2772')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (d): a builder task with no folders blocked every launch (H3), a rescue-landed dependency stayed "not merged" (H4),
+// a Producer undid the orchestrator's parks (H5), a builder's stop cooldown refused a reviewer (M1), task add named one flag (M2).
+if (inShard('selftest-2773d')) {
+  const dir = copyRepo();
+  const { selftest2773D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773d.mjs')).href);
+  await selftest2773D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

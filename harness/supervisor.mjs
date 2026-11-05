@@ -414,7 +414,7 @@ export async function supervise(opts, state, now = Date.now()) {
   let claimEvents = null;
   const waiting = q.backlog.filter((t) => {
     if (!t.role || t.role === 'human' || lockStatus(`task:${t.id}`).locked) return false;
-    let h = holdReason(t.id, q, now);
+    let h = holdReason(t.id, q, now, undefined, t.role);
     if (!h) {
       const a = claimActive(t.id, { root: mainRoot(), now, events: (claimEvents ||= readRecentEvents(20000)), orphaned: true });
       if (a.busy) h = `waits for ${a.owner}: ${a.why}`;

@@ -1682,7 +1682,7 @@ export function pauseAgent(agent, note = '', by = 'war-room-human') {
     pauseTask(t, agent, `${note || `Paused from the War Room; ${agent}'s work so far is ${s.copy ? 'in its copy' : 'in the working tree'}.`}${patch ? ` Saved to ${patch}.` : ''} Paused by ${by} (${STOP_NOTE}).`, { force: true });
   }
   // A paused task doesn't restart straight away under a new name (STUDIO_STOP_COOLDOWN_MIN, default 15).
-  for (const t of tasksOf(agent, s)) cooldown(t, by);
+  for (const t of tasksOf(agent, s)) cooldown(t, by, undefined, s.role || null);
   stopAgent(s, { by, record: 'pause' });
   emitEvent({ type: 'agent.paused', agent, to: 'producer', msg: `${agent} paused${held.length ? `; ${held.join(', ')} back in the queue` : ''}${note ? `: ${note}` : ''}` });
   return { ok: true, handed: held };
@@ -1697,9 +1697,9 @@ export function stopAgentNamed(agent, by = 'war-room-human') {
   const s = sessions().find((x) => x.agent === agent && x.status === 'running');
   if (!s) return { ok: false, message: `${agent || '(no name)'} isn't running.` };
   const tasks = tasksOf(agent, s);
-  const until = tasks.map((t) => cooldown(t, by)).filter(Boolean)[0] || null;
+  const until = tasks.map((t) => cooldown(t, by, undefined, s.role || null)).filter(Boolean)[0] || null;
   const r = stopAgent(s, { by, record: 'stop' });
-  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? until.slice(11, 16) : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
+  emitEvent({ type: 'agent.stopped', agent: by, to: 'producer', msg: `${by} stopped ${agent}${r.killed ? '' : ` (nothing killed: ${r.why})`}${tasks.length ? `; ${tasks.join(', ')} can restart after ${until ? `${until.slice(11, 16)} UTC` : 'now'}` : ''}`, meta: { killed: r.killed, kind: r.kind, target: r.target } });
   return { ok: true, agent, tasks, until, killed: r.killed, ended: r.ended, kind: r.kind, target: r.target, why: r.why };
 }
 
