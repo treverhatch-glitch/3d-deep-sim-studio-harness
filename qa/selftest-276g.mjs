@@ -94,7 +94,11 @@ export async function selftest276G({ dir, run, report, tmpRoot }) {
     apFile = files[0] ? path.join('studio', 'approvals', files[0]) : null;
     let doc = null;
     try { doc = JSON.parse(fs.readFileSync(path.join(lane, apFile), 'utf8')); } catch {}
+    // 2.78.2 (h, the owner's call): a beta approval counts only once committed, by someone who isn't a worker.
+    if (apFile) { g(lane, ['add', apFile]); g(lane, ['commit', '-qm', 'approval\n\nStudio-Agent: opus-1', '--no-verify']); }
     const after = show();
+    // The next check commits the approval itself (first as a builder): put it back to uncommitted, file kept.
+    if (apFile) g(lane, ['reset', '-q', '--soft', 'HEAD~1']);
     return [before.status !== 0 && ap.status === 0 && doc?.signature === null && doc?.beta?.by === 'pat' && doc?.approval?.recordedBy === 'opus-1' && after.status === 0,
       `before ${before.status}: ${out(before).slice(-200)}\napprove ${ap.status}: ${out(ap).slice(-300)}\n${JSON.stringify(doc).slice(0, 400)}\nafter ${after.status}: ${out(after).slice(-200)}`];
   });
