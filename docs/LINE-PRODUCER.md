@@ -13,14 +13,20 @@ executes and reports up).
 
 | Step | What | Changes anything? |
 |---|---|---|
-| Builders | N = min(the pace's builder count, what the rig can carry): RAM room after the heavy claims / `STUDIO_LINE_BUILDER_GB`, and no new builder while the CPU is at `STUDIO_LINE_CPU_BUSY_PCT`. The rig comes from `harness/rig-budget.mjs` `rigBudget()` when it is there, else the machine scan and heavy claims (`harness/heavy-budget.mjs`). | It can hold builders back when the rig is full; it never starts more than the pace allows. |
+| Builders | N = min(the pace's builder count, what the rig can carry): RAM room after the heavy claims (2.78.1: and a running engine train's RAM between its land runs, `heavy-budget.mjs` `engineTrainReserve`, `STUDIO_ENGINE_TRAIN_RESERVE`) / `STUDIO_LINE_BUILDER_GB`, and no new builder while the CPU is at `STUDIO_LINE_CPU_BUSY_PCT`. The rig comes from `harness/rig-budget.mjs` `rigBudget()` when it is there, else the machine scan and heavy claims (`harness/heavy-budget.mjs`). | It can hold builders back when the rig is full; it never starts more than the pace allows. |
 | Blocked | For every waiting task, why it can't start: trunk, chain, park, cooldown, block, budget, lock, busy, merge, yes, held, lane. | Mechanical fixes only (below). |
 | Fixes | A lock whose holder's session is over (freed); a lane queued for the train whose copy is gone (recreated from its branch, never while a train runs); a cooldown, block or park whose time has come (cleared). Each one is logged in `.studio/line/actions.jsonl` and as a `line.fixed` event. | Yes: routine harness housekeeping. |
 | Chain-breakers | A task `STUDIO_LINE_CHAIN_MIN` (3) or more open tasks wait on (directly or down a chain): first in the order, on the strongest model. | The supervisor's order. |
 | Models | Size 1-2 cheap, 3 (or none) mid, 4-5 top, one tier up per red round; models from the 2.73 routing tiers (`studio/policy.json` "routing".tiers, only listed models) else `STUDIO_TIER_<TIER>_MODEL`. A task that already started keeps its model; a rescue keeps the rescue model; no model for the tier: the launcher's default (nothing changes). Only on the role's preferred tool, never on a custom command. A routed start is a `model.routed` event with arm `line-producer`. | The model of a new session. |
 | Expansion | round(N × `STUDIO_LINE_EXPANSION_SHARE`) builders on research/expansion work (a research/study/idea task, an engine track, or a `Research:` / `Expansion:` title), the least-covered phase (1 early, 2 mid, 3 late) first. Under `STUDIO_LINE_EXPANSION_MIN` such tasks open: ONE "Director: next ranked slice for phase N" task (never two open). | One Director task. |
+| Lanes (2.78.1, B-123) | Each ready builder task with no lane (and not the whole game on purpose) gets one worked out from its `--scope` globs (their folders), the code paths its title, `--asked` text or its own hand-off note names (existing paths outside `studio/`, `docs/` and the harness), the files its title points at, and plan-waves' predicted files (its overlap history). The lane goes where the supervisor reads it (`studio/task-holds.json` "lane", as `task lane` writes it), as the Producer's decision (a `task.lane` event, `.studio/decisions.jsonl` action `task-lane`). A ready task it can't scope is listed as blocked kind `unscoped` (it still runs, alone) and in the Producer note when more than one builder could run; a running task with no lane is only reported. `STUDIO_LINE_LANES` (`harness/lane-plan.mjs`). | A task's lane. |
+| Phase awareness (2.78.1) | A ready builder task whose lane or predicted files touch shared sim code (`STUDIO_SHARED_SIM`, else the game manifest's `"sharedSim"`, else the default: a cartridge's `index.*`/`sim.*`/`core/`/`systems/`, a sim folder's `sim.*`, `index.*`, `core/`, `systems/`, `shared/`, `types.*`) waits (`--after`) for the open task before it (in progress first, then the order) that touches the same shared files: a chain, never side by side. Logged as the Producer's decision (`task-stack`) and in the status (`lanes.stacked`, the "Stacked on shared sim code" line). | A task's `--after`. |
 | Producer note | When the plan can't run (a chain-breaker waiting on a yes, a park or a hold; free builder slots and every builder task blocked; a chain on a task that isn't on the board; a red trunk): `.studio/line/producer-note.md`, and a `line.plan_blocked` event when the reasons change (`line.plan_ok` when it clears). It never changes direction itself. | A note. |
 | Remote (2.77.0) | When the local builders are at their target, the remote-eligible ready tasks (`npm run remote -- mark`) are offered to remote (cloud) workers, at most `STUDIO_REMOTE_MAX` out: a `remote` line and `remote: { on, out, queued, max, leases, offer, why }` in the status, one `remote.offer` event when the offer changes. With `STUDIO_REMOTE=on` the pass also ends leases that ran out (the claim released, the task back on the board) and starts a background `remote -- fetch` every `STUDIO_REMOTE_FETCH_MIN` minutes while a lease is out (docs/REMOTE-WORKERS.md). | Leases that ran out; a background fetch. |
+| Status | `.studio/line/status.json`: `{ at, builders: { running, target, why }, blocked: [{ task, why, fix }], lanes: { set, unscoped, running, stacked, shared }, chainBreakers, expansion: { share, byPhase }, rig, order, routes, actions, text }` (`text`: one plain line, "Line: 2/5 builders; 4 blocked (2 chain, 1 yes, 1 park); …") — what the Communicator posts (`lineStatus()`), and what the supervisor follows. | — |
+
+| Chain-breaker push (2.78.1) | While a chain-breaker is queued for the merge train (`.studio/train/queue.json`, not held for a person), a quiet hold (`harness/heavy.mjs` `markQuietHold`, tag `chain-breaker`, the 2.78.0 C2c mechanism): heavy work that isn't a game landing (builders' verifies, an engine land) waits in the heavy queue, so the train's checks get a quiet machine. Running jobs are never stopped. Bounded by `STUDIO_LINE_CHAIN_HOLD_MIN` from when the chain-breaker was queued; cleared when none is queued or the supervisor is gone. `chainPush` in the status. | A hold marker in `.studio/locks/`. |
+| Engine twins (2.78.1) | When a game task lands (a `task.done` event) and its commits on the main branch (messages naming the task) change a file an engine's twin paths list (`studio/game.json` `engines.<name>.twins`: globs, or `{ "paths": [...], "role", "priority", "branch": "<engine>/twin-{task}", "lane" }`; none listed by default), ONE twin task: `<Label> twin of T-n: <title>`, role `engine-porter`, track `engine:<name>`, its branch, stacked `--after` the landed task and that engine's open twins. A task that matches nothing is reported "no twin needed". Each landed task is looked at once (`.studio/line/twins.json`; the first pass only starts the record). `twins` in the status; `STUDIO_LINE_TWINS=off` turns it off. | One engine task per matching landing. |
 | Status | `.studio/line/status.json`: `{ at, builders: { running, target, why }, blocked: [{ task, why, fix }], chainBreakers, expansion: { share, byPhase }, rig, order, routes, actions, text }` (`text`: one plain line, "Line: 2/5 builders; 4 blocked (2 chain, 1 yes, 1 park); …") — what the Communicator posts (`lineStatus()`), and what the supervisor follows. | — |
 
 Beta mode: the fixes above are housekeeping, never an owner decision. A yes, an unpark or an unhold is only reported,
@@ -44,7 +50,34 @@ naming who may act for the owner (beta mode's agents; the owner's delegate via `
 | `STUDIO_LINE_CPU_BUSY_PCT` | `90` | CPU busy at or above this (the last machine scan): no new builder. |
 | `STUDIO_LINE_RIG` | (auto) | `heavy`: read the heavy budget even when `harness/rig-budget.mjs` is there. |
 | `STUDIO_LINE_PLAN_MAX_SEC` | `300` | The supervisor ignores a status older than this. |
+| `STUDIO_LINE_LANES` | `on` | 2.78.1 (B-123): `on`: the pass sets lanes on unscoped ready builder tasks. `report`: it says what it would set (`lanes.set`, `dry`). `off`: it sets none (unscoped tasks are still reported). |
+| `STUDIO_SHARED_SIM` | (the default list) | 2.78.1: shared sim code for phase awareness, comma-separated globs; `off` stacks nothing. Unset: the game manifest's `"sharedSim"`, else the default (above). |
+| `STUDIO_UNSCOPED_PARALLEL` | `on` | 2.78.1 (B-123): the supervisor runs builders with no lane side by side when both have a prediction (a lane, else plan-waves' `--scope` or overlap history) and they don't overlap. `off`: no lane = the whole game, as before. |
+
+| `STUDIO_LINE_CHAIN_HOLD_MIN` | `60` | 2.78.1: minutes from a chain-breaker's queueing that new builder verifies wait for its train (`0`/`off`: no push). |
+| `STUDIO_LINE_TWINS` | `on` | 2.78.1: `off`: no engine twin tasks (`studio/game.json` `engines.<name>.twins` lists the game paths that have one). |
+
+| `STUDIO_PLANNING_ROOM` | `on` | 2.78.1 (g): the Line Producer's Planning Room on the War Room's Studio floor (below). `off`: no room; the Line Producer sits in the Production room as before. |
 | `STUDIO_LINE_PROTECTED_HOLD_MIN` | `120` | How long a task whose protected step was routed to an approver is held from new builders (or until an approval names it). |
+
+## The Planning Room in the War Room (2.78.1, g)
+
+The owner asked for the Line Producer's own room in the Studio view, "big … so it shows the line producer's plans
+plainly and clearly". The **Planning Room** is a room of its own (harness/war-room.mjs `roomFor` seats the role there; the
+page draws the room from the HUD's `planning`, beside the Rail Yard and Watchtower) that takes the whole width of the
+Studio floor, sits right under the Production room and is taller than the others; the role `line-producer` (its
+desk, and any session started in that role, even one hired into Production) sits there. Its wall board shows the plan
+in plain text, read from the harness's own files by `harness/planning-room.mjs` (the HUD's `planning` in `/api/hud`, on
+the War Room's usual poll; nothing estimated, a field that isn't on file is left out): **Now**, the running builders
+(task, title, lane or "whole game", who, model, when it started: the board, the launcher's sessions, `task.start`);
+**Next up**, the ready queue in this pass's order (`.studio/line/status.json` "order") with each task's lane, "unscoped"
+in the warning color, its wave from plan-waves' last `waves.shadow` event and its model route; **Waiting**, tasks
+stacked with `--after` (on what, and why: "shared sim code: <file>" from the pass's stack, which its `task.hold` event
+now carries as `meta.via`, else the hold's own words) and the pass's blocked and unscoped tasks with the reason and the
+fix; **Last pass**, when, the lanes it set, the stacks it added, its fixes, its one-line status, its Producer-note
+blockers, builders running against the target and its recent decisions. With no status on file it says "No plan yet:
+the Line Producer hasn't run"; a plan older than `STUDIO_LINE_PLAN_MAX_SEC`, or with the supervisor down, is shown with
+its age as "Last plan". The room has no buttons. `STUDIO_PLANNING_ROOM=off` takes it away.
 
 ## Model pools: quota-aware routing that prefers Gemini (2.77.0)
 

@@ -73,6 +73,11 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   named in the agent's prompt and passed to the tool as an extra folder. Only `git worktree add` runs in the engine
   repo; its other checkouts and the land script's gate worktree are never touched. `STUDIO_ENGINE_LANES=off` turns
   this off.
+  2.78.1 (B-119): a branch can't be checked out twice. When the pass's branch is already checked out in another
+  worktree of the engine repo and that worktree is clean, the pass works there (its note says so). With uncommitted
+  work there, or when it is the land script's own `gateWorktree`, the launch is refused with what to do (commit or
+  stash there, or switch that folder to another branch) instead of starting a session that can't reach the code.
+  `STUDIO_ENGINE_LANE_REQUIRED=off` lets such a session start anyway, as before.
 - **Done check.** A pass in its own repo is judged in that repo:
   - its branch has commits the target lacks, and everything on it is committed;
   - the visual check passes, when the task asks for one;
@@ -107,6 +112,32 @@ The Line Producer doesn't start the same engine's train again within `STUDIO_ENG
 `STUDIO_ENGINE_TRAIN_AUTO=off`, or `"trainAuto": false` for one engine, leaves starting it to a person.
 
 The land run itself still takes `machine:heavy` as that engine's job kind, with its RAM and its free-RAM floor.
+
+**The engine line (2.78.1, B-117).** A Unity land (8 GB, 2 GB VRAM) used to take one of the game's `STUDIO_HEAVY_SLOTS`
+and go as a landing: with few slots a game train's flake re-run waited 20+ minutes behind it. Now an engine land
+(`harness/unity-gate.mjs`, any engine) takes the engine line instead: at most `STUDIO_ENGINE_SLOTS` (default 1; read
+live like the heavy slots) engine lands at once, never a game slot, so builders and the game's train keep every game
+slot. Its RAM, VRAM and threads still count in the budget every job is admitted against. It gives way to the game's
+train (the owner's order, train > builder verifies > engine): it doesn't start while a game train's verify holds a
+slot, while a game landing waits in the queue, while the train-wait marker (M6) is up, or while a quiet hold is (a flake
+check's quiet re-run, the chain-breaker push). A land that waits too long is refused (never red) and the engine train
+tries again as before. The line needs a fresh machine scan (`npm run machine`; older than `STUDIO_MACHINE_MAX_AGE_MIN`
+counts as none): with none, the slot count is the only guard on the machine, so the land keeps sharing the game's slots
+(it still gives way to the train). The scan must also show room for both at full size: the engine land's claim plus one
+game job (the `heavy` kind's claim, `studio/machine-budget.json` `jobs.heavy`) within the usable RAM (total minus
+`STUDIO_RESERVE_RAM_GB`) and the logical cores with no overcommit; a smaller machine (a 4-core runner: 4 + 2 threads on
+4 cores) keeps sharing the game's slots, and the land says why. On Windows every heavy wait takes a scan of its own
+(for the commit headroom), so a scan alone is not enough. `STUDIO_ENGINE_LINE_ROOM=off` opens the line on any fresh
+scan. `STUDIO_ENGINE_SLOTS=0` or `off`: the 2.78.0 behaviour (a game slot, a landing).
+
+**Room for builders.** A running engine train (its lock live) keeps its land run's RAM (the engine table's `rig.ramGb`,
+written to the lock) off the room for builder sessions between its land runs too (the supervisor's session cap and the
+Line Producer's rig; `heavy-budget.mjs` `engineTrainReserve`). While a land holds its slot its claim counts instead,
+never both. `STUDIO_ENGINE_TRAIN_RESERVE=off` turns it off.
+
+**Twins (2.78.1).** `"engines": { "unity": { "twins": ["web/my-game/sim/**"] } }` lists the game paths whose change
+needs a twin in the engine slice (a fuel ladder's "Unity models" step). When a game task touching one lands, the Line
+Producer adds the twin task (docs/LINE-PRODUCER.md). None are listed by default.
 
 - **Recorded durations.** Every land run that runs to the end (pass, red or conflict) records its length in
   `.studio/engine/durations.json`. The median of the last 12 runs becomes the expected minutes; until there are any,

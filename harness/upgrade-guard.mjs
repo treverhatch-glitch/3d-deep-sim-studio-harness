@@ -366,7 +366,7 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     // step existed (2.77.0 on the crew's main) are listed too. Only the ref's history: the studio's own commits aren't in it.
     const b = hs.changeBase ? await hs.changeBase(env).catch(() => null) : null;
     const gf = hs.grandfatherRange ? await hs.grandfatherRange(`${b?.base || head}..${sha}`, root) : null;
-    if (gf?.ok && gf.added) lines.push(`[upgrade] ${gf.added} commit(s) of the update listed as made without this studio's hooks (exempt from the hooks gate).`);
+    if (gf?.ok && gf.added) lines.push(`[upgrade] ${gf.added} commit(s) of the update listed as made without this studio's hooks (exempt from the hooks gate)${gf.merges ? `, ${gf.merges} of them its own merge commits (2.78.1)` : ''}.`);
     else if (gf && !gf.ok) lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${gf.why}): node harness/hook-stamp.mjs grandfather adds them by hand.`);
   } catch (e) { lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${String(e?.message || e).slice(0, 160)}).`); }
   await emit(root, {

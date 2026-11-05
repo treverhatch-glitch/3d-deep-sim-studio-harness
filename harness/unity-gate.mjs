@@ -230,7 +230,8 @@ export async function runUnityGate({ engine = 'unity', task = null, branch = nul
   const timeoutMin = Number(cfg.timeoutMin || env.STUDIO_UNITY_GATE_TIMEOUT_MIN || 120);
   // 2.77.0 (u, P5.3): the engine table's job kind, RAM and floor (unity: the "unity" kind and STUDIO_UNITY_MIN_FREE_GB as before).
   const floor = engineFloor(engine, { env });
-  const heavyOpts = { log, env, kind: et.heavyKind, ...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
+  // 2.78.1 (f, B-117): engine: the land takes the engine line (STUDIO_ENGINE_SLOTS), not one of the game's slots.
+  const heavyOpts = { log, env, kind: et.heavyKind, engine,...(et.heavyKind === 'unity' ? {} : { ramGb: et.rig.ramGb }), ...(et.heavyKind === 'unity' ? (/tuned/.test(floor.from) ? { minFreeGb: floor.gb } : {}) : floor.gb > 0 ? { minFreeGb: floor.gb } : {}) };
   const landLabel = label || `${engine} land${task ? ` (${task})` : ''}`;
   let lk;
   try {

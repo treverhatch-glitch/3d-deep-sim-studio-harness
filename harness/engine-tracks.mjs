@@ -213,6 +213,54 @@ export function engineFloor(engine, { env = process.env, root = mainRoot() } = {
 const safeName = (s) => typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(s) && !s.includes('..') && !s.endsWith('.lock') && !s.endsWith('/');
 
 /**
+ * 2.78.1 (B-119 on Windows): one path in one spelling for comparing. git prints a worktree as its real path (long names,
+ * forward slashes: C:/Users/runneradmin/...), while the studio's own paths may be short names (C:\Users\RUNNER~1\..., as
+ * Windows' TEMP is) or another letter case; path.resolve() equates neither. The native real path does; on Windows case
+ * doesn't count.
+ */
+const canonPath = (p) => {
+  let r;
+  try { r = fs.realpathSync.native(p); } catch { r = path.resolve(p); }
+  return process.platform === 'win32' ? r.toLowerCase() : r;
+};
+export const samePath = (a, b) => Boolean(a) && Boolean(b) && canonPath(a) === canonPath(b);
+/**
+ * A path git printed, in the studio's own spelling: under the nearest folder of `anchors` (and their parents) that holds
+ * it, so it compares and prints the way the studio's paths do (the engine repo's folder, the studio). Unchanged when none does.
+ */
+export function ownSpelling(p, anchors = []) {
+  if (!p) return p;
+  let real;
+  try { real = fs.realpathSync.native(p); } catch { return p; }
+  const fold = (x) => (process.platform === 'win32' ? x.toLowerCase() : x);
+  for (const anchor of anchors.filter(Boolean)) {
+    for (let a = path.resolve(anchor); ; a = path.dirname(a)) {
+      let ra = null;
+      try { ra = fs.realpathSync.native(a); } catch { ra = null; }
+      if (ra) {
+        if (fold(real) === fold(ra)) return a;
+        const pre = ra.endsWith(path.sep) ? ra : `${ra}${path.sep}`;
+        if (fold(real).startsWith(fold(pre))) return path.join(a, real.slice(pre.length));
+      }
+      if (path.dirname(a) === a) break;
+    }
+  }
+  return p;
+}
+
+/** 2.78.1 (e, B-119): the worktree of `repo` that has `branch` checked out (git worktree list), or null. */
+export function worktreeOn(repo, branch) {
+  const r = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  if (r.status !== 0) return null;
+  let dir = null;
+  for (const l of String(r.stdout || '').split(/\r?\n/)) {
+    if (l.startsWith('worktree ')) dir = l.slice(9).trim();
+    else if (l.trim() === `branch refs/heads/${branch}` && dir) return path.resolve(dir);
+  }
+  return null;
+}
+
+/**
  * A launched pass on an engine whose work lives in its own repo gets its own worktree of that repo on the task's
  * branch (made from the target when the branch doesn't exist yet), at <studio>/.lanes/engine/<task>. Only `git worktree
  * add` runs in the engine repo; its checked-out folders and the land script's gate worktree are never touched.
@@ -235,6 +283,28 @@ export function engineLaunch({ task, agent = null, root = mainRoot(), dryRun = f
     const cur = spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: dir, encoding: 'utf8', windowsHide: true }).stdout.trim();
     if (cur === branch) return { dir, branch, repo, created: false, note: note(false) };
     return { error: `${dir} is a worktree on ${cur || 'a detached HEAD'}, not ${branch}: remove it (git -C "${repo}" worktree remove "${dir}") and start again` };
+  }
+  // 2.78.1 (e, B-119): a branch checked out in another worktree can't be checked out twice. An engine pass launched then
+  // ran with no code access. Clean there: the pass works in that worktree. Uncommitted work there: refused, with what to do.
+  if (has) {
+    g('worktree', 'prune');
+    // In the studio's spelling, compared by real path (Windows: short names, letter case; see samePath).
+    // The configured folders first: engineRepo's repo is git's own top-level path, in git's spelling too.
+    const spelled = [t.cfg.gateWorktree, t.cfg.folder, t.cfg.cwd].filter((c) => typeof c === 'string' && c.trim()).map((c) => path.resolve(root, c));
+    const other = ownSpelling(worktreeOn(repo, branch), [...spelled, root, repo]);
+    if (other && !samePath(other, dir)) {
+      const st = spawnSync('git', ['status', '--porcelain'], { cwd: other, encoding: 'utf8', windowsHide: true });
+      const dirty = st.status === 0 ? st.stdout.split('\n').filter((l) => l.trim()) : null;
+      const shown = other.split(path.sep).join('/');
+      // The land script's own worktree (engines.<x>.gateWorktree) is never an agent's: the harness never touches its files.
+      const gw = t.cfg.gateWorktree ? path.resolve(root, t.cfg.gateWorktree) : null;
+      if (gw && samePath(other, gw)) return { error: `the task's ${t.label} branch ${branch} is checked out in ${shown}, the land script's own worktree (engines.${rec.engine}.gateWorktree), which no agent edits: switch that folder back to its own branch (git -C "${shown}" switch <its branch>), then start the pass again`, busy: shown };
+      if (dirty && !dirty.length) {
+        const n = `Your ${t.label} work is in its own repo: your worktree is ${shown} on branch ${branch} (already checked out there and clean, so you work there). Edit and commit there (no editor run needed; the land run does it). Then: npm run task -- done ${task} --agent ${agent || '<you>'} --train${rec.visual?.required ? ` (first the visual check: npm run visual -- status ${task})` : ''}.`;
+        return { dir: other, branch, repo, created: false, reused: true, note: n };
+      }
+      return { error: `the task's ${t.label} branch ${branch} is checked out in ${shown}${dirty ? ` with uncommitted work (${dirty.slice(0, 3).map((l) => l.slice(3)).join(', ')}${dirty.length > 3 ? ` +${dirty.length - 3}` : ''})` : ' (its state could not be read)'}, and a branch can't be checked out twice: commit or stash that work there (or switch that folder to another branch: git -C "${shown}" switch <other>), then start the pass again`, busy: shown };
+    }
   }
   if (dryRun) return { dir, branch, repo, created: !has, dry: true, note: note(!has) };
   fs.mkdirSync(path.dirname(dir), { recursive: true });

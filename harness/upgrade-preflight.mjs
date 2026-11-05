@@ -25,6 +25,11 @@
  *                 the update's lane refresh skips a lane with uncommitted work. 2.73.1 (B-51): a lane is a registered
  *                 worktree of this repo (git worktree list) with its own .git; any other folder there is a "leftover
  *                 folder (not a lane)" (INFO), never asked for git status (git would answer for the main checkout)
+ *   long-run/…    2.78.1, "before a long run" (WARN only): .env workarounds a later release made unnecessary (the list is
+ *                 harness/upgrade-leftovers.json: version, key, value, why), ready builder tasks with no lane (the
+ *                 studio's own harness/task.mjs and task-hold.mjs read the board, when it has them), uncommitted changes
+ *                 in harness/ or scripts/ (a local patch), and trains (.studio/train/<id>/life.json) or gate runs
+ *                 (.studio/verify-running) still running from before the harness last changed
  *
  * No harness imports (only node's): an old studio runs this from the ref through the upgrade guard (docs/RELEASE.md).
  * The guard passes its own checkUpgrade / isMainCheckout in. UNTESTED on Windows: `where` for the PATH lookups.
@@ -33,7 +38,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const git = (args, cwd, opts = {}) => spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true, ...opts });
 const out1 = (r) => (r.status === 0 ? String(r.stdout || '').trim() : '');
@@ -256,12 +261,95 @@ function checkLanes(root) {
   return [...left, item('lanes', 'WARN', `${busy.length} lane(s) hold unlanded work: ${busy.slice(0, 8).join('; ')}${busy.length > 8 ? ` and ${busy.length - 8} more` : ''}`, 'land them first (npm run task -- train --by <you>), or let their agents commit: the update\'s lane refresh skips a lane with uncommitted work, and its agent merges main in later')];
 }
 
+// ---- 2.78.1: before a long run (leftovers from earlier workarounds) -------------------------------------------------
+
+/** harness/upgrade-leftovers.json: the studio's own, else the one beside this file. [{ version, key, value?, why }]. */
+export function readLeftovers(root) {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const f of [path.join(root, 'harness', 'upgrade-leftovers.json'), path.join(here, 'upgrade-leftovers.json')]) {
+    const j = readJson(f);
+    if (j && Array.isArray(j.leftovers)) return j.leftovers.filter((x) => x && /^[A-Z][A-Z0-9_]*$/.test(String(x.key || '')) && x.version);
+  }
+  return [];
+}
+const pidLive = (pid) => { const n = Number(pid); if (!Number.isInteger(n) || n <= 0) return false; try { process.kill(n, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+
+/** .env keys a later release made unnecessary (WARN), from harness/upgrade-leftovers.json. Values are never printed. */
+function checkLeftoverEnv(root) {
+  const version = readJson(path.join(root, 'package.json'))?.version || '0.0.0';
+  const dot = readDotEnv(root);
+  const hits = readLeftovers(root).filter((x) => versionAtLeast(version, `>=${x.version}`) && String(dot[x.key] ?? '').trim() !== '' && (x.value === undefined || x.value === null || String(dot[x.key]).trim() === String(x.value)));
+  if (!hits.length) return [item('long-run/env', 'PASS', 'no .env workaround a release since made unnecessary (harness/upgrade-leftovers.json)')];
+  return hits.map((x) => item('long-run/env', 'WARN', `${x.key}${x.value !== undefined && x.value !== null ? `=${x.value}` : ' is set'} in .env, a workaround ${x.version} made unnecessary: ${x.why}`, `remove the ${x.key} line from the studio's .env (the owner edits it), then npm run studio:reload-env`));
+}
+
+/** Ready builder tasks with no lane (each would hold the whole game, so no other builder runs beside it). */
+async function checkUnscoped(root) {
+  const t = path.join(root, 'harness', 'task.mjs');
+  const h = path.join(root, 'harness', 'task-hold.mjs');
+  if (!fs.existsSync(t) || !fs.existsSync(h)) return [];
+  try {
+    const tm = await import(pathToFileURL(t).href);
+    const hm = await import(pathToFileURL(h).href);
+    let events = [];
+    try { events = (await import(pathToFileURL(path.join(root, 'harness', 'event.mjs')).href)).readRecentEvents(20000); } catch {}
+    const q = tm.parseNextQueue();
+    const holds = hm.readHolds ? hm.readHolds() : {};
+    const now = Date.now();
+    const ready = (q.backlog || []).filter((x) => x.role === 'builder' && !(hm.holdReason && hm.holdReason(x.id, q, now, holds, x.role)));
+    const onPurpose = (id) => (holds[id] && 'lane' in holds[id]) || events.some((e) => e.type === 'task.added' && e.task === id && e.meta?.wholeGame);
+    const none = ready.filter((x) => !hm.laneOf(x.id, events, holds) && !onPurpose(x.id));
+    if (!none.length) return [item('long-run/lanes', 'PASS', `${ready.length} ready builder task(s), each with a lane`)];
+    return [item('long-run/lanes', 'WARN', `${none.length} ready builder task(s) have no lane: ${none.map((x) => x.id).slice(0, 10).join(', ')}${none.length > 10 ? ` and ${none.length - 10} more` : ''}; a builder on one works on the whole game, so no other builder starts beside it`, 'set each one\'s folders: npm run task -- lane <ID> <folder>[,<folder>…] (or "all" when it really needs the whole game)')];
+  } catch (e) { return [item('long-run/lanes', 'INFO', `ready tasks not read (${String(e.message || e).slice(0, 120)})`)]; }
+}
+
+/** Uncommitted changes in harness/ or scripts/: a local patch runs instead of the release's code. */
+function checkHarnessDirty(root) {
+  const r = git(['status', '--porcelain=v1', '--untracked-files=normal', '--', 'harness', 'scripts'], root);
+  const files = r.status === 0 ? String(r.stdout || '').split(/\r?\n/).filter((l) => l.length > 3).map((l) => l.slice(3).trim()) : [];
+  if (!files.length) return [item('long-run/harness', 'PASS', 'no uncommitted change in harness/ or scripts/')];
+  return [item('long-run/harness', 'WARN', `${files.length} uncommitted change(s) in the harness: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` and ${files.length - 8} more` : ''} (a local patch runs instead of the release's code)`, 'if the release fixed what the patch worked around, undo it (git diff <file>, then git checkout -- <file>); if not, keep it and report it to the harness')];
+}
+
+/** Trains and gate runs still running from before the harness last changed (they run the old code). */
+function checkOldRuns(root) {
+  const since = Number(out1(git(['log', '-1', '--format=%ct', 'HEAD', '--', 'harness', 'scripts', 'package.json'], root))) * 1000 || 0;
+  const tree = ['harness', 'scripts'].map((d) => out1(git(['rev-parse', '-q', '--verify', `HEAD:${d}`], root))).join('+');
+  const old = [];
+  const tdir = path.join(root, '.studio', 'train');
+  let names = [];
+  try { names = fs.readdirSync(tdir); } catch {}
+  for (const n of names) {
+    const life = readJson(path.join(tdir, n, 'life.json'));
+    if (!life || life.ended || !pidLive(life.pid)) continue;
+    const before = life.harness?.tree ? life.harness.tree !== tree : since && Date.parse(life.at || 0) < since;
+    if (before) old.push(`train ${life.id || n} (pid ${life.pid}${life.harness?.version ? `, harness ${life.harness.version}` : ''})`);
+  }
+  const vdir = path.join(root, '.studio', 'verify-running');
+  let runs = [];
+  try { runs = fs.readdirSync(vdir).filter((f) => f.endsWith('.json') && !f.endsWith('.result.json')); } catch {}
+  for (const f of runs) {
+    const st = readJson(path.join(vdir, f));
+    const pid = st?.hostPid || st?.pid;
+    if (!st || st.state === 'done' || !pidLive(pid)) continue;
+    if (since && Date.parse(st.startedAt || 0) < since) old.push(`gate run ${st.owner || f.replace(/\.json$/, '')} (pid ${pid}, since ${String(st.startedAt || '').slice(0, 16)})`);
+  }
+  if (!old.length) return [item('long-run/runs', 'PASS', 'no train or gate run from before the harness last changed is still running')];
+  return [item('long-run/runs', 'WARN', `${old.length} still running from before the harness last changed (they run the old code): ${old.slice(0, 6).join('; ')}${old.length > 6 ? ` and ${old.length - 6} more` : ''}`, 'let them finish, or stop them (npm run task -- train cancel, npm run studio:stop); the supervisor and train daemon start fresh ones on the new harness')];
+}
+
+/** 2.78.1: "before a long run": leftovers from earlier workarounds. WARN only, never a FAIL. */
+export async function longRunItems(root) {
+  return [...checkLeftoverEnv(root), ...(await checkUnscoped(root)), ...checkHarnessDirty(root), ...checkOldRuns(root)];
+}
+
 /** The preflight: { ok, items, lines }. deps: { checkUpgrade, isMainCheckout } (the guard's). */
 export async function preflight({ root, ref = null, env = process.env, deps = {} } = {}) {
   // The environment wins over .env, except where it is empty (an empty value is no value).
   const e = { ...readDotEnv(root) };
   for (const [k, v] of Object.entries(env)) if (String(v ?? '').trim() !== '' || !(k in e)) e[k] = v;
-  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root)];
+  const items = [checkNode(root, ref), checkGit(e), checkCheckout(root, ref, deps), ...checkBoard(root, deps), ...checkOwnerKey(root, e), checkSignatures(root, env), ...(await checkMachine(root, e)), ...checkTools(e), ...checkWebhook(root, e), ...checkDotEnvIdentity(root), ...checkPolicy(root), ...checkLanes(root), ...(await longRunItems(root))];
   return { ok: !items.some((i) => i.status === 'FAIL'), items, lines: itemLines('preflight', items) };
 }
 

@@ -4,6 +4,35 @@ All notable upgrades to the **3D Deep Simulation & AI Game Studio Harness** are 
 
 ---
 
+## [2.78.1] — 2026-11-05
+The crew's patch request from the first day on 2.78 (B-106 to B-123, M7, the Line Producer and fresh-session asks),
+the War Room's Planning Room and a long-run preflight. Item-by-item status and Patch's upgrade note:
+docs/RELEASE-2.78.1.md.
+- **More builders at once (B-123, P-263).** The supervisor reads a running session's lane from the board, so
+  `task lane <ID> <folders> --by <you>` takes effect at once; the Line Producer sets lanes on unscoped ready tasks and
+  reports the rest; laneless builders with apart predicted files run side by side; tasks on shared sim code are
+  stacked with `--after`.
+- **Gemini builders work in stream mode by default (B-118, P-264):** the input keyed on `event`, a failover continues
+  in its own lane copy, an automatic one-turn fallback if agy refuses the stream input, and a "continue" nudge before
+  the stall kill. The agy reviewer names a Gemini model (it used agy's default, a Claude model).
+- **Hooks on a studio that doesn't push (B-120, P-265):** approvals are verified with local main's key; a release's
+  merge commits can be grandfathered.
+- **Upgrades don't mix old and new code (B-122, B-116, P-266):** a train started before an upgrade starts no further
+  train; a re-check on a changed harness is "not run", not main's fault; parentless gate runs are ended.
+- **Unity and game trains share the machine (B-117, B-121, P-267):** the `.env` heavy-slot count is live for every
+  session, Unity lands have their own slot and give way to game trains, a task in any train counts as in progress, and
+  a queued chain-breaker gets a quiet machine.
+- **Trains land what they should (B-114, P-268):** a known load-sensitive test that passes alone at low load skips the
+  quiet wait (still required to pass); rescue-landed dependencies count; merge-of-main-only lanes and empty-diff lanes
+  close at once; discarded speculative trains aren't "dead".
+- **Sessions:** the prompt cache breaker (`studio/CURRENT_TASK.md` rewritten by every launched task command) is gone;
+  reviewers and engine-porters refresh at 70k; hand-offs carry the lane, commits, last verify and next command from
+  harness state; a builder red on a new cause starts fresh; `lanes -- orphans` / `lanes -- carry <ID>`; a relaunch
+  gets a fresh name; the engine-porter worktree check (B-119).
+- **M7:** stage 1 says what it stepped and warns when it played the template, not the studio's game.
+- **War Room:** the Line Producer's Planning Room. **Preflight:** a "before a long run" section.
+- Tests: qa/selftest-2781a.mjs to qa/selftest-2781g.mjs.
+
 ## [2.78.0] — 2026-11-05
 Builders that get more tasks right: the dev plan's research items PU-54 to PU-63 (all but PU-61) and the crew's B-105.
 No new approval step. Status per item, what is untested and the upgrade note: docs/RELEASE-2.78.0.md.

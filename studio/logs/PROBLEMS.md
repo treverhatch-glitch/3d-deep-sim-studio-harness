@@ -1376,3 +1376,28 @@ P-034 to P-041 below). Times are UTC (Bangkok = +7 h). Nothing on that PC was ch
 ### P-262 — a timing test failed "alone" under load and finished work was handed back · fixed in 2.78.0
 - **Evidence:** the crew's M7: with 4–6 verifies plus a Unity gate, a 2 ms timing test ran 2.2–2.5 ms (0.7–1.1 ms on a quiet machine); T-133 was handed back four times and T-199 once. The flake log judged it "real: fails when run alone" from a run whose `lowLoad` was false.
 - **Fix:** a file that fails alone runs again at low load on a quiet machine before it is `real`; passing there labels it `load-sensitive`, and a train whose only reds are load-sensitive lands. qa/selftest-278a.mjs.
+
+### P-263 — ready tasks without a lane ran one at a time · fixed in 2.78.1
+- **Evidence:** 1–2 builders with 5 ready and a target of 6: "working on the whole game (no lane)" (B-123).
+- **Why:** a running session's lane was fixed at launch, so scoping its task (or any other) changed nothing until it ended; nothing scoped tasks added without folders.
+- **Fix:** the supervisor reads the board's lane for running sessions; the Line Producer sets lanes; apart predictions run side by side. qa/selftest-2781a.mjs.
+
+### P-264 — agy refused the stream input, and the failover was refused · fixed in 2.78.1
+- **Evidence:** "stream input message is missing the "event" field"; "no lane copy could be made for builder-agyf9 (still in use)" (B-118).
+- **Fix:** the probed input shape, a failover in its own copy, stream mode by default with a one-turn fallback. qa/selftest-2781b.mjs.
+
+### P-265 — the owner's hooks approvals never verified on the main checkout · fixed in 2.78.1
+- **Evidence:** T-009 "verify red on hooks: 2 commit(s) since origin/main skipped the git hooks" while the train passed (B-120); release merges couldn't be grandfathered.
+- **Fix:** local main's key when the studio doesn't push; release merges listed by sha. qa/selftest-2781c.mjs.
+
+### P-266 — an old train chain-started on the new harness · fixed in 2.78.1
+- **Evidence:** "./lane-sparse.mjs does not provide an export named protectSharedLinks" (B-122); "main itself fails its checks" after an upgrade (B-116); a 13 h orphaned gate run.
+- **Fix:** the harness a train started with is checked before chaining; "not run (harness changed underneath)"; the orphan reaper. qa/selftest-2781c.mjs.
+
+### P-267 — Unity and game trains starved each other · fixed in 2.78.1
+- **Evidence:** a game train's flake re-run waited 20+ min behind Unity; 4–5 heavy stages with slots=2 (B-117); a builder launched on a task mid-Unity-train (B-121).
+- **Fix:** a live `.env` slot count, Unity's own slot, a task in any train held, a chain-breaker hold. qa/selftest-2781f.mjs.
+
+### P-268 — work that had landed kept tasks open or waiting · fixed in 2.78.1
+- **Evidence:** "T-124 waiting on T-152: done, but 14 commits on lane/builder-agy11 not merged yet" (B-114); T-173 stayed open after landing; it bounced 3 times on tests that pass alone.
+- **Fix:** rescue and content evidence for dependencies, merge-of-main-only and empty-diff lanes close, trusted load-sensitive files skip the quiet wait. qa/selftest-2781d.mjs.

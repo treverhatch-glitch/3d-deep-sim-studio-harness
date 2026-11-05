@@ -86,9 +86,11 @@ beat(); setInterval(beat, workerData.ms);`;
  * Start recording train `id`'s life. Returns a handle: lanes(list) records its lanes, end(summary) records a normal end,
  * died(cause) records a death (idempotent; the first record wins). Never throws.
  */
-export function beginTrainLife(root, { id, by = 'train', beatMs = 30000 } = {}) {
+export function beginTrainLife(root, { id, by = 'train', beatMs = 30000, harness = null } = {}) {
   const f = lifeFile(root, id);
-  const doc = { id, pid: process.pid, by, at: new Date().toISOString(), lanes: [], ended: null };
+  // 2.78.1 (B-122): the harness this train's process runs (harness-version.mjs processHarness: version, committed tree,
+  // last harness commit), so a train from before an update is known as one (upgrade --preflight lists those still running).
+  const doc = { id, pid: process.pid, by, at: new Date().toISOString(), lanes: [], ended: null, ...(harness ? { harness } : {}) };
   writeJson(f, doc);
   let worker = null;
   try {

@@ -17,7 +17,7 @@ import { summarize as summarizeVerdict, renderDecision } from './verdict-split.m
 import { readBible, crossedLayersIn, readIdea, writeIdea, latestReview, LAYERS } from './bible.mjs';
 import { writeFocus } from './focus.mjs';
 import { causeOf, isAccepted } from './cause-store.mjs';
-import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal } from './task-hold.mjs';
+import { inferLaneAtAdd, laneRequired, holdReason, setHold, readHolds, laneList, gameFolders, updateHolds, holdRefusal, parkRank, unparkRefusal, laneRefusal } from './task-hold.mjs';
 import { stopIfOverBudget } from './task-budget.mjs';
 import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
@@ -40,7 +40,7 @@ import { attachTricks } from './cheatsheet.mjs';
 import { readBaseline, recordBaseline, setTrunk, trunkState, judgeRed } from './baseline.mjs';
 import { recordAlive } from './proc-identity.mjs';
 import { withFileLock, writeAtomic } from './fsafe.mjs';
-import { withFacts, splitFacts, recordGateRefusal } from './handback-facts.mjs';
+import { factsFor, splitFacts, recordGateRefusal } from './handback-facts.mjs';
 import { assetGateApplies, assetGateText, fileAssetHandoff } from './asset-gate.mjs';
 import { reviewsAtDone } from './asset-review.mjs';
 import { checkStamped, stampWrite, watchCommand } from './workaround.mjs';
@@ -307,7 +307,23 @@ function writeNextQueueRaw(tasks, kept = { next: [], done: [] }) {
   }
 }
 
+/**
+ * 2.78.1 (e): studio/CURRENT_TASK.md is imported into every Claude Code session's context by CLAUDE.md
+ * (@studio/CURRENT_TASK.md), ahead of the launch prompt, and a lane copy reads the main checkout's through its studio/
+ * link. Rewritten (with the time and the task) by every launched session's task start, done and pause, it made each
+ * session's prompt differ before the stable marker: a prompt-cache miss for every session of every role. It is one
+ * agent's checkpoint (a hand-run session's), so a launched session (STUDIO_ROLE set by the launcher) leaves it as it is.
+ * STUDIO_CURRENT_TASK_FILE: auto (the default: hand-run sessions only), on (every session, as before), off (never).
+ */
+export function currentTaskWrites(env = process.env) {
+  const v = String(env.STUDIO_CURRENT_TASK_FILE || 'auto').toLowerCase();
+  if (/^(off|0|false|no|never)$/.test(v)) return false;
+  if (/^(on|1|true|yes|always)$/.test(v)) return true;
+  return !String(env.STUDIO_ROLE || '').trim();
+}
+
 export function syncCurrentTaskCheckpoint(activeTask, note = '') {
+  if (!currentTaskWrites()) return;
   const ts = new Date().toISOString();
   const content = `# Active Session State (\`studio/CURRENT_TASK.md\`)
 
@@ -643,6 +659,11 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   }
 
   const check = checkDone(target);
+  // 2.78.1 (f, M7): warnings that don't block (a playtest report that played the template, not the studio's game).
+  for (const w of check.warnings || []) {
+    console.warn(`[done] WARN ${w}`);
+    emitEvent({ type: 'task.warn', agent: agent || target.role, task: target.id, status: 'warn', msg: `${target.id}: WARN ${w}`.slice(0, 400) });
+  }
   // 2.38.0: notes that don't block (built but not wired, in warn mode), shown and logged once per done.
   for (const n of check.notes || []) {
     console.warn(`[done] note: ${n} (STUDIO_REACHABILITY=fail makes this a failing check)`);
@@ -1148,6 +1169,12 @@ function holderRunning(owner) {
 }
 /** 2.30c (#4): a hand-back note is at most this many characters (20 lines). */
 export const HANDBACK_MAX = 2400;
+/**
+ * 2.78.1: a whole hand-back entry (its "## <time> · <who>" heading, the harness's facts block and the prose) is at most
+ * this many characters, so it stays under 3k with the facts in front: the prose is cut to what is left.
+ */
+export const HANDBACK_ENTRY_MAX = 2900;
+const HANDBACK_CUT = '(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)';
 /** Is `lock` (a claim, or null) the claim `expect` describes: 'none', or { owner, claimedAt }? */
 export function sameClaim(lock, expect) {
   if (expect === 'none' || expect === null) return !lock;
@@ -1198,16 +1225,25 @@ export function pauseTask(taskId, agent = null, note = '', { force = false, expe
   // at most, in a fixed shape (done, not done, files, next step, proof). Longer notes are cut.
   // 2.66.0 (c): facts a caller already put in front (the merge train's drop) aren't prose: kept whole, never cut,
   // and the events, the breaker and the "blocked by" hold read only the prose.
+  // 2.78.1: the 20-line / under-3k cut holds for the whole entry: the facts (compact, harness/handback-facts.mjs) are
+  // built first and the prose is cut to the room they leave.
   const given = splitFacts(note);
-  note = given.prose;
+  const prose = given.prose;
+  // 2.66.0 (c): the harness's own facts (changed files, gates, failure signature, seed, log) go in front of the prose.
+  const facts = given.facts || factsFor(target.id, prose || 'No note left.', { agent: lock.lock?.owner || agent });
+  const heading = `## ${new Date().toISOString()} · ${who}`;
+  const releasedLine = freed.length ? `Released claims: ${freed.join(', ')}` : '';
+  const released = releasedLine.length > 300 ? `${releasedLine.slice(0, 299)}…` : releasedLine;
+  const room = Math.max(0, HANDBACK_ENTRY_MAX - heading.length - 1 - (facts ? facts.length + 1 : 0) - (released ? released.length + 1 : 0));
+  note = prose;
   const capLines = String(note || '').split('\n');
-  if (capLines.length > 20 || String(note || '').length > HANDBACK_MAX) note = `${capLines.slice(0, 20).join('\n').slice(0, 2400)}\n(Cut to 20 lines. Keep hand-back notes short: done, not done, files touched, next step, proof.)`;
-  if (freed.length) note = `${note || 'No note left.'}\nReleased claims: ${freed.join(', ')}`;
+  const proseMax = Math.min(HANDBACK_MAX, room);
+  if (capLines.length > 20 || String(note || '').length > proseMax) note = `${capLines.slice(0, 20).join('\n').slice(0, Math.max(0, Math.min(HANDBACK_MAX, room - HANDBACK_CUT.length - 1)))}\n${HANDBACK_CUT}`;
+  if (released) note = `${note || 'No note left.'}\n${released}`;
   fs.mkdirSync(HANDOFF_DIR, { recursive: true });
   const file = handoffFile(taskId);
   const head = fs.existsSync(file) ? '' : `# Handoff notes for ${target.id}: ${target.title}\n\nNewest last. Read these before you pick the task up.\n`;
-  // 2.66.0 (c): the harness's own facts (changed files, gates, failure signature, seed, log) go in front of the prose.
-  fs.appendFileSync(file, `${head}\n## ${new Date().toISOString()} · ${who}\n${given.facts ? `${given.facts}\n${note || 'No note left.'}` : withFacts(target.id, note || 'No note left.', { agent: lock.lock?.owner || agent })}\n`);
+  fs.appendFileSync(file, `${head}\n${heading}\n${facts ? `${facts}\n` : ''}${note || 'No note left.'}\n`);
   syncCurrentTaskCheckpoint(q.inProgress[0] || null, `Paused ${target.id}: ${note || 'handed back'}`);
   emitEvent({ type: 'task.paused', agent: who, task: target.id, status: 'paused', msg: `Handed back ${target.id}: ${note || 'no note'}`, meta: { ...(isFailureNote(note) ? { reasonKey: reasonKey(note) } : {}), ...(cause ? { cause } : {}) } });
   // PU-58: a canary task handed back for a failure (the impossible exit records its own outcome).
@@ -2236,6 +2272,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         console.error(`Usage: npm run task -- lane ${arg1} <folder> [<folder>…] [--by <name>]   (or "all" / "none": the whole game, no other builder runs beside it)`);
         process.exit(1);
       }
+      // 2.78.1 (B-123): a person, the orchestrator or a Producer/Director session decides a lane; never a worker.
+      const laneNo = laneRefusal(by);
+      if (laneNo) { console.error(laneNo); process.exit(1); }
       const lane = ['none', 'all', '.'].includes(folder) ? null : laneList(folder).join(',') || null;
       if (lane && /^(harness|hub|qa|scripts)(\/|$)/.test(lane) && fs.existsSync(path.join(STUDIO_STATE_DIR, 'harness-frozen'))) {
         console.error(`${lane} is harness code, and this clone's harness is frozen.`);
@@ -2245,7 +2284,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const laneWide = lane && typeof flags.wide === 'string' ? { lane, why: flags.wide, by, ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } : undefined;
       updateHolds((all2) => { all2[arg1] = { ...(all2[arg1] || {}), lane, laneWide }; });
       emitEvent({ type: 'task.lane', agent: by, task: arg1, msg: `${by}: ${arg1} works in ${lane || 'the whole game'}` });
-      console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.`);
+      await logTaskDecision({ action: 'task-lane', subject: arg1, by, why: `${arg1} works in ${lane || 'the whole game'}`, evidence: 'npm run task -- lane', undo: { kind: 'text', text: `npm run task -- lane ${arg1} <the earlier folders, or "all"> --by <you>` } });
+      // 2.78.1 (B-123): a task already in progress: the supervisor reads its new lane for the running builder too.
+      const running = q.inProgress.some((t) => t.id === arg1);
+      console.log(`${arg1} works in ${lane || 'the whole game (no other builder runs beside it)'}.${running ? ` It is in progress: from the supervisor's next pass its builder counts as working ${lane ? `in ${lane}` : 'on the whole game'}.` : ''}`);
     }
     process.exit(0);
   }

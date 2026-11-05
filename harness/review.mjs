@@ -172,9 +172,14 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
       continue;
     }
     // Read-only: the reviewer looks and writes a verdict, it never edits the game.
+    // 2.78.1: agy runs a Gemini model by name (with none it ran its own default, a Claude model: a "Gemini" review of a
+    // Claude builder's work would have been the same family) and reads the review from stdin (H-2: on Windows agy split
+    // a `-p <text>` argument at its spaces); no --mode, so it can't edit. agyReview below.
+    const agyRun = tool === 'agy' ? await agyReview(model) : null;
     const argv = tool === 'claude' ? ['claude', '-p', '--output-format', 'text', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit', ...(model ? ['--model', model] : [])]
       : tool === 'codex' ? ['codex', 'exec', '--sandbox', 'read-only', ...(model ? ['-m', model] : []), '-']
-      : tool === 'agy' || tool === 'gemini' ? [tool, '-p', text, '--print-timeout', '900s']
+      : agyRun ? agyRun.argv
+      : tool === 'gemini' ? [tool, '-p', text, '--print-timeout', '900s']
       : ['grok', '-p', text, ...(model ? ['-m', model] : [])];
     // P-066: no shell for the tool (harness/launch.mjs), so agy's and grok's review text arrives as one argument on
     // Windows too; text too long for the command line goes by file.
@@ -184,10 +189,10 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
       fs.mkdirSync(path.dirname(promptFile), { recursive: true });
       fs.writeFileSync(promptFile, text);
     }
-    const opts = { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex'].includes(tool) ? text : undefined, timeout: 15 * 60000, maxBuffer: 32 * 1024 * 1024 };
+    const opts = { cwd: REPO_ROOT, encoding: 'utf8', input: ['claude', 'codex', 'agy'].includes(tool) ? text : undefined, timeout: 15 * 60000, maxBuffer: 32 * 1024 * 1024 };
     const r = run === spawnSync ? spawnAgentSync(argv, { ...opts, promptAt, promptFile }) : run(argv[0], argv.slice(1), opts);
     const out = String(r.stdout || '').trim();
-    if (r.status === 0 && out) return { ok: true, model: model || TOOL_MODEL_NAME[tool], content: out, tool };
+    if (r.status === 0 && out) return { ok: true, model: agyRun?.model || model || TOOL_MODEL_NAME[tool], content: out, tool };
     // A reviewer that says it hit its limit is marked out until it resets, so the owed review knows when to retry.
     // 2.30 (J12): the provider's limit line on a failed run, never the review text (a review of budget code
     // that said "quota" marked the reviewer out for an hour).
@@ -200,6 +205,18 @@ export async function cliReview(g, messages, { run = spawnSync } = {}) {
     tried.push(`${tool}: exit ${r.status}${r.stderr ? ` (${String(r.stderr).trim().split('\n').pop().slice(0, 120)})` : ''}`);
   }
   return { ok: false, error: tried.length ? tried.join('; ') : `no reviewer tool of another family than ${modelFamily(g.builder)} (set STUDIO_REVIEWER_TOOL)` };
+}
+
+/**
+ * 2.78.1: how the agy reviewer starts: { argv, model }. The model is Gemini: the one asked for (STUDIO_REVIEWER_MODEL with
+ * STUDIO_REVIEWER_TOOL=agy, or agy:<model> in STUDIO_REVIEW_TOOLS) when it is a Gemini model, else STUDIO_TOOL_AGY_MODEL,
+ * else the agy default (harness/agent.mjs AGY_DEFAULT_MODEL). agy's print timeout 900 s and its model flag
+ * (STUDIO_AGY_MODEL_FLAG) as for a builder (agyOptions), without --mode; the review goes on stdin.
+ */
+export async function agyReview(asked = null, env = process.env) {
+  const { agyOptions, isGeminiModel, AGY_DEFAULT_MODEL } = await import('./agent.mjs');
+  const model = [asked, env.STUDIO_TOOL_AGY_MODEL].map((m) => String(m || '').trim()).find((m) => isGeminiModel(m)) || AGY_DEFAULT_MODEL;
+  return { argv: ['agy', ...agyOptions(model, { ...env, STUDIO_AGY_PRINT_TIMEOUT: '900s', STUDIO_AGY_MODE: 'off' })], model };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

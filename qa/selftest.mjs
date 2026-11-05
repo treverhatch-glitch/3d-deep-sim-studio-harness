@@ -4792,6 +4792,80 @@ if (inShard('selftest-278i')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.1 (b, B-118): agy stream input keyed on "event", stream mode by default with a one-turn safety net and record,
+// a failover in its own lane copy, the progress nudge, and the agy CLI reviewer on a named Gemini model.
+if (inShard('selftest-2781b')) {
+  const dir = copyRepo();
+  const { selftest2781B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781b.mjs')).href);
+  await selftest2781B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (a): B-123, unscoped ready tasks ran one at a time: `task lane` reaches running builders, the Line Producer sets
+// lanes and reports "unscoped", unscoped builders with apart predictions run side by side, shared sim code is stacked.
+if (inShard('selftest-2781a')) {
+  const dir = copyRepo();
+  const { selftest2781A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781a.mjs')).href);
+  await selftest2781A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (c): the hooks check's key-carrying base on a studio that doesn't push (B-120), a release's merge commits in the
+// grandfather list, no chain-start across a harness update (B-122), "not run (harness changed underneath)" (B-116), the
+// orphaned gate reaper, and the preflight's "before a long run" section.
+if (inShard('selftest-2781c')) {
+  const dir = copyRepo();
+  const { selftest2781C } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781c.mjs')).href);
+  await selftest2781C({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (e): the prompt prefix the same for every session of a role, refresh points per role, hand-off facts, a fresh
+// session for a red on a new cause, orphaned lane work (lanes orphans / carry), a fresh name on relaunch, B-119.
+if (inShard('selftest-2781e')) {
+  const dir = copyRepo();
+  const { selftest2781E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781e.mjs')).href);
+  await selftest2781E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (f): B-121 (a task in any train counts as in progress), B-117 (the machine's slot count; the engine line),
+// rig-aware room for builders, the chain-breaker push, engine twins, M7 (stage 1 on the template isn't the game).
+if (inShard('selftest-2781f')) {
+  const dir = copyRepo();
+  const { selftest2781F } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781f.mjs')).href);
+  await selftest2781F({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (g): the Planning Room, the Line Producer's own room on the War Room's Studio floor: its plan in the HUD (now,
+// next up with lanes and "unscoped", stacked and blocked with why, the last pass), the empty state, the page.
+if (inShard('selftest-2781g')) {
+  const dir = copyRepo();
+  const { selftest2781G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781g.mjs')).href);
+  await selftest2781G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (d): trusted load-sensitive files skip the quiet wait; a dependency landed under other hashes, by a rescue or
+// before the event window; a lane that gained only merges of main closes; empty-diff lanes land without a verify; a
+// discarded speculative train is not "dead".
+if (inShard('selftest-2781d')) {
+  const dir = copyRepo();
+  const { selftest2781D } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781d.mjs')).href);
+  await selftest2781D({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.1 (h): the first push's CI failures: a hand-back entry under 3k with the facts, B-119's engine worktree by real
+// path in the studio's spelling (Windows short names), the engine line only where the machine has room for both.
+if (inShard('selftest-2781h')) {
+  const dir = copyRepo();
+  const { selftest2781H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2781h.mjs')).href);
+  await selftest2781H({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

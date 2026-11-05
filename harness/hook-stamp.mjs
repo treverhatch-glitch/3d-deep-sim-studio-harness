@@ -26,6 +26,7 @@
  * pushed) are listed once, by patch-id, in <git common dir>/studio-hooks-grandfather.json. The first stamping hook run
  * writes it (the upgrade's own merge commit), and `node harness/hook-stamp.mjs grandfather` adds to it by hand. Those
  * commits stay exempt after a clean rebase onto the upgrade (P-068); a commit made after the list was written is not in it.
+ * 2.78.1: an update's own merge commits (`grandfather --ref`, upgrade --merge: grandfatherRange) are listed too, by sha.
  *
  * Limits: a stamp is plain text, so a deliberate forger who computes one by hand passes (the weakened-test and
  * protected-file gates still judge the content); `git revert`, `git rebase` with conflicts or squashes, and an amend
@@ -332,20 +333,29 @@ export async function writeGrandfather(cwd = ROOT) {
  * made on GitHub without this studio's hooks) to the grandfather list, by sha and patch-id. `upgrade --merge` calls it
  * right after its merge commit, so the hooks gate on main doesn't start red. Adds only; never removes an entry.
  */
-export async function grandfatherRange(range, cwd = ROOT) {
+export async function grandfatherRange(range, cwd = ROOT, { env = process.env } = {}) {
   const f = grandfatherPath(cwd);
   if (!f) return { ok: false, why: 'not a git checkout' };
-  const list = gitAll(['log', '--no-merges', '--format=%x1e%H%x1f%B', range], { cwd });
+  // 2.78.1 (grandfather): the release's own merge commits too ("Merge 2.77.3 into claude/278", "Merge main into …"):
+  // with --no-merges they were never listed, so the hooks gate on main stayed red on them after taking the release.
+  // Only the merges of this range (reachable from the release tip, not from the base: the release's, never the
+  // studio's own), and by sha only (a merge has no patch-id): the merge itself, as the release made it, is exempt; a
+  // merge made later (a lane merging main) is a different commit and is judged as before. STUDIO_GRANDFATHER_MERGES=off:
+  // non-merge commits only (the 2.78.0 way).
+  const merges = !/^(off|0|false|no)$/i.test(String(env.STUDIO_GRANDFATHER_MERGES || '').trim());
+  const list = gitAll(['log', ...(merges ? [] : ['--no-merges']), '--format=%x1e%H%x1f%P%x1f%B', range], { cwd });
   if (list.status !== 0) return { ok: false, why: (list.stderr || '').trim().split('\n')[0] || `git log ${range} failed` };
-  const unstamped = list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, msg]) => !parseStamps(msg).length).map(([sha]) => sha.trim());
+  const rows = list.stdout.split('\x1e').filter((x) => x.includes('\x1f')).map((x) => x.split('\x1f')).filter(([, , msg]) => !parseStamps(msg).length).map(([sha, parents]) => ({ sha: sha.trim(), merge: String(parents || '').trim().split(/\s+/).filter(Boolean).length > 1 }));
+  const unstamped = rows.map((r) => r.sha);
   const old = readGrandfather(cwd);
   const fresh = unstamped.filter((x) => !old.shas.has(x));
-  if (!fresh.length) return { ok: true, file: f, added: 0, total: old.shas.size };
+  const freshMerges = rows.filter((r) => r.merge && !old.shas.has(r.sha)).length;
+  if (!fresh.length) return { ok: true, file: f, added: 0, merges: 0, total: old.shas.size };
   const pids = new Set(old.pids);
-  for (const pid of (await patchIdsOf(fresh, 'p', cwd)).values()) pids.add(pid);
+  for (const pid of (await patchIdsOf(rows.filter((r) => !r.merge && !old.shas.has(r.sha)).map((r) => r.sha), 'p', cwd)).values()) pids.add(pid);
   const shas = new Set([...old.shas, ...fresh]);
   fs.writeFileSync(f, `${JSON.stringify({ at: old.at || new Date().toISOString(), updated: new Date().toISOString(), shas: [...shas], pids: [...pids] }, null, 1)}\n`);
-  return { ok: true, file: f, added: fresh.length, total: shas.size };
+  return { ok: true, file: f, added: fresh.length, merges: freshMerges, total: shas.size };
 }
 const grandfathered = (g, sha, pid) => g.shas.has(sha) || Boolean(pid && g.pids.has(pid));
 /** Was HEAD checked? A valid stamp, a commit other branches hold (already shared), or one exempt from stamping. */
@@ -551,6 +561,9 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   for (const c of commits) {
     if (!stamped(c)) { exempt++; continue; }
     if (maybeOld(c) && grandfathered(g, c.sha, pids.get(c.sha, 'p'))) { exempt++; continue; }
+    // 2.78.1 (grandfather): an unstamped merge commit is exempt only by its own sha on the list (grandfatherRange adds
+    // a release's merges; a merge has no patch-id, so a re-made merge is a new commit and judged).
+    if (c.parents.length > 1 && g.shas.has(c.sha) && !parseStamps(c.msg).length) { exempt++; continue; }
     const kind = (c.msg.match(/^Studio-Harness:[ \t]*([\w-]+)/m) || [])[1];
     if (harnessExempt(kind, c)) { exempt++; continue; }
     judged.push({ c, kind, parentTree: parentTree(c) });
@@ -581,9 +594,14 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
 
   let approved = [];
   let left = open;
+  let keyNote = '';
   if (open.length && !ignoreApprovals) {
-    const { ownerPublicKey, readApprovals, verifyApproval } = await import('./approve.mjs');
-    const pub = ownerPublicKey(b.base);
+    const { readApprovals, verifyApproval, keyFor } = await import('./approve.mjs');
+    // 2.78.1 (B-120): the key-carrying base's key (approve.mjs keyFor): on a studio that doesn't push, the base
+    // origin/main has no owner key, and the owner's `approve -- hooks` never verified.
+    const key = keyFor(b, env);
+    const pub = key.pub;
+    if (key.from === 'main') keyNote = `; the owner's approvals verified with ${key.ref}'s key (${b.ref} has none: this studio doesn't push there)`;
     if (pub) {
       const signed = readApprovals().filter((a) => a.approval?.kind === 'hooks' && verifyApproval(a, pub));
       const ok = new Set(signed.flatMap((a) => (a.approval.commits || []).flatMap((x) => [x.sha, x.pid && `pid:${x.pid}`]).filter(Boolean)));
@@ -593,7 +611,7 @@ export async function checkHookStamps({ env = process.env, ignoreApprovals = fal
   }
   const why = left.length
     ? `${left.length} commit(s) since ${b.ref} skipped the git hooks (no valid ${TRAILER} stamp)${enforced ? '' : '; not enforced here: the hooks aren\'t installed in this checkout and the base has no stamped commits (npm run hooks:install; STUDIO_HOOKS_CHECK=on enforces)'}${refNote}`
-    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner)` : ''}${refNote}`;
+    : `every one of ${commits.length} commit(s) since ${b.ref} passed the hooks${exempt ? ` (${exempt} exempt: made before the stamping hooks or already in this checkout when it took them, or by the harness)` : ''}${approved.length ? ` (${approved.length} approved by the owner${keyNote})` : ''}${refNote}`;
   const hr = harnessRef?.declared ? { ref: harnessRef.ref, used: harnessRef.ok, sha: harnessRef.sha || null, exempt: harnessRef.exempt || 0, why: harnessRef.why } : null;
   return { ok: !left.length || !enforced, enforced, base: b.ref, baseSha: b.base, checked: commits.length, open: left, approved, exempt, patchIds: pids.computed, harnessRef: hr, why };
 }
@@ -847,7 +865,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       const b = await changeBase();
       const r = await grandfatherRange(`${b?.base || 'HEAD'}..${sha}`);
       if (!r.ok) { console.error(`[hooks] FAIL ${r.why}`); process.exit(1); }
-      console.log(`[hooks] PASS ${r.added} unstamped commit(s) of ${ref} (${sha.slice(0, 10)}) since ${b?.ref || 'HEAD'} added to the exempt list (${r.total} in all): ${r.file}`);
+      console.log(`[hooks] PASS ${r.added} unstamped commit(s) of ${ref} (${sha.slice(0, 10)}) since ${b?.ref || 'HEAD'} added to the exempt list${r.merges ? ` (${r.merges} of them the update's own merge commits)` : ''} (${r.total} in all): ${r.file}`);
       process.exit(0);
     }
     const r = await writeGrandfather();

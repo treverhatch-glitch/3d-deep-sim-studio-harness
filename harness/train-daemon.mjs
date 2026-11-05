@@ -90,7 +90,7 @@ export async function verifyRoom(root, env = process.env) {
     const holders = h.heavyHolders(hroot, { env });
     const state = hb.budgetState(profile, holders, { env });
     const claim = hb.jobClaim('verify', { root, env, profile, state, as: 'train' }); // 2.76.0 (j, B-89): sized as the train's verify
-    const a = hb.admit(claim, state, { slots: h.heavySlots(env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
+    const a = hb.admit(claim, state, { slots: h.heavySlotsAt(hroot, env, profile), holders, kindMax: hb.maxConcurrent('verify', { root, env }) });
     return { ok: a.ok, line: a.ok ? '' : a.line };
   } catch (e) { return { ok: false, line: `the machine budget couldn't be read (${e.message})` }; }
 }
@@ -267,7 +267,10 @@ export async function runNextNow({ root, after, env = process.env, log = (m) => 
   let rerun = null;
   if (res.discarded && !res.busy) {
     const auto = trainAuto(root, env);
-    if (auto.on && tr.trainOn(env)) rerun = await tr.runTrain({ root, by: pl.NEXT_BY, now: true, waitMs: pl.staleMs(env), deps, log });
+    // 2.78.1 (B-122): not from a process whose harness changed since it started: the train daemon starts it fresh.
+    const cg = (await import('./harness-version.mjs')).chainGuard({ env });
+    if (!cg.ok) log(`[train] the discarded lanes wait for the train daemon's next train: ${cg.why}`);
+    else if (auto.on && tr.trainOn(env)) rerun = await tr.runTrain({ root, by: pl.NEXT_BY, now: true, waitMs: pl.staleMs(env), deps, log });
     else log(`[train] the discarded lanes wait for the next train (the train daemon is off: ${auto.why || 'STUDIO_TRAIN is off'})`);
   }
   return { res, rerun };
@@ -277,6 +280,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const { mainRoot } = await import('./worktree.mjs');
   const root = mainRoot();
+  // 2.78.1 (B-122): the harness this process runs, as it starts (harness-version.mjs).
+  (await import('./harness-version.mjs')).processHarness();
   if (argv[0] === 'run-next' && argv[1]) {
     const { res, rerun } = await runNextNow({ root, after: argv[1] });
     console.log(res.message || '');

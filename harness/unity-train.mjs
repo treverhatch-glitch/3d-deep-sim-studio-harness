@@ -252,7 +252,10 @@ export async function runUnityTrain(opts = {}) {
     const w = await deps.waitForDrain();
     if (!w.ok) return { ...empty, ok: false, message: w.message };
   }
-  const locked = await withUnityTrainLock(root, { id, by, lanes: [] }, (update) => unityTrainBody({ ...opts, engine, root, log, deps, id, by, s, update }), { waitMs: opts.waitMs ?? 0, log, engine });
+  // 2.78.1 (f): the lock names its engine and the RAM a land run takes, so room for builders counts it between runs
+  // (heavy-budget.mjs engineTrainReserve).
+  const rigRam = Number(engineTarget(engine)?.rig?.ramGb) || null;
+  const locked = await withUnityTrainLock(root, { id, by, lanes: [], engine, ...(rigRam ? { ramGb: rigRam } : {}) }, (update) => unityTrainBody({ ...opts, engine, root, log, deps, id, by, s, update }), { waitMs: opts.waitMs ?? 0, log, engine });
   if (locked?.busy) return { ...empty, ok: false, busy: locked.busy, message: `Another ${L} train is running (${locked.busy.id || '?'}, by ${locked.busy.by || '?'}, pid ${locked.busy.pid || '?'}); one ${L} train at a time: run this again when it ends (npm run task -- train status shows it).` };
   return locked;
 }

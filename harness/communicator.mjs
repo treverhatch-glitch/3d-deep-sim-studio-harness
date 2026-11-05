@@ -173,11 +173,15 @@ export async function commFacts({ root = REPO_ROOT, env = process.env, now = Dat
   const lastEnd = ends[ends.length - 1] || null;
   if (lastEnd) { const st = starts.filter((e) => e.meta.train === lastEnd.meta.train).pop(); f.lastTrain = { id: lastEnd.meta.train, at: Date.parse(lastEnd.ts) || 0, ms: st ? (Date.parse(lastEnd.ts) || 0) - (Date.parse(st.ts) || 0) : null, msg: short(String(lastEnd.msg || '').replace(/^train \S+:\s*/, ''), 110), died: lastEnd.type !== 'task.train.done' }; }
   const endedIds = new Set(ends.map((e) => e.meta.train));
+  // 2.78.1 (d, B-106): a speculative train that was discarded ended on purpose (task.train.next_discarded, then its life
+  // record's normal end), not "died silently"; so did any train whose life record (.studio/train/<id>/life.json) ended.
+  for (const e of events) if (e.type === 'task.train.next_discarded' && e.meta?.train) endedIds.add(e.meta.train);
+  const lifeEnded = (id) => { const l = readJson(path.join(root, '.studio', 'train', String(id), 'life.json'), null); return Boolean(l && l.ended); };
   // 2.77.2 (B-106): a train still beating (its .studio/train/<id>/beat, rewritten every 30 s while it runs) is alive, with
   // or without a lock: a speculative train verifies before it takes train-next.lock, and it was called "died silently".
   const beating = (id) => { try { return now - (Number(fs.readFileSync(path.join(root, '.studio', 'train', String(id), 'beat'), 'utf8')) || 0) <= trainDeadMs(env); } catch { return false; } };
   const nextLock = readJson(path.join(root, '.studio', 'locks', 'train-next.lock'), null);
-  f.unendedTrains = starts.filter((e) => !endedIds.has(e.meta.train) && (!lock?.id || lock.id !== e.meta.train) && (!nextLock?.id || nextLock.id !== e.meta.train) && !beating(e.meta.train) && now - (Date.parse(e.ts) || 0) > 2 * 60000 && now - (Date.parse(e.ts) || 0) < 12 * 3600000).map((e) => ({ id: e.meta.train, at: Date.parse(e.ts) || 0 }));
+  f.unendedTrains = starts.filter((e) => !endedIds.has(e.meta.train) && (!lock?.id || lock.id !== e.meta.train) && (!nextLock?.id || nextLock.id !== e.meta.train) && !beating(e.meta.train) && !lifeEnded(e.meta.train) && now - (Date.parse(e.ts) || 0) > 2 * 60000 && now - (Date.parse(e.ts) || 0) < 12 * 3600000).map((e) => ({ id: e.meta.train, at: Date.parse(e.ts) || 0 }));
   const q = readJson(path.join(root, '.studio', 'train', 'queue.json'), []);
   f.queue = Array.isArray(q) ? q.filter((e) => e && e.task) : [];
   f.held = f.queue.filter((e) => e.held && !(e.released && e.released.head === e.head));

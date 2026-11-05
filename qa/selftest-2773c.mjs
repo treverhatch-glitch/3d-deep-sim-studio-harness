@@ -117,6 +117,8 @@ process.stdin.on('data', (d) => {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
     let o = null; try { o = JSON.parse(line); } catch {}
+    // 2.78.1 (B-118): real agy keys its stream input on "event" and refuses a line without it.
+    if (o && typeof o.event !== 'string') { process.stderr.write('Error: stream input message is missing the "event" field\\n'); save(); process.exit(1); }
     const c = o && o.message && o.message.content;
     turn(Array.isArray(c) ? c.map((x) => x.text || '').join('') : String(line));
   }
@@ -157,16 +159,16 @@ console.log(JSON.stringify({
   reviewer: s.taskStillOpen({ agent: 'reviewer-g1', role: 'reviewer', task: 'T-2', locks: [lk('reviewer-g1', 'T-2')] }).open,
   none: open({}).open,
   kinds: [{ type: 'result', subtype: 'success' }, { type: 'turn_complete' }, { type: 'system', subtype: 'turn_end' }, { type: 'assistant', message: { content: [{ type: 'tool_use' }] } }, { type: 'user' }, { type: 'zzz_new' }, 'x', null].map((o) => { const c = s.classifyEvent(o); return c.kind + (c.toolPending === undefined ? '' : ':' + c.toolPending); }),
-  line: line.type === 'user' && line.message.role === 'user' && line.message.content[0].text === 'hi "there"',
+  line: line.event === 'user' && line.message.role === 'user' && line.message.content[0].text === 'hi "there"',
   wanted: [s.agyStreamWanted({ role: 'builder', env: { STUDIO_AGY_STREAM: '1' } }), s.agyStreamWanted({ role: 'reviewer', env: { STUDIO_AGY_STREAM: '1' } }), s.agyStreamWanted({ role: 'builder', env: { STUDIO_AGY_STREAM: '0' } }), s.agyStreamWanted({ role: 'builder', env: { STUDIO_AGY_STREAM: '1', STUDIO_AGY_PROMPT: 'arg' } }), s.agyStreamWanted({ role: 'builder', env: {} })],
   cfg: s.agyContinueSettings({}), cfg2: s.agyContinueSettings({ STUDIO_AGY_CONTINUE_MAX: '3', STUDIO_AGY_CONTINUE_WAIT_SEC: '2', STUDIO_AGY_STREAM_IDLE_SEC: '0' }),
   cmd: a.toolCommand('agy', { model: 'gemini-x-high', prompt: 'P', stream: true }),
   oneTurn: a.toolCommand('agy', { model: 'gemini-x-high', prompt: 'P' }),
 }));`);
-    await guard('2.77.3 (C1 / B-99): taskStillOpen says a session is mid-task while it holds its claim or its pinned task is not claimed yet, and not once it let go, the task is done or someone else\'s, the studio or the agent was stopped, or it is a reviewer; events: result/turn_complete/system turn_end end a turn, a tool_use is pending, an unknown type is unknown; the kickoff is one stream-json user line; the stream launch is a builder\'s with STUDIO_AGY_STREAM=1 and off by default (unset), with 0 or with STUDIO_AGY_PROMPT=arg; defaults 8 follow-ups, 15 s wait, 1800 s idle, 180 s for a first stream-json event (fails on 2.77.2: no harness/agy-stream.mjs)', () => [
+    await guard('2.77.3 (C1 / B-99): taskStillOpen says a session is mid-task while it holds its claim or its pinned task is not claimed yet, and not once it let go, the task is done or someone else\'s, the studio or the agent was stopped, or it is a reviewer; events: result/turn_complete/system turn_end end a turn, a tool_use is pending, an unknown type is unknown; the kickoff is one stream-json user line; the stream launch is a builder\'s with STUDIO_AGY_STREAM=1 and (2.78.1) by default (unset), not with 0 or with STUDIO_AGY_PROMPT=arg; defaults 8 follow-ups, 15 s wait, 1800 s idle, 180 s for a first stream-json event (fails on 2.77.2: no harness/agy-stream.mjs)', () => [
       r.holds === true && r.pinnedUnclaimed === true && r.pinnedLetGo === false && r.pinnedDone === false && r.pinnedOther === false && r.studioStop === false && r.agentStop === false && r.reviewer === false && r.none === false
         && JSON.stringify(r.kinds) === JSON.stringify(['turn-end', 'turn-end', 'turn-end', 'event:true', 'event:false', 'unknown', 'unknown', 'unknown']) && r.line === true
-        && JSON.stringify(r.wanted) === JSON.stringify([true, false, false, false, false]) && r.cfg?.max === 8 && r.cfg?.waitSec === 15 && r.cfg?.idleSec === 1800 && r.cfg?.firstSec === 180 && r.cfg2?.max === 3 && r.cfg2?.waitSec === 2 && r.cfg2?.idleSec === 0,
+        && JSON.stringify(r.wanted) === JSON.stringify([true, false, false, false, true]) && r.cfg?.max === 8 && r.cfg?.waitSec === 15 && r.cfg?.idleSec === 1800 && r.cfg?.firstSec === 180 && r.cfg2?.max === 3 && r.cfg2?.waitSec === 2 && r.cfg2?.idleSec === 0,
       JSON.stringify(r).slice(0, 2500)]);
     await guard('2.77.3 (C1 / B-99): a stream agy command is `agy --input-format stream-json --output-format stream-json --print-timeout 5400s --mode accept-edits --model <m>` with the kickoff as a stream-json line on stdin; without stream the one-turn command is unchanged (fails on 2.77.2: toolCommand has no stream launch)', () => [
       r.cmd?.stream === 'agy' && JSON.stringify(r.cmd.argv) === JSON.stringify(['agy', '--input-format', 'stream-json', '--output-format', 'stream-json', '--print-timeout', '5400s', '--mode', 'accept-edits', '--model', 'gemini-x-high']) && JSON.parse(r.cmd.stdin).message.content[0].text === 'P'
