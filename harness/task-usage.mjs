@@ -41,7 +41,7 @@ export const TASK_USAGE = {
   promote: `${T} promote <TASK_ID> --by <name>   put a proposed task on the live queue`,
   add: `${T} add "<Task Title>" [--role builder] [--priority P1] [--type bug|chore|…] [--size 1-5] [--lane <folder>] [--after T-x] [--start --agent <you>] …`,
 };
-export const GENERAL_USAGE = 'Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]\n`<subcommand> --help` shows one subcommand.';
+export const GENERAL_USAGE = 'Usage: node harness/task.mjs [next | list | start <ID> [--model m] | pause <ID> --note "..." | done <ID> | add "<Title>" [--after T-x] | park|unpark|unblock <ID> | block <ID> --until <T-ID|time> | lane <ID> <folder|a.js,b.js|none> | track <ID> engine:<name> | holds | note <ID> "<ruling>" --by <name> | yes <ID> --by <dev> | drop <ID> --why "…" | reorder <ID> --to top|bottom|<n> | --before <ID>]\n`<subcommand> --help` shows one subcommand.';
 
 /** --help or -h anywhere on the command line (as its own word). */
 export const wantsHelp = (argv) => argv.includes('--help') || argv.includes('-h');

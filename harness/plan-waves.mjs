@@ -57,7 +57,9 @@ const related = (a, b) => a === b || !a || !b || a.startsWith(`${b}/`) || b.star
 
 /** Can these two globs (or paths) name the same file? Conservative: when unsure, yes. */
 export function globsOverlap(a, b) {
-  a = norm(a); b = norm(b);
+  // 2.78.2 (item 9): a region entry (path/sim.ts#symbol) is its whole file here: predictions stay file-level; only the
+  // supervisor's lane check and the shared-sim stacking read regions (harness/lane-regions.mjs).
+  a = norm(String(a ?? '').split('#')[0]); b = norm(String(b ?? '').split('#')[0]);
   const ga = GLOB_CHARS.test(a); const gb = GLOB_CHARS.test(b);
   if (!ga && !gb) return related(a, b) && a !== '' && b !== '';
   if (ga !== gb) {

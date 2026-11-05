@@ -40,7 +40,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, emitEvent } from './event.mjs';
+import { REPO_ROOT, emitEvent, boardRoot } from './event.mjs';
 import { canonicalBytes } from './hash.mjs';
 import { proxyApprovalOk, proxyShell } from './owner-proxy.mjs';
 import { betaActor, betaApprovalOk } from './beta-mode.mjs';
@@ -193,20 +193,76 @@ export function resolveBase(envIn = process.env) {
  * which key verifies the owner's approvals of them. This is the key a train copy (base: the local main) reads, so
  * verify, the train and approve agree. A lane copy's base is the studio's branch (decisive), whose own key wins.
  * STUDIO_KEY_BASE=off: the base's key only (the 2.78.0 way).
+ *
+ * 2.78.2 (A-030): origin/main can hold commits local main doesn't (pull requests merged on GitHub, never pulled), so
+ * "origin/main is an ancestor of main" missed, and so did "the base is in main's history" when the base came from
+ * origin/main's side. The relation now: the key is always read from refs/heads/main (main's own history); the base
+ * shares history with main; none of the base's commits that main lacks (main..base) touches the owner key file, so the
+ * base's side never set or removed a key; and origin/main carries no other owner key (none, or main's). A base whose
+ * own side changed the key, or an origin/main with a different key, gets none. STUDIO_KEY_BASE=ancestor: 2.78.1's rule.
  */
+const pemKey = (p) => String(p || '').replace(/\r\n/g, '\n').trim();
 export function keyFor(b, env = process.env) {
   if (!b?.base) return { pub: null, ref: null, from: 'none' };
   const own = ownerPublicKey(b.base);
   if (own) return { pub: own, ref: b.ref, from: 'base' };
-  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_KEY_BASE || '').trim())) return { pub: null, ref: b.ref, from: 'none' };
+  const mode = String(env.STUDIO_KEY_BASE || '').trim().toLowerCase();
+  const none = { pub: null, ref: b.ref, from: 'none' };
+  if (/^(off|0|false|no)$/.test(mode)) return none;
   const sha = (ref) => git(['rev-parse', '-q', '--verify', `${ref}^{commit}`]).stdout.trim();
   const main = sha('refs/heads/main');
-  if (!/^[0-9a-f]{40}$/.test(main)) return { pub: null, ref: b.ref, from: 'none' };
+  if (!/^[0-9a-f]{40}$/.test(main)) return none;
   const origin = sha('refs/remotes/origin/main');
-  const noPush = !origin || git(['merge-base', '--is-ancestor', origin, main]).status === 0;
-  if (!noPush || git(['merge-base', '--is-ancestor', b.base, main]).status !== 0) return { pub: null, ref: b.ref, from: 'none' };
   const pub = ownerPublicKey(main);
-  return pub ? { pub, ref: `main ${main.slice(0, 8)}`, from: 'main' } : { pub: null, ref: b.ref, from: 'none' };
+  if (!pub) return none;
+  if (mode === 'ancestor') {
+    const noPush = !origin || git(['merge-base', '--is-ancestor', origin, main]).status === 0;
+    if (!noPush || git(['merge-base', '--is-ancestor', b.base, main]).status !== 0) return none;
+    return { pub, ref: `main ${main.slice(0, 8)}`, from: 'main' };
+  }
+  if (!/^[0-9a-f]{40}$/.test(git(['merge-base', b.base, main]).stdout.trim())) return none;
+  const keyTouched = git(['log', '-1', '--format=%H', `${main}..${b.base}`, '--', OWNER_PUB_REL]);
+  if (keyTouched.status !== 0 || keyTouched.stdout.trim()) return none;
+  if (origin) { const op = ownerPublicKey(origin); if (op && pemKey(op) !== pemKey(pub)) return none; }
+  return { pub, ref: `main ${main.slice(0, 8)}`, from: 'main' };
+}
+
+/**
+ * 2.78.2 (B-120 again, A-030): THE base and key every approval kind is made and judged with: resolveBase's base and
+ * keyFor's key ({ ...base, key }). `exact`: a kind whose enforcement starts with the key (protected files, weakened
+ * tests). When the key came from local main (the base has none: a studio that doesn't push, or an origin/main with
+ * merges main lacks), those are judged since the key-carrying base, local main (git merge-base HEAD main), the base a
+ * lane copy and a train copy use. Without it `approve -- protected` on the main checkout (or in a checkout outside
+ * .lanes/) signed the change set since origin/main, which also held main's own protected commits since then, so its
+ * change id never matched the set the train judges since local main. The range only shrinks (merge-base HEAD main
+ * descends from the old base): commits main already has are not judged again. The hooks gate keeps its base (it is
+ * enforced without a key) and only takes the key. STUDIO_KEY_BASE=off: the 2.78.0 reading for every kind.
+ */
+/**
+ * 2.78.2: the owner's switch, STUDIO_MAIN_CHECKOUT_ENFORCE (default off). Where the base has no owner key and the key
+ * comes from local main (keyFor from 'main': in practice the main checkout of a studio that doesn't push), 2.78.1 did
+ * not enforce protected files, weakened tests or `task done --force` there ("not enforced"), and the owner kept that
+ * call for himself. judgeBase still gives every approve kind one base and key (so an approval signed there is the one
+ * the train accepts); this only decides whether those three checks enforce on such a checkout. on: they do, with main's
+ * key. The hooks gate is unchanged (enforced without a key since 2.58.2; 2.78.1 verifies its approvals with main's key).
+ * Returns the key to enforce with, or null (not enforced).
+ */
+export const mainCheckoutEnforce = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_MAIN_CHECKOUT_ENFORCE || '').trim());
+export function enforcingKey(b, env = process.env) {
+  if (!b?.key) return null;
+  if (b.key.from === 'main' && !mainCheckoutEnforce(env)) return null;
+  return b.key.pub || null;
+}
+
+export function judgeBase(env = process.env, { exact = false } = {}) {
+  const b = resolveBase(env);
+  if (!b) return null;
+  const key = keyFor(b, env);
+  if (exact && key.from === 'main') {
+    const mb = git(['merge-base', 'HEAD', 'refs/heads/main']).stdout.trim();
+    if (/^[0-9a-f]{40}$/.test(mb)) return { ref: 'main', base: mb, key, movedFrom: b.ref };
+  }
+  return { ...b, key };
 }
 
 // 2.76.0 (B-93): a text file is hashed with LF line endings, as git stores it: a Windows checkout (core.autocrlf) has CRLF
@@ -306,10 +362,13 @@ function checkProtectedWith(env) {
   // base branch's protected list, its owner key, main itself), in every lane copy of this git folder: never a pass.
   const redirects = gitRedirectsWhy(gitRedirects(ROOT));
   if (redirects) return { enforced: true, ok: false, changes: [], redirect: true, why: `${redirects}. Remove them (git replace -d <sha> for each, delete the grafts file) or hand the task back if you didn't add them` };
-  const b = resolveBase(env);
+  // 2.78.2 (B-120 again): the base and key every approve kind uses (judgeBase): the key-carrying base's key, and the
+  // change set since that base, so an approval made on the main checkout names the set a train copy judges.
+  const b = judgeBase(env, { exact: true });
   if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet; ${OWNER_KEY_HOWTO}` };
-  const pub = ownerPublicKey(b.base);
+  const pub = enforcingKey(b, env);
   const changes = protectedChanges(b.base);
+  if (!pub && b.key.from === 'main') return { enforced: false, ok: true, changes, base: b.ref, why: `${b.movedFrom || b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced on this checkout, as before 2.78.2 (local main has the key and the train enforces it; STUDIO_MAIN_CHECKOUT_ENFORCE=on, the owner's switch, enforces it here too)` };
   if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: ${OWNER_KEY_HOWTO}` };
   if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: `no protected file changed since ${b.ref}, committed or not` };
   if (b.byHash) {
@@ -330,8 +389,10 @@ function checkProtectedWith(env) {
 
 /** A task done --force / --accepted-by for this task: is it signed by the owner? null = no owner key (not enforced). */
 export function forceApproved(taskId, { env = process.env } = {}) {
-  const b = resolveBase(env);
-  const pub = ownerPublicKey(b?.base || null);
+  // 2.78.2: the key every approve kind is judged with (judgeBase); with the key from local main, enforced only with
+  // STUDIO_MAIN_CHECKOUT_ENFORCE=on (enforcingKey), as 2.78.1 left it.
+  const b = judgeBase(env);
+  const pub = b ? enforcingKey(b, env) : ownerPublicKey(null);
   if (!pub) return null;
   const a = readApprovals().find((x) => x.approval?.kind === 'force' && x.approval.task === taskId && verifyApproval(x, pub));
   return a ? { ok: true, by: a.approval.by, reason: a.approval.reason, file: a.file } : { ok: false };
@@ -370,6 +431,37 @@ function signOrProxy(approval) {
   import('./decisions-log.mjs').then((dm) => dm.logDecision({ action: `approve-${approval.kind}`, subject: approval.change || approval.task || approval.kind, by: String(approval.by || p.doc.by).slice(0, 60), as: dm.asOf ? dm.asOf({ via: 'outside agent', permission: yes }) : 'outside agent', why: String(approval.note || approval.reason || '').slice(0, 300), evidence: `owner proxy ${p.doc.agent}: ${yes.slice(0, 200)}`, undo: null })).catch(() => {});
   return { approval: a, signature: null, proxy: { grant: p.doc } };
 }
+/**
+ * 2.78.2 (item 7c): the task an approval is for, so its event names it (the Line Producer releases a task held for its
+ * protected step on an approval event for that task): in a lane copy the copy's own task (its branch in the main
+ * checkout's .studio/lane-branches.json, or its session record), else the one task id the note names. null otherwise.
+ */
+function approvalTask(note = '') {
+  try {
+    const board = boardRoot();
+    if (board !== REPO_ROOT) {
+      const branch = git(['symbolic-ref', '-q', '--short', 'HEAD']).stdout.trim();
+      const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+      const found = new Set();
+      if (branch) {
+        for (const [k, v] of Object.entries(read(path.join(board, '.studio', 'lane-branches.json')) || {})) if (/^[A-Z]+-\d+$/.test(k) && v === branch) found.add(k);
+        const s = read(path.join(board, '.studio', 'agents', `${path.basename(ROOT)}.json`));
+        if (s?.task && s.copy?.branch === branch) found.add(String(s.task));
+      }
+      if (found.size === 1) return [...found][0];
+    }
+  } catch {}
+  const ids = [...new Set(String(note).match(/\b[A-Z]+-\d+\b/g) || [])];
+  return ids.length === 1 ? ids[0] : null;
+}
+/** 2.78.2 (B-120 again): say so when the approval just written won't verify with the key the checks use. */
+function checkSigned(rel, key) {
+  try {
+    if (!key?.pub) return;
+    const doc = JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+    if (!verifyApproval({ file: rel, ...doc }, key.pub)) console.log(`Note: ${rel} does not verify with the owner key the checks read (${key.ref || 'the base'}${key.from === 'main' ? ', the key-carrying base' : ''}): it was signed with another key, or the stand-in's record doesn't count here. The checks will not accept it.`);
+  } catch {}
+}
 function writeApproval(name, approval) {
   const doc = signOrProxy(approval);
   const dir = path.join(ROOT, APPROVALS_REL);
@@ -382,7 +474,8 @@ function writeApproval(name, approval) {
 /** 2.58.2 (PU-29): sign the weakened tests (`tests`) or the commits that skipped the hooks (`hooks`) the gate lists now. */
 async function approveListed(cmd, note, by) {
   const { changeBase, checkHookStamps } = await import('./hook-stamp.mjs');
-  const b = await changeBase();
+  // 2.78.2: tests are judged since judgeBase's base (as test-weakening.mjs findWeakenings); hooks keep their base.
+  const b = (cmd === 'tests' ? judgeBase(process.env, { exact: true }) : null) || await changeBase();
   if (!b) throw new Error('no base branch to compare with (--base <ref>)');
   let items;
   if (cmd === 'tests') {
@@ -397,7 +490,9 @@ async function approveListed(cmd, note, by) {
   }
   const id = crypto.createHash('sha256').update(canonicalBytes(items)).digest('hex');
   const file = writeApproval(`${cmd}-${id.slice(0, 16)}`, { kind: cmd, [cmd === 'tests' ? 'findings' : 'commits']: items, base: b.ref, by, note, at: new Date().toISOString() });
-  emitEvent({ type: `approval.${cmd}`, agent: by, msg: `${by} approved ${items.length} ${cmd === 'tests' ? 'weakened test(s)' : 'commit(s) made without the hooks'}: ${note.slice(0, 200)}` });
+  const task = approvalTask(note);
+  emitEvent({ type: `approval.${cmd}`, agent: by, ...(task ? { task } : {}), msg: `${by} approved ${items.length} ${cmd === 'tests' ? 'weakened test(s)' : 'commit(s) made without the hooks'}: ${note.slice(0, 200)}` });
+  checkSigned(file, b.key || keyFor(b));
   console.log(`Approved ${items.length} ${cmd === 'tests' ? 'weakened test(s)' : 'commit(s)'}. Commit ${file}. Anything else changed later needs a new approval.`);
 }
 
@@ -427,14 +522,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     } else if (cmd === 'protected') {
       const note = flag('--note') || '';
       if (note.trim().length < 10) throw new Error('say why, in 10+ characters: --note "…"');
-      const b = resolveBase();
+      // 2.78.2 (B-120 again): the base and key the protected check uses (judgeBase), wherever this runs.
+      const b = judgeBase(process.env, { exact: true });
       if (!b) throw new Error('no base branch to compare with (--base <ref>)');
+      if (b.movedFrom) console.log(`  (judged since ${b.ref} ${b.base.slice(0, 8)}, the key-carrying base: ${b.movedFrom} has no owner key)`);
       const changes = protectedChanges(b.base);
       if (!changes.length) throw new Error(`no protected file changed since ${b.ref}`);
       const id = changeId(changes);
       for (const c of changes) console.log(`  ${c.path}  ${c.sha256 === 'deleted' ? 'deleted' : c.sha256.slice(0, 12)}`);
       const file = writeApproval(`protected-${id.slice(0, 16)}`, { kind: 'protected', change: id, files: changes, base: b.ref, by, note, at: new Date().toISOString() });
-      emitEvent({ type: 'approval.protected', agent: by, msg: `${by} approved ${changes.length} protected change(s): ${note.slice(0, 200)}` });
+      const task = approvalTask(note);
+      emitEvent({ type: 'approval.protected', agent: by, ...(task ? { task } : {}), msg: `${by} approved ${changes.length} protected change(s)${task && !note.includes(task) ? ` for ${task}` : ''}: ${note.slice(0, 200)}` });
+      checkSigned(file, b.key);
       console.log(`Approved ${changes.length} protected change(s). Commit ${file} with them. Any later edit to these files needs a new approval.`);
       // 2.77.1 (H7): the train and the gates read approvals from the studio's main branch (a lane copy's studio/ is main's).
       console.log('Approvals are read from the studio\'s main branch (studio/approvals/): commit it on main, not only on a lane branch, or the merge train won\'t see it.');
@@ -444,6 +543,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (!/^[A-Z]+-\d+$/.test(task || '')) throw new Error('Usage: npm run approve -- force <T-ID> --reason "why it can close without its check"');
       if (reason.trim().length < 10) throw new Error('say why, in 10+ characters: --reason "…"');
       const file = writeApproval(`force-${task}`, { kind: 'force', task, reason, by, at: new Date().toISOString() });
+      checkSigned(file, judgeBase()?.key);
       emitEvent({ type: 'approval.force', agent: by, task, msg: `${by} approved closing ${task} without its check: ${reason.slice(0, 200)}` });
       console.log(`Approved: ${task} may close with task done --force. Commit ${file}.`);
     } else if (cmd === 'proposal') {
@@ -463,6 +563,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         if (!part.changes.length) throw new Error(`${rel} changes no protected file: it needs no approval`);
         for (const c of part.changes) for (const [k, v] of Object.entries(c.set)) console.log(`  ${c.file}  ${k} = ${JSON.stringify(v).slice(0, 100)}`);
         const file = writeApproval(`proposal-${task}-${part.hash.slice(0, 12)}`, { kind: 'proposal', task, change: part.hash, changes: part.changes, by, note, at: new Date().toISOString() });
+        checkSigned(file, judgeBase()?.key);
         emitEvent({ type: 'approval.proposal', agent: by, task, msg: `${by} approved ${task}'s protected config change(s) (${part.changes.map((c) => c.file).join(', ')}): ${note.slice(0, 200)}` });
         console.log(`Approved ${task}'s protected config change(s). Commit ${file} to the studio's main branch: the merge train applies the proposal when the lane lands (or npm run task -- train config ${task} if it is held on main). A different value needs a new approval.`);
       }).catch((e) => { console.error(e.message); process.exit(1); });

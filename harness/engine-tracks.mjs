@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_ROOT, readRecentEvents } from './event.mjs';
+import { REPO_ROOT, readRecentEvents, emitEvent } from './event.mjs';
 import { mainRoot } from './worktree.mjs';
 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
@@ -132,6 +132,33 @@ export function setEngineTask(taskId, patch, { root = mainRoot() } = {}) {
   all[taskId] = next;
   writeJson(tasksFile(root), all);
   return { task: taskId, ...next };
+}
+
+/** 2.78.2 (item 7d): is this a launch role that works on an engine pass (engine-porter, or an engine's own "role")? */
+export function isEngineRole(role, { root = REPO_ROOT } = {}) {
+  const r = String(role || '').trim().toLowerCase();
+  if (!r) return false;
+  if (r === BASE.role) return true;
+  return Object.values(enginesConfig(root)).some((c) => c && typeof c.role === 'string' && c.role.toLowerCase() === r);
+}
+
+/**
+ * 2.78.2 (item 7d): the track of an engine-porter task that has no engine record. With exactly one engine named in
+ * studio/game.json "engines" (the owner's), that engine: the record is written (.studio/engine/tasks.json, inferred: true)
+ * and an engine.track_inferred event says so. With several: { error } naming them and how to set it (npm run task --
+ * track <ID> engine:<name>). With none: { rec: null } (the engine's work lives in the studio, as before).
+ * STUDIO_ENGINE_TRACK_INFER=off: { rec: null } always (a plain lane, the 2.78.1 way).
+ */
+export function inferEngineTrack(taskId, { root = mainRoot(), env = process.env, dryRun = false, by = null } = {}) {
+  if (off(env.STUDIO_ENGINE_TRACK_INFER)) return { rec: null, why: 'STUDIO_ENGINE_TRACK_INFER=off' };
+  const names = Object.keys(enginesConfig(root)).filter((n) => ENGINE_NAME_RE.test(n)).sort();
+  if (!names.length) return { rec: null, why: 'no engine in studio/game.json "engines"' };
+  if (names.length > 1) return { error: `${taskId} is an engine-porter task with no engine track, and this studio names ${names.length} engines (${names.join(', ')}): say which, then launch again: npm run task -- track ${taskId} engine:<${names.join('|')}> --by <you> (a person, the orchestrator or a Producer)` };
+  const engine = names[0];
+  if (dryRun) return { rec: { task: taskId, engine, track: `engine:${engine}`, inferred: true, dry: true } };
+  const rec = setEngineTask(taskId, { engine, track: `engine:${engine}`, inferred: { from: 'studio/game.json engines (the only one)', by: by || null } }, { root });
+  try { emitEvent({ type: 'engine.track_inferred', agent: by || 'launcher', task: taskId, to: 'producer', msg: `${taskId} had no engine track: set to engine:${engine}, the only engine in studio/game.json (npm run task -- track ${taskId} engine:<name> --by <you> changes it)`.slice(0, 400), meta: { engine } }); } catch {}
+  return { rec };
 }
 
 // ---- the engine repo ------------------------------------------------------------------------------------------------
@@ -266,8 +293,15 @@ export function worktreeOn(repo, branch) {
  * add` runs in the engine repo; its checked-out folders and the land script's gate worktree are never touched.
  * { dir, branch, repo, created, note } | { error } | null (not an engine task, or the engine's work is in the studio).
  */
-export function engineLaunch({ task, agent = null, root = mainRoot(), dryRun = false } = {}) {
-  const rec = engineTask(task, { root });
+export function engineLaunch({ task, agent = null, role = null, root = mainRoot(), dryRun = false, env = process.env } = {}) {
+  let rec = engineTask(task, { root });
+  // 2.78.2 (item 7d): an engine-porter task with no engine record (added before 2.77, or without --track) got a plain
+  // lane copy of the studio. Its track is worked out (inferEngineTrack) or the launch is refused with how to set it.
+  if (!rec && isEngineRole(role, { root })) {
+    const inf = inferEngineTrack(task, { root, env, dryRun, by: agent });
+    if (inf.error) return { error: inf.error };
+    rec = inf.rec || null;
+  }
   if (!rec) return null;
   const repo = engineRepo(rec.engine, { root });
   if (!repo) return null;

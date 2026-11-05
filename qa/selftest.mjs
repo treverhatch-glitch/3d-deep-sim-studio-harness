@@ -4884,6 +4884,15 @@ if (inShard('selftest-2782c')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (e): one base and key for every approve kind (B-120 again), keyFor with origin/main's pull-request merges
+// (A-030), a lane copy's approval events in the main checkout's log, engine-porter tracks, region lanes; 7e report only.
+if (inShard('selftest-2782e')) {
+  const dir = copyRepo();
+  const { selftest2782E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782e.mjs')).href);
+  await selftest2782E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

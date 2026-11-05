@@ -29,7 +29,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, emitEvent } from './event.mjs';
-import { laneList, laneOf, inferLaneAtAdd, gameFolders, setHold } from './task-hold.mjs';
+import { laneList, laneEntries, laneOf, inferLaneAtAdd, gameFolders, setHold } from './task-hold.mjs';
+import { splitEntry, entriesClash, regionFiles } from './lane-regions.mjs';
 import { parseScope, overlapHistory, firstOverlap } from './plan-waves.mjs';
 import { matchAny } from './merge-lane.mjs';
 
@@ -188,13 +189,22 @@ export function repoFiles(root = REPO_ROOT, cap = 50000) {
   return out;
 }
 
-/** The shared sim files a footprint touches: [path or glob], sorted. files: the repo's files. */
+/**
+ * The shared sim files a footprint touches: [path or glob], sorted. files: the repo's files. 2.78.2 (item 9): a region
+ * entry (path/sim.ts#symbol, harness/lane-regions.mjs) on a shared file is kept with its region, so stacking judges it
+ * as the supervisor does (lanesClash): two regions of an opted-in file that don't overlap aren't stacked.
+ */
 export function sharedTouches(footprint = [], shared = [], files = []) {
   if (!footprint.length || !shared.length) return [];
   const sharedFiles = files.filter((f) => matchAny(f, shared));
   const out = new Set();
   for (const e0 of footprint) {
-    const e = norm(e0);
+    const sp = splitEntry(e0);
+    if (sp.region) {
+      if (sp.path && (matchAny(sp.path, shared) || sharedFiles.includes(sp.path))) out.add(sp.raw);
+      continue;
+    }
+    const e = norm(sp.path);
     if (!e) continue;
     if (!GLOB.test(e) && matchAny(e, shared)) out.add(e);
     for (const f of sharedFiles) if (GLOB.test(e) ? matchAny(f, [e]) : f === e || f.startsWith(`${e}/`)) out.add(f);
@@ -215,18 +225,22 @@ function waitsOn(holds, from, to, seen = new Set()) {
  * row that shares a file with an earlier row waits for the LAST such row (a chain: B after A, C after B), unless it
  * already waits for one of them or that row waits for it. Returns [{ task, after, via }].
  */
-export function stackShared(rows = [], holds = {}) {
+export function stackShared(rows = [], holds = {}, { clash = null } = {}) {
   const out = [];
   const h = JSON.parse(JSON.stringify(holds || {}));
+  // 2.78.2 (item 9): two touches meet the way two lane entries clash (harness/lane-regions.mjs entriesClash): the same
+  // file, except non-overlapping regions of an opted-in file. Plain files: equal paths, as before.
+  const globs = clash ? null : regionFiles().globs;
+  const meets = clash || ((a, b) => (String(a).includes('#') || String(b).includes('#') ? entriesClash(a, b, { globs }) : a === b));
   for (let i = 0; i < rows.length; i += 1) {
     const t = rows[i];
     if (t.state !== 'ready' || !t.touches?.length) continue;
-    const before = rows.slice(0, i).filter((o) => o.touches?.length && o.touches.some((f) => t.touches.includes(f)));
+    const before = rows.slice(0, i).filter((o) => o.touches?.length && o.touches.some((f) => t.touches.some((g) => meets(f, g))));
     if (!before.length) continue;
     if (before.some((o) => waitsOn(h, t.id, o.id))) continue;
     const o = before[before.length - 1];
     if (waitsOn(h, o.id, t.id)) continue;
-    const via = o.touches.filter((f) => t.touches.includes(f));
+    const via = o.touches.filter((f) => t.touches.some((g) => meets(f, g)));
     out.push({ task: t.id, after: o.id, via });
     h[t.id] = { ...(h[t.id] || {}), after: [...(h[t.id]?.after || []), o.id] };
   }
@@ -297,7 +311,7 @@ export async function lanePass({ tasks = [], order = null, holds = {}, events = 
     const rows = builders.filter((t) => t.state === 'running' || t.state === 'ready')
       .map((t) => {
         const lane = laneNow.get(t.id);
-        const fp = [...(lane ? laneList(lane) : []), ...predict(t.id)];
+        const fp = [...(lane ? laneEntries(lane) : []), ...predict(t.id)];
         return { id: t.id, state: t.state, touches: sharedTouches(fp, sh.globs, list) };
       })
       .sort((a, b) => (a.state === 'running' ? 0 : 1) - (b.state === 'running' ? 0 : 1) || (idx.has(a.id) ? idx.get(a.id) : 1e6 + pos.get(a.id)) - (idx.has(b.id) ? idx.get(b.id) : 1e6 + pos.get(b.id)));
