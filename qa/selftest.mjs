@@ -4659,6 +4659,15 @@ if (inShard('selftest-2772')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.77.3 (e): the stall killer counted cache reads (H1), owner allow rules for hooks restamp/grandfather (H6), reload-env
+// "queued" (M5), a playtest stage that ran 0 steps (M7).
+if (inShard('selftest-2773e')) {
+  const dir = copyRepo();
+  const { selftest2773E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2773e.mjs')).href);
+  await selftest2773E({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

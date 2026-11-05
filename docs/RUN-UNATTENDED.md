@@ -48,7 +48,9 @@ the end time). It writes `.studio/supervisor-extend.json`; the next pass (within
 mtime or size changed: each supervisor pass (with the train daemon's pass in it), each launcher heartbeat (the stall
 limits, the idle exit), the watchdog's pass and the watch pass. So a raised `STUDIO_STALL_MIN` reaches the sessions
 already running at their next heartbeat, not only new ones. `npm run studio:reload-env` asks for a reload now; a
-running supervisor answers within seconds with what changed. Each change is logged once (`env.reloaded`, naming the
+running supervisor answers within seconds with what changed; if it is busy in a pass, the command waits one pass
+(`STUDIO_SUPERVISOR_SEC` plus 10 s) and then says "Queued: the supervisor reloads on its next pass" (exit 0); with no
+supervisor running it exits 0 and says the settings apply when it starts. Each change is logged once (`env.reloaded`, naming the
 keys; values of keys that look secret, `*_TOKEN`, `*_KEY`, `*_SECRET`, `*PASSWORD*`, webhooks, are never written).
 Precedence: a variable set in the environment a process was started with (your shell, a scheduled task's
 environment) still wins over `.env`; a value that came from `.env`, in the process or through its parent (a launcher
@@ -136,7 +138,10 @@ Scheduler (Windows); `--uninstall` removes it.
   low"). `STUDIO_QUOTA_SKIP=off` turns quota-skipping off entirely when you watch usage outside the harness.
 - **The stall watchdog (harness/stall.mjs).** A session with no file write, commit or task change for
   `STUDIO_STALL_MIN` (15) minutes, or past its wall-clock cap (`STUDIO_SESSION_MAX_MIN`, 90; planning roles
-  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.76.0 (B-83, the crew's
+  `STUDIO_SESSION_PLAN_MAX_MIN`, 25), is ended and its task handed back (`session.stall`). 2.77.3 (B-109): the
+  read-burn ratio (`STUDIO_STALL_RATIO`, 120:1 over `STUDIO_STALL_RATIO_WINDOW_TOKENS`; 0 = off) counts uncached input
+  plus cache creation only (a cache read is the same context re-read each turn, not new work), and gives no read-burn
+  verdict in the first `STUDIO_STALL_GRACE_MIN` (15) minutes of a session. 2.76.0 (B-83, the crew's
   W-0070): each session is judged on its own tokens only. An agent's log is appended to across sessions under one name,
   so a relaunch counted the last session's tokens and was ended within seconds ("read 837668 tokens … 3 s into the new
   session", every builder). The session record's `logFrom` says where its part of the log starts (the launcher's
