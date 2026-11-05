@@ -73,6 +73,15 @@
  * 2.70.0 (t): mostly-GPU kinds (browser playtest with GPU flags, Blender, Unity bake/graphics, the landing clip) take the
  * GPU area beside CPU work when the scan shows a GPU, and say which area they took and why (heavy-budget.mjs).
  *
+ * 2.77.3 (M6): with few slots, builders' verifies took every freed slot and the train daemon kept saying "no room on the
+ * machine for a verify". A merge train now gets the next free slot: while one waits for room (the daemon's pass found
+ * none; or a train's check just gave its slot back and its next check is about to ask), it leaves
+ * machine-heavy-train-wait.json, and a waiter that isn't a landing doesn't take a newly freed slot (in its class) while
+ * that marker is fresh: up to 3 x STUDIO_SUPERVISOR_SEC (at least 5 min) since the daemon last saw no room, 15 s after a
+ * train's check, and never more than STUDIO_TRAIN_SLOT_PRIORITY_MIN (15; 0 or off: no priority) since it was set (then
+ * as long without it, so builders get their turn when the train can't start for another reason). A landing that takes
+ * a slot clears it. Running holders are never stopped.
+ *
  * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
  * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
  * average exists); STUDIO_PROC_LIST_STUB (proc-identity.mjs) for the process list; STUDIO_TEST_FREEMEM_MB for free
@@ -102,6 +111,51 @@ export async function heavyRoot() {
   try { return (await import('./worktree.mjs')).mainRoot(); } catch { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); }
 }
 export const heavyDir = (root) => path.join(root, '.studio', 'locks');
+
+// ---- 2.77.3 (M6): a merge train waiting for a slot goes first ----
+export const TRAIN_WAIT_FILE = `${PREFIX}-train-wait.json`;
+/** STUDIO_TRAIN_SLOT_PRIORITY_MIN in ms (default 15 min; 0/off: trains get no slot priority). */
+export function trainSlotPriorityMs(env = process.env) {
+  const v = String(env.STUDIO_TRAIN_SLOT_PRIORITY_MIN ?? '').trim();
+  if (off(v)) return 0;
+  return num(v, 15) * 60000;
+}
+const HANDOFF_MS = 15000;
+const daemonFreshMs = (env) => Math.max(5 * 60000, 3 * num(env.STUDIO_SUPERVISOR_SEC, 60) * 1000);
+/**
+ * Leave (or refresh) the marker: a merge train waits for a machine:heavy slot. handoff: a train's check just released
+ * its slot and the train's next check follows (15 s). Returns the record, or null when the priority is off. Never throws.
+ */
+export function markTrainWait(root, { why = '', lanes = [], handoff = false, env = process.env, now = Date.now(), train = null } = {}) {
+  const limit = trainSlotPriorityMs(env);
+  if (!(limit > 0)) return null;
+  try {
+    const dir = heavyDir(root);
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, TRAIN_WAIT_FILE);
+    const was = readJson(f);
+    const age = was ? now - Number(was.at || 0) : 0;
+    // Held for STUDIO_TRAIN_SLOT_PRIORITY_MIN at most, then as long without (builders get their turn), then again.
+    if (was && !handoff && !was.handoff && age > limit && age <= 2 * limit) return null;
+    const keep = was && !handoff && !was.handoff && age <= limit && now - Number(was.seen || 0) <= Number(was.ttlMs || HANDOFF_MS);
+    const rec = { at: keep ? was.at : now, seen: now, ttlMs: handoff ? HANDOFF_MS : daemonFreshMs(env), handoff: Boolean(handoff), why: String(why || '').slice(0, 240), lanes: (lanes || []).slice(0, 20), train: train || null, pid: process.pid };
+    const t = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(t, JSON.stringify(rec));
+    fs.renameSync(t, f);
+    return rec;
+  } catch { return null; }
+}
+export function clearTrainWait(root) { try { fs.rmSync(path.join(heavyDir(root), TRAIN_WAIT_FILE), { force: true }); } catch {} }
+/** The marker when it still holds (fresh, within STUDIO_TRAIN_SLOT_PRIORITY_MIN), else null. */
+export function trainWaiting(root, { env = process.env, now = Date.now() } = {}) {
+  const limit = trainSlotPriorityMs(env);
+  const f = path.join(heavyDir(root), TRAIN_WAIT_FILE);
+  const w = readJson(f);
+  if (!w) return null;
+  // Not removed when it lapses: markTrainWait reads it to give builders their turn before it is set again.
+  if (!(limit > 0) || now - Number(w.seen || 0) > Number(w.ttlMs || HANDOFF_MS) || now - Number(w.at || 0) > limit) return null;
+  return w;
+}
 /** 2.68.0 (n): STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
 export const heavySlots = (env = process.env, profile = null) => slotsFor(profile, env);
 const staleOf = (env) => num(env.STUDIO_HEAVY_STALE_MIN, 240) * 60000;
@@ -437,7 +491,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const t0 = Date.now();
   const firstClaim = givenClaim || jobClaim(kind, { root, env, label, profile, state: budgetState(profile, [], { env }), ramGb, vramGb, gpuOnly });
   const queueFile = path.join(dir, `${PREFIX}-queue-${process.pid}.wait`);
-  try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly) })); } catch {}
+  try { fs.writeFileSync(queueFile, JSON.stringify({ pid: process.pid, identity: selfIdentity(), at: t0, label, landing, gpuOnly: Boolean(firstClaim.gpuOnly), owner: owner || env.STUDIO_LOCK_OWNER || null })); } catch {} // 2.77.3: owner (a train's stall watch reads it)
   let mine = null;
   let claim = firstClaim;
   let toldAt = 0;
@@ -478,6 +532,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       // 2.76.0 (j, B-89): a verify's share of the cores also counts the lane checks running (gate slots).
       claim = givenClaim || jobClaim(kind, { root, env, label, profile, state, ramGb, vramGb, gpuOnly, extraJobs: kind === 'verify' && profile ? laneCheckSlots(root, env).map(() => ({ kind: 'check', workers: null, threads: 0 })) : [] });
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
+      // 2.77.3 (M6): a merge train waiting for a slot goes ahead of every waiter that isn't a landing (CPU class).
+      if (!landing && !(profile && claim.gpuOnly)) { const tw = trainWaiting(root, { env }); if (tw) ahead.push({ pid: tw.pid || 0, label: `a merge train waiting for the next free slot${tw.why ? ` (${tw.why.slice(0, 120)})` : ''}; STUDIO_TRAIN_SLOT_PRIORITY_MIN`, landing: true, train: true }); }
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }) });
       floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
       if (adm.ok && !ram.low && !floor.low) {
@@ -520,6 +576,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
     try { fs.rmSync(queueFile, { force: true }); } catch {}
   }
   const waitedMs = Date.now() - t0;
+  if (landing) clearTrainWait(root); // 2.77.3 (M6): the train has its slot
   if (toldAt) log(`[heavy] ${label} got the machine:heavy lock after ${Math.round(waitedMs / 1000)} s`);
   if (floorCfg.gb > 0) log(`[heavy] ${label}: free RAM ${floor.freeGb ?? '?'} GB, over the ${floorCfg.gb} GB floor (${floorVar === '--min-free-gb' ? `--min-free-gb ${minFreeGb}` : floorCfg.why})`);
   if (adm.line) log(`[heavy] ${label}: ${adm.line}`);
@@ -529,9 +586,12 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
   const prevEnv = process.env.STUDIO_HEAVY_HELD;
   process.env.STUDIO_HEAVY_HELD = token;
   let released = false;
+  const trainOwner = landing && /^train-/.test(String(owner || env.STUDIO_LOCK_OWNER || ''));
   const release = () => {
     if (released) return;
     released = true;
+    // 2.77.3 (M6): a train's check hands its slot to the train's next check (15 s), not to a builder's verify.
+    if (trainOwner) markTrainWait(root, { handoff: true, why: `${String(owner || env.STUDIO_LOCK_OWNER)} just ran a check`, env, train: String(owner || env.STUDIO_LOCK_OWNER).replace(/^train-/, '') });
     try { if (readJson(mine)?.pid === process.pid) fs.rmSync(mine, { force: true }); } catch {}
     if (process.env.STUDIO_HEAVY_HELD === token) { if (prevEnv === undefined) delete process.env.STUDIO_HEAVY_HELD; else process.env.STUDIO_HEAVY_HELD = prevEnv; }
   };
