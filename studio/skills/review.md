@@ -11,6 +11,10 @@
    each point. Start it with two lines, `model-family: <yours, e.g. anthropic>` and
    `implementer-family: <the builder's>`. They must differ; the reviewer gate checks every note.
    No folder lock: each review is its own file (claim only that file, if you claim at all).
+   End the note with its own line `Verdict: approve` or `Verdict: changes requested` (or reject). The LAST `Verdict:`
+   line in the file decides, so a re-review appended to a first one counts, and a "non-blocking note" in the text
+   doesn't turn an approval into a rejection. A note with no `Verdict:` line is read the old way (any "changes
+   requested", "reject" or "blocking" in it means no approval).
 
 4. If the task has an acceptance contract (`npm run task -- contract <ID> show`), grade against each criterion
    and sign the manual ones: `npm run task -- contract <ID> sign <CID> pass|fail --by <you>` (docs/CONTRACTS.md).

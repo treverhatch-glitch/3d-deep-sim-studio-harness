@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { actor, emitEvent, REPO_ROOT, STUDIO_STATE_DIR, readRecentEvents } from './event.mjs';
 import { claim, release, status as lockStatus, listLocks, SHARED_OWNERS } from './lock.mjs';
 import { ensureResearchTemplate, researchRel } from './research.mjs';
-import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType } from './done-check.mjs';
+import { checkDone, taskType, joinWaveIfGameplay, taskBase, lastFullRecord, taskChanges, startedAt, typeOf, titleType, skipGameChecks } from './done-check.mjs';
 import { splitEolOnly, eolNote } from './eol-only.mjs';
 import { isGameCode } from '../scripts/check-function-size.mjs';
 import { summarize as summarizeVerdict, renderDecision } from './verdict-split.mjs';
@@ -802,7 +802,22 @@ export function completeTask(taskId, note = '', agent = null, { force = false, r
   // 2.30n: the studio game's own checks and, for files in a Godot project, the engine gate. Before
   // 2.30n only example-sim was gated, so the real game never was. STUDIO_DONE_GAME_GATES=skip turns it off.
   if (extEngine && !force && process.env.STUDIO_DONE_GAME_GATES !== 'skip') console.log(`[task done] ${target.id} is a ${extEngine.engine} pass in its own repo: the studio game's checks don't judge it; its ${extEngine.engine} land run does`);
-  if (!force && !extEngine && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
+  // 2.78.2 (c): a direction, review, docs, idea, research or study task whose lane changes no game code doesn't run the
+  // game's own checks (T-219: a direction task's done ran the whole game suite and timed out). done-check.mjs skipGameChecks.
+  const noGame = (() => {
+    if (force || extEngine || process.env.STUDIO_DONE_GAME_GATES === 'skip') return null;
+    try {
+      const ld0 = laneDiff();
+      const st0 = spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude)studio'], { windowsHide: true, cwd: REPO_ROOT, encoding: 'utf8' });
+      const dirty0 = st0.status === 0 ? String(st0.stdout || '').split('\0').filter((x) => x.length > 3).map((x) => x.slice(3)) : ['?'];
+      const claimed0 = (lock.locked ? lock.lock.owner : agent) ? listLocks().filter((l) => l.owner === (lock.locked ? lock.lock.owner : agent) && l.key.startsWith('path:')).map((l) => l.key.slice(5)) : [];
+      const own = (() => { try { return taskChanges(target.id, startedAt(target.id)).files; } catch { return ['?']; } })();
+      const r0 = skipGameChecks(check.type, [...(ld0?.changed || []), ...dirty0, ...claimed0, ...own]);
+      return r0.skip ? r0 : null;
+    } catch { return null; }
+  })();
+  if (noGame) console.log(`[task done] the game's checks are not run: ${noGame.why} (STUDIO_DONE_SKIP_GAME_NONCODE=off runs them)`);
+  if (!force && !extEngine && !noGame && process.env.STUDIO_DONE_GAME_GATES !== 'skip') {
     const owner = lock.locked ? lock.lock.owner : agent;
     const claimed = owner ? listLocks().filter((l) => l.owner === owner && l.key.startsWith('path:')).map((l) => l.key.slice(5)).filter(Boolean) : [];
     const lanePaths = laneList(readHolds()[target.id]?.lane);

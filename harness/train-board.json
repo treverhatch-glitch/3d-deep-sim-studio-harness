@@ -5,6 +5,8 @@
     "studio/DONE.md",
     "studio/task-types.json",
     "studio/handoffs/**",
+    "studio/producer/**",
+    "studio/reviews/**",
     "studio/memory/**",
     "studio/logs/**",
     "studio/notes/**",
@@ -37,12 +39,6 @@
     "studio/approvals/**": [
       "protected",
       "approvals"
-    ],
-    "studio/reviews/**": [
-      "reviewer"
-    ],
-    "studio/producer/**": [
-      "docs"
     ],
     "studio/meetings/**": [
       "docs"

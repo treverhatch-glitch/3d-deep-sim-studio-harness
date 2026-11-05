@@ -2695,6 +2695,26 @@ export function recheckPaths(file = path.join(path.dirname(fileURLToPath(import.
   try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j.recheckPaths && typeof j.recheckPaths === 'object' ? j.recheckPaths : {}; } catch { return {}; }
 }
 
+/**
+ * 2.78.2 (c): did studio/quarantine.json change only by skipping MORE tests (every test the runner skipped at `tip` is
+ * still skipped at `now`)? A verify that ran a test and was green stays true when later runs skip it, so a quarantine
+ * that only grows can't make the verified tree wrong; a release (or a status turned back to "proposed") means a test
+ * the verify never ran will run, so that still verifies again. STUDIO_TRAIN_QUARANTINE_MOVE=off: every change verifies again.
+ */
+export function quarantineOnlyGrows(root, tip, now, rel = 'studio/quarantine.json', env = process.env) {
+  if (/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_QUARANTINE_MOVE ?? '').trim())) return false;
+  const active = (rev) => {
+    const r = git(root, 'show', `${rev}:${rel}`);
+    if (r.status !== 0) return new Set();
+    let j; try { j = JSON.parse(r.stdout); } catch { return null; }
+    const list = Array.isArray(j) ? j : Array.isArray(j?.tests) ? j.tests : null;
+    if (!list) return null;
+    return new Set(list.filter((e) => e && typeof e.test === 'string' && e.test.trim() && (!e.status || e.status === 'active')).map((e) => e.test.trim().replace(/\\/g, '/')));
+  };
+  const a = active(tip); const b = active(now);
+  return Boolean(a && b && [...a].every((t) => b.has(t)));
+}
+
 export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = null, records = taskRecordPaths(), addOnly = addOnlyPaths(), rechecks = recheckPaths() } = {}) {
   if (!list.length) return { ok: false, why: 'no board paths are listed (harness/train-board.json)' };
   if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
@@ -2710,6 +2730,7 @@ export function boardOnlyMove(root, tip, now, list = boardPaths(), { lanes = nul
     if (!matchAny(f, list) && st === 'A' && matchAny(f, addOnly)) { files.push(f); continue; }
     const rc = Object.entries(rechecks).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
     if (!matchAny(f, list) && rc.length) { for (const x of rc) recheck.add(x); files.push(f); continue; }
+    if (!matchAny(f, list) && f === 'studio/quarantine.json' && quarantineOnlyGrows(root, tip, now, f)) { files.push(f); continue; }
     if (!matchAny(f, list)) {
       // 2.67.0 (B-29): a task record (holds, approval cards) counts when no entry it changes is a lane of this train.
       const rec = Array.isArray(lanes) && records[f] ? recordEntriesChanged(root, tip, now, f, records[f]) : null;

@@ -130,7 +130,7 @@ export async function carryTask({ id, from = null, by = null, root = mainRoot(),
   const t0 = Date.now();
   const res = (status, why, extra = {}) => {
     try { emitEvent({ type: `lanes.carry.${status}`, agent: String(by || env.STUDIO_LOCK_OWNER || 'unknown').slice(0, 60), task: id || null, to: status === 'carried' || status === 'nothing' ? null : 'producer', status: status === 'carried' || status === 'nothing' ? 'ok' : status === 'refused' ? 'warn' : 'blocked', durationMs: Date.now() - t0, msg: `carry ${id}: ${why}`.slice(0, 600), meta: { from: extra.from || from || null, branch: extra.branch || null, carried: (extra.carried || []).map((c) => c.sha.slice(0, 12)) } }); } catch {}
-    return { ok: status === 'carried' || status === 'nothing', status, why, carried: [], left: [], ...extra };
+    return { ok: status === 'carried' || status === 'nothing', status, why, carried: [], left: [], skipped: [], ...extra };
   };
   if (!/^[A-Z]+-\d+$/.test(String(id || ''))) return res('refused', 'Usage: npm run lanes -- carry <ID> [--from <lane branch>] --by <you>');
   const who = carryCaller({ id, by, env });
@@ -169,16 +169,27 @@ export async function carryTask({ id, from = null, by = null, root = mainRoot(),
   if (!mine.length) { drop(); return res('nothing', `no commit on ${src} names ${id} that ${branch || 'this copy'} lacks${left.length ? ` (${left.length} other commit(s) left out)` : ''}`, { left, from: src }); }
   const ident = out(git(dir, 'config', 'user.email')) ? [] : ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local'];
   const carried = [];
+  const skipped = []; // 2.78.2 (c): commits whose patch is already on the target (git cherry '-'): listed, not an error
+  const already = (sha) => /^-\s/m.test(String(git(dir, 'cherry', 'HEAD', sha, `${sha}^`).stdout || ''));
   for (const c of mine) {
+    if (!/^(off|0|false|no)$/i.test(String(env.STUDIO_CARRY_SKIP_APPLIED ?? '').trim()) && already(c.sha)) { skipped.push({ sha: c.sha, subject: c.subject }); continue; }
     const p = spawnSync('git', [...ident, 'cherry-pick', '--allow-empty', c.sha], { cwd: dir, encoding: 'utf8', env: cleanEnv({ STUDIO_MAIN_ROOT: root }), maxBuffer: 64 * 1024 * 1024, windowsHide: true });
     if (p.status === 0) { carried.push({ sha: c.sha, new: out(git(dir, 'rev-parse', 'HEAD')), subject: c.subject }); continue; }
     const files = out(git(dir, 'diff', '--name-only', '--diff-filter=U')).split('\n').filter(Boolean);
+    // 2.78.2 (c): a pick that changes nothing (the same change is on the target some other way) is skipped, not a conflict.
+    if (!files.length && gd && fs.existsSync(path.join(gd, 'CHERRY_PICK_HEAD')) && git(dir, 'diff', '--cached', '--quiet').status === 0 && !/^(off|0|false|no)$/i.test(String(env.STUDIO_CARRY_SKIP_APPLIED ?? '').trim())) {
+      git(dir, 'cherry-pick', '--abort');
+      skipped.push({ sha: c.sha, subject: c.subject });
+      continue;
+    }
     if (gd && fs.existsSync(path.join(gd, 'CHERRY_PICK_HEAD'))) git(dir, 'cherry-pick', '--abort');
     git(dir, 'reset', '-q', '--hard', start);
     drop();
     const why = `stopped at ${c.sha.slice(0, 8)} "${c.subject.slice(0, 80)}": ${files.length ? `conflict in ${files.join(', ')}` : String(`${p.stderr || ''}${p.stdout || ''}`).trim().split('\n').pop()}; cherry-pick aborted, nothing carried (${carried.length} of ${mine.length} had applied before it and were taken back): resolve it by hand, or carry from a branch that applies`;
     return res('conflict', why, { from: src, left, conflict: { sha: c.sha, subject: c.subject, files } });
   }
+  const skipNote = skipped.length ? `; skipped ${skipped.length} commit(s) already on ${branch || 'the target'} (same patch): ${skipped.map((c) => `${c.sha.slice(0, 8)} ${c.subject.slice(0, 50)}`).join('; ')}` : '';
+  if (!carried.length) { drop(); return res('nothing', `every commit of ${id} on ${src} is already on ${branch || 'this copy'}${skipNote}`, { left, from: src, skipped }); }
   // The hooks gate judges a cherry-pick by patch-id; a stamp that no longer matches is re-stamped through the real hooks.
   let stampNote = '';
   try {
@@ -196,7 +207,7 @@ export async function carryTask({ id, from = null, by = null, root = mainRoot(),
   if (copyAgent) {
     rememberTaskBranch(id, branch);
     removeLaneCopy(copyAgent, { keepBranch: true });
-    return res('carried', `carried ${carried.length} commit(s) of ${id} from ${src} onto ${branch} (off ${main})${left.length ? `; left out ${left.length} commit(s) that don't name ${id}` : ''}${stampNote}. The next session on ${id} gets them merged into its copy. Carried: ${list}`, { carried, left, branch, from: src });
+    return res('carried', `carried ${carried.length} commit(s) of ${id} from ${src} onto ${branch} (off ${main})${left.length ? `; left out ${left.length} commit(s) that don't name ${id}` : ''}${skipNote}${stampNote}. The next session on ${id} gets them merged into its copy. Carried: ${list}`, { carried, left, skipped, branch, from: src });
   }
-  return res('carried', `carried ${carried.length} commit(s) of ${id} from ${src} into your copy (${branch})${left.length ? `; left out ${left.length} commit(s) that don't name ${id}` : ''}${stampNote}. Carried: ${list}`, { carried, left, branch, from: src, dir });
+  return res('carried', `carried ${carried.length} commit(s) of ${id} from ${src} into your copy (${branch})${left.length ? `; left out ${left.length} commit(s) that don't name ${id}` : ''}${skipNote}${stampNote}. Carried: ${list}`, { carried, left, skipped, branch, from: src, dir });
 }
