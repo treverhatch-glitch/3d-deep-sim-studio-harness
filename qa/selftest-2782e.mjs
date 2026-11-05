@@ -60,17 +60,29 @@ export async function selftest2782E({ dir, report, tmpRoot, root }) {
     g(S, 'add', '-A'); g(S, 'commit', '-qm', 'owner key (a protected commit on main itself)', '--no-verify');
     touch(S, 'the owner re-pins a protected check');
     const jb = probe(S, `const a = await import(${u(S, 'harness/approve.mjs')}); const j = a.judgeBase(process.env, { exact: true }); const o = a.judgeBase({ ...process.env, STUDIO_KEY_BASE: 'off' }, { exact: true }); console.log(JSON.stringify({ ref: j?.ref, moved: j?.movedFrom || null, from: j?.key?.from, offRef: o?.ref, offFrom: o?.key?.from }));`, env);
+    // The owner's switch: by default the main checkout's protected, weakened-tests and force checks stay "not enforced"
+    // there (2.78.1's status); STUDIO_MAIN_CHECKOUT_ENFORCE=on enforces them with main's key.
+    const ON = { STUDIO_MAIN_CHECKOUT_ENFORCE: 'on' };
+    const showDefault = node(S, ['harness/approve.mjs', 'show'], env);
+    const showOn = node(S, ['harness/approve.mjs', 'show'], { ...env, ...ON });
+    const enf = (x) => probe(S, `const a = await import(${u(S, 'harness/approve.mjs')}); const w = await import(${u(S, 'harness/test-weakening.mjs')}); const r = await w.checkWeakening(); console.log(JSON.stringify({ tests: r.enforced, force: a.forceApproved('T-1') }));`, { ...env, STUDIO_WEAKENED_TESTS: '', ...x });
+    const enfDefault = enf({}); const enfOn = enf(ON);
     const forged = node(S, ['harness/approve.mjs', 'protected', '--note', 'not the owner: another key signs this', '--by', 'pat'], { ...env, STUDIO_OWNER_KEY: other.priv });
     for (const f of fs.readdirSync(path.join(S, 'studio', 'approvals'))) fs.rmSync(path.join(S, 'studio', 'approvals', f));
     const appr = node(S, ['harness/approve.mjs', 'protected', '--note', 'the owner re-pins the controls check', '--by', 'pat'], { ...env, STUDIO_OWNER_KEY: owner.priv });
+    const showOnAfter = node(S, ['harness/approve.mjs', 'show'], { ...env, ...ON });
     g(S, 'checkout', '-q', '-b', 'lane/x');
     g(S, 'add', '-A'); g(S, 'commit', '-qm', 'the re-pin and its approval', '--no-verify');
     const train = node(S, ['harness/approve.mjs', 'show'], { ...env, STUDIO_PROTECT_BASE: 'main' });
-    await guard('2.78.2 (e, 7a B-120 again): on the main checkout of a studio that doesn\'t push (origin/main has no owner key, main committed one), `approve -- protected` signs the change set since the key-carrying base (local main: only the re-pinned file), so the train\'s check (base: local main) accepts it; an approval signed with another key says it won\'t verify; STUDIO_KEY_BASE=off keeps origin/main and no key (fails on 2.78.1: the approval covered the change since origin/main, which also held main\'s own key commit, so its change id never matched and the train said NEEDS APPROVAL)', () => [
+    await guard('2.78.2 (e, 7a B-120 again): on the main checkout of a studio that doesn\'t push (origin/main has no owner key, main committed one), `approve -- protected` signs the change set since the key-carrying base (local main: only the re-pinned file), so the train\'s check (base: local main) accepts it; an approval signed with another key says it won\'t verify; STUDIO_KEY_BASE=off keeps origin/main and no key. The main checkout\'s own enforcement stays as on 2.78.1 by default (protected files, weakened tests and task done --force "not enforced"), and STUDIO_MAIN_CHECKOUT_ENFORCE=on (the owner\'s switch) enforces all three there: NEEDS APPROVAL before the owner signs, approved after (fails on 2.78.1: the approval covered the change since origin/main, which also held main\'s own key commit, so its change id never matched and the train said NEEDS APPROVAL; and the switch didn\'t exist)', () => [
       jb.j?.ref === 'main' && jb.j?.moved === 'origin/main' && jb.j?.from === 'main' && jb.j?.offRef === 'origin/main' && jb.j?.offFrom === 'none'
+        && showDefault.status === 0 && /aren't enforced/.test(out(showDefault))
+        && showOn.status === 3 && /NEEDS APPROVAL: 1 protected file/.test(out(showOn)) && /qa\/controls-check\.mjs/.test(out(showOn)) && !/studio\/keys/.test(out(showOn))
+        && enfDefault.j?.tests === false && enfDefault.j?.force === null && enfOn.j?.tests === true && enfOn.j?.force?.ok === false
+        && showOnAfter.status === 0 && /OK: approved by pat/.test(out(showOnAfter))
         && forged.status === 0 && /does not verify with the owner key the checks read/.test(out(forged))
         && appr.status === 0 && !/studio\/keys/.test(out(appr)) && train.status === 0 && /OK: approved by pat/.test(out(train)),
-      JSON.stringify({ jb: jb.j || out(jb).slice(-300), forged: out(forged).slice(-300), appr: out(appr).slice(-400), train: out(train).slice(-400) })]);
+      JSON.stringify({ jb: jb.j || out(jb).slice(-300), showDefault: out(showDefault).slice(-300), showOn: out(showOn).slice(-300), enfDefault: enfDefault.j || out(enfDefault).slice(-300), enfOn: enfOn.j || out(enfOn).slice(-300), showOnAfter: out(showOnAfter).slice(-300), forged: out(forged).slice(-300), appr: out(appr).slice(-400), train: out(train).slice(-400) })]);
   }
 
   // ---- 7b: keyFor when origin/main has a pull request's merge commit that main doesn't (A-030) ----

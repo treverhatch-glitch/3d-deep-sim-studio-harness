@@ -171,6 +171,12 @@
   since `origin/main`, which also held main's own protected commits (the key itself), so the train never matched it.
   The range only shrinks: commits already on `main` aren't judged again. The hooks gate keeps its base. After signing,
   `approve` says when the approval won't verify with the key the checks read.
+- The owner's switch, `STUDIO_MAIN_CHECKOUT_ENFORCE` (2.78.2, default `off`): where the base has no owner key and the key
+  comes from local `main` (in practice the main checkout of a studio that doesn't push), the protected-files check, the
+  weakened-tests check and `task done --force` stay "not enforced" there, as in 2.78.1: the owner keeps that call. The
+  one base and key above still apply to signing, so an approval made there is the one the train (base: local `main`,
+  with its key) accepts, and the train and lane copies enforce as before. `on`: those three checks enforce on such a
+  checkout too, with `main`'s key, for changes since the key-carrying base. The hooks gate is unchanged by it.
 - The key-carrying base with merges on GitHub (2.78.2, A-030): `origin/main` may hold pull-request merge commits local
   `main` lacks. `keyFor` no longer asks that `origin/main` be an ancestor of `main`. It takes local `main`'s key when
   the base shares `main`'s history, none of the base's commits that `main` lacks touches the owner key file, and

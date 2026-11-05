@@ -238,6 +238,22 @@ export function keyFor(b, env = process.env) {
  * descends from the old base): commits main already has are not judged again. The hooks gate keeps its base (it is
  * enforced without a key) and only takes the key. STUDIO_KEY_BASE=off: the 2.78.0 reading for every kind.
  */
+/**
+ * 2.78.2: the owner's switch, STUDIO_MAIN_CHECKOUT_ENFORCE (default off). Where the base has no owner key and the key
+ * comes from local main (keyFor from 'main': in practice the main checkout of a studio that doesn't push), 2.78.1 did
+ * not enforce protected files, weakened tests or `task done --force` there ("not enforced"), and the owner kept that
+ * call for himself. judgeBase still gives every approve kind one base and key (so an approval signed there is the one
+ * the train accepts); this only decides whether those three checks enforce on such a checkout. on: they do, with main's
+ * key. The hooks gate is unchanged (enforced without a key since 2.58.2; 2.78.1 verifies its approvals with main's key).
+ * Returns the key to enforce with, or null (not enforced).
+ */
+export const mainCheckoutEnforce = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_MAIN_CHECKOUT_ENFORCE || '').trim());
+export function enforcingKey(b, env = process.env) {
+  if (!b?.key) return null;
+  if (b.key.from === 'main' && !mainCheckoutEnforce(env)) return null;
+  return b.key.pub || null;
+}
+
 export function judgeBase(env = process.env, { exact = false } = {}) {
   const b = resolveBase(env);
   if (!b) return null;
@@ -350,8 +366,9 @@ function checkProtectedWith(env) {
   // change set since that base, so an approval made on the main checkout names the set a train copy judges.
   const b = judgeBase(env, { exact: true });
   if (!b) return { enforced: false, ok: true, changes: [], why: `no base branch to compare with and no owner key (${OWNER_PUB_REL}) committed, so protected files aren't enforced yet; ${OWNER_KEY_HOWTO}` };
-  const pub = b.key.pub;
+  const pub = enforcingKey(b, env);
   const changes = protectedChanges(b.base);
+  if (!pub && b.key.from === 'main') return { enforced: false, ok: true, changes, base: b.ref, why: `${b.movedFrom || b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced on this checkout, as before 2.78.2 (local main has the key and the train enforces it; STUDIO_MAIN_CHECKOUT_ENFORCE=on, the owner's switch, enforces it here too)` };
   if (!pub) return { enforced: false, ok: true, changes, base: b.ref, why: `${b.ref} has no owner key (${OWNER_PUB_REL}), so protected files aren't enforced yet: ${OWNER_KEY_HOWTO}` };
   if (!changes.length) return { enforced: true, ok: true, changes, base: b.ref, why: `no protected file changed since ${b.ref}, committed or not` };
   if (b.byHash) {
@@ -372,9 +389,10 @@ function checkProtectedWith(env) {
 
 /** A task done --force / --accepted-by for this task: is it signed by the owner? null = no owner key (not enforced). */
 export function forceApproved(taskId, { env = process.env } = {}) {
-  // 2.78.2: the key every approve kind is judged with (judgeBase: the key-carrying base's on a studio that doesn't push).
+  // 2.78.2: the key every approve kind is judged with (judgeBase); with the key from local main, enforced only with
+  // STUDIO_MAIN_CHECKOUT_ENFORCE=on (enforcingKey), as 2.78.1 left it.
   const b = judgeBase(env);
-  const pub = b ? b.key.pub : ownerPublicKey(null);
+  const pub = b ? enforcingKey(b, env) : ownerPublicKey(null);
   if (!pub) return null;
   const a = readApprovals().find((x) => x.approval?.kind === 'force' && x.approval.task === taskId && verifyApproval(x, pub));
   return a ? { ok: true, by: a.approval.by, reason: a.approval.reason, file: a.file } : { ok: false };

@@ -294,8 +294,9 @@ async function checkWeakeningWith(env) {
   if (falsy(env.STUDIO_WEAKENED_TESTS)) return { ok: true, off: true, enforced: false, findings: [], why: 'off (STUDIO_WEAKENED_TESTS=off): tests are not checked for weakening' };
   const { base: b, findings } = await findWeakenings({ env });
   if (!b) return { ok: true, enforced: false, findings: [], why: 'no base branch to compare with, so no change to check' };
-  const { ownerPublicKey, readApprovals, verifyApproval, OWNER_PUB_REL, OWNER_KEY_HOWTO } = await import('./approve.mjs');
-  const pub = b.key ? b.key.pub : ownerPublicKey(b.base);
+  const { ownerPublicKey, readApprovals, verifyApproval, enforcingKey, OWNER_PUB_REL, OWNER_KEY_HOWTO } = await import('./approve.mjs');
+  // 2.78.2: with the key from local main (judgeBase), enforced only with STUDIO_MAIN_CHECKOUT_ENFORCE=on, as 2.78.1 left it.
+  const pub = b.key ? enforcingKey(b, env) : ownerPublicKey(b.base);
   const enforced = truthy(env.STUDIO_WEAKENED_TESTS) || Boolean(pub);
   let approved = [];
   let open = findings;
