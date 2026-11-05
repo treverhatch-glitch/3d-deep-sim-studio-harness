@@ -74,7 +74,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emitEvent, readRecentEvents } from './event.mjs';
 import { mainRoot, mainBranch, linkDir, nodeModuleDirs, ignoreLanes, landFastForward, forgetLanded, rememberTaskBranch, LANES_DIR } from './worktree.mjs';
-import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates } from './merge-lane.mjs';
+import { withLandLock, judgeVerifyReuse, matchAny, withGateSlot, selectGates, ALWAYS_SHARED } from './merge-lane.mjs';
+import { studioCheckReaders } from './check-reads.mjs';
 import { recordTrust } from './gate-trust.mjs';
 import { beginTrainLife, reapDeadTrains } from './train-life.mjs';
 import { processHarness, chainGuard, copyHarnessDrift } from './harness-version.mjs';
@@ -2914,6 +2915,126 @@ function rebuildOverBoardMove(root, sc, { tip, now, built, id, unionFiles }) {
   return { ok: true, built: again, files: move.files, ...(rc.ran.length ? { rechecked: rc.ran } : {}) };
 }
 
+// ---- 2.78.2 (g, item 16): land the verified tree, then main's new non-code commits on top ------------------------
+
+/** STUDIO_TRAIN_LAND_OVER_NONCODE (default on). off: a move of main the board rule can't take verifies again (2.78.1). */
+export const landOverNonCodeOn = (env = process.env) => !/^(off|0|false|no)$/i.test(String(env.STUDIO_TRAIN_LAND_OVER_NONCODE || '').trim());
+
+/**
+ * What the game manifests at `rev` say their checks read: [{ glob, by }] from each game|web/<x>/studio.gates.json (the
+ * required checks' "paths", the "shared" globs, the manifest itself). A manifest that can't be read: every studio file.
+ */
+export function gameReadGlobs(root, rev) {
+  const found = [];
+  for (const top of ['game', 'web']) {
+    const ls = git(root, 'ls-tree', '--name-only', '-z', `${rev}:${top}`);
+    if (ls.status !== 0) continue;
+    for (const d of String(ls.stdout || '').split('\0').filter(Boolean)) {
+      const rel = `${top}/${d}/studio.gates.json`;
+      const r = git(root, 'show', `${rev}:${rel}`);
+      if (r.status !== 0) continue;
+      found.push({ glob: rel, by: `${rel} (the manifest)` });
+      let j = null;
+      try { j = JSON.parse(r.stdout); } catch { found.push({ glob: 'studio/**', by: `${rel} (not readable JSON)` }); continue; }
+      for (const g of Array.isArray(j?.shared) ? j.shared : []) found.push({ glob: String(g), by: `${rel} "shared"` });
+      for (const g of Array.isArray(j?.gates) ? j.gates : []) {
+        if (!g || !g.id || g.required === false || !Array.isArray(g.paths)) continue;
+        for (const p of g.paths) found.push({ glob: String(p), by: `game:${g.id} (its paths)` });
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Who reads this file, by the checks' own rules: [] means no required check does (a "non-code" file); else the reasons.
+ * The train's copy tests every file outside studio/ from its own tree, and the studio's required checks declare no
+ * paths (each reads the whole tree), so any such file is code. studio/ is never tested from the tree (sparse-excluded,
+ * linked to the main checkout's); a studio file is non-code only when it is on the board list and no rule reads it: not
+ * a task record, approval or recheckPaths file, not read by docs, session or reviewer (harness/check-reads.mjs), not in a
+ * game check's "paths" or "shared" globs, not always-shared. ctx: { board, rechecks, records, addOnly, game }.
+ */
+export function nonCodeReaders(file, ctx) {
+  const f = String(file || '').replace(/\\/g, '/');
+  if (!f.startsWith('studio/')) return ['the train tests it from its own tree, and the studio\'s required checks declare no paths (each reads the whole tree)'];
+  const why = [];
+  if (matchAny(f, ALWAYS_SHARED)) why.push('every check (always shared)');
+  if (!matchAny(f, ctx.board || [])) why.push('not on the board list (harness/train-board.json boardPaths)');
+  if ((ctx.records || {})[f]) why.push('a task record (the board rule judges its entries)');
+  if (matchAny(f, ctx.addOnly || [])) why.push('an approval');
+  const rc = Object.entries(ctx.rechecks || {}).filter(([g]) => matchAny(f, [g])).flatMap(([, ids]) => (Array.isArray(ids) ? ids.map(String) : []));
+  if (rc.length) why.push(`read by ${[...new Set(rc)].join(', ')} (recheckPaths)`);
+  for (const id of studioCheckReaders(f)) why.push(`read by ${id}`);
+  for (const g of ctx.game || []) if (matchAny(f, [g.glob])) why.push(`read by ${g.by}`);
+  return why;
+}
+
+/**
+ * Main's new commits tip..now, each judged file by file: { ok, commits: [{ sha, subject, files }], files } when every
+ * file any of them touches (added, changed, deleted or renamed; a merge's against each parent) has no reader, else
+ * { ok: false, why } naming the first file a check reads and why.
+ */
+export function mainNonCodeCommits(root, tip, now, ctx) {
+  if (git(root, 'merge-base', '--is-ancestor', tip, now).status !== 0) return { ok: false, why: `the new ${now.slice(0, 8)} doesn't descend from ${tip.slice(0, 8)}` };
+  const shas = out(git(root, 'rev-list', '--reverse', `${tip}..${now}`)).split('\n').filter(Boolean);
+  if (!shas.length) return { ok: false, why: 'no new commit' };
+  const max = Number(process.env.STUDIO_TRAIN_LAND_OVER_NONCODE_MAX || 200);
+  if (shas.length > max) return { ok: false, why: `${shas.length} new commits (more than STUDIO_TRAIN_LAND_OVER_NONCODE_MAX=${max})` };
+  const commits = [];
+  const all = new Set();
+  for (const sha of shas) {
+    const d = git(root, '-c', 'core.quotePath=false', 'diff-tree', '-r', '-m', '--no-commit-id', '--name-only', '--no-renames', '-z', sha);
+    if (d.status !== 0) return { ok: false, why: `could not read ${sha.slice(0, 8)}` };
+    const files = [...new Set(String(d.stdout || '').split('\0').filter(Boolean))].sort();
+    for (const f of files) {
+      const r = nonCodeReaders(f, ctx);
+      if (r.length) return { ok: false, why: `${sha.slice(0, 8)} touches ${f}: ${r.join('; ')}` };
+      all.add(f);
+    }
+    commits.push({ sha, subject: out(git(root, 'log', '-1', '--format=%s', sha)).slice(0, 120), files });
+  }
+  return { ok: true, commits, files: [...all].sort() };
+}
+
+/**
+ * Main moved after a green verify of the train's tree T, and the board rule (rebuildOverBoardMove) can't take it (a
+ * deleted or renamed board file, a pin-refresh commit, ...). When every new main commit touches only files no check
+ * reads (mainNonCodeCommits): merge main's new commits onto T in the train's copy (`git merge`, hooks on, as the lanes
+ * are merged: parents T, then main) and land that, under the land lock, without a new verify. Checked with git before:
+ * a clean merge (merge-tree) whose tree is T with exactly main's versions of those files; and the one required check
+ * that reads every file, secrets, runs on the new commits themselves (secret-scan --since T). Any doubt: { ok: false,
+ * why }, the copy back at T, and the caller builds and verifies again as before.
+ */
+function landOverNonCode(root, sc, { tip, now, verified, id }) {
+  const ctx = { board: boardPaths(), rechecks: recheckPaths(), records: taskRecordPaths(), addOnly: addOnlyPaths(), game: gameReadGlobs(root, now) };
+  const mv = mainNonCodeCommits(root, tip, now, ctx);
+  if (!mv.ok) return mv;
+  const head = verified.head;
+  const back = () => { git(sc.dir, 'merge', '--abort'); git(sc.dir, 'reset', '-q', '--hard', head); git(sc.dir, 'clean', '-fdq'); };
+  git(sc.dir, 'reset', '-q', '--hard', head); // a refused board rebuild left the copy on main's new tip
+  git(sc.dir, 'clean', '-fdq');
+  if (out(git(root, 'rev-parse', `refs/heads/${sc.branch}^{tree}`)) !== verified.tree) { back(); return { ok: false, why: 'the train branch is not at the verified tree' }; }
+  const mt = git(root, 'merge-tree', '--write-tree', head, now);
+  if (mt.status !== 0) return { ok: false, why: `main's new commits don't merge cleanly onto the verified tree (${out(mt).split('\n')[0].slice(0, 120) || `exit ${mt.status}`})` };
+  const want = out(mt).split('\n')[0].trim();
+  const d = git(root, 'diff-tree', '-r', '--name-only', '--no-renames', '-z', verified.tree, want);
+  if (d.status !== 0) return { ok: false, why: 'could not compare the trees' };
+  const blob = (rev, f) => out(git(root, 'rev-parse', '-q', '--verify', `${rev}:${f}`));
+  const odd = String(d.stdout || '').split('\0').filter(Boolean).find((f) => !mv.files.includes(f) || blob(want, f) !== blob(now, f));
+  if (odd) return { ok: false, why: `the merged tree differs from the verified one in ${odd}, not only by main's version of its non-code files` };
+  const msg = [`train ${id}: land the verified tree ${verified.tree.slice(0, 8)}, then ${mv.commits.length} new commit(s) of main that touch only non-code files`, '', ...mv.commits.slice(0, 20).map((c) => `  ${c.sha.slice(0, 8)} ${c.subject}`), '', `Studio-Train: ${id} over-noncode`].join('\n');
+  const env = { ...process.env };
+  for (const k of ['STUDIO_LOCK_OWNER', 'STUDIO_EXPERIMENT', 'STUDIO_AGENT_MODEL']) delete env[k];
+  const m = spawnSync('git', ['-c', 'user.name=launcher', '-c', 'user.email=launcher@studio.local', 'merge', '--no-ff', '--no-edit', '-m', msg, now], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env, maxBuffer: 16 * 1024 * 1024 });
+  if (m.status !== 0) { back(); return { ok: false, why: `the merge stopped: ${`${m.stdout || ''}${m.stderr || ''}`.trim().split('\n').slice(-2).join(' ').slice(0, 200)}` }; }
+  const merged = out(git(sc.dir, 'rev-parse', 'HEAD'));
+  const tree = out(git(sc.dir, 'rev-parse', 'HEAD^{tree}'));
+  if (tree !== want) { back(); return { ok: false, why: 'the merge commit\'s tree is not the one git predicted' }; }
+  const sec = spawnSync(process.execPath, [path.join(sc.dir, 'scripts', 'secret-scan.mjs'), '--since', head], { windowsHide: true, cwd: sc.dir, encoding: 'utf8', env: { ...env, STUDIO_MAIN_ROOT: root }, maxBuffer: 16 * 1024 * 1024 });
+  if (sec.status !== 0) { back(); return { ok: false, why: `the secrets check is red on main's new commits (${`${sec.stdout || ''}${sec.stderr || ''}`.trim().split('\n').filter((l) => /FAIL|secret/i.test(l)).slice(-1)[0]?.slice(0, 160) || `exit ${sec.status}`})` }; }
+  return { ok: true, built: { ...verified, head: merged, tree }, commits: mv.commits, files: mv.files, merge: merged };
+}
+
 /**
  * 2.77.0 (P9.1): re-run only the checks `ids` (those the studio has) on the train copy's tree after main moved by files
  * they read. { ok, ran: [ids], why }. Nothing to run: ok.
@@ -2947,22 +3068,32 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
   let out1;
   let built = verified;
   let board = null;
+  let over = null; // 2.78.2 (g): landed over main's non-code commits
   try {
     out1 = withLandLock(root, () => {
       const now = out(git(root, 'rev-parse', `refs/heads/${main}`));
       if (now !== tip) {
         // 2.60.1 (B-29): a board-only commit on main (a task type record, NEXT.md) restarted the whole verify (~9 min).
         const re = rebuildOverBoardMove(root, sc, { tip, now, built: verified, id, unionFiles });
-        if (!re.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}`); return 'moved'; }
-        built = re.built;
-        board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
-        log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
-        ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
+        // 2.78.2 (g, item 16): main's new commits touch only files no check reads: land T, then those commits on top.
+        const lo = re.ok ? null : !landOverNonCodeOn() ? { ok: false, why: 'STUDIO_TRAIN_LAND_OVER_NONCODE=off' } : v?.emptyDiff ? { ok: false, why: 'an empty-diff landing (no verify of its own)' } : landOverNonCode(root, sc, { tip, now, verified, id });
+        if (!re.ok && !lo.ok) { log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) and the verify can't stand for it: ${re.why}; nor can the train land over those commits: ${lo.why}`); return 'moved'; }
+        if (lo?.ok) {
+          built = lo.built;
+          over = { from: tip, to: now, merge: lo.merge, files: lo.files, commits: lo.commits.map((c) => ({ sha: c.sha, subject: c.subject, files: c.files })), verifiedTree: verified.tree };
+          log(`[train] ${id}: ${main} moved (${tip.slice(0, 8)} -> ${now.slice(0, 8)}) by ${lo.commits.length} commit(s) that touch only files no check reads (${lo.files.join(', ')}): landing the verified tree ${verified.tree.slice(0, 8)} with them merged on top (${lo.merge.slice(0, 8)}), no new verify`);
+        } else {
+          built = re.built;
+          board = { from: tip, to: now, files: re.files, ...(re.rechecked ? { rechecked: re.rechecked } : {}) };
+          log(`[train] ${id}: ${main} moved by board/record files only (${re.files.join(', ')}); the lanes merged onto it again without a conflict and the tree is the verified tree plus those files: verify reused${re.rechecked ? ` (re-ran only ${re.rechecked.join(', ')}, the checks that read them: green)` : ''}`);
+          ev('board_move', id, `${main} moved ${tip.slice(0, 8)} -> ${now.slice(0, 8)} by board/record files only (${re.files.join(', ')}): verify of ${verified.tree.slice(0, 8)} reused for ${built.tree.slice(0, 8)}`, { agent: by, status: 'ok', meta: board });
+        }
       }
       if (out(git(root, 'rev-parse', `${sc.branch}^{tree}`)) !== built.tree) return { ok: false, message: 'the train branch changed after its verify' };
       const landedFrom = out(git(root, 'rev-parse', `refs/heads/${main}`));
       const ff = landFastForward(root, main, sc.branch, { taskId: `train ${id}` });
       if (!ff.ok) return { ok: false, message: ff.message };
+      if (over) ev('landed_over_noncode', id, `${main} moved ${tip.slice(0, 8)} -> ${over.to.slice(0, 8)} while the train was verified, by ${over.commits.length} commit(s) that touch only files no check reads (${over.files.slice(0, 8).join(', ')}${over.files.length > 8 ? ', …' : ''}): landed the verified tree ${over.verifiedTree.slice(0, 8)} with them merged on top (${over.merge.slice(0, 8)}), no new verify`, { agent: by, status: 'ok', meta: over });
       // 2.65.0 (B-40): each landed lane's config proposal, in a commit right after the landing (Config-From: <task>).
       applyLandedConfig(root, main, built.included.map((l) => ({ task: l.task, base: out(git(root, 'merge-base', landedFrom, l.head)) || landedFrom, released: l.released || null })), { log, by, res, id });
       for (const lane of built.included) {
@@ -2998,14 +3129,15 @@ function landTrain(root, sc, main, tip, { built: verified, v }, { id, by, deps, 
   if (out1 === 'moved') return 'moved';
   if (!out1.ok) { res.ok = false; res.message = `The train's verify was green but ${main} didn't move: ${out1.message}. Nothing was closed; run the train again.`; log(`[train] ${id}: ${res.message}`); return undefined; }
   if (board) res.boardMove = board;
-  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}${board ? `; the verify of ${verified.tree.slice(0, 8)} reused across a board-only move of ${main} (${board.files.join(', ')})` : ''}): ${res.landed.slice(from).join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed.slice(from), reused: Boolean(v.reused), ...(v.emptyDiff ? { emptyDiff: true } : {}), ...(board ? { boardMove: board, verifiedTree: verified.tree } : {}) } });
+  if (over) res.overNonCode = over;
+  ev('landed', id, `${main} moved to ${built.head.slice(0, 8)} (tree ${built.tree.slice(0, 8)}, verified${v.reused ? ' by an earlier record of this tree' : ''}${board ? `; the verify of ${verified.tree.slice(0, 8)} reused across a board-only move of ${main} (${board.files.join(', ')})` : ''}${over ? `; the verified tree ${verified.tree.slice(0, 8)} with ${over.commits.length} non-code commit(s) of ${main} merged on top` : ''}): ${res.landed.slice(from).join(', ')}`, { agent: by, status: 'ok', meta: { head: built.head, tree: built.tree, lanes: res.landed.slice(from), reused: Boolean(v.reused), ...(v.emptyDiff ? { emptyDiff: true } : {}), ...(board ? { boardMove: board, verifiedTree: verified.tree } : {}), ...(over ? { overNonCode: over, verifiedTree: verified.tree } : {}) } });
   return undefined;
 }
 
-const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}), ...(res.config ? { config: res.config } : {}), ...(res.redBudget ? { redBudget: res.redBudget } : {}) });
+const brief = (res) => ({ landed: res.landed, dropped: res.dropped.map((d) => d.task), deferred: res.deferred.map((d) => d.task), ...(res.held?.length ? { held: res.held.map((h) => h.task) } : {}), ...(res.tiers && Object.keys(res.tiers).length ? { tiers: res.tiers } : {}), verifies: res.verifies, reused: res.reused, ...(res.rechecks ? { rechecks: res.rechecks } : {}), ...(res.pinRefresh ? { pinRefresh: res.pinRefresh.lanes } : {}), ...(res.union ? { union: res.union } : {}), ...(res.boardMove ? { boardMove: res.boardMove.files } : {}), ...(res.overNonCode ? { overNonCode: res.overNonCode.commits.map((c) => c.sha) } : {}), ...(res.config ? { config: res.config } : {}), ...(res.redBudget ? { redBudget: res.redBudget } : {}) });
 function summary(res) {
   const parts = [];
-  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
+  if (res.landed.length) parts.push(`landed ${res.landed.join(', ')} with ${res.verifies} verify run(s)${res.reused ? ` (${res.reused} taken from a green record of the same tree)` : ''}${res.boardMove ? ` (kept across a board-only move of main: ${res.boardMove.files.join(', ')})` : ''}${res.overNonCode ? ` (main's ${res.overNonCode.commits.length} new non-code commit(s) merged on top: ${res.overNonCode.files.slice(0, 5).join(', ')})` : ''}${res.rechecks ? ` and ${res.rechecks} re-check(s) of the failing checks` : ''}${res.pinRefresh ? `, plus one pin-refresh commit for ${res.pinRefresh.lanes.join(', ')} (${res.pinRefresh.report})` : ''}${res.union ? `; union-merged ${res.union.map((u) => `${u.files.join(', ')} for ${u.task}`).join('; ')}` : ''}`);
   if (res.dropped.length) parts.push(`handed back ${res.dropped.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.deferred.length) parts.push(`waiting for the next train: ${res.deferred.map((d) => `${d.task} (${d.why.split('\n')[0]})`).join('; ')}`);
   if (res.config?.length) parts.push(`config proposals: ${res.config.map((c) => `${c.task} applied ${c.applied.join(', ') || 'nothing'}${c.held.length ? `, HELD for a person: ${c.held.map((h) => h.file).join(', ')} (npm run task -- train config ${c.task})` : ''}`).join('; ')}`);

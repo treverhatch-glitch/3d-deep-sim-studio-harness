@@ -85,6 +85,18 @@ npm run task -- add "Pass 11: realism pass on the hangar" --role engine-porter -
   `npm run task -- track <T-ID> engine:<name> --by <you>` (a person, the orchestrator or a Producer/Director session;
   never a worker). `npm run task -- track <T-ID>` shows the record. With no engine named, nothing changes (the
   engine's work lives in the studio). `STUDIO_ENGINE_TRACK_INFER=off`: no inference (a plain lane, the 2.78.1 way).
+  2.78.2 (item 18): a track written without `engine:` (`"unity"`: `task add --track unity`, a record set by hand, an old
+  `task.added` event) silently made the task no engine pass, so `task done --train` didn't queue it. Now a bare name
+  the studio configures (`studio/game.json` `"engines"`, or an `engine/<game>/engine.json` track) reads as
+  `engine:<name>` (`harness/engine-tracks.mjs readTrack`): `task add` and `task track` say so; a record or event is
+  fixed once with an `engine.track_normalized` event. `task track` refuses an engine the studio doesn't configure and
+  anything that is no track. Other tracks (`asset`, `web`) are untouched. `STUDIO_ENGINE_TRACK_NORMALIZE=off`: a bare
+  name is no track (2.78.1).
+  Backfill on upgrade: `npm run upgrade -- --merge …` (its post-merge step) gives every open engine-porter task with no
+  track the studio's only engine (the record says `inferred: upgrade backfill`, an `engine.track_backfilled` event) and
+  prints each one; with several engines configured it lists them for a person with the `task track` command, and an
+  engine-porter whose track names no engine is listed too. By hand: `node harness/engine-tracks.mjs backfill
+  [--dry-run] --by <you>`.
 - **Done check.** A pass in its own repo is judged in that repo:
   - its branch has commits the target lacks, and everything on it is committed;
   - the visual check passes, when the task asks for one;
@@ -99,6 +111,13 @@ every engine queue and starts `task train --engine <name>` detached in a quiet w
 `.studio/line/<name>-train.log`, and the start is logged in `.studio/line/actions.jsonl`. From there the train does
 what it did before: a merge-tree check against the target, ONE land run (the studio's land script), bisection when
 the run is red, then it closes the tasks.
+
+2.78.2 (item 18): `task done --train` on an engine pass it can't queue says why and exits 1 (a
+`task.train.not_queued` event), never going on as a studio lane in silence. The reasons
+(`harness/engine-tracks.mjs engineTrainVerdict`) are: an engine-porter task whose track names no engine (or with
+several engines and no track), with the `task track` fix; `STUDIO_DONE_UNITY_GATE=skip` (the engine gate and train
+off); an engine whose work is in its own repo but has no land command. An engine with no land command whose work is
+in the studio, or an engine-porter in a studio with no engine, trains as a studio lane, and done says so.
 
 Engine trains run beside the web train and beside each other. They compete only for `machine:heavy` and RAM.
 `npm run task -- train --engine <name>` still starts one by hand, and `npm run line -- status --json` shows the

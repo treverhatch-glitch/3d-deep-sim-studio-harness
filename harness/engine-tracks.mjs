@@ -26,6 +26,7 @@
  *
  *   node harness/engine-tracks.mjs [list] [--json]       every engine target, its land command, queue and cost
  *   node harness/engine-tracks.mjs task <T-ID> [--json]   the engine record of one task
+ *   node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]   2.78.2: open engine-porter tasks get their track
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,20 +107,166 @@ const tasksFile = (root) => path.join(root, '.studio', 'engine', 'tasks.json');
 export function readEngineTasks(root = mainRoot()) { const j = readJson(tasksFile(root), {}); return j && typeof j === 'object' && !Array.isArray(j) ? j : {}; }
 
 /**
+ * 2.78.2 (g, item 18): the engines this studio configures: the names in studio/game.json "engines" (the owner's) and
+ * the engine of each engine/<game>/engine.json track. Sorted.
+ */
+export function configuredEngines({ root = REPO_ROOT } = {}) {
+  const names = new Set(Object.keys(enginesConfig(root)).filter((n) => ENGINE_NAME_RE.test(n)));
+  try { for (const g of fs.readdirSync(path.join(root, 'engine'))) { const e = readJson(path.join(root, 'engine', g, 'engine.json'))?.engine; if (ENGINE_NAME_RE.test(String(e || ''))) names.add(e); } } catch {}
+  return [...names].sort();
+}
+
+/**
+ * 2.78.2 (g, item 18): read a track value. "engine:<name>" is that engine (configured: whether the studio names it);
+ * a bare name the studio configures ("unity") reads as "engine:<name>" (normalized: true; tasks added before engine
+ * tracks, or a hand-set record, said it that way and silently weren't engine tasks); anything else is unknown.
+ * { track, engine, configured, normalized } | { track: null, engine: null, unknown: <value>, why } | { track: null } (empty).
+ * STUDIO_ENGINE_TRACK_NORMALIZE=off: a bare name is unknown (2.78.1).
+ */
+export function readTrack(value, { root = REPO_ROOT, env = process.env } = {}) {
+  const v = String(value ?? '').trim();
+  if (!v) return { track: null, engine: null };
+  const known = configuredEngines({ root });
+  const e = engineOfTrack(v);
+  if (e) return { track: v, engine: e, configured: known.includes(e), normalized: false };
+  const bare = v.toLowerCase();
+  if (!off(env.STUDIO_ENGINE_TRACK_NORMALIZE) && ENGINE_NAME_RE.test(bare) && known.includes(bare)) return { track: `engine:${bare}`, engine: bare, configured: true, normalized: true, from: v };
+  return { track: null, engine: null, unknown: v, why: `"${v}" is not a track: an engine pass's track is engine:<name>, and ${known.length ? `this studio configures ${known.map((n) => `engine:${n}`).join(', ')}` : 'this studio configures no engine (studio/game.json "engines")'}` };
+}
+
+/** 2.78.2 (g, item 18): a track written without "engine:" was read as the engine: the record is fixed once, and said so. */
+function normalizeOnce(taskId, t, { root, from }) {
+  let rec = null;
+  try { rec = setEngineTask(taskId, { engine: t.engine, track: t.track, normalized: { from: t.from, at: new Date().toISOString() } }, { root }); } catch { return null; }
+  try { emitEvent({ type: 'engine.track_normalized', agent: 'launcher', task: taskId, to: 'producer', msg: `${taskId}'s track "${t.from}" (${from}) is read as ${t.track}: the engine it names (npm run task -- track ${taskId} engine:<name> --by <you> changes it)`.slice(0, 400), meta: { from: t.from, track: t.track, source: from } }); } catch {}
+  return rec;
+}
+
+/**
  * The engine record of a task: { task, engine, track, branch, scope, visual: { required, refs }, by, at } or null. The
  * record (.studio/engine/tasks.json, written by task add --track engine:<x>) wins; a task added before 2.77 falls back
- * to its task.added event (and its task.unity_branch record) as before.
+ * to its task.added event (and its task.unity_branch record) as before. 2.78.2 (g, item 18): a track written as a bare
+ * engine name ("unity", in the record or the event) reads as engine:<name> (readTrack); the record is written once.
  */
-export function engineTask(taskId, { root = mainRoot(), events = null } = {}) {
+export function engineTask(taskId, { root = mainRoot(), events = null, env = process.env } = {}) {
   if (!taskId) return null;
   const rec = readEngineTasks(root)[taskId];
-  if (rec?.engine) return { task: taskId, ...rec };
+  if (rec?.engine && engineOfTrack(rec.track) === rec.engine) return { task: taskId, ...rec };
+  if (rec?.engine || rec?.track) {
+    const t = readTrack(rec.track || rec.engine, { root, env });
+    if (t.normalized && (!rec.engine || rec.engine === t.engine)) { const n = normalizeOnce(taskId, t, { root, from: '.studio/engine/tasks.json' }); if (n) return n; }
+    if (rec.engine) return { task: taskId, ...rec };
+    if (t.engine) return { task: taskId, ...rec, engine: t.engine, track: t.track };
+  }
   const evs = events || readRecentEvents(20000);
   const added = evs.filter((e) => e.type === 'task.added' && e.task === taskId).pop();
-  const engine = engineOfTrack(added?.meta?.track);
+  let track = added?.meta?.track;
+  let engine = engineOfTrack(track);
+  if (!engine && track) {
+    const t = readTrack(track, { root, env });
+    if (t.normalized) {
+      const branch0 = evs.filter((e) => e.type === 'task.unity_branch' && e.task === taskId).pop()?.meta?.branch || added.meta.branch || null;
+      try { setEngineTask(taskId, { branch: branch0, scope: added.meta.scope || null, visual: added.meta.visualCheck ? { required: true, refs: added.meta.refs || [] } : null }, { root }); } catch {}
+      const n = normalizeOnce(taskId, t, { root, from: 'its task.added event' });
+      if (n) return n;
+      engine = t.engine; track = t.track;
+    }
+  }
   if (!engine) return null;
   const branch = evs.filter((e) => e.type === 'task.unity_branch' && e.task === taskId).pop()?.meta?.branch || added.meta.branch || null;
-  return { task: taskId, engine, track: added.meta.track, branch, scope: added.meta.scope || null, visual: added.meta.visualCheck ? { required: true, refs: added.meta.refs || [] } : null, from: 'event' };
+  return { task: taskId, engine, track, branch, scope: added.meta.scope || null, visual: added.meta.visualCheck ? { required: true, refs: added.meta.refs || [] } : null, from: 'event' };
+}
+
+/**
+ * 2.78.2 (g, item 18): the raw track a task was given (record, else its task.added event), for saying why it isn't an
+ * engine task. '' when none.
+ */
+export function rawTrack(taskId, { root = mainRoot(), events = null } = {}) {
+  const rec = readEngineTasks(root)[taskId];
+  if (rec?.track || rec?.engine) return String(rec.track || rec.engine);
+  const evs = events || readRecentEvents(20000);
+  return String(evs.filter((e) => e.type === 'task.added' && e.task === taskId).pop()?.meta?.track || '');
+}
+
+/**
+ * 2.78.2 (g, item 18): which engine train `task done --train` queues this task on, or why none. The one place the
+ * decision is made (task.mjs asks it). { engine } | { engine: null, engineTask: true, why, fix } (an engine pass that
+ * can't be queued: done says so and queues nothing) | { engine: null, engineTask: false, note? } (a studio lane).
+ */
+export function engineTrainVerdict(taskId, { role = null, root = mainRoot(), env = process.env, events = null } = {}) {
+  const fixTrack = `npm run task -- track ${taskId} engine:<name> --by <you> (a person, the orchestrator or a Producer)`;
+  let rec = null;
+  try { rec = engineTask(taskId, { root, env, events }); } catch { rec = null; }
+  const raw = rec ? '' : rawTrack(taskId, { root, events });
+  // A track that names no engine: other tracks ("asset", "web") are not engine passes, but an engine-porter's is one.
+  if (!rec && raw && isEngineRole(role, { root })) {
+    const t = readTrack(raw, { root, env });
+    return { engine: null, engineTask: true, why: `it is an engine-porter task and ${t.why || `its track "${raw}" is not one this studio can train`}`, fix: fixTrack };
+  }
+  if (!rec && raw) return { engine: null, engineTask: false };
+  if (!rec && isEngineRole(role, { root })) {
+    const inf = inferEngineTrack(taskId, { root, env, by: 'task-done' });
+    if (inf.error) return { engine: null, engineTask: true, why: `it is an engine-porter task with no engine track, and the studio names several engines`, fix: fixTrack };
+    rec = inf.rec || null;
+    if (!rec) return { engine: null, engineTask: false, note: `${taskId} is an engine-porter task with no engine track (${inf.why}): it trains as a studio lane` };
+  }
+  const e = rec ? engineOfTrack(rec.track) || rec.engine : null;
+  if (!e) return { engine: null, engineTask: false };
+  if (String(env.STUDIO_DONE_UNITY_GATE || '') === 'skip') return { engine: null, engineTask: true, why: `STUDIO_DONE_UNITY_GATE=skip turns the engine land gate and its train off`, fix: 'unset STUDIO_DONE_UNITY_GATE, then run task done --train again' };
+  const t = engineTarget(e, { root });
+  if (e === 'unity' || t?.land) return { engine: e };
+  const outside = (() => { try { return Boolean(engineRepo(e, { root })); } catch { return false; } })();
+  const why = `its engine ${e} has no land command (studio/game.json "engines": { "${e}": { "land": "<command>" } }), so there is no ${t?.label || e} train`;
+  if (!outside) return { engine: null, engineTask: false, note: `${taskId} is on engine:${e}, but ${why.slice(4)}; its work is in the studio, so it trains as a studio lane` };
+  return { engine: null, engineTask: true, why, fix: `the owner sets engines.${e}.land in studio/game.json (protected)` };
+}
+
+/**
+ * 2.78.2 (g, item 18): on upgrade, open engine-porter tasks that have no engine track (added before engine tracks)
+ * get one when the studio configures exactly one engine (the record, inferred: { from: 'upgrade backfill' }, and an
+ * engine.track_backfilled event); with several, they are listed for a person (npm run task -- track <ID> engine:<name>).
+ * A bare-name track ("unity") is normalized on the way (engineTask); an engine-porter's track that names no engine is
+ * listed. `open`: [{ id, role }] (default: the board's open tasks). { changed: [{ task, track, how }], ambiguous: [task],
+ * unknown: [{ task, track }], engines, lines }. dryRun: nothing written.
+ */
+export async function backfillEngineTracks({ root = mainRoot(), by = 'upgrade', dryRun = false, env = process.env, open = null } = {}) {
+  let tasks = open;
+  if (!tasks) {
+    const { parseNextQueue } = await import('./task.mjs');
+    const q = parseNextQueue();
+    tasks = [...q.inProgress, ...q.backlog].map((t) => ({ id: t.id, role: t.role }));
+  }
+  const names = configuredEngines({ root });
+  const events = readRecentEvents(20000);
+  const changed = [];
+  const ambiguous = [];
+  const unknown = [];
+  for (const t of tasks) {
+    const raw = rawTrack(t.id, { root, events });
+    const tr = raw ? readTrack(raw, { root, env }) : null;
+    if (tr?.normalized) {
+      if (!dryRun) engineTask(t.id, { root, events, env });
+      changed.push({ task: t.id, track: tr.track, how: `"${raw}" read as ${tr.track}` });
+      continue;
+    }
+    if (!isEngineRole(t.role, { root })) continue;
+    if (raw) { if (!engineOfTrack(raw)) unknown.push({ task: t.id, track: raw }); continue; }
+    if (names.length === 1) {
+      const track = `engine:${names[0]}`;
+      if (!dryRun) {
+        setEngineTask(t.id, { engine: names[0], track, inferred: { from: 'upgrade backfill (the only engine in studio/game.json)', by } }, { root });
+        try { emitEvent({ type: 'engine.track_backfilled', agent: by, task: t.id, to: 'producer', msg: `${t.id} (engine-porter, no engine track) set to ${track}, the studio's only engine (npm run task -- track ${t.id} engine:<name> --by <you> changes it)`.slice(0, 400), meta: { track } }); } catch {}
+      }
+      changed.push({ task: t.id, track, how: 'no track: the only engine' });
+    } else if (names.length > 1) ambiguous.push(t.id);
+  }
+  const verb = dryRun ? 'would set' : 'set';
+  const lines = [
+    ...changed.map((c) => `[upgrade] engine track ${verb}: ${c.task} -> ${c.track} (${c.how})`),
+    ...unknown.map((u) => `[upgrade] ${u.task} is an engine-porter task whose track "${u.track}" names no engine this studio configures (${names.join(', ') || 'none'}): a person sets it: npm run task -- track ${u.task} engine:<name> --by <you>`),
+    ...(ambiguous.length ? [`[upgrade] ${ambiguous.length} open engine-porter task(s) have no engine track and this studio configures ${names.length} engines (${names.join(', ')}): a person says which: ${ambiguous.map((x) => `npm run task -- track ${x} engine:<${names.join('|')}> --by <you>`).join('; ')}`] : []),
+  ];
+  return { changed, ambiguous, unknown, engines: names, lines };
 }
 
 /** Write (merge) a task's engine record. Returns the record. */
@@ -356,6 +503,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const argv = process.argv.slice(2);
   const json = argv.includes('--json');
   const root = mainRoot();
+  // 2.78.2 (g, item 18): the upgrade's backfill, by hand: node harness/engine-tracks.mjs backfill [--dry-run] [--by <name>]
+  if (argv[0] === 'backfill') {
+    const i = argv.indexOf('--by');
+    const r = await backfillEngineTracks({ root, by: i >= 0 && argv[i + 1] ? argv[i + 1] : 'engine-tracks', dryRun: argv.includes('--dry-run') });
+    if (json) console.log(JSON.stringify({ changed: r.changed, ambiguous: r.ambiguous, unknown: r.unknown, engines: r.engines }));
+    else console.log(r.lines.length ? r.lines.join('\n') : '[upgrade] engine tracks: nothing to backfill (every open engine-porter task has its track)');
+    process.exit(0);
+  }
   if (argv[0] === 'task') {
     const r = engineTask(argv[1], { root });
     console.log(json ? JSON.stringify(r) : r ? `${argv[1]}: ${r.track}${r.branch ? `, branch ${r.branch}` : ''}${r.scope ? `, scope: ${r.scope}` : ''}${r.visual?.required ? `, visual check required${r.visual.refs?.length ? ` (refs: ${r.visual.refs.join(', ')})` : ''}` : ''}` : `${argv[1]} is not an engine task.`);

@@ -11,14 +11,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DOCS_SKIP_DIRS, DOCS_SKIP_FILES, DOCS_SKIP_PREFIXES } from '../harness/check-reads.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['node_modules', '.git', '.studio', '.lanes', 'dist', 'harness-notes', 'retros', 'daily', 'reviews', 'research', 'meetings', 'handoffs']);
 // Free text people and agents write (test #2: a Producer note ending "npm run verify:" turned the docs gate red).
-const SKIP_FILES = new Set(['CHANGELOG.md', 'docs/ROADMAP.md', 'studio/producer/LOG.md', 'studio/producer/INBOX.md', 'studio/PITFALLS.md', 'studio/PITFALLS-ARCHIVE.md', 'studio/HARNESS-TASKS.md']);
 // 2.78.2 (c): agent-written logs, reviews, handoffs and notes are free text too: a gating check never reads them (a log
 // commit on main restarted a verified train because this check counted a line in one as red).
-const SKIP_PREFIXES = ['studio/producer/', 'studio/reviews/', 'studio/handoffs/', 'studio/notes/'];
+// 2.78.2 (g): the lists live in harness/check-reads.mjs, which the merge train asks too (what no check reads).
+const SKIP_DIRS = new Set(DOCS_SKIP_DIRS);
+const SKIP_FILES = new Set(DOCS_SKIP_FILES);
+const SKIP_PREFIXES = DOCS_SKIP_PREFIXES;
 const scripts = new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts || {}));
 const hubScripts = fs.existsSync(path.join(root, 'hub', 'package.json')) ? new Set(Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'hub', 'package.json'), 'utf8')).scripts || {})) : new Set();
 

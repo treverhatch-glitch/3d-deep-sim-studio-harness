@@ -4866,6 +4866,15 @@ if (inShard('selftest-2781h')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (g): a train lands its verified tree over main's non-code commits (items 16); engine tracks written "unity",
+// task track refusals, done --train saying why an engine pass isn't queued, the upgrade's engine-track backfill (item 18).
+if (inShard('selftest-2782g')) {
+  const dir = copyRepo();
+  const { selftest2782G } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782g.mjs')).href);
+  await selftest2782G({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.78.2 (d): a 429 on one Gemini model no longer marks all of agy; an outside review can be recorded; a hand-back that
 // names an owner-only step parks the task for the owner instead of relaunching builders.
 if (inShard('selftest-2782d')) {
