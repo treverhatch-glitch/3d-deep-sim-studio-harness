@@ -206,6 +206,21 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   `.studio/train/<id>-move-recheck.log`, `meta.rechecked` on the event): green lands on the same verify, red verifies
   again. Anything else (`studio/protected.json`, `studio/game.json`, gates, keys, a deleted approval, code, goldens) or a
   train with a pin-refresh commit: built and verified again, as before.
+- Main moved by non-code commits only (2.78.2, g): when the rule above refuses a move (a deleted or renamed run log,
+  a train with a pin-refresh commit, lanes that no longer merge exactly as before), the train looks at each new commit
+  of main. If every file each one touches has no reader by the checks' own rules (`harness/train.mjs nonCodeReaders`),
+  the train lands its verified tree T and merges those commits on top, with no new verify. A file has no reader when
+  it is under `studio/` (never tested from the train's tree), on the board list, not a task record, approval or
+  `recheckPaths` file, not read by the docs, session or reviewer checks (`harness/check-reads.mjs`, the lists those
+  checks use), not in a required game check's `"paths"` or the manifest's `"shared"` globs, and not always-shared.
+  A file outside `studio/` is always code: the studio's required checks declare no paths, so each reads the whole
+  tree. The merge is `git merge` in the train's copy (hooks on, as the lanes are merged; parents T, then main), and it
+  lands only if git first shows a clean merge whose tree is T with exactly main's versions of those files, and the
+  secrets check (the one required check that reads every file) is green on the new commits (`secret-scan --since T`).
+  Event `task.train.landed_over_noncode` (the commits, the files, the merge); the `landed` event says so too. Any
+  doubt (a file some check reads, a conflict, a different tree, a red secrets scan, more than
+  `STUDIO_TRAIN_LAND_OVER_NONCODE_MAX` (200) commits): built and verified again, as before.
+  `STUDIO_TRAIN_LAND_OVER_NONCODE=off` turns it off (2.78.1).
 - Conflict prediction at queue time (2.65.0, B-34, `harness/train-predict.mjs`): `task done <ID> --train` runs
   `git merge-tree --write-tree --name-only` (no index, no files touched) of the lane against main and against main +
   each lane already queued. A conflict with main refuses the queue, naming file:line ("merge main into the lane",

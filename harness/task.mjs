@@ -23,7 +23,7 @@ import { applyRescue, rescueOf, closeRescuesFor } from './rescue.mjs';
 import { savePatch } from './wip.mjs';
 import { laneConfigWarning } from './lane-studio.mjs';
 import { overlapCheck } from './task-overlap.mjs';
-import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack } from './engine-tracks.mjs';
+import { engineTask as engineTaskOf, engineRepo, engineTarget, engineOfTrack, engineTrainVerdict as engineTrainVerdictOf, readTrack } from './engine-tracks.mjs';
 import { inLaneCopy, catchUp, carryTaskBranch, carryTaskBranchEx, deliver, laneDiff, mainRoot, laneDirty, unmerged, landFastForward, mainBranch as mainBranchOf } from './worktree.mjs';
 import { laneConfigBefore } from './config-proposal.mjs';
 import { recordPass, clearPass, withLandLock, judgeVerifyReuse } from './merge-lane.mjs';
@@ -2038,8 +2038,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       if (flags.force) { console.error('--train and --force don\'t go together: a forced done never goes through the merge train. Nothing was queued.'); process.exit(1); }
       // 2.63.0: a Unity-track task queues its Unity branch for the Unity merge train (harness/unity-train.mjs).
       // 2.77.0 (u, P5.2/P5.6): any engine target with a land command trains on its own engine train.
-      const trainEngine = (() => { const e = engineOfTrack((() => { try { return (engineTaskOf(targetId) || {}).track; } catch { return null; } })()); return e && (e === 'unity' || engineTarget(e)?.land) ? e : null; })();
-      if (process.env.STUDIO_DONE_UNITY_GATE !== 'skip' && trainEngine) {
+      // 2.78.2 (g, item 18): one verdict (engine-tracks.mjs engineTrainVerdict): a track written "unity" reads as
+      // engine:unity, and an engine pass it can't queue says why instead of going on as a studio lane in silence.
+      const roleOf = (() => { try { const q0 = parseNextQueue(); return [...q0.inProgress, ...q0.backlog].find((t) => t.id === targetId)?.role || null; } catch { return null; } })();
+      const tv = (() => { try { return engineTrainVerdictOf(targetId, { role: roleOf }); } catch (e) { return { engine: null, engineTask: false, note: `could not read its engine track (${e.message})` }; } })();
+      if (!tv.engine && tv.engineTask) {
+        const msg = `${targetId} was not queued: it is an engine pass, but ${tv.why}. ${tv.fix ? `Fix: ${tv.fix}, then run task done --train again.` : ''}`.trim();
+        emitEvent({ type: 'task.train.not_queued', agent: whoAmI(flags), task: targetId, to: 'producer', status: 'blocked', msg: msg.slice(0, 600), meta: { why: tv.why } });
+        console.error(msg);
+        process.exit(1);
+      }
+      if (tv.note) console.log(`[task done] ${tv.note}`);
+      const trainEngine = tv.engine || null;
+      if (trainEngine) {
         // --branch is recorded first, so the done check looks at that branch in the engine repo.
         if (typeof flags.branch === 'string' && flags.branch) { try { (await import('./engine-tracks.mjs')).setEngineTask(targetId, { engine: trainEngine, branch: flags.branch }); } catch {} }
         const pre = completeTask(targetId, '', whoAmI(flags), { unityTrainCheck: true, noop: noopFlag });
@@ -2309,18 +2320,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
     if (cmd === 'track') {
       // 2.78.2 (item 7d): an engine pass's track (engine:<name>), for a task added without one (an older engine-porter
       // task got a plain lane). Decided like a lane: a person, the orchestrator or a Producer/Director session.
-      const want = String(flags._[2] || '').trim();
+      const asked = String(flags._[2] || '').trim();
       const et = await import('./engine-tracks.mjs');
-      const engine = et.engineOfTrack(want);
-      if (!engine) {
+      if (!asked) {
         const cur = et.engineTask(arg1);
         console.log(cur ? `${arg1}: ${cur.track}${cur.inferred ? ' (inferred)' : ''}${cur.branch ? `, branch ${cur.branch}` : ''}` : `${arg1} has no engine track. Set one: npm run task -- track ${arg1} engine:<name> --by <you>`);
-        process.exit(want ? 1 : 0);
+        process.exit(0);
       }
+      // 2.78.2 (g, item 18): "unity" (a configured engine without the prefix) is engine:unity; an engine the studio
+      // doesn't configure, or anything else, is refused (it would leave the task off every engine train).
+      const rt = et.readTrack(asked);
+      if (!rt.engine || !rt.configured) {
+        const known = et.configuredEngines();
+        console.error(`${arg1}'s track was not set: ${rt.engine ? `engine:${rt.engine} is not an engine this studio configures (${known.length ? known.map((n) => `engine:${n}`).join(', ') : 'none: studio/game.json "engines" names them, the owner\'s'})` : rt.why}.`);
+        process.exit(1);
+      }
+      const want = rt.track;
+      const engine = rt.engine;
+      if (rt.normalized) console.log(`"${asked}" is read as ${want} (the engine it names).`);
       const trackNo = laneRefusal(by);
       if (trackNo) { console.error(trackNo.replace(/set a task's lane|sets lanes/g, 'set a task\'s engine track')); process.exit(1); }
-      const rec = et.setEngineTask(arg1, { engine, track: want, inferred: null, setBy: by });
-      emitEvent({ type: 'task.track', agent: by, task: arg1, msg: `${by}: ${arg1} is an engine pass on ${want}`, meta: { track: want } });
+      const rec = et.setEngineTask(arg1, { engine, track: want, inferred: null, normalized: rt.normalized ? { from: asked, at: new Date().toISOString() } : null, setBy: by });
+      emitEvent({ type: 'task.track', agent: by, task: arg1, msg: `${by}: ${arg1} is an engine pass on ${want}${rt.normalized ? ` (given as "${asked}")` : ''}`, meta: { track: want, ...(rt.normalized ? { given: asked } : {}) } });
       await logTaskDecision({ action: 'task-track', subject: arg1, by, why: `${arg1} is an engine pass on ${want}`, evidence: 'npm run task -- track', undo: { kind: 'text', text: `npm run task -- track ${arg1} engine:<the earlier engine> --by <you>` } });
       console.log(`${arg1} is an engine pass on ${rec.track}: its next launch gets that engine's worktree.`);
       process.exit(0);
@@ -2534,7 +2555,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ...(typeof flags.paths === 'string' && laneList(flags.paths).length ? { paths: laneEntries(flags.paths) } : typeof flags.scope === 'string' && typeof flags.lane !== 'string' && scopePaths(flags.scope).length ? { paths: scopePaths(flags.scope) } : {}),
         // 2.59.0 (#8): a person keeps a broad lane for a launch in the main checkout: --wide "<why>" (harness/agent.mjs).
         ...(typeof flags.wide === 'string' && (typeof flags.lane === 'string' || typeof flags.paths === 'string') ? { laneWide: { lane: laneList(typeof flags.paths === 'string' && laneList(flags.paths).length ? flags.paths : flags.lane).join(','), why: flags.wide, by: typeof flags.by === 'string' ? flags.by : actor(), ...(process.env.STUDIO_ROLE ? { inSession: true } : {}) } } : {}),
-        ...(typeof flags.track === 'string' ? { track: flags.track } : {}),
+        // 2.78.2 (g, item 18): --track unity (a configured engine) is engine:unity, said once.
+        ...(typeof flags.track === 'string' ? { track: (() => { const rt = readTrack(flags.track); if (rt.normalized) { console.log(`--track ${flags.track} is read as ${rt.track} (the engine it names).`); return rt.track; } return flags.track; })() } : {}),
         // 2.60.1 (B-41): the Unity branch a --track engine:unity task lands from (harness/unity-gate.mjs {branch}).
         ...(typeof flags.branch === 'string' ? { branch: flags.branch } : {}),
         // 2.77.0 (u, P5.1/P5.5): an engine pass's scope, its visual check and the studio's reference photos (local paths).

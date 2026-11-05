@@ -369,6 +369,17 @@ export async function upgradeMerge({ ref, by, permission = '', goldenReason = ''
     if (gf?.ok && gf.added) lines.push(`[upgrade] ${gf.added} commit(s) of the update listed as made without this studio's hooks (exempt from the hooks gate)${gf.merges ? `, ${gf.merges} of them its own merge commits (2.78.1)` : ''}.`);
     else if (gf && !gf.ok) lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${gf.why}): node harness/hook-stamp.mjs grandfather adds them by hand.`);
   } catch (e) { lines.push(`[upgrade] WARN couldn't list the update's commits for the hooks gate (${String(e?.message || e).slice(0, 160)}).`); }
+  // 2.78.2 (g, item 18): open engine-porter tasks added before engine tracks get their track (the studio's only engine;
+  // with several they are listed for a person), and a track written "unity" reads as engine:unity. The merged harness's
+  // helper, loaded from the studio; a studio without it (before 2.78.2) or a failure is said, never fatal.
+  try {
+    const etf = path.join(root, 'harness', 'engine-tracks.mjs');
+    const et = fs.existsSync(etf) ? await import(pathToFileURL(etf).href) : null;
+    if (et?.backfillEngineTracks) {
+      const bf = await et.backfillEngineTracks({ root, by: String(by).trim().slice(0, 60), env });
+      lines.push(...bf.lines);
+    }
+  } catch (e) { lines.push(`[upgrade] WARN couldn't backfill the engine tracks of open engine-porter tasks (${String(e?.message || e).slice(0, 160)}): node harness/engine-tracks.mjs backfill --by <you> does it.`); }
   await emit(root, {
     type: 'upgrade.merged', agent: String(by).trim().slice(0, 60),
     msg: `harness update ${ref} (${from} -> ${to}) merged into ${branch} as ${commit.slice(0, 10)} for ${String(by).trim()}${who.permission ? ` (recorded by ${who.recordedBy} on their permission: "${who.permission.slice(0, 120)}")` : ''}; backup ${backup}`.slice(0, 600),
