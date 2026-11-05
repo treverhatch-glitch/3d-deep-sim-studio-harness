@@ -60,6 +60,16 @@
  * other verify starts on the same fixed port, or loads the machine again); bounded by STUDIO_FLAKE_HOLD_MIN (default
  * the quiet wait + STUDIO_FLAKE_WAIT_MIN + STUDIO_GAME_GATE_TIMEOUT_MS; 0/off: no hold), released when the run ends,
  * ignored once its train's process is gone. Running verifies are never stopped: the quiet wait waits for them.
+ * 2.78.2 (b): with STUDIO_FLAKE_TOGETHER=on (default off: one file at a time as above; see togetherOn), a check with two
+ * or more failing files is triaged TOGETHER when the caller can run several files at once (triageRed's `together`): ONE
+ * run of all of them at low load (one test worker; the runner takes the files), then ONE quiet low-load re-run of those
+ * still failing. Each file is labelled from the run's own per-file result (game-gates' "failing test files in <check>"
+ * line): passes at low load -> port-collision (the red run's output) / seed-flake / load-sensitive "trusted" (its record,
+ * as above) / load-flake; fails there and passes at quiet low load -> load-sensitive; no quiet machine in time -> real
+ * "unconfirmed under load". A file that fails the quiet re-run beside others is "real" only once it fails by itself there
+ * (one at a time, up to the first real; it passes by itself: load-flake). A run whose output can't be split by file (it names no failing file, names one
+ * outside the group, timed out, fell back to the whole check, or shows a port collision with more than one file failing)
+ * falls back to one run per file for those files. The crew's train paid ~20 min per failing file (4 files: 80 min).
  * Imports only small modules (train.mjs and game-gates.mjs import this one).
  */
 import fs from 'node:fs';
@@ -271,6 +281,93 @@ export function collisionWaitExcuse(a = {}) {
 }
 
 /**
+ * 2.78.2 (b): STUDIO_FLAKE_TOGETHER=on: several failing files of one check are triaged in one run. Default off (one file
+ * at a time, as 2.78.1): qa/selftest-269r.mjs (c) and qa/selftest-2773b.mjs expect the per-file runs on purpose (a file
+ * whose run never ends must not be run once another file is real), so the default is the owner's call.
+ */
+export const togetherOn = (env = process.env) => /^(on|1|true|yes)$/i.test(String(env.STUDIO_FLAKE_TOGETHER ?? '').trim());
+
+/**
+ * 2.78.2 (b): which files of a group run failed, from that run's output: { ok: true, failing, passing } or { ok: false,
+ * why } when it can't be told file by file (the caller then runs them one at a time). A green run: every file passed.
+ */
+export function attribute(run, check, files) {
+  if (run?.ok) return { ok: true, failing: [], passing: [...files] };
+  const text = String(run?.text || '');
+  if (/^Error: timed out after \d+ s/m.test(text)) return { ok: false, why: 'the run timed out' };
+  if (/running the whole check instead/.test(text)) return { ok: false, why: 'the focused run fell back to the whole check' };
+  const named = focusFromLog(text).files[check] || [];
+  if (!named.length) return { ok: false, why: 'it names no failing test file' };
+  const outside = named.filter((n) => !files.some((f) => samePath(f, n)));
+  if (outside.length) return { ok: false, why: `it names ${outside.slice(0, 2).join(', ')}, not one of the files run` };
+  const failing = files.filter((f) => named.some((n) => samePath(f, n)));
+  return { ok: true, failing, passing: files.filter((f) => !failing.includes(f)) };
+}
+
+/** 2.78.2 (b): the label of a file that failed in the red run and passed when run again alone at low load. */
+function passedLowLoad(file, { redText, rng, trust, together, runs }) {
+  const pcRed = portCollision(redText, { file });
+  if (pcRed) return { label: 'port-collision', why: portCollisionWhy(pcRed, { alone: false }), runs, rng: [], port: pcRed.port };
+  const found = rngFindingsFor(file, rng);
+  if (found.length) return { label: 'seed-flake', why: `passes alone at low load${together ? ` (with the other ${together - 1} failing file(s) of its check)` : ''}; the test uses randomness without a fixed seed (${found.slice(0, 2).join('; ')})`, runs, rng: found };
+  if (trust?.trusted) return { label: 'load-sensitive', trusted: true, why: `fails in the verify while other work runs, passes alone at low load (one test worker${together ? `, with the other ${together - 1} failing file(s) of its check` : ''}); trusted without a quiet machine: ${trust.why}`, runs, rng: [] };
+  return { label: 'load-flake', why: `passes alone at low load (one test worker${together ? `, with the other ${together - 1} failing file(s) of its check` : ''}): it failed only beside other work`, runs, rng: [] };
+}
+
+/**
+ * 2.78.2 (b): label the failing files of ONE check together (see the header). runAlone({ check, files, lowLoad, quiet?,
+ * quietWaitMin?, together: true }) runs them in one run. Returns { labels: [{ file, ...label }], notRun?, perFile:
+ * [files to label one at a time], why? }.
+ */
+export function labelGroup({ check, files, runAlone, rng = null, env = process.env, redText = '', trusts = {}, log = () => {} }) {
+  const labels = [];
+  const n = files.length;
+  const first = runAlone({ check, files, lowLoad: true, together: true });
+  if (first?.notRun) return { labels, notRun: String(first.notRun).slice(0, 300), why: `not run alone together (${String(first.notRun).slice(0, 200)})`, perFile: [] };
+  const a = attribute(first, check, files);
+  if (!a.ok) { log(`[flakes] ${check}: the ${n} failing files run together can't be told apart (${a.why}): each runs alone instead`); return { labels, perFile: [...files], why: a.why }; }
+  const run1 = (f) => ({ ok: !a.failing.includes(f), lowLoad: true, together: n });
+  for (const f of a.passing) labels.push({ file: f, ...passedLowLoad(f, { redText, rng, trust: trusts[f], together: n, runs: [run1(f)] }) });
+  if (!a.failing.length) return { labels, perFile: [] };
+  const pc1 = portCollision(first?.text || '', {});
+  if (pc1 && a.failing.length > 1) { log(`[flakes] ${check}: a port collision with ${a.failing.length} files failing together: each runs alone instead`); return { labels, perFile: [...a.failing], why: 'a port collision with more than one file failing' }; }
+  if (pc1) { const f = a.failing[0]; const pc = portCollision(first.text, { file: f }); labels.push({ file: f, label: 'port-collision', why: portCollisionWhy(pc, { alone: true }), runs: [run1(f)], rng: [], port: pc.port }); return { labels, perFile: [] }; }
+  // Still failing at low load: the quiet low-load re-run (PU-56), together.
+  const Q = a.failing;
+  const m = Q.length;
+  const wait = quietWaitMin(env);
+  const q = runAlone({ check, files: Q, lowLoad: true, quiet: true, quietWaitMin: wait, together: true });
+  if (q?.notRun) return { labels, notRun: String(q.notRun).slice(0, 300), why: `failed alone at low load; the quiet low-load re-run was not run (${String(q.notRun).slice(0, 200)})`, perFile: [] };
+  if (q?.quietUnreached) {
+    for (const f of Q) labels.push({ file: f, label: 'real', why: `fails alone at low load on the same tree${m > 1 ? ` (with ${m - 1} other failing file(s) of its check)` : ''}; unconfirmed under load: a quiet machine was not reached within ${wait} min (STUDIO_FLAKE_QUIET_WAIT_MIN), so the failure is treated as real`, runs: [run1(f), { ok: false, lowLoad: true, quiet: false, together: m }], rng: [] });
+    return { labels, perFile: [] };
+  }
+  const b = attribute(q, check, Q);
+  if (!b.ok) { log(`[flakes] ${check}: the quiet re-run of ${m} files together can't be told apart (${b.why}): each runs alone instead`); return { labels, perFile: [...Q], why: b.why }; }
+  const pcQ = b.failing.length ? portCollision(q?.text || '', {}) : null;
+  if (pcQ && b.failing.length > 1) return { labels: [...labels, ...b.passing.map((f) => ({ file: f, label: 'load-sensitive', why: quietWhy(m), runs: [run1(f), { ok: true, lowLoad: true, quiet: true, together: m }], rng: [] }))], perFile: [...b.failing], why: 'a port collision with more than one file failing' };
+  const runQ = (f) => [run1(f), { ok: !b.failing.includes(f), lowLoad: true, quiet: true, together: m }];
+  for (const f of b.passing) labels.push({ file: f, label: 'load-sensitive', why: quietWhy(m), runs: runQ(f), rng: [] });
+  if (pcQ) { const f = b.failing[0]; const pc = portCollision(q.text, { file: f }); labels.push({ file: f, label: 'port-collision', why: portCollisionWhy(pc, { alone: true }), runs: runQ(f), rng: [], port: pc.port }); return { labels, perFile: [] }; }
+  if (m === 1) { const f = b.failing[0]; labels.push({ file: f, label: 'real', why: 'fails alone at low load on the same tree, and again at quiet low load', runs: runQ(f), rng: [] }); return { labels, perFile: [] }; }
+  // Failed beside the others even at quiet low load: "real" only once it fails by itself (a file that fails only next to
+  // other test files is not this lane's red). One at a time, until the first real (2.77.3: one real file is enough).
+  for (const f of b.failing) {
+    const c = runAlone({ check, files: [f], lowLoad: true, quiet: true, quietWaitMin: wait, together: true });
+    if (c?.notRun) return { labels, notRun: String(c.notRun).slice(0, 300), why: `failed at quiet low load with the others; its run alone was not run (${String(c.notRun).slice(0, 200)})`, perFile: [] };
+    if (c?.quietUnreached) { labels.push({ file: f, label: 'real', why: `fails at quiet low load with ${m - 1} other failing file(s) of its check; unconfirmed alone: a quiet machine was not reached within ${wait} min (STUDIO_FLAKE_QUIET_WAIT_MIN), so the failure is treated as real`, runs: [...runQ(f), { ok: false, lowLoad: true, quiet: false }], rng: [] }); return { labels, perFile: [] }; }
+    const runsC = [...runQ(f), { ok: Boolean(c?.ok), lowLoad: true, quiet: true }];
+    if (c?.ok) { labels.push({ file: f, label: 'load-flake', why: `fails beside the other failing files of its check, even at quiet low load, and passes by itself at quiet low load: it failed only beside other work`, runs: runsC, rng: [] }); continue; }
+    const pc = portCollision(c?.text || '', { file: f });
+    if (pc) { labels.push({ file: f, label: 'port-collision', why: portCollisionWhy(pc, { alone: true }), runs: runsC, rng: [], port: pc.port }); return { labels, perFile: [] }; }
+    labels.push({ file: f, label: 'real', why: `fails alone at low load on the same tree, and again by itself at quiet low load`, runs: runsC, rng: [] });
+    return { labels, perFile: [] };
+  }
+  return { labels, perFile: [] };
+}
+const quietWhy = (m) => `fails alone at low load while other work runs, passes alone at low load (one test worker${m > 1 ? `, with ${m - 1} other failing file(s) of its check` : ''}) on a quiet machine: it needs a quiet machine (load-sensitive)`;
+
+/**
  * After a red verify or re-check: label each failing test file (at most STUDIO_FLAKE_MAX_FILES; each once per `seen`
  * set, usually one per train), record the labels, and quarantine a test flaky `after` times in the window.
  * opts: { root, dir (the tree's checkout), text (the red run's output), train, tree, runAlone, seen, now, env, log,
@@ -278,8 +375,10 @@ export function collisionWaitExcuse(a = {}) {
  * real (the first file labelled real: the triage stops there), notRun ({ test, why }: a run refused as busy; it stops
  * there too), allPortCollision (every failing file was labelled port-collision), portCollisionWait (2.78.0: every failing
  * file was labelled port-collision or load-sensitive, at least one port-collision). runAlone also gets { k, of }.
+ * 2.78.2 (b): together (the caller's runAlone takes { files: [...] } and runs them in one run): a check with two or more
+ * failing files is labelled with labelGroup (STUDIO_FLAKE_TOGETHER=off: one file at a time, as before).
  */
-export function triageRed({ root, dir = root, text, train = '', tree = '', runAlone, seen = new Set(), now = Date.now(), env = process.env, log = () => {}, emit = emitEvent, rng } = {}) {
+export function triageRed({ root, dir = root, text, train = '', tree = '', runAlone, seen = new Set(), now = Date.now(), env = process.env, log = () => {}, emit = emitEvent, rng, together = false } = {}) {
   const out = { labels: [], quarantined: [] }; // 2.77.3: + real (the file red alone), notRun, skipped, allPortCollision; 2.78.0: portCollisionWait
   if (!triageOn(env) || typeof runAlone !== 'function') return out;
   const f = focusFromLog(text);
@@ -289,33 +388,64 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
   const rules = flakeRules(env);
   const facts = rng === undefined ? testRngFacts(dir, env) : rng;
   const todo = pairs.slice(0, rules.maxFiles);
-  for (let k = 0; k < todo.length; k += 1) {
-    const { check, file } = todo[k];
-    seen.add(`${check}|${file}`);
-    let l;
-    let trust = null;
-    try { trust = loadSensitiveTrust(root, { test: normTestPath(file), check, now, env }); } catch { trust = null; } // 2.78.1 (d)
-    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k: k + 1, of: todo.length }), rng: facts, env, redText: text, trust }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); continue; }
-    if (!l.label) {
-      // 2.77.3 (H2): refused before it ran (busy): no label, and the rest would wait the same way.
-      out.notRun = { test: normTestPath(file), check, why: l.notRun };
-      log(`[flakes] ${normTestPath(file)} (${check}): ${l.why}: no label${todo.length > k + 1 ? `; ${todo.length - k - 1} more failing file(s) not run alone either` : ''}; the train goes on`);
-      for (const p of pairs) seen.add(`${p.check}|${p.file}`); // not again in this train (its next reds would wait the same way)
-      break;
-    }
-    const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng.length ? { rng: l.rng } : {}), ...(l.port ? { port: l.port } : {}), ...(l.trusted ? { trusted: true } : {}) };
+  // 2.78.2 (b): a check's failing files run together (one run, then one quiet re-run) when the caller can (`together`).
+  const units = [];
+  if (together && togetherOn(env)) {
+    const by = new Map();
+    for (const p of todo) { if (!by.has(p.check)) by.set(p.check, []); by.get(p.check).push(p.file); }
+    for (const [check, files] of by) units.push(files.length > 1 ? { check, files } : { check, file: files[0] });
+  } else for (const p of todo) units.push(p);
+  const trustOf = (check, file) => { try { return loadSensitiveTrust(root, { test: normTestPath(file), check, now, env }); } catch { return null; } }; // 2.78.1 (d)
+  const stopAll = () => { for (const p of pairs) seen.add(`${p.check}|${p.file}`); };
+  let done = 0; // files labelled or tried so far (for the "more not run" counts)
+  // One label: recorded, quarantine rule, the "real" stop (2.77.3 H2, B-112). Returns true when the triage stops.
+  const record = (check, file, l) => {
+    const row = { at: new Date(now).toISOString(), test: normTestPath(file), check, label: l.label, why: l.why, train, tree, runs: l.runs, ...(l.rng?.length ? { rng: l.rng } : {}), ...(l.port ? { port: l.port } : {}), ...(l.trusted ? { trusted: true } : {}) };
     try { appendFlake(root, row); } catch {}
     if (row.label === 'load-sensitive') { try { noteLoadSensitive(root, row); } catch {} }
     out.labels.push(row);
     log(`[flakes] ${row.test} (${check}): ${row.label}: ${row.why}`);
     const q = maybeQuarantine(root, row, { now, env, emit });
     if (q) { out.quarantined.push(q); log(q.status === 'active' ? `[flakes] ${row.test} is quarantined (${q.why}; autoQuarantine in ${q.auto}); the game's runner skips it via STUDIO_TEST_QUARANTINE until a game dev releases it` : `[flakes] ${row.test} is PROPOSED for quarantine (${q.why}); it still runs until a person confirms: npm run flakes -- confirm ${row.test} --by <name>`); }
-    if (row.label === 'real') {
-      // 2.77.3 (H2, B-112): one file red alone is enough: the red is real, and the train goes on to name the lane.
-      out.real = row.test;
-      if (todo.length > k + 1 || pairs.length > todo.length) { out.skipped = pairs.length - k - 1; log(`[flakes] ${pairs.length - k - 1} more failing test file(s) not run alone: ${row.test} fails alone, so this red is real; the train goes on`); }
-      for (const p of pairs) seen.add(`${p.check}|${p.file}`); // nor on this train's later reds (its re-checks)
-      break;
+    if (row.label === 'real' && !out.real) out.real = row.test;
+    return row.label === 'real';
+  };
+  const notRunStop = (check, file, why, more, said) => {
+    // 2.77.3 (H2): refused before it ran (busy): no label, and the rest would wait the same way.
+    out.notRun = { test: normTestPath(file), check, why };
+    log(`[flakes] ${normTestPath(file)} (${check}): ${said}: no label${more > 0 ? `; ${more} more failing file(s) not run alone either` : ''}; the train goes on`);
+    stopAll(); // not again in this train (its next reds would wait the same way)
+  };
+  const realStop = () => {
+    // 2.77.3 (H2, B-112): one file red alone is enough: the red is real, and the train goes on to name the lane.
+    const left = pairs.length - done;
+    if (left > 0) { out.skipped = left; log(`[flakes] ${left} more failing test file(s) not run alone: ${out.real} fails alone, so this red is real; the train goes on`); }
+    stopAll(); // nor on this train's later reds (its re-checks)
+  };
+  const single = (check, file, k, of) => {
+    seen.add(`${check}|${file}`);
+    done += 1;
+    let l;
+    try { l = labelTest({ check, file, runAlone: (a) => runAlone({ ...a, k, of }), rng: facts, env, redText: text, trust: trustOf(check, file) }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${file}: not triaged (${e.message})`); return 'next'; }
+    if (!l.label) { notRunStop(check, file, l.notRun, pairs.length - done, l.why); return 'stop'; }
+    return record(check, file, l) ? 'real' : 'next';
+  };
+  let stopped = false;
+  for (let k = 0; k < units.length && !stopped; k += 1) {
+    const u = units[k];
+    if (u.file) { const r = single(u.check, u.file, k + 1, units.length); if (r === 'real') realStop(); stopped = r !== 'next'; continue; }
+    for (const file of u.files) seen.add(`${u.check}|${file}`);
+    const trusts = Object.fromEntries(u.files.map((file) => [file, trustOf(u.check, file)]));
+    let g;
+    try { g = labelGroup({ check: u.check, files: u.files, runAlone: (a) => runAlone({ ...a, file: a.files[0], k: k + 1, of: units.length }), rng: facts, env, redText: text, trusts, log }); } catch (e) { if (e?.stopsTriage) throw e; log(`[flakes] ${u.check}: ${u.files.length} files not triaged (${e.message})`); done += u.files.length; continue; }
+    let real = false;
+    for (const l of g.labels) { done += 1; if (record(u.check, l.file, l)) real = true; }
+    if (g.notRun) { const left = u.files.filter((file) => !g.labels.some((l) => l.file === file)); done += left.length; notRunStop(u.check, left[0] || u.files[0], g.notRun, pairs.length - done, g.why); stopped = true; break; }
+    if (real) { done += g.perFile.length; realStop(); stopped = true; break; }
+    for (const file of g.perFile) {
+      const r = single(u.check, file, k + 1, units.length);
+      if (r === 'real') { realStop(); stopped = true; break; }
+      if (r === 'stop') { stopped = true; break; }
     }
   }
   if (!out.real && !out.notRun && pairs.length > rules.maxFiles) log(`[flakes] ${pairs.length - rules.maxFiles} more failing test file(s) not triaged (STUDIO_FLAKE_MAX_FILES ${rules.maxFiles})`);
@@ -323,7 +453,7 @@ export function triageRed({ root, dir = root, text, train = '', tree = '', runAl
   // 2.78.0 merge: every failing file is a port collision or load-sensitive, at least one a collision (the lanes wait, see the header).
   out.portCollisionWait = out.labels.length > 0 && !out.real && !out.notRun && pairs.length <= todo.length && out.labels.length === pairs.length && out.labels.every((r) => r.label === 'port-collision' || r.label === 'load-sensitive') && out.labels.some((r) => r.label === 'port-collision');
   if (out.labels.length) {
-    try { emit({ type: 'test.flake_triage', agent: 'train', status: out.labels.some((r) => r.label === 'real') ? 'blocked' : 'warn', msg: `${train ? `train ${train}: ` : ''}failing tests run alone: ${out.labels.map((r) => `${r.test} ${r.label}${r.trusted ? ' (trusted)' : ''}${r.port ? ` (port ${r.port})` : ''}`).join(', ')}`.slice(0, 600), meta: { train, tree, labels: out.labels.map(({ test, check, label, port, trusted }) => ({ test, check, label, ...(port ? { port } : {}), ...(trusted ? { trusted: true } : {}) })) } }); } catch {}
+    try { emit({ type: 'test.flake_triage', agent: 'train', status: out.labels.some((r) => r.label === 'real') ? 'blocked' : 'warn', msg: `${train ? `train ${train}: ` : ''}failing tests run alone${units.some((x) => x.files) ? ' (a check\'s failing files together)' : ''}: ${out.labels.map((r) => `${r.test} ${r.label}${r.trusted ? ' (trusted)' : ''}${r.port ? ` (port ${r.port})` : ''}`).join(', ')}`.slice(0, 600), meta: { train, tree, labels: out.labels.map(({ test, check, label, port, trusted }) => ({ test, check, label, ...(port ? { port } : {}), ...(trusted ? { trusted: true } : {}) })) } }); } catch {}
   }
   return out;
 }

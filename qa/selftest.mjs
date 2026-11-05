@@ -4893,6 +4893,16 @@ if (inShard('selftest-2782e')) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
+// 2.78.2 (b): a red train costs minutes: a check's failing files triaged together, the red chain's time budget
+// (STUDIO_TRAIN_RED_BUDGET_MIN), the game:perf step on a quiet machine, an engine-porter session is not quiet, and the
+// parallel bisect leaves a heavy slot for builders.
+if (inShard('selftest-2782b')) {
+  const dir = copyRepo();
+  const { selftest2782B } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782b.mjs')).href);
+  await selftest2782B({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
 // 2.77.0 (helper n): Gemini as a first-class builder: agy runs Gemini only, the pinned task (B-92 launcher side), agy
 // usage and model telemetry, model pools with quota-aware routing that prefers Gemini, protected steps to an approver.
 if (inShard('selftest-277n')) {

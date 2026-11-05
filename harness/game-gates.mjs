@@ -45,6 +45,18 @@
  * 2.72.0 (b): a gate may declare "ratchet": true (with a section in <game>/purity-baseline.json it fails only on new
  * hits, harness/ratchet.mjs) and "canary": "<command or fixture path>" (input that must make it fail; npm run gates --
  * --canaries, harness/canaries.mjs).
+ *
+ * 2.78.2 (b): the game:perf step. Tests that measure wall-clock (a millisecond budget) flake on a busy machine (the crew:
+ * the same tree green at 674 s, red at 1000 s with only the load changed). A studio lists their globs in studio/game.json
+ * "perfTests" (["src/**\/*.perf.test.ts", ...]; the file is protected: the owner adds the key) or STUDIO_PERF_TESTS (comma
+ * list; off: none). The test checks (a "related" or "focus" command, "slowTests": true, or a command that clearly runs
+ * vitest, jest or node --test) leave them out (STUDIO_TEST_EXCLUDE) and, after the other checks, a game:perf step runs
+ * only them (STUDIO_TEST_ONLY, one test worker) once the machine is quiet (harness/flake-quiet.mjs: no other heavy job,
+ * game check, Unity editor or engine-porter session). A landing run (a merge train's) waits up to STUDIO_PERF_WAIT_MIN
+ * (10) and holds new builder and lane verifies back meanwhile (harness/heavy.mjs markQuietHold, as the flake triager's
+ * quiet re-run); any other verify runs it only if the machine is quiet already. Never quiet: "not run (busy)", a WARN,
+ * never red; in a train's focused re-check of game:perf it is a busy refusal (the train judges nothing from it). Quiet:
+ * its result counts like any required check. docs/ONBOARDING-A-GAME.md "Perf tests".
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,6 +75,7 @@ import { timeoutRerun } from './self-triage.mjs';
 import { readFocus, focusCommand, failingTestFiles } from './train-focus.mjs';
 import { quarantineEnvValue } from './flakes.mjs';
 import { gateEnv, applyGateEnv } from './gate-env.mjs';
+import { clearRunner } from './train-focus.mjs';
 
 const exists = (rel) => fs.existsSync(path.join(REPO_ROOT, rel));
 
@@ -151,6 +164,28 @@ export function slowTierOf(game) {
 export const slowTierRun = (env = process.env) => /^slow$/i.test(String(env.STUDIO_GATE_TIER || ''));
 /** 2.69.0 (p): STUDIO_SLOW_TIER=off: no slow tier, every check and test runs in every verify (as before 2.69.0). */
 export const slowTierOff = (env = process.env) => /^(off|0|false|no)$/i.test(String(env.STUDIO_SLOW_TIER || ''));
+
+/**
+ * 2.78.2 (b): the perf test globs: STUDIO_PERF_TESTS (comma list; off: none), else studio/game.json "perfTests" (a list
+ * of globs, or one comma-separated string). [] when neither.
+ */
+export function perfTestsOf(env = process.env, root = REPO_ROOT) {
+  const split = (v) => String(v).split(',').map((x) => x.trim()).filter(Boolean);
+  if (env.STUDIO_PERF_TESTS !== undefined && String(env.STUDIO_PERF_TESTS).trim() !== '') return /^(off|0|false|no)$/i.test(String(env.STUDIO_PERF_TESTS).trim()) ? [] : split(env.STUDIO_PERF_TESTS);
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(root, 'studio', 'game.json'), 'utf8')).perfTests;
+    if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').flatMap(split);
+    if (typeof v === 'string') return split(v);
+  } catch {}
+  return [];
+}
+/** 2.78.2 (b): minutes a landing run's game:perf step waits for a quiet machine (STUDIO_PERF_WAIT_MIN, default 10). */
+export function perfWaitMin(env = process.env) {
+  const v = String(env.STUDIO_PERF_WAIT_MIN ?? '').trim();
+  return v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 10;
+}
+/** 2.78.2 (b): a check that runs the game's tests (it gets STUDIO_TEST_EXCLUDE / STUDIO_TEST_ONLY). */
+export const isTestCheck = (g) => Boolean(g && (g.related || g.focus || g.slowTests || clearRunner(g.command)));
 
 /**
  * The per-test timeout factor a game's test command gets: the gate's load factor, at least the manifest's minScale
@@ -284,7 +319,17 @@ export async function planGameGates({ paths = [], changed = null, incoming = nul
     slowTier = { run: slowRun, globs: tierInfo.globs };
     if (slowRun) { runLayout = false; engine = []; }
   }
-  return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '', slowTier };
+  // 2.78.2 (b): the game:perf step (perf test globs; not in the slow tier's own run).
+  let perf = null;
+  if (game && !slowTierRun()) {
+    const globs = perfTestsOf();
+    if (globs.length) {
+      perf = { globs, gates: gates.filter((g) => g.tier !== 'slow' && isTestCheck(g)) };
+      // A change whose scope selected none of the test checks doesn't run their perf tests either.
+      if (!perf.gates.length && all.some((g) => g.tier !== 'slow' && isTestCheck(g))) { skipped.push({ id: 'game:perf', why: 'none of the checks that run the perf tests is selected for this change' }); perf = null; }
+    }
+  }
+  return { game, all, shared, gates, skipped, scope, layout: runLayout, layoutPaths, engine, why: sel.why || '', slowTier, perf };
 }
 
 /** 2.69.0 (p): the slow-tier env one game check runs with: STUDIO_TEST_EXCLUDE in a verify, STUDIO_TEST_ONLY in the slow tier. */
@@ -447,6 +492,7 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
     // load factor 1; the line is printed whenever the timeout differs from the base, naming why.
     let curRelated = false;
     let curGate = null;
+    let curPerf = null; // 2.78.2 (b): the test globs or files of the game:perf step while it runs
     const timeKey = () => `${game.name}:${cmdLabel}`;
     const timingWhy = (t) => [t.factor > 1 ? `${Math.round(baseTimeout / 1000)} s x ${t.factor}: ${t.why}` : '', t.floor ? t.floor.why : '', t.rerun && !(t.factor > 1) && !t.floor ? 'self-triage\'s one re-run at the cap' : ''].filter(Boolean).join('; ');
     const workersNow = () => {
@@ -486,6 +532,15 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       // 2.69.0 (p): the slow tier's test globs: left out of a verify (STUDIO_TEST_EXCLUDE), the only ones in the slow tier.
       const ste = slowTierEnv(plan.slowTier, curGate);
       if (Object.keys(ste).length) { runEnv = { ...runEnv, ...ste }; console.error(`[game-gates] ${cmdLabel}: slow tier: ${ste.STUDIO_TEST_ONLY ? `only ${ste.STUDIO_TEST_ONLY} (STUDIO_TEST_ONLY)` : `skips ${plan.slowTier.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run nightly on main)`}`); }
+      // 2.78.2 (b): the perf tests: only them in the game:perf step (STUDIO_TEST_ONLY), left out of every other run.
+      if (plan.perf) {
+        if (curPerf) { runEnv = { ...runEnv, STUDIO_TEST_ONLY: curPerf.join(',') }; console.error(`[game-gates] ${cmdLabel}: game:perf: only ${curPerf.join(', ')} (STUDIO_TEST_ONLY)`); }
+        else {
+          const mine = String(runEnv.STUDIO_TEST_EXCLUDE || '').split(',').map((x) => x.trim()).filter(Boolean);
+          runEnv = { ...runEnv, STUDIO_TEST_EXCLUDE: [...new Set([...mine, ...plan.perf.globs])].join(',') };
+          console.error(`[game-gates] ${cmdLabel}: skips the perf tests ${plan.perf.globs.join(', ')} (STUDIO_TEST_EXCLUDE; they run alone in game:perf)`);
+        }
+      }
       // 2.69.0 (r): the quarantine list (studio/quarantine.json, harness/flakes.mjs) as STUDIO_TEST_QUARANTINE, a JSON
       // list of test files for the game's runner to skip; unset when nothing is quarantined.
       const quarantined = quarantineEnvValue(REPO_ROOT);
@@ -623,6 +678,62 @@ export async function runGameGates({ paths = [], changed = null, incoming = null
       if (r.status !== 0 && redAlone) failFiles = [...redAlone];
       rows.push({ id: g.id, ok: r.status === 0 && sg.ok, required: g.required, ...(failFiles.length ? { failingFiles: failFiles } : {}), ...(focused ? { focus: focused.fellBack ? { files: focused.files, fellBack: focused.fellBack } : { files: focused.files, how: focused.how } } : {}), ...(timing.ms !== baseTimeout ? { timeoutMs: timing.ms, timeoutBaseMs: baseTimeout, timeoutWhy: [timing.why, timing.floor?.why].filter(Boolean).join('; ') } : {}), ...(slow ? { testTimeoutScale: testScale } : {}), ...(testTO ? { testTimeout: testTO } : {}), ...(twRow ? { testWorkers: twRow } : {}), ...(failures?.length ? { failures } : {}), why: r.status === 0 ? sg.why : `exit ${r.status}${tail ? `: ${tail.slice(0, 300)}` : ''}`, ...(related ? { related: existing.length } : {}), ...(flaky ? { flaky } : {}), ...(oomRetry ? { oomRetry } : {}), ...(timeoutFlake ? { timeoutFlake } : {}) });
       if (ratchet) { const row = rows[rows.length - 1]; delete row.failures; delete row.failingFiles; if (ratchet.why) row.why = ratchet.why; row.ratchet = { fresh: ratchet.judged?.fresh.length ?? null, standing: ratchet.judged?.standing ?? null }; }
+    }
+    // 2.78.2 (b): the game:perf step (see the header): the perf tests alone, on a quiet machine, after the other checks.
+    const perfFocus = focusMap ? focusMap['game:perf'] || null : null;
+    if (plan.perf && relatedOnly) skipped.push({ id: 'game:perf', why: 'related-first: the perf tests run in the full verify' });
+    else if (plan.perf && focusMap && !perfFocus) skipped.push({ id: 'game:perf', why: 'it passed in the train\'s verify; this focused re-check runs only the checks that failed there' });
+    else if (plan.perf && !plan.perf.gates.length) rows.push({ id: 'game:perf', ok: false, required: false, why: `not run: perf tests are listed (${plan.perf.globs.join(', ')}) but no check of the game runs its tests (a "related" or "focus" command, "slowTests": true, or vitest, jest or node --test as its command's last step)` });
+    else if (plan.perf) {
+      const landing = /^landing$/i.test(String(process.env.STUDIO_GATE_PRIORITY || ''));
+      const waitMin = landing ? perfWaitMin() : 0;
+      const only = perfFocus?.length ? perfFocus : plan.perf.globs;
+      const { waitQuiet } = await import('./flake-quiet.mjs');
+      const hv = await import('./heavy.mjs');
+      const holdMs = waitMin > 0 ? (waitMin + baseTimeout / 60000 * plan.perf.gates.length) * 60000 : 0;
+      const held = holdMs ? hv.markQuietHold(slotRoot, { ms: holdMs, owner: process.env.STUDIO_LOCK_OWNER || null, why: 'the game:perf step (wall-clock tests, alone on a quiet machine)', tag: 'perf' }) : null;
+      if (held) console.error(`[game-gates] game:perf: holding new builder and lane verifies back while it waits for a quiet machine and runs (at most ${Math.round(holdMs / 6000) / 10} min; running ones are not stopped)`);
+      try {
+        const t0 = Date.now();
+        const q = waitQuiet(slotRoot, { waitMin, log: (m) => console.error(`[game-gates] game:perf: ${m}`), what: 'the game:perf step', pollMs: 5000 });
+        if (!q.quiet) {
+          const busyWhat = q.busy.slice(0, 3).join('; ');
+          const why = `not run (busy): ${landing ? `no quiet machine within ${waitMin} min (STUDIO_PERF_WAIT_MIN)` : 'the machine is not quiet (a lane verify runs it only on a quiet machine; the merge train waits for one)'}: ${busyWhat}`.slice(0, 400);
+          // In a train's focused re-check of game:perf the step judged nothing: a busy refusal, never "green".
+          if (perfFocus) { console.error(`[heavy] game:perf did not run: ${why}`); rows.push({ id: 'game:perf', ok: false, required: true, why, perf: { notRun: 'busy' } }); }
+          else rows.push({ id: 'game:perf', ok: false, required: false, why, perf: { notRun: 'busy', busy: q.busy.slice(0, 5) } });
+        } else {
+          log(`[game-gates] game:perf: the machine is quiet${q.waitedMs > 1000 ? ` after ${Math.round(q.waitedMs / 1000)} s` : ''}: ${only.join(', ')} alone, one test worker, in ${plan.perf.gates.map((g) => g.id).join(', ')}`);
+          let okAll = true;
+          let required = false;
+          const fails = [];
+          const files = [];
+          const tails = [];
+          let ran = '';
+          for (const g of plan.perf.gates) {
+            cmdLabel = `${g.id} (game:perf)`;
+            curGate = g;
+            curPerf = only;
+            curRelated = true; // a part of the suite: never the check's quiet-run time
+            let r;
+            try { r = runOnce(g.command, null, { STUDIO_TEST_WORKERS: '1', VITEST_MAX_WORKERS: '1', STUDIO_TIMEOUT_RERUN: 'off' }); } finally { curPerf = null; curRelated = false; }
+            const text = `${r.stdout || ''}${r.stderr || ''}`;
+            ran += text;
+            if (r.status !== 0) {
+              okAll = false;
+              required ||= g.required !== false;
+              for (const f of failingTestFiles(text)) if (!files.includes(f)) files.push(f);
+              const ft = (await import('./baseline.mjs')).failingTests(text);
+              for (const t of ft || []) fails.push(t);
+              tails.push(`${g.id}: exit ${r.status ?? r.signal ?? '?'}${(r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal)) ? ` (timed out after ${Math.round(timing.ms / 1000)} s)` : ''}`);
+            }
+          }
+          const sg = okAll ? judgePass('game:perf', { output: ran }) : null;
+          if (sg?.note) log(`[game-gates] WARN ${sg.note}`);
+          const tail = ran.trim().split('\n').filter((l) => /FAIL|Error|error/.test(l)).slice(0, 3).join(' | ');
+          rows.push({ id: 'game:perf', ok: okAll && sg.ok, required: okAll ? true : required, ...(files.length ? { failingFiles: files } : {}), ...(fails.length ? { failures: fails } : {}), perf: { globs: only, waitedMs: Date.now() - t0 }, why: okAll ? sg.why : `${tails.join('; ')}${tail ? `: ${tail.slice(0, 300)}` : ''}` });
+        }
+      } finally { if (held) hv.clearQuietHold(slotRoot, 'perf'); }
     }
   }
   // 2.30o: the game's layout rules (studio.layout.json), when it declares them.

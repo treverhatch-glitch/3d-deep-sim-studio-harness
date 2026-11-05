@@ -255,6 +255,30 @@ include: only?.length ? only : ['src/**/*.test.ts'], exclude: [...configDefaults
 puts everything back into every verify. The object form of `"slowTests"` (above) still only scales timeouts, unless it
 also says `"tier": "slow"` (then its `pattern` is a slow glob).
 
+## Perf tests: the game:perf step (2.78.2)
+
+Tests that measure wall-clock time (a millisecond budget for a layout pass, a path search over N guests) pass alone and
+fail when three verifies, a Unity porter and a flake check share the PC: the same tree went green at 674 s and red at
+1000 s with nothing changed but load. List their globs so they run alone, on a quiet machine, instead of inside the
+parallel verify:
+
+```json
+{ "game": "my-game", "perfTests": ["src/**/*.perf.test.ts"] }
+```
+
+`studio/game.json` is protected, so the owner adds `"perfTests"`; until then (or to try it) `STUDIO_PERF_TESTS` (a comma
+list of globs) does the same, and `STUDIO_PERF_TESTS=off` turns it off (they run in the unit checks again). The test
+checks (a `related` or `focus` command, `"slowTests": true`, or vitest, jest or `node --test` as the command's last step)
+get the globs in `STUDIO_TEST_EXCLUDE`; after the other checks a `game:perf` step runs those checks again with
+`STUDIO_TEST_ONLY` set to the globs and one test worker, once the machine is quiet (no other heavy job, game check,
+Unity editor or engine-porter session: `harness/flake-quiet.mjs`). Read both variables in the test config as for the
+slow tier above. A merge train's verify waits up to `STUDIO_PERF_WAIT_MIN` (10) minutes for quiet and holds new builder
+and lane verifies back meanwhile (running ones finish); a builder's or lane's verify runs the step only if the machine
+is quiet already. Never quiet: `WARN game:perf: not run (busy)`, never red (in a train's focused re-check of game:perf
+it is a busy refusal: the train judges nothing from it). Quiet and red: it fails like any required check and names its
+failing files. A lane verify whose step said "not run (busy)" can still stand for the train's verify of the same tree,
+so that landing goes without the perf tests.
+
 ## The purity ratchet and must-fail canaries (2.72.0)
 
 A real game switched to the sim purity check (or a lint check) can start with hundreds of hits. Record them once as
