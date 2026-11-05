@@ -244,6 +244,41 @@
   assert in the same count (`toBe` → `toBeTruthy`), an assert removed with an unrelated one added in the same place, a
   helper that always passes, a special case in the game code instead of the test, and tests outside the names above.
 
+## Who makes which beta decision (2.78.2, h)
+The owner's rule (2026-11-05): every agent that isn't the outside agent keeps the rules. One function decides
+(`harness/permission.mjs mayDecide(kind, actor)`, with that file's `WORKER_NAME`, `DECIDER_ROLES` and the launcher's
+session records as its only lists):
+- Board decisions (task type, visual off, lanes, parks and unparks, stacking, a lane release, a non-protected config
+  change): the owner, an outside agent (the orchestrator: not launched by the harness, so no `STUDIO_ROLE`, no
+  launched session record in `.studio/agents/`, not a launcher-shaped name), and a Producer/Director session. As before.
+- Protected decisions (`approve -- protected | tests | hooks | force | proposal`, and `task -- train config` of a held
+  protected config part): the owner and outside agents only. A Producer/Director session is refused with who to ask
+  ("ask the orchestrator (opus-1) or the owner"). Workers make neither.
+- The owner's switch, `STUDIO_PRODUCER_APPROVES` (default off; `protected` in the main checkout's `.env`: on). On, a
+  Producer/Director session makes protected decisions too. Off by default because the Producer is a launched session
+  whose job is throughput: if it can approve protected changes, a builder can ask it to, and the one check that a person
+  (or the outside agent the owner trusts) looked at a protected change is gone. It is read from the main checkout's
+  `.env` only (`harness/permission.mjs producerApprovesProtected`), where the approval is made and wherever it is
+  checked (a lane copy, a train copy): a session's own environment, or a lane copy's `.env`, never turns it on. Turning
+  it off again stops the Producer's protected approvals made under it from counting. Such records say how they were
+  made (`via: beta producer`, `decides: protected`).
+- One predicate for every beta record (`harness/beta-mode.mjs betaRecordVerdict`): approvals of protected files, weakened
+  tests, hooks and forced dones now count like task types, visual decisions and config proposal approvals already did:
+  only committed exactly as written (in the main checkout for a lane copy's linked `studio/`), under the beta session on
+  now, not from a worker's commit nor recorded by a worker, and made by someone `mayDecide` allows (the role it was
+  recorded under, who recorded it, and the commit's `Studio-Agent` trailers: a launched session's name counts as that
+  session). Before, `verifyApproval` accepted a beta approval nobody committed, so a builder could drop one into
+  `studio/approvals/` (which lane copies share) and pass the protected check, the weakened-tests and hooks gates and
+  `task done --force`. `readApprovals` also lets the real file name win over a `file` key in the JSON.
+- After `approve` in beta mode, commit the approval: it counts from then on (the command says so). A protected
+  approval a Producer/Director session committed before 2.78.2 (no `decides` field) keeps counting until beta mode's
+  session changes (`npm run beta -- off`, then on again); an uncommitted one stops counting now. A lane release a
+  Producer/Director session made no longer applies a held protected config part (unless the switch is on): the part
+  stays held until the orchestrator or the owner runs `npm run task -- train config <ID>`.
+- Not covered: an agent that sets another agent's name (`STUDIO_LOCK_OWNER=opus-1`) or unsets its own to commit as "a
+  person" is impersonating; the record and the decisions log show what it ran. The owner proxy's approvals
+  (`harness/owner-proxy.mjs`) are judged as before.
+
 ## What the gates trust (2.71.1, red-team fixes)
 
 - Gate runners are protected (A01b/A01d/A03): `scripts/run-gates.mjs`, `harness/gate-spawn.mjs`, `harness/game-gates.mjs`,

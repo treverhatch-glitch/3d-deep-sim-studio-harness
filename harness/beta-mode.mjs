@@ -23,7 +23,13 @@
  * Who may turn it on: the owner in their own terminal (signed with the owner key when the private key is here), or the
  * owner proxy's own shell recording the owner's yes (--permission), like any proxy approval. A commit that set it from
  * a worker's session (Studio-Agent trailer naming a worker) doesn't count. No harness imports beyond owner-proxy.mjs,
- * hash.mjs and event.mjs: approve.mjs, delegation.mjs and permission.mjs use it.
+ * hash.mjs, event.mjs and permission.mjs (its name lists and mayDecide; it imports this file back, used only inside
+ * functions): approve.mjs, delegation.mjs and permission.mjs use it.
+ *
+ * 2.78.2 (h), the owner's rule (2026-11-05): which beta actor makes which decision is permission.mjs mayDecide. Board
+ * decisions: the owner, the outside orchestrator, a Producer/Director session. Protected decisions (protected files,
+ * weakened tests, hooks, task done --force, a protected config change): the owner and outside agents only, unless the
+ * owner's switch STUDIO_PRODUCER_APPROVES=protected is on. Every beta record is judged by one predicate, betaRecordVerdict.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,13 +40,12 @@ import { fileURLToPath } from 'node:url';
 import { canonicalBytes } from './hash.mjs';
 import { REPO_ROOT, emitEvent, readRecentEvents } from './event.mjs';
 import { mainCheckout, ownerPubAt, proxyShell, inLane } from './owner-proxy.mjs';
+import { WORKER_NAME as WORKER, AGENT_SHELL, mayDecide, actorOf, recordTier, decisionClass } from './permission.mjs';
 
 export const BETA_REL = 'studio/beta.json';
 export const BETA_ROLES = ['producer', 'director'];
 export const BETA_NEVER = ['money', 'spend', 'payment', 'delete'];
 const FIELDS = ['on', 'by', 'at', 'why', 'agents', 'roles'];
-const WORKER = /^(builder|rnd|qa|qa-playtester|playtester|reviewer|art|artist|art-director|designer|designer-calibrator|balancer|fun-tester|scout|reference-scout|engine-porter|dev-hacker|planner|liaison)(-|_|\d|$)/i;
-const AGENT_SHELL = ['CLAUDECODE', 'AI_AGENT', 'CODEX_SANDBOX', 'GEMINI_CLI'];
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
 const body = (d) => Object.fromEntries(FIELDS.map((k) => [k, d?.[k]]));
 const short = (iso) => String(iso || '').slice(0, 16).replace('T', ' ');
@@ -79,8 +84,10 @@ export const betaWords = (doc) => `beta mode: set by ${doc.by} at ${short(doc.at
  * Is this caller one beta mode lets act as the owner? { ok, who, via, doc, words, why }. A named outside agent
  * (STUDIO_LOCK_OWNER in agents, or the owner proxy's agent), or a launched Producer/Director session (STUDIO_ROLE);
  * never a worker's name or a worker session. A lane copy counts only with allowLane (approving that lane's own change).
+ * 2.78.2 (h): `kind` is the decision (permission.mjs decisionClass; default a board decision): a protected one is refused
+ * to a Producer/Director session unless the owner's switch is on (mayDecide), with { refused: true } and who to ask.
  */
-export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = false } = {}) {
+export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = false, kind = 'board' } = {}) {
   let root = from;
   try { root = mainCheckout(from); } catch {}
   const b = readBeta({ root });
@@ -96,8 +103,17 @@ export function betaActor({ env = process.env, from = REPO_ROOT, allowLane = fal
   let proxyAgent = '';
   try { const p = proxyShell({ env, from, allowLane: true }); if (p.ok) proxyAgent = String(p.doc.agent); } catch {}
   const named = me && (agents.includes(me.toLowerCase()) || me.toLowerCase() === proxyAgent.toLowerCase());
-  if (role && (b.doc.roles || BETA_ROLES).includes(role)) return { ok: true, who: me || `a ${role} session`, via: `beta ${role}`, doc: b.doc, words: betaWords(b.doc), why: '' };
-  if (named) return { ok: true, who: me, via: 'beta agent', doc: b.doc, words: betaWords(b.doc), why: '' };
+  const decide = () => mayDecide(kind, actorOf({ env, root: from }), { root, agents: b.doc.agents || [] });
+  if (role && (b.doc.roles || BETA_ROLES).includes(role)) {
+    const d = decide();
+    if (!d.ok) return { ok: false, refused: true, why: `Refused: ${d.why}.` };
+    return { ok: true, who: me || `a ${role} session`, via: `beta ${role}`, doc: b.doc, words: betaWords(b.doc), why: '', decides: d.cls };
+  }
+  if (named) {
+    const d = decide();
+    if (!d.ok) return { ok: false, refused: true, why: `Refused: ${d.why}.` };
+    return { ok: true, who: me, via: 'beta agent', doc: b.doc, words: betaWords(b.doc), why: '', decides: d.cls };
+  }
   return { ok: false, why: '' };
 }
 
@@ -111,27 +127,59 @@ export function betaApprovalOk(doc, { root = null } = {}) {
 }
 
 /**
- * 2.77.3 (B-111): a beta-format record (an approval with no signature and studio/beta.json's by/at) that counts: it is
- * an approval betaApprovalOk accepts (the current beta session, recordedBy set and not a worker), committed in `root`
- * with exactly this content (git show HEAD:<rel> equals doc), by a commit that isn't a worker's (its Studio-Agent
- * trailer). A file dropped in the folder, edited after its commit, or carried in by a worker proves nothing. One
- * predicate for every beta record: task types and visual decisions (harness/reclassify.mjs) and config proposal
- * approvals (harness/config-proposal.mjs signedProposal). Never throws.
+ * 2.78.2 (h): the repository that holds a studio/ record: a lane copy's studio/ is a link to the main checkout's
+ * (harness/worktree.mjs), so a record there is committed (or not) in the main checkout, never in the lane's own history.
  */
-export function betaRecordCommitted(root, rel, doc) {
+export function recordRepo(root, rel) {
   try {
-    if (!doc || doc.signature || !doc.beta) return false;
-    if (!betaApprovalOk(doc, { root: mainCheckout(root) })) return false;
-    const r = String(rel || '').replace(/\\/g, '/');
-    const log = git(root, 'log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', 'HEAD', '--', r);
-    const [sha = '', agent = ''] = String(log.stdout || '').trim().split('\t');
-    if (log.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) return false;
-    if (agent.trim() && agent.split(',').some((a) => WORKER.test(a.trim()))) return false;
-    const shown = git(root, 'show', `HEAD:${r}`);
-    if (shown.status !== 0) return false;
-    return Buffer.from(canonicalBytes(JSON.parse(shown.stdout))).equals(Buffer.from(canonicalBytes(doc)));
-  } catch { return false; }
+    const top = String(rel || '').replace(/\\/g, '/').split('/')[0];
+    const real = (p) => { const r = fs.realpathSync.native(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+    if (top && fs.existsSync(path.join(root, top)) && real(path.join(root, top)) !== path.join(real(root), top)) return mainCheckout(root);
+  } catch { /* root as given */ }
+  return root;
 }
+
+/**
+ * 2.77.3 (B-111), 2.78.2 (h): the one predicate for every beta-format record (an approval with no signature and
+ * studio/beta.json's by/at): task types and visual decisions (harness/reclassify.mjs), config proposal approvals
+ * (harness/config-proposal.mjs signedProposal), and since 2.78.2 protected files, weakened tests, hooks and forced dones
+ * (harness/approve.mjs verifyApproval, which before accepted one nobody committed). { ok, why, grandfathered }. It counts
+ * when it is:
+ *   - an approval betaApprovalOk accepts: the current beta session, recordedBy set and not a worker;
+ *   - committed with exactly this content (git show HEAD:<rel> equals doc, the reader's `file` key aside) in the
+ *     repository that holds it (recordRepo: the main checkout for a lane copy's linked studio/);
+ *   - made by someone who may make that kind of decision (permission.mjs mayDecide, judged by recordTier: the role it
+ *     was recorded under, who recorded it, the commit's Studio-Agent trailers): never a worker; a protected decision by a
+ *     Producer/Director session only with STUDIO_PRODUCER_APPROVES=protected, or (grandfathered) one recorded before
+ *     2.78.2 (no `decides` field) under the beta session still on: it stops counting when beta mode's session changes.
+ * A file dropped in the folder, edited after its commit, or carried in by a worker proves nothing. The owner's switch is
+ * read from the main checkout's .env (permission.mjs producerApprovesProtected). Never throws.
+ */
+export function betaRecordVerdict(root, rel, doc) {
+  const no = (why) => ({ ok: false, why, grandfathered: false });
+  try {
+    if (!doc || doc.signature || !doc.beta) return no('not a beta record');
+    const { file: _file, ...rec } = doc; // readApprovals adds the file name; it isn't part of what was committed
+    if (!betaApprovalOk(rec, { root: mainCheckout(root) })) return no('not made under the beta session that is on now, or recorded by no one or by a worker');
+    const r = String(rel || '').replace(/\\/g, '/');
+    if (!r) return no('no file to find its commit');
+    const repo = recordRepo(root, r);
+    const log = git(repo, 'log', '-1', '--format=%H%x09%(trailers:key=Studio-Agent,valueonly,separator=%x2C)', 'HEAD', '--', r);
+    const [sha = '', agent = ''] = String(log.stdout || '').trim().split('\t');
+    if (log.status !== 0 || !/^[0-9a-f]{40}$/.test(sha)) return no(`${r} isn't committed (a beta record counts only once committed)`);
+    const committers = agent.split(',').map((a) => a.trim()).filter(Boolean);
+    const shown = git(repo, 'show', `HEAD:${r}`);
+    if (shown.status !== 0) return no(`${r} isn't committed`);
+    if (!Buffer.from(canonicalBytes(JSON.parse(shown.stdout))).equals(Buffer.from(canonicalBytes(rec)))) return no(`${r} was changed after its commit`);
+    const a = rec.approval || {};
+    const tier = recordTier({ via: a.via, recordedBy: a.recordedBy, committers }, repo);
+    const d = mayDecide(a.kind, { tier }, { root: repo });
+    if (d.ok) return { ok: true, why: '', grandfathered: false };
+    if (tier === 'decider' && decisionClass(a.kind) === 'protected' && !a.decides) return { ok: true, why: `recorded by a Producer/Director session before 2.78.2; counts until beta mode's session changes`, grandfathered: true };
+    return no(d.why);
+  } catch (e) { return no(`unreadable (${e.message})`); }
+}
+export const betaRecordCommitted = (root, rel, doc) => betaRecordVerdict(root, rel, doc).ok;
 
 /** `beta on|off`. Returns { ok, message, doc? }. */
 export function setBeta({ on, by, agents = '', why = '', permission = '', env = process.env, root = mainCheckout(), commit = true, now = Date.now() } = {}) {
@@ -165,7 +213,7 @@ export function setBeta({ on, by, agents = '', why = '', permission = '', env = 
     const c = commit ? commitBeta(root, `beta: on (by ${doc.by}${viaProxy ? `, recorded by ${doc.recordedBy}` : ''})`, doc.why) : { committed: false, note: ' Not committed (--no-commit).' };
     emitEvent({ type: 'beta.on', agent: viaProxy ? doc.recordedBy : doc.by, msg: `beta mode on: ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions act as the owner (${doc.why})`.slice(0, 400), meta: { agents: list, roles: BETA_ROLES, by: doc.by, recordedBy: doc.recordedBy || null, signed: Boolean(doc.signature) } });
     logBeta({ action: 'beta-on', by: doc.by, why: doc.why, evidence: `${list.join(', ') || 'Producer/Director sessions'}${viaProxy ? `; recorded by ${doc.recordedBy}: ${yes.slice(0, 160)}` : ''}`, root });
-    return { ok: true, doc, committed: c.committed, message: `Beta mode is on${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions now act as the owner: every owner action, approvals (protected files, gates, tests, hooks, forced dones), owner asks and golden releases, with --by <their name>, no owner key and no --permission. Every use is logged (npm run decisions; the digest; the War Room). Tests, the train's full verify, no deletes and no money stay on. npm run beta -- off ends it.`.replace(/\s+/g, ' ').trim() };
+    return { ok: true, doc, committed: c.committed, message: `Beta mode is on${c.committed ? ` (committed ${BETA_REL})` : ''}.${c.note || ''} ${list.length ? `${list.join(', ')} and ` : ''}Producer/Director sessions now act as the owner, with --by <their name>, no owner key and no --permission: every owner action, owner asks and golden releases; approvals of protected files, weakened tests, hooks, forced dones and protected config changes are the outside agents' only (Producer/Director sessions too with STUDIO_PRODUCER_APPROVES=protected), and count once committed. Every use is logged (npm run decisions; the digest; the War Room). Tests, the train's full verify, no deletes and no money stay on. npm run beta -- off ends it.`.replace(/\s+/g, ' ').trim() };
   }
   if (!fs.existsSync(path.join(root, BETA_REL))) return { ok: true, message: 'Beta mode is already off.' };
   let old = {};

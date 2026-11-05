@@ -4904,7 +4904,7 @@ if (inShard('selftest-2782c')) {
 }
 
 // 2.78.2 (e): one base and key for every approve kind (B-120 again), keyFor with origin/main's pull-request merges
-// (A-030), a lane copy's approval events in the main checkout's log, engine-porter tracks, region lanes; 7e report only.
+// (A-030), a lane copy's approval events in the main checkout's log, engine-porter tracks, region lanes; 7e (an assertion since h).
 if (inShard('selftest-2782e')) {
   const dir = copyRepo();
   const { selftest2782E } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782e.mjs')).href);
@@ -4928,6 +4928,15 @@ if (inShard('selftest-2782a')) {
   const dir = copyRepo();
   const { selftest2782A } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782a.mjs')).href);
   await selftest2782A({ dir, run, report, tmpRoot, root });
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
+}
+
+// 2.78.2 (h): who makes which beta decision (the owner's rule, 2026-11-05: protected decisions are the owner's and the
+// outside agents', STUDIO_PRODUCER_APPROVES the owner's switch), one predicate for every beta record (the 2.79 audit D1.1).
+if (inShard('selftest-2782h')) {
+  const dir = copyRepo();
+  const { selftest2782H } = await import(pathToFileURL(path.join(dir, 'qa', 'selftest-2782h.mjs')).href);
+  await selftest2782H({ dir, run, report, tmpRoot, root });
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch {}
 }
 
