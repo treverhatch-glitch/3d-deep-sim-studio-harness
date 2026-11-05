@@ -10,7 +10,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## AGENT_* (7)
 
 - `STUDIO_AGENT` · default `'producer'` · harness/asset-review.mjs, harness/bench.mjs, harness/boot.mjs (+63 more) · [AUTONOMY.md:218](AUTONOMY.md)
-- `STUDIO_AGENT_CMD` · default `'the custom command'` · harness/agent.mjs, harness/budget.mjs, harness/launch.mjs (+24 more) · [AGENT-TOOLS.md:105](AGENT-TOOLS.md)
+- `STUDIO_AGENT_CMD` · default `'the custom command'` · harness/agent.mjs, harness/budget.mjs, harness/launch.mjs (+24 more) · [AGENT-TOOLS.md:111](AGENT-TOOLS.md)
 - `STUDIO_AGENT_ENV` · no simple default · harness/agent-env.mjs, qa/selftest-233.mjs, qa/selftest-2583m.mjs (+2 more) · undocumented
 - `STUDIO_AGENT_ENV_PASS` · no simple default · harness/agent-env.mjs, qa/selftest-2585r.mjs · undocumented
 - `STUDIO_AGENT_MODEL` · default `'unknown'` · harness/agent.mjs, harness/budget.mjs, harness/event.mjs (+25 more) · [AGENT-TOOLS.md:9](AGENT-TOOLS.md)
@@ -20,24 +20,24 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## AGY_* (13)
 
 - `STUDIO_AGY_ANY_MODEL` · no simple default · harness/agent.mjs, qa/selftest-277n.mjs · [AGENT-TOOLS.md:70](AGENT-TOOLS.md)
-- `STUDIO_AGY_BYPASS` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/kickoff.mjs (+3 more) · [AGENT-TOOLS.md:171](AGENT-TOOLS.md)
-- `STUDIO_AGY_CONTINUE_MAX` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:96](AGENT-TOOLS.md)
-- `STUDIO_AGY_CONTINUE_WAIT_SEC` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:94](AGENT-TOOLS.md)
+- `STUDIO_AGY_BYPASS` · no simple default · harness/agent.mjs, harness/agy-allow.mjs, harness/kickoff.mjs (+3 more) · [AGENT-TOOLS.md:177](AGENT-TOOLS.md)
+- `STUDIO_AGY_CONTINUE_MAX` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:102](AGENT-TOOLS.md)
+- `STUDIO_AGY_CONTINUE_WAIT_SEC` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:100](AGENT-TOOLS.md)
 - `STUDIO_AGY_MODE` · no simple default · harness/agent.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:62](AGENT-TOOLS.md)
 - `STUDIO_AGY_MODEL_FLAG` · no simple default · harness/agent.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:67](AGENT-TOOLS.md)
 - `STUDIO_AGY_PRINT_TIMEOUT` · no simple default · harness/agent.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:59](AGENT-TOOLS.md)
 - `STUDIO_AGY_PROMPT` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, harness/budget.mjs (+5 more) · [AGENT-TOOLS.md:56](AGENT-TOOLS.md)
 - `STUDIO_AGY_QUOTA_CMD` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:76](LINE-PRODUCER.md)
 - `STUDIO_AGY_QUOTA_SEC` · no simple default · harness/model-pools.mjs, qa/selftest-277n.mjs · [LINE-PRODUCER.md:77](LINE-PRODUCER.md)
-- `STUDIO_AGY_STREAM` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:100](AGENT-TOOLS.md)
-- `STUDIO_AGY_STREAM_FIRST_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:99](AGENT-TOOLS.md)
-- `STUDIO_AGY_STREAM_IDLE_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:97](AGENT-TOOLS.md)
+- `STUDIO_AGY_STREAM` · no simple default · harness/agent.mjs, harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:85](AGENT-TOOLS.md)
+- `STUDIO_AGY_STREAM_FIRST_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:105](AGENT-TOOLS.md)
+- `STUDIO_AGY_STREAM_IDLE_SEC` · no simple default · harness/agy-stream.mjs, qa/selftest-2773c.mjs · [AGENT-TOOLS.md:103](AGENT-TOOLS.md)
 
 ## AIDER_* (3)
 
-- `STUDIO_AIDER_CMD` · no simple default · harness/agent.mjs, harness/aider-launch.mjs, harness/kickoff.mjs (+2 more) · [AGENT-TOOLS.md:206](AGENT-TOOLS.md)
+- `STUDIO_AIDER_CMD` · no simple default · harness/agent.mjs, harness/aider-launch.mjs, harness/kickoff.mjs (+2 more) · [AGENT-TOOLS.md:212](AGENT-TOOLS.md)
 - `STUDIO_AIDER_MAP_REFRESH` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · undocumented
-- `STUDIO_AIDER_MAP_TOKENS` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:228](AGENT-TOOLS.md)
+- `STUDIO_AIDER_MAP_TOKENS` · no simple default · harness/agent.mjs, harness/models.config.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:234](AGENT-TOOLS.md)
 
 ## AUTO_* (2)
 
@@ -369,16 +369,16 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## KEEP_* (2)
 
 - `STUDIO_KEEP_DAYS` · no simple default · harness/autonomy.mjs, qa/selftest-266a.mjs · [AUTONOMY.md:89](AUTONOMY.md)
-- `STUDIO_KEEP_FAILED_LANE` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:232](AGENT-TOOLS.md)
+- `STUDIO_KEEP_FAILED_LANE` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:238](AGENT-TOOLS.md)
 
 ## KEYMAP_* (6)
 
-- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:235](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [AGENT-TOOLS.md:241](AGENT-TOOLS.md)
 - `STUDIO_KEYMAP_AGENT_*` · no simple default · harness/agent-env.mjs, harness/agent.mjs, qa/selftest-259e.mjs · [RELEASE.md:200](RELEASE.md)
-- `STUDIO_KEYMAP_AGENT_BUILDER_S3` · no simple default · harness/agent-env.mjs · [AGENT-TOOLS.md:242](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_AGENT_BUILDER_S3` · no simple default · harness/agent-env.mjs · [AGENT-TOOLS.md:248](AGENT-TOOLS.md)
 - `STUDIO_KEYMAP_AGENT_KM_1` · no simple default · qa/selftest-259e.mjs · undocumented
 - `STUDIO_KEYMAP_AGENT_KM_7` · no simple default · qa/selftest-259e.mjs · undocumented
-- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs · [AGENT-TOOLS.md:241](AGENT-TOOLS.md)
+- `STUDIO_KEYMAP_BUILDER` · no simple default · qa/selftest-259e.mjs · [AGENT-TOOLS.md:247](AGENT-TOOLS.md)
 
 ## LAND_* (5)
 
@@ -442,17 +442,17 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 ## MAIN_* (2)
 
 - `STUDIO_MAIN_COMMIT` · no simple default · harness/adopt.mjs, scripts/hooks/pre-commit, qa/selftest-259b.mjs (+7 more) · [RELEASE.md:90](RELEASE.md)
-- `STUDIO_MAIN_ROOT` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+121 more) · [AGENT-TOOLS.md:112](AGENT-TOOLS.md)
+- `STUDIO_MAIN_ROOT` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/aider-launch.mjs (+121 more) · [AGENT-TOOLS.md:118](AGENT-TOOLS.md)
 
 ## NIM_* (7)
 
-- `STUDIO_NIM_CHECK` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2583m.mjs (+5 more) · [AGENT-TOOLS.md:221](AGENT-TOOLS.md)
-- `STUDIO_NIM_CHECK_HOURS` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:220](AGENT-TOOLS.md)
+- `STUDIO_NIM_CHECK` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2583m.mjs (+5 more) · [AGENT-TOOLS.md:227](AGENT-TOOLS.md)
+- `STUDIO_NIM_CHECK_HOURS` · no simple default · harness/models.config.mjs, harness/nim-check.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:226](AGENT-TOOLS.md)
 - `STUDIO_NIM_CHECK_STUB` · no simple default · harness/agent.mjs, qa/selftest-2601n.mjs · undocumented
 - `STUDIO_NIM_FALLBACK` · no simple default · harness/agent.mjs, qa/selftest-230i.mjs, qa/selftest-2601n.mjs · undocumented
-- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:211](AGENT-TOOLS.md)
-- `STUDIO_NIM_MODEL` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/kickoff.mjs (+5 more) · [AGENT-TOOLS.md:193](AGENT-TOOLS.md)
-- `STUDIO_NIM_MODELS` · no simple default · harness/agent.mjs, harness/models-check.mjs, harness/models.config.mjs (+3 more) · [AGENT-TOOLS.md:216](AGENT-TOOLS.md)
+- `STUDIO_NIM_MAX_SESSIONS` · default `1` · harness/families.mjs, qa/selftest-230i.mjs · [AGENT-TOOLS.md:217](AGENT-TOOLS.md)
+- `STUDIO_NIM_MODEL` · no simple default · harness/agent-env.mjs, harness/agent.mjs, harness/kickoff.mjs (+5 more) · [AGENT-TOOLS.md:199](AGENT-TOOLS.md)
+- `STUDIO_NIM_MODELS` · no simple default · harness/agent.mjs, harness/models-check.mjs, harness/models.config.mjs (+3 more) · [AGENT-TOOLS.md:222](AGENT-TOOLS.md)
 
 ## NO_* (2)
 
@@ -671,13 +671,13 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 
 ## TOOL_* (9)
 
-- `STUDIO_TOOL_*` · no simple default · harness/agent.mjs, harness/spend-guard.mjs, harness/supervisor.mjs · [AGENT-TOOLS.md:105](AGENT-TOOLS.md)
+- `STUDIO_TOOL_*` · no simple default · harness/agent.mjs, harness/spend-guard.mjs, harness/supervisor.mjs · [AGENT-TOOLS.md:111](AGENT-TOOLS.md)
 - `STUDIO_TOOL_AGY_CMD` · no simple default · qa/selftest-2585r.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · undocumented
 - `STUDIO_TOOL_AGY_MODEL` · no simple default · harness/agent.mjs, qa/selftest-276i.mjs, qa/selftest-2773c.mjs (+1 more) · [AGENT-TOOLS.md:65](AGENT-TOOLS.md)
 - `STUDIO_TOOL_AIDER_CMD` · no simple default · qa/selftest-2601n.mjs · undocumented
 - `STUDIO_TOOL_CLAUDE_CMD` · no simple default · qa/selftest-2585r.mjs, qa/selftest-259e.mjs, qa/selftest-276i.mjs (+3 more) · undocumented
 - `STUDIO_TOOL_HERMES_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
-- `STUDIO_TOOL_NIM_CMD` · no simple default · harness/agent.mjs, qa/selftest-2585r.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:211](AGENT-TOOLS.md)
+- `STUDIO_TOOL_NIM_CMD` · no simple default · harness/agent.mjs, qa/selftest-2585r.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:217](AGENT-TOOLS.md)
 - `STUDIO_TOOL_ZZALPHA_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
 - `STUDIO_TOOL_ZZBETA_CMD` · no simple default · qa/selftest-230o.mjs · undocumented
 
@@ -838,13 +838,13 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_CHARTER` · no simple default · harness/producer-refill.mjs · undocumented
 - `STUDIO_CI_NOTIFY_CMD` · no simple default · harness/ci-watch.mjs, qa/selftest-230h.mjs · [DIRECTOR-FLOW.md:116](DIRECTOR-FLOW.md)
 - `STUDIO_CONTRACT_TIMEOUT_S` · no simple default · harness/contracts.mjs · [CONTRACTS.md:92](CONTRACTS.md)
-- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/bench.mjs, harness/budget.mjs, harness/retro.mjs (+8 more) · [AGENT-TOOLS.md:281](AGENT-TOOLS.md)
+- `STUDIO_DAILY_TOKEN_CAP` · no simple default · harness/bench.mjs, harness/budget.mjs, harness/retro.mjs (+8 more) · [AGENT-TOOLS.md:287](AGENT-TOOLS.md)
 - `STUDIO_DECISION_MIN_N` · no simple default · harness/decisions-log.mjs, qa/selftest-271x.mjs · [AUTONOMY.md:382](AUTONOMY.md)
 - `STUDIO_DISK_MIN_FREE_GB` · no simple default · harness/digest.mjs, harness/machine.mjs, harness/upgrade-preflight.mjs (+3 more) · [RELEASE.md:72](RELEASE.md)
 - `STUDIO_DOTNET` · default `'dotnet'` · harness/unity.mjs, scripts/check-unity-template.mjs, qa/selftest-2671k.mjs (+3 more) · [UNITY-TRACK.md:494](UNITY-TRACK.md)
 - `STUDIO_ENV_FROM_FILE` · no simple default · harness/dotenv.mjs, harness/env-reload.mjs, harness/event.mjs (+4 more) · [RUN-UNATTENDED.md:55](RUN-UNATTENDED.md)
 - `STUDIO_EXPERIMENT` · no simple default · harness/experiment.mjs, harness/train.mjs, scripts/hooks/commit-msg (+7 more) · [GAME-BIBLE.md:182](GAME-BIBLE.md)
-- `STUDIO_FAILED_TAIL_LINES` · default `200` · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:231](AGENT-TOOLS.md)
+- `STUDIO_FAILED_TAIL_LINES` · default `200` · harness/agent.mjs, qa/selftest-2601n.mjs · [AGENT-TOOLS.md:237](AGENT-TOOLS.md)
 - `STUDIO_FAILS_BEFORE_TIMEOUT_MS` · default `120000` · qa/fails-before.mjs, qa/selftest-2584a.mjs · undocumented
 - `STUDIO_FIDELITY_TIMEOUT_MS` · default `60000` · harness/fidelity.mjs · undocumented
 - `STUDIO_FLOOR_IDLE_MIN` · no simple default · harness/hud.mjs, qa/selftest-275h.mjs · [WAR-ROOM-V3.md:94](WAR-ROOM-V3.md)
@@ -860,7 +860,7 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_IMPACT_MIN_N` · no simple default · harness/impact.mjs, harness/release-predict.mjs, qa/selftest-268o.mjs (+2 more) · [AUTONOMY.md:72](AUTONOMY.md)
 - `STUDIO_JOB_TASK` · no simple default · harness/game-gates.mjs, harness/lanes.mjs · undocumented
 - `STUDIO_L3_CONFIDENCE` · no simple default · harness/autonomy.mjs, qa/selftest-264k.mjs, qa/selftest-273e.mjs · [AUTONOMY.md:133](AUTONOMY.md)
-- `STUDIO_LANELESS` · no simple default · harness/agent.mjs, harness/lane-at-claim.mjs, harness/worktree.mjs (+16 more) · [AGENT-TOOLS.md:118](AGENT-TOOLS.md)
+- `STUDIO_LANELESS` · no simple default · harness/agent.mjs, harness/lane-at-claim.mjs, harness/worktree.mjs (+16 more) · [AGENT-TOOLS.md:124](AGENT-TOOLS.md)
 - `STUDIO_LAUNCH_LOCK_SEC` · default `120` · harness/supervisor.mjs, qa/selftest-268o.mjs, qa/selftest-269s.mjs (+2 more) · undocumented
 - `STUDIO_LAYOUT_GATE` · no simple default · harness/game-gates.mjs · undocumented
 - `STUDIO_LEDGER_LOGS` · no simple default · harness/ledger.mjs · undocumented
@@ -917,6 +917,6 @@ To document one: describe it (what it does, its default) on the docs/ page for i
 - `STUDIO_VFX_CAPTURE_CMD` · no simple default · harness/vfx.mjs · [VFX.md:43](VFX.md)
 - `STUDIO_WATCH_INTERVAL` · default `300` · hub/server.mjs, qa/hub-smoke.mjs, qa/hud-check.mjs (+8 more) · [DIRECTOR-FLOW.md:50](DIRECTOR-FLOW.md)
 - `STUDIO_WEAKENED_TESTS` · no simple default · harness/bench.mjs, harness/gate-output.mjs, harness/gate-trust.mjs (+17 more) · [CONTRACTS.md:66](CONTRACTS.md)
-- `STUDIO_WORKTREES` · no simple default · harness/agent.mjs, harness/bench.mjs, harness/lane-at-claim.mjs (+18 more) · [AGENT-TOOLS.md:276](AGENT-TOOLS.md)
+- `STUDIO_WORKTREES` · no simple default · harness/agent.mjs, harness/bench.mjs, harness/lane-at-claim.mjs (+18 more) · [AGENT-TOOLS.md:282](AGENT-TOOLS.md)
 - `STUDIO_X` · no simple default · qa/selftest-2583m.mjs · undocumented
 - `STUDIO_X230I` · no simple default · qa/selftest-230i.mjs · undocumented

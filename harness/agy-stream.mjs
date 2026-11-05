@@ -23,8 +23,9 @@
  * Event parsing is tolerant: a line that isn't JSON is agy's own text; an event type not known here is noted once in
  * the log ("[launcher] agy stream: …") and ignored, never fatal.
  *
- * STUDIO_AGY_STREAM=0 (off) keeps the 2.58.5 launch (prompt on stdin, closed at once, one turn); so does
- * STUDIO_AGY_PROMPT=arg (-p <prompt>). Roles whose session is one turn by design (reviewer, Producer, Director,
+ * OFF BY DEFAULT (the coordinator's call for 2.77.3): STUDIO_AGY_STREAM=1 turns it on; unset or 0 keeps the 2.58.5
+ * launch (prompt on stdin, closed at once, one turn), and so does STUDIO_AGY_PROMPT=arg (-p <prompt>). It stays off
+ * until one hand-run session on real agy confirms the input shape (docs/AGENT-TOOLS.md has the command). Roles whose session is one turn by design (reviewer, Producer, Director,
  * liaison: ONE_TURN_ROLES) keep that launch as well: the crew's Gemini reviewer worked on it.
  *
  * UNTESTED on real agy: the input message shape (userLine: Claude Code's stream-json user message) and which output
@@ -36,11 +37,12 @@ export const AGY_STREAM_FLAGS = Object.freeze(['--input-format', 'stream-json', 
 /** Roles whose session is one turn by design: they never get a follow-up and keep the one-turn launch. */
 export const ONE_TURN_ROLES = /^(reviewer|producer|director|liaison)$/i;
 
-const OFF = /^(off|0|false|no|none)$/i;
+const ON = /^(on|1|true|yes)$/i;
 const num = (v, d, { min = 0 } = {}) => (v === undefined || v === null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? d : Math.max(min, Number(v)));
 
-/** Is the stream launch on? (STUDIO_AGY_STREAM, on unless 0/off; STUDIO_AGY_PROMPT=arg keeps the -p launch.) */
-export const agyStreamOn = (env = process.env) => !OFF.test(String(env.STUDIO_AGY_STREAM ?? '').trim()) && !/^(arg|argument|p)$/i.test(String(env.STUDIO_AGY_PROMPT || '').trim());
+/** Is the stream launch on? (STUDIO_AGY_STREAM=1/on; off by default until a hand-run session on real agy confirms the
+ * input shape. STUDIO_AGY_PROMPT=arg keeps the -p launch either way.) */
+export const agyStreamOn = (env = process.env) => ON.test(String(env.STUDIO_AGY_STREAM ?? '').trim()) && !/^(arg|argument|p)$/i.test(String(env.STUDIO_AGY_PROMPT || '').trim());
 /** Does a session of this role get the stream launch? */
 export const agyStreamWanted = ({ role = '', env = process.env } = {}) => agyStreamOn(env) && !ONE_TURN_ROLES.test(String(role || '').trim());
 

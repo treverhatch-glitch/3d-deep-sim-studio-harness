@@ -298,7 +298,8 @@ export function toolCommand(tool, { model, file, prompt, effort, addDirs = [], a
       // -i/--prompt-interactive, or stdin"), so the kickoff goes there and no argument has a space to split.
       // STUDIO_AGY_PROMPT=arg brings back `-p <prompt>` (UNTESTED on real agy: which of the two works for your agy).
       if (/^(arg|argument|p)$/i.test(process.env.STUDIO_AGY_PROMPT || '')) return { argv: ['agy', '-p', prompt, ...tail], promptAt: 2 };
-      // 2.77.3 (C1 / B-99): stream (the launcher asks for it for a builder-like session, harness/agy-stream.mjs): the
+      // 2.77.3 (C1 / B-99): stream (STUDIO_AGY_STREAM=1, off by default; the launcher asks for it for a builder-like
+      // session, harness/agy-stream.mjs): the
       // kickoff is the first stream-json user message and stdin stays open, so the launcher can send a follow-up when a
       // turn ends with the task still in progress. --print-timeout and the other options stay as they are.
       if (stream && agyStreamOn()) return { argv: ['agy', ...AGY_STREAM_FLAGS, ...tail], stdin: userLine(prompt), stream: 'agy' };
@@ -1240,7 +1241,7 @@ export async function runAgent({ role, agent, tool, model, fallback = [], task =
   // and sends a follow-up while its task is still in progress (STUDIO_AGY_CONTINUE_MAX, STUDIO_AGY_CONTINUE_WAIT_SEC).
   let agyDriver = null;
   if (cmd?.stream === 'agy' && child.stdin) {
-    fs.writeSync(out, `[launcher] agy stream session: ${AGY_STREAM_FLAGS.join(' ')}; stdin stays open for follow-ups while the task is in progress (STUDIO_AGY_STREAM=0 starts the one-turn launch)\n`);
+    fs.writeSync(out, `[launcher] agy stream session: ${AGY_STREAM_FLAGS.join(' ')}; stdin stays open for follow-ups while the task is in progress (STUDIO_AGY_STREAM=1; unset or 0 starts the one-turn launch)\n`);
     try {
       agyDriver = driveAgyStream({
         agent, child, logFile, from: logStart, firstMessage: cmd.stdin,

@@ -82,10 +82,16 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
     own `GEMINI.md` keeps it. The agy kickoff carries the same rules.
   - When agy stops on a refused tool, its line (`jetski: … permission … auto-denied`, or a print timeout) is put in the
     hand-back note and the session's end event (`meta.agyStop`), so the reason isn't only in `.studio/agents/<name>.log`.
-  - **A builder's agy session stays open across turns (2.77.3, C1 / B-99).** `agy -p` runs one turn: a Gemini builder
-    that started a command in the background ("… and am waiting for the process to complete") ended its turn and agy
-    exited minutes later with the task unfinished (the GEMINI.md foreground rule was ignored). A builder-like session
-    (not reviewer, Producer, Director or liaison) now starts as
+  - **A builder's agy session can stay open across turns (2.77.3, C1 / B-99): OFF by default, `STUDIO_AGY_STREAM=1`
+    turns it on.** `agy -p` runs one turn: a Gemini builder that started a command in the background ("… and am waiting
+    for the process to complete") ended its turn and agy exited minutes later with the task unfinished (the GEMINI.md
+    foreground rule was ignored). It stays off until one hand-run session on the crew's PC confirms the input shape:
+    in a studio shell, run `agy --input-format stream-json --output-format stream-json --print-timeout 0 --mode accept-edits --model gemini-4-argon-high`
+    and paste `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say hello, then run node --version in the foreground."}]}}`
+    as one line. It works when agy answers, prints a `{"type":"result",…}` line (or another turn-end line) at the end of
+    the turn and waits; a second such line starts a second turn; closing its input (Ctrl+Z then Enter on Windows,
+    Ctrl+D elsewhere) ends it. If agy refuses the flags without `-p`, or ends turns with another line, say so before
+    turning it on. With it on, a builder-like session (not reviewer, Producer, Director or liaison) starts as
     `agy --input-format stream-json --output-format stream-json --print-timeout <STUDIO_AGY_PRINT_TIMEOUT> --mode accept-edits --model <model> [--settings <file>]`,
     gets the kickoff as the first NDJSON user message on stdin
     (`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`), and its stdin stays open.
@@ -97,8 +103,8 @@ tool without a shell, on every OS, so each argument reaches the tool exactly as 
     paused or handed back, it closes stdin and agy exits. Output silent for `STUDIO_AGY_STREAM_IDLE_SEC` (1800; 0 never)
     with no tool call pending also closes it, and so does no stream-json event at all in the first
     `STUDIO_AGY_STREAM_FIRST_SEC` (180; an agy that doesn't take the stream flags then runs as one turn). Each step is a `[launcher] agy stream: …` line in the log; an event type
-    the launcher doesn't know is noted once and ignored. `STUDIO_AGY_STREAM=0` (or `STUDIO_AGY_PROMPT=arg`) keeps the
-    one-turn launch. **Untested on real agy:** the input message shape and which output event ends a turn (the
+    the launcher doesn't know is noted once and ignored. `STUDIO_AGY_STREAM` unset or `0` (or `STUDIO_AGY_PROMPT=arg`)
+    keeps the one-turn launch. **Untested on real agy:** the input message shape and which output event ends a turn (the
     selftest drives a stand-in agy that speaks this shape; harness/agy-stream.mjs).
 - The agent's log (`npm run agent -- logs <agent>`) starts with a `[launcher]` line when a Windows tool was started
   as an npm shim or through cmd.exe, or wasn't found on PATH.
