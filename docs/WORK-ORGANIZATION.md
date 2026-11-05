@@ -351,6 +351,14 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   train whose red has ONLY `load-sensitive` failing test files (each labelled in that triage) doesn't hand its lanes
   back for them, like a timeout-flake that passed alone at low load: it lands, the reds are reported
   (`task.train.load_sensitive`, the log says so).
+  2.78.0 (C2c): the quiet re-run also holds other verifies back, since an alone run isn't alone when another verify
+  starts on the same fixed port: from the start of its quiet wait to the end of its run, the train leaves
+  `.studio/locks/machine-heavy-quiet-hold-<pid>.json` and new heavy work that isn't a landing (builder and lane
+  verifies) waits in the heavy queue, as for M6's train priority (`harness/heavy.mjs markQuietHold`). Bounded by
+  `STUDIO_FLAKE_HOLD_MIN` (default the quiet wait + `STUDIO_FLAKE_WAIT_MIN` + the game check's
+  `STUDIO_GAME_GATE_TIMEOUT_MS`, 30 minutes with the defaults; 0 or off: no hold), released when the re-run ends,
+  ignored and removed once past its bound or when the train's process is gone. Verifies already running are never
+  stopped: the quiet wait waits for them.
   2.77.3 (H2, B-112): each alone-run shows in the train's status (`flake check k of n: <file> alone`) and waits at
   most `STUDIO_FLAKE_WAIT_MIN` (10) minutes for a machine:heavy slot; a run refused as busy, or stopped before any gate
   ran, is "not run" (no label, never `real`) and the triage stops; the triage also stops at the first `real` label (the

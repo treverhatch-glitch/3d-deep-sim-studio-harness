@@ -81,6 +81,12 @@
  * train's check, and never more than STUDIO_TRAIN_SLOT_PRIORITY_MIN (15; 0 or off: no priority) since it was set (then
  * as long without it, so builders get their turn when the train can't start for another reason). A landing that takes
  * a slot clears it. Running holders are never stopped.
+ * 2.78.0 (C2c): "the alone re-run isn't alone if another verify is on the same port". While the flake triager's quiet
+ * re-run (PU-56, harness/flakes.mjs) waits for a quiet machine and runs, its train leaves
+ * machine-heavy-quiet-hold-<pid>.json (markQuietHold), and a waiter that isn't a landing doesn't start (any class), as
+ * for M6's marker but not cleared by a landing taking a slot: it ends when the re-run ends (clearQuietHold), at its
+ * bound (until: STUDIO_FLAKE_HOLD_MIN), or when its process is gone (quietHolding removes it). Running holders are never
+ * stopped (the quiet wait waits for them).
  *
  * Test hooks: STUDIO_TEST_LOADAVG=<1-min load> stands in for os.loadavg()[0] in loadFactor (unset: the real one; set,
  * the CPU probe is not used); STUDIO_TEST_CPU_BUSY=<0..1> stands in for the CPU probe (and is used even where a load
@@ -155,6 +161,46 @@ export function trainWaiting(root, { env = process.env, now = Date.now() } = {})
   // Not removed when it lapses: markTrainWait reads it to give builders their turn before it is set again.
   if (!(limit > 0) || now - Number(w.seen || 0) > Number(w.ttlMs || HANDOFF_MS) || now - Number(w.at || 0) > limit) return null;
   return w;
+}
+// ---- 2.78.0 (C2c): a flake triager's quiet re-run holds new heavy work back ----
+const QUIET_HOLD_RE = /^machine-heavy-quiet-hold-(\d+)\.json$/;
+export const quietHoldFile = (root, pid = process.pid) => path.join(heavyDir(root), `${PREFIX}-quiet-hold-${pid}.json`);
+/**
+ * Leave the hold marker (one per process): from the start of the flake triager's quiet wait to the end of its re-run,
+ * a waiter that isn't a landing doesn't start (it waits in the queue). ms: the bound (STUDIO_FLAKE_HOLD_MIN; 0: no
+ * hold). Returns the record, or null (no hold). Never throws.
+ */
+export function markQuietHold(root, { ms = 0, why = '', owner = null, train = null, file = '', now = Date.now() } = {}) {
+  if (!(Number(ms) > 0)) return null;
+  try {
+    fs.mkdirSync(heavyDir(root), { recursive: true });
+    const f = quietHoldFile(root);
+    const rec = { pid: process.pid, identity: selfIdentity(), at: now, until: now + Number(ms), owner: owner || null, train: train || null, file: String(file || '').slice(0, 300), why: String(why || '').slice(0, 240) };
+    const t = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(t, JSON.stringify(rec));
+    fs.renameSync(t, f);
+    return rec;
+  } catch { return null; }
+}
+/** Remove this process's hold marker (never another's). */
+export function clearQuietHold(root) { try { fs.rmSync(quietHoldFile(root), { force: true }); } catch {} }
+/**
+ * The live hold (the newest), else null. A marker past its bound (until) or whose process is gone (pid and start
+ * identity, as for a holder) is removed: a train that died never blocks heavy work.
+ */
+export function quietHolding(root, { now = Date.now() } = {}) {
+  let live = null;
+  try {
+    const dir = heavyDir(root);
+    for (const nm of fs.readdirSync(dir)) {
+      if (!QUIET_HOLD_RE.test(nm)) continue;
+      const f = path.join(dir, nm);
+      const h = readJson(f);
+      if (!h || !(now < Number(h.until || 0)) || holderGone(h)) { try { fs.rmSync(f, { force: true }); } catch {} continue; }
+      if (!live || Number(h.at || 0) > Number(live.at || 0)) live = h;
+    }
+  } catch {}
+  return live;
 }
 /** 2.68.0 (n): STUDIO_HEAVY_SLOTS, else computed from the machine scan (heavy-budget.mjs slotsFor); 1 with no scan. */
 export const heavySlots = (env = process.env, profile = null) => slotsFor(profile, env);
@@ -534,6 +580,8 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
       const ahead = queueAhead(dir, { landing, at: t0, gpuOnly: Boolean(profile && claim.gpuOnly), classed: Boolean(profile), staleMs });
       // 2.77.3 (M6): a merge train waiting for a slot goes ahead of every waiter that isn't a landing (CPU class).
       if (!landing && !(profile && claim.gpuOnly)) { const tw = trainWaiting(root, { env }); if (tw) ahead.push({ pid: tw.pid || 0, label: `a merge train waiting for the next free slot${tw.why ? ` (${tw.why.slice(0, 120)})` : ''}; STUDIO_TRAIN_SLOT_PRIORITY_MIN`, landing: true, train: true }); }
+      // 2.78.0 (C2c): a flake triager's quiet re-run is running: nothing but a landing starts (any class: quiet means quiet).
+      if (!landing) { const qh = quietHolding(root); if (qh) ahead.push({ pid: qh.pid || 0, label: `a flake check's quiet re-run${qh.file ? ` of ${qh.file}` : ''}${qh.owner ? ` by ${qh.owner}` : ''} holds new heavy work back until it ends (at most until ${new Date(Number(qh.until)).toISOString().slice(11, 19)} UTC, STUDIO_FLAKE_HOLD_MIN)`, landing: true, hold: true }); }
       adm = ahead.length ? { ok: false, area: 'queue', line: '' } : admit(claim, state, { slots: n, holders, kindMax: maxConcurrent(claim.kind, { root, env }), groupMax: maxConcurrent(capGroup(claim.kind), { root, env }) });
       floor = floorCfg.gb > 0 ? floorFree(floorCfg.gb, { env, freemem, profile }) : { low: false };
       if (adm.ok && !ram.low && !floor.low) {
@@ -559,7 +607,7 @@ export function acquireHeavy(root, label, { log = () => {}, env = process.env, o
         continue;
       }
       if (ram.low && !holders.length && !ahead.length) { sleep(poll); continue; }
-      const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `${ahead.some((w) => w.landing) && !landing ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
+      const busyWith = holders.length ? holders.map(describeHolder).join('; ') : ahead.length ? `${ahead.some((w) => w.hold) && !landing ? 'a quiet re-run holding the machine' : ahead.some((w) => w.landing) && !landing ? 'a landing waiting first' : 'earlier waiters'} (${ahead.map((w) => w.label).join(', ')})` : 'nobody';
       const why = [['ram', 'gpu', 'cpu', 'kind'].includes(adm.area) ? adm.line : '', floorLine].filter(Boolean).join('; ');
       if (Date.now() - t0 >= waitMs) {
         throw Object.assign(new Error(`[heavy] waited ${span(Date.now() - t0)} for the machine:heavy lock and it is still held: ${why ? `${why}; ` : ''}${busyWith}. ${label} did not run (it never runs on top of other heavy work). Run it again when that ends (node harness/heavy.mjs status shows the holder); STUDIO_HEAVY_WAIT_MIN sets the wait.`), { code: 'HEAVY_BUSY', holders, ...(why ? { area: adm.area } : {}) });

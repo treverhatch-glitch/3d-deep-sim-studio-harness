@@ -98,8 +98,9 @@ import { trainFocus, failingTestsLine } from './train-focus.mjs';
 import { trainEta, stepsLeft, writeTrainStatus, writeTrainsSummary, quietVerifyMs, capNote, readTrainStatus } from './train-status.mjs';
 import { batchCap, batchSize, pipelineMode, pipelineRoom, pipelineKick, nextBusy, waitForNext, takeNextLock, trainState, judgeTrainA, pickNextLanes, speculativeBaseVerdict, NEXT_BY } from './train-pipeline.mjs';
 import { withFacts } from './handback-facts.mjs';
-import { triageRed, triageOn, fileQuarantineTasks, loadSensitiveExcuse, collisionWaitExcuse, flakeRules } from './flakes.mjs';
+import { triageRed, triageOn, fileQuarantineTasks, loadSensitiveExcuse, collisionWaitExcuse, flakeRules, flakeHoldMin } from './flakes.mjs';
 import { waitQuiet } from './flake-quiet.mjs';
+import { markQuietHold, clearQuietHold } from './heavy.mjs';
 import { subIdsFromLog } from './gate-subids.mjs';
 import { timeoutFlakesFromLog } from './timeout-rerun.mjs';
 import { runGatesWaiting, busyWhy, ranNoCheck } from './train-busy.mjs';
@@ -904,7 +905,7 @@ export function flakeTriage(sc, { id, tree, text, log }) {
     if (!flakeSeen.has(base)) flakeSeen.set(base, new Set());
     let n = 0;
     const waitMin = flakeRules().waitMin;
-    const runAlone = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10, k = 1, of = 1 }) => {
+    const runOne = ({ check, file, lowLoad, quiet = false, quietWaitMin = 10, k = 1, of = 1 }) => {
       checkCancel(root, id); // 2.77.1 (B-98); 2.77.3: rethrown below, so the train stops here
       // 2.78.0 (PU-56): the confirming re-run of a red alone waits for a quiet machine (no other heavy job), bounded.
       // It is an alone-run like the others: it shows in the status ("flake check k of n") while it waits and runs.
@@ -936,6 +937,16 @@ export function flakeTriage(sc, { id, tree, text, log }) {
       const busy = r.status !== 0 ? busyWhy(out2) : '';
       if (r.status !== 0 && (busy || ranNoCheck(out2))) return { ok: false, notRun: busy || `it stopped before any gate ran (${r.status === null ? `signal ${r.signal || '?'}` : `exit ${r.status}`})`, text: out2 };
       return { ok: r.status === 0, text: out2 };
+    };
+    // 2.78.0 (C2c): the quiet re-run holds new non-landing heavy work (builder and lane verifies) back from the start of
+    // its quiet wait to the end of its run (harness/heavy.mjs markQuietHold), bounded by STUDIO_FLAKE_HOLD_MIN; released
+    // however the run ends (a cancel included); a train that dies leaves a marker heavy.mjs ignores (its process is gone).
+    const runAlone = (a) => {
+      if (!a.quiet) return runOne(a);
+      const holdMin = flakeHoldMin();
+      const held = markQuietHold(root, { ms: holdMin * 60000, owner: `train-${id}-flake`, train: id, file: a.file, why: `the quiet re-run of ${a.file}` });
+      if (held) log(`[train] ${id}: holding new builder and lane verifies back while ${a.file} is re-run on a quiet machine (at most ${Math.round(holdMin * 10) / 10} min, STUDIO_FLAKE_HOLD_MIN; running ones are not stopped)`);
+      try { return runOne(a); } finally { if (held) clearQuietHold(root); }
     };
     return triageRed({ root, dir: sc.dir, text, train: id, tree, runAlone, seen: flakeSeen.get(base), log: (m) => log(`[train] ${id}: ${m}`) });
   } catch (e) { if (e instanceof TrainCancelled) throw e; log(`[train] ${id}: flake triage skipped (${e.message})`); return null; }

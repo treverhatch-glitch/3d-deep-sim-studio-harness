@@ -51,6 +51,11 @@
  * own additions are recorded with their evidence (a test.quarantined event) and shown in the daily digest.
  * STUDIO_FLAKE_TRIAGE=off turns the triage off; STUDIO_FLAKE_MAX_FILES (5) caps the files triaged per red run;
  * STUDIO_FLAKE_WAIT_MIN (10, 2.77.3) caps how long one alone-run waits for a machine:heavy slot.
+ * 2.78.0 (C2c): from the start of its quiet wait to the end of its run, the quiet re-run holds new non-landing heavy work
+ * (builder and lane verifies) back in the heavy queue (harness/heavy.mjs markQuietHold), so "alone" stays alone (no
+ * other verify starts on the same fixed port, or loads the machine again); bounded by STUDIO_FLAKE_HOLD_MIN (default
+ * the quiet wait + STUDIO_FLAKE_WAIT_MIN + STUDIO_GAME_GATE_TIMEOUT_MS; 0/off: no hold), released when the run ends,
+ * ignored once its train's process is gone. Running verifies are never stopped: the quiet wait waits for them.
  * Imports only small modules (train.mjs and game-gates.mjs import this one).
  */
 import fs from 'node:fs';
@@ -131,6 +136,17 @@ export function rngFindingsFor(test, facts) {
 
 /** 2.78.0 (PU-56): minutes a quiet re-run may wait for the machine to be quiet (STUDIO_FLAKE_QUIET_WAIT_MIN, default 10). */
 export const quietWaitMin = (env = process.env) => num(env.STUDIO_FLAKE_QUIET_WAIT_MIN, 10);
+/**
+ * 2.78.0 (C2c): minutes the quiet re-run may hold other heavy work back (harness/heavy.mjs markQuietHold), from the start
+ * of its quiet wait to the end of its run: STUDIO_FLAKE_HOLD_MIN; default the quiet wait + STUDIO_FLAKE_WAIT_MIN (its
+ * slot wait) + the game check's own timeout (STUDIO_GAME_GATE_TIMEOUT_MS, 600 s); 0 or off: no hold.
+ */
+export function flakeHoldMin(env = process.env) {
+  const v = String(env.STUDIO_FLAKE_HOLD_MIN ?? '').trim();
+  if (off(v)) return 0;
+  if (v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v);
+  return quietWaitMin(env) + flakeRules(env).waitMin + num(env.STUDIO_GAME_GATE_TIMEOUT_MS, 600000) / 60000;
+}
 
 /**
  * Label one failing test file: runAlone({ check, file, lowLoad, quiet?, quietWaitMin? }) -> { ok, text?, notRun?, quietUnreached? }
