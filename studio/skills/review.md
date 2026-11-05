@@ -4,10 +4,13 @@
 
 **Steps.**
 1. Read the diff and the task it closes, not the whole repo.
-2. Run `npm run verify` and `node scripts/check-sim-isolation.mjs`.
+2. Read the verify result the builder or the merge train left (`node harness/done-check.mjs <ID>` shows it). A reviewer
+   never runs `npm run verify` or the gates (the harness refuses it): you read the change and write one file. No green
+   verify yet? Say so in the review (request changes) and the builder runs it.
 3. Write `studio/reviews/<date>-<task>.md`: approve or request changes, with file and line for
    each point. Start it with two lines, `model-family: <yours, e.g. anthropic>` and
    `implementer-family: <the builder's>`. They must differ; the reviewer gate checks every note.
+   No folder lock: each review is its own file (claim only that file, if you claim at all).
 
 4. If the task has an acceptance contract (`npm run task -- contract <ID> show`), grade against each criterion
    and sign the manual ones: `npm run task -- contract <ID> sign <CID> pass|fail --by <you>` (docs/CONTRACTS.md).
