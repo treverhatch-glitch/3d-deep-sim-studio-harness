@@ -305,7 +305,7 @@ export async function lanePass({ tasks = [], order = null, holds = {}, events = 
     for (const s of stacked) {
       if (!writing) { s.dry = true; continue; }
       try {
-        setHold(s.task, { after: [...new Set([...(holds[s.task]?.after || []), s.after])] }, { by, msg: `${by} (for the Producer): ${s.task} waits for ${s.after}: both touch shared sim code (${s.via.slice(0, 3).join(', ')}), so they run one after the other` });
+        setHold(s.task, { after: [...new Set([...(holds[s.task]?.after || []), s.after])] }, { by, msg: `${by} (for the Producer): ${s.task} waits for ${s.after}: both touch shared sim code (${s.via.slice(0, 3).join(', ')}), so they run one after the other`, meta: { after: s.after, via: s.via, stack: 'shared-sim' } });
         await logLaneDecision({ action: 'task-stack', subject: s.task, by, why: `the Producer's stack: ${s.task} after ${s.after}, both touch shared sim code`, evidence: `${s.via.join(', ')} (shared sim code: ${sh.from})`, undo: { kind: 'text', text: `npm run task -- holds; edit the "after" of ${s.task} out with the Producer's call` } });
       } catch (e) { s.error = e.message; }
     }

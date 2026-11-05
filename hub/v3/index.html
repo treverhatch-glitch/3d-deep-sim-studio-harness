@@ -1112,6 +1112,59 @@
   html body .live { position: static; order: 8; margin-left: auto; box-shadow: none; }
   html body[data-skin="tycoon"] .live { bottom: auto; }
 
+  /* ---- 2.78.1 (g): the Planning Room, the Line Producer's own room: the whole floor's width, taller, right after
+     Production (row 2), its plan in plain text on a wall board (Now, Next up, Waiting, the last pass). The pixel room
+     stays around it: the wall, the carpet, the planner's desk at the left (at the foot on a phone). ---- */
+  html body .room.r-planning { grid-column: 1 / -1; grid-row: 2; height: auto; min-height: 520px; }
+  html body .room.r-planning .wall { height: 120px; background: repeating-linear-gradient(90deg, var(--wall) 0 46px, var(--wall2) 46px 48px); border-bottom-color: var(--trim); }
+  html body .room.r-planning .floor { top: 126px; background: radial-gradient(var(--fb) 2px, transparent 2px) 0 0 / 12px 12px, var(--fa); }
+  html body .room.r-planning .now { display: none; }
+  html body .room.r-planning .sign { background: var(--ds-tape); }
+  html body .room.r-planning .door { left: 100px; }
+  html body .plan { position: relative; z-index: 4; margin: 40px 12px 14px 212px; padding: 12px 14px 14px; background: var(--ds-surface); color: var(--ds-text); border: 1px solid var(--ds-line); border-top: 4px solid var(--ds-tape); border-radius: var(--ds-r2); box-shadow: 0 3px 0 rgba(0, 0, 0, .35); font: 13px/1.4 var(--ds-font); image-rendering: auto; overflow-wrap: anywhere; }
+  html body .plan .ph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--ds-line); }
+  html body .plan .ph h3 { margin: 0; font: 700 15px/1.2 var(--ds-display); color: var(--ds-text); letter-spacing: .02em; }
+  html body .plan .pill { display: inline-block; padding: 1px 7px; border-radius: var(--ds-r1); font: 700 12px/1.4 var(--ds-font); border: 1px solid currentColor; }
+  html body .plan .pill.live { color: var(--ds-go); background: var(--ds-go-bg); }
+  html body .plan .pill.stale { color: var(--ds-wait); background: var(--ds-wait-bg); }
+  html body .plan .pill.none { color: var(--ds-muted); background: var(--ds-surface-2); }
+  html body .plan .bnum { font: 700 15px/1.2 var(--ds-display); color: var(--ds-text); }
+  html body .plan .bnum small { font: 500 12px/1.2 var(--ds-font); color: var(--ds-muted); }
+  html body .plan .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+  html body .plan section { min-width: 0; }
+  html body .plan h4 { margin: 0 0 4px; font: 700 13px/1.3 var(--ds-display); color: var(--ds-tape); text-transform: uppercase; letter-spacing: .06em; }
+  html body .plan h4 small { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ds-muted); }
+  html body .plan h5 { margin: 6px 0 2px; font: 600 12px/1.3 var(--ds-font); color: var(--ds-muted); }
+  html body .plan ol, html body .plan ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  html body .plan li { padding: 3px 6px 4px; border-left: var(--ds-strip) solid var(--ds-info); background: var(--ds-surface-2); border-radius: var(--ds-r1); min-width: 0; }
+  html body .plan li.run { border-left-color: var(--ds-go); }
+  html body .plan li.warn { border-left-color: var(--ds-wait); }
+  html body .plan li.stop { border-left-color: var(--ds-stop); }
+  html body .plan li.hold { border-left-color: var(--ds-hold); }
+  html body .plan li .k { font-weight: 700; color: var(--ds-text); margin-right: 6px; }
+  html body .plan li .n { color: var(--ds-muted); margin-right: 4px; }
+  html body .plan li .tt { color: var(--ds-text); }
+  html body .plan li .mt { display: block; margin-top: 1px; font-size: 12px; line-height: 1.45; color: var(--ds-muted); }
+  html body .plan .ch { font-style: normal; }
+  html body .plan .mt > .ch + .ch::before { content: '\a0\b7\a0 '; color: var(--ds-muted); font-weight: 400; }
+  html body .plan .mt > .ch { white-space: normal; }
+  html body .plan .ch.lane { color: var(--ds-info); }
+  html body .plan .ch.unscoped { color: var(--ds-wait); font-weight: 700; }
+  html body .plan .ch.whole { color: var(--ds-muted); }
+  html body .plan .ch.cb { color: var(--ds-stop); font-weight: 700; }
+  html body .plan .why { display: block; font-size: 12px; color: var(--ds-text); opacity: .85; }
+  html body .plan .fix { display: block; font-size: 12px; color: var(--ds-muted); }
+  html body .plan .empty { color: var(--ds-muted); font-style: italic; }
+  html body .plan .more { color: var(--ds-muted); font-size: 12px; }
+  html body .plan .say { margin: 0 0 6px; color: var(--ds-text); }
+  html body .plan .big { margin: 10px 0; font: 700 18px/1.35 var(--ds-display); color: var(--ds-wait); }
+  @media (min-width: 1700px) { html body .plan .cols { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 599px) {
+    html body .room.r-planning { min-height: 0; }
+    html body .room.r-planning .door { left: 50%; }
+    html body .plan { margin: 40px 8px 150px; padding: 10px; }
+    html body .plan .cols { grid-template-columns: minmax(0, 1fr); }
+  }
   /* ---- 2.77.0: the Rail Yard, a loom chamber (two columns wide, so the loom reads at the room's size) ---- */
   @media (min-width: 600px) { html body .room.r-rails { grid-column: span 2; } }
   html body .room.r-rails .wall { background: radial-gradient(ellipse at 60% 80%, #2b1c05, #120b03 70%); border-bottom-color: #2a1d06; }
@@ -2231,7 +2284,7 @@
   const STEP = ['..hhhh..', '.hhhhhh.', '.hssssh.', '.sesses.', '.ssssss.', '..tttt..', '.tttttt.', '.tttttt.', '..pppp..', '.p....p.'];
   const HAIR = ['#3e2723', '#212121', '#ffb300', '#8d6e63', '#c62828', '#5d4037', '#f5f5f5'];
   const SKIN = ['#ffcc99', '#e0ac69', '#c68642', '#8d5524', '#f1c27d'];
-  const SHIRT = { production: '#7b1fa2', engineering: '#1e88e5', qa: '#43a047', design: '#fb8c00', review: '#6d4c41', sound: '#00897b', art: '#d81b60', '3d': '#3949ab', localization: '#00acc1', ui: '#8e24aa', narrative: '#5e35b1', release: '#f4511e', devlog: '#546e7a', engine: '#455a64', rails: '#ef6c00', watchtower: '#283593' };
+  const SHIRT = { production: '#7b1fa2', engineering: '#1e88e5', qa: '#43a047', design: '#fb8c00', review: '#6d4c41', sound: '#00897b', art: '#d81b60', '3d': '#3949ab', localization: '#00acc1', ui: '#8e24aa', narrative: '#5e35b1', release: '#f4511e', devlog: '#546e7a', engine: '#455a64', rails: '#ef6c00', watchtower: '#283593', planning: '#c77800' };
   const hash = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const PX = 4;
@@ -2447,6 +2500,8 @@
     // 2.74.0: the Rail Yard's signal desk and the Watchtower's console.
     rails: art(['..R..G..', '.kkkkkk.', 'kSSSSSSk', 'kSSSSSSk', 'kkkkkkkk', '...kk...'], { k: '#263238', R: { c: '#ff5252', k: 'lv3' }, G: { c: '#76ff03', k: 'lv1' }, S: scr('#ffcc80') }, 3),
     watchtower: art(['kkkkkkkkk', 'kCCCCCCCk', 'kCcCCCcCk', 'kCCCCCCCk', 'kkkkkkkkk', '....k....', '...kkk...'], { k: '#102027', C: scr('#a5d6a7'), c: '#2e7d32' }, 3),
+    // 2.78.1 (g): the Line Producer's screen: a schedule, bars staggered like a plan.
+    planning: art(['kkkkkkkkk', 'kGGGddddk', 'kddAAAddk', 'kddddGGGk', 'kkkkkkkkk', '....k....', '...kkk...'], { k: '#263238', d: scr('#37474f'), G: '#ffb340', A: '#66e3ff' }, 3),
   };
 
   // ----- the rooms: look, floor and props per division -----
@@ -2491,6 +2546,10 @@
     // verify's real progress in a terminal readout under it, the train's keeper at the desk below.
     rails: { cls: 'wl-plain r-rails', v: '--wall:#140d04;--wall2:#1d1407;--trim:#ffb340;--fa:#0b0f0a;--fb:#101a10',
       html: () => '<div class="rloom" data-dyn="rloom"><div class="rl-svg"></div><div class="rbar"></div></div>' },
+    // 2.78.1 (g): the Line Producer's Planning Room: a wall board with its plan in plain text (harness/planning-room.mjs).
+    planning: { cls: 'wl-plain r-planning', v: '--wall:#2a3a4a;--wall2:#223040;--trim:#ffb340;--fa:#3b4a5a;--fb:#475868',
+      html: () => prop('left:22px;top:40px', P.whiteboard) + prop('left:16px;bottom:150px', P.plant)
+        + '<div class="plan" data-dyn="plan" role="region" aria-label="The Line Producer\'s plan"></div>' },
     // 2.74.0: the outside overseer / owner proxy: a beacon lit while it acted in the last hour, its log, Revoke.
     watchtower: { cls: 'wl-plain fl-concrete r-watchtower', v: '--wall:#263238;--wall2:#1c262b;--trim:#ffee58;--fa:#78909c;--fb:#6c818c',
       html: () => prop('right:20px;top:24px', '<div class="tower"><span class="beacon" data-dyn="beacon"></span></div>') + '<div class="towerlog" data-dyn="towerlog" style="right:58px;top:30px"></div>' },
@@ -2523,9 +2582,16 @@
       for (let k = 0; k < n; k++) out.push(k === 0 ? { ...d, baseId: d.id, k } : { ...d, id: `${d.id}-annex-${k + 1}`, baseId: d.id, name: `${d.name} ${k + 1}`, k });
     }
     // 2.74.0: rooms for specific assignments (harness/war-room.mjs): Rail Yard, Watchtower. Engine Bay is the engine division.
-    for (const r of s.assignmentRooms || []) {
-      const n = Math.max(1, Math.ceil(s.agents.filter((a) => a.room === r.id && a.onFloor !== false).length / CAP));
-      for (let k = 0; k < n; k++) out.push({ id: k ? `${r.id}-annex-${k + 1}` : r.id, baseId: r.id, name: k ? `${r.name} ${k + 1}` : r.name, active: true, roles: r.roles, about: r.about, k, assignment: true });
+    // 2.78.1 (g): the Planning Room (the HUD's "planning", harness/planning-room.mjs) beside the assignment rooms.
+    const extra = s.planning?.on && s.planning.roomInfo ? [s.planning.roomInfo] : [];
+    for (const r of [...extra, ...(s.assignmentRooms || [])]) {
+      // 2.78.1 (g): a wide room (the Planning Room) is one room, never an annex; "after" puts it right after that room.
+      const n = r.wide ? 1 : Math.max(1, Math.ceil(s.agents.filter((a) => a.room === r.id && a.onFloor !== false).length / CAP));
+      const rows = [];
+      for (let k = 0; k < n; k++) rows.push({ id: k ? `${r.id}-annex-${k + 1}` : r.id, baseId: r.id, name: k ? `${r.name} ${k + 1}` : r.name, active: true, roles: r.roles, about: r.about, k, assignment: true, wide: Boolean(r.wide) });
+      let at = -1;
+      if (r.after) out.forEach((d, i) => { if (d.baseId === r.after) at = i; });
+      if (at >= 0) out.splice(at + 1, 0, ...rows); else out.push(...rows);
     }
     out.push({ id: 'kennel', baseId: 'kennel', name: 'Watchdog', active: true, roles: [], k: 0 });
     return out;
@@ -2543,6 +2609,8 @@
   }
   // Feet position of desk i in a room. The Producer's big desk takes slot 0 and pushes the rest right.
   const slotPt = (g, i, roomId) => {
+    // 2.78.1 (g): the Planning Room's desks: two columns at the left of the board (a row at the foot on a phone).
+    if (roomId === 'planning' && g.w >= 560) return { x: g.x + 18 + (i % 2) * 86, y: g.y - 46 - Math.floor(i / 2) * 88 };
     const big = roomId === 'production';
     return { x: g.x + 18 + (i % 3) * 74 + (big && i % 3 ? 44 : 0), y: g.y - 46 - Math.floor(i / 3) * 88 };
   };
@@ -2842,7 +2910,47 @@
     if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
   }
 
+  // 2.78.1 (g): the Planning Room's board: the Line Producer's plan in plain text (the HUD's "planning",
+  // harness/planning-room.mjs). Read-only: no buttons. Every field shown is on file; one that isn't is left out.
+  const planAgo = (iso) => { const t = Date.parse(iso); if (!t) return ''; const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  const planTime = (iso) => (iso ? `${hhmm(iso)} (${planAgo(iso)})` : '');
+  function planningHtml(p) {
+    if (!p) return '<p class="big">No plan data from the hub yet.</p>';
+    const laneChip = (r) => (r.lane ? `<i class="ch lane" title="Lane: ${esc(r.lane)}">lane ${esc(r.lane)}</i>` : r.unscoped ? '<i class="ch unscoped" title="No lane could be worked out: a builder on it holds the whole game, so nothing runs beside it (npm run task -- lane <ID> <folders> --by <you>)">unscoped</i>' : '<i class="ch whole">whole game</i>');
+    const more = (n, what) => (n ? `<li class="more">+${n} more ${what} (npm run line -- status)</li>` : '');
+    const b = p.builders || {};
+    const head = `<div class="ph"><h3>The Line Producer's plan</h3>${!p.hasPlan ? '<span class="pill none">No plan yet</span>' : p.live ? `<span class="pill live" title="The supervisor runs the Line Producer every pass">Live · pass at ${esc(hhmm(p.lastPass?.at))}</span>` : `<span class="pill stale" title="${esc(p.stale || '')}">Last plan · ${esc(planAgo(p.lastPass?.at) || 'age unknown')}</span>`}<span class="bnum">${p.now?.length ?? 0}${Number.isFinite(b.target) ? ` / ${b.target}` : ''} <small>builders running${Number.isFinite(b.target) ? ' / target' : ''}</small></span>${p.hasPlan && !p.live && p.stale ? `<span class="fix">${esc(p.stale)}</span>` : ''}</div>`;
+    const nowList = (p.now || []).map((r) => `<li class="run"><span class="k">${esc(r.task)}</span><span class="tt">${esc(r.title || '')}</span><span class="mt">${laneChip(r)}${r.startedAt ? `<i class="ch">started ${esc(planTime(r.startedAt))}</i>` : ''}${r.agent ? `<i class="ch">${esc(r.agent)}${r.model ? ` · ${esc(r.model)}` : ''}</i>` : ''}</span></li>`).join('') + more(p.nowMore, 'running');
+    const nowSec = `<section><h4>Now <small>running builders</small></h4><ul>${nowList || '<li class="empty">No builder is running.</li>'}</ul>${b.why ? `<p class="fix">${esc(b.why)}</p>` : ''}</section>`;
+    if (!p.hasPlan) {
+      return `${head}<p class="big">${esc(p.why || "No plan yet: the Line Producer hasn't run")}</p>${p.hint ? `<p class="say">${esc(p.hint)}.</p>` : ''}${p.error ? `<p class="fix">The plan could not be read: ${esc(p.error)}</p>` : ''}<div class="cols">${nowSec}</div>`;
+    }
+    const nextList = (p.next || []).map((r) => `<li class="${r.unscoped ? 'warn' : ''}"><span class="n">${r.rank}.</span><span class="k">${esc(r.task)}</span><span class="tt">${esc(r.title || '')}</span><span class="mt">${r.role && r.role !== 'builder' ? `<i class="ch">${esc(r.role)}</i>` : ''}${laneChip(r)}${r.wave ? `<i class="ch" title="plan-waves' shadow plan${p.wavesAt ? `, ${esc(hhmm(p.wavesAt))}` : ''}">wave ${r.wave}</i>` : ''}${r.model ? `<i class="ch" title="The Line Producer's model route">${esc(r.model)}${r.tool ? ` (${esc(r.tool)})` : ''}${r.tier ? ` · ${esc(r.tier)}` : ''}</i>` : r.tier ? `<i class="ch">${esc(r.tier)} tier</i>` : ''}${r.chainBreaker ? '<i class="ch cb" title="Three or more tasks wait on it: it starts first, on the strongest model">chain-breaker</i>' : ''}</span></li>`).join('') + more(p.nextMore, 'ready');
+    const nextSec = `<section><h4>Next up <small>in the order it starts them</small></h4><ol>${nextList || '<li class="empty">Nothing ready to start.</li>'}</ol></section>`;
+    const w = p.waiting || {};
+    const st = (w.stacked || []).map((r) => `<li class="hold"><span class="k">${esc(r.task)}</span><span class="tt">after ${r.after.map((a) => `${esc(a.task)}${a.state === 'running' ? ' (running)' : a.state === 'not on the board' ? ' (not on the board)' : ''}`).join(', ')}</span>${r.why ? `<span class="why">${esc(r.why)}</span>` : ''}<span class="fix">${esc(r.title || '')}</span></li>`).join('') + more(w.stackedMore, 'stacked');
+    const bl = (w.blocked || []).map((r) => `<li class="${r.kind === 'unscoped' ? 'warn' : r.kind === 'trunk' ? 'stop' : 'hold'}"><span class="k">${esc(r.task)}</span><i class="ch${r.kind === 'unscoped' ? ' unscoped' : ''}">${esc(r.kind)}</i><span class="why">${esc(r.why)}</span>${r.fix ? `<span class="fix">→ ${esc(r.fix)}</span>` : ''}</li>`).join('') + more(w.blockedMore, 'blocked');
+    const waitSec = `<section><h4>Waiting <small>stacked and blocked</small></h4><h5>Stacked (--after)</h5><ul>${st || '<li class="empty">Nothing stacked.</li>'}</ul><h5>Blocked or unscoped</h5><ul>${bl || '<li class="empty">Nothing blocked.</li>'}</ul></section>`;
+    const lp = p.lastPass || {};
+    const dec = [
+      ...(lp.lanesSet || []).map((x) => `<li class="run"><span class="k">${esc(x.task)}</span>${x.dry ? 'would get' : 'got'} lane <i class="ch lane">${esc(x.lane)}</i>${x.from?.length ? `<span class="fix">from its ${esc(x.from.join(', '))}</span>` : ''}${x.error ? `<span class="why">${esc(x.error)}</span>` : ''}</li>`),
+      ...(lp.stacked || []).map((x) => `<li class="hold"><span class="k">${esc(x.task)}</span>${x.dry ? 'would be stacked' : 'stacked'} after ${esc(x.after)}${x.via?.length ? `<span class="why">shared sim code: ${esc(x.via.slice(0, 3).join(', '))}</span>` : ''}</li>`),
+      ...(lp.fixed || []).map((x) => `<li><span class="k">${esc(x.task || 'fixed')}</span>${esc(x.what)}</li>`),
+    ].join('');
+    const reasons = (lp.reasons || []).map((r) => `<li class="warn">${esc(r)}</li>`).join('');
+    const recent = (lp.recent || []).map((r) => `<li><span class="n">${esc(hhmm(r.at))}</span>${r.task ? `<span class="k">${esc(r.task)}</span>` : ''}${esc(r.what)}</li>`).join('');
+    const lastSec = `<section><h4>Last pass <small>${esc(planTime(lp.at))}${lp.mode && lp.mode !== 'on' ? ` · mode ${esc(lp.mode)}` : ''}${lp.dryRun ? ' · dry pass' : ''}</small></h4>${lp.error ? `<p class="why">The pass failed: ${esc(lp.error)}</p>` : ''}${lp.text ? `<p class="say">${esc(lp.text)}</p>` : ''}<h5>What it decided</h5><ul>${dec || '<li class="empty">No new lanes, stacks or fixes this pass.</li>'}</ul>${reasons ? `<h5>Blockers (for the Producer)</h5><ul>${reasons}</ul>` : ''}${recent ? `<h5>Its recent decisions (24 h)</h5><ul>${recent}</ul>` : ''}</section>`;
+    return `${head}<div class="cols">${nowSec}${nextSec}${waitSec}${lastSec}</div>`;
+  }
+  function renderPlanningRoom(s) {
+    const box = office.querySelector('[data-dyn="plan"]');
+    if (!box) return;
+    const html = planningHtml(s.planning);
+    if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
+  }
+
   function renderWidgets(s) {
+    renderPlanningRoom(s);
     // 2.74.0: the Rail Yard (the merge train), the Engine Bay belt (the engine train) and the Watchtower (the proxy).
     const rl = office.querySelector('[data-dyn="rloom"]');
     const web = (s.warRoom?.trains || []).find((t) => t.kind === 'web');
@@ -2943,7 +3051,7 @@
       // 2.30 (J13): nobody sits at a desk in a locked room; only an agent actually working there shows.
       const staff = s.agents.filter((a) => a.room === d.baseId && a.onFloor !== false && (d.active !== false || (a.status === 'working' && !a.placeholder))).sort((x, y) => (x.room === 'production' && x.name === 'producer' ? -1 : y.name === 'producer' ? 1 : x.name.localeCompare(y.name))).slice(d.k * CAP, (d.k + 1) * CAP);
       g.el.querySelector('.count').textContent = staff.length && !staff.every((a) => a.placeholder) ? `${staff.length} staff` : '';
-      g.el.classList.toggle('busy', staff.some((a) => a.status === 'working') || (d.baseId === 'rails' && (s.warRoom?.trains || []).some((t) => t.kind === 'web' && t.running)) || (d.baseId === 'engine' && (s.warRoom?.trains || []).some((t) => t.kind === 'unity' && t.running)));
+      g.el.classList.toggle('busy', staff.some((a) => a.status === 'working') || (d.baseId === 'rails' && (s.warRoom?.trains || []).some((t) => t.kind === 'web' && t.running)) || (d.baseId === 'engine' && (s.warRoom?.trains || []).some((t) => t.kind === 'unity' && t.running)) || (d.baseId === 'planning' && Boolean(s.planning?.live)));
       renderTickets(g.el, staff, s);
       staff.forEach((a, i) => {
         present.add(a.name);

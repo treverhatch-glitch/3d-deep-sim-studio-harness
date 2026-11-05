@@ -13,7 +13,8 @@
  *   steps       per agent: its task, title and current step (editing, verifying, waiting on the train, held for a person's
  *               release, handed back, parked) and the actions a person can take on it (release, hold, unhold, unpark)
  *   rooms       the Studio floor's assignment rooms: Rail Yard (the merge train), Watchtower (the owner proxy / outside
- *               overseer); engine sessions sit in Engine Bay (the engine division). roomFor() is the role mapping.
+ *               overseer); engine sessions sit in Engine Bay (the engine division). roomFor() is the role mapping; it
+ *               seats the Line Producer in the Planning Room (2.78.1 g: harness/planning-room.mjs, the HUD's "planning").
  * Never throws: a part that can't be read is null.
  */
 import fs from 'node:fs';
@@ -24,6 +25,7 @@ import { sessionRamGb } from './heavy-budget.mjs';
 import { readTrainStatus } from './train-status.mjs';
 import { readHolds } from './task-hold.mjs';
 import { progressOf } from './gate-progress.mjs';
+import { planningRoomOn } from './planning-room.mjs';
 
 const readJson = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const H = 3600000;
@@ -45,7 +47,10 @@ const KEYWORDS = [
  * The assignment room for an agent, or null (the HUD's own division mapping then applies): the owner's delegated agent
  * sits in the Watchtower, a session on an engine track (--track engine:<name>) in Engine Bay, then by role or name.
  */
-export function roomFor({ name = '', role = '', track = '', proxyAgent = '' } = {}) {
+export function roomFor({ name = '', role = '', track = '', proxyAgent = '', env = process.env } = {}) {
+  // 2.78.1 (g): the Line Producer sits in its own Planning Room (harness/planning-room.mjs PLANNING_ROOM); the room is
+  // drawn from the HUD's "planning", so the assignment rooms' list is unchanged.
+  if (role === 'line-producer' || String(name).toLowerCase() === 'line-producer') return planningRoomOn(env) ? 'planning' : null;
   if (proxyAgent && String(name).toLowerCase() === String(proxyAgent).toLowerCase()) return 'watchtower';
   if (/^engine:/i.test(String(track || ''))) return 'engine';
   if (ROLE_ROOM[role]) return ROLE_ROOM[role];

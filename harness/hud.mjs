@@ -34,6 +34,7 @@ import { forcedGroups, readAccepted } from './cause-store.mjs';
 import { listBuilds } from './builds.mjs';
 import { readTrack } from './engine.mjs';
 import { roomFor as assignmentRoom, cachedProxy, ASSIGNMENT_ROOMS } from './war-room.mjs';
+import { planningRoom, readPlanStatus } from './planning-room.mjs';
 
 /** The engine track for the Arcade: which engine, its web export if built, its last frames. */
 function engineInfo() {
@@ -269,7 +270,8 @@ export function buildHudState() {
     const w = holdOwner(t.id, queue, now, holds, holders) || handout[t.id] || null;
     return { ...t, hold: w?.why || undefined, waitOwner: w?.owner || undefined, needsYes: Boolean(holds[t.id]?.needsYes) || undefined };
   });
-  const added = readRecentEvents(20000).filter((e) => e.type === 'task.added' && e.task);
+  const evLong = readRecentEvents(20000);
+  const added = evLong.filter((e) => e.type === 'task.added' && e.task);
   const originOf = Object.fromEntries(added.filter((e) => e.meta?.origin).map((e) => [e.task, e.meta.origin]));
   // 2.74.0: a task on another version of the game (--track engine:<name>) seats its agent in Engine Bay.
   const trackOf = Object.fromEntries(added.filter((e) => e.meta?.track).map((e) => [e.task, String(e.meta.track)]));
@@ -337,11 +339,16 @@ export function buildHudState() {
       role,
       // Seated by the division it was hired into, then by role.
       // 2.74.0: then the Studio floor's assignment rooms (Rail Yard, Watchtower, Engine Bay: harness/war-room.mjs roomFor).
-      room: (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || assignmentRoom({ name: a.name, role: sess?.role || role || '', track: trackOf[a.task] || '', proxyAgent }) || roomForRole(role, divs) || 'engineering',
+      // 2.78.1 (g): the Line Producer sits in its own Planning Room, also when its session was hired into Production.
+      room: (() => {
+        const ar = assignmentRoom({ name: a.name, role: sess?.role || role || '', track: trackOf[a.task] || '', proxyAgent });
+        return (ar === 'planning' ? ar : null) || (sess?.division && divs.some((d) => d.id === sess.division) ? sess.division : null) || ar || roomForRole(role, divs) || 'engineering';
+      })(),
       // The launcher's heartbeat is the truth for agents it started.
       status: sess?.running ? (sess.stalled ? 'stalled' : 'working') : stalled ? 'stalled' : errored ? 'needs-attention' : idleMin !== null && idleMin > 15 ? 'idle' : 'working',
       launched: Boolean(sess?.running),
-      kind: a.name === 'watch' ? 'script' : 'agent',
+      // 2.78.1 (g): the Line Producer is code on the supervisor's loop (a script, like the watcher) unless a session runs as it.
+      kind: a.name === 'watch' || (a.name === 'line-producer' && !sess?.running) ? 'script' : 'agent',
       // What kind of work it is doing, for the Studio view's animations.
       work: a.task && taskById.get(a.task) ? taskType(taskById.get(a.task)) : null,
       idleMin,
@@ -397,9 +404,10 @@ export function buildHudState() {
   if (watchLast && !agentList.some((a) => a.name === 'watch')) {
     agentList.push({ name: 'watch', role: 'watch', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
   }
-  // 2.76.0 (k): the Line Producer's desk in the Producer's office (a script, like the watcher), once it has run.
+  // 2.76.0 (k): the Line Producer's desk (a script, like the watcher), once it has run. 2.78.1 (g): in its own Planning
+  // Room (harness/war-room.mjs; STUDIO_PLANNING_ROOM=off: in the Producer's office as before).
   if (fs.existsSync(path.join(STUDIO_STATE_DIR, 'line', 'status.json')) && !agentList.some((a) => a.name === 'line-producer')) {
-    agentList.push({ name: 'line-producer', role: 'line-producer', room: 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
+    agentList.push({ name: 'line-producer', role: 'line-producer', room: assignmentRoom({ name: 'line-producer', role: 'line-producer' }) || 'production', status: 'idle', kind: 'script', events: 0, idleMin: null, placeholder: true });
   }
   const producerName = (pname && agentList.find((a) => a.name === pname)?.name) || agentList.find((a) => a.room === 'production' && (a.name === 'producer' || a.role === 'producer'))?.name || agentList.find((a) => a.room === 'production').name;
   const byName = new Map(agentList.map((a) => [a.name, a]));
@@ -590,6 +598,12 @@ export function buildHudState() {
     now: queue.inProgress.map((t) => ({ id: t.id, title: t.title, agents: [...new Set(events.filter((e) => e.task === t.id && Date.parse(e.ts) > now - 30 * 60000).map((e) => e.agent))] })).filter((t, i) => t.agents.length || i === 0),
     divisions: divs,
     assignmentRooms: ASSIGNMENT_ROOMS,
+    // 2.78.1 (g): the Planning Room's plan (harness/planning-room.mjs): the Line Producer's last pass and the live board.
+    planning: planningRoom({
+      status: readPlanStatus(), queue, holds, launched: launchedNow, events: evLong, holders,
+      supervisorRunning: (() => { try { const sv = supervisorStatus(); return Boolean(sv && sv.status === 'running' && pidAlive(sv.pid, sv.identity, { eperm: false })); } catch { return false; } })(),
+      now,
+    }),
     lessons: lessons(),
     rtk: rtkGain(),
     tokenUse: tokensCached(),
