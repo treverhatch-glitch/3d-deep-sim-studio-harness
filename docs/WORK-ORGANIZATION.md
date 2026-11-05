@@ -130,6 +130,18 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   scan, live heavy holders, slots, RAM, CPU), capped by `STUDIO_TRAIN_BISECT_PARALLEL` (default 4; `1`/`off`: one at
   a time). No scan: K = 1, the search above unchanged. The log says "bisect round 1: checking prefixes 3, 6 at once";
   event `task.train.bisect_round`.
+  2.78.2 (b): K also leaves `STUDIO_TRAIN_BISECT_SPARE` (default 1) machine:heavy slots for builders: K is at most
+  max(1, slots - 1), slots as the heavy lock counts them now (`STUDIO_HEAVY_SLOTS`, the main checkout's `.env`, else the
+  scan). The crew's bisect took all 3 slots and a builder's verify waited 858 s. `0`/`off`: no slot kept back.
+- The red budget (2.78.2, `STUDIO_TRAIN_RED_BUDGET_MIN`, default 30; `0`/`off`: no cap): one red cost the crew 1-2 h
+  (the flake triage, the bisection, the re-check of main; train 111009: 106 min, nothing landed). From a train's first
+  red verify, it checks the clock before each flake run (the quiet wait is cut to what is left), re-check, bisect round,
+  later round's verify and early prefix landing. Past the budget it stops: the NEWEST lane in the train (queued last:
+  the most likely cause) is handed back, its note saying so with the red's summary (gates, failing tests, log); of the
+  other lanes, the longest prefix whose exact tree a full verify already passed (this train's own, or a trusted record
+  that covers it, such as the lane's own verify on main's tip) lands; nothing that no full verify passed lands; the rest
+  keep their place in the queue (a second time at the same head, held for the Producer). Event `task.train.red_budget`
+  (`meta.handedBack`, `.landing`, `.requeued`, `.red`); the train's done event carries `redBudget`.
 - Remote verify (2.69.0, `harness/remote-verify.mjs`, `STUDIO_VERIFY_REMOTE=github`, off by default): the remote CI
   may stand for the game's own checks ONLY, never for a safety gate. The train first runs every other gate locally on
   its tree (`run-gates --only`, every studio gate but the game checks, engine and heavy ones: protected, secrets,
@@ -369,6 +381,15 @@ landing moved main, so every other lane rebased (often breaking its hook stamps)
   label never counts toward trust, so the record is renewed only by quiet runs); it fails → the quiet re-run as above.
   A lane whose only reds are such files lands, and `task.train.load_sensitive` says "trusted" (`meta.trusted` lists
   them). Every other red keeps the path above.
+  2.78.2 (b): `STUDIO_FLAKE_TOGETHER=on` (default off: one file at a time, as above) triages a check's failing files
+  TOGETHER: one run of all of them at low load (one test worker), then one quiet low-load re-run of those still failing,
+  each file labelled from that run's per-file result (game-gates' `failing test files in <check>` line). A file still
+  failing beside the others is `real` only once it fails by itself at quiet low load (one at a time, up to the first
+  real); passing by itself it is `load-flake`. A run whose output can't be split by file (no failing file named, one
+  outside the group, a timeout, a whole-check fallback, a port collision with more than one file failing) falls back
+  to one run per file. Four failing files took the crew's train ~80 minutes one at a time; together it is two or three
+  runs. Off by default because a run of several files can't stop at the first real file the way a per-file triage does
+  (a file whose run never ends holds the group run until the check's timeout).
   2.78.0 (C2c): the quiet re-run also holds other verifies back, since an alone run isn't alone when another verify
   starts on the same fixed port: from the start of its quiet wait to the end of its run, the train leaves
   `.studio/locks/machine-heavy-quiet-hold-<pid>.json` and new heavy work that isn't a landing (builder and lane
@@ -579,6 +600,10 @@ RAM, threads and minutes; `node harness/rig-budget.mjs` shows an `artBake` share
   builder verifies at once slow a timing test past its budget (a 2 ms test took 2.2-2.5 ms under load, 0.7-1.1 ms
   alone): set `STUDIO_HEAVY_MAX_VERIFY=3` there. The flake triager's confirming re-run waits for a quiet machine up
   to `STUDIO_FLAKE_QUIET_WAIT_MIN` (10) minutes (see the flake triager).
+  2.78.2 (b): a live agent session in an engine role (`STUDIO_QUIET_BUSY_ROLES`, default `engine-porter,engine-worker`;
+  `off`: none) counts as "not quiet" too, whether or not its Unity editor is running at that moment (a porter starts
+  and stops it between steps); the session the waiting process runs in doesn't. The game:perf step
+  (docs/ONBOARDING-A-GAME.md) waits on the same test.
 - A job that doesn't fit waits in a queue (a landing first, then first come) and says why: `waiting for RAM: needs
   8 GB, 3.1 free`. It waits up to `STUDIO_HEAVY_WAIT_MIN` like any wait; a claim bigger than the whole budget runs
   alone. `node harness/heavy.mjs status` shows the budget and each holder's claim.
